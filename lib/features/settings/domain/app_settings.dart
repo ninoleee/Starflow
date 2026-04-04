@@ -1,5 +1,6 @@
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 
 enum HomeModuleType {
@@ -298,6 +299,8 @@ class AppSettings {
     required this.homeModules,
     this.homeHeroStyle = HomeHeroStyle.normal,
     this.tmdbMetadataMatchEnabled = false,
+    this.wmdbMetadataMatchEnabled = false,
+    this.metadataMatchPriority = MetadataMatchProvider.tmdb,
     this.imdbRatingMatchEnabled = false,
     this.tmdbReadAccessToken = '',
   });
@@ -308,6 +311,8 @@ class AppSettings {
   final List<HomeModuleConfig> homeModules;
   final HomeHeroStyle homeHeroStyle;
   final bool tmdbMetadataMatchEnabled;
+  final bool wmdbMetadataMatchEnabled;
+  final MetadataMatchProvider metadataMatchPriority;
   final bool imdbRatingMatchEnabled;
   final String tmdbReadAccessToken;
 
@@ -318,6 +323,8 @@ class AppSettings {
     List<HomeModuleConfig>? homeModules,
     HomeHeroStyle? homeHeroStyle,
     bool? tmdbMetadataMatchEnabled,
+    bool? wmdbMetadataMatchEnabled,
+    MetadataMatchProvider? metadataMatchPriority,
     bool? imdbRatingMatchEnabled,
     String? tmdbReadAccessToken,
   }) {
@@ -329,6 +336,10 @@ class AppSettings {
       homeHeroStyle: homeHeroStyle ?? this.homeHeroStyle,
       tmdbMetadataMatchEnabled:
           tmdbMetadataMatchEnabled ?? this.tmdbMetadataMatchEnabled,
+      wmdbMetadataMatchEnabled:
+          wmdbMetadataMatchEnabled ?? this.wmdbMetadataMatchEnabled,
+      metadataMatchPriority:
+          metadataMatchPriority ?? this.metadataMatchPriority,
       imdbRatingMatchEnabled:
           imdbRatingMatchEnabled ?? this.imdbRatingMatchEnabled,
       tmdbReadAccessToken: tmdbReadAccessToken ?? this.tmdbReadAccessToken,
@@ -343,6 +354,8 @@ class AppSettings {
       'homeModules': homeModules.map((item) => item.toJson()).toList(),
       'homeHeroStyle': homeHeroStyle.name,
       'tmdbMetadataMatchEnabled': tmdbMetadataMatchEnabled,
+      'wmdbMetadataMatchEnabled': wmdbMetadataMatchEnabled,
+      'metadataMatchPriority': metadataMatchPriority.name,
       'imdbRatingMatchEnabled': imdbRatingMatchEnabled,
       'tmdbReadAccessToken': tmdbReadAccessToken,
     };
@@ -383,6 +396,11 @@ class AppSettings {
       ),
       tmdbMetadataMatchEnabled: json['tmdbMetadataMatchEnabled'] as bool? ??
           legacyImdbAutoMatchEnabled,
+      wmdbMetadataMatchEnabled:
+          json['wmdbMetadataMatchEnabled'] as bool? ?? false,
+      metadataMatchPriority: MetadataMatchProviderX.fromName(
+        json['metadataMatchPriority'] as String? ?? '',
+      ),
       imdbRatingMatchEnabled: json['imdbRatingMatchEnabled'] as bool? ?? false,
       tmdbReadAccessToken: json['tmdbReadAccessToken'] as String? ?? '',
     );

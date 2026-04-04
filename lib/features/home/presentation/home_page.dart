@@ -22,148 +22,194 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final sectionsAsync = ref.watch(homeSectionsProvider);
+    final enabledModules = ref.watch(homeEnabledModulesProvider);
+    final sectionStates = <String, AsyncValue<HomeSectionViewModel?>>{
+      for (final module in enabledModules)
+        module.id: ref.watch(homeSectionProvider(module.id)),
+    };
     final heroStyle = ref.watch(
       appSettingsProvider.select((settings) => settings.homeHeroStyle),
     );
+    final resolvedSections = <HomeSectionViewModel>[];
+    var hasPendingSections = false;
+
+    for (final module in enabledModules) {
+      final state = sectionStates[module.id];
+      final section = state?.valueOrNull;
+      if (section != null) {
+        resolvedSections.add(section);
+      }
+      if (state?.isLoading ?? false) {
+        hasPendingSections = true;
+      }
+    }
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: sectionsAsync.when(
-        data: (sections) {
-          if (sections.isEmpty) {
-            return const _HomeShell(
+      body: enabledModules.isEmpty
+          ? const _HomeShell(
               backgroundImageUrl: '',
               child: _EmptyHomeState(),
-            );
-          }
+            )
+          : _buildLoadedHome(
+              context: context,
+              enabledModules: enabledModules,
+              sectionStates: sectionStates,
+              resolvedSections: resolvedSections,
+              hasPendingSections: hasPendingSections,
+              heroStyle: heroStyle,
+            ),
+    );
+  }
 
-          HomeSectionViewModel? featuredSection;
-          for (final section in sections) {
-            if (section.layout == HomeSectionLayout.carousel &&
-                section.carouselItems.isNotEmpty) {
-              featuredSection = section;
-              break;
-            }
-          }
+  Widget _buildLoadedHome({
+    required BuildContext context,
+    required List<HomeModuleConfig> enabledModules,
+    required Map<String, AsyncValue<HomeSectionViewModel?>> sectionStates,
+    required List<HomeSectionViewModel> resolvedSections,
+    required bool hasPendingSections,
+    required HomeHeroStyle heroStyle,
+  }) {
+    HomeSectionViewModel? featuredSection;
+    for (final section in resolvedSections) {
+      if (section.layout == HomeSectionLayout.carousel &&
+          section.carouselItems.isNotEmpty) {
+        featuredSection = section;
+        break;
+      }
+    }
 
-          final featuredItems = featuredSection != null
-              ? featuredSection.carouselItems
-                  .take(5)
-                  .map(_FeaturedHeroItem.fromCarousel)
-                  .toList()
-              : _fallbackFeaturedItems(sections);
-          final activeHero = _resolveActiveHeroItem(featuredItems);
-          final featuredSectionId = featuredSection?.id;
-          final visibleSections = featuredSection == null
-              ? sections
-              : sections
-                  .where((section) => section.id != featuredSectionId)
-                  .toList();
+    final featuredItems = featuredSection != null
+        ? featuredSection.carouselItems
+            .take(5)
+            .map(_FeaturedHeroItem.fromCarousel)
+            .toList()
+        : _fallbackFeaturedItems(resolvedSections);
+    final activeHero = _resolveActiveHeroItem(featuredItems);
+    final featuredSectionId = featuredSection?.id;
 
-          return _HomeShell(
-            backgroundImageUrl: activeHero?.imageUrl ?? '',
-            child: RefreshIndicator(
-              color: Colors.white,
-              backgroundColor: const Color(0xFF102033),
-              onRefresh: () async {
-                final future = ref.refresh(homeSectionsProvider.future);
-                await future;
-              },
-              child: ListView(
-                physics: const BouncingScrollPhysics(
-                  parent: AlwaysScrollableScrollPhysics(),
+    return _HomeShell(
+      backgroundImageUrl: activeHero?.imageUrl ?? '',
+      child: RefreshIndicator(
+        color: Colors.white,
+        backgroundColor: const Color(0xFF102033),
+        onRefresh: () => refreshHomeModules(ref),
+        child: ListView(
+          physics: const BouncingScrollPhysics(
+            parent: AlwaysScrollableScrollPhysics(),
+          ),
+          padding: EdgeInsets.zero,
+          children: [
+            if (featuredItems.isNotEmpty)
+              Padding(
+                padding: heroStyle.heroPadding(context),
+                child: _FeaturedHero(
+                  items: featuredItems,
+                  style: heroStyle,
+                  onFocusedItemChanged: _handleFocusedHeroChanged,
                 ),
-                padding: EdgeInsets.zero,
-                children: [
-                  if (featuredItems.isNotEmpty)
-                    Padding(
-                      padding: heroStyle.heroPadding(context),
-                      child: _FeaturedHero(
-                        items: featuredItems,
-                        style: heroStyle,
-                        onFocusedItemChanged: _handleFocusedHeroChanged,
-                      ),
-                    ),
-                  ...visibleSections.map(
-                    (section) => Padding(
-                      padding: const EdgeInsets.only(bottom: 26),
-                      child: _HomeSection(
-                        title: section.title,
-                        onTitleTap: section.viewAllTarget == null
-                            ? null
-                            : () {
-                                context.pushNamed(
-                                  'collection',
-                                  extra: section.viewAllTarget,
-                                );
-                              },
-                        child: section.layout == HomeSectionLayout.carousel
-                            ? _HomeCarousel(items: section.carouselItems)
-                            : section.items.isEmpty
-                                ? _SectionEmptyState(
-                                    message: section.emptyMessage,
-                                  )
-                                : SizedBox(
-                                    height: 246,
-                                    child: ListView.separated(
-                                      primary: false,
-                                      physics: const BouncingScrollPhysics(),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                      ),
-                                      scrollDirection: Axis.horizontal,
-                                      itemCount: section.items.length,
-                                      separatorBuilder: (context, index) =>
-                                          const SizedBox(width: 10),
-                                      itemBuilder: (context, index) {
-                                        final item = section.items[index];
-                                        return MediaPosterTile(
-                                          title: item.title,
-                                          subtitle: item.subtitle,
-                                          posterUrl: item.posterUrl,
-                                          titleColor: Colors.white,
-                                          subtitleColor:
-                                              const Color(0xFF98A7C2),
-                                          onTap: () {
-                                            context.pushNamed(
-                                              'detail',
-                                              extra: item.detailTarget,
-                                            );
-                                          },
-                                        );
-                                      },
-                                    ),
-                                  ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  const _HomeEditButton(),
-                ],
+              )
+            else if (hasPendingSections)
+              Padding(
+                padding: heroStyle.heroPadding(context),
+                child: _HomeHeroPlaceholder(style: heroStyle),
               ),
-            ),
-          );
-        },
-        loading: () => const _HomeShell(
-          backgroundImageUrl: '',
-          child: _HomeLoadingState(),
+            ...enabledModules.map((module) {
+              final state = sectionStates[module.id] ??
+                  const AsyncLoading<HomeSectionViewModel?>();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 26),
+                child: _buildSectionSlot(
+                  context: context,
+                  module: module,
+                  state: state,
+                  featuredSectionId: featuredSectionId,
+                ),
+              );
+            }),
+            const SizedBox(height: 6),
+            const _HomeEditButton(),
+          ],
         ),
-        error: (error, stackTrace) {
-          return _HomeShell(
-            backgroundImageUrl: '',
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: EdgeInsets.zero,
-              children: [
-                _SectionEmptyState(message: '加载首页模块失败：$error'),
-                const SizedBox(height: 12),
-                const _HomeEditButton(),
-              ],
-            ),
-          );
-        },
       ),
+    );
+  }
+
+  Widget _buildSectionSlot({
+    required BuildContext context,
+    required HomeModuleConfig module,
+    required AsyncValue<HomeSectionViewModel?> state,
+    required String? featuredSectionId,
+  }) {
+    final section = state.valueOrNull;
+    if (section != null) {
+      if (section.id == featuredSectionId) {
+        return const SizedBox.shrink();
+      }
+      return _buildResolvedSection(context, section);
+    }
+
+    if (state.hasError) {
+      return _HomeSection(
+        title: module.title,
+        child: const _SectionEmptyState(message: '加载失败'),
+      );
+    }
+
+    return _HomeSectionLoading(
+      title: module.title,
+      layout: module.type == HomeModuleType.doubanCarousel
+          ? HomeSectionLayout.carousel
+          : HomeSectionLayout.posterRail,
+    );
+  }
+
+  Widget _buildResolvedSection(
+    BuildContext context,
+    HomeSectionViewModel section,
+  ) {
+    return _HomeSection(
+      title: section.title,
+      onTitleTap: section.viewAllTarget == null
+          ? null
+          : () {
+              context.pushNamed(
+                'collection',
+                extra: section.viewAllTarget,
+              );
+            },
+      child: section.layout == HomeSectionLayout.carousel
+          ? _HomeCarousel(items: section.carouselItems)
+          : section.items.isEmpty
+              ? _SectionEmptyState(message: section.emptyMessage)
+              : SizedBox(
+                  height: 246,
+                  child: ListView.separated(
+                    primary: false,
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    scrollDirection: Axis.horizontal,
+                    itemCount: section.items.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(width: 10),
+                    itemBuilder: (context, index) {
+                      final item = section.items[index];
+                      return MediaPosterTile(
+                        title: item.title,
+                        subtitle: item.subtitle,
+                        posterUrl: item.posterUrl,
+                        titleColor: Colors.white,
+                        subtitleColor: const Color(0xFF98A7C2),
+                        onTap: () {
+                          context.pushNamed(
+                            'detail',
+                            extra: item.detailTarget,
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
     );
   }
 
@@ -353,17 +399,126 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
   }
 }
 
-class _HomeLoadingState extends StatelessWidget {
-  const _HomeLoadingState();
+class _HomeHeroPlaceholder extends StatelessWidget {
+  const _HomeHeroPlaceholder({required this.style});
+
+  final HomeHeroStyle style;
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      children: const [
-        SizedBox(height: 220),
-        Center(child: CircularProgressIndicator(color: Colors.white)),
-      ],
+    final borderRadius = BorderRadius.circular(style.cardBorderRadius);
+
+    return SizedBox(
+      height: style.heroHeight,
+      child: ClipRRect(
+        borderRadius: borderRadius,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: borderRadius,
+            gradient: LinearGradient(
+              colors: [
+                const Color(0xFF142235),
+                const Color(0xFF0C1626),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: const Center(
+            child: CircularProgressIndicator(color: Colors.white),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeSectionLoading extends StatelessWidget {
+  const _HomeSectionLoading({
+    required this.title,
+    required this.layout,
+  });
+
+  final String title;
+  final HomeSectionLayout layout;
+
+  @override
+  Widget build(BuildContext context) {
+    return _HomeSection(
+      title: title,
+      child: layout == HomeSectionLayout.carousel
+          ? Container(
+              height: 184,
+              decoration: BoxDecoration(
+                color: const Color(0xFF0B1631).withValues(alpha: 0.56),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: const Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            )
+          : SizedBox(
+              height: 246,
+              child: ListView.separated(
+                primary: false,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                scrollDirection: Axis.horizontal,
+                itemCount: 3,
+                separatorBuilder: (context, index) => const SizedBox(width: 10),
+                itemBuilder: (context, index) {
+                  return const _PosterPlaceholderCard();
+                },
+              ),
+            ),
+    );
+  }
+}
+
+class _PosterPlaceholderCard extends StatelessWidget {
+  const _PosterPlaceholderCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 154,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            height: 206,
+            decoration: BoxDecoration(
+              color: const Color(0xFF112036).withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(22),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            height: 14,
+            width: 118,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            height: 12,
+            width: 44,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

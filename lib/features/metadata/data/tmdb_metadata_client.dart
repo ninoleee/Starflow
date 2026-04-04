@@ -13,6 +13,8 @@ class TmdbMetadataClient {
   TmdbMetadataClient(this._client);
 
   final http.Client _client;
+  final Map<String, TmdbMetadataMatch?> _resolvedMatches = {};
+  final Map<String, Future<TmdbMetadataMatch?>> _inflightMatches = {};
 
   Future<TmdbMetadataMatch?> matchTitle({
     required String query,
@@ -26,9 +28,47 @@ class TmdbMetadataClient {
       return null;
     }
 
+    final cacheKey = _buildCacheKey(
+      query: cleanedQuery,
+      token: cleanedToken,
+      year: year,
+      preferSeries: preferSeries,
+    );
+    if (_resolvedMatches.containsKey(cacheKey)) {
+      return _resolvedMatches[cacheKey];
+    }
+
+    final inflight = _inflightMatches[cacheKey];
+    if (inflight != null) {
+      return inflight;
+    }
+
+    final future = _matchTitleUncached(
+      query: cleanedQuery,
+      readAccessToken: cleanedToken,
+      year: year,
+      preferSeries: preferSeries,
+    );
+    _inflightMatches[cacheKey] = future;
+
+    try {
+      final result = await future;
+      _resolvedMatches[cacheKey] = result;
+      return result;
+    } finally {
+      _inflightMatches.remove(cacheKey);
+    }
+  }
+
+  Future<TmdbMetadataMatch?> _matchTitleUncached({
+    required String query,
+    required String readAccessToken,
+    required int year,
+    required bool preferSeries,
+  }) async {
     final searchResponse = await _client.get(
-      _buildSearchUri(cleanedQuery),
-      headers: _buildHeaders(cleanedToken),
+      _buildSearchUri(query),
+      headers: _buildHeaders(readAccessToken),
     );
     if (searchResponse.statusCode != 200) {
       throw TmdbMetadataException(
@@ -53,7 +93,7 @@ class TmdbMetadataClient {
 
     final best = _pickBestMatch(
       candidates,
-      query: cleanedQuery,
+      query: query,
       year: year,
       preferSeries: preferSeries,
     );
@@ -63,7 +103,7 @@ class TmdbMetadataClient {
 
     final detailsResponse = await _client.get(
       _buildDetailsUri(best),
-      headers: _buildHeaders(cleanedToken),
+      headers: _buildHeaders(readAccessToken),
     );
     if (detailsResponse.statusCode != 200) {
       throw TmdbMetadataException(
@@ -79,6 +119,20 @@ class TmdbMetadataClient {
     }
 
     return _mapDetails(best, decodedDetails);
+  }
+
+  String _buildCacheKey({
+    required String query,
+    required String token,
+    required int year,
+    required bool preferSeries,
+  }) {
+    return [
+      token.hashCode,
+      preferSeries ? 'tv' : 'movie',
+      year,
+      _normalizeTitle(query),
+    ].join('|');
   }
 
   Uri _buildSearchUri(String query) {

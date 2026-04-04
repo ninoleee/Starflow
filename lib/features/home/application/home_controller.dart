@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
@@ -6,7 +8,8 @@ import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
-import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
+import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
+import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -69,77 +72,93 @@ class HomeSectionViewModel {
   final LibraryCollectionTarget? viewAllTarget;
 }
 
-final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
-  ref,
-) async {
+final homeEnabledModulesProvider = Provider<List<HomeModuleConfig>>((ref) {
+  final settings = ref.watch(appSettingsProvider);
+  return settings.homeModules.where((item) => item.enabled).toList();
+});
+
+final homeModuleByIdProvider =
+    Provider.family<HomeModuleConfig?, String>((ref, moduleId) {
+  final normalizedModuleId = moduleId.trim();
+  if (normalizedModuleId.isEmpty) {
+    return null;
+  }
+
+  for (final module in ref.watch(homeEnabledModulesProvider)) {
+    if (module.id == normalizedModuleId) {
+      return module;
+    }
+  }
+  return null;
+});
+
+final homeLibrarySnapshotProvider =
+    FutureProvider<List<MediaItem>>((ref) async {
+  final settings = ref.watch(appSettingsProvider);
+  final enabledModules = ref.watch(homeEnabledModulesProvider);
+  final shouldWarmPosterLibrarySnapshot =
+      _needsDoubanPosterCandidates(enabledModules) &&
+          !_hasRemoteMetadataPosterFallback(settings);
+  if (!shouldWarmPosterLibrarySnapshot) {
+    return const [];
+  }
+
+  return ref.read(mediaRepositoryProvider).fetchLibrary(limit: 2000);
+});
+
+final homeRecentItemsProvider = FutureProvider<List<MediaItem>>((ref) async {
+  final enabledModules = ref.watch(homeEnabledModulesProvider);
+  if (!_needsRecentlyAdded(enabledModules)) {
+    return const [];
+  }
+
+  final sharedSnapshot = await ref.watch(homeLibrarySnapshotProvider.future);
+  if (sharedSnapshot.isNotEmpty) {
+    return sharedSnapshot.take(6).toList();
+  }
+
+  return ref.read(mediaRepositoryProvider).fetchRecentlyAdded(limit: 6);
+});
+
+final homePosterCandidatesProvider =
+    FutureProvider<List<MediaItem>>((ref) async {
+  final enabledModules = ref.watch(homeEnabledModulesProvider);
+  if (!_needsDoubanPosterCandidates(enabledModules)) {
+    return const [];
+  }
+
+  final sharedSnapshot = await ref.watch(homeLibrarySnapshotProvider.future);
+  final source = sharedSnapshot.isNotEmpty
+      ? sharedSnapshot
+      : await ref.watch(homeRecentItemsProvider.future);
+  return source.where((item) => item.posterUrl.trim().isNotEmpty).toList();
+});
+
+final homeCarouselItemsProvider =
+    FutureProvider<List<DoubanCarouselEntry>>((ref) async {
+  final enabledModules = ref.watch(homeEnabledModulesProvider);
+  if (!_needsCarousel(enabledModules)) {
+    return const [];
+  }
+
+  return ref.read(discoveryRepositoryProvider).fetchCarouselItems();
+});
+
+final homeSectionProvider =
+    FutureProvider.family<HomeSectionViewModel?, String>((ref, moduleId) async {
+  final module = ref.watch(homeModuleByIdProvider(moduleId));
+  if (module == null) {
+    return null;
+  }
+
   final settings = ref.watch(appSettingsProvider);
   final mediaRepository = ref.read(mediaRepositoryProvider);
   final discoveryRepository = ref.read(discoveryRepositoryProvider);
-  final tmdbMetadataClient = ref.read(tmdbMetadataClientProvider);
-  final enabledModules =
-      settings.homeModules.where((item) => item.enabled).toList();
-  final needsRecentlyAdded = enabledModules.any(
-    (item) => item.type == HomeModuleType.recentlyAdded,
-  );
-  final needsCarousel = enabledModules.any(
-    (item) => item.type == HomeModuleType.doubanCarousel,
-  );
-  final needsDoubanPosterCandidates = enabledModules.any(
-    (item) =>
-        item.type == HomeModuleType.doubanInterest ||
-        item.type == HomeModuleType.doubanSuggestion ||
-        item.type == HomeModuleType.doubanList ||
-        item.type == HomeModuleType.doubanCarousel,
-  );
+  final metadataMatchResolver = ref.read(metadataMatchResolverProvider);
 
-  final warmups = await Future.wait([
-    needsRecentlyAdded
-        ? mediaRepository.fetchRecentlyAdded(limit: 6)
-        : Future.value(const <MediaItem>[]),
-    needsCarousel
-        ? discoveryRepository.fetchCarouselItems()
-        : Future.value(const <DoubanCarouselEntry>[]),
-    needsDoubanPosterCandidates
-        ? mediaRepository.fetchLibrary(limit: 2000)
-        : Future.value(const <MediaItem>[]),
-  ]);
-
-  final recentItems = warmups[0] as List<MediaItem>;
-  final carouselItems = warmups[1] as List<DoubanCarouselEntry>;
-  final posterCandidates = (warmups[2] as List<MediaItem>)
-      .where((item) => item.posterUrl.trim().isNotEmpty)
-      .toList();
-
-  final sections = await Future.wait(
-    enabledModules.map(
-      (module) => _buildSectionForModule(
-        module: module,
-        settings: settings,
-        mediaRepository: mediaRepository,
-        discoveryRepository: discoveryRepository,
-        tmdbMetadataClient: tmdbMetadataClient,
-        recentItems: recentItems,
-        carouselItems: carouselItems,
-        posterCandidates: posterCandidates,
-      ),
-    ),
-  );
-
-  return sections.whereType<HomeSectionViewModel>().toList();
-});
-
-Future<HomeSectionViewModel?> _buildSectionForModule({
-  required HomeModuleConfig module,
-  required AppSettings settings,
-  required MediaRepository mediaRepository,
-  required DiscoveryRepository discoveryRepository,
-  required TmdbMetadataClient tmdbMetadataClient,
-  required List<MediaItem> recentItems,
-  required List<DoubanCarouselEntry> carouselItems,
-  required List<MediaItem> posterCandidates,
-}) async {
   switch (module.type) {
     case HomeModuleType.recentlyAdded:
+      final recentItems = await ref.watch(homeRecentItemsProvider.future);
       return _buildLibrarySection(
         module: module,
         items: recentItems,
@@ -172,26 +191,100 @@ Future<HomeSectionViewModel?> _buildSectionForModule({
     case HomeModuleType.doubanSuggestion:
     case HomeModuleType.doubanList:
       final entries = await discoveryRepository.fetchEntries(module);
+      final posterCandidates =
+          await ref.watch(homePosterCandidatesProvider.future);
       return _buildDoubanSection(
         module: module,
         settings: settings,
-        tmdbMetadataClient: tmdbMetadataClient,
+        metadataMatchResolver: metadataMatchResolver,
         entries: entries,
         posterCandidates: posterCandidates,
         emptyMessage:
             _resolveDoubanEmptyMessage(module, settings.doubanAccount),
       );
     case HomeModuleType.doubanCarousel:
+      final carouselItems = await ref.watch(homeCarouselItemsProvider.future);
+      final posterCandidates =
+          await ref.watch(homePosterCandidatesProvider.future);
       return _buildCarouselSection(
         module: module,
         settings: settings,
-        tmdbMetadataClient: tmdbMetadataClient,
+        metadataMatchResolver: metadataMatchResolver,
         items: carouselItems,
         posterCandidates: posterCandidates,
         emptyMessage:
             _resolveDoubanEmptyMessage(module, settings.doubanAccount),
       );
   }
+});
+
+final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
+  ref,
+) async {
+  final enabledModules = ref.watch(homeEnabledModulesProvider);
+  final sections = await Future.wait(
+    enabledModules.map(
+      (module) => ref.watch(homeSectionProvider(module.id).future),
+    ),
+  );
+
+  return sections.whereType<HomeSectionViewModel>().toList();
+});
+
+void primeHomeModules(Ref ref) {
+  _primeHomeModulesWithReader(ref.read);
+}
+
+void primeHomeModulesFromWidget(WidgetRef ref) {
+  _primeHomeModulesWithReader(ref.read);
+}
+
+void _primeHomeModulesWithReader(
+  T Function<T>(ProviderListenable<T> provider) read,
+) {
+  final modules = read(homeEnabledModulesProvider);
+  unawaited(read(homeLibrarySnapshotProvider.future));
+  unawaited(read(homeRecentItemsProvider.future));
+  unawaited(read(homePosterCandidatesProvider.future));
+  unawaited(read(homeCarouselItemsProvider.future));
+  for (final module in modules) {
+    unawaited(read(homeSectionProvider(module.id).future));
+  }
+}
+
+Future<void> refreshHomeModules(WidgetRef ref) async {
+  ref.invalidate(homeLibrarySnapshotProvider);
+  ref.invalidate(homeRecentItemsProvider);
+  ref.invalidate(homePosterCandidatesProvider);
+  ref.invalidate(homeCarouselItemsProvider);
+  ref.invalidate(homeSectionProvider);
+  ref.invalidate(homeSectionsProvider);
+  primeHomeModulesFromWidget(ref);
+  await Future<void>.delayed(const Duration(milliseconds: 140));
+}
+
+bool _hasRemoteMetadataPosterFallback(AppSettings settings) {
+  return settings.wmdbMetadataMatchEnabled ||
+      (settings.tmdbMetadataMatchEnabled &&
+          settings.tmdbReadAccessToken.trim().isNotEmpty);
+}
+
+bool _needsRecentlyAdded(List<HomeModuleConfig> modules) {
+  return modules.any((item) => item.type == HomeModuleType.recentlyAdded);
+}
+
+bool _needsCarousel(List<HomeModuleConfig> modules) {
+  return modules.any((item) => item.type == HomeModuleType.doubanCarousel);
+}
+
+bool _needsDoubanPosterCandidates(List<HomeModuleConfig> modules) {
+  return modules.any(
+    (item) =>
+        item.type == HomeModuleType.doubanInterest ||
+        item.type == HomeModuleType.doubanSuggestion ||
+        item.type == HomeModuleType.doubanList ||
+        item.type == HomeModuleType.doubanCarousel,
+  );
 }
 
 HomeSectionViewModel _buildLibrarySection({
@@ -224,7 +317,7 @@ HomeSectionViewModel _buildLibrarySection({
 Future<HomeSectionViewModel> _buildDoubanSection({
   required HomeModuleConfig module,
   required AppSettings settings,
-  required TmdbMetadataClient tmdbMetadataClient,
+  required MetadataMatchResolver metadataMatchResolver,
   required List<DoubanEntry> entries,
   required List<MediaItem> posterCandidates,
   required String emptyMessage,
@@ -233,13 +326,15 @@ Future<HomeSectionViewModel> _buildDoubanSection({
     final resolvedPosterUrl = await _resolveDoubanPosterUrl(
       primaryPosterUrl: entry.posterUrl,
       title: entry.title,
+      doubanId: entry.id,
       year: entry.year,
       preferSeries: _preferSeriesForEntry(
         subjectType: entry.subjectType,
       ),
+      actors: entry.actors,
       posterCandidates: posterCandidates,
       settings: settings,
-      tmdbMetadataClient: tmdbMetadataClient,
+      metadataMatchResolver: metadataMatchResolver,
     );
     return HomeCardViewModel(
       id: entry.id,
@@ -263,6 +358,7 @@ Future<HomeSectionViewModel> _buildDoubanSection({
         actors: entry.actors,
         availabilityLabel: '无',
         searchQuery: entry.title,
+        doubanId: entry.id,
         sourceName: '豆瓣',
       ),
     );
@@ -281,7 +377,7 @@ Future<HomeSectionViewModel> _buildDoubanSection({
 Future<HomeSectionViewModel> _buildCarouselSection({
   required HomeModuleConfig module,
   required AppSettings settings,
-  required TmdbMetadataClient tmdbMetadataClient,
+  required MetadataMatchResolver metadataMatchResolver,
   required List<DoubanCarouselEntry> items,
   required List<MediaItem> posterCandidates,
   required String emptyMessage,
@@ -290,11 +386,13 @@ Future<HomeSectionViewModel> _buildCarouselSection({
     final resolvedPosterUrl = await _resolveDoubanPosterUrl(
       primaryPosterUrl: item.posterUrl,
       title: item.title,
+      doubanId: item.id,
       year: item.year,
       preferSeries: _preferSeriesForEntry(subjectType: item.mediaType),
+      actors: const [],
       posterCandidates: posterCandidates,
       settings: settings,
-      tmdbMetadataClient: tmdbMetadataClient,
+      metadataMatchResolver: metadataMatchResolver,
     );
     final resolvedImageUrl = _firstNonEmpty(
       item.imageUrl,
@@ -317,6 +415,8 @@ Future<HomeSectionViewModel> _buildCarouselSection({
             item.ratingLabel.trim().isEmpty ? const [] : [item.ratingLabel],
         availabilityLabel: '无',
         searchQuery: item.title,
+        doubanId: item.id,
+        sourceName: '豆瓣',
       ),
     );
   }));
@@ -364,11 +464,13 @@ MediaSourceKind _resolveSourceKind(AppSettings settings, String sourceId) {
 Future<String> _resolveDoubanPosterUrl({
   required String primaryPosterUrl,
   required String title,
+  required String doubanId,
   required int year,
   required bool preferSeries,
+  required List<String> actors,
   required List<MediaItem> posterCandidates,
   required AppSettings settings,
-  required TmdbMetadataClient tmdbMetadataClient,
+  required MetadataMatchResolver metadataMatchResolver,
 }) async {
   final preferredPosterUrl = primaryPosterUrl.trim();
   if (preferredPosterUrl.isNotEmpty) {
@@ -384,17 +486,20 @@ Future<String> _resolveDoubanPosterUrl({
     return matchedPoster!;
   }
 
-  if (!settings.tmdbMetadataMatchEnabled ||
-      settings.tmdbReadAccessToken.trim().isEmpty) {
+  if (!_hasRemoteMetadataPosterFallback(settings)) {
     return '';
   }
 
   try {
-    final match = await tmdbMetadataClient.matchTitle(
-      query: title,
-      readAccessToken: settings.tmdbReadAccessToken,
-      year: year,
-      preferSeries: preferSeries,
+    final match = await metadataMatchResolver.match(
+      settings: settings,
+      request: MetadataMatchRequest(
+        query: title,
+        doubanId: doubanId,
+        year: year,
+        preferSeries: preferSeries,
+        actors: actors,
+      ),
     );
     return match?.posterUrl.trim() ?? '';
   } catch (_) {

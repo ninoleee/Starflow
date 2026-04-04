@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -193,6 +194,87 @@ void main() {
         'https://image.tmdb.org/t/p/w185/pedro.jpg',
       );
       expect(result.imdbId, 'tt3581920');
+    });
+
+    test('reuses identical lookups from in-memory cache', () async {
+      final searchGate = Completer<void>();
+      var searchRequests = 0;
+      var detailRequests = 0;
+      final client = TmdbMetadataClient(
+        MockClient((request) async {
+          if (request.url.path == '/3/search/multi') {
+            searchRequests += 1;
+            await searchGate.future;
+            return http.Response(
+              jsonEncode({
+                'results': [
+                  {
+                    'id': 603,
+                    'media_type': 'movie',
+                    'title': 'The Matrix',
+                    'original_title': 'The Matrix',
+                    'overview': '',
+                    'poster_path': '/matrix-search.jpg',
+                    'release_date': '1999-03-30',
+                    'popularity': 88.0,
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          if (request.url.path == '/3/movie/603') {
+            detailRequests += 1;
+            return http.Response.bytes(
+              utf8.encode(
+                jsonEncode({
+                  'title': '黑客帝国',
+                  'overview': '一名黑客发现世界的真实面貌。',
+                  'poster_path': '/matrix-detail.jpg',
+                  'release_date': '1999-03-31',
+                  'runtime': 136,
+                  'genres': const [],
+                  'credits': {
+                    'cast': const [],
+                    'crew': const [],
+                  },
+                  'external_ids': {'imdb_id': 'tt0133093'},
+                }),
+              ),
+              200,
+            );
+          }
+
+          throw UnsupportedError('Unexpected request: ${request.url}');
+        }),
+      );
+
+      final first = client.matchTitle(
+        query: 'The Matrix',
+        readAccessToken: 'tmdb-token',
+        year: 1999,
+      );
+      final second = client.matchTitle(
+        query: 'The Matrix',
+        readAccessToken: 'tmdb-token',
+        year: 1999,
+      );
+      await Future<void>.delayed(Duration.zero);
+      searchGate.complete();
+
+      final results = await Future.wait([first, second]);
+      final cached = await client.matchTitle(
+        query: 'The Matrix',
+        readAccessToken: 'tmdb-token',
+        year: 1999,
+      );
+
+      expect(results.first, isNotNull);
+      expect(results.last, isNotNull);
+      expect(cached, isNotNull);
+      expect(searchRequests, 1);
+      expect(detailRequests, 1);
     });
   });
 }

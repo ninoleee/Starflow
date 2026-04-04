@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
@@ -15,5 +16,18 @@ void main() {
     final settings = AppSettings.fromJson(const {});
 
     expect(settings.homeHeroStyle, HomeHeroStyle.normal);
+  });
+
+  test('app settings persist metadata match preferences', () {
+    final settings = AppSettings.fromJson({
+      'tmdbMetadataMatchEnabled': true,
+      'wmdbMetadataMatchEnabled': true,
+      'metadataMatchPriority': 'wmdb',
+    });
+
+    expect(settings.tmdbMetadataMatchEnabled, isTrue);
+    expect(settings.wmdbMetadataMatchEnabled, isTrue);
+    expect(settings.metadataMatchPriority, MetadataMatchProvider.wmdb);
+    expect(settings.toJson()['metadataMatchPriority'], 'wmdb');
   });
 }

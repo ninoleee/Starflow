@@ -9,21 +9,18 @@ import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
-import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
+import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
+import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 
 final enrichedDetailTargetProvider =
     FutureProvider.family<MediaDetailTarget, MediaDetailTarget>((
   ref,
   target,
 ) async {
-  final tmdbEnabled = ref.watch(
-    appSettingsProvider.select((settings) => settings.tmdbMetadataMatchEnabled),
-  );
-  final tmdbToken = ref.watch(
-    appSettingsProvider.select((settings) => settings.tmdbReadAccessToken),
-  );
+  final settings = ref.watch(appSettingsProvider);
   final imdbEnabled = ref.watch(
     appSettingsProvider.select((settings) => settings.imdbRatingMatchEnabled),
   );
@@ -31,17 +28,14 @@ final enrichedDetailTargetProvider =
       target.searchQuery.trim().isEmpty ? target.title : target.searchQuery;
 
   var resolved = target;
-  TmdbMetadataMatch? tmdbMatch;
+  MetadataMatchResult? metadataMatch;
 
-  if (resolved.needsLibraryMatch &&
-      tmdbEnabled &&
-      tmdbToken.trim().isNotEmpty) {
-    tmdbMatch = await _tryTmdbMetadataMatch(
-      tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
+  if (resolved.needsLibraryMatch || resolved.needsMetadataMatch) {
+    metadataMatch = await _tryPreferredMetadataMatch(
+      metadataMatchResolver: ref.read(metadataMatchResolverProvider),
+      settings: settings,
+      target: resolved,
       query: query,
-      readAccessToken: tmdbToken,
-      year: resolved.year,
-      preferSeries: resolved.isSeries,
     );
   }
 
@@ -50,27 +44,15 @@ final enrichedDetailTargetProvider =
       mediaRepository: ref.read(mediaRepositoryProvider),
       target: resolved,
       query: query,
-      tmdbMatch: tmdbMatch,
+      metadataMatch: metadataMatch,
     );
     if (matchedTarget != null) {
       resolved = matchedTarget;
     }
   }
 
-  if (tmdbEnabled &&
-      tmdbToken.trim().isNotEmpty &&
-      resolved.needsMetadataMatch) {
-    final match = tmdbMatch ??
-        await _tryTmdbMetadataMatch(
-          tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
-          query: query,
-          readAccessToken: tmdbToken,
-          year: resolved.year,
-          preferSeries: resolved.isSeries,
-        );
-    if (match != null) {
-      resolved = _applyTmdbMetadata(resolved, match);
-    }
+  if (resolved.needsMetadataMatch && metadataMatch != null) {
+    resolved = _applyMetadataMatch(resolved, metadataMatch);
   }
 
   if (imdbEnabled && resolved.needsImdbRatingMatch) {
@@ -103,19 +85,22 @@ final enrichedDetailTargetProvider =
   return resolved;
 });
 
-Future<TmdbMetadataMatch?> _tryTmdbMetadataMatch({
-  required TmdbMetadataClient tmdbMetadataClient,
+Future<MetadataMatchResult?> _tryPreferredMetadataMatch({
+  required MetadataMatchResolver metadataMatchResolver,
+  required AppSettings settings,
+  required MediaDetailTarget target,
   required String query,
-  required String readAccessToken,
-  required int year,
-  required bool preferSeries,
 }) async {
   try {
-    return await tmdbMetadataClient.matchTitle(
-      query: query,
-      readAccessToken: readAccessToken,
-      year: year,
-      preferSeries: preferSeries,
+    return await metadataMatchResolver.match(
+      settings: settings,
+      request: MetadataMatchRequest(
+        query: query,
+        doubanId: target.doubanId,
+        year: target.year,
+        preferSeries: target.isSeries,
+        actors: target.actors,
+      ),
     );
   } catch (_) {
     return null;
@@ -126,7 +111,7 @@ Future<MediaDetailTarget?> _tryMatchLibraryResource({
   required MediaRepository mediaRepository,
   required MediaDetailTarget target,
   required String query,
-  TmdbMetadataMatch? tmdbMatch,
+  MetadataMatchResult? metadataMatch,
 }) async {
   const detailLibraryMatchLimit = 2000;
 
@@ -138,10 +123,9 @@ Future<MediaDetailTarget?> _tryMatchLibraryResource({
       titles: [
         target.title,
         query,
-        if (tmdbMatch != null) tmdbMatch.title,
-        if (tmdbMatch != null) tmdbMatch.originalTitle,
+        if (metadataMatch != null) ...metadataMatch.titlesForMatching,
       ],
-      year: target.year > 0 ? target.year : (tmdbMatch?.year ?? 0),
+      year: target.year > 0 ? target.year : (metadataMatch?.year ?? 0),
     );
     if (matched == null) {
       return null;
@@ -185,13 +169,14 @@ MediaDetailTarget _mergeMatchedLibraryTarget({
       matched.ratingLabels,
       current.ratingLabels,
     ),
+    doubanId: current.doubanId,
     imdbId: current.imdbId,
   );
 }
 
-MediaDetailTarget _applyTmdbMetadata(
+MediaDetailTarget _applyMetadataMatch(
   MediaDetailTarget target,
-  TmdbMetadataMatch match,
+  MetadataMatchResult match,
 ) {
   return target.copyWith(
     posterUrl:
@@ -214,6 +199,8 @@ MediaDetailTarget _applyTmdbMetadata(
               ),
             )
             .toList(),
+    ratingLabels: _mergeLabels(target.ratingLabels, match.ratingLabels),
+    doubanId: target.doubanId.trim().isEmpty ? match.doubanId : target.doubanId,
     imdbId: target.imdbId.trim().isEmpty ? match.imdbId : target.imdbId,
   );
 }
@@ -355,24 +342,18 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     final query = currentTarget.searchQuery.trim().isEmpty
         ? currentTarget.title
         : currentTarget.searchQuery;
-    TmdbMetadataMatch? tmdbMatch;
-
-    if (settings.tmdbMetadataMatchEnabled &&
-        settings.tmdbReadAccessToken.trim().isNotEmpty) {
-      tmdbMatch = await _tryTmdbMetadataMatch(
-        tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
-        query: query,
-        readAccessToken: settings.tmdbReadAccessToken,
-        year: currentTarget.year,
-        preferSeries: currentTarget.isSeries,
-      );
-    }
+    final metadataMatch = await _tryPreferredMetadataMatch(
+      metadataMatchResolver: ref.read(metadataMatchResolverProvider),
+      settings: settings,
+      target: currentTarget,
+      query: query,
+    );
 
     final matched = await _tryMatchLibraryResource(
       mediaRepository: ref.read(mediaRepositoryProvider),
       target: currentTarget,
       query: query,
-      tmdbMatch: tmdbMatch,
+      metadataMatch: metadataMatch,
     );
 
     if (!mounted) {

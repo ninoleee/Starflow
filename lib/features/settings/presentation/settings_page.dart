@@ -6,12 +6,13 @@ import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
+import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/media_source_editor_page.dart';
 import 'package:starflow/features/settings/presentation/douban_account_editor_page.dart';
+import 'package:starflow/features/settings/presentation/metadata_match_settings_page.dart';
 import 'package:starflow/features/settings/presentation/search_provider_editor_page.dart';
 
 class SettingsPage extends ConsumerWidget {
@@ -129,80 +130,13 @@ class SettingsPage extends ConsumerWidget {
             const SizedBox(height: 18),
             SectionPanel(
               title: '元数据与评分',
-              subtitle: 'TMDB 补影片信息，IMDb 补评分；都只在详情页按需触发，不拖慢首页和媒体库',
-              child: Column(
-                children: [
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('启用 TMDB 自动补全影片信息'),
-                    subtitle: Text(
-                      settings.tmdbReadAccessToken.trim().isEmpty
-                          ? '当前未配置 TMDB Read Access Token，打开开关后也不会触发。'
-                          : '缺少海报、简介、导演、演员等信息时自动补全。',
-                    ),
-                    value: settings.tmdbMetadataMatchEnabled,
-                    onChanged: (value) {
-                      ref
-                          .read(settingsControllerProvider.notifier)
-                          .setTmdbMetadataMatchEnabled(value);
-                    },
-                  ),
-                  const SizedBox(height: 6),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('TMDB Read Access Token'),
-                    subtitle: Text(
-                      settings.tmdbReadAccessToken.trim().isEmpty
-                          ? '未配置'
-                          : '已配置',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      OutlinedButton(
-                        onPressed: () => _openTmdbTokenEditor(
-                          context,
-                          ref,
-                          settings.tmdbReadAccessToken,
-                        ),
-                        child: Text(
-                          settings.tmdbReadAccessToken.trim().isEmpty
-                              ? '填写 Token'
-                              : '编辑 Token',
-                        ),
-                      ),
-                      OutlinedButton(
-                        onPressed: () => _openTmdbTestDialog(
-                          context,
-                          ref,
-                        ),
-                        child: const Text('测试 TMDB'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '可以直接测试一个片名，确认 Token、搜索和详情接口是不是都正常。',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF7F8FAE),
-                        ),
-                  ),
-                  const Divider(height: 20),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('启用 IMDb 自动补评分'),
-                    subtitle: const Text('会先匹配 IMDb 条目，再补一个 IMDb 评分标签。'),
-                    value: settings.imdbRatingMatchEnabled,
-                    onChanged: (value) {
-                      ref
-                          .read(settingsControllerProvider.notifier)
-                          .setImdbRatingMatchEnabled(value);
-                    },
-                  ),
-                ],
+              subtitle: 'TMDB、WMDB 和 IMDb 的匹配顺序、开关与测试入口都收在二级页面里',
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('打开匹配与评分设置'),
+                subtitle: Text(_buildMetadataMatchSubtitle(settings)),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _openMetadataMatchSettings(context),
               ),
             ),
             const SizedBox(height: 18),
@@ -302,224 +236,12 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
-  Future<void> _openTmdbTokenEditor(
-    BuildContext context,
-    WidgetRef ref,
-    String currentToken,
-  ) async {
-    final controller = TextEditingController(text: currentToken);
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('TMDB Read Access Token'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            minLines: 2,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              hintText: '粘贴 TMDB 的 Read Access Token',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('取消'),
-            ),
-            TextButton(
-              onPressed: () {
-                controller.clear();
-                Navigator.of(dialogContext).pop(true);
-              },
-              child: const Text('清空'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('保存'),
-            ),
-          ],
-        );
-      },
+  Future<void> _openMetadataMatchSettings(BuildContext context) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => const MetadataMatchSettingsPage(),
+      ),
     );
-    if (saved == true) {
-      await ref
-          .read(settingsControllerProvider.notifier)
-          .setTmdbReadAccessToken(controller.text);
-    }
-    controller.dispose();
-  }
-
-  Future<void> _openTmdbTestDialog(
-    BuildContext context,
-    WidgetRef ref,
-  ) async {
-    final controller = TextEditingController(text: '这个杀手不太冷');
-    var preferSeries = false;
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        var loading = false;
-        String message = '';
-        TmdbMetadataMatch? result;
-
-        return StatefulBuilder(
-          builder: (context, setState) {
-            Future<void> runTest() async {
-              final token =
-                  ref.read(appSettingsProvider).tmdbReadAccessToken.trim();
-              final query = controller.text.trim();
-              if (token.isEmpty) {
-                setState(() {
-                  message = '请先填写 TMDB Read Access Token。';
-                  result = null;
-                });
-                return;
-              }
-              if (query.isEmpty) {
-                setState(() {
-                  message = '请先输入要测试的片名。';
-                  result = null;
-                });
-                return;
-              }
-
-              setState(() {
-                loading = true;
-                message = '';
-                result = null;
-              });
-
-              try {
-                final match =
-                    await ref.read(tmdbMetadataClientProvider).matchTitle(
-                          query: query,
-                          readAccessToken: token,
-                          preferSeries: preferSeries,
-                        );
-                setState(() {
-                  loading = false;
-                  result = match;
-                  message = match == null ? '没有匹配到结果。' : '匹配成功。';
-                });
-              } catch (error) {
-                setState(() {
-                  loading = false;
-                  result = null;
-                  message = '$error';
-                });
-              }
-            }
-
-            return AlertDialog(
-              title: const Text('测试 TMDB'),
-              content: SizedBox(
-                width: 420,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      TextField(
-                        controller: controller,
-                        autofocus: true,
-                        textInputAction: TextInputAction.search,
-                        decoration: const InputDecoration(
-                          labelText: '测试片名',
-                          hintText: '例如：这个杀手不太冷',
-                          border: OutlineInputBorder(),
-                        ),
-                        onSubmitted: (_) => runTest(),
-                      ),
-                      const SizedBox(height: 10),
-                      CheckboxListTile(
-                        value: preferSeries,
-                        onChanged: (value) {
-                          setState(() {
-                            preferSeries = value ?? false;
-                          });
-                        },
-                        contentPadding: EdgeInsets.zero,
-                        controlAffinity: ListTileControlAffinity.leading,
-                        title: const Text('优先按剧集匹配'),
-                      ),
-                      if (loading) ...[
-                        const SizedBox(height: 6),
-                        const LinearProgressIndicator(),
-                      ],
-                      if (message.trim().isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          message,
-                          style: TextStyle(
-                            color: result == null
-                                ? const Color(0xFFE79A9A)
-                                : const Color(0xFF9FD6B3),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                      if (result != null) ...[
-                        const SizedBox(height: 12),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.04),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                result!.title,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w700),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                  '年份：${result!.year > 0 ? result!.year : '未知'}'),
-                              Text(
-                                '海报：${result!.posterUrl.trim().isEmpty ? '无' : '有'}',
-                              ),
-                              Text(
-                                'IMDb ID：${result!.imdbId.trim().isEmpty ? '无' : result!.imdbId}',
-                              ),
-                              if (result!.overview.trim().isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                Text(
-                                  result!.overview,
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('关闭'),
-                ),
-                FilledButton(
-                  onPressed: loading ? null : runTest,
-                  child: const Text('开始测试'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-    controller.dispose();
   }
 
   String _buildMediaSourceSubtitle(MediaSourceConfig source) {
@@ -549,6 +271,14 @@ class SettingsPage extends ConsumerWidget {
             ? '自动登录 ${provider.username}'
             : '匿名请求';
     return '$adapter · ${provider.endpoint}\n$authStatus';
+  }
+
+  String _buildMetadataMatchSubtitle(AppSettings settings) {
+    final tmdbStatus = settings.tmdbMetadataMatchEnabled ? 'TMDB 开' : 'TMDB 关';
+    final wmdbStatus = settings.wmdbMetadataMatchEnabled ? 'WMDB 开' : 'WMDB 关';
+    final imdbStatus =
+        settings.imdbRatingMatchEnabled ? 'IMDb 评分开' : 'IMDb 评分关';
+    return '${settings.metadataMatchPriority.label} 优先 · $tmdbStatus · $wmdbStatus · $imdbStatus';
   }
 }
 

@@ -1,5 +1,6 @@
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 
@@ -24,6 +25,8 @@ class SeedData {
     homeModules: const [],
     homeHeroStyle: HomeHeroStyle.normal,
     tmdbMetadataMatchEnabled: false,
+    wmdbMetadataMatchEnabled: false,
+    metadataMatchPriority: MetadataMatchProvider.tmdb,
     imdbRatingMatchEnabled: false,
     tmdbReadAccessToken: '',
   );

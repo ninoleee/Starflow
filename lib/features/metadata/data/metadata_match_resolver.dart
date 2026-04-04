@@ -1,0 +1,92 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
+import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
+import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
+
+final metadataMatchResolverProvider = Provider<MetadataMatchResolver>((ref) {
+  return MetadataMatchResolver(
+    tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
+    wmdbMetadataClient: ref.read(wmdbMetadataClientProvider),
+  );
+});
+
+class MetadataMatchResolver {
+  const MetadataMatchResolver({
+    required TmdbMetadataClient tmdbMetadataClient,
+    required WmdbMetadataClient wmdbMetadataClient,
+  })  : _tmdbMetadataClient = tmdbMetadataClient,
+        _wmdbMetadataClient = wmdbMetadataClient;
+
+  final TmdbMetadataClient _tmdbMetadataClient;
+  final WmdbMetadataClient _wmdbMetadataClient;
+
+  Future<MetadataMatchResult?> match({
+    required AppSettings settings,
+    required MetadataMatchRequest request,
+  }) async {
+    for (final provider in _orderedEnabledProviders(settings)) {
+      switch (provider) {
+        case MetadataMatchProvider.tmdb:
+          final token = settings.tmdbReadAccessToken.trim();
+          if (!settings.tmdbMetadataMatchEnabled || token.isEmpty) {
+            continue;
+          }
+          final match = await _tmdbMetadataClient.matchTitle(
+            query: request.query,
+            readAccessToken: token,
+            year: request.year,
+            preferSeries: request.preferSeries,
+          );
+          if (match != null) {
+            return MetadataMatchResult(
+              provider: MetadataMatchProvider.tmdb,
+              title: match.title,
+              originalTitle: match.originalTitle,
+              posterUrl: match.posterUrl,
+              overview: match.overview,
+              year: match.year,
+              durationLabel: match.durationLabel,
+              genres: match.genres,
+              directors: match.directors,
+              actors: match.actors,
+              actorProfiles: match.actorProfiles
+                  .map(
+                    (item) => MetadataPersonProfile(
+                      name: item.name,
+                      avatarUrl: item.avatarUrl,
+                    ),
+                  )
+                  .toList(),
+              imdbId: match.imdbId,
+            );
+          }
+        case MetadataMatchProvider.wmdb:
+          if (!settings.wmdbMetadataMatchEnabled) {
+            continue;
+          }
+          final doubanId = request.doubanId.trim();
+          final match = doubanId.isNotEmpty
+              ? await _wmdbMetadataClient.matchByDoubanId(doubanId: doubanId)
+              : await _wmdbMetadataClient.matchTitle(
+                  query: request.query,
+                  year: request.year,
+                  preferSeries: request.preferSeries,
+                  actors: request.actors,
+                );
+          if (match != null) {
+            return match;
+          }
+      }
+    }
+
+    return null;
+  }
+
+  List<MetadataMatchProvider> _orderedEnabledProviders(AppSettings settings) {
+    final preferred = settings.metadataMatchPriority;
+    return preferred == MetadataMatchProvider.wmdb
+        ? const [MetadataMatchProvider.wmdb, MetadataMatchProvider.tmdb]
+        : const [MetadataMatchProvider.tmdb, MetadataMatchProvider.wmdb];
+  }
+}

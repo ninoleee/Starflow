@@ -31,6 +31,7 @@ class MediaDetailTarget {
     this.itemType = '',
     this.sectionId = '',
     this.sectionName = '',
+    this.doubanId = '',
     this.imdbId = '',
     this.sourceKind,
     this.sourceName = '',
@@ -54,6 +55,7 @@ class MediaDetailTarget {
   final String itemType;
   final String sectionId;
   final String sectionName;
+  final String doubanId;
   final String imdbId;
   final MediaSourceKind? sourceKind;
   final String sourceName;
@@ -124,6 +126,7 @@ class MediaDetailTarget {
     String? itemType,
     String? sectionId,
     String? sectionName,
+    String? doubanId,
     String? imdbId,
     MediaSourceKind? sourceKind,
     String? sourceName,
@@ -147,6 +150,7 @@ class MediaDetailTarget {
       itemType: itemType ?? this.itemType,
       sectionId: sectionId ?? this.sectionId,
       sectionName: sectionName ?? this.sectionName,
+      doubanId: doubanId ?? this.doubanId,
       imdbId: imdbId ?? this.imdbId,
       sourceKind: sourceKind ?? this.sourceKind,
       sourceName: sourceName ?? this.sourceName,
@@ -183,6 +187,7 @@ class MediaDetailTarget {
       itemType: item.itemType,
       sectionId: item.sectionId,
       sectionName: item.sectionName,
+      doubanId: '',
       imdbId: '',
       sourceKind: item.sourceKind,
       sourceName: item.sourceName,
