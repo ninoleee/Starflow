@@ -6,7 +6,6 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/pansou_api_client.dart';
-import 'package:starflow/features/search/data/search_link_validator.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 
 abstract class SearchRepository {
@@ -26,7 +25,6 @@ final searchRepositoryProvider = Provider<SearchRepository>(
   (ref) => AppSearchRepository(
     ref.read(panSouApiClientProvider),
     ref.read(cloudSaverApiClientProvider),
-    ref.read(searchLinkValidatorProvider),
     ref.read(mediaRepositoryProvider),
   ),
 );
@@ -35,13 +33,11 @@ class AppSearchRepository implements SearchRepository {
   AppSearchRepository(
     this._panSouApiClient,
     this._cloudSaverApiClient,
-    this._searchLinkValidator,
     this._mediaRepository,
   );
 
   final PanSouApiClient _panSouApiClient;
   final CloudSaverApiClient _cloudSaverApiClient;
-  final SearchLinkValidator _searchLinkValidator;
   final MediaRepository _mediaRepository;
 
   @override
@@ -69,29 +65,7 @@ class AppSearchRepository implements SearchRepository {
     }
 
     final filtered = _applyProviderFilters(rawResults, provider: provider);
-    if (filtered.items.isEmpty) {
-      return filtered;
-    }
-
-    final availability = await Future.wait(
-      filtered.items
-          .map((item) => _searchLinkValidator.hasFiles(item.resourceUrl)),
-    );
-    final visibleItems = <SearchResult>[];
-    var filteredCount = filtered.filteredCount;
-    for (var index = 0; index < filtered.items.length; index += 1) {
-      if (availability[index]) {
-        visibleItems.add(filtered.items[index]);
-      } else {
-        filteredCount += 1;
-      }
-    }
-
-    return SearchFetchResult(
-      items: visibleItems,
-      rawCount: filtered.rawCount,
-      filteredCount: filteredCount,
-    );
+    return filtered;
   }
 
   @override
@@ -189,8 +163,11 @@ class AppSearchRepository implements SearchRepository {
     var filteredCount = 0;
 
     for (final item in rawResults) {
+      final detectedCloudType =
+          detectSearchCloudTypeFromUrl(item.resourceUrl)?.code ??
+              item.cloudType.trim();
       if (allowedCloudTypes.isNotEmpty &&
-          !allowedCloudTypes.contains(item.cloudType.trim())) {
+          !allowedCloudTypes.contains(detectedCloudType)) {
         filteredCount += 1;
         continue;
       }

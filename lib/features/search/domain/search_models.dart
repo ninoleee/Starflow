@@ -347,8 +347,62 @@ String normalizeSearchResourceUrl(String rawUrl) {
     scheme: uri.scheme.toLowerCase(),
     host: uri.host.toLowerCase(),
     path: uri.path == '/' ? uri.path : uri.path.replaceFirst(RegExp(r'/$'), ''),
-    queryParameters: queryParameters.isEmpty ? null : queryParameters,
+    query: queryParameters.isEmpty
+        ? ''
+        : Uri(queryParameters: queryParameters).query,
     fragment: null,
   );
   return normalized.toString();
+}
+
+SearchCloudType? detectSearchCloudTypeFromUrl(String rawUrl) {
+  final uri = Uri.tryParse(rawUrl.trim());
+  if (uri == null) {
+    return null;
+  }
+
+  final host = uri.host.toLowerCase();
+  final path = uri.path.toLowerCase();
+  final normalized = '$host$path';
+
+  if (host.contains('pan.baidu.com')) {
+    return SearchCloudType.baidu;
+  }
+  if (host.contains('pan.quark.cn')) {
+    return SearchCloudType.quark;
+  }
+  if (host.contains('alipan.com') || host.contains('aliyundrive.com')) {
+    return SearchCloudType.aliyun;
+  }
+  if (host.contains('cloud.189.cn')) {
+    return SearchCloudType.tianyi;
+  }
+  if (host.contains('drive.uc.cn') || host.contains('pan.uc.cn')) {
+    return SearchCloudType.uc;
+  }
+  if (host.contains('yun.139.com')) {
+    return SearchCloudType.mobile;
+  }
+  if (host.contains('115.com')) {
+    return SearchCloudType.cloud115;
+  }
+  if (host.contains('mypikpak.com') || host.contains('pikpak.me')) {
+    return SearchCloudType.pikpak;
+  }
+  if (host.contains('pan.xunlei.com')) {
+    return SearchCloudType.xunlei;
+  }
+  if (host.contains('123684.com') ||
+      host.contains('123865.com') ||
+      host.contains('123912.com') ||
+      host.contains('123pan.com')) {
+    return SearchCloudType.cloud123;
+  }
+  if (normalized.startsWith('magnet:')) {
+    return SearchCloudType.magnet;
+  }
+  if (normalized.startsWith('ed2k://')) {
+    return SearchCloudType.ed2k;
+  }
+  return null;
 }

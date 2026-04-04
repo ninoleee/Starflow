@@ -6,7 +6,6 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/cloud_saver_api_client.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
 import 'package:starflow/features/search/data/pansou_api_client.dart';
-import 'package:starflow/features/search/data/search_link_validator.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 
 void main() {
@@ -18,9 +17,6 @@ void main() {
         ),
         CloudSaverApiClient(
           MockClient((request) async => http.Response('{}', 200)),
-        ),
-        SearchLinkValidator(
-          MockClient((request) async => http.Response('', 200)),
         ),
         _FakeMediaRepository(
           items: [
@@ -86,9 +82,6 @@ void main() {
         CloudSaverApiClient(
           MockClient((request) async => http.Response('{}', 200)),
         ),
-        SearchLinkValidator(
-          MockClient((request) async => http.Response('', 200)),
-        ),
         const _FakeMediaRepository(items: []),
       );
 
@@ -107,7 +100,8 @@ void main() {
       expect(results.filteredCount, 0);
     });
 
-    test('searchOnline filters invalid share links', () async {
+    test('searchOnline keeps deduplicated results from provider output',
+        () async {
       final repository = AppSearchRepository(
         PanSouApiClient(
           MockClient((request) async {
@@ -119,7 +113,7 @@ void main() {
                   "merged_by_type": {
                     "quark": [
                       {"url":"https://pan.quark.cn/s/valid","note":"有效资源","password":""},
-                      {"url":"https://pan.quark.cn/s/invalid","note":"失效资源","password":""}
+                      {"url":"https://pan.quark.cn/s/valid?pwd=1234","note":"重复资源","password":"1234"}
                     ]
                   }
                 }
@@ -132,14 +126,6 @@ void main() {
         ),
         CloudSaverApiClient(
           MockClient((request) async => http.Response('{}', 200)),
-        ),
-        SearchLinkValidator(
-          MockClient((request) async {
-            if (request.url.toString().endsWith('/invalid')) {
-              return http.Response('分享已失效', 200);
-            }
-            return http.Response('<html>资源仍可访问</html>', 200);
-          }),
         ),
         const _FakeMediaRepository(items: []),
       );
@@ -190,9 +176,6 @@ void main() {
         CloudSaverApiClient(
           MockClient((request) async => http.Response('{}', 200)),
         ),
-        SearchLinkValidator(
-          MockClient((request) async => http.Response('<html>ok</html>', 200)),
-        ),
         const _FakeMediaRepository(items: []),
       );
 
@@ -213,6 +196,55 @@ void main() {
       expect(results.items.single.resourceUrl, 'https://pan.quark.cn/s/good');
       expect(results.filteredCount, 2);
       expect(results.rawCount, 3);
+    });
+
+    test('searchOnline filters cloud type by resource url', () async {
+      final repository = AppSearchRepository(
+        PanSouApiClient(
+          MockClient((request) async {
+            return http.Response(
+              '''
+              {
+                "code": 0,
+                "data": {
+                  "merged_by_type": {
+                    "quark": [
+                      {"url":"https://pan.quark.cn/s/quark-item","note":"夸克资源","password":""}
+                    ],
+                    "baidu": [
+                      {"url":"https://pan.baidu.com/s/baidu-item","note":"百度资源","password":""}
+                    ]
+                  }
+                }
+              }
+              ''',
+              200,
+              headers: const {'content-type': 'application/json'},
+            );
+          }),
+        ),
+        CloudSaverApiClient(
+          MockClient((request) async => http.Response('{}', 200)),
+        ),
+        const _FakeMediaRepository(items: []),
+      );
+
+      final results = await repository.searchOnline(
+        '测试资源',
+        provider: const SearchProviderConfig(
+          id: 'pansou-api',
+          name: 'PanSou',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'https://so.252035.xyz',
+          enabled: true,
+          allowedCloudTypes: ['baidu'],
+        ),
+      );
+
+      expect(results.items, hasLength(1));
+      expect(results.items.single.resourceUrl,
+          'https://pan.baidu.com/s/baidu-item');
+      expect(results.filteredCount, 1);
     });
   });
 }

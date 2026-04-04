@@ -50,19 +50,41 @@ func point(_ x: CGFloat, _ y: CGFloat, in rect: CGRect) -> CGPoint {
   )
 }
 
-func gradientImage(size: CGSize, draw: (CGContext, CGRect) -> Void) -> NSImage {
-  let image = NSImage(size: size)
-  image.lockFocus()
-  guard let context = NSGraphicsContext.current?.cgContext else {
-    image.unlockFocus()
-    return image
+func makeBitmap(size: CGFloat, draw: (CGContext, CGRect) -> Void) throws -> NSBitmapImageRep {
+  let pixelSize = Int(size.rounded())
+  guard let bitmap = NSBitmapImageRep(
+    bitmapDataPlanes: nil,
+    pixelsWide: pixelSize,
+    pixelsHigh: pixelSize,
+    bitsPerSample: 8,
+    samplesPerPixel: 4,
+    hasAlpha: true,
+    isPlanar: false,
+    colorSpaceName: .deviceRGB,
+    bytesPerRow: 0,
+    bitsPerPixel: 0
+  ) else {
+    throw NSError(domain: "StarflowIcon", code: 2, userInfo: [
+      NSLocalizedDescriptionKey: "Failed to create bitmap for \(pixelSize)x\(pixelSize)",
+    ])
   }
 
-  let rect = CGRect(origin: .zero, size: size)
-  draw(context, rect)
-  context.flush()
-  image.unlockFocus()
-  return image
+  bitmap.size = NSSize(width: size, height: size)
+  guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+    throw NSError(domain: "StarflowIcon", code: 3, userInfo: [
+      NSLocalizedDescriptionKey: "Failed to create graphics context",
+    ])
+  }
+
+  NSGraphicsContext.saveGraphicsState()
+  NSGraphicsContext.current = context
+  context.cgContext.interpolationQuality = .high
+  let rect = CGRect(x: 0, y: 0, width: size, height: size)
+  draw(context.cgContext, rect)
+  context.flushGraphics()
+  NSGraphicsContext.restoreGraphicsState()
+
+  return bitmap
 }
 
 func drawLinearStroke(
@@ -90,9 +112,11 @@ func drawLinearStroke(
   context.restoreGState()
 }
 
-func drawAppIcon(size: CGFloat) -> NSImage {
-  gradientImage(size: CGSize(width: size, height: size)) { context, rect in
+func drawAppIconBitmap(size: CGFloat) throws -> NSBitmapImageRep {
+  try makeBitmap(size: size) { context, rect in
     context.interpolationQuality = .high
+    context.translateBy(x: 0, y: rect.height)
+    context.scaleBy(x: 1, y: -1)
 
     let backgroundGradient = CGGradient(
       colorsSpace: CGColorSpaceCreateDeviceRGB(),
@@ -104,32 +128,14 @@ func drawAppIcon(size: CGFloat) -> NSImage {
     )!
     context.drawLinearGradient(
       backgroundGradient,
-      start: CGPoint(x: rect.minX, y: rect.maxY),
-      end: CGPoint(x: rect.maxX, y: rect.minY),
+      start: CGPoint(x: rect.minX, y: rect.minY),
+      end: CGPoint(x: rect.maxX, y: rect.maxY),
       options: []
     )
 
-    let innerGlowCenter = CGPoint(x: rect.midX, y: rect.midY + rect.height * 0.08)
-    let innerGlow = CGGradient(
-      colorsSpace: CGColorSpaceCreateDeviceRGB(),
-      colors: [
-        color(0x64A0FF, alpha: 0.20).cgColor,
-        color(0x64A0FF, alpha: 0.0).cgColor,
-      ] as CFArray,
-      locations: [0.0, 1.0]
-    )!
-    context.drawRadialGradient(
-      innerGlow,
-      startCenter: innerGlowCenter,
-      startRadius: 0,
-      endCenter: innerGlowCenter,
-      endRadius: rect.width * 0.7,
-      options: []
-    )
-
-    let cardInset = rect.width * 0.12
+    let cardInset = rect.width * 0.04
     let cardRect = rect.insetBy(dx: cardInset, dy: cardInset)
-    let radius = rect.width * 0.22
+    let radius = rect.width * 0.20
     let cardPath = CGPath(
       roundedRect: cardRect,
       cornerWidth: radius,
@@ -149,18 +155,18 @@ func drawAppIcon(size: CGFloat) -> NSImage {
     )!
     context.drawLinearGradient(
       cardGradient,
-      start: CGPoint(x: cardRect.minX, y: cardRect.maxY),
-      end: CGPoint(x: cardRect.maxX, y: cardRect.minY),
+      start: CGPoint(x: cardRect.minX, y: cardRect.minY),
+      end: CGPoint(x: cardRect.maxX, y: cardRect.maxY),
       options: []
     )
     context.restoreGState()
 
-    context.setStrokeColor(color(0xFFFFFF, alpha: 0.08).cgColor)
-    context.setLineWidth(max(1, rect.width * 0.006))
+    context.setStrokeColor(color(0xFFFFFF, alpha: 0.05).cgColor)
+    context.setLineWidth(max(1, rect.width * 0.004))
     context.addPath(cardPath)
     context.strokePath()
 
-    let iconRect = cardRect.insetBy(dx: cardRect.width * 0.12, dy: cardRect.height * 0.12)
+    let iconRect = cardRect.insetBy(dx: cardRect.width * 0.04, dy: cardRect.height * 0.04)
 
     let line1 = CGMutablePath()
     line1.move(to: point(18, 62, in: iconRect))
@@ -253,10 +259,8 @@ func drawAppIcon(size: CGFloat) -> NSImage {
   }
 }
 
-func savePNG(_ image: NSImage, to path: String) throws {
-  guard let tiff = image.tiffRepresentation,
-        let bitmap = NSBitmapImageRep(data: tiff),
-        let data = bitmap.representation(using: .png, properties: [:]) else {
+func savePNG(_ bitmap: NSBitmapImageRep, to path: String) throws {
+  guard let data = bitmap.representation(using: .png, properties: [:]) else {
     throw NSError(domain: "StarflowIcon", code: 1, userInfo: [
       NSLocalizedDescriptionKey: "Failed to encode PNG for \(path)",
     ])
@@ -271,7 +275,7 @@ func savePNG(_ image: NSImage, to path: String) throws {
 }
 
 for target in targets {
-  let image = drawAppIcon(size: target.size)
-  try savePNG(image, to: target.path)
+  let bitmap = try drawAppIconBitmap(size: target.size)
+  try savePNG(bitmap, to: target.path)
   print("Generated \(target.path)")
 }

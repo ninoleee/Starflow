@@ -31,6 +31,7 @@ class _SearchProviderEditorPageState
   late bool _enabled;
   late final String _providerId;
   late bool _advancedAuthExpanded;
+  late bool _cloudTypesExpanded;
   late Set<SearchCloudType> _selectedCloudTypes;
   bool _didDelete = false;
   bool _skipAutoSaveOnPop = false;
@@ -63,6 +64,7 @@ class _SearchProviderEditorPageState
         : configuredCloudTypes;
     _advancedAuthExpanded = _apiKeyController.text.trim().isNotEmpty ||
         _usernameController.text.trim().isNotEmpty;
+    _cloudTypesExpanded = false;
     if (e == null) {
       _applyDefaultsForKind(_kind);
     }
@@ -122,6 +124,23 @@ class _SearchProviderEditorPageState
     _blockedKeywordsController.clear();
     _connectionTestSucceeded = null;
     _connectionTestMessage = '';
+  }
+
+  String _selectedCloudTypesLabel() {
+    if (_selectedCloudTypes.isEmpty) {
+      return '未选择';
+    }
+    if (_selectedCloudTypes.length == SearchCloudType.values.length) {
+      return '全部网盘';
+    }
+    if (_selectedCloudTypes.length <= 2) {
+      final ordered = SearchCloudType.values
+          .where(_selectedCloudTypes.contains)
+          .map((item) => item.label)
+          .toList(growable: false);
+      return ordered.join('、');
+    }
+    return '已选 ${_selectedCloudTypes.length} 个网盘';
   }
 
   Future<void> _saveDraft({bool popAfterSave = true}) async {
@@ -400,26 +419,64 @@ class _SearchProviderEditorPageState
                   ],
                 ),
                 _SectionTitle(theme: theme, label: '结果筛选'),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: SearchCloudType.values
-                      .map(
-                        (item) => FilterChip(
-                          label: Text(item.label),
-                          selected: _selectedCloudTypes.contains(item),
-                          onSelected: (selected) {
-                            setState(() {
-                              if (selected) {
-                                _selectedCloudTypes.add(item);
-                              } else {
-                                _selectedCloudTypes.remove(item);
-                              }
-                            });
-                          },
-                        ),
-                      )
-                      .toList(),
+                ExpansionTile(
+                  initiallyExpanded: _cloudTypesExpanded,
+                  onExpansionChanged: (expanded) {
+                    setState(() => _cloudTypesExpanded = expanded);
+                  },
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: EdgeInsets.zero,
+                  title: Text(
+                    '网盘类型',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                  subtitle: Text(
+                    _selectedCloudTypesLabel(),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          TextButton(
+                            onPressed: () {
+                              setState(() {
+                                _selectedCloudTypes =
+                                    SearchCloudType.values.toSet();
+                              });
+                            },
+                            child: const Text('全选'),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              setState(() {
+                                _selectedCloudTypes = <SearchCloudType>{};
+                              });
+                            },
+                            child: const Text('清空'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    ...SearchCloudType.values.map(
+                      (item) => CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.trailing,
+                        value: _selectedCloudTypes.contains(item),
+                        title: Text(item.label),
+                        onChanged: (selected) {
+                          setState(() {
+                            if (selected ?? false) {
+                              _selectedCloudTypes.add(item);
+                            } else {
+                              _selectedCloudTypes.remove(item);
+                            }
+                          });
+                        },
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 TextField(

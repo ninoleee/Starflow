@@ -242,7 +242,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                       _controller.text.trim().isEmpty
                           ? '输入关键字后开始搜索。'
                           : _filteredResultCount > 0
-                              ? '没有可用结果，已过滤 $_filteredResultCount 条失效链接。'
+                              ? '没有可用结果，已过滤 $_filteredResultCount 条结果。'
                               : '没有找到结果。',
                     )
                   else

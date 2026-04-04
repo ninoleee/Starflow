@@ -20,58 +20,32 @@ class StarflowLogo extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        SizedBox(
-          width: iconSize + 24,
-          height: iconSize + 24,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              IgnorePointer(
-                child: Container(
-                  width: iconSize + 12,
-                  height: iconSize + 12,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(iconSize * 0.4),
-                    gradient: RadialGradient(
-                      center: const Alignment(0, 0.35),
-                      radius: 0.9,
-                      colors: [
-                        const Color(0xFF64A0FF).withValues(alpha: 0.18),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              Container(
-                width: iconSize,
-                height: iconSize,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(iconSize * 0.27),
-                  gradient: const LinearGradient(
-                    colors: [
-                      Color(0xFF0D1117),
-                      Color(0xFF161B27),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.07),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.6),
-                      blurRadius: iconSize * 0.6,
-                      offset: Offset(0, iconSize * 0.22),
-                    ),
-                  ],
-                ),
-                child: CustomPaint(
-                  painter: _StarflowIconPainter(),
-                ),
+        Container(
+          width: iconSize,
+          height: iconSize,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(iconSize * 0.24),
+            gradient: const LinearGradient(
+              colors: [
+                Color(0xFF0D1117),
+                Color(0xFF161B27),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.06),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.38),
+                blurRadius: iconSize * 0.22,
+                offset: Offset(0, iconSize * 0.07),
               ),
             ],
+          ),
+          child: CustomPaint(
+            painter: _StarflowIconPainter(),
           ),
         ),
         if (showWordmark) ...[
@@ -108,8 +82,18 @@ class StarflowLogo extends StatelessWidget {
 class _StarflowIconPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
+    final artRect = Rect.fromLTWH(
+      size.width * 0.03,
+      size.height * 0.03,
+      size.width * 0.94,
+      size.height * 0.94,
+    );
+
     Offset point(double x, double y) {
-      return Offset(size.width * x / 96, size.height * y / 96);
+      return Offset(
+        artRect.left + artRect.width * x / 96,
+        artRect.top + artRect.height * y / 96,
+      );
     }
 
     Paint strokePaint({
