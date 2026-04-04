@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
-import 'package:starflow/features/settings/domain/app_settings.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -117,44 +117,18 @@ class SettingsPage extends ConsumerWidget {
           const SizedBox(height: 18),
           SectionPanel(
             title: '首页模块',
-            subtitle: '拖动排序，控制首页展示顺序；后续加新模块时这里无需重构',
-            child: ReorderableListView.builder(
-              shrinkWrap: true,
-              buildDefaultDragHandles: false,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: settings.homeModules.length,
-              onReorder: (oldIndex, newIndex) {
-                ref
-                    .read(settingsControllerProvider.notifier)
-                    .reorderHomeModules(oldIndex, newIndex);
-              },
-              itemBuilder: (context, index) {
-                final module = settings.homeModules[index];
-                return Container(
-                  key: ValueKey(module.id),
-                  margin: const EdgeInsets.only(bottom: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFE),
-                    borderRadius: BorderRadius.circular(22),
-                  ),
-                  child: ListTile(
-                    title: Text(module.title),
-                    subtitle: Text(module.type.description),
-                    leading: ReorderableDragStartListener(
-                      index: index,
-                      child: const Icon(Icons.drag_indicator_rounded),
-                    ),
-                    trailing: Switch(
-                      value: module.enabled,
-                      onChanged: (value) {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .toggleHomeModule(module.id, value);
-                      },
-                    ),
-                  ),
-                );
-              },
+            subtitle: '首页最底部有一个低调的“编辑首页”入口，用它来选择显示哪些模块',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('当前已配置 ${settings.homeModules.length} 个首页模块。'),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: () => context.pushNamed('home-editor'),
+                  icon: const Icon(Icons.tune_rounded),
+                  label: const Text('去首页编辑器'),
+                ),
+              ],
             ),
           ),
         ],

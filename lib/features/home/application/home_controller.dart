@@ -8,6 +8,11 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
+enum HomeSectionLayout {
+  posterRail,
+  carousel,
+}
+
 class HomeCardViewModel {
   const HomeCardViewModel({
     required this.id,
@@ -30,13 +35,31 @@ class HomeCardViewModel {
   final MediaDetailTarget detailTarget;
 }
 
+class HomeCarouselItemViewModel {
+  const HomeCarouselItemViewModel({
+    required this.id,
+    required this.title,
+    required this.subtitle,
+    required this.imageUrl,
+    required this.detailTarget,
+  });
+
+  final String id;
+  final String title;
+  final String subtitle;
+  final String imageUrl;
+  final MediaDetailTarget detailTarget;
+}
+
 class HomeSectionViewModel {
   const HomeSectionViewModel({
     required this.id,
     required this.title,
     required this.subtitle,
     required this.emptyMessage,
-    required this.items,
+    required this.layout,
+    this.items = const [],
+    this.carouselItems = const [],
     this.viewAllTarget,
   });
 
@@ -44,7 +67,9 @@ class HomeSectionViewModel {
   final String title;
   final String subtitle;
   final String emptyMessage;
+  final HomeSectionLayout layout;
   final List<HomeCardViewModel> items;
+  final List<HomeCarouselItemViewModel> carouselItems;
   final LibraryCollectionTarget? viewAllTarget;
 }
 
@@ -56,164 +81,182 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
   final discoveryRepository = ref.read(discoveryRepositoryProvider);
   final enabledModules =
       settings.homeModules.where((item) => item.enabled).toList();
-  final needsRecommendations = enabledModules.any(
-    (item) => item.type == HomeModuleType.doubanRecommendations,
+  final needsLibraryMatching = enabledModules.any(
+    (item) =>
+        item.type == HomeModuleType.doubanInterest ||
+        item.type == HomeModuleType.doubanSuggestion ||
+        item.type == HomeModuleType.doubanList ||
+        item.type == HomeModuleType.doubanCarousel,
   );
-  final needsWishList = enabledModules.any(
-    (item) => item.type == HomeModuleType.doubanWishList,
+  final needsRecentlyAdded = enabledModules.any(
+    (item) => item.type == HomeModuleType.recentlyAdded,
   );
-  final needsEmbyModules = enabledModules.any(
-    (item) => item.type == HomeModuleType.embyLibrary,
+  final needsCarousel = enabledModules.any(
+    (item) => item.type == HomeModuleType.doubanCarousel,
   );
 
-  final futures = await Future.wait([
-    mediaRepository.fetchLibrary(),
-    needsRecommendations
-        ? discoveryRepository.fetchRecommendations()
-        : Future.value(const <DoubanEntry>[]),
-    needsWishList
-        ? discoveryRepository.fetchWishList()
-        : Future.value(const <DoubanEntry>[]),
-    needsEmbyModules
-        ? mediaRepository.fetchCollections(kind: MediaSourceKind.emby)
-        : Future.value(const <MediaCollection>[]),
+  final warmups = await Future.wait([
+    needsLibraryMatching
+        ? mediaRepository.fetchLibrary()
+        : Future.value(const <MediaItem>[]),
+    needsRecentlyAdded
+        ? mediaRepository.fetchRecentlyAdded(limit: 6)
+        : Future.value(const <MediaItem>[]),
+    needsCarousel
+        ? discoveryRepository.fetchCarouselItems()
+        : Future.value(const <DoubanCarouselEntry>[]),
   ]);
 
-  final library = futures[0] as List<MediaItem>;
-  final recommendations = futures[1] as List<DoubanEntry>;
-  final wishList = futures[2] as List<DoubanEntry>;
-  final embyCollections = futures[3] as List<MediaCollection>;
-  final embyItems = library
-      .where((item) => item.sourceKind == MediaSourceKind.emby)
-      .take(6)
-      .toList();
-  final nasItems = library
-      .where((item) => item.sourceKind == MediaSourceKind.nas)
-      .take(6)
-      .toList();
-  final recentlyAdded = library.take(6).toList();
-  final sections = <HomeSectionViewModel>[];
+  final library = warmups[0] as List<MediaItem>;
+  final recentItems = warmups[1] as List<MediaItem>;
+  final carouselItems = warmups[2] as List<DoubanCarouselEntry>;
 
-  for (final module in enabledModules) {
-    switch (module.type) {
-      case HomeModuleType.doubanRecommendations:
-        sections.add(_buildDoubanSection(module, recommendations, library));
-        break;
-      case HomeModuleType.doubanWishList:
-        sections.add(_buildDoubanSection(module, wishList, library));
-        break;
-      case HomeModuleType.recentlyAdded:
-        sections.add(
-          _buildLibrarySection(
-            module,
-            recentlyAdded,
-            emptyMessage: '无',
-          ),
-        );
-        break;
-      case HomeModuleType.embyLibrary:
-        final selectedIds = settings.mediaSources
-            .where((item) => item.kind == MediaSourceKind.emby && item.enabled)
-            .expand((item) => item.featuredSectionIds)
-            .toSet();
-        if (selectedIds.isEmpty) {
-          sections.add(
-            const HomeSectionViewModel(
-              id: 'module-emby-library-empty',
-              title: 'Emby 分区',
-              subtitle: '在媒体源里读取并勾选你想放到首页的分区',
-              emptyMessage: '无',
-              items: [],
-            ),
-          );
-          break;
-        }
+  final sections = await Future.wait(
+    enabledModules.map(
+      (module) => _buildSectionForModule(
+        module: module,
+        settings: settings,
+        mediaRepository: mediaRepository,
+        discoveryRepository: discoveryRepository,
+        library: library,
+        recentItems: recentItems,
+        carouselItems: carouselItems,
+      ),
+    ),
+  );
 
-        final selectedCollections = embyCollections
-            .where((item) => selectedIds.contains(item.id))
-            .toList();
-        final collectionSections = await Future.wait(
-          selectedCollections.map((collection) async {
-            final sectionItems = await mediaRepository.fetchLibrary(
-              sourceId: collection.sourceId,
-              sectionId: collection.id,
-              limit: 6,
-            );
-            return _buildLibrarySection(
-              HomeModuleConfig(
-                id: 'emby-${collection.id}',
-                type: module.type,
-                title: collection.title,
-                enabled: true,
-              ),
-              sectionItems,
-              subtitle:
-                  '${collection.sourceName} · ${collection.subtitle.isEmpty ? 'Emby 分区' : collection.subtitle}',
-              emptyMessage: '无',
-              viewAllTarget: LibraryCollectionTarget(
-                title: collection.title,
-                sourceId: collection.sourceId,
-                sourceName: collection.sourceName,
-                sourceKind: collection.sourceKind,
-                sectionId: collection.id,
-                subtitle: collection.subtitle,
-              ),
-            );
-          }),
-        );
-        sections.addAll(collectionSections);
-        if (collectionSections.isEmpty && embyItems.isNotEmpty) {
-          sections.add(
-            _buildLibrarySection(
-              module,
-              embyItems,
-              emptyMessage: '无',
-            ),
-          );
-        }
-        break;
-      case HomeModuleType.nasLibrary:
-        sections.add(
-          _buildLibrarySection(
-            module,
-            nasItems,
-            emptyMessage: '无',
-          ),
-        );
-        break;
-    }
-  }
-
-  return sections;
+  return sections.whereType<HomeSectionViewModel>().toList();
 });
 
-HomeSectionViewModel _buildDoubanSection(
-  HomeModuleConfig module,
-  List<DoubanEntry> entries,
-  List<MediaItem> library,
-) {
+Future<HomeSectionViewModel?> _buildSectionForModule({
+  required HomeModuleConfig module,
+  required AppSettings settings,
+  required MediaRepository mediaRepository,
+  required DiscoveryRepository discoveryRepository,
+  required List<MediaItem> library,
+  required List<MediaItem> recentItems,
+  required List<DoubanCarouselEntry> carouselItems,
+}) async {
+  switch (module.type) {
+    case HomeModuleType.recentlyAdded:
+      return _buildLibrarySection(
+        module: module,
+        items: recentItems,
+        subtitle: module.description,
+      );
+    case HomeModuleType.librarySection:
+      final sectionItems = module.isLibrarySection
+          ? await mediaRepository.fetchLibrary(
+              sourceId: module.sourceId,
+              sectionId: module.sectionId,
+              limit: 6,
+            )
+          : const <MediaItem>[];
+      return _buildLibrarySection(
+        module: module,
+        items: sectionItems,
+        subtitle: module.description,
+        viewAllTarget: module.isLibrarySection
+            ? LibraryCollectionTarget(
+                title: module.title,
+                sourceId: module.sourceId,
+                sourceName: module.sourceName,
+                sourceKind: _resolveSourceKind(settings, module.sourceId),
+                sectionId: module.sectionId,
+                subtitle: module.sectionName,
+              )
+            : null,
+      );
+    case HomeModuleType.doubanInterest:
+    case HomeModuleType.doubanSuggestion:
+    case HomeModuleType.doubanList:
+      final entries = await discoveryRepository.fetchEntries(module);
+      return _buildDoubanSection(
+        module: module,
+        entries: entries,
+        library: library,
+        emptyMessage:
+            _resolveDoubanEmptyMessage(module, settings.doubanAccount),
+      );
+    case HomeModuleType.doubanCarousel:
+      return _buildCarouselSection(
+        module: module,
+        items: carouselItems,
+        library: library,
+        emptyMessage:
+            _resolveDoubanEmptyMessage(module, settings.doubanAccount),
+      );
+  }
+}
+
+HomeSectionViewModel _buildLibrarySection({
+  required HomeModuleConfig module,
+  required List<MediaItem> items,
+  required String subtitle,
+  LibraryCollectionTarget? viewAllTarget,
+}) {
+  final viewModels = items.map((item) {
+    final cardSubtitle = [
+      if (item.year > 0) '${item.year}',
+      item.durationLabel,
+    ].where((item) => item.trim().isNotEmpty).join(' · ');
+
+    return HomeCardViewModel(
+      id: item.id,
+      title: item.title,
+      subtitle: cardSubtitle.isEmpty ? item.sourceName : cardSubtitle,
+      posterUrl: item.posterUrl,
+      badges: [
+        item.sourceKind.label,
+        if (item.sectionName.trim().isNotEmpty) item.sectionName,
+      ],
+      caption: item.overview,
+      actionLabel: '',
+      detailTarget: MediaDetailTarget.fromMediaItem(item),
+    );
+  }).toList();
+
+  return HomeSectionViewModel(
+    id: module.id,
+    title: module.title,
+    subtitle: subtitle,
+    emptyMessage: '无',
+    layout: HomeSectionLayout.posterRail,
+    items: viewModels,
+    viewAllTarget: viewAllTarget,
+  );
+}
+
+HomeSectionViewModel _buildDoubanSection({
+  required HomeModuleConfig module,
+  required List<DoubanEntry> entries,
+  required List<MediaItem> library,
+  required String emptyMessage,
+}) {
   final items = entries.map((entry) {
     final matched = _matchByTitle(library, entry.title);
     return HomeCardViewModel(
       id: entry.id,
       title: entry.title,
-      subtitle: matched != null ? '${matched.sourceName} 已就绪' : '无',
+      subtitle: matched != null
+          ? '${matched.sourceName} 已就绪'
+          : entry.ratingLabel.isEmpty
+              ? '无'
+              : entry.ratingLabel,
       posterUrl: entry.posterUrl,
       badges: [
-        '${entry.year}',
+        if (entry.year > 0) '${entry.year}',
+        if (entry.subjectType.trim().isNotEmpty) entry.subjectType,
         matched?.sourceKind.label ?? '待补片',
       ],
       caption: entry.note,
-      actionLabel: '查看详情',
+      actionLabel: '',
       detailTarget: matched == null
           ? MediaDetailTarget(
               title: entry.title,
               posterUrl: entry.posterUrl,
               overview: entry.note,
               year: entry.year,
-              genres: const [],
-              directors: const [],
-              actors: const [],
               availabilityLabel: '无',
               searchQuery: entry.title,
             )
@@ -229,40 +272,87 @@ HomeSectionViewModel _buildDoubanSection(
   return HomeSectionViewModel(
     id: module.id,
     title: module.title,
-    subtitle: module.type.description,
-    emptyMessage: '无',
+    subtitle: module.description,
+    emptyMessage: emptyMessage,
+    layout: HomeSectionLayout.posterRail,
     items: items,
   );
 }
 
-HomeSectionViewModel _buildLibrarySection(
-  HomeModuleConfig module,
-  List<MediaItem> library, {
-  String? subtitle,
+HomeSectionViewModel _buildCarouselSection({
+  required HomeModuleConfig module,
+  required List<DoubanCarouselEntry> items,
+  required List<MediaItem> library,
   required String emptyMessage,
-  LibraryCollectionTarget? viewAllTarget,
 }) {
-  final items = library.map((item) {
-    return HomeCardViewModel(
+  final carouselItems = items.map((item) {
+    final matched = _matchByTitle(library, item.title);
+    return HomeCarouselItemViewModel(
       id: item.id,
       title: item.title,
-      subtitle: '${item.sourceName} · ${item.durationLabel}',
-      posterUrl: item.posterUrl,
-      badges: [item.sourceKind.label, '${item.year}'],
-      caption: item.overview,
-      actionLabel: '查看详情',
-      detailTarget: MediaDetailTarget.fromMediaItem(item),
+      subtitle: [
+        if (item.ratingLabel.trim().isNotEmpty) item.ratingLabel,
+        if (item.year > 0) '${item.year}',
+        if (matched != null) '${matched.sourceKind.label} 已就绪',
+      ].join(' · '),
+      imageUrl: item.imageUrl,
+      detailTarget: matched == null
+          ? MediaDetailTarget(
+              title: item.title,
+              posterUrl:
+                  item.posterUrl.isEmpty ? item.imageUrl : item.posterUrl,
+              overview: item.overview,
+              year: item.year,
+              availabilityLabel: '无',
+              searchQuery: item.title,
+            )
+          : MediaDetailTarget.fromMediaItem(
+              matched,
+              availabilityLabel:
+                  '豆瓣轮播条目已关联到 ${matched.sourceKind.label} · ${matched.sourceName}',
+              searchQuery: item.title,
+            ),
     );
   }).toList();
 
   return HomeSectionViewModel(
     id: module.id,
     title: module.title,
-    subtitle: subtitle ?? module.type.description,
+    subtitle: module.description,
     emptyMessage: emptyMessage,
-    items: items,
-    viewAllTarget: viewAllTarget,
+    layout: HomeSectionLayout.carousel,
+    carouselItems: carouselItems,
   );
+}
+
+String _resolveDoubanEmptyMessage(
+  HomeModuleConfig module,
+  DoubanAccountConfig account,
+) {
+  if (!account.enabled) {
+    return '请先启用豆瓣模块';
+  }
+  if (module.type == HomeModuleType.doubanInterest &&
+      account.userId.trim().isEmpty) {
+    return '请先在设置里填写 Douban User ID';
+  }
+  if (module.type == HomeModuleType.doubanSuggestion &&
+      account.sessionCookie.trim().isEmpty) {
+    return '请先在设置里填写豆瓣 Cookie';
+  }
+  if (module.type == HomeModuleType.doubanList &&
+      module.doubanListUrl.trim().isEmpty) {
+    return '请先填写豆瓣片单地址';
+  }
+  return '无';
+}
+
+MediaSourceKind _resolveSourceKind(AppSettings settings, String sourceId) {
+  final source = settings.mediaSources.cast<MediaSourceConfig?>().firstWhere(
+        (item) => item?.id == sourceId,
+        orElse: () => null,
+      );
+  return source?.kind ?? MediaSourceKind.emby;
 }
 
 MediaItem? _matchByTitle(List<MediaItem> library, String title) {

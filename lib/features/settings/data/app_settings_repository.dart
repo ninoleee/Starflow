@@ -61,6 +61,21 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
         )
         .toList();
     final isDemoDouban = settings.doubanAccount.userId == 'demo-user';
+    final homeModules = settings.homeModules.where((module) {
+      if (module.id == 'module-douban-recommendations' ||
+          module.id == 'module-douban-wish' ||
+          module.id == 'module-emby-library' ||
+          module.id == 'module-nas-library') {
+        return false;
+      }
+      if (module.type == HomeModuleType.librarySection &&
+          (!module.enabled ||
+              module.sectionId.trim().isEmpty ||
+              module.sourceId.trim().isEmpty)) {
+        return false;
+      }
+      return true;
+    }).toList();
 
     return settings.copyWith(
       mediaSources: mediaSources,
@@ -68,6 +83,7 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
       doubanAccount: isDemoDouban
           ? SeedData.defaultSettings.doubanAccount
           : settings.doubanAccount,
+      homeModules: homeModules,
     );
   }
 }

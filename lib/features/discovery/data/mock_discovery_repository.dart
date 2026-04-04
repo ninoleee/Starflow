@@ -1,42 +1,62 @@
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/core/utils/seed_data.dart';
+import 'package:starflow/features/discovery/data/douban_api_client.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 
 abstract class DiscoveryRepository {
-  Future<List<DoubanEntry>> fetchRecommendations();
+  Future<List<DoubanEntry>> fetchEntries(HomeModuleConfig module);
 
-  Future<List<DoubanEntry>> fetchWishList();
+  Future<List<DoubanCarouselEntry>> fetchCarouselItems();
 }
 
 final discoveryRepositoryProvider = Provider<DiscoveryRepository>(
-  (ref) => MockDiscoveryRepository(ref),
+  (ref) => AppDiscoveryRepository(
+    ref,
+    ref.read(doubanApiClientProvider),
+  ),
 );
 
-class MockDiscoveryRepository implements DiscoveryRepository {
-  MockDiscoveryRepository(this.ref);
+class AppDiscoveryRepository implements DiscoveryRepository {
+  AppDiscoveryRepository(this.ref, this._apiClient);
 
   final Ref ref;
+  final DoubanApiClient _apiClient;
 
-  bool get _doubanEnabled => ref.read(appSettingsProvider).doubanAccount.enabled;
+  DoubanAccountConfig get _config =>
+      ref.read(appSettingsProvider).doubanAccount;
 
   @override
-  Future<List<DoubanEntry>> fetchRecommendations() async {
-    await Future<void>.delayed(const Duration(milliseconds: 180));
-    if (!_doubanEnabled) {
+  Future<List<DoubanEntry>> fetchEntries(HomeModuleConfig module) async {
+    if (!_config.enabled) {
       return const [];
     }
-    return SeedData.seedDoubanRecommendations;
+
+    switch (module.type) {
+      case HomeModuleType.doubanInterest:
+        return _apiClient.fetchInterestItems(
+          userId: _config.userId,
+          status: module.doubanInterestStatus,
+        );
+      case HomeModuleType.doubanSuggestion:
+        return _apiClient.fetchSuggestionItems(
+          cookie: _config.sessionCookie,
+          mediaType: module.doubanSuggestionType,
+        );
+      case HomeModuleType.doubanList:
+        return _apiClient.fetchListItems(url: module.doubanListUrl);
+      case HomeModuleType.recentlyAdded:
+      case HomeModuleType.librarySection:
+      case HomeModuleType.doubanCarousel:
+        return const [];
+    }
   }
 
   @override
-  Future<List<DoubanEntry>> fetchWishList() async {
-    await Future<void>.delayed(const Duration(milliseconds: 180));
-    if (!_doubanEnabled) {
+  Future<List<DoubanCarouselEntry>> fetchCarouselItems() async {
+    if (!_config.enabled) {
       return const [];
     }
-    return SeedData.seedDoubanWishList;
+    return _apiClient.fetchCarouselItems();
   }
 }

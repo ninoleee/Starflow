@@ -21,38 +21,7 @@ class SeedData {
       userId: '',
       sessionCookie: '',
     ),
-    homeModules: const [
-      HomeModuleConfig(
-        id: 'module-douban-recommendations',
-        type: HomeModuleType.doubanRecommendations,
-        title: '豆瓣推荐',
-        enabled: true,
-      ),
-      HomeModuleConfig(
-        id: 'module-douban-wish',
-        type: HomeModuleType.doubanWishList,
-        title: '豆瓣想看',
-        enabled: true,
-      ),
-      HomeModuleConfig(
-        id: 'module-recently-added',
-        type: HomeModuleType.recentlyAdded,
-        title: '最近新增',
-        enabled: true,
-      ),
-      HomeModuleConfig(
-        id: 'module-emby-library',
-        type: HomeModuleType.embyLibrary,
-        title: 'Emby 片库',
-        enabled: true,
-      ),
-      HomeModuleConfig(
-        id: 'module-nas-library',
-        type: HomeModuleType.nasLibrary,
-        title: 'NAS 片库',
-        enabled: true,
-      ),
-    ],
+    homeModules: const [],
   );
 
   static const List<MediaItem> seedLibrary = [];

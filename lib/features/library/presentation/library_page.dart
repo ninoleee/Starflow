@@ -90,8 +90,8 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                       return const Text('无');
                     }
                     return Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
+                      spacing: 8,
+                      runSpacing: 8,
                       children: items
                           .map(
                             (item) => MediaPosterTile(

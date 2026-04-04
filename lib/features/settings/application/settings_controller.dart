@@ -11,8 +11,8 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 
 final settingsControllerProvider =
     AsyncNotifierProvider<SettingsController, AppSettings>(
-      SettingsController.new,
-    );
+  SettingsController.new,
+);
 
 final appSettingsProvider = Provider<AppSettings>((ref) {
   return ref.watch(settingsControllerProvider).valueOrNull ??
@@ -20,7 +20,8 @@ final appSettingsProvider = Provider<AppSettings>((ref) {
 });
 
 class SettingsController extends AsyncNotifier<AppSettings> {
-  AppSettingsRepository get _repository => ref.read(appSettingsRepositoryProvider);
+  AppSettingsRepository get _repository =>
+      ref.read(appSettingsRepositoryProvider);
 
   @override
   FutureOr<AppSettings> build() async {
@@ -109,6 +110,28 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         for (final module in current.homeModules)
           module.id == id ? module.copyWith(enabled: enabled) : module,
       ],
+    );
+    await _persist(next);
+  }
+
+  Future<void> saveHomeModule(HomeModuleConfig config) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    final exists = current.homeModules.any((item) => item.id == config.id);
+    final next = current.copyWith(
+      homeModules: exists
+          ? [
+              for (final module in current.homeModules)
+                module.id == config.id ? config : module,
+            ]
+          : [...current.homeModules, config],
+    );
+    await _persist(next);
+  }
+
+  Future<void> removeHomeModule(String id) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    final next = current.copyWith(
+      homeModules: current.homeModules.where((item) => item.id != id).toList(),
     );
     await _persist(next);
   }

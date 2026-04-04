@@ -27,17 +27,11 @@ class MediaPosterTile extends StatelessWidget {
     final cacheWidth = (158 * pixelRatio).round();
     final cacheHeight = (198 * pixelRatio).round();
     return InkWell(
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: BorderRadius.circular(18),
       onTap: onTap,
-      child: Container(
-        width: 182,
-        height: 328,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFE),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: const Color(0xFFE4E9F6)),
-        ),
+      child: SizedBox(
+        width: 166,
+        height: 304,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -51,7 +45,8 @@ class MediaPosterTile extends StatelessWidget {
                   cacheWidth: cacheWidth,
                   cacheHeight: cacheHeight,
                   filterQuality: FilterQuality.low,
-                  frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                  frameBuilder:
+                      (context, child, frame, wasSynchronouslyLoaded) {
                     if (wasSynchronouslyLoaded || frame != null) {
                       return child;
                     }
@@ -82,7 +77,7 @@ class MediaPosterTile extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -95,7 +90,7 @@ class MediaPosterTile extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
                     subtitle,
                     maxLines: 1,
@@ -104,7 +99,7 @@ class MediaPosterTile extends StatelessWidget {
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
@@ -130,26 +125,6 @@ class MediaPosterTile extends StatelessWidget {
                         )
                         .toList(),
                   ),
-                  if (actionLabel != null && actionLabel!.trim().isNotEmpty) ...[
-                    const Spacer(),
-                    Row(
-                      children: [
-                        Text(
-                          actionLabel!,
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            color: theme.colorScheme.primary,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(
-                          Icons.arrow_forward_rounded,
-                          size: 18,
-                          color: theme.colorScheme.primary,
-                        ),
-                      ],
-                    ),
-                  ],
                 ],
               ),
             ),

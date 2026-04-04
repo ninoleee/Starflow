@@ -166,5 +166,142 @@ void main() {
       expect(items.first.directors, ['Denis Villeneuve']);
       expect(items.first.actors, ['Timothee Chalamet', 'Zendaya']);
     });
+
+    test('returns browseable folder items for emby sections', () async {
+      final client = EmbyApiClient(
+        MockClient((request) async {
+          if (request.url.path == '/Users/user-123/Items' &&
+              request.url.queryParameters['ParentId'] == 'shows-view') {
+            expect(request.url.queryParameters['Recursive'], isNull);
+            expect(
+              request.url.queryParameters['IncludeItemTypes'],
+              contains('Series'),
+            );
+            expect(request.url.queryParameters['Filters'], isNull);
+            expect(request.url.queryParameters['MediaTypes'], isNull);
+
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {
+                    'Id': 'series-1',
+                    'Name': 'The Last of Us',
+                    'Type': 'Series',
+                    'IsFolder': true,
+                    'Overview': 'Post-apocalyptic drama',
+                    'ProductionYear': 2023,
+                    'DateCreated': '2026-03-15T08:00:00.0000000Z',
+                    'Genres': ['Drama'],
+                    'ImageTags': {'Primary': 'poster-series-1'},
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          return http.Response('Not found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'emby-main',
+          name: 'Home Emby',
+          kind: MediaSourceKind.emby,
+          endpoint: 'https://media.example.com',
+          enabled: true,
+          username: 'alice',
+          accessToken: 'token-789',
+          userId: 'user-123',
+          deviceId: 'device-456',
+        ),
+        sectionId: 'shows-view',
+        sectionName: '剧集',
+      );
+
+      expect(items, hasLength(1));
+      expect(items.first.id, 'series-1');
+      expect(items.first.sectionId, 'shows-view');
+      expect(items.first.sectionName, '剧集');
+      expect(items.first.streamUrl, isEmpty);
+      expect(items.first.streamHeaders, isEmpty);
+      expect(
+        items.first.posterUrl,
+        'https://media.example.com/Items/series-1/Images/Primary?maxHeight=720&quality=90&tag=poster-series-1&api_key=token-789',
+      );
+    });
+
+    test('falls back to recursive playable query when section browse is empty',
+        () async {
+      final client = EmbyApiClient(
+        MockClient((request) async {
+          if (request.url.path == '/Users/user-123/Items' &&
+              request.url.queryParameters['ParentId'] == 'shows-view' &&
+              request.url.queryParameters['Recursive'] == null) {
+            return http.Response(jsonEncode({'Items': []}), 200);
+          }
+
+          if (request.url.path == '/Users/user-123/Items' &&
+              request.url.queryParameters['ParentId'] == 'shows-view' &&
+              request.url.queryParameters['Recursive'] == 'true') {
+            expect(
+              request.url.queryParameters['IncludeItemTypes'],
+              'Movie,Episode,Video',
+            );
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {
+                    'Id': 'episode-1',
+                    'Name': 'The Last of Us S01E01',
+                    'Type': 'Episode',
+                    'MediaType': 'Video',
+                    'Overview': 'Pilot episode',
+                    'ProductionYear': 2023,
+                    'DateCreated': '2026-03-15T08:00:00.0000000Z',
+                    'Genres': ['Drama'],
+                    'ImageTags': {'Primary': 'poster-2'},
+                    'MediaSources': [
+                      {
+                        'Id': 'media-source-2',
+                        'Container': 'mp4',
+                      },
+                    ],
+                    'RunTimeTicks': 48600000000,
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          return http.Response('Not found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'emby-main',
+          name: 'Home Emby',
+          kind: MediaSourceKind.emby,
+          endpoint: 'https://media.example.com',
+          enabled: true,
+          username: 'alice',
+          accessToken: 'token-789',
+          userId: 'user-123',
+          deviceId: 'device-456',
+        ),
+        sectionId: 'shows-view',
+        sectionName: '剧集',
+      );
+
+      expect(items, hasLength(1));
+      expect(items.first.id, 'episode-1');
+      expect(
+        items.first.streamUrl,
+        'https://media.example.com/Videos/episode-1/stream.mp4?static=true&MediaSourceId=media-source-2&api_key=token-789',
+      );
+    });
   });
 }

@@ -44,8 +44,8 @@ class LibraryCollectionPage extends ConsumerWidget {
                   return const Text('无');
                 }
                 return Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
+                  spacing: 8,
+                  runSpacing: 8,
                   children: items
                       .map(
                         (item) => MediaPosterTile(

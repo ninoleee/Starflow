@@ -79,16 +79,21 @@ class EmbyApiClient {
       return const [];
     }
 
+    if (sectionId != null && sectionId.trim().isNotEmpty) {
+      final sectionItems = await _fetchSectionItems(
+        source: source,
+        limit: limit,
+        sectionId: sectionId,
+        sectionName: sectionName,
+      );
+      return sectionItems;
+    }
+
     final rootItems = await _fetchItems(
       source: source,
       limit: limit,
-      parentId: sectionId,
-      sectionId: sectionId,
-      sectionName: sectionName,
+      queryMode: _EmbyItemsQueryMode.recursivePlayable,
     );
-    if (sectionId != null && sectionId.trim().isNotEmpty) {
-      return rootItems;
-    }
     if (rootItems.isNotEmpty) {
       return rootItems;
     }
@@ -116,12 +121,41 @@ class EmbyApiClient {
     );
   }
 
+  Future<List<MediaItem>> _fetchSectionItems({
+    required MediaSourceConfig source,
+    required int limit,
+    required String sectionId,
+    required String sectionName,
+  }) async {
+    final browseItems = await _fetchItems(
+      source: source,
+      limit: limit,
+      parentId: sectionId,
+      sectionId: sectionId,
+      sectionName: sectionName,
+      queryMode: _EmbyItemsQueryMode.sectionBrowse,
+    );
+    if (browseItems.isNotEmpty) {
+      return browseItems;
+    }
+
+    return _fetchItems(
+      source: source,
+      limit: limit,
+      parentId: sectionId,
+      sectionId: sectionId,
+      sectionName: sectionName,
+      queryMode: _EmbyItemsQueryMode.recursivePlayable,
+    );
+  }
+
   Future<List<MediaItem>> _fetchItems({
     required MediaSourceConfig source,
     required int limit,
     String? parentId,
     String? sectionId,
     String sectionName = '',
+    _EmbyItemsQueryMode queryMode = _EmbyItemsQueryMode.recursivePlayable,
   }) async {
     final response = await _requestJson(
       source.endpoint,
@@ -129,23 +163,11 @@ class EmbyApiClient {
       method: 'GET',
       token: source.accessToken,
       deviceId: source.deviceId,
-      query: {
-        'Recursive': 'true',
-        'IncludeItemTypes': 'Movie,Episode,Video',
-        'Filters': 'IsNotFolder',
-        'MediaTypes': 'Video',
-        'Fields':
-            'DateCreated,Genres,Overview,Path,People,ProductionYear,RunTimeTicks,SortName',
-        'EnableImages': 'true',
-        'EnableImageTypes': 'Primary',
-        'ImageTypeLimit': '1',
-        'EnableUserData': 'true',
-        'SortBy': 'DateCreated,SortName',
-        'SortOrder': 'Descending,Ascending',
-        'Limit': '$limit',
-        if (parentId != null && parentId.trim().isNotEmpty)
-          'ParentId': parentId.trim(),
-      },
+      query: _buildItemsQuery(
+        limit: limit,
+        parentId: parentId,
+        queryMode: queryMode,
+      ),
     );
 
     final items = response.json['Items'] as List<dynamic>? ?? const [];
@@ -242,6 +264,14 @@ class EmbyApiClient {
         .map((entry) => Map<String, dynamic>.from(entry as Map))
         .toList();
     final mediaSource = mediaSources.isEmpty ? null : mediaSources.first;
+    final itemType = (item['Type'] as String? ?? '').trim();
+    final mediaType = (item['MediaType'] as String? ?? '').trim().toLowerCase();
+    final isFolder =
+        item['IsFolder'] as bool? ?? _isFolderLikeItemType(itemType);
+    final isPlayable = !isFolder &&
+        (mediaSource != null ||
+            mediaType == 'video' ||
+            _isDirectPlayableItemType(itemType));
     final overview = item['Overview'] as String? ?? '';
     final productionYear = item['ProductionYear'] as int? ?? 0;
     final genres = (item['Genres'] as List<dynamic>? ?? const [])
@@ -258,13 +288,15 @@ class EmbyApiClient {
     );
     final runTimeTicks = item['RunTimeTicks'] as int?;
     final durationLabel = formatRunTimeTicks(runTimeTicks);
-    final streamUrl = buildDirectStreamUri(
-      baseUri: baseUri,
-      itemId: id,
-      container: _resolveContainer(item, mediaSource),
-      mediaSourceId: mediaSource?['Id'] as String? ?? '',
-      accessToken: source.accessToken,
-    ).toString();
+    final streamUrl = isPlayable
+        ? buildDirectStreamUri(
+            baseUri: baseUri,
+            itemId: id,
+            container: _resolveContainer(item, mediaSource),
+            mediaSourceId: mediaSource?['Id'] as String? ?? '',
+            accessToken: source.accessToken,
+          ).toString()
+        : '';
 
     return MediaItem(
       id: id,
@@ -287,16 +319,56 @@ class EmbyApiClient {
       sourceName: source.name,
       sourceKind: source.kind,
       streamUrl: streamUrl,
-      streamHeaders: {
-        'X-Emby-Token': source.accessToken,
-        'X-Emby-Authorization': _authorizationHeader(
-          token: source.accessToken,
-          deviceId: source.deviceId,
-        ),
-      },
+      streamHeaders: isPlayable
+          ? {
+              'X-Emby-Token': source.accessToken,
+              'X-Emby-Authorization': _authorizationHeader(
+                token: source.accessToken,
+                deviceId: source.deviceId,
+              ),
+            }
+          : const {},
       addedAt: createdAt,
       lastWatchedAt: lastPlayedAt,
     );
+  }
+
+  Map<String, String> _buildItemsQuery({
+    required int limit,
+    required _EmbyItemsQueryMode queryMode,
+    String? parentId,
+  }) {
+    final query = <String, String>{
+      'Fields':
+          'DateCreated,Genres,Overview,Path,People,ProductionYear,RunTimeTicks,SortName',
+      'EnableImages': 'true',
+      'EnableImageTypes': 'Primary',
+      'ImageTypeLimit': '1',
+      'EnableUserData': 'true',
+      'SortBy': 'DateCreated,SortName',
+      'SortOrder': 'Descending,Ascending',
+      'Limit': '$limit',
+      if (parentId != null && parentId.trim().isNotEmpty)
+        'ParentId': parentId.trim(),
+    };
+
+    switch (queryMode) {
+      case _EmbyItemsQueryMode.recursivePlayable:
+        query.addAll({
+          'Recursive': 'true',
+          'IncludeItemTypes': 'Movie,Episode,Video',
+          'Filters': 'IsNotFolder',
+          'MediaTypes': 'Video',
+        });
+        break;
+      case _EmbyItemsQueryMode.sectionBrowse:
+        query.addAll({
+          'IncludeItemTypes': 'Movie,Video,Series,BoxSet,Folder',
+        });
+        break;
+    }
+
+    return query;
   }
 
   Future<_EmbyJsonResponse> _requestJson(
@@ -492,6 +564,20 @@ class EmbyApiClient {
     return names;
   }
 
+  bool _isDirectPlayableItemType(String itemType) {
+    return switch (itemType.trim().toLowerCase()) {
+      'movie' || 'episode' || 'video' || 'musicvideo' => true,
+      _ => false,
+    };
+  }
+
+  bool _isFolderLikeItemType(String itemType) {
+    return switch (itemType.trim().toLowerCase()) {
+      'series' || 'season' || 'boxset' || 'folder' => true,
+      _ => false,
+    };
+  }
+
   String _authorizationHeader({
     required String deviceId,
     String token = '',
@@ -611,4 +697,9 @@ class _EmbyView {
   final String id;
   final String title;
   final String collectionType;
+}
+
+enum _EmbyItemsQueryMode {
+  recursivePlayable,
+  sectionBrowse,
 }
