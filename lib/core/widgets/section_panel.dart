@@ -29,8 +29,11 @@ class SectionPanel extends StatelessWidget {
         border: Border.all(
           color: theme.colorScheme.outlineVariant.withValues(alpha: 0.92),
         ),
-        gradient: const LinearGradient(
-          colors: [Color(0xFFFFFFFF), Color(0xFFF7FAFF)],
+        gradient: LinearGradient(
+          colors: [
+            theme.colorScheme.surfaceContainerHigh,
+            theme.colorScheme.surfaceContainer,
+          ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),

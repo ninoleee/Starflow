@@ -49,7 +49,7 @@ class MediaPosterTile extends StatelessWidget {
                       return child;
                     }
                     return Container(
-                      color: const Color(0xFFDCE6FF),
+                      color: theme.colorScheme.surfaceContainerHighest,
                       alignment: Alignment.center,
                       child: SizedBox(
                         width: 20,
@@ -63,7 +63,7 @@ class MediaPosterTile extends StatelessWidget {
                   },
                   errorBuilder: (context, error, stackTrace) {
                     return Container(
-                      color: const Color(0xFFDCE6FF),
+                      color: theme.colorScheme.surfaceContainerHighest,
                       alignment: Alignment.center,
                       child: Icon(
                         Icons.movie_creation_outlined,

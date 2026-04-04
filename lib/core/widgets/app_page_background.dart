@@ -10,13 +10,14 @@ class AppPageBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Color(0xFFF7FAFF),
-            Color(0xFFF2F5FB),
-            Color(0xFFF9FBFE),
+            scheme.surfaceContainerLow,
+            scheme.surface,
+            scheme.surfaceContainerHigh,
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,

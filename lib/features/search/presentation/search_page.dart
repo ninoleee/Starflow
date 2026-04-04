@@ -209,7 +209,7 @@ class _SearchResultCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.72),
+          color: theme.colorScheme.surfaceContainerHigh,
           borderRadius: BorderRadius.circular(24),
           border: Border.all(
             color: theme.colorScheme.outlineVariant.withValues(alpha: 0.9),
@@ -229,7 +229,7 @@ class _SearchResultCard extends StatelessWidget {
                   return Container(
                     width: 82,
                     height: 118,
-                    color: const Color(0xFFDCE6FF),
+                    color: theme.colorScheme.surfaceContainerHighest,
                     alignment: Alignment.center,
                     child: const Icon(Icons.link_rounded),
                   );

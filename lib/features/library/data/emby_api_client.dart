@@ -469,13 +469,14 @@ class EmbyApiClient {
     final actors = _resolvePeople(item, const {'actor', 'gueststar'});
     final createdAt = DateTime.tryParse(item['DateCreated'] as String? ?? '') ??
         DateTime.now();
+    final userData = item['UserData'] as Map<String, dynamic>? ?? const {};
     final lastPlayedAt = DateTime.tryParse(
-      (item['UserData'] as Map<String, dynamic>? ?? const {})['LastPlayedDate']
-              as String? ??
-          '',
+      userData['LastPlayedDate'] as String? ?? '',
     );
     final runTimeTicks = item['RunTimeTicks'] as int?;
     final durationLabel = formatRunTimeTicks(runTimeTicks);
+    final playbackProgress =
+        _resolvePlaybackProgress(userData, runTimeTicks: runTimeTicks);
     final rawIndexNumber = item['IndexNumber'] as int?;
     final rawParentIndexNumber = item['ParentIndexNumber'] as int?;
     final seasonNumber = itemType.trim().toLowerCase() == 'season'
@@ -512,6 +513,7 @@ class EmbyApiClient {
       preferredMediaSourceId: mediaSource?['Id'] as String? ?? '',
       seasonNumber: seasonNumber,
       episodeNumber: episodeNumber,
+      playbackProgress: playbackProgress,
       addedAt: createdAt,
       lastWatchedAt: lastPlayedAt,
     );
@@ -696,6 +698,32 @@ class EmbyApiClient {
       return '${minutes}m';
     }
     return '${hours}h ${minutes}m';
+  }
+
+  static double? _resolvePlaybackProgress(
+    Map<String, dynamic> userData, {
+    required int? runTimeTicks,
+  }) {
+    final playedPercentage = (userData['PlayedPercentage'] as num?)?.toDouble();
+    if (playedPercentage != null && playedPercentage > 0) {
+      return (playedPercentage / 100).clamp(0.0, 1.0);
+    }
+
+    final playbackPositionTicks =
+        (userData['PlaybackPositionTicks'] as num?)?.toDouble();
+    if (playbackPositionTicks != null &&
+        playbackPositionTicks > 0 &&
+        runTimeTicks != null &&
+        runTimeTicks > 0) {
+      return (playbackPositionTicks / runTimeTicks).clamp(0.0, 1.0);
+    }
+
+    final played = userData['Played'] as bool?;
+    if (played == true) {
+      return 1.0;
+    }
+
+    return null;
   }
 
   String _resolveErrorMessage(http.Response response) {

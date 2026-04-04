@@ -763,7 +763,7 @@ class _EpisodeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = _episodeMeta(item);
+    final badgeText = _episodeBadgeText(item);
     final summary = _episodeSummary(item);
     return Material(
       color: Colors.transparent,
@@ -798,35 +798,63 @@ class _EpisodeCard extends StatelessWidget {
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
                           colors: [
+                            Colors.black.withValues(alpha: 0.18),
                             Colors.transparent,
                             Colors.black.withValues(alpha: 0.12),
-                            Colors.black.withValues(alpha: 0.42),
+                            Colors.black.withValues(alpha: 0.58),
                           ],
-                          begin: Alignment.topCenter,
+                          begin: Alignment.topLeft,
                           end: Alignment.bottomCenter,
+                          stops: const [0, 0.34, 0.62, 1],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 14,
+                      right: 46,
+                      top: 14,
+                      child: Text(
+                        item.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          height: 1.25,
+                          shadows: [
+                            Shadow(
+                              color: Color(0xAA000000),
+                              blurRadius: 16,
+                              offset: Offset(0, 3),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                     Positioned(
                       left: 12,
                       bottom: 12,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.46),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          item.episodeNumber != null
-                              ? '第 ${item.episodeNumber} 集'
-                              : '剧集',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 214),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.46),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            badgeText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ),
                       ),
@@ -853,36 +881,10 @@ class _EpisodeCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (label.trim().isNotEmpty) ...[
-                        Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Color(0xFF90A0BD),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.2,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                      ],
-                      Text(
-                        item.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          height: 1.3,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
                       Expanded(
                         child: Text(
                           summary,
-                          maxLines: 4,
+                          maxLines: 6,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: Color(0xFFD7E0F1),
@@ -902,12 +904,12 @@ class _EpisodeCard extends StatelessWidget {
     );
   }
 
-  String _episodeMeta(MediaItem item) {
+  String _episodeBadgeText(MediaItem item) {
     final entries = <String>[
-      if (item.seasonNumber != null && item.episodeNumber != null)
-        'S${item.seasonNumber!.toString().padLeft(2, '0')}E${item.episodeNumber!.toString().padLeft(2, '0')}',
+      item.episodeNumber != null ? '第 ${item.episodeNumber} 集' : '剧集',
       if (item.durationLabel.trim().isNotEmpty && item.durationLabel != '时长未知')
         item.durationLabel,
+      if (_progressLabel(item).trim().isNotEmpty) _progressLabel(item),
     ];
     return entries.join(' · ');
   }
@@ -927,6 +929,17 @@ class _EpisodeCard extends StatelessWidget {
       return '暂无简介';
     }
     return fallback.join(' · ');
+  }
+
+  String _progressLabel(MediaItem item) {
+    final progress = item.playbackProgress;
+    if (progress == null || progress <= 0) {
+      return '';
+    }
+    if (progress >= 0.995) {
+      return '已看完';
+    }
+    return '已看 ${(progress * 100).round()}%';
   }
 }
 

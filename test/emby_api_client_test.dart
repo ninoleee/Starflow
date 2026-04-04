@@ -128,6 +128,9 @@ void main() {
                         'Container': 'mp4',
                       },
                     ],
+                    'UserData': {
+                      'PlayedPercentage': 37.5,
+                    },
                     'RunTimeTicks': 48600000000,
                   },
                 ],
@@ -166,6 +169,7 @@ void main() {
       expect(items.first.isPlayable, isTrue);
       expect(items.first.directors, ['Denis Villeneuve']);
       expect(items.first.actors, ['Timothee Chalamet', 'Zendaya']);
+      expect(items.last.playbackProgress, closeTo(0.375, 0.0001));
     });
 
     test('prefers nested series over recursive episodes for tv sections',

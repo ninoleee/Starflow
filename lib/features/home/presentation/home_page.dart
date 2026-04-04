@@ -68,7 +68,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 physics: const BouncingScrollPhysics(
                   parent: AlwaysScrollableScrollPhysics(),
                 ),
-                padding: const EdgeInsets.fromLTRB(0, 6, 0, 28),
+                padding: const EdgeInsets.fromLTRB(0, 6, 0, 112),
                 children: [
                   if (featuredItems.isNotEmpty)
                     Padding(
@@ -222,7 +222,11 @@ class _HomeShell extends StatelessWidget {
             ),
           ),
         ),
-        SafeArea(child: child),
+        SafeArea(
+          top: true,
+          bottom: false,
+          child: child,
+        ),
       ],
     );
   }

@@ -33,15 +33,38 @@ class AppTheme {
       inversePrimary: Color(0xFFB5CBFF),
       surfaceTint: Color(0xFF1C57D5),
     );
+    return _buildTheme(
+      colorScheme,
+      scaffoldBackgroundOverride: const Color(0xFFF2F5FB),
+    );
+  }
+
+  static ThemeData get darkTheme {
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: const Color(0xFF1C57D5),
+      brightness: Brightness.dark,
+    );
+    return _buildTheme(colorScheme);
+  }
+
+  static ThemeData _buildTheme(
+    ColorScheme colorScheme, {
+    Color? scaffoldBackgroundOverride,
+  }) {
     final baseTextTheme = ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
     ).textTheme;
 
+    final navUnselectedIcon = colorScheme.brightness == Brightness.dark
+        ? colorScheme.onSurfaceVariant
+        : const Color(0xFFBDD2FF);
+
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
-      scaffoldBackgroundColor: const Color(0xFFF2F5FB),
+      scaffoldBackgroundColor:
+          scaffoldBackgroundOverride ?? colorScheme.surface,
       splashFactory: InkSparkle.splashFactory,
       textTheme: baseTextTheme.copyWith(
         headlineSmall: baseTextTheme.headlineSmall?.copyWith(
@@ -97,14 +120,14 @@ class AppTheme {
           if (states.contains(WidgetState.selected)) {
             return const IconThemeData(color: Colors.white);
           }
-          return const IconThemeData(color: Color(0xFFBDD2FF));
+          return IconThemeData(color: navUnselectedIcon);
         }),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           return TextStyle(
             fontWeight: FontWeight.w700,
             color: states.contains(WidgetState.selected)
                 ? Colors.white
-                : const Color(0xFFBDD2FF),
+                : navUnselectedIcon,
           );
         }),
       ),
@@ -141,7 +164,7 @@ class AppTheme {
         ),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: const Color(0xFFF1F5FF),
+        backgroundColor: colorScheme.surfaceContainerHighest,
         selectedColor: colorScheme.primaryContainer,
         side: BorderSide.none,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
@@ -149,7 +172,7 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: const Color(0xFFF8FAFF),
+        fillColor: colorScheme.surfaceContainerLow,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 18,
           vertical: 16,
@@ -174,7 +197,7 @@ class AppTheme {
         ),
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: const Color(0xFFFFFCFF),
+        backgroundColor: colorScheme.surface,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(28),
@@ -186,7 +209,7 @@ class AppTheme {
             if (states.contains(WidgetState.selected)) {
               return colorScheme.primaryContainer;
             }
-            return const Color(0xFFF5F7FD);
+            return colorScheme.surfaceContainerHighest;
           }),
           foregroundColor: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.selected)) {
@@ -211,7 +234,7 @@ class AppTheme {
           if (states.contains(WidgetState.selected)) {
             return colorScheme.onPrimary;
           }
-          return Colors.white;
+          return colorScheme.outline;
         }),
         trackColor: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
@@ -227,8 +250,8 @@ class AppTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: const Color(0xFF0F1C2F),
-        contentTextStyle: const TextStyle(color: Colors.white),
+        backgroundColor: colorScheme.inverseSurface,
+        contentTextStyle: TextStyle(color: colorScheme.onInverseSurface),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
         ),

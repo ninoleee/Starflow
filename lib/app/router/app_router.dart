@@ -16,6 +16,9 @@ import 'package:starflow/features/playback/presentation/player_page.dart';
 import 'package:starflow/features/search/presentation/search_page.dart';
 import 'package:starflow/features/settings/presentation/settings_page.dart';
 
+const _kBottomNavShellRadius = 34.0;
+const _kBottomNavItemRadius = 24.0;
+
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: '/boot',
@@ -125,23 +128,15 @@ class _AppNavigationShell extends StatelessWidget {
       body: navigationShell,
       bottomNavigationBar: SafeArea(
         top: false,
-        minimum: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        minimum: const EdgeInsets.fromLTRB(16, 0, 16, 0),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(30),
+          borderRadius: BorderRadius.circular(_kBottomNavShellRadius),
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: const Color(0x28101927),
-                borderRadius: BorderRadius.circular(30),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.18),
-                    blurRadius: 30,
-                    offset: const Offset(0, 18),
-                  ),
-                ],
+                color: const Color(0x120F1622),
+                borderRadius: BorderRadius.circular(_kBottomNavShellRadius),
               ),
               child: _FloatingNavigationBar(
                 currentIndex: navigationShell.currentIndex,
@@ -191,7 +186,7 @@ class _FloatingNavigationBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       child: Row(
         children: List.generate(_items.length, (index) {
           final item = _items[index];
@@ -222,26 +217,26 @@ class _FloatingNavigationButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foregroundColor = selected ? Colors.white : const Color(0xCCFFFFFF);
+    final foregroundColor = selected ? Colors.white : const Color(0xA8FFFFFF);
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(22),
-        splashColor: Colors.white.withValues(alpha: 0.12),
-        highlightColor: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(_kBottomNavItemRadius),
+        splashColor: Colors.white.withValues(alpha: 0.06),
+        highlightColor: Colors.white.withValues(alpha: 0.02),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 220),
             curve: Curves.easeOutCubic,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(
               color: selected
-                  ? Colors.white.withValues(alpha: 0.10)
+                  ? Colors.white.withValues(alpha: 0.05)
                   : Colors.transparent,
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(_kBottomNavItemRadius),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -249,16 +244,16 @@ class _FloatingNavigationButton extends StatelessWidget {
                 Icon(
                   selected ? item.selectedIcon : item.icon,
                   color: foregroundColor,
-                  size: 22,
+                  size: 20,
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   item.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: foregroundColor,
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.1,
                   ),

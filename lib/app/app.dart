@@ -11,7 +11,9 @@ class StarflowApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'Starflow',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
+      theme: AppTheme.darkTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: ThemeMode.dark,
       routerConfig: ref.watch(appRouterProvider),
     );
   }

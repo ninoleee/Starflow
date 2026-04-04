@@ -245,7 +245,9 @@ class SettingsPage extends ConsumerWidget {
                         width: double.infinity,
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF1F5FF),
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(18),
                         ),
                         child: Column(
@@ -800,12 +802,13 @@ class _SettingsTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.72),
+        color: scheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: Theme.of(context).colorScheme.outlineVariant,
+          color: scheme.outlineVariant,
         ),
       ),
       child: ListTile(

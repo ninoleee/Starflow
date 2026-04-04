@@ -160,6 +160,7 @@ class MediaItem {
     this.preferredMediaSourceId = '',
     this.seasonNumber,
     this.episodeNumber,
+    this.playbackProgress,
     required this.addedAt,
     this.lastWatchedAt,
   });
@@ -186,6 +187,7 @@ class MediaItem {
   final String preferredMediaSourceId;
   final int? seasonNumber;
   final int? episodeNumber;
+  final double? playbackProgress;
   final DateTime addedAt;
   final DateTime? lastWatchedAt;
 

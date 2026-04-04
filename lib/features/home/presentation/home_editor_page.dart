@@ -53,7 +53,9 @@ class HomeEditorPage extends ConsumerWidget {
                           key: ValueKey(module.id),
                           margin: const EdgeInsets.only(bottom: 10),
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.72),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHigh,
                             borderRadius: BorderRadius.circular(22),
                             border: Border.all(
                               color:
@@ -437,12 +439,13 @@ class _AddModuleTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.72),
+        color: scheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
