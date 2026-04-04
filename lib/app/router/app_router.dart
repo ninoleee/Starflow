@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/home/presentation/home_page.dart';
 import 'package:starflow/features/library/presentation/library_page.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -58,6 +60,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ],
       ),
       GoRoute(
+        path: '/detail',
+        name: 'detail',
+        builder: (context, state) {
+          final target = state.extra as MediaDetailTarget?;
+          if (target == null) {
+            return const _MissingDetailTargetPage();
+          }
+          return MediaDetailPage(target: target);
+        },
+      ),
+      GoRoute(
         path: '/player',
         name: 'player',
         builder: (context, state) {
@@ -106,6 +119,18 @@ class _AppNavigationShell extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _MissingDetailTargetPage extends StatelessWidget {
+  const _MissingDetailTargetPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('详情')),
+      body: const Center(child: Text('没有收到可展示的详情数据。')),
     );
   }
 }

@@ -28,7 +28,11 @@ class HomePage extends ConsumerWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(32),
                 gradient: const LinearGradient(
-                  colors: [Color(0xFF0F172A), Color(0xFF1D4ED8), Color(0xFF93C5FD)],
+                  colors: [
+                    Color(0xFF0F172A),
+                    Color(0xFF1D4ED8),
+                    Color(0xFF93C5FD)
+                  ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
@@ -69,10 +73,12 @@ class HomePage extends ConsumerWidget {
                             title: section.title,
                             subtitle: section.subtitle,
                             child: section.items.isEmpty
-                                ? _SectionEmptyState(message: section.emptyMessage)
+                                ? _SectionEmptyState(
+                                    message: section.emptyMessage)
                                 : SizedBox(
                                     height: 352,
                                     child: ListView.separated(
+                                      primary: false,
                                       scrollDirection: Axis.horizontal,
                                       itemCount: section.items.length,
                                       separatorBuilder: (context, index) =>
@@ -87,16 +93,9 @@ class HomePage extends ConsumerWidget {
                                           caption: item.caption,
                                           actionLabel: item.actionLabel,
                                           onTap: () {
-                                            if (item.playbackTarget != null) {
-                                              context.pushNamed(
-                                                'player',
-                                                extra: item.playbackTarget,
-                                              );
-                                              return;
-                                            }
-                                            context.goNamed(
-                                              'search',
-                                              queryParameters: {'q': item.title},
+                                            context.pushNamed(
+                                              'detail',
+                                              extra: item.detailTarget,
                                             );
                                           },
                                         );

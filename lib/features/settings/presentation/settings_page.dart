@@ -68,7 +68,7 @@ class SettingsPage extends ConsumerWidget {
                     padding: const EdgeInsets.only(bottom: 10),
                     child: _SettingsTile(
                       title: provider.name,
-                      subtitle: '${provider.kind.label} · ${provider.endpoint}',
+                      subtitle: _buildSearchProviderSubtitle(provider),
                       value: provider.enabled,
                       onChanged: (value) {
                         ref
@@ -105,9 +105,7 @@ class SettingsPage extends ConsumerWidget {
                   : '当前账号：${settings.doubanAccount.userId}',
               value: settings.doubanAccount.enabled,
               onChanged: (value) {
-                ref
-                    .read(settingsControllerProvider.notifier)
-                    .saveDoubanAccount(
+                ref.read(settingsControllerProvider.notifier).saveDoubanAccount(
                       settings.doubanAccount.copyWith(enabled: value),
                     );
               },
@@ -233,7 +231,8 @@ class SettingsPage extends ConsumerWidget {
                     TextField(
                       controller: usernameController,
                       decoration: InputDecoration(
-                        labelText: kind == MediaSourceKind.emby ? 'Emby 用户名' : '用户名',
+                        labelText:
+                            kind == MediaSourceKind.emby ? 'Emby 用户名' : '用户名',
                       ),
                     ),
                     if (kind == MediaSourceKind.emby) ...[
@@ -279,7 +278,8 @@ class SettingsPage extends ConsumerWidget {
                       const SizedBox(height: 12),
                       TextField(
                         controller: tokenController,
-                        decoration: const InputDecoration(labelText: 'Token / API Key'),
+                        decoration:
+                            const InputDecoration(labelText: 'Token / API Key'),
                       ),
                     ],
                     const SizedBox(height: 12),
@@ -423,6 +423,12 @@ class SettingsPage extends ConsumerWidget {
     final apiKeyController = TextEditingController(
       text: existing?.apiKey ?? '',
     );
+    final usernameController = TextEditingController(
+      text: existing?.username ?? '',
+    );
+    final passwordController = TextEditingController(
+      text: existing?.password ?? '',
+    );
     final parserHintController = TextEditingController(
       text: existing?.parserHint ?? '',
     );
@@ -472,12 +478,34 @@ class SettingsPage extends ConsumerWidget {
                     const SizedBox(height: 12),
                     TextField(
                       controller: apiKeyController,
-                      decoration: const InputDecoration(labelText: 'API Key'),
+                      decoration: const InputDecoration(
+                        labelText: 'JWT Token / API Key',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: usernameController,
+                      decoration: const InputDecoration(labelText: '登录用户名'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: passwordController,
+                      obscureText: true,
+                      decoration: const InputDecoration(labelText: '登录密码'),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: parserHintController,
                       decoration: const InputDecoration(labelText: '解析器提示'),
+                    ),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'PanSou 兼容接口建议填 parserHint 为 pansou-api。'
+                        ' 如果服务启用了认证，可以直接填 JWT Token，'
+                        '或者填写用户名和密码让应用自动登录。',
+                      ),
                     ),
                     const SizedBox(height: 12),
                     SwitchListTile(
@@ -514,6 +542,8 @@ class SettingsPage extends ConsumerWidget {
                             enabled: enabled,
                             apiKey: apiKeyController.text.trim(),
                             parserHint: parserHintController.text.trim(),
+                            username: usernameController.text.trim(),
+                            password: passwordController.text.trim(),
                           ),
                         );
                     Navigator.of(context).pop();
@@ -550,7 +580,8 @@ class SettingsPage extends ConsumerWidget {
                   children: [
                     TextField(
                       controller: userIdController,
-                      decoration: const InputDecoration(labelText: 'Douban User ID'),
+                      decoration:
+                          const InputDecoration(labelText: 'Douban User ID'),
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -625,6 +656,18 @@ class SettingsPage extends ConsumerWidget {
       return '已经保存 token，但还没有拿到 User ID，建议重新测试登录。';
     }
     return '填写账号密码后可以直接验证 Emby 登录。';
+  }
+
+  String _buildSearchProviderSubtitle(SearchProviderConfig provider) {
+    final adapter = provider.parserHint.trim().isEmpty
+        ? provider.kind.label
+        : '${provider.kind.label} · ${provider.parserHint}';
+    final authStatus = provider.apiKey.trim().isNotEmpty
+        ? '已填 Token'
+        : provider.username.trim().isNotEmpty
+            ? '自动登录 ${provider.username}'
+            : '匿名请求';
+    return '$adapter · ${provider.endpoint}\n$authStatus';
   }
 }
 

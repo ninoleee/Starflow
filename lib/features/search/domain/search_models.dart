@@ -33,6 +33,8 @@ class SearchProviderConfig {
     required this.enabled,
     this.apiKey = '',
     this.parserHint = '',
+    this.username = '',
+    this.password = '',
   });
 
   final String id;
@@ -42,6 +44,8 @@ class SearchProviderConfig {
   final bool enabled;
   final String apiKey;
   final String parserHint;
+  final String username;
+  final String password;
 
   SearchProviderConfig copyWith({
     String? id,
@@ -51,6 +55,8 @@ class SearchProviderConfig {
     bool? enabled,
     String? apiKey,
     String? parserHint,
+    String? username,
+    String? password,
   }) {
     return SearchProviderConfig(
       id: id ?? this.id,
@@ -60,6 +66,8 @@ class SearchProviderConfig {
       enabled: enabled ?? this.enabled,
       apiKey: apiKey ?? this.apiKey,
       parserHint: parserHint ?? this.parserHint,
+      username: username ?? this.username,
+      password: password ?? this.password,
     );
   }
 
@@ -72,6 +80,8 @@ class SearchProviderConfig {
       'enabled': enabled,
       'apiKey': apiKey,
       'parserHint': parserHint,
+      'username': username,
+      'password': password,
     };
   }
 
@@ -84,6 +94,8 @@ class SearchProviderConfig {
       enabled: json['enabled'] as bool? ?? false,
       apiKey: json['apiKey'] as String? ?? '',
       parserHint: json['parserHint'] as String? ?? '',
+      username: json['username'] as String? ?? '',
+      password: json['password'] as String? ?? '',
     );
   }
 }
@@ -100,6 +112,10 @@ class SearchResult {
     required this.seeders,
     required this.summary,
     required this.resourceUrl,
+    this.password = '',
+    this.source = '',
+    this.publishedAt = '',
+    this.imageUrls = const [],
   });
 
   final String id;
@@ -112,4 +128,8 @@ class SearchResult {
   final int seeders;
   final String summary;
   final String resourceUrl;
+  final String password;
+  final String source;
+  final String publishedAt;
+  final List<String> imageUrls;
 }

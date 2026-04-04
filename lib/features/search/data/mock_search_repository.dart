@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/features/search/data/pansou_api_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 
 abstract class SearchRepository {
@@ -11,10 +12,14 @@ abstract class SearchRepository {
 }
 
 final searchRepositoryProvider = Provider<SearchRepository>(
-  (ref) => MockSearchRepository(),
+  (ref) => AppSearchRepository(ref.read(panSouApiClientProvider)),
 );
 
-class MockSearchRepository implements SearchRepository {
+class AppSearchRepository implements SearchRepository {
+  AppSearchRepository(this._panSouApiClient);
+
+  final PanSouApiClient _panSouApiClient;
+
   static const _qualities = [
     '1080p WEB-DL',
     '2160p HDR',
@@ -33,6 +38,10 @@ class MockSearchRepository implements SearchRepository {
       return const [];
     }
 
+    if (PanSouApiClient.supports(provider)) {
+      return _panSouApiClient.search(keyword, provider: provider);
+    }
+
     await Future<void>.delayed(const Duration(milliseconds: 280));
 
     return List.generate(6, (index) {
@@ -48,7 +57,9 @@ class MockSearchRepository implements SearchRepository {
         sizeLabel: '${12 + index * 4} GB',
         seeders: 18 + index * 7,
         summary: '${provider.kind.label} 结果，适合后续接入下载器或离线缓存流程。',
-        resourceUrl: '${provider.endpoint}?q=${Uri.encodeQueryComponent(keyword)}',
+        resourceUrl:
+            '${provider.endpoint}?q=${Uri.encodeQueryComponent(keyword)}',
+        source: provider.name,
       );
     });
   }

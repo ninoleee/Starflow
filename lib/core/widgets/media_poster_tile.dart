@@ -23,6 +23,9 @@ class MediaPosterTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final cacheWidth = (158 * pixelRatio).round();
+    final cacheHeight = (198 * pixelRatio).round();
     return InkWell(
       borderRadius: BorderRadius.circular(24),
       onTap: onTap,
@@ -45,6 +48,26 @@ class MediaPosterTile extends StatelessWidget {
                 child: Image.network(
                   posterUrl,
                   fit: BoxFit.cover,
+                  cacheWidth: cacheWidth,
+                  cacheHeight: cacheHeight,
+                  filterQuality: FilterQuality.low,
+                  frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                    if (wasSynchronouslyLoaded || frame != null) {
+                      return child;
+                    }
+                    return Container(
+                      color: const Color(0xFFDCE6FF),
+                      alignment: Alignment.center,
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                    );
+                  },
                   errorBuilder: (context, error, stackTrace) {
                     return Container(
                       color: const Color(0xFFDCE6FF),

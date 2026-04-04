@@ -77,6 +77,37 @@ class EmbyApiClient {
       return const [];
     }
 
+    final rootItems = await _fetchItems(source: source, limit: limit);
+    if (rootItems.isNotEmpty) {
+      return rootItems;
+    }
+
+    final views = await _fetchViews(source);
+    if (views.isEmpty) {
+      return rootItems;
+    }
+
+    final groupedItems = await Future.wait(
+      views.map(
+        (view) => _fetchItems(
+          source: source,
+          limit: limit,
+          parentId: view.id,
+        ),
+      ),
+    );
+
+    return _dedupeAndSort(
+      groupedItems.expand((items) => items).toList(),
+      limit: limit,
+    );
+  }
+
+  Future<List<MediaItem>> _fetchItems({
+    required MediaSourceConfig source,
+    required int limit,
+    String? parentId,
+  }) async {
     final response = await _requestJson(
       source.endpoint,
       path: 'Users/${source.userId}/Items',
@@ -86,24 +117,79 @@ class EmbyApiClient {
       query: {
         'Recursive': 'true',
         'IncludeItemTypes': 'Movie,Episode,Video',
-        'Fields': 'Overview,Genres,DateCreated,MediaSources,ImageTags,UserData,ProductionYear',
+        'Filters': 'IsNotFolder',
+        'MediaTypes': 'Video',
+        'Fields':
+            'DateCreated,Genres,Overview,Path,People,ProductionYear,RunTimeTicks,SortName',
+        'EnableImages': 'true',
+        'EnableImageTypes': 'Primary',
+        'ImageTypeLimit': '1',
+        'EnableUserData': 'true',
         'SortBy': 'DateCreated,SortName',
         'SortOrder': 'Descending,Ascending',
         'Limit': '$limit',
+        if (parentId != null && parentId.trim().isNotEmpty)
+          'ParentId': parentId.trim(),
+      },
+    );
+
+    final items = response.json['Items'] as List<dynamic>? ?? const [];
+    return _dedupeAndSort(
+      items
+          .map(
+            (item) => _mapLibraryItem(
+              response.baseUri,
+              source,
+              Map<String, dynamic>.from(item as Map),
+            ),
+          )
+          .whereType<MediaItem>()
+          .toList(),
+      limit: limit,
+    );
+  }
+
+  Future<List<_EmbyView>> _fetchViews(MediaSourceConfig source) async {
+    final response = await _requestJson(
+      source.endpoint,
+      path: 'Users/${source.userId}/Views',
+      method: 'GET',
+      token: source.accessToken,
+      deviceId: source.deviceId,
+      query: const {
+        'IncludeHidden': 'false',
       },
     );
 
     final items = response.json['Items'] as List<dynamic>? ?? const [];
     return items
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .where(_supportsVideoBrowsing)
         .map(
-          (item) => _mapLibraryItem(
-            response.baseUri,
-            source,
-            Map<String, dynamic>.from(item as Map),
+          (item) => _EmbyView(
+            id: item['Id'] as String? ?? '',
+            collectionType: item['CollectionType'] as String? ?? '',
           ),
         )
-        .whereType<MediaItem>()
+        .where((view) => view.id.trim().isNotEmpty)
         .toList();
+  }
+
+  List<MediaItem> _dedupeAndSort(
+    List<MediaItem> items, {
+    required int limit,
+  }) {
+    final deduped = <String, MediaItem>{};
+    for (final item in items) {
+      deduped[item.id] = item;
+    }
+
+    final sorted = deduped.values.toList()
+      ..sort((left, right) => right.addedAt.compareTo(left.addedAt));
+    if (sorted.length <= limit) {
+      return sorted;
+    }
+    return sorted.take(limit).toList();
   }
 
   MediaItem? _mapLibraryItem(
@@ -126,6 +212,8 @@ class EmbyApiClient {
     final genres = (item['Genres'] as List<dynamic>? ?? const [])
         .map((entry) => '$entry')
         .toList();
+    final directors = _resolvePeople(item, const {'director'});
+    final actors = _resolvePeople(item, const {'actor', 'gueststar'});
     final createdAt = DateTime.tryParse(item['DateCreated'] as String? ?? '') ??
         DateTime.now();
     final lastPlayedAt = DateTime.tryParse(
@@ -156,6 +244,8 @@ class EmbyApiClient {
       year: productionYear,
       durationLabel: durationLabel,
       genres: genres,
+      directors: directors,
+      actors: actors,
       sourceId: source.id,
       sourceName: source.name,
       sourceKind: source.kind,
@@ -239,11 +329,13 @@ class EmbyApiClient {
       return const [];
     }
 
-    final base = Uri.parse(normalized.endsWith('/') ? normalized : '$normalized/');
-    final cleaned = base.replace(
-      path: _trimTrailingSlash(base.path),
-      query: '',
-      fragment: '',
+    final parsed = Uri.parse(normalized);
+    final cleaned = Uri(
+      scheme: parsed.scheme,
+      userInfo: parsed.userInfo,
+      host: parsed.host,
+      port: parsed.hasPort ? parsed.port : null,
+      path: _trimTrailingSlash(parsed.path),
     );
 
     final candidates = <Uri>[cleaned];
@@ -342,11 +434,33 @@ class EmbyApiClient {
         'mp4';
   }
 
+  List<String> _resolvePeople(
+    Map<String, dynamic> item,
+    Set<String> acceptedTypes,
+  ) {
+    final seen = <String>{};
+    final people = item['People'] as List<dynamic>? ?? const [];
+    final names = <String>[];
+
+    for (final entry in people) {
+      final person = Map<String, dynamic>.from(entry as Map);
+      final type = (person['Type'] as String? ?? '').trim().toLowerCase();
+      final name = (person['Name'] as String? ?? '').trim();
+      if (!acceptedTypes.contains(type) || name.isEmpty || !seen.add(name)) {
+        continue;
+      }
+      names.add(name);
+    }
+
+    return names;
+  }
+
   String _authorizationHeader({
     required String deviceId,
     String token = '',
   }) {
-    final safeDeviceId = deviceId.trim().isEmpty ? _generateDeviceId() : deviceId;
+    final safeDeviceId =
+        deviceId.trim().isEmpty ? _generateDeviceId() : deviceId;
     final attributes = <String>[
       'Client="$_clientName"',
       'Device="$_deviceName"',
@@ -361,6 +475,19 @@ class EmbyApiClient {
     final random = Random.secure();
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     return 'starflow-$timestamp-${random.nextInt(1 << 32)}';
+  }
+
+  bool _supportsVideoBrowsing(Map<String, dynamic> item) {
+    final collectionType =
+        (item['CollectionType'] as String? ?? '').trim().toLowerCase();
+    if (collectionType.isEmpty) {
+      return true;
+    }
+
+    return switch (collectionType) {
+      'movies' || 'tvshows' || 'homevideos' || 'musicvideos' => true,
+      _ => false,
+    };
   }
 
   static bool _pathEndsWithEmby(String path) {
@@ -381,9 +508,8 @@ class EmbyApiClient {
 
   static String _joinPath(String basePath, String segment) {
     final normalizedBase = _trimTrailingSlash(basePath);
-    final normalizedSegment = segment.startsWith('/')
-        ? segment.substring(1)
-        : segment;
+    final normalizedSegment =
+        segment.startsWith('/') ? segment.substring(1) : segment;
     if (normalizedBase.isEmpty) {
       return '/$normalizedSegment';
     }
@@ -426,4 +552,14 @@ class _EmbyJsonResponse {
 
   final Uri baseUri;
   final Map<String, dynamic> json;
+}
+
+class _EmbyView {
+  const _EmbyView({
+    required this.id,
+    required this.collectionType,
+  });
+
+  final String id;
+  final String collectionType;
 }

@@ -1,9 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -16,7 +16,7 @@ class HomeCardViewModel {
     required this.badges,
     required this.caption,
     required this.actionLabel,
-    this.playbackTarget,
+    required this.detailTarget,
   });
 
   final String id;
@@ -26,7 +26,7 @@ class HomeCardViewModel {
   final List<String> badges;
   final String caption;
   final String actionLabel;
-  final PlaybackTarget? playbackTarget;
+  final MediaDetailTarget detailTarget;
 }
 
 class HomeSectionViewModel {
@@ -51,24 +51,52 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
   final settings = ref.watch(appSettingsProvider);
   final mediaRepository = ref.read(mediaRepositoryProvider);
   final discoveryRepository = ref.read(discoveryRepositoryProvider);
-  final library = await mediaRepository.fetchLibrary();
+  final enabledModules =
+      settings.homeModules.where((item) => item.enabled).toList();
+  final needsRecommendations = enabledModules.any(
+    (item) => item.type == HomeModuleType.doubanRecommendations,
+  );
+  final needsWishList = enabledModules.any(
+    (item) => item.type == HomeModuleType.doubanWishList,
+  );
+
+  final futures = await Future.wait([
+    mediaRepository.fetchLibrary(),
+    needsRecommendations
+        ? discoveryRepository.fetchRecommendations()
+        : Future.value(const <DoubanEntry>[]),
+    needsWishList
+        ? discoveryRepository.fetchWishList()
+        : Future.value(const <DoubanEntry>[]),
+  ]);
+
+  final library = futures[0] as List<MediaItem>;
+  final recommendations = futures[1] as List<DoubanEntry>;
+  final wishList = futures[2] as List<DoubanEntry>;
+  final embyItems = library
+      .where((item) => item.sourceKind == MediaSourceKind.emby)
+      .take(6)
+      .toList();
+  final nasItems = library
+      .where((item) => item.sourceKind == MediaSourceKind.nas)
+      .take(6)
+      .toList();
+  final recentlyAdded = library.take(6).toList();
   final sections = <HomeSectionViewModel>[];
 
-  for (final module in settings.homeModules.where((item) => item.enabled)) {
+  for (final module in enabledModules) {
     switch (module.type) {
       case HomeModuleType.doubanRecommendations:
-        final entries = await discoveryRepository.fetchRecommendations();
-        sections.add(_buildDoubanSection(module, entries, library));
+        sections.add(_buildDoubanSection(module, recommendations, library));
         break;
       case HomeModuleType.doubanWishList:
-        final entries = await discoveryRepository.fetchWishList();
-        sections.add(_buildDoubanSection(module, entries, library));
+        sections.add(_buildDoubanSection(module, wishList, library));
         break;
       case HomeModuleType.recentlyAdded:
         sections.add(
           _buildLibrarySection(
             module,
-            library.take(6).toList(),
+            recentlyAdded,
             emptyMessage: '最近还没有新增内容，等同步任务跑起来后这里会很有用。',
           ),
         );
@@ -77,10 +105,7 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
         sections.add(
           _buildLibrarySection(
             module,
-            library
-                .where((item) => item.sourceKind == MediaSourceKind.emby)
-                .take(6)
-                .toList(),
+            embyItems,
             emptyMessage: '当前没有启用中的 Emby 资源源。',
           ),
         );
@@ -89,10 +114,7 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
         sections.add(
           _buildLibrarySection(
             module,
-            library
-                .where((item) => item.sourceKind == MediaSourceKind.nas)
-                .take(6)
-                .toList(),
+            nasItems,
             emptyMessage: '当前没有可展示的 NAS 资源。',
           ),
         );
@@ -120,9 +142,25 @@ HomeSectionViewModel _buildDoubanSection(
         matched?.sourceKind.label ?? '待补片',
       ],
       caption: entry.note,
-      actionLabel: matched != null ? '立即播放' : '去搜索',
-      playbackTarget:
-          matched == null ? null : PlaybackTarget.fromMediaItem(matched),
+      actionLabel: '查看详情',
+      detailTarget: matched == null
+          ? MediaDetailTarget(
+              title: entry.title,
+              posterUrl: entry.posterUrl,
+              overview: entry.note,
+              year: entry.year,
+              genres: const [],
+              directors: const [],
+              actors: const [],
+              availabilityLabel: '当前还没有关联到本地或服务器资源',
+              searchQuery: entry.title,
+            )
+          : MediaDetailTarget.fromMediaItem(
+              matched,
+              availabilityLabel:
+                  '豆瓣条目已关联到 ${matched.sourceKind.label} · ${matched.sourceName}',
+              searchQuery: entry.title,
+            ),
     );
   }).toList();
 
@@ -148,8 +186,8 @@ HomeSectionViewModel _buildLibrarySection(
       posterUrl: item.posterUrl,
       badges: [item.sourceKind.label, '${item.year}'],
       caption: item.overview,
-      actionLabel: '打开播放',
-      playbackTarget: PlaybackTarget.fromMediaItem(item),
+      actionLabel: '查看详情',
+      detailTarget: MediaDetailTarget.fromMediaItem(item),
     );
   }).toList();
 

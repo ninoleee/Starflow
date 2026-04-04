@@ -19,6 +19,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   List<SearchResult> _results = const [];
   bool _isSearching = false;
   String? _selectedProviderId;
+  String? _errorMessage;
 
   @override
   void initState() {
@@ -49,12 +50,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   Future<void> _performSearch() async {
     final settings = ref.read(appSettingsProvider);
-    final enabledProviders = settings.searchProviders
-        .where((item) => item.enabled)
-        .toList();
+    final enabledProviders =
+        settings.searchProviders.where((item) => item.enabled).toList();
     if (enabledProviders.isEmpty) {
       setState(() {
         _results = const [];
+        _errorMessage = null;
       });
       return;
     }
@@ -67,28 +68,40 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     setState(() {
       _selectedProviderId = provider.id;
       _isSearching = true;
+      _errorMessage = null;
     });
 
-    final result = await ref
-        .read(searchRepositoryProvider)
-        .search(_controller.text, provider: provider);
+    try {
+      final result = await ref
+          .read(searchRepositoryProvider)
+          .search(_controller.text, provider: provider);
 
-    if (!mounted) {
-      return;
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _results = result;
+        _isSearching = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _results = const [];
+        _isSearching = false;
+        _errorMessage = '$error';
+      });
     }
-
-    setState(() {
-      _results = result;
-      _isSearching = false;
-    });
   }
 
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(appSettingsProvider);
-    final enabledProviders = settings.searchProviders
-        .where((item) => item.enabled)
-        .toList();
+    final enabledProviders =
+        settings.searchProviders.where((item) => item.enabled).toList();
     final selectedProvider = enabledProviders.where(
       (item) => item.id == _selectedProviderId,
     );
@@ -157,18 +170,20 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                     padding: EdgeInsets.symmetric(vertical: 32),
                     child: Center(child: CircularProgressIndicator()),
                   )
-                : _results.isEmpty
-                    ? const Text('输入关键字后开始搜索；这里会展示统一结构的资源结果。')
-                    : Column(
-                        children: _results
-                            .map(
-                              (item) => Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: _SearchResultCard(result: item),
-                              ),
-                            )
-                            .toList(),
-                      ),
+                : _errorMessage != null
+                    ? Text('搜索失败：$_errorMessage')
+                    : _results.isEmpty
+                        ? const Text('输入关键字后开始搜索；这里会展示统一结构的资源结果。')
+                        : Column(
+                            children: _results
+                                .map(
+                                  (item) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: _SearchResultCard(result: item),
+                                  ),
+                                )
+                                .toList(),
+                          ),
           ),
         ],
       ),
@@ -240,7 +255,8 @@ class _SearchResultCard extends StatelessWidget {
                       _MetaChip(label: result.providerName),
                       _MetaChip(label: result.quality),
                       _MetaChip(label: result.sizeLabel),
-                      _MetaChip(label: '${result.seeders} seeders'),
+                      if (result.seeders > 0)
+                        _MetaChip(label: '${result.seeders} seeders'),
                     ],
                   ),
                 ],
@@ -253,18 +269,26 @@ class _SearchResultCard extends StatelessWidget {
   }
 
   Future<void> _showDetailDialog(BuildContext context, SearchResult result) {
+    final detailLines = <String>[
+      'Provider: ${result.providerName}',
+      'Type: ${result.quality}',
+      'Source: ${result.source.isEmpty ? '未知来源' : result.source}',
+      'Password: ${result.password.isEmpty ? '无' : result.password}',
+      if (result.publishedAt.isNotEmpty) 'Published At: ${result.publishedAt}',
+      if (result.seeders > 0) 'Seeders: ${result.seeders}',
+      '',
+      result.summary,
+      '',
+      'Resource URL:',
+      result.resourceUrl,
+    ];
+
     return showDialog<void>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: Text(result.title),
-          content: SelectableText(
-            'Provider: ${result.providerName}\n'
-            'Quality: ${result.quality}\n'
-            'Size: ${result.sizeLabel}\n'
-            'Seeders: ${result.seeders}\n\n'
-            'Resource URL:\n${result.resourceUrl}',
-          ),
+          content: SelectableText(detailLines.join('\n')),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),

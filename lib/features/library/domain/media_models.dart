@@ -129,6 +129,8 @@ class MediaItem {
     required this.year,
     required this.durationLabel,
     required this.genres,
+    this.directors = const [],
+    this.actors = const [],
     required this.sourceId,
     required this.sourceName,
     required this.sourceKind,
@@ -145,6 +147,8 @@ class MediaItem {
   final int year;
   final String durationLabel;
   final List<String> genres;
+  final List<String> directors;
+  final List<String> actors;
   final String sourceId;
   final String sourceName;
   final MediaSourceKind sourceKind;

@@ -3,9 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
+import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/playback/domain/playback_models.dart';
 
 enum LibraryFilter {
   all,
@@ -39,8 +39,8 @@ extension LibraryFilterX on LibraryFilter {
 
 final libraryItemsProvider =
     FutureProvider.family<List<MediaItem>, LibraryFilter>((ref, filter) {
-      return ref.read(mediaRepositoryProvider).fetchLibrary(kind: filter.kind);
-    });
+  return ref.read(mediaRepositoryProvider).fetchLibrary(kind: filter.kind);
+});
 
 class LibraryPage extends ConsumerStatefulWidget {
   const LibraryPage({super.key});
@@ -96,15 +96,16 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                           .map(
                             (item) => MediaPosterTile(
                               title: item.title,
-                              subtitle: '${item.sourceName} · ${item.durationLabel}',
+                              subtitle:
+                                  '${item.sourceName} · ${item.durationLabel}',
                               posterUrl: item.posterUrl,
                               badges: [item.sourceKind.label, '${item.year}'],
                               caption: item.overview,
-                              actionLabel: '播放',
+                              actionLabel: '查看详情',
                               onTap: () {
                                 context.pushNamed(
-                                  'player',
-                                  extra: PlaybackTarget.fromMediaItem(item),
+                                  'detail',
+                                  extra: MediaDetailTarget.fromMediaItem(item),
                                 );
                               },
                             ),
@@ -112,7 +113,8 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                           .toList(),
                     );
                   },
-                  loading: () => const Center(child: CircularProgressIndicator()),
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
                   error: (error, stackTrace) => Text('加载失败：$error'),
                 ),
               ],

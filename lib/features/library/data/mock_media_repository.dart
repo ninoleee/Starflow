@@ -35,7 +35,9 @@ class AppMediaRepository implements MediaRepository {
   final EmbyApiClient _embyApiClient;
 
   List<MediaSourceConfig> get _enabledSources {
-    return ref.read(appSettingsProvider).mediaSources
+    return ref
+        .read(appSettingsProvider)
+        .mediaSources
         .where((item) => item.enabled)
         .toList();
   }
@@ -58,24 +60,44 @@ class AppMediaRepository implements MediaRepository {
     final sources = _enabledSources
         .where((item) => kind == null || item.kind == kind)
         .toList();
-    final items = <MediaItem>[];
+    final seededLibrary = _enabledLibrary;
+    final sourceResults = await Future.wait(
+      sources.map((source) async {
+        if (source.kind == MediaSourceKind.emby) {
+          if (!source.hasActiveSession) {
+            return const _SourceFetchResult(items: <MediaItem>[]);
+          }
+          try {
+            return _SourceFetchResult(
+              items: await _embyApiClient.fetchLibrary(source),
+            );
+          } catch (error, stackTrace) {
+            return _SourceFetchResult(
+              items: const <MediaItem>[],
+              error: error,
+              stackTrace: stackTrace,
+            );
+          }
+        }
 
-    for (final source in sources) {
-      if (source.kind == MediaSourceKind.emby) {
-        if (!source.hasActiveSession) {
-          continue;
+        return _SourceFetchResult(
+          items: seededLibrary
+              .where((item) => item.sourceId == source.id)
+              .toList(),
+        );
+      }),
+    );
+    final items = sourceResults.expand((group) => group.items).toList();
+
+    if (items.isEmpty) {
+      for (final result in sourceResults) {
+        if (result.error != null) {
+          Error.throwWithStackTrace(
+            result.error!,
+            result.stackTrace ?? StackTrace.current,
+          );
         }
-        try {
-          items.addAll(await _embyApiClient.fetchLibrary(source));
-        } catch (_) {
-          continue;
-        }
-        continue;
       }
-
-      items.addAll(
-        _enabledLibrary.where((item) => item.sourceId == source.id),
-      );
     }
 
     items.sort((left, right) => right.addedAt.compareTo(left.addedAt));
@@ -115,4 +137,16 @@ class AppMediaRepository implements MediaRepository {
   String _normalize(String value) {
     return value.toLowerCase().replaceAll(RegExp(r'\s+'), '');
   }
+}
+
+class _SourceFetchResult {
+  const _SourceFetchResult({
+    required this.items,
+    this.error,
+    this.stackTrace,
+  });
+
+  final List<MediaItem> items;
+  final Object? error;
+  final StackTrace? stackTrace;
 }

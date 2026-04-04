@@ -1,5 +1,10 @@
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 
 void main() {
   group('EmbyApiClient helpers', () {
@@ -37,6 +42,129 @@ void main() {
         EmbyApiClient.formatRunTimeTicks(54000000000),
         '1h 30m',
       );
+    });
+
+    test('falls back to user views when root items query is empty', () async {
+      final client = EmbyApiClient(
+        MockClient((request) async {
+          expect(request.headers['X-Emby-Token'], 'token-789');
+
+          if (request.url.path == '/Users/user-123/Items' &&
+              !request.url.queryParameters.containsKey('ParentId')) {
+            return http.Response(jsonEncode({'Items': []}), 200);
+          }
+
+          if (request.url.path == '/Users/user-123/Views') {
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {
+                    'Id': 'movies-view',
+                    'CollectionType': 'movies',
+                  },
+                  {
+                    'Id': 'shows-view',
+                    'CollectionType': 'tvshows',
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          if (request.url.path == '/Users/user-123/Items' &&
+              request.url.queryParameters['ParentId'] == 'movies-view') {
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {
+                    'Id': 'movie-1',
+                    'Name': 'Dune: Part Two',
+                    'Overview': 'Sci-fi epic',
+                    'ProductionYear': 2024,
+                    'DateCreated': '2026-04-01T12:00:00.0000000Z',
+                    'Genres': ['Sci-Fi'],
+                    'People': [
+                      {'Name': 'Denis Villeneuve', 'Type': 'Director'},
+                      {'Name': 'Timothee Chalamet', 'Type': 'Actor'},
+                      {'Name': 'Zendaya', 'Type': 'Actor'},
+                    ],
+                    'ImageTags': {'Primary': 'poster-1'},
+                    'MediaSources': [
+                      {
+                        'Id': 'media-source-1',
+                        'Container': 'mkv',
+                      },
+                    ],
+                    'RunTimeTicks': 99600000000,
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          if (request.url.path == '/Users/user-123/Items' &&
+              request.url.queryParameters['ParentId'] == 'shows-view') {
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {
+                    'Id': 'episode-1',
+                    'Name': 'The Last of Us S01E01',
+                    'Overview': 'Pilot episode',
+                    'ProductionYear': 2023,
+                    'DateCreated': '2026-03-15T08:00:00.0000000Z',
+                    'Genres': ['Drama'],
+                    'People': [
+                      {'Name': 'Craig Mazin', 'Type': 'Director'},
+                      {'Name': 'Pedro Pascal', 'Type': 'Actor'},
+                    ],
+                    'ImageTags': {'Primary': 'poster-2'},
+                    'MediaSources': [
+                      {
+                        'Id': 'media-source-2',
+                        'Container': 'mp4',
+                      },
+                    ],
+                    'RunTimeTicks': 48600000000,
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          return http.Response('Not found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'emby-main',
+          name: 'Home Emby',
+          kind: MediaSourceKind.emby,
+          endpoint: 'https://media.example.com',
+          enabled: true,
+          username: 'alice',
+          accessToken: 'token-789',
+          userId: 'user-123',
+          deviceId: 'device-456',
+        ),
+      );
+
+      expect(items, hasLength(2));
+      expect(items.map((item) => item.id), ['movie-1', 'episode-1']);
+      expect(
+        items.first.posterUrl,
+        'https://media.example.com/Items/movie-1/Images/Primary?maxHeight=720&quality=90&tag=poster-1&api_key=token-789',
+      );
+      expect(
+        items.first.streamUrl,
+        'https://media.example.com/Videos/movie-1/stream.mkv?static=true&MediaSourceId=media-source-1&api_key=token-789',
+      );
+      expect(items.first.directors, ['Denis Villeneuve']);
+      expect(items.first.actors, ['Timothee Chalamet', 'Zendaya']);
     });
   });
 }
