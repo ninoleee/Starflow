@@ -12,6 +12,8 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
 import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
+import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
+import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -23,21 +25,35 @@ final enrichedDetailTargetProvider =
   target,
 ) async {
   final settings = ref.watch(appSettingsProvider);
-  return _resolvePlaybackDetailsIfNeeded(
+  return _resolveDetailTargetIfNeeded(
     ref: ref,
     settings: settings,
     target: target,
   );
 });
 
-Future<MediaDetailTarget> _resolvePlaybackDetailsIfNeeded({
+Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
   required Ref ref,
   required AppSettings settings,
   required MediaDetailTarget target,
 }) async {
-  final playback = target.playbackTarget;
+  var nextTarget = target;
+  if (_shouldAutoEnrichMetadataTarget(
+    settings: settings,
+    target: nextTarget,
+  )) {
+    nextTarget = await _resolveAutomaticMetadataIfNeeded(
+      settings: settings,
+      target: nextTarget,
+      wmdbMetadataClient: ref.read(wmdbMetadataClientProvider),
+      tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
+      imdbRatingClient: ref.read(imdbRatingClientProvider),
+    );
+  }
+
+  final playback = nextTarget.playbackTarget;
   if (playback == null) {
-    return target;
+    return nextTarget;
   }
 
   final shouldResolve = playback.sourceKind == MediaSourceKind.emby &&
@@ -47,7 +63,7 @@ Future<MediaDetailTarget> _resolvePlaybackDetailsIfNeeded({
           playback.resolutionLabel.trim().isEmpty ||
           playback.fileSizeLabel.trim().isEmpty);
   if (!shouldResolve) {
-    return target;
+    return nextTarget;
   }
 
   MediaSourceConfig? source;
@@ -58,7 +74,7 @@ Future<MediaDetailTarget> _resolvePlaybackDetailsIfNeeded({
     }
   }
   if (source == null || !source.hasActiveSession) {
-    return target;
+    return nextTarget;
   }
 
   try {
@@ -67,10 +83,188 @@ Future<MediaDetailTarget> _resolvePlaybackDetailsIfNeeded({
               source: source,
               target: playback,
             );
-    return target.copyWith(playbackTarget: resolvedPlayback);
+    return nextTarget.copyWith(playbackTarget: resolvedPlayback);
   } catch (_) {
-    return target;
+    return nextTarget;
   }
+}
+
+bool _shouldAutoEnrichMetadataTarget({
+  required AppSettings settings,
+  required MediaDetailTarget target,
+}) {
+  if (_detailMetadataQuery(target).isEmpty && target.doubanId.trim().isEmpty) {
+    return false;
+  }
+
+  final needsWmdb = settings.wmdbMetadataMatchEnabled &&
+      (target.needsMetadataMatch ||
+          _needsRatingLabel(target, prefix: '豆瓣 ') ||
+          target.needsImdbRatingMatch ||
+          target.doubanId.trim().isEmpty ||
+          target.imdbId.trim().isEmpty ||
+          target.tmdbId.trim().isEmpty);
+  final needsTmdb = settings.tmdbMetadataMatchEnabled &&
+      settings.tmdbReadAccessToken.trim().isNotEmpty &&
+      (target.needsMetadataMatch ||
+          target.imdbId.trim().isEmpty ||
+          target.tmdbId.trim().isEmpty);
+  final needsImdb = settings.imdbRatingMatchEnabled &&
+      target.needsImdbRatingMatch;
+  return needsWmdb || needsTmdb || needsImdb;
+}
+
+String _detailMetadataQuery(MediaDetailTarget target) {
+  final raw = target.searchQuery.trim().isEmpty ? target.title : target.searchQuery;
+  return raw.trim();
+}
+
+bool _needsRatingLabel(MediaDetailTarget target, {required String prefix}) {
+  final normalizedPrefix = prefix.toLowerCase();
+  return target.ratingLabels.every(
+    (label) => !label.trim().toLowerCase().startsWith(normalizedPrefix),
+  );
+}
+
+Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
+  required AppSettings settings,
+  required MediaDetailTarget target,
+  required WmdbMetadataClient wmdbMetadataClient,
+  required TmdbMetadataClient tmdbMetadataClient,
+  required ImdbRatingClient imdbRatingClient,
+}) async {
+  var nextTarget = target;
+  final initialQuery = _detailMetadataQuery(target);
+
+  if (settings.wmdbMetadataMatchEnabled &&
+      (nextTarget.needsMetadataMatch ||
+          _needsRatingLabel(nextTarget, prefix: '豆瓣 ') ||
+          nextTarget.needsImdbRatingMatch ||
+          nextTarget.doubanId.trim().isEmpty ||
+          nextTarget.imdbId.trim().isEmpty ||
+          nextTarget.tmdbId.trim().isEmpty)) {
+    try {
+      final wmdbMatch = nextTarget.doubanId.trim().isNotEmpty
+          ? await wmdbMetadataClient.matchByDoubanId(
+              doubanId: nextTarget.doubanId,
+            )
+          : await wmdbMetadataClient.matchTitle(
+              query: initialQuery,
+              year: nextTarget.year,
+              preferSeries: nextTarget.isSeries,
+              actors: nextTarget.actors,
+            );
+      if (wmdbMatch != null) {
+        nextTarget = _applyManualMetadataMatch(nextTarget, wmdbMatch);
+      }
+    } catch (_) {
+      // Ignore WMDB failures and continue.
+    }
+  }
+
+  if (nextTarget.tmdbId.trim().isEmpty &&
+      settings.tmdbMetadataMatchEnabled &&
+      settings.tmdbReadAccessToken.trim().isNotEmpty) {
+    try {
+      final currentQuery = _detailMetadataQuery(nextTarget);
+      final tmdbMatch = await tmdbMetadataClient.matchTitle(
+            query: currentQuery.isEmpty ? initialQuery : currentQuery,
+            readAccessToken: settings.tmdbReadAccessToken.trim(),
+            year: nextTarget.year,
+            preferSeries: nextTarget.isSeries,
+          );
+      if (tmdbMatch != null) {
+        nextTarget = _applyManualMetadataMatch(
+          nextTarget,
+          MetadataMatchResult(
+            provider: MetadataMatchProvider.tmdb,
+            title: tmdbMatch.title,
+            originalTitle: tmdbMatch.originalTitle,
+            posterUrl: tmdbMatch.posterUrl,
+            overview: tmdbMatch.overview,
+            year: tmdbMatch.year,
+            durationLabel: tmdbMatch.durationLabel,
+            genres: tmdbMatch.genres,
+            directors: tmdbMatch.directors,
+            actors: tmdbMatch.actors,
+            actorProfiles: tmdbMatch.actorProfiles
+                .map(
+                  (item) => MetadataPersonProfile(
+                    name: item.name,
+                    avatarUrl: item.avatarUrl,
+                  ),
+                )
+                .toList(),
+            imdbId: tmdbMatch.imdbId,
+            tmdbId: tmdbMatch.tmdbId,
+          ),
+        );
+      }
+    } catch (_) {
+      // Ignore TMDB failures and continue.
+    }
+  }
+
+  if (settings.imdbRatingMatchEnabled && nextTarget.needsImdbRatingMatch) {
+    try {
+      final currentQuery = _detailMetadataQuery(nextTarget);
+      final ratingMatch = await imdbRatingClient.matchRating(
+            query: currentQuery.isEmpty ? initialQuery : currentQuery,
+            year: nextTarget.year,
+            preferSeries: nextTarget.isSeries,
+            imdbId: nextTarget.imdbId,
+          );
+      if (ratingMatch != null) {
+        final nextRatings = [...nextTarget.ratingLabels];
+        final nextRatingLabel = ratingMatch.ratingLabel.trim();
+        final hasSameRating = nextRatings.any(
+          (label) => label.toLowerCase() == nextRatingLabel.toLowerCase(),
+        );
+        if (nextRatingLabel.isNotEmpty && !hasSameRating) {
+          nextRatings.add(nextRatingLabel);
+        }
+        nextTarget = nextTarget.copyWith(
+          ratingLabels: nextRatings,
+          imdbId: nextTarget.imdbId.trim().isEmpty
+              ? ratingMatch.imdbId
+              : nextTarget.imdbId,
+        );
+      }
+    } catch (_) {
+      // Ignore IMDb failures and continue.
+    }
+  }
+
+  return nextTarget;
+}
+
+bool _hasMetadataChanged(
+  MediaDetailTarget current,
+  MediaDetailTarget next,
+) {
+  return current.posterUrl != next.posterUrl ||
+      current.overview != next.overview ||
+      current.year != next.year ||
+      current.durationLabel != next.durationLabel ||
+      !_sameStrings(current.ratingLabels, next.ratingLabels) ||
+      !_sameStrings(current.genres, next.genres) ||
+      !_sameStrings(current.directors, next.directors) ||
+      !_sameStrings(current.actors, next.actors) ||
+      current.doubanId != next.doubanId ||
+      current.imdbId != next.imdbId ||
+      current.tmdbId != next.tmdbId;
+}
+
+bool _sameStrings(List<String> left, List<String> right) {
+  if (left.length != right.length) {
+    return false;
+  }
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 Future<MetadataMatchResult?> _tryPreferredMetadataMatch({
@@ -240,6 +434,14 @@ Future<MediaItem?> _tryMatchEmbyResourceBySections({
         sectionId: collection.id,
         limit: limit,
       );
+      final exactMatched = matchMediaItemByExternalIds(
+        items,
+        imdbId: _resolveManualMatchImdbId(target, metadataMatch),
+        tmdbId: _resolveManualMatchTmdbId(target, metadataMatch),
+      );
+      if (exactMatched != null) {
+        return exactMatched;
+      }
       final matched = matchMediaItemByTitles(
         items,
         titles: titles,
@@ -254,6 +456,28 @@ Future<MediaItem?> _tryMatchEmbyResourceBySections({
   }
 
   return null;
+}
+
+String _resolveManualMatchImdbId(
+  MediaDetailTarget target,
+  MetadataMatchResult? metadataMatch,
+) {
+  final current = target.imdbId.trim();
+  if (current.isNotEmpty) {
+    return current;
+  }
+  return metadataMatch?.imdbId.trim() ?? '';
+}
+
+String _resolveManualMatchTmdbId(
+  MediaDetailTarget target,
+  MetadataMatchResult? metadataMatch,
+) {
+  final current = target.tmdbId.trim();
+  if (current.isNotEmpty) {
+    return current;
+  }
+  return metadataMatch?.tmdbId.trim() ?? '';
 }
 
 int _scoreManualMatchCollection(
@@ -459,6 +683,7 @@ MediaDetailTarget _mergeMatchedLibraryTarget({
     ),
     doubanId: current.doubanId,
     imdbId: current.imdbId,
+    tmdbId: current.tmdbId.trim().isNotEmpty ? current.tmdbId : matched.tmdbId,
   );
 }
 
@@ -492,6 +717,7 @@ MediaDetailTarget _applyManualMetadataMatch(
     doubanId:
         match.doubanId.trim().isNotEmpty ? match.doubanId : target.doubanId,
     imdbId: match.imdbId.trim().isNotEmpty ? match.imdbId : target.imdbId,
+    tmdbId: match.tmdbId.trim().isNotEmpty ? match.tmdbId : target.tmdbId,
   );
 }
 
@@ -685,55 +911,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     });
 
     final settings = ref.read(appSettingsProvider);
-    final query = currentTarget.searchQuery.trim().isEmpty
-        ? currentTarget.title
-        : currentTarget.searchQuery;
-    var nextTarget = currentTarget;
-    var changed = false;
-
-    final metadataMatch = await _tryPreferredMetadataMatch(
-      metadataMatchResolver: ref.read(metadataMatchResolverProvider),
+    final nextTarget = await _resolveAutomaticMetadataIfNeeded(
       settings: settings,
       target: currentTarget,
-      query: query,
+      wmdbMetadataClient: ref.read(wmdbMetadataClientProvider),
+      tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
+      imdbRatingClient: ref.read(imdbRatingClientProvider),
     );
-    if (metadataMatch != null) {
-      nextTarget = _applyManualMetadataMatch(nextTarget, metadataMatch);
-      changed = true;
-    }
-
-    if (settings.imdbRatingMatchEnabled) {
-      try {
-        final ratingMatch =
-            await ref.read(imdbRatingClientProvider).matchRating(
-                  query: query,
-                  year: nextTarget.year,
-                  preferSeries: nextTarget.isSeries,
-                  imdbId: nextTarget.imdbId,
-                );
-        if (ratingMatch != null) {
-          final nextRatings = [...nextTarget.ratingLabels];
-          final nextRatingLabel = ratingMatch.ratingLabel.trim();
-          final hasSameRating = nextRatings.any(
-            (label) => label.toLowerCase() == nextRatingLabel.toLowerCase(),
-          );
-          if (nextRatingLabel.isNotEmpty && !hasSameRating) {
-            nextRatings.add(nextRatingLabel);
-            changed = true;
-          }
-          if (nextTarget.imdbId.trim().isEmpty &&
-              ratingMatch.imdbId.trim().isNotEmpty) {
-            changed = true;
-          }
-          nextTarget = nextTarget.copyWith(
-            imdbId: nextTarget.imdbId.trim().isEmpty
-                ? ratingMatch.imdbId
-                : nextTarget.imdbId,
-            ratingLabels: nextRatings,
-          );
-        }
-      } catch (_) {}
-    }
+    final changed = _hasMetadataChanged(currentTarget, nextTarget);
 
     if (!mounted) {
       return;

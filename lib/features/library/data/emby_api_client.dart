@@ -501,6 +501,10 @@ class EmbyApiClient {
     final durationLabel = formatRunTimeTicks(runTimeTicks);
     final playbackProgress =
         _resolvePlaybackProgress(userData, runTimeTicks: runTimeTicks);
+    final providerIds = (item['ProviderIds'] as Map?)?.map(
+          (key, value) => MapEntry('$key'.trim(), '$value'.trim()),
+        ) ??
+        const <String, String>{};
     final rawIndexNumber = item['IndexNumber'] as int?;
     final rawParentIndexNumber = item['ParentIndexNumber'] as int?;
     final seasonNumber = itemType.trim().toLowerCase() == 'season'
@@ -543,6 +547,8 @@ class EmbyApiClient {
       seasonNumber: seasonNumber,
       episodeNumber: episodeNumber,
       playbackProgress: playbackProgress,
+      imdbId: _resolveProviderId(providerIds, const ['Imdb', 'IMDb']),
+      tmdbId: _resolveProviderId(providerIds, const ['Tmdb', 'TMDb', 'TMDB']),
       addedAt: createdAt,
       lastWatchedAt: lastPlayedAt,
     );
@@ -555,7 +561,7 @@ class EmbyApiClient {
   }) {
     final query = <String, String>{
       'Fields':
-          'DateCreated,Genres,IndexNumber,OriginalTitle,Overview,ParentIndexNumber,Path,People,ProductionYear,RunTimeTicks,SortName',
+          'DateCreated,Genres,IndexNumber,OriginalTitle,Overview,ParentIndexNumber,Path,People,ProductionYear,ProviderIds,RunTimeTicks,SortName',
       'EnableImages': 'true',
       'EnableImageTypes': 'Primary',
       'ImageTypeLimit': '1',
@@ -782,6 +788,19 @@ class EmbyApiClient {
     return imageTags['Primary'] as String? ??
         item['PrimaryImageTag'] as String? ??
         '';
+  }
+
+  String _resolveProviderId(
+    Map<String, String> providerIds,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final value = providerIds[key]?.trim() ?? '';
+      if (value.isNotEmpty) {
+        return value;
+      }
+    }
+    return '';
   }
 
   Map<String, dynamic>? _selectMediaStream(

@@ -41,6 +41,8 @@ void main() {
                 ],
                 'originalName': '天书奇谭',
                 'imdbId': 'tt6035092',
+                'tmdbId': '135130',
+                'imdbRating': '7.4',
                 'year': '1983',
                 'duration': 5340,
                 'doubanId': '1428581',
@@ -60,9 +62,10 @@ void main() {
       expect(result.durationLabel, '1h 29m');
       expect(result.directors, ['钱运达']);
       expect(result.actors, ['刘风']);
-      expect(result.ratingLabels, ['豆瓣 9.2']);
+      expect(result.ratingLabels, ['豆瓣 9.2', 'IMDb 7.4']);
       expect(result.doubanId, '1428581');
       expect(result.imdbId, 'tt6035092');
+      expect(result.tmdbId, '135130');
     });
 
     test('maps search lookup and prefers best title match', () async {

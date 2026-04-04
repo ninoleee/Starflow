@@ -6,11 +6,13 @@ import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
-import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
+import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class SearchPage extends ConsumerStatefulWidget {
@@ -32,6 +34,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   int _totalSearchTaskCount = 0;
   int _completedSearchTaskCount = 0;
   int _filteredResultCount = 0;
+  final Set<String> _savingResultIds = <String>{};
 
   @override
   void initState() {
@@ -151,20 +154,22 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       sources: enabledSources,
       providers: enabledProviders,
     );
-    final selectedTargets = _resolveSelectedTargets(targets);
 
     return Scaffold(
       body: AppPageBackground(
-        contentPadding: appPageContentPadding(
-          context,
-          includeBottomNavigationBar: true,
+        contentPadding: EdgeInsets.only(
+          top: MediaQuery.paddingOf(context).top,
         ),
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            SectionPanel(
-              title: '搜索',
-              subtitle: '可选全部、指定 Emby/WebDAV 来源，或指定在线搜索服务',
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                kAppPageHorizontalPadding,
+                0,
+                kAppPageHorizontalPadding,
+                0,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -180,13 +185,13 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 10),
                   if (targets.length == 1)
                     const Text('还没有启用可搜索的来源，请先去设置页添加媒体源或搜索服务。')
                   else
                     Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
+                      spacing: 8,
+                      runSpacing: 8,
                       children: targets
                           .map(
                             (target) => FilterChip(
@@ -202,18 +207,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                           )
                           .toList(),
                     ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 18),
-            SectionPanel(
-              title: '搜索结果',
-              subtitle: targets.length == 1
-                  ? '启用来源后就可以开始搜索'
-                  : '当前范围：${_buildSelectedTargetsLabel(selectedTargets, targets)}',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+                  const SizedBox(height: 12),
                   if (_isSearching) ...[
                     LinearProgressIndicator(
                       value: _totalSearchTaskCount > 0
@@ -226,39 +220,51 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                           ? '正在搜索...'
                           : '正在继续搜索 $_completedSearchTaskCount/$_totalSearchTaskCount',
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 10),
                   ],
                   if (_controller.text.trim().isNotEmpty &&
-                      (_results.isNotEmpty || _filteredResultCount > 0)) ...[
-                    Text(
-                      '结果 ${_results.length} 条 · 过滤 $_filteredResultCount 条',
+                      (_results.isNotEmpty || _filteredResultCount > 0))
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        '结果 ${_results.length} 条 · 过滤 $_filteredResultCount 条',
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                  ],
                   if (_errorMessage != null)
-                    Text('搜索失败：$_errorMessage')
-                  else if (_results.isEmpty)
-                    Text(
-                      _controller.text.trim().isEmpty
-                          ? '输入关键字后开始搜索。'
-                          : _filteredResultCount > 0
-                              ? '没有可用结果，已过滤 $_filteredResultCount 条结果。'
-                              : '没有找到结果。',
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text('搜索失败：$_errorMessage'),
                     )
-                  else
-                    Column(
-                      children: _results
-                          .map(
-                            (item) => Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: _SearchResultCard(result: item),
-                            ),
-                          )
-                          .toList(),
+                  else if (_results.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        _controller.text.trim().isEmpty
+                            ? '输入关键字后开始搜索。'
+                            : _filteredResultCount > 0
+                                ? '没有可用结果，已过滤 $_filteredResultCount 条结果。'
+                                : '没有找到结果。',
+                      ),
                     ),
                 ],
               ),
             ),
+            if (_results.isNotEmpty)
+              ..._results.map(
+                (item) => _SearchResultCard(
+                  result: item,
+                  isSaving: _savingResultIds.contains(item.id),
+                  showSaveAction: _canSaveResultToQuark(
+                    result: item,
+                    settings: settings,
+                  ),
+                  onSave: () => _saveResultToQuark(
+                    result: item,
+                    settings: settings,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -431,26 +437,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     });
   }
 
-  String _buildSelectedTargetsLabel(
-    List<_SearchTarget> selectedTargets,
-    List<_SearchTarget> allTargets,
-  ) {
-    if (selectedTargets.isEmpty ||
-        selectedTargets.any((item) => item.id == _SearchTarget.allId)) {
-      return '全部';
-    }
-
-    if (selectedTargets.length >= allTargets.length - 1) {
-      return '全部';
-    }
-
-    if (selectedTargets.length <= 2) {
-      return selectedTargets.map((item) => item.label).join(' + ');
-    }
-
-    return '已选 ${selectedTargets.length} 个来源';
-  }
-
   List<SearchResult> _sortResults(List<SearchResult> items) {
     final sorted = [...items];
     sorted.sort((left, right) {
@@ -463,12 +449,134 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     });
     return sorted;
   }
+
+  bool _canSaveResultToQuark({
+    required SearchResult result,
+    required AppSettings settings,
+  }) {
+    if (result.detailTarget != null) {
+      return false;
+    }
+    final cloudType = detectSearchCloudTypeFromUrl(result.resourceUrl);
+    if (cloudType != SearchCloudType.quark) {
+      return false;
+    }
+    return _resolveQuarkSaveProvider(result, settings)?.quarkCookie.trim().isNotEmpty ==
+        true;
+  }
+
+  SearchProviderConfig? _resolveQuarkSaveProvider(
+    SearchResult result,
+    AppSettings settings,
+  ) {
+    for (final provider in settings.searchProviders) {
+      if (provider.id == result.providerId &&
+          provider.quarkCookie.trim().isNotEmpty) {
+        return provider;
+      }
+    }
+    for (final provider in settings.searchProviders) {
+      if (provider.enabled && provider.quarkCookie.trim().isNotEmpty) {
+        return provider;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _saveResultToQuark({
+    required SearchResult result,
+    required AppSettings settings,
+  }) async {
+    final saveProvider = _resolveQuarkSaveProvider(result, settings);
+    final cookie = saveProvider?.quarkCookie.trim() ?? '';
+    if (saveProvider == null || cookie.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先在搜索设置里填写夸克 Cookie')),
+      );
+      return;
+    }
+
+    setState(() {
+      _savingResultIds.add(result.id);
+    });
+
+    try {
+      final response = await ref.read(quarkSaveClientProvider).saveShareLink(
+            shareUrl: result.resourceUrl,
+            cookie: cookie,
+            toPdirFid: saveProvider.quarkSaveFolderId,
+          );
+      var triggeredTask = false;
+      if (saveProvider.smartStrmWebhookUrl.trim().isNotEmpty &&
+          saveProvider.smartStrmTaskName.trim().isNotEmpty) {
+        await ref.read(smartStrmWebhookClientProvider).triggerTask(
+              webhookUrl: saveProvider.smartStrmWebhookUrl,
+              taskName: saveProvider.smartStrmTaskName,
+              storagePath: saveProvider.quarkSaveFolderPath == '/'
+                  ? ''
+                  : saveProvider.quarkSaveFolderPath,
+            );
+        triggeredTask = true;
+      }
+      if (!mounted) {
+        return;
+      }
+      final message = response.taskId.isEmpty
+          ? '已提交到夸克，保存 ${response.savedCount} 个文件'
+          : '已提交到夸克，任务 ${response.taskId}';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            triggeredTask ? '$message，已触发 STRM 任务' : message,
+          ),
+        ),
+      );
+    } on QuarkSaveException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    } on SmartStrmWebhookException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('夸克保存成功，但 STRM 触发失败：${error.message}')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('保存失败：$error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _savingResultIds.remove(result.id);
+        });
+      }
+    }
+  }
 }
 
 class _SearchResultCard extends StatelessWidget {
-  const _SearchResultCard({required this.result});
+  const _SearchResultCard({
+    required this.result,
+    required this.isSaving,
+    required this.showSaveAction,
+    required this.onSave,
+  });
 
   final SearchResult result;
+  final bool isSaving;
+  final bool showSaveAction;
+  final VoidCallback onSave;
 
   @override
   Widget build(BuildContext context) {
@@ -476,7 +584,6 @@ class _SearchResultCard extends StatelessWidget {
     final posterUrl = result.posterUrl.trim();
     final resourceUri = _parseLaunchUri(result.resourceUrl);
     return InkWell(
-      borderRadius: BorderRadius.circular(18),
       onTap: () {
         if (result.detailTarget != null) {
           context.pushNamed('detail', extra: result.detailTarget);
@@ -490,61 +597,103 @@ class _SearchResultCard extends StatelessWidget {
       },
       onLongPress: () => _showDetailDialog(context, result),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+        child: Column(
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: posterUrl.isEmpty
-                  ? _SearchPosterPlaceholder(theme: theme)
-                  : Image.network(
-                      posterUrl,
-                      headers: networkImageHeadersForUrl(posterUrl),
-                      width: 76,
-                      height: 108,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return _SearchPosterPlaceholder(theme: theme);
-                      },
-                    ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    result.title,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    result.summary,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: posterUrl.isEmpty
+                      ? _SearchPosterPlaceholder(theme: theme)
+                      : Image.network(
+                          posterUrl,
+                          headers: networkImageHeadersForUrl(posterUrl),
+                          width: 72,
+                          height: 102,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return _SearchPosterPlaceholder(theme: theme);
+                          },
+                        ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _MetaChip(label: result.providerName),
-                      _MetaChip(label: result.quality),
-                      _MetaChip(label: result.sizeLabel),
-                      if (result.seeders > 0)
-                        _MetaChip(label: '${result.seeders} seeders'),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              result.title,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (showSaveAction)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 6),
+                              child: SizedBox(
+                                width: 32,
+                                height: 32,
+                                child: IconButton(
+                                  padding: EdgeInsets.zero,
+                                  tooltip: '保存到夸克',
+                                  onPressed: isSaving ? null : onSave,
+                                  icon: isSaving
+                                      ? const SizedBox(
+                                          width: 14,
+                                          height: 14,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(
+                                          Icons.bookmark_add_rounded,
+                                          size: 18,
+                                        ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        result.summary,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          _MetaChip(label: result.providerName),
+                          _MetaChip(label: result.quality),
+                          _MetaChip(label: result.sizeLabel),
+                          if (result.seeders > 0)
+                            _MetaChip(label: '${result.seeders} seeders'),
+                        ],
+                      ),
                     ],
                   ),
-                ],
-              ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Divider(
+              height: 1,
+              thickness: 0.5,
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
             ),
           ],
         ),
@@ -657,8 +806,8 @@ class _SearchPosterPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 82,
-      height: 118,
+      width: 72,
+      height: 102,
       color: theme.colorScheme.surfaceContainerHighest,
       alignment: Alignment.center,
       child: const Icon(Icons.link_rounded),

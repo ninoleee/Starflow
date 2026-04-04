@@ -90,6 +90,10 @@ void main() {
                       {'Name': 'Timothee Chalamet', 'Type': 'Actor'},
                       {'Name': 'Zendaya', 'Type': 'Actor'},
                     ],
+                    'ProviderIds': {
+                      'Imdb': 'tt15239678',
+                      'Tmdb': '693134',
+                    },
                     'ImageTags': {'Primary': 'poster-1'},
                     'MediaSources': [
                       {
@@ -169,6 +173,8 @@ void main() {
       expect(items.first.isPlayable, isTrue);
       expect(items.first.directors, ['Denis Villeneuve']);
       expect(items.first.actors, ['Timothee Chalamet', 'Zendaya']);
+      expect(items.first.imdbId, 'tt15239678');
+      expect(items.first.tmdbId, '693134');
       expect(items.last.playbackProgress, closeTo(0.375, 0.0001));
     });
 

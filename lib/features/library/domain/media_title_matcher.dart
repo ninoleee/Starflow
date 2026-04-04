@@ -30,6 +30,30 @@ MediaItem? matchMediaItemByTitles(
   return bestScore >= 72 ? best : null;
 }
 
+MediaItem? matchMediaItemByExternalIds(
+  List<MediaItem> library, {
+  String imdbId = '',
+  String tmdbId = '',
+}) {
+  final normalizedImdbId = imdbId.trim().toLowerCase();
+  final normalizedTmdbId = tmdbId.trim().toLowerCase();
+  if (normalizedImdbId.isEmpty && normalizedTmdbId.isEmpty) {
+    return null;
+  }
+
+  for (final item in library) {
+    if (normalizedImdbId.isNotEmpty &&
+        item.imdbId.trim().toLowerCase() == normalizedImdbId) {
+      return item;
+    }
+    if (normalizedTmdbId.isNotEmpty &&
+        item.tmdbId.trim().toLowerCase() == normalizedTmdbId) {
+      return item;
+    }
+  }
+  return null;
+}
+
 double _scoreMediaItem(
   MediaItem item, {
   required Set<String> normalizedTargets,

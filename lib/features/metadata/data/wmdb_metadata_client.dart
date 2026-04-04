@@ -251,8 +251,10 @@ class WmdbMetadataClient {
     final overview = (data['description'] ?? '').trim();
     final year = int.tryParse('${json['year'] ?? ''}') ?? 0;
     final imdbId = '${json['imdbId'] ?? ''}'.trim();
+    final tmdbId = '${json['tmdbId'] ?? ''}'.trim();
     final doubanId = '${json['doubanId'] ?? ''}'.trim();
     final doubanRating = '${json['doubanRating'] ?? ''}'.trim();
+    final imdbRating = '${json['imdbRating'] ?? ''}'.trim();
     final durationLabel = _formatDuration(
       (json['duration'] as num?)?.toInt() ?? 0,
     );
@@ -270,8 +272,12 @@ class WmdbMetadataClient {
       directors: directors,
       actors: actors,
       imdbId: imdbId,
+      tmdbId: tmdbId,
       doubanId: doubanId,
-      ratingLabels: doubanRating.isEmpty ? const [] : ['豆瓣 $doubanRating'],
+      ratingLabels: [
+        if (doubanRating.isNotEmpty) '豆瓣 $doubanRating',
+        if (imdbRating.isNotEmpty) 'IMDb $imdbRating',
+      ],
     );
   }
 
