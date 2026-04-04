@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -138,27 +136,24 @@ class _AppNavigationShell extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
           child: Material(
-            color: Colors.transparent,
+            type: MaterialType.transparency,
             elevation: 0,
             shadowColor: Colors.transparent,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(_kBottomNavShellRadius),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius:
-                        BorderRadius.circular(_kBottomNavShellRadius),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.2),
-                    ),
-                    color: const Color(0x1A0F1622),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius:
+                      BorderRadius.circular(_kBottomNavShellRadius),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.24),
                   ),
-                  child: _FloatingNavigationBar(
-                    currentIndex: navigationShell.currentIndex,
-                    onDestinationSelected: (index) =>
-                        navigationShell.goBranch(index),
-                  ),
+                  color: Colors.transparent,
+                ),
+                child: _FloatingNavigationBar(
+                  currentIndex: navigationShell.currentIndex,
+                  onDestinationSelected: (index) =>
+                      navigationShell.goBranch(index),
                 ),
               ),
             ),

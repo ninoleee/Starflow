@@ -39,8 +39,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   void initState() {
     super.initState();
     final e = widget.initial;
-    _sourceId = e?.id ??
-        'media-source-${DateTime.now().millisecondsSinceEpoch}';
+    _sourceId =
+        e?.id ?? 'media-source-${DateTime.now().millisecondsSinceEpoch}';
     _nameController = TextEditingController(text: e?.name ?? '');
     _endpointController = TextEditingController(text: e?.endpoint ?? '');
     _usernameController = TextEditingController(text: e?.username ?? '');
@@ -52,9 +52,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _resolvedServerId = e?.serverId ?? '';
     _resolvedDeviceId = e?.deviceId ?? '';
     _selectedSectionIds = {...?e?.featuredSectionIds};
-    _connectionMessage = e == null
-        ? '填写账号密码后可以直接验证 Emby 登录。'
-        : e.embyEditorStatusMessage;
+    _connectionMessage =
+        e == null ? '填写账号密码后可以直接验证 Emby 登录。' : e.embyEditorStatusMessage;
     _advancedTokenExpanded = _tokenController.text.trim().isNotEmpty;
   }
 
@@ -94,12 +93,11 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       _connectionMessage = '正在连接 Emby...';
     });
     try {
-      final authenticated = await ref
-          .read(settingsControllerProvider.notifier)
-          .authenticateEmby(
-            source: draft,
-            password: _passwordController.text.trim(),
-          );
+      final authenticated =
+          await ref.read(settingsControllerProvider.notifier).authenticateEmby(
+                source: draft,
+                password: _passwordController.text.trim(),
+              );
       if (!mounted) {
         return;
       }
@@ -171,8 +169,9 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
             enabled: _enabled,
             username: _usernameController.text.trim(),
             password: _passwordController.text,
-            accessToken:
-                _kind == MediaSourceKind.emby ? _tokenController.text.trim() : '',
+            accessToken: _kind == MediaSourceKind.emby
+                ? _tokenController.text.trim()
+                : '',
             userId: _kind == MediaSourceKind.emby ? _resolvedUserId : '',
             serverId: _kind == MediaSourceKind.emby ? _resolvedServerId : '',
             deviceId: _kind == MediaSourceKind.emby ? _resolvedDeviceId : '',
@@ -192,227 +191,206 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.initial == null ? '新增媒体源' : '编辑媒体源'),
+        actions: [
+          TextButton(
+            onPressed: _onSave,
+            child: const Text('保存'),
+          ),
+        ],
       ),
-      body: Column(
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: [
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          _SectionTitle(theme: theme, label: '基本信息'),
+          TextField(
+            controller: _nameController,
+            textInputAction: TextInputAction.next,
+            decoration: const InputDecoration(labelText: '名称'),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<MediaSourceKind>(
+            key: ValueKey(_kind),
+            initialValue: _kind,
+            decoration: const InputDecoration(labelText: '类型'),
+            items: MediaSourceKind.values
+                .map(
+                  (item) => DropdownMenuItem(
+                    value: item,
+                    child: Text(item.label),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value != null) {
+                setState(() => _kind = value);
+              }
+            },
+          ),
+          _SectionTitle(theme: theme, label: '连接'),
+          TextField(
+            controller: _endpointController,
+            keyboardType: TextInputType.url,
+            textInputAction: TextInputAction.next,
+            autocorrect: false,
+            decoration: InputDecoration(
+              labelText: isEmby ? 'Endpoint' : 'WebDAV Endpoint',
+              hintText: isEmby
+                  ? 'https://emby.example.com'
+                  : 'https://nas.example.com/dav',
+            ),
+          ),
+          const SizedBox(height: 12),
+          AutofillGroup(
+            child: Column(
               children: [
-                _SectionTitle(theme: theme, label: '基本信息'),
                 TextField(
-                  controller: _nameController,
+                  controller: _usernameController,
                   textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(labelText: '名称'),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<MediaSourceKind>(
-                  key: ValueKey(_kind),
-                  initialValue: _kind,
-                  decoration: const InputDecoration(labelText: '类型'),
-                  items: MediaSourceKind.values
-                      .map(
-                        (item) => DropdownMenuItem(
-                          value: item,
-                          child: Text(item.label),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() => _kind = value);
-                    }
-                  },
-                ),
-                _SectionTitle(theme: theme, label: '连接'),
-                TextField(
-                  controller: _endpointController,
-                  keyboardType: TextInputType.url,
-                  textInputAction: TextInputAction.next,
-                  autocorrect: false,
+                  autofillHints: const [AutofillHints.username],
                   decoration: InputDecoration(
-                    labelText: isEmby ? 'Endpoint' : 'WebDAV Endpoint',
-                    hintText: isEmby
-                        ? 'https://emby.example.com'
-                        : 'https://nas.example.com/dav',
+                    labelText: isEmby ? 'Emby 用户名' : '用户名',
                   ),
                 ),
                 const SizedBox(height: 12),
-                AutofillGroup(
-                  child: Column(
-                    children: [
-                      TextField(
-                        controller: _usernameController,
-                        textInputAction: TextInputAction.next,
-                        autofillHints: const [AutofillHints.username],
-                        decoration: InputDecoration(
-                          labelText: isEmby ? 'Emby 用户名' : '用户名',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _passwordController,
-                        obscureText: true,
-                        textInputAction: TextInputAction.done,
-                        autofillHints: const [AutofillHints.password],
-                        decoration: InputDecoration(
-                          labelText:
-                              isEmby ? 'Emby 密码' : 'WebDAV 密码',
-                        ),
-                      ),
-                    ],
+                TextField(
+                  controller: _passwordController,
+                  obscureText: true,
+                  textInputAction: TextInputAction.done,
+                  autofillHints: const [AutofillHints.password],
+                  decoration: InputDecoration(
+                    labelText: isEmby ? 'Emby 密码' : 'WebDAV 密码',
                   ),
-                ),
-                if (isEmby) ...[
-                  const SizedBox(height: 8),
-                  ExpansionTile(
-                    initiallyExpanded: _advancedTokenExpanded,
-                    onExpansionChanged: (expanded) {
-                      setState(() => _advancedTokenExpanded = expanded);
-                    },
-                    title: Text(
-                      '高级（可选）',
-                      style: theme.textTheme.titleSmall,
-                    ),
-                    subtitle: Text(
-                      '手动粘贴 Access Token / API Key',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                    children: [
-                      TextField(
-                        controller: _tokenController,
-                        minLines: 1,
-                        maxLines: 4,
-                        decoration: const InputDecoration(
-                          labelText: 'Access Token / API Key',
-                          alignLabelWithHint: true,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _connectionMessage,
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                          if (_resolvedUserId.trim().isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            SelectableText(
-                              'User ID: $_resolvedUserId',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (_availableSections.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      '首页展示分区',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ..._availableSections.map(
-                      (section) => CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        value: _selectedSectionIds.contains(section.id),
-                        title: Text(section.title),
-                        subtitle: section.subtitle.trim().isEmpty
-                            ? null
-                            : Text(section.subtitle),
-                        onChanged: (value) {
-                          setState(() {
-                            if (value ?? false) {
-                              _selectedSectionIds.add(section.id);
-                            } else {
-                              _selectedSectionIds.remove(section.id);
-                            }
-                          });
-                        },
-                      ),
-                    ),
-                  ],
-                ] else ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    '飞牛 NAS 可直接填写 WebDAV 地址、用户名和密码。',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('启用此媒体源'),
-                  value: _enabled,
-                  onChanged: (value) => setState(() => _enabled = value),
                 ),
               ],
             ),
           ),
-          SafeArea(
-            top: false,
-            child: Material(
-              elevation: 8,
-              shadowColor: theme.shadowColor.withValues(alpha: 0.12),
-              color: theme.colorScheme.surface,
+          if (isEmby) ...[
+            const SizedBox(height: 8),
+            ExpansionTile(
+              initiallyExpanded: _advancedTokenExpanded,
+              onExpansionChanged: (expanded) {
+                setState(() => _advancedTokenExpanded = expanded);
+              },
+              title: Text(
+                '高级（可选）',
+                style: theme.textTheme.titleSmall,
+              ),
+              subtitle: Text(
+                '手动粘贴 Access Token / API Key',
+                style: theme.textTheme.bodySmall,
+              ),
+              children: [
+                TextField(
+                  controller: _tokenController,
+                  minLines: 1,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Access Token / API Key',
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+            const SizedBox(height: 12),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(18),
+              ),
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+                padding: const EdgeInsets.all(14),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (isEmby)
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        alignment: WrapAlignment.start,
-                        children: [
-                          OutlinedButton(
-                            onPressed: _isAuthenticating ? null : _onTestEmbyLogin,
-                            child: Text(
-                              _isAuthenticating ? '登录中…' : '测试登录',
-                            ),
-                          ),
-                          OutlinedButton(
-                            onPressed: _isLoadingSections ||
-                                    _endpointController.text.trim().isEmpty ||
-                                    _tokenController.text.trim().isEmpty ||
-                                    _resolvedUserId.trim().isEmpty
-                                ? null
-                                : _onFetchEmbySections,
-                            child: Text(
-                              _isLoadingSections ? '读取中…' : '读取分区',
-                            ),
-                          ),
-                        ],
-                      ),
-                    if (isEmby) const SizedBox(height: 10),
-                    FilledButton(
-                      onPressed: _onSave,
-                      child: const Text('保存'),
+                    Text(
+                      _connectionMessage,
+                      style: theme.textTheme.bodyMedium,
                     ),
+                    if (_resolvedUserId.trim().isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      SelectableText(
+                        'User ID: $_resolvedUserId',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
                   ],
                 ),
               ),
             ),
+            if (_availableSections.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                '首页展示分区',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ..._availableSections.map(
+                (section) => CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _selectedSectionIds.contains(section.id),
+                  title: Text(section.title),
+                  subtitle: section.subtitle.trim().isEmpty
+                      ? null
+                      : Text(section.subtitle),
+                  onChanged: (value) {
+                    setState(() {
+                      if (value ?? false) {
+                        _selectedSectionIds.add(section.id);
+                      } else {
+                        _selectedSectionIds.remove(section.id);
+                      }
+                    });
+                  },
+                ),
+              ),
+            ],
+          ] else ...[
+            const SizedBox(height: 12),
+            Text(
+              '飞牛 NAS 可直接填写 WebDAV 地址、用户名和密码。',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('启用此媒体源'),
+            value: _enabled,
+            onChanged: (value) => setState(() => _enabled = value),
           ),
+          if (isEmby) ...[
+            const SizedBox(height: 28),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              alignment: WrapAlignment.start,
+              children: [
+                OutlinedButton(
+                  onPressed: _isAuthenticating ? null : _onTestEmbyLogin,
+                  child: Text(
+                    _isAuthenticating ? '登录中…' : '测试登录',
+                  ),
+                ),
+                OutlinedButton(
+                  onPressed: _isLoadingSections ||
+                          _endpointController.text.trim().isEmpty ||
+                          _tokenController.text.trim().isEmpty ||
+                          _resolvedUserId.trim().isEmpty
+                      ? null
+                      : _onFetchEmbySections,
+                  child: Text(
+                    _isLoadingSections ? '读取中…' : '读取分区',
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );

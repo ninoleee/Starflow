@@ -121,9 +121,25 @@ class SettingsPage extends ConsumerWidget {
                       );
                 },
                 onEdit: () => _openDoubanAccountEditor(
-                      context,
-                      settings.doubanAccount,
-                    ),
+                  context,
+                  settings.doubanAccount,
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            SectionPanel(
+              title: '元数据匹配',
+              subtitle: '当影片缺少海报、简介、演员等信息时，可自动尝试用 IMDb 搜索补全',
+              child: SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('启用 IMDb 自动匹配'),
+                subtitle: const Text('当前先在详情页按需触发，避免拖慢首页和媒体库加载。'),
+                value: settings.imdbAutoMatchEnabled,
+                onChanged: (value) {
+                  ref
+                      .read(settingsControllerProvider.notifier)
+                      .setImdbAutoMatchEnabled(value);
+                },
               ),
             ),
             const SizedBox(height: 18),

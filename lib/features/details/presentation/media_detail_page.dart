@@ -24,7 +24,9 @@ final enrichedDetailTargetProvider =
 
   try {
     final match = await ref.read(imdbMetadataClientProvider).matchTitle(
-          query: target.searchQuery.trim().isEmpty ? target.title : target.searchQuery,
+          query: target.searchQuery.trim().isEmpty
+              ? target.title
+              : target.searchQuery,
           year: target.year,
           preferSeries: target.isSeries,
         );
@@ -32,8 +34,10 @@ final enrichedDetailTargetProvider =
       return target;
     }
     return target.copyWith(
-      posterUrl: match.posterUrl.trim().isEmpty ? target.posterUrl : match.posterUrl,
-      overview: target.overview.trim().isEmpty ? match.overview : target.overview,
+      posterUrl:
+          match.posterUrl.trim().isEmpty ? target.posterUrl : match.posterUrl,
+      overview:
+          target.overview.trim().isEmpty ? match.overview : target.overview,
       year: target.year > 0 ? target.year : match.year,
       actors: target.actors.isNotEmpty ? target.actors : match.actors,
     );
@@ -140,7 +144,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   Widget build(BuildContext context) {
     final targetAsync = ref.watch(enrichedDetailTargetProvider(widget.target));
     final target = targetAsync.valueOrNull ?? widget.target;
-    final seriesAsync = ref.watch(seriesBrowserProvider(target));
+    final seriesAsync = ref.watch(seriesBrowserProvider(widget.target));
 
     return Scaffold(
       backgroundColor: const Color(0xFF030914),

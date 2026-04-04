@@ -46,12 +46,25 @@ class MediaDetailTarget {
 
   bool get isSeries => itemType.trim().toLowerCase() == 'series';
 
-  bool get needsMetadataMatch =>
-      posterUrl.trim().isEmpty &&
-      overview.trim().isEmpty &&
-      directors.isEmpty &&
-      actors.isEmpty &&
-      genres.isEmpty;
+  bool get needsMetadataMatch {
+    final hasPoster = posterUrl.trim().isNotEmpty;
+    final hasPeople = directors.isNotEmpty || actors.isNotEmpty;
+    final hasGenres = genres.isNotEmpty;
+    final hasOverview = _hasUsefulOverview(overview);
+    return !hasPoster || !(hasOverview || hasPeople || hasGenres);
+  }
+
+  static bool _hasUsefulOverview(String value) {
+    final cleaned = value.trim();
+    if (cleaned.isEmpty) {
+      return false;
+    }
+    final uri = Uri.tryParse(cleaned);
+    if (uri != null && uri.hasScheme) {
+      return false;
+    }
+    return true;
+  }
 
   MediaDetailTarget copyWith({
     String? title,

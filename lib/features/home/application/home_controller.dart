@@ -229,8 +229,17 @@ HomeSectionViewModel _buildDoubanSection({
               posterUrl: entry.posterUrl,
               overview: entry.note,
               year: entry.year,
+              durationLabel: entry.durationLabel,
+              genres: entry.genres.isNotEmpty
+                  ? entry.genres
+                  : (entry.subjectType.trim().isEmpty
+                      ? const []
+                      : [entry.subjectType]),
+              directors: entry.directors,
+              actors: entry.actors,
               availabilityLabel: '无',
               searchQuery: entry.title,
+              sourceName: '豆瓣',
             )
           : MediaDetailTarget.fromMediaItem(
               matched,

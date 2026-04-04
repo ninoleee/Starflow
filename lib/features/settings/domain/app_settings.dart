@@ -294,8 +294,7 @@ class AppSettings {
       searchProviders: searchProviders ?? this.searchProviders,
       doubanAccount: doubanAccount ?? this.doubanAccount,
       homeModules: homeModules ?? this.homeModules,
-      imdbAutoMatchEnabled:
-          imdbAutoMatchEnabled ?? this.imdbAutoMatchEnabled,
+      imdbAutoMatchEnabled: imdbAutoMatchEnabled ?? this.imdbAutoMatchEnabled,
     );
   }
 

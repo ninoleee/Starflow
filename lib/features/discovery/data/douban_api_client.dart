@@ -244,6 +244,8 @@ class DoubanApiClient {
       subject,
       noteFallback: [
         (item['comment'] as String? ?? '').trim(),
+      ],
+      secondaryNoteFallback: [
         (item['create_time'] as String? ?? '').trim(),
       ],
     );
@@ -252,6 +254,7 @@ class DoubanApiClient {
   DoubanEntry? _mapDoubanEntry(
     Map<String, dynamic> item, {
     List<String> noteFallback = const [],
+    List<String> secondaryNoteFallback = const [],
   }) {
     final target = _resolveSubjectMap(item);
     final id = _resolveId(target, item);
@@ -267,11 +270,36 @@ class DoubanApiClient {
     final year = _resolveYear(target, item);
     final posterUrl = _resolvePosterUrl(target, item);
     final ratingLabel = _resolveRating(target, item);
+    final description = _resolveString(
+      target,
+      const ['description', 'desc', 'intro', 'card_subtitle', 'subtitle'],
+    );
+    final backupDescription = _resolveString(
+      item,
+      const ['description', 'brief', 'comment'],
+    );
+    final durationLabel = _resolveDurationLabel(target, item);
+    final genres =
+        _resolveNames(target, item, const ['genres', 'genre', 'type']);
+    final directors = _resolveNames(
+      target,
+      item,
+      const ['directors', 'director', 'director_names'],
+    );
+    final actors = _resolveNames(
+      target,
+      item,
+      const ['actors', 'actor', 'casts', 'cast'],
+    );
     final note = [
       ...noteFallback,
-      _resolveString(target, const ['card_subtitle', 'subtitle', 'intro']),
-      _resolveString(item, const ['description', 'comment', 'brief']),
+      description,
+      backupDescription,
+      if (directors.isNotEmpty) '导演：${directors.take(3).join(' / ')}',
+      if (actors.isNotEmpty) '演员：${actors.take(4).join(' / ')}',
+      if (genres.isNotEmpty) genres.join(' / '),
       ratingLabel,
+      ...secondaryNoteFallback,
     ].firstWhere((value) => value.trim().isNotEmpty, orElse: () => '');
     final subjectType = _resolveString(target, const ['type', 'type_name']);
 
@@ -281,6 +309,10 @@ class DoubanApiClient {
       year: year,
       posterUrl: posterUrl,
       note: note,
+      durationLabel: durationLabel,
+      genres: genres,
+      directors: directors,
+      actors: actors,
       sourceUrl: 'https://movie.douban.com/subject/$id/',
       ratingLabel: ratingLabel,
       subjectType: subjectType,
@@ -422,9 +454,90 @@ class DoubanApiClient {
 
   String _resolveString(Map<String, dynamic> map, List<String> keys) {
     for (final key in keys) {
-      final text = '${map[key] ?? ''}'.trim();
+      final raw = map[key];
+      if (raw is List) {
+        final names = raw
+            .map((item) => _extractName(item))
+            .where((item) => item.isNotEmpty)
+            .toList();
+        if (names.isNotEmpty) {
+          return names.join(' / ');
+        }
+      }
+      final text = '$raw'.trim();
       if (text.isNotEmpty && text != 'null') {
         return text;
+      }
+    }
+    return '';
+  }
+
+  List<String> _resolveNames(
+    Map<String, dynamic> target,
+    Map<String, dynamic> fallback,
+    List<String> keys,
+  ) {
+    for (final map in [target, fallback]) {
+      for (final key in keys) {
+        final raw = map[key];
+        final names = _extractNames(raw);
+        if (names.isNotEmpty) {
+          return names;
+        }
+      }
+    }
+    return const [];
+  }
+
+  List<String> _extractNames(Object? raw) {
+    if (raw is List) {
+      return raw
+          .map(_extractName)
+          .where((item) => item.isNotEmpty)
+          .toSet()
+          .toList();
+    }
+    final single = _extractName(raw);
+    return single.isEmpty ? const [] : [single];
+  }
+
+  String _extractName(Object? raw) {
+    if (raw is Map) {
+      final map = Map<String, dynamic>.from(raw);
+      for (final key in ['name', 'title']) {
+        final text = '${map[key] ?? ''}'.trim();
+        if (text.isNotEmpty && text != 'null') {
+          return text;
+        }
+      }
+    }
+    final text = '$raw'.trim();
+    if (text.isEmpty || text == 'null') {
+      return '';
+    }
+    return text;
+  }
+
+  String _resolveDurationLabel(
+    Map<String, dynamic> target,
+    Map<String, dynamic> fallback,
+  ) {
+    for (final map in [target, fallback]) {
+      final duration = map['durations'];
+      if (duration is List && duration.isNotEmpty) {
+        final text = _extractName(duration.first);
+        if (text.isNotEmpty) {
+          return text;
+        }
+      }
+      for (final key in ['duration', 'card_subtitle']) {
+        final text = '${map[key] ?? ''}'.trim();
+        if (text.isNotEmpty &&
+            text != 'null' &&
+            RegExp(r'(\d+\s*分钟|\d+h|\d+m|\d+\s*min)', caseSensitive: false)
+                .hasMatch(text)) {
+          return text;
+        }
       }
     }
     return '';

@@ -119,6 +119,10 @@ class DoubanEntry {
     required this.year,
     required this.posterUrl,
     required this.note,
+    this.durationLabel = '',
+    this.genres = const [],
+    this.directors = const [],
+    this.actors = const [],
     this.sourceUrl = '',
     this.ratingLabel = '',
     this.subjectType = '',
@@ -129,6 +133,10 @@ class DoubanEntry {
   final int year;
   final String posterUrl;
   final String note;
+  final String durationLabel;
+  final List<String> genres;
+  final List<String> directors;
+  final List<String> actors;
   final String sourceUrl;
   final String ratingLabel;
   final String subjectType;

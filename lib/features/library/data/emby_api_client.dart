@@ -484,17 +484,20 @@ class EmbyApiClient {
         : rawParentIndexNumber;
     final episodeNumber =
         itemType.trim().toLowerCase() == 'episode' ? rawIndexNumber : null;
+    final imageTag = _resolvePrimaryImageTag(item);
 
     return MediaItem(
       id: id,
       title: title,
       overview: overview,
-      posterUrl: buildPosterUri(
-        baseUri: baseUri,
-        itemId: id,
-        imageTag: _resolvePrimaryImageTag(item),
-        accessToken: source.accessToken,
-      ).toString(),
+      posterUrl: imageTag.isEmpty
+          ? ''
+          : buildPosterUri(
+              baseUri: baseUri,
+              itemId: id,
+              imageTag: imageTag,
+              accessToken: source.accessToken,
+            ).toString(),
       year: productionYear,
       durationLabel: durationLabel,
       genres: genres,

@@ -83,14 +83,17 @@ class _SearchProviderEditorPageState
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.initial == null ? '新增搜索服务' : '编辑搜索服务'),
+        actions: [
+          TextButton(
+            onPressed: _onSave,
+            child: const Text('保存'),
+          ),
+        ],
       ),
-      body: Column(
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: [
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              children: [
                 _SectionTitle(theme: theme, label: '基本信息'),
                 TextField(
                   controller: _nameController,
@@ -211,24 +214,6 @@ class _SearchProviderEditorPageState
                   value: _enabled,
                   onChanged: (value) => setState(() => _enabled = value),
                 ),
-              ],
-            ),
-          ),
-          SafeArea(
-            top: false,
-            child: Material(
-              elevation: 8,
-              shadowColor: theme.shadowColor.withValues(alpha: 0.12),
-              color: theme.colorScheme.surface,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
-                child: FilledButton(
-                  onPressed: _onSave,
-                  child: const Text('保存'),
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );

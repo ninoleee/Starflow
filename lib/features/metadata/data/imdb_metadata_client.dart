@@ -238,7 +238,7 @@ class _ImdbSuggestionItem {
     if (raw is! Map) {
       return null;
     }
-    final json = Map<String, dynamic>.from(raw as Map);
+    final json = Map<String, dynamic>.from(raw);
     final id = '${json['id'] ?? ''}'.trim();
     final title = '${json['l'] ?? ''}'.trim();
     if (id.isEmpty || title.isEmpty) {
