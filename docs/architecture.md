@@ -51,7 +51,7 @@ Starflow 不是单纯的视频播放器，而是你的个人媒体中枢：
 
 建议真实实现：
 
-- `EmbyMediaRepository`
+- `EmbyMediaRepository`  已在当前版本接入第一版真实实现
 - `NasIndexRepository`
 
 ### 4.2 在线搜索
@@ -85,6 +85,13 @@ Starflow 不是单纯的视频播放器，而是你的个人媒体中枢：
 ### 4.4 播放
 
 当前骨架先定义 `PlaybackTarget`，播放器页先保留集成点。
+
+当前已经接上的能力：
+
+- Emby 用户名密码登录
+- Emby 媒体列表拉取
+- Emby 直链 URL 生成
+- `PlaybackTarget.headers` 中透传 `X-Emby-Token`
 
 建议后续：
 

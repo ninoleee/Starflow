@@ -14,6 +14,9 @@ class SeedData {
         enabled: true,
         username: 'starflow',
         accessToken: '',
+        userId: '',
+        serverId: '',
+        deviceId: '',
       ),
       MediaSourceConfig(
         id: 'nas-living-room',

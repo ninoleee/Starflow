@@ -31,7 +31,7 @@ class SettingsPage extends ConsumerWidget {
                     padding: const EdgeInsets.only(bottom: 10),
                     child: _SettingsTile(
                       title: source.name,
-                      subtitle: '${source.kind.label} · ${source.endpoint}',
+                      subtitle: _buildMediaSourceSubtitle(source),
                       value: source.enabled,
                       onChanged: (value) {
                         ref
@@ -178,8 +178,16 @@ class SettingsPage extends ConsumerWidget {
     final tokenController = TextEditingController(
       text: existing?.accessToken ?? '',
     );
+    final passwordController = TextEditingController();
     var kind = existing?.kind ?? MediaSourceKind.emby;
     var enabled = existing?.enabled ?? true;
+    var resolvedUserId = existing?.userId ?? '';
+    var resolvedServerId = existing?.serverId ?? '';
+    var resolvedDeviceId = existing?.deviceId ?? '';
+    var isAuthenticating = false;
+    var connectionMessage = existing == null
+        ? '填写账号密码后可以直接验证 Emby 登录。'
+        : _buildEmbyConnectionMessage(existing);
 
     return showDialog<void>(
       context: context,
@@ -224,13 +232,56 @@ class SettingsPage extends ConsumerWidget {
                     const SizedBox(height: 12),
                     TextField(
                       controller: usernameController,
-                      decoration: const InputDecoration(labelText: '用户名'),
+                      decoration: InputDecoration(
+                        labelText: kind == MediaSourceKind.emby ? 'Emby 用户名' : '用户名',
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: tokenController,
-                      decoration: const InputDecoration(labelText: 'Token / API Key'),
-                    ),
+                    if (kind == MediaSourceKind.emby) ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: passwordController,
+                        obscureText: true,
+                        decoration: const InputDecoration(labelText: 'Emby 密码'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: tokenController,
+                        decoration: const InputDecoration(
+                          labelText: 'Access Token / API Key',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF1F5FF),
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              connectionMessage,
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                            if (resolvedUserId.trim().isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              SelectableText(
+                                'User ID: $resolvedUserId',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ] else ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: tokenController,
+                        decoration: const InputDecoration(labelText: 'Token / API Key'),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
@@ -250,6 +301,73 @@ class SettingsPage extends ConsumerWidget {
                   onPressed: () => Navigator.of(context).pop(),
                   child: const Text('取消'),
                 ),
+                if (kind == MediaSourceKind.emby)
+                  OutlinedButton(
+                    onPressed: isAuthenticating
+                        ? null
+                        : () async {
+                            final draft = MediaSourceConfig(
+                              id: existing?.id ??
+                                  'media-source-${DateTime.now().millisecondsSinceEpoch}',
+                              name: nameController.text.trim().isEmpty
+                                  ? '未命名媒体源'
+                                  : nameController.text.trim(),
+                              kind: kind,
+                              endpoint: endpointController.text.trim(),
+                              enabled: enabled,
+                              username: usernameController.text.trim(),
+                              accessToken: tokenController.text.trim(),
+                              userId: resolvedUserId,
+                              serverId: resolvedServerId,
+                              deviceId: resolvedDeviceId,
+                            );
+
+                            setState(() {
+                              isAuthenticating = true;
+                              connectionMessage = '正在连接 Emby...';
+                            });
+
+                            try {
+                              final authenticated = await ref
+                                  .read(settingsControllerProvider.notifier)
+                                  .authenticateEmby(
+                                    source: draft,
+                                    password: passwordController.text.trim(),
+                                  );
+                              if (!context.mounted) {
+                                return;
+                              }
+
+                              usernameController.text = authenticated.username;
+                              endpointController.text = authenticated.endpoint;
+                              tokenController.text = authenticated.accessToken;
+                              setState(() {
+                                isAuthenticating = false;
+                                resolvedUserId = authenticated.userId;
+                                resolvedServerId = authenticated.serverId;
+                                resolvedDeviceId = authenticated.deviceId;
+                                connectionMessage = _buildEmbyConnectionMessage(
+                                  authenticated,
+                                );
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Emby 登录成功')),
+                              );
+                            } catch (error) {
+                              if (!context.mounted) {
+                                return;
+                              }
+                              setState(() {
+                                isAuthenticating = false;
+                                connectionMessage = '登录失败：$error';
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Emby 登录失败：$error')),
+                              );
+                            }
+                          },
+                    child: Text(isAuthenticating ? '登录中...' : '测试登录'),
+                  ),
                 FilledButton(
                   onPressed: () {
                     ref
@@ -264,8 +382,21 @@ class SettingsPage extends ConsumerWidget {
                             kind: kind,
                             endpoint: endpointController.text.trim(),
                             enabled: enabled,
-                            username: usernameController.text.trim(),
-                            accessToken: tokenController.text.trim(),
+                            username: kind == MediaSourceKind.emby
+                                ? usernameController.text.trim()
+                                : '',
+                            accessToken: kind == MediaSourceKind.emby
+                                ? tokenController.text.trim()
+                                : tokenController.text.trim(),
+                            userId: kind == MediaSourceKind.emby
+                                ? resolvedUserId
+                                : '',
+                            serverId: kind == MediaSourceKind.emby
+                                ? resolvedServerId
+                                : '',
+                            deviceId: kind == MediaSourceKind.emby
+                                ? resolvedDeviceId
+                                : '',
                           ),
                         );
                     Navigator.of(context).pop();
@@ -470,6 +601,30 @@ class SettingsPage extends ConsumerWidget {
         );
       },
     );
+  }
+
+  String _buildMediaSourceSubtitle(MediaSourceConfig source) {
+    if (source.kind != MediaSourceKind.emby) {
+      return '${source.kind.label} · ${source.endpoint}';
+    }
+
+    final authLine = source.hasActiveSession
+        ? '状态：已登录 ${source.username.isEmpty ? '' : '· ${source.username}'}'
+        : '状态：${source.connectionStatusLabel}';
+    return 'Emby · ${source.endpoint}\n$authLine';
+  }
+
+  String _buildEmbyConnectionMessage(MediaSourceConfig source) {
+    if (source.hasActiveSession) {
+      final serverPart = source.serverId.trim().isEmpty
+          ? ''
+          : '，Server ID: ${source.serverId}';
+      return '当前会话可用，登录用户 ${source.username}$serverPart';
+    }
+    if (source.accessToken.trim().isNotEmpty) {
+      return '已经保存 token，但还没有拿到 User ID，建议重新测试登录。';
+    }
+    return '填写账号密码后可以直接验证 Emby 登录。';
   }
 }
 

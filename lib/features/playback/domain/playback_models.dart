@@ -24,6 +24,7 @@ class PlaybackTarget {
       sourceName: item.sourceName,
       sourceKind: item.sourceKind,
       subtitle: item.overview,
+      headers: item.streamHeaders,
     );
   }
 }

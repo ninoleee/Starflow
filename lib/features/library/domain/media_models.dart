@@ -30,6 +30,9 @@ class MediaSourceConfig {
     required this.enabled,
     this.username = '',
     this.accessToken = '',
+    this.userId = '',
+    this.serverId = '',
+    this.deviceId = '',
   });
 
   final String id;
@@ -39,6 +42,26 @@ class MediaSourceConfig {
   final bool enabled;
   final String username;
   final String accessToken;
+  final String userId;
+  final String serverId;
+  final String deviceId;
+
+  bool get hasAccessToken => accessToken.trim().isNotEmpty;
+
+  bool get hasActiveSession => hasAccessToken && userId.trim().isNotEmpty;
+
+  String get connectionStatusLabel {
+    if (kind != MediaSourceKind.emby) {
+      return '已配置';
+    }
+    if (hasActiveSession) {
+      return '已登录';
+    }
+    if (username.trim().isNotEmpty) {
+      return '待登录';
+    }
+    return '未配置';
+  }
 
   MediaSourceConfig copyWith({
     String? id,
@@ -48,6 +71,9 @@ class MediaSourceConfig {
     bool? enabled,
     String? username,
     String? accessToken,
+    String? userId,
+    String? serverId,
+    String? deviceId,
   }) {
     return MediaSourceConfig(
       id: id ?? this.id,
@@ -57,6 +83,9 @@ class MediaSourceConfig {
       enabled: enabled ?? this.enabled,
       username: username ?? this.username,
       accessToken: accessToken ?? this.accessToken,
+      userId: userId ?? this.userId,
+      serverId: serverId ?? this.serverId,
+      deviceId: deviceId ?? this.deviceId,
     );
   }
 
@@ -69,6 +98,9 @@ class MediaSourceConfig {
       'enabled': enabled,
       'username': username,
       'accessToken': accessToken,
+      'userId': userId,
+      'serverId': serverId,
+      'deviceId': deviceId,
     };
   }
 
@@ -81,6 +113,9 @@ class MediaSourceConfig {
       enabled: json['enabled'] as bool? ?? false,
       username: json['username'] as String? ?? '',
       accessToken: json['accessToken'] as String? ?? '',
+      userId: json['userId'] as String? ?? '',
+      serverId: json['serverId'] as String? ?? '',
+      deviceId: json['deviceId'] as String? ?? '',
     );
   }
 }
@@ -98,6 +133,7 @@ class MediaItem {
     required this.sourceName,
     required this.sourceKind,
     required this.streamUrl,
+    this.streamHeaders = const {},
     required this.addedAt,
     this.lastWatchedAt,
   });
@@ -113,6 +149,7 @@ class MediaItem {
   final String sourceName;
   final MediaSourceKind sourceKind;
   final String streamUrl;
+  final Map<String, String> streamHeaders;
   final DateTime addedAt;
   final DateTime? lastWatchedAt;
 

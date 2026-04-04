@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
+import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
@@ -49,6 +50,26 @@ class SettingsController extends AsyncNotifier<AppSettings> {
           : [...current.mediaSources, config],
     );
     await _persist(next);
+  }
+
+  Future<MediaSourceConfig> authenticateEmby({
+    required MediaSourceConfig source,
+    required String password,
+  }) async {
+    final session = await ref
+        .read(embyApiClientProvider)
+        .authenticate(source: source, password: password);
+
+    final authenticatedSource = source.copyWith(
+      endpoint: session.baseUri.toString(),
+      username: session.username,
+      accessToken: session.accessToken,
+      userId: session.userId,
+      serverId: session.serverId,
+      deviceId: session.deviceId,
+    );
+    await saveMediaSource(authenticatedSource);
+    return authenticatedSource;
   }
 
   Future<void> toggleSearchProvider(String id, bool enabled) async {

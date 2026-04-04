@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/seed_data.dart';
+import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
@@ -21,13 +22,17 @@ abstract class MediaRepository {
 }
 
 final mediaRepositoryProvider = Provider<MediaRepository>(
-  (ref) => MockMediaRepository(ref),
+  (ref) => AppMediaRepository(
+    ref,
+    ref.read(embyApiClientProvider),
+  ),
 );
 
-class MockMediaRepository implements MediaRepository {
-  MockMediaRepository(this.ref);
+class AppMediaRepository implements MediaRepository {
+  AppMediaRepository(this.ref, this._embyApiClient);
 
   final Ref ref;
+  final EmbyApiClient _embyApiClient;
 
   List<MediaSourceConfig> get _enabledSources {
     return ref.read(appSettingsProvider).mediaSources
@@ -50,13 +55,31 @@ class MockMediaRepository implements MediaRepository {
 
   @override
   Future<List<MediaItem>> fetchLibrary({MediaSourceKind? kind}) async {
-    await Future<void>.delayed(const Duration(milliseconds: 160));
-    final items = _enabledLibrary;
-    final filtered = kind == null
-        ? items
-        : items.where((item) => item.sourceKind == kind).toList();
-    filtered.sort((left, right) => right.addedAt.compareTo(left.addedAt));
-    return filtered;
+    final sources = _enabledSources
+        .where((item) => kind == null || item.kind == kind)
+        .toList();
+    final items = <MediaItem>[];
+
+    for (final source in sources) {
+      if (source.kind == MediaSourceKind.emby) {
+        if (!source.hasActiveSession) {
+          continue;
+        }
+        try {
+          items.addAll(await _embyApiClient.fetchLibrary(source));
+        } catch (_) {
+          continue;
+        }
+        continue;
+      }
+
+      items.addAll(
+        _enabledLibrary.where((item) => item.sourceId == source.id),
+      );
+    }
+
+    items.sort((left, right) => right.addedAt.compareTo(left.addedAt));
+    return items;
   }
 
   @override
@@ -70,16 +93,15 @@ class MockMediaRepository implements MediaRepository {
 
   @override
   Future<MediaItem?> findById(String id) async {
-    await Future<void>.delayed(const Duration(milliseconds: 80));
-    final matches = _enabledLibrary.where((item) => item.id == id);
+    final matches = (await fetchLibrary()).where((item) => item.id == id);
     return matches.isEmpty ? null : matches.first;
   }
 
   @override
   Future<MediaItem?> matchTitle(String title) async {
-    await Future<void>.delayed(const Duration(milliseconds: 80));
+    final library = await fetchLibrary();
     final target = _normalize(title);
-    for (final item in _enabledLibrary) {
+    for (final item in library) {
       final sourceTitle = _normalize(item.title);
       if (sourceTitle == target ||
           sourceTitle.contains(target) ||
