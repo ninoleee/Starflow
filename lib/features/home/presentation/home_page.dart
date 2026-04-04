@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
@@ -68,7 +69,12 @@ class _HomePageState extends ConsumerState<HomePage> {
                 physics: const BouncingScrollPhysics(
                   parent: AlwaysScrollableScrollPhysics(),
                 ),
-                padding: const EdgeInsets.fromLTRB(0, 6, 0, 112),
+                padding: const EdgeInsets.fromLTRB(
+                  0,
+                  6,
+                  0,
+                  kShellScrollContentBottomPadding,
+                ),
                 children: [
                   if (featuredItems.isNotEmpty)
                     Padding(

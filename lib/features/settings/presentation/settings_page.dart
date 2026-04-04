@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
-import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/presentation/media_source_editor_page.dart';
+import 'package:starflow/features/settings/presentation/douban_account_editor_page.dart';
+import 'package:starflow/features/settings/presentation/search_provider_editor_page.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -21,7 +24,12 @@ class SettingsPage extends ConsumerWidget {
       appBar: AppBar(title: const Text('设置')),
       body: AppPageBackground(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+          padding: const EdgeInsets.fromLTRB(
+            20,
+            8,
+            20,
+            kShellScrollContentBottomPadding,
+          ),
           children: [
             if (loading) const LinearProgressIndicator(),
             SectionPanel(
@@ -41,9 +49,8 @@ class SettingsPage extends ConsumerWidget {
                               .read(settingsControllerProvider.notifier)
                               .toggleMediaSource(source.id, value);
                         },
-                        onEdit: () => _showMediaSourceDialog(
+                        onEdit: () => _openMediaSourceEditor(
                           context,
-                          ref,
                           existing: source,
                         ),
                       ),
@@ -52,7 +59,7 @@ class SettingsPage extends ConsumerWidget {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: OutlinedButton.icon(
-                      onPressed: () => _showMediaSourceDialog(context, ref),
+                      onPressed: () => _openMediaSourceEditor(context),
                       icon: const Icon(Icons.add_rounded),
                       label: const Text('新增媒体源'),
                     ),
@@ -78,9 +85,8 @@ class SettingsPage extends ConsumerWidget {
                               .read(settingsControllerProvider.notifier)
                               .toggleSearchProvider(provider.id, value);
                         },
-                        onEdit: () => _showSearchProviderDialog(
+                        onEdit: () => _openSearchProviderEditor(
                           context,
-                          ref,
                           existing: provider,
                         ),
                       ),
@@ -89,7 +95,7 @@ class SettingsPage extends ConsumerWidget {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: OutlinedButton.icon(
-                      onPressed: () => _showSearchProviderDialog(context, ref),
+                      onPressed: () => _openSearchProviderEditor(context),
                       icon: const Icon(Icons.add_rounded),
                       label: const Text('新增搜索服务'),
                     ),
@@ -114,8 +120,10 @@ class SettingsPage extends ConsumerWidget {
                         settings.doubanAccount.copyWith(enabled: value),
                       );
                 },
-                onEdit: () =>
-                    _showDoubanDialog(context, ref, settings.doubanAccount),
+                onEdit: () => _openDoubanAccountEditor(
+                      context,
+                      settings.doubanAccount,
+                    ),
               ),
             ),
             const SizedBox(height: 18),
@@ -141,604 +149,39 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
-  Future<void> _showMediaSourceDialog(
-    BuildContext context,
-    WidgetRef ref, {
+  Future<void> _openMediaSourceEditor(
+    BuildContext context, {
     MediaSourceConfig? existing,
   }) {
-    final nameController = TextEditingController(text: existing?.name ?? '');
-    final endpointController = TextEditingController(
-      text: existing?.endpoint ?? '',
-    );
-    final usernameController = TextEditingController(
-      text: existing?.username ?? '',
-    );
-    final passwordController = TextEditingController(
-      text: existing?.password ?? '',
-    );
-    final tokenController = TextEditingController(
-      text: existing?.accessToken ?? '',
-    );
-    var kind = existing?.kind ?? MediaSourceKind.emby;
-    var enabled = existing?.enabled ?? true;
-    var resolvedUserId = existing?.userId ?? '';
-    var resolvedServerId = existing?.serverId ?? '';
-    var resolvedDeviceId = existing?.deviceId ?? '';
-    var selectedSectionIds = {
-      ...existing?.featuredSectionIds ?? const <String>[]
-    };
-    var availableSections = <MediaCollection>[];
-    var isAuthenticating = false;
-    var isLoadingSections = false;
-    var connectionMessage = existing == null
-        ? '填写账号密码后可以直接验证 Emby 登录。'
-        : _buildEmbyConnectionMessage(existing);
-
-    return showDialog<void>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: Text(existing == null ? '新增媒体源' : '编辑媒体源'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: nameController,
-                      decoration: const InputDecoration(labelText: '名称'),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<MediaSourceKind>(
-                      initialValue: kind,
-                      decoration: const InputDecoration(labelText: '类型'),
-                      items: MediaSourceKind.values
-                          .map(
-                            (item) => DropdownMenuItem(
-                              value: item,
-                              child: Text(item.label),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() {
-                            kind = value;
-                          });
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: endpointController,
-                      decoration: InputDecoration(
-                        labelText: kind == MediaSourceKind.emby
-                            ? 'Endpoint'
-                            : 'WebDAV Endpoint',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: usernameController,
-                      decoration: InputDecoration(
-                        labelText:
-                            kind == MediaSourceKind.emby ? 'Emby 用户名' : '用户名',
-                      ),
-                    ),
-                    if (kind == MediaSourceKind.emby) ...[
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: passwordController,
-                        obscureText: true,
-                        decoration: const InputDecoration(labelText: 'Emby 密码'),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: tokenController,
-                        decoration: const InputDecoration(
-                          labelText: 'Access Token / API Key',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              connectionMessage,
-                              style: Theme.of(context).textTheme.bodyMedium,
-                            ),
-                            if (resolvedUserId.trim().isNotEmpty) ...[
-                              const SizedBox(height: 6),
-                              SelectableText(
-                                'User ID: $resolvedUserId',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      if (availableSections.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            '首页展示分区',
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        ...availableSections.map(
-                          (section) => CheckboxListTile(
-                            contentPadding: EdgeInsets.zero,
-                            value: selectedSectionIds.contains(section.id),
-                            title: Text(section.title),
-                            subtitle: section.subtitle.trim().isEmpty
-                                ? null
-                                : Text(section.subtitle),
-                            onChanged: (value) {
-                              setState(() {
-                                if (value ?? false) {
-                                  selectedSectionIds.add(section.id);
-                                } else {
-                                  selectedSectionIds.remove(section.id);
-                                }
-                              });
-                            },
-                          ),
-                        ),
-                      ],
-                    ] else ...[
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: passwordController,
-                        obscureText: true,
-                        decoration:
-                            const InputDecoration(labelText: 'WebDAV 密码'),
-                      ),
-                      const SizedBox(height: 12),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          '飞牛 NAS 可直接填写它的 WebDAV 地址、用户名和密码。',
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('启用'),
-                      value: enabled,
-                      onChanged: (value) {
-                        setState(() {
-                          enabled = value;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('取消'),
-                ),
-                if (kind == MediaSourceKind.emby)
-                  OutlinedButton(
-                    onPressed: isAuthenticating
-                        ? null
-                        : () async {
-                            final draft = MediaSourceConfig(
-                              id: existing?.id ??
-                                  'media-source-${DateTime.now().millisecondsSinceEpoch}',
-                              name: nameController.text.trim().isEmpty
-                                  ? '未命名媒体源'
-                                  : nameController.text.trim(),
-                              kind: kind,
-                              endpoint: endpointController.text.trim(),
-                              enabled: enabled,
-                              username: usernameController.text.trim(),
-                              password: passwordController.text,
-                              accessToken: tokenController.text.trim(),
-                              userId: resolvedUserId,
-                              serverId: resolvedServerId,
-                              deviceId: resolvedDeviceId,
-                              featuredSectionIds: selectedSectionIds.toList(),
-                            );
-
-                            setState(() {
-                              isAuthenticating = true;
-                              connectionMessage = '正在连接 Emby...';
-                            });
-
-                            try {
-                              final authenticated = await ref
-                                  .read(settingsControllerProvider.notifier)
-                                  .authenticateEmby(
-                                    source: draft,
-                                    password: passwordController.text.trim(),
-                                  );
-                              if (!context.mounted) {
-                                return;
-                              }
-
-                              usernameController.text = authenticated.username;
-                              endpointController.text = authenticated.endpoint;
-                              tokenController.text = authenticated.accessToken;
-                              setState(() {
-                                isAuthenticating = false;
-                                resolvedUserId = authenticated.userId;
-                                resolvedServerId = authenticated.serverId;
-                                resolvedDeviceId = authenticated.deviceId;
-                                connectionMessage = _buildEmbyConnectionMessage(
-                                  authenticated,
-                                );
-                              });
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Emby 登录成功')),
-                              );
-                            } catch (error) {
-                              if (!context.mounted) {
-                                return;
-                              }
-                              setState(() {
-                                isAuthenticating = false;
-                                connectionMessage = '登录失败：$error';
-                              });
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Emby 登录失败：$error')),
-                              );
-                            }
-                          },
-                    child: Text(isAuthenticating ? '登录中...' : '测试登录'),
-                  ),
-                if (kind == MediaSourceKind.emby)
-                  OutlinedButton(
-                    onPressed: isLoadingSections ||
-                            endpointController.text.trim().isEmpty ||
-                            tokenController.text.trim().isEmpty ||
-                            resolvedUserId.trim().isEmpty
-                        ? null
-                        : () async {
-                            setState(() {
-                              isLoadingSections = true;
-                              connectionMessage = '正在读取 Emby 分区...';
-                            });
-
-                            try {
-                              final sections = await ref
-                                  .read(embyApiClientProvider)
-                                  .fetchCollections(
-                                    MediaSourceConfig(
-                                      id: existing?.id ??
-                                          'media-source-${DateTime.now().millisecondsSinceEpoch}',
-                                      name: nameController.text.trim().isEmpty
-                                          ? '未命名媒体源'
-                                          : nameController.text.trim(),
-                                      kind: kind,
-                                      endpoint: endpointController.text.trim(),
-                                      enabled: enabled,
-                                      username: usernameController.text.trim(),
-                                      password: passwordController.text,
-                                      accessToken: tokenController.text.trim(),
-                                      userId: resolvedUserId,
-                                      serverId: resolvedServerId,
-                                      deviceId: resolvedDeviceId,
-                                      featuredSectionIds:
-                                          selectedSectionIds.toList(),
-                                    ),
-                                  );
-                              if (!context.mounted) {
-                                return;
-                              }
-                              setState(() {
-                                isLoadingSections = false;
-                                availableSections = sections;
-                                connectionMessage =
-                                    '${_buildEmbyConnectionMessage(
-                                  MediaSourceConfig(
-                                    id: existing?.id ?? '',
-                                    name: nameController.text.trim(),
-                                    kind: kind,
-                                    endpoint: endpointController.text.trim(),
-                                    enabled: enabled,
-                                    username: usernameController.text.trim(),
-                                    password: passwordController.text,
-                                    accessToken: tokenController.text.trim(),
-                                    userId: resolvedUserId,
-                                    serverId: resolvedServerId,
-                                    deviceId: resolvedDeviceId,
-                                    featuredSectionIds:
-                                        selectedSectionIds.toList(),
-                                  ),
-                                )}\n已读取 ${sections.length} 个分区。';
-                              });
-                            } catch (error) {
-                              if (!context.mounted) {
-                                return;
-                              }
-                              setState(() {
-                                isLoadingSections = false;
-                                connectionMessage = '读取分区失败：$error';
-                              });
-                            }
-                          },
-                    child: Text(isLoadingSections ? '读取中...' : '读取分区'),
-                  ),
-                FilledButton(
-                  onPressed: () {
-                    ref
-                        .read(settingsControllerProvider.notifier)
-                        .saveMediaSource(
-                          MediaSourceConfig(
-                            id: existing?.id ??
-                                'media-source-${DateTime.now().millisecondsSinceEpoch}',
-                            name: nameController.text.trim().isEmpty
-                                ? '未命名媒体源'
-                                : nameController.text.trim(),
-                            kind: kind,
-                            endpoint: endpointController.text.trim(),
-                            enabled: enabled,
-                            username: usernameController.text.trim(),
-                            password: passwordController.text,
-                            accessToken: kind == MediaSourceKind.emby
-                                ? tokenController.text.trim()
-                                : '',
-                            userId: kind == MediaSourceKind.emby
-                                ? resolvedUserId
-                                : '',
-                            serverId: kind == MediaSourceKind.emby
-                                ? resolvedServerId
-                                : '',
-                            deviceId: kind == MediaSourceKind.emby
-                                ? resolvedDeviceId
-                                : '',
-                            featuredSectionIds: kind == MediaSourceKind.emby
-                                ? selectedSectionIds.toList()
-                                : const [],
-                          ),
-                        );
-                    Navigator.of(context).pop();
-                  },
-                  child: const Text('保存'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (context) => MediaSourceEditorPage(initial: existing),
+      ),
     );
   }
 
-  Future<void> _showSearchProviderDialog(
-    BuildContext context,
-    WidgetRef ref, {
+  Future<void> _openSearchProviderEditor(
+    BuildContext context, {
     SearchProviderConfig? existing,
   }) {
-    final nameController = TextEditingController(text: existing?.name ?? '');
-    final endpointController = TextEditingController(
-      text: existing?.endpoint ?? '',
-    );
-    final apiKeyController = TextEditingController(
-      text: existing?.apiKey ?? '',
-    );
-    final usernameController = TextEditingController(
-      text: existing?.username ?? '',
-    );
-    final passwordController = TextEditingController(
-      text: existing?.password ?? '',
-    );
-    final parserHintController = TextEditingController(
-      text: existing?.parserHint ?? '',
-    );
-    var kind = existing?.kind ?? SearchProviderKind.indexer;
-    var enabled = existing?.enabled ?? true;
-
-    return showDialog<void>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: Text(existing == null ? '新增搜索服务' : '编辑搜索服务'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: nameController,
-                      decoration: const InputDecoration(labelText: '名称'),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<SearchProviderKind>(
-                      initialValue: kind,
-                      decoration: const InputDecoration(labelText: '类型'),
-                      items: SearchProviderKind.values
-                          .map(
-                            (item) => DropdownMenuItem(
-                              value: item,
-                              child: Text(item.label),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() {
-                            kind = value;
-                          });
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: endpointController,
-                      decoration: const InputDecoration(labelText: 'Endpoint'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: apiKeyController,
-                      decoration: const InputDecoration(
-                        labelText: 'JWT Token / API Key',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: usernameController,
-                      decoration: const InputDecoration(labelText: '登录用户名'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: passwordController,
-                      obscureText: true,
-                      decoration: const InputDecoration(labelText: '登录密码'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: parserHintController,
-                      decoration: const InputDecoration(labelText: '解析器提示'),
-                    ),
-                    const SizedBox(height: 12),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'PanSou 兼容接口建议填 parserHint 为 pansou-api。'
-                        ' 如果服务启用了认证，可以直接填 JWT Token，'
-                        '或者填写用户名和密码让应用自动登录。',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('启用'),
-                      value: enabled,
-                      onChanged: (value) {
-                        setState(() {
-                          enabled = value;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    ref
-                        .read(settingsControllerProvider.notifier)
-                        .saveSearchProvider(
-                          SearchProviderConfig(
-                            id: existing?.id ??
-                                'search-provider-${DateTime.now().millisecondsSinceEpoch}',
-                            name: nameController.text.trim().isEmpty
-                                ? '未命名搜索服务'
-                                : nameController.text.trim(),
-                            kind: kind,
-                            endpoint: endpointController.text.trim(),
-                            enabled: enabled,
-                            apiKey: apiKeyController.text.trim(),
-                            parserHint: parserHintController.text.trim(),
-                            username: usernameController.text.trim(),
-                            password: passwordController.text.trim(),
-                          ),
-                        );
-                    Navigator.of(context).pop();
-                  },
-                  child: const Text('保存'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (context) => SearchProviderEditorPage(initial: existing),
+      ),
     );
   }
 
-  Future<void> _showDoubanDialog(
+  Future<void> _openDoubanAccountEditor(
     BuildContext context,
-    WidgetRef ref,
     DoubanAccountConfig config,
   ) {
-    final userIdController = TextEditingController(text: config.userId);
-    final sessionController = TextEditingController(text: config.sessionCookie);
-    var enabled = config.enabled;
-
-    return showDialog<void>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('豆瓣配置'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: userIdController,
-                      decoration:
-                          const InputDecoration(labelText: 'Douban User ID'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: sessionController,
-                      minLines: 2,
-                      maxLines: 4,
-                      decoration: const InputDecoration(
-                        labelText: 'Cookie / Session',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('启用豆瓣模块'),
-                      value: enabled,
-                      onChanged: (value) {
-                        setState(() {
-                          enabled = value;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    ref
-                        .read(settingsControllerProvider.notifier)
-                        .saveDoubanAccount(
-                          DoubanAccountConfig(
-                            enabled: enabled,
-                            userId: userIdController.text.trim(),
-                            sessionCookie: sessionController.text.trim(),
-                          ),
-                        );
-                    Navigator.of(context).pop();
-                  },
-                  child: const Text('保存'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (context) => DoubanAccountEditorPage(initial: config),
+      ),
     );
   }
 
@@ -757,19 +200,6 @@ class SettingsPage extends ConsumerWidget {
         ? '首页分区：未选择'
         : '首页分区：已选 ${source.featuredSectionIds.length} 个';
     return 'Emby · ${source.endpoint}\n$authLine\n$sectionLine';
-  }
-
-  String _buildEmbyConnectionMessage(MediaSourceConfig source) {
-    if (source.hasActiveSession) {
-      final serverPart = source.serverId.trim().isEmpty
-          ? ''
-          : '，Server ID: ${source.serverId}';
-      return '当前会话可用，登录用户 ${source.username}$serverPart';
-    }
-    if (source.accessToken.trim().isNotEmpty) {
-      return '已经保存 token，但还没有拿到 User ID，建议重新测试登录。';
-    }
-    return '填写账号密码后可以直接验证 Emby 登录。';
   }
 
   String _buildSearchProviderSubtitle(SearchProviderConfig provider) {

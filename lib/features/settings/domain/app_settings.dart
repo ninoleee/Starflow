@@ -273,24 +273,29 @@ class AppSettings {
     required this.searchProviders,
     required this.doubanAccount,
     required this.homeModules,
+    this.imdbAutoMatchEnabled = false,
   });
 
   final List<MediaSourceConfig> mediaSources;
   final List<SearchProviderConfig> searchProviders;
   final DoubanAccountConfig doubanAccount;
   final List<HomeModuleConfig> homeModules;
+  final bool imdbAutoMatchEnabled;
 
   AppSettings copyWith({
     List<MediaSourceConfig>? mediaSources,
     List<SearchProviderConfig>? searchProviders,
     DoubanAccountConfig? doubanAccount,
     List<HomeModuleConfig>? homeModules,
+    bool? imdbAutoMatchEnabled,
   }) {
     return AppSettings(
       mediaSources: mediaSources ?? this.mediaSources,
       searchProviders: searchProviders ?? this.searchProviders,
       doubanAccount: doubanAccount ?? this.doubanAccount,
       homeModules: homeModules ?? this.homeModules,
+      imdbAutoMatchEnabled:
+          imdbAutoMatchEnabled ?? this.imdbAutoMatchEnabled,
     );
   }
 
@@ -300,6 +305,7 @@ class AppSettings {
       'searchProviders': searchProviders.map((item) => item.toJson()).toList(),
       'doubanAccount': doubanAccount.toJson(),
       'homeModules': homeModules.map((item) => item.toJson()).toList(),
+      'imdbAutoMatchEnabled': imdbAutoMatchEnabled,
     };
   }
 
@@ -331,6 +337,7 @@ class AppSettings {
             ),
           )
           .toList(),
+      imdbAutoMatchEnabled: json['imdbAutoMatchEnabled'] as bool? ?? false,
     );
   }
 }

@@ -6,7 +6,41 @@ import 'package:go_router/go_router.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/metadata/data/imdb_metadata_client.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
+
+final enrichedDetailTargetProvider =
+    FutureProvider.family<MediaDetailTarget, MediaDetailTarget>((
+  ref,
+  target,
+) async {
+  final imdbEnabled = ref.watch(
+    appSettingsProvider.select((settings) => settings.imdbAutoMatchEnabled),
+  );
+  if (!imdbEnabled || !target.needsMetadataMatch) {
+    return target;
+  }
+
+  try {
+    final match = await ref.read(imdbMetadataClientProvider).matchTitle(
+          query: target.searchQuery.trim().isEmpty ? target.title : target.searchQuery,
+          year: target.year,
+          preferSeries: target.isSeries,
+        );
+    if (match == null) {
+      return target;
+    }
+    return target.copyWith(
+      posterUrl: match.posterUrl.trim().isEmpty ? target.posterUrl : match.posterUrl,
+      overview: target.overview.trim().isEmpty ? match.overview : target.overview,
+      year: target.year > 0 ? target.year : match.year,
+      actors: target.actors.isNotEmpty ? target.actors : match.actors,
+    );
+  } catch (_) {
+    return target;
+  }
+});
 
 final seriesBrowserProvider =
     FutureProvider.family<_SeriesBrowserState?, MediaDetailTarget>((
@@ -104,7 +138,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final target = widget.target;
+    final targetAsync = ref.watch(enrichedDetailTargetProvider(widget.target));
+    final target = targetAsync.valueOrNull ?? widget.target;
     final seriesAsync = ref.watch(seriesBrowserProvider(target));
 
     return Scaffold(

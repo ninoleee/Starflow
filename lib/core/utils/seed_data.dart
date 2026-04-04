@@ -22,6 +22,7 @@ class SeedData {
       sessionCookie: '',
     ),
     homeModules: const [],
+    imdbAutoMatchEnabled: false,
   );
 
   static const List<MediaItem> seedLibrary = [];

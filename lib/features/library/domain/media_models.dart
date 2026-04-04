@@ -136,6 +136,21 @@ class MediaSourceConfig {
   }
 }
 
+extension MediaSourceConfigEditorX on MediaSourceConfig {
+  /// 编辑页「连接状态」说明文案（仅 Emby）。
+  String get embyEditorStatusMessage {
+    if (hasActiveSession) {
+      final serverPart =
+          serverId.trim().isEmpty ? '' : '，Server ID: $serverId';
+      return '当前会话可用，登录用户 $username$serverPart';
+    }
+    if (accessToken.trim().isNotEmpty) {
+      return '已经保存 token，但还没有拿到 User ID，建议重新测试登录。';
+    }
+    return '填写账号密码后可以直接验证 Emby 登录。';
+  }
+}
+
 class MediaItem {
   const MediaItem({
     required this.id,

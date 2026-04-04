@@ -103,6 +103,11 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(doubanAccount: config));
   }
 
+  Future<void> setImdbAutoMatchEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(imdbAutoMatchEnabled: enabled));
+  }
+
   Future<void> toggleHomeModule(String id, bool enabled) async {
     final current = state.valueOrNull ?? await _repository.load();
     final next = current.copyWith(

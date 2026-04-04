@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/features/bootstrap/presentation/bootstrap_page.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
@@ -125,23 +126,40 @@ class _AppNavigationShell extends StatelessWidget {
     return Scaffold(
       extendBody: true,
       backgroundColor: Colors.transparent,
-      body: navigationShell,
+      body: Padding(
+        padding: EdgeInsets.only(
+          bottom: shellTabBodyBottomInset(context),
+        ),
+        child: navigationShell,
+      ),
       bottomNavigationBar: SafeArea(
         top: false,
-        minimum: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(_kBottomNavShellRadius),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: const Color(0x120F1622),
-                borderRadius: BorderRadius.circular(_kBottomNavShellRadius),
-              ),
-              child: _FloatingNavigationBar(
-                currentIndex: navigationShell.currentIndex,
-                onDestinationSelected: (index) =>
-                    navigationShell.goBranch(index),
+        minimum: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+          child: Material(
+            color: Colors.transparent,
+            elevation: 0,
+            shadowColor: Colors.transparent,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(_kBottomNavShellRadius),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius:
+                        BorderRadius.circular(_kBottomNavShellRadius),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.2),
+                    ),
+                    color: const Color(0x1A0F1622),
+                  ),
+                  child: _FloatingNavigationBar(
+                    currentIndex: navigationShell.currentIndex,
+                    onDestinationSelected: (index) =>
+                        navigationShell.goBranch(index),
+                  ),
+                ),
               ),
             ),
           ),

@@ -46,6 +46,55 @@ class MediaDetailTarget {
 
   bool get isSeries => itemType.trim().toLowerCase() == 'series';
 
+  bool get needsMetadataMatch =>
+      posterUrl.trim().isEmpty &&
+      overview.trim().isEmpty &&
+      directors.isEmpty &&
+      actors.isEmpty &&
+      genres.isEmpty;
+
+  MediaDetailTarget copyWith({
+    String? title,
+    String? posterUrl,
+    String? overview,
+    int? year,
+    String? durationLabel,
+    List<String>? genres,
+    List<String>? directors,
+    List<String>? actors,
+    String? availabilityLabel,
+    String? searchQuery,
+    PlaybackTarget? playbackTarget,
+    String? itemId,
+    String? sourceId,
+    String? itemType,
+    String? sectionId,
+    String? sectionName,
+    MediaSourceKind? sourceKind,
+    String? sourceName,
+  }) {
+    return MediaDetailTarget(
+      title: title ?? this.title,
+      posterUrl: posterUrl ?? this.posterUrl,
+      overview: overview ?? this.overview,
+      year: year ?? this.year,
+      durationLabel: durationLabel ?? this.durationLabel,
+      genres: genres ?? this.genres,
+      directors: directors ?? this.directors,
+      actors: actors ?? this.actors,
+      availabilityLabel: availabilityLabel ?? this.availabilityLabel,
+      searchQuery: searchQuery ?? this.searchQuery,
+      playbackTarget: playbackTarget ?? this.playbackTarget,
+      itemId: itemId ?? this.itemId,
+      sourceId: sourceId ?? this.sourceId,
+      itemType: itemType ?? this.itemType,
+      sectionId: sectionId ?? this.sectionId,
+      sectionName: sectionName ?? this.sectionName,
+      sourceKind: sourceKind ?? this.sourceKind,
+      sourceName: sourceName ?? this.sourceName,
+    );
+  }
+
   factory MediaDetailTarget.fromMediaItem(
     MediaItem item, {
     String availabilityLabel = '',
