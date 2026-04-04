@@ -10,8 +10,8 @@ class SeedData {
     searchProviders: const [
       SearchProviderConfig(
         id: 'pansou-api',
-        name: 'PanSou API',
-        kind: SearchProviderKind.indexer,
+        name: 'PanSou',
+        kind: SearchProviderKind.panSou,
         endpoint: 'https://so.252035.xyz',
         enabled: false,
         parserHint: 'pansou-api',

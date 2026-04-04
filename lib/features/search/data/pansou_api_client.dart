@@ -43,8 +43,55 @@ class PanSouApiClient {
       throw PanSouApiException(
           _resolveErrorMessage(payload, response.statusCode));
     }
+    if ((payload['code'] as int?) case final code? when code != 0) {
+      throw PanSouApiException(
+        _resolveErrorMessage(payload, response.statusCode),
+      );
+    }
 
-    return _parseMergedResults(payload, provider);
+    return _parseMergedResults(_unwrapPayload(payload), provider);
+  }
+
+  Future<PanSouHealthStatus> testConnection({
+    required SearchProviderConfig provider,
+  }) async {
+    final response = await _client.get(
+      _resolveHealthUri(provider.endpoint),
+      headers: const {
+        'Accept': 'application/json',
+      },
+    );
+
+    final payload = _decode(response);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw PanSouApiException(
+          _resolveErrorMessage(payload, response.statusCode));
+    }
+
+    final status = (payload['status'] as String? ?? '').trim().toLowerCase();
+    if (status != 'ok') {
+      throw PanSouApiException(
+        _resolveErrorMessage(payload, response.statusCode),
+      );
+    }
+
+    final plugins = (payload['plugins'] as List<dynamic>? ?? const [])
+        .map((value) => '$value')
+        .where((value) => value.trim().isNotEmpty)
+        .toList(growable: false);
+    final channels = (payload['channels'] as List<dynamic>? ?? const [])
+        .map((value) => '$value')
+        .where((value) => value.trim().isNotEmpty)
+        .toList(growable: false);
+
+    return PanSouHealthStatus(
+      authEnabled: payload['auth_enabled'] as bool? ?? false,
+      pluginsEnabled: payload['plugins_enabled'] as bool? ?? false,
+      pluginCount: payload['plugin_count'] as int? ?? plugins.length,
+      plugins: plugins,
+      channelsCount: payload['channels_count'] as int? ?? channels.length,
+      channels: channels,
+    );
   }
 
   Future<String> _resolveToken(SearchProviderConfig provider) async {
@@ -110,9 +157,7 @@ class PanSouApiClient {
             .map((value) => '$value')
             .where((value) => value.trim().isNotEmpty)
             .toList();
-        final posterUrl = images.isEmpty
-            ? _fallbackPosterUrl(provider.id, note.isEmpty ? url : note)
-            : images.first;
+        final posterUrl = images.isEmpty ? '' : images.first;
 
         results.add(
           SearchResult(
@@ -139,6 +184,61 @@ class PanSouApiClient {
       }
     });
 
+    if (results.isNotEmpty) {
+      return results;
+    }
+
+    final rawResults = payload['results'] as List<dynamic>? ?? const [];
+    for (final rawEntry in rawResults) {
+      final entry = Map<String, dynamic>.from(rawEntry as Map);
+      final title = (entry['title'] as String? ?? '').trim();
+      final content = (entry['content'] as String? ?? '').trim();
+      final channel = (entry['channel'] as String? ?? '').trim();
+      final publishedAt = (entry['datetime'] as String? ?? '').trim();
+      final images = (entry['images'] as List<dynamic>? ?? const [])
+          .map((value) => '$value')
+          .where((value) => value.trim().isNotEmpty)
+          .toList(growable: false);
+      final links = entry['links'] as List<dynamic>? ?? const [];
+      for (final rawLink in links) {
+        final link = Map<String, dynamic>.from(rawLink as Map);
+        final url = (link['url'] as String? ?? '').trim();
+        if (url.isEmpty || !seen.add(url)) {
+          continue;
+        }
+        final password = (link['password'] as String? ?? '').trim();
+        final cloudType = (link['type'] as String? ?? '').trim();
+        final workTitle = (link['work_title'] as String? ?? '').trim();
+        final resolvedTitle =
+            workTitle.isNotEmpty ? workTitle : (title.isNotEmpty ? title : url);
+
+        results.add(
+          SearchResult(
+            id: url,
+            title: resolvedTitle,
+            posterUrl: images.isEmpty ? '' : images.first,
+            providerId: provider.id,
+            providerName: provider.name,
+            quality: _cloudTypeLabel(cloudType),
+            sizeLabel: password.isEmpty ? '免提取码' : '提取码 $password',
+            seeders: 0,
+            summary: [
+              if (channel.isNotEmpty) 'tg:$channel',
+              if (publishedAt.isNotEmpty) publishedAt,
+              if (content.isNotEmpty && content != resolvedTitle) content,
+              if (channel.isEmpty && publishedAt.isEmpty && content.isEmpty)
+                'PanSou 搜索结果',
+            ].join(' · '),
+            resourceUrl: url,
+            password: password,
+            source: channel.isEmpty ? '' : 'tg:$channel',
+            publishedAt: publishedAt,
+            imageUrls: images,
+          ),
+        );
+      }
+    }
+
     return results;
   }
 
@@ -148,6 +248,10 @@ class PanSouApiClient {
 
   Uri _resolveLoginUri(String endpoint) {
     return _resolveEndpoint(endpoint, resourcePath: 'auth/login');
+  }
+
+  Uri _resolveHealthUri(String endpoint) {
+    return _resolveEndpoint(endpoint, resourcePath: 'health');
   }
 
   Uri _resolveEndpoint(String endpoint, {required String resourcePath}) {
@@ -191,9 +295,15 @@ class PanSouApiClient {
     return const {};
   }
 
-  String _fallbackPosterUrl(String providerId, String seed) {
-    final encodedSeed = Uri.encodeComponent('$providerId-$seed');
-    return 'https://picsum.photos/seed/$encodedSeed/400/600';
+  Map<String, dynamic> _unwrapPayload(Map<String, dynamic> payload) {
+    final data = payload['data'];
+    if (data is Map<String, dynamic>) {
+      return data;
+    }
+    if (data is Map) {
+      return Map<String, dynamic>.from(data);
+    }
+    return payload;
   }
 
   String _cloudTypeLabel(String raw) {
@@ -228,9 +338,12 @@ class PanSouApiClient {
   static bool supports(SearchProviderConfig provider) {
     final hint = provider.parserHint.trim().toLowerCase();
     final endpoint = provider.endpoint.trim().toLowerCase();
-    return hint == 'pansou-api' ||
+    return provider.kind == SearchProviderKind.panSou ||
+        hint == 'pansou-api' ||
         endpoint.contains('so.252035.xyz') ||
-        endpoint.contains('/api/search');
+        (endpoint.contains('/api/search') &&
+            provider.kind != SearchProviderKind.cloudSaver &&
+            hint != 'cloudsaver-api');
   }
 
   static String _trimTrailingSlash(String path) {
@@ -258,4 +371,31 @@ class PanSouApiException implements Exception {
 
   @override
   String toString() => message;
+}
+
+class PanSouHealthStatus {
+  const PanSouHealthStatus({
+    required this.authEnabled,
+    required this.pluginsEnabled,
+    required this.pluginCount,
+    required this.plugins,
+    required this.channelsCount,
+    required this.channels,
+  });
+
+  final bool authEnabled;
+  final bool pluginsEnabled;
+  final int pluginCount;
+  final List<String> plugins;
+  final int channelsCount;
+  final List<String> channels;
+
+  String get summary {
+    final parts = <String>[
+      authEnabled ? '已启用认证' : '未启用认证',
+      pluginsEnabled ? '插件 $pluginCount' : '插件关闭',
+      '频道 $channelsCount',
+    ];
+    return parts.join(' · ');
+  }
 }

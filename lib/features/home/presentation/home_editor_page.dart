@@ -10,6 +10,7 @@ import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/presentation/douban_account_editor_page.dart';
 
 final homeEditorCollectionsProvider = FutureProvider<List<MediaCollection>>((
   ref,
@@ -236,7 +237,7 @@ class HomeEditorPage extends ConsumerWidget {
                       const SizedBox(height: 10),
                       _SourceCategoryTile(
                         title: '豆瓣',
-                        subtitle: '我想看、推荐和片单',
+                        subtitle: '我想看、推荐、片单和账号配置',
                         icon: Icons.movie_filter_rounded,
                         onTap: () => _showDoubanModuleSheet(context, ref),
                       ),
@@ -360,6 +361,7 @@ class HomeEditorPage extends ConsumerWidget {
   }
 
   Future<void> _showDoubanModuleSheet(BuildContext context, WidgetRef ref) {
+    final doubanAccount = ref.read(appSettingsProvider).doubanAccount;
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -367,6 +369,22 @@ class HomeEditorPage extends ConsumerWidget {
         return _HomeEditorSecondarySheetBody(
           title: '豆瓣模块',
           tiles: [
+            _AddModuleTile(
+              title: '豆瓣账号设置',
+              subtitle: doubanAccount.userId.trim().isEmpty
+                  ? '配置 User ID 和 Cookie'
+                  : '当前账号：${doubanAccount.userId}',
+              onTap: () async {
+                Navigator.of(context).pop();
+                await Navigator.of(context, rootNavigator: true).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (context) => DoubanAccountEditorPage(
+                      initial: doubanAccount,
+                    ),
+                  ),
+                );
+              },
+            ),
             _AddModuleTile(
               title: '豆瓣我想看',
               subtitle: '来自豆瓣我看列表',

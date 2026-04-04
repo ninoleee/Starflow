@@ -3,14 +3,19 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/search/data/cloud_saver_api_client.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
 import 'package:starflow/features/search/data/pansou_api_client.dart';
+import 'package:starflow/features/search/domain/search_models.dart';
 
 void main() {
   group('AppSearchRepository', () {
     test('searchLocal filters by configured media source', () async {
       final repository = AppSearchRepository(
         PanSouApiClient(
+          MockClient((request) async => http.Response('{}', 200)),
+        ),
+        CloudSaverApiClient(
           MockClient((request) async => http.Response('{}', 200)),
         ),
         _FakeMediaRepository(
@@ -64,6 +69,31 @@ void main() {
 
       expect(
           allResults.map((item) => item.title), containsAll(['黑客帝国', '黑客军团']));
+    });
+
+    test('searchOnline returns empty for unsupported providers', () async {
+      final repository = AppSearchRepository(
+        PanSouApiClient(
+          MockClient((request) async => http.Response('{}', 200)),
+        ),
+        CloudSaverApiClient(
+          MockClient((request) async => http.Response('{}', 200)),
+        ),
+        const _FakeMediaRepository(items: []),
+      );
+
+      final results = await repository.searchOnline(
+        '英雄本色',
+        provider: const SearchProviderConfig(
+          id: 'custom-indexer',
+          name: '自定义索引',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'https://search.example.com',
+          enabled: true,
+        ),
+      );
+
+      expect(results, isEmpty);
     });
   });
 }

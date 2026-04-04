@@ -1,28 +1,61 @@
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 
 enum SearchProviderKind {
-  torrent,
-  direct,
-  indexer,
+  panSou,
+  cloudSaver,
 }
 
 extension SearchProviderKindX on SearchProviderKind {
   String get label {
     switch (this) {
-      case SearchProviderKind.torrent:
-        return 'BT/Torrent';
-      case SearchProviderKind.direct:
-        return '直链';
-      case SearchProviderKind.indexer:
-        return '聚合索引';
+      case SearchProviderKind.panSou:
+        return 'PanSou';
+      case SearchProviderKind.cloudSaver:
+        return 'CloudSaver';
+    }
+  }
+
+  String get defaultName {
+    switch (this) {
+      case SearchProviderKind.panSou:
+        return 'PanSou';
+      case SearchProviderKind.cloudSaver:
+        return 'CloudSaver';
+    }
+  }
+
+  String get defaultEndpoint {
+    switch (this) {
+      case SearchProviderKind.panSou:
+        return 'https://so.252035.xyz';
+      case SearchProviderKind.cloudSaver:
+        return 'http://127.0.0.1:8009';
+    }
+  }
+
+  String get defaultParserHint {
+    switch (this) {
+      case SearchProviderKind.panSou:
+        return 'pansou-api';
+      case SearchProviderKind.cloudSaver:
+        return 'cloudsaver-api';
     }
   }
 
   static SearchProviderKind fromName(String raw) {
-    return SearchProviderKind.values.firstWhere(
-      (item) => item.name == raw,
-      orElse: () => SearchProviderKind.indexer,
-    );
+    switch (raw) {
+      case 'panSou':
+      case 'pansou':
+      case 'indexer':
+      case 'direct':
+      case 'torrent':
+        return SearchProviderKind.panSou;
+      case 'cloudSaver':
+      case 'cloudsaver':
+        return SearchProviderKind.cloudSaver;
+      default:
+        return SearchProviderKind.panSou;
+    }
   }
 }
 

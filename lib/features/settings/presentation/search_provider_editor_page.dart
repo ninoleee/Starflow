@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/features/search/data/cloud_saver_api_client.dart';
+import 'package:starflow/features/search/data/pansou_api_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
@@ -23,7 +25,6 @@ class _SearchProviderEditorPageState
   late final TextEditingController _apiKeyController;
   late final TextEditingController _usernameController;
   late final TextEditingController _passwordController;
-  late final TextEditingController _parserHintController;
 
   late SearchProviderKind _kind;
   late bool _enabled;
@@ -31,6 +32,9 @@ class _SearchProviderEditorPageState
   late bool _advancedAuthExpanded;
   bool _didDelete = false;
   bool _skipAutoSaveOnPop = false;
+  bool _isTestingConnection = false;
+  bool? _connectionTestSucceeded;
+  String _connectionTestMessage = '';
 
   @override
   void initState() {
@@ -43,11 +47,13 @@ class _SearchProviderEditorPageState
     _apiKeyController = TextEditingController(text: e?.apiKey ?? '');
     _usernameController = TextEditingController(text: e?.username ?? '');
     _passwordController = TextEditingController(text: e?.password ?? '');
-    _parserHintController = TextEditingController(text: e?.parserHint ?? '');
-    _kind = e?.kind ?? SearchProviderKind.indexer;
+    _kind = e?.kind ?? SearchProviderKind.panSou;
     _enabled = e?.enabled ?? true;
     _advancedAuthExpanded = _apiKeyController.text.trim().isNotEmpty ||
         _usernameController.text.trim().isNotEmpty;
+    if (e == null) {
+      _applyDefaultsForKind(_kind);
+    }
   }
 
   @override
@@ -57,7 +63,6 @@ class _SearchProviderEditorPageState
     _apiKeyController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
-    _parserHintController.dispose();
     super.dispose();
   }
 
@@ -67,8 +72,31 @@ class _SearchProviderEditorPageState
         _apiKeyController.text.trim().isNotEmpty ||
         _usernameController.text.trim().isNotEmpty ||
         _passwordController.text.trim().isNotEmpty ||
-        _parserHintController.text.trim().isNotEmpty ||
         widget.initial != null;
+  }
+
+  SearchProviderConfig _buildDraftConfig() {
+    return SearchProviderConfig(
+      id: _providerId,
+      name: _nameController.text.trim().isEmpty
+          ? _kind.defaultName
+          : _nameController.text.trim(),
+      kind: _kind,
+      endpoint: _endpointController.text.trim(),
+      enabled: _enabled,
+      apiKey: _apiKeyController.text.trim(),
+      parserHint: _kind.defaultParserHint,
+      username: _usernameController.text.trim(),
+      password: _passwordController.text.trim(),
+    );
+  }
+
+  void _applyDefaultsForKind(SearchProviderKind kind) {
+    _kind = kind;
+    _nameController.text = kind.defaultName;
+    _endpointController.text = kind.defaultEndpoint;
+    _connectionTestSucceeded = null;
+    _connectionTestMessage = '';
   }
 
   Future<void> _saveDraft({bool popAfterSave = true}) async {
@@ -80,23 +108,92 @@ class _SearchProviderEditorPageState
     }
 
     await ref.read(settingsControllerProvider.notifier).saveSearchProvider(
-          SearchProviderConfig(
-            id: _providerId,
-            name: _nameController.text.trim().isEmpty
-                ? '未命名搜索服务'
-                : _nameController.text.trim(),
-            kind: _kind,
-            endpoint: _endpointController.text.trim(),
-            enabled: _enabled,
-            apiKey: _apiKeyController.text.trim(),
-            parserHint: _parserHintController.text.trim(),
-            username: _usernameController.text.trim(),
-            password: _passwordController.text.trim(),
-          ),
+          _buildDraftConfig(),
         );
     if (popAfterSave && mounted) {
       _skipAutoSaveOnPop = true;
       Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _testConnection() async {
+    FocusScope.of(context).unfocus();
+    final draft = _buildDraftConfig();
+    if (draft.endpoint.trim().isEmpty) {
+      setState(() {
+        _connectionTestSucceeded = false;
+        _connectionTestMessage = '请先填写搜索服务地址';
+      });
+      return;
+    }
+
+    setState(() {
+      _isTestingConnection = true;
+      _connectionTestSucceeded = null;
+      _connectionTestMessage = '';
+    });
+
+    try {
+      late final String summary;
+      if (draft.kind == SearchProviderKind.panSou) {
+        final status = await ref
+            .read(panSouApiClientProvider)
+            .testConnection(provider: draft);
+        summary = status.summary;
+      } else {
+        final status = await ref
+            .read(cloudSaverApiClientProvider)
+            .testConnection(provider: draft);
+        summary = status.summary;
+      }
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _connectionTestSucceeded = true;
+        _connectionTestMessage = summary;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('连接成功 · $summary')),
+      );
+    } on PanSouApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _connectionTestSucceeded = false;
+        _connectionTestMessage = error.message;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('连接失败 · ${error.message}')),
+      );
+    } on CloudSaverApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _connectionTestSucceeded = false;
+        _connectionTestMessage = error.message;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('连接失败 · ${error.message}')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final message = '$error';
+      setState(() {
+        _connectionTestSucceeded = false;
+        _connectionTestMessage = message;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('连接失败 · $message')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isTestingConnection = false);
+      }
     }
   }
 
@@ -182,7 +279,7 @@ class _SearchProviderEditorPageState
                       .toList(),
                   onChanged: (value) {
                     if (value != null) {
-                      setState(() => _kind = value);
+                      setState(() => _applyDefaultsForKind(value));
                     }
                   },
                 ),
@@ -192,11 +289,39 @@ class _SearchProviderEditorPageState
                   keyboardType: TextInputType.url,
                   textInputAction: TextInputAction.next,
                   autocorrect: false,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Endpoint',
-                    hintText: 'https://search.example.com',
+                    hintText: _kind.defaultEndpoint,
                   ),
                 ),
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: _isTestingConnection ? null : _testConnection,
+                    icon: _isTestingConnection
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.network_check_rounded),
+                    label: Text(
+                      _isTestingConnection ? '测试中...' : '测试连接',
+                    ),
+                  ),
+                ),
+                if (_connectionTestMessage.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _connectionTestMessage,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: _connectionTestSucceeded == false
+                          ? theme.colorScheme.error
+                          : const Color(0xFF7F8FAE),
+                    ),
+                  ),
+                ],
                 _SectionTitle(theme: theme, label: '认证（可选）'),
                 ExpansionTile(
                   initiallyExpanded: _advancedAuthExpanded,
@@ -249,32 +374,6 @@ class _SearchProviderEditorPageState
                     const SizedBox(height: 8),
                   ],
                 ),
-                _SectionTitle(theme: theme, label: '其他'),
-                TextField(
-                  controller: _parserHintController,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: '解析器提示',
-                    hintText: '例如 pansou-api',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Text(
-                      'PanSou 兼容接口建议将解析器提示填为 pansou-api。'
-                      '若服务启用认证，可直接填写 JWT Token，'
-                      '或填写用户名与密码由应用自动登录。',
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('启用此搜索服务'),

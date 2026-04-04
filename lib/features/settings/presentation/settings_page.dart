@@ -4,14 +4,12 @@ import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
-import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/media_source_editor_page.dart';
-import 'package:starflow/features/settings/presentation/douban_account_editor_page.dart';
 import 'package:starflow/features/settings/presentation/metadata_match_settings_page.dart';
 import 'package:starflow/features/settings/presentation/search_provider_editor_page.dart';
 
@@ -35,7 +33,6 @@ class SettingsPage extends ConsumerWidget {
             if (loading) const LinearProgressIndicator(),
             SectionPanel(
               title: '媒体源',
-              subtitle: '把 Emby 或 WebDAV 来源都挂进来，首页和媒体库都会共用这里的配置',
               child: Column(
                 children: [
                   ...settings.mediaSources.map(
@@ -43,7 +40,6 @@ class SettingsPage extends ConsumerWidget {
                       padding: const EdgeInsets.only(bottom: 10),
                       child: _SettingsTile(
                         title: source.name,
-                        subtitle: _buildMediaSourceSubtitle(source),
                         value: source.enabled,
                         onChanged: (value) {
                           ref
@@ -71,7 +67,6 @@ class SettingsPage extends ConsumerWidget {
             const SizedBox(height: 18),
             SectionPanel(
               title: '搜索服务',
-              subtitle: '可以挂自己的索引服务、聚合接口或站点模板',
               child: Column(
                 children: [
                   ...settings.searchProviders.map(
@@ -79,7 +74,6 @@ class SettingsPage extends ConsumerWidget {
                       padding: const EdgeInsets.only(bottom: 10),
                       child: _SettingsTile(
                         title: provider.name,
-                        subtitle: _buildSearchProviderSubtitle(provider),
                         value: provider.enabled,
                         onChanged: (value) {
                           ref
@@ -106,31 +100,7 @@ class SettingsPage extends ConsumerWidget {
             ),
             const SizedBox(height: 18),
             SectionPanel(
-              title: '豆瓣',
-              subtitle: '推荐与想看模块会读取这里的账号配置',
-              child: _SettingsTile(
-                title: settings.doubanAccount.enabled ? '豆瓣已启用' : '豆瓣未启用',
-                subtitle: settings.doubanAccount.userId.isEmpty
-                    ? '还没有填写 userId'
-                    : '当前账号：${settings.doubanAccount.userId}',
-                value: settings.doubanAccount.enabled,
-                onChanged: (value) {
-                  ref
-                      .read(settingsControllerProvider.notifier)
-                      .saveDoubanAccount(
-                        settings.doubanAccount.copyWith(enabled: value),
-                      );
-                },
-                onEdit: () => _openDoubanAccountEditor(
-                  context,
-                  settings.doubanAccount,
-                ),
-              ),
-            ),
-            const SizedBox(height: 18),
-            SectionPanel(
               title: '元数据与评分',
-              subtitle: 'TMDB、WMDB 和 IMDb 的匹配顺序、开关与测试入口都收在二级页面里',
               child: ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('打开匹配与评分设置'),
@@ -142,7 +112,6 @@ class SettingsPage extends ConsumerWidget {
             const SizedBox(height: 18),
             SectionPanel(
               title: '首页模块',
-              subtitle: '首页最底部有一个低调的“编辑首页”入口，用它来选择显示哪些模块',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -184,12 +153,11 @@ class SettingsPage extends ConsumerWidget {
                         ),
                   ),
                   const SizedBox(height: 14),
-                  Text('当前已配置 ${settings.homeModules.length} 个首页模块。'),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: () => context.pushNamed('home-editor'),
-                    icon: const Icon(Icons.tune_rounded),
-                    label: const Text('去首页编辑器'),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('打开首页编辑器'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => context.pushNamed('home-editor'),
                   ),
                 ],
               ),
@@ -222,58 +190,12 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
-  Future<void> _openDoubanAccountEditor(
-    BuildContext context,
-    DoubanAccountConfig config,
-  ) {
-    return Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(
-        builder: (context) => DoubanAccountEditorPage(initial: config),
-      ),
-    );
-  }
-
   Future<void> _openMetadataMatchSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
         builder: (context) => const MetadataMatchSettingsPage(),
       ),
     );
-  }
-
-  String _buildMediaSourceSubtitle(MediaSourceConfig source) {
-    if (source.kind != MediaSourceKind.emby) {
-      final authLine = source.username.trim().isEmpty
-          ? '匿名 WebDAV'
-          : 'WebDAV · ${source.username}';
-      final pathLine = source.libraryPath.trim().isEmpty
-          ? '媒体目录：根目录'
-          : '媒体目录：${source.libraryPath}';
-      final sectionLine = source.featuredSectionIds.isEmpty
-          ? '展示分区：全部'
-          : '展示分区：已选 ${source.featuredSectionIds.length} 个';
-      return '${source.kind.label} · ${source.endpoint}\n$authLine\n$pathLine\n$sectionLine';
-    }
-
-    final authLine = source.hasActiveSession
-        ? '状态：已登录 ${source.username.isEmpty ? '' : '· ${source.username}'}'
-        : '状态：${source.connectionStatusLabel}';
-    final sectionLine = source.featuredSectionIds.isEmpty
-        ? '展示分区：全部'
-        : '展示分区：已选 ${source.featuredSectionIds.length} 个';
-    return 'Emby · ${source.endpoint}\n$authLine\n$sectionLine';
-  }
-
-  String _buildSearchProviderSubtitle(SearchProviderConfig provider) {
-    final adapter = provider.parserHint.trim().isEmpty
-        ? provider.kind.label
-        : '${provider.kind.label} · ${provider.parserHint}';
-    final authStatus = provider.apiKey.trim().isNotEmpty
-        ? '已填 Token'
-        : provider.username.trim().isNotEmpty
-            ? '自动登录 ${provider.username}'
-            : '匿名请求';
-    return '$adapter · ${provider.endpoint}\n$authStatus';
   }
 
   String _buildMetadataMatchSubtitle(AppSettings settings) {
@@ -288,14 +210,12 @@ class SettingsPage extends ConsumerWidget {
 class _SettingsTile extends StatelessWidget {
   const _SettingsTile({
     required this.title,
-    required this.subtitle,
     required this.value,
     required this.onChanged,
     required this.onEdit,
   });
 
   final String title;
-  final String subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
   final VoidCallback onEdit;
@@ -313,7 +233,6 @@ class _SettingsTile extends StatelessWidget {
       ),
       child: ListTile(
         title: Text(title),
-        subtitle: Text(subtitle),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [

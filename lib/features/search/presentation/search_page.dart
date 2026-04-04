@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -23,8 +25,11 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   late final TextEditingController _controller;
   List<SearchResult> _results = const [];
   bool _isSearching = false;
-  String _selectedTargetId = _SearchTarget.allId;
+  Set<String> _selectedTargetIds = const {_SearchTarget.allId};
   String? _errorMessage;
+  int _activeSearchRequestId = 0;
+  int _totalSearchTaskCount = 0;
+  int _completedSearchTaskCount = 0;
 
   @override
   void initState() {
@@ -71,67 +76,59 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       return;
     }
 
-    final target = targets.firstWhere(
-      (item) => item.id == _selectedTargetId,
-      orElse: () => targets.first,
-    );
+    final selectedTargets = _resolveSelectedTargets(targets);
 
     setState(() {
-      _selectedTargetId = target.id;
+      _selectedTargetIds = selectedTargets.map((item) => item.id).toSet();
       _isSearching = true;
+      _results = const [];
       _errorMessage = null;
+      _totalSearchTaskCount = 0;
+      _completedSearchTaskCount = 0;
     });
 
-    try {
-      final repository = ref.read(searchRepositoryProvider);
-      final keyword = _controller.text.trim();
-      late final List<SearchResult> result;
-      switch (target.kind) {
-        case _SearchTargetKind.all:
-          final groups = await Future.wait([
-            repository.searchLocal(keyword, limit: 80),
-            ...enabledProviders.map(
-              (provider) => repository.searchOnline(
-                keyword,
-                provider: provider,
-              ),
-            ),
-          ]);
-          result = groups.expand((items) => items).toList(growable: false);
-          break;
-        case _SearchTargetKind.mediaSource:
-          result = await repository.searchLocal(
-            keyword,
-            sourceId: target.mediaSource!.id,
-            limit: 80,
-          );
-          break;
-        case _SearchTargetKind.provider:
-          result = await repository.searchOnline(
-            keyword,
-            provider: target.provider!,
-          );
-          break;
-      }
+    final repository = ref.read(searchRepositoryProvider);
+    final keyword = _controller.text.trim();
+    final requestId = ++_activeSearchRequestId;
+    final operations = _buildSearchOperations(
+      repository: repository,
+      keyword: keyword,
+      targets: selectedTargets,
+      enabledSources: enabledSources,
+      enabledProviders: enabledProviders,
+    );
 
-      if (!mounted) {
+    if (operations.isEmpty) {
+      if (!mounted || requestId != _activeSearchRequestId) {
         return;
       }
-
       setState(() {
-        _results = _sortResults(result);
         _isSearching = false;
       });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
+      return;
+    }
 
-      setState(() {
-        _results = const [];
-        _isSearching = false;
-        _errorMessage = '$error';
-      });
+    setState(() {
+      _totalSearchTaskCount = operations.length;
+      _completedSearchTaskCount = 0;
+    });
+
+    final aggregated = <SearchResult>[];
+    final errors = <String>[];
+    var completed = 0;
+
+    for (final operation in operations) {
+      unawaited(
+        _runSearchOperation(
+          requestId: requestId,
+          operation: operation,
+          aggregated: aggregated,
+          errors: errors,
+          totalCount: operations.length,
+          onCompleted: () => completed += 1,
+          getCompleted: () => completed,
+        ),
+      );
     }
   }
 
@@ -146,10 +143,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       sources: enabledSources,
       providers: enabledProviders,
     );
-    final activeTarget = targets.firstWhere(
-      (item) => item.id == _selectedTargetId,
-      orElse: () => targets.first,
-    );
+    final selectedTargets = _resolveSelectedTargets(targets);
 
     return Scaffold(
       body: AppPageBackground(
@@ -187,13 +181,11 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                       runSpacing: 10,
                       children: targets
                           .map(
-                            (target) => ChoiceChip(
+                            (target) => FilterChip(
                               label: Text(target.label),
-                              selected: activeTarget.id == target.id,
+                              selected: _selectedTargetIds.contains(target.id),
                               onSelected: (_) {
-                                setState(() {
-                                  _selectedTargetId = target.id;
-                                });
+                                _toggleTargetSelection(target, targets);
                                 if (_controller.text.trim().isNotEmpty) {
                                   _performSearch();
                                 }
@@ -210,32 +202,148 @@ class _SearchPageState extends ConsumerState<SearchPage> {
               title: '搜索结果',
               subtitle: targets.length == 1
                   ? '启用来源后就可以开始搜索'
-                  : '当前范围：${activeTarget.label}',
-              child: _isSearching
-                  ? const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 32),
-                      child: Center(child: CircularProgressIndicator()),
+                  : '当前范围：${_buildSelectedTargetsLabel(selectedTargets, targets)}',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_isSearching) ...[
+                    LinearProgressIndicator(
+                      value: _totalSearchTaskCount > 0
+                          ? _completedSearchTaskCount / _totalSearchTaskCount
+                          : null,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _results.isEmpty
+                          ? '正在搜索...'
+                          : '正在继续搜索 $_completedSearchTaskCount/$_totalSearchTaskCount',
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                  if (_errorMessage != null)
+                    Text('搜索失败：$_errorMessage')
+                  else if (_results.isEmpty)
+                    Text(
+                      _controller.text.trim().isEmpty
+                          ? '输入关键字后开始搜索。'
+                          : '没有找到结果。',
                     )
-                  : _errorMessage != null
-                      ? Text('搜索失败：$_errorMessage')
-                      : _results.isEmpty
-                          ? const Text('输入关键字后开始搜索。')
-                          : Column(
-                              children: _results
-                                  .map(
-                                    (item) => Padding(
-                                      padding:
-                                          const EdgeInsets.only(bottom: 12),
-                                      child: _SearchResultCard(result: item),
-                                    ),
-                                  )
-                                  .toList(),
+                  else
+                    Column(
+                      children: _results
+                          .map(
+                            (item) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: _SearchResultCard(result: item),
                             ),
+                          )
+                          .toList(),
+                    ),
+                ],
+              ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  List<_SearchOperation> _buildSearchOperations({
+    required SearchRepository repository,
+    required String keyword,
+    required List<_SearchTarget> targets,
+    required List<MediaSourceConfig> enabledSources,
+    required List<SearchProviderConfig> enabledProviders,
+  }) {
+    final operations = <_SearchOperation>[];
+    for (final target in targets) {
+      switch (target.kind) {
+        case _SearchTargetKind.all:
+          operations.addAll([
+            ...enabledSources.map(
+              (source) => _SearchOperation(
+                label: source.name,
+                run: () => repository.searchLocal(
+                  keyword,
+                  sourceId: source.id,
+                  limit: 80,
+                ),
+              ),
+            ),
+            ...enabledProviders.map(
+              (provider) => _SearchOperation(
+                label: provider.name,
+                run: () => repository.searchOnline(
+                  keyword,
+                  provider: provider,
+                ),
+              ),
+            ),
+          ]);
+          break;
+        case _SearchTargetKind.mediaSource:
+          operations.add(
+            _SearchOperation(
+              label: target.mediaSource!.name,
+              run: () => repository.searchLocal(
+                keyword,
+                sourceId: target.mediaSource!.id,
+                limit: 80,
+              ),
+            ),
+          );
+          break;
+        case _SearchTargetKind.provider:
+          operations.add(
+            _SearchOperation(
+              label: target.provider!.name,
+              run: () => repository.searchOnline(
+                keyword,
+                provider: target.provider!,
+              ),
+            ),
+          );
+          break;
+      }
+    }
+    return operations;
+  }
+
+  Future<void> _runSearchOperation({
+    required int requestId,
+    required _SearchOperation operation,
+    required List<SearchResult> aggregated,
+    required List<String> errors,
+    required int totalCount,
+    required VoidCallback onCompleted,
+    required int Function() getCompleted,
+  }) async {
+    try {
+      final result = await operation.run();
+      if (!mounted || requestId != _activeSearchRequestId) {
+        return;
+      }
+      aggregated.addAll(result);
+    } catch (error) {
+      if (!mounted || requestId != _activeSearchRequestId) {
+        return;
+      }
+      errors.add('${operation.label}: $error');
+    } finally {
+      if (mounted && requestId == _activeSearchRequestId) {
+        onCompleted();
+        final completed = getCompleted();
+        final hasFinished = completed >= totalCount;
+        setState(() {
+          _completedSearchTaskCount = completed;
+          _results = _sortResults(aggregated);
+          _isSearching = !hasFinished;
+          _errorMessage = aggregated.isEmpty && errors.isNotEmpty && hasFinished
+              ? errors.join('\n')
+              : null;
+        });
+      }
+    }
   }
 
   List<_SearchTarget> _buildTargets({
@@ -247,6 +355,68 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       ...sources.map(_SearchTarget.mediaSource),
       ...providers.map(_SearchTarget.provider),
     ];
+  }
+
+  List<_SearchTarget> _resolveSelectedTargets(List<_SearchTarget> targets) {
+    if (targets.isEmpty) {
+      return const [];
+    }
+
+    if (_selectedTargetIds.contains(_SearchTarget.allId)) {
+      return [targets.first];
+    }
+
+    final selected = targets
+        .where((item) => _selectedTargetIds.contains(item.id))
+        .toList(growable: false);
+    if (selected.isEmpty) {
+      return [targets.first];
+    }
+    return selected;
+  }
+
+  void _toggleTargetSelection(
+    _SearchTarget target,
+    List<_SearchTarget> targets,
+  ) {
+    final next = {..._selectedTargetIds};
+    if (target.id == _SearchTarget.allId) {
+      setState(() {
+        _selectedTargetIds = {_SearchTarget.allId};
+      });
+      return;
+    }
+
+    next.remove(_SearchTarget.allId);
+    if (next.contains(target.id)) {
+      next.remove(target.id);
+    } else {
+      next.add(target.id);
+    }
+
+    setState(() {
+      _selectedTargetIds = next.isEmpty ? {_SearchTarget.allId} : next;
+    });
+  }
+
+  String _buildSelectedTargetsLabel(
+    List<_SearchTarget> selectedTargets,
+    List<_SearchTarget> allTargets,
+  ) {
+    if (selectedTargets.isEmpty ||
+        selectedTargets.any((item) => item.id == _SearchTarget.allId)) {
+      return '全部';
+    }
+
+    if (selectedTargets.length >= allTargets.length - 1) {
+      return '全部';
+    }
+
+    if (selectedTargets.length <= 2) {
+      return selectedTargets.map((item) => item.label).join(' + ');
+    }
+
+    return '已选 ${selectedTargets.length} 个来源';
   }
 
   List<SearchResult> _sortResults(List<SearchResult> items) {
@@ -456,4 +626,14 @@ class _SearchTarget {
   final _SearchTargetKind kind;
   final MediaSourceConfig? mediaSource;
   final SearchProviderConfig? provider;
+}
+
+class _SearchOperation {
+  const _SearchOperation({
+    required this.label,
+    required this.run,
+  });
+
+  final String label;
+  final Future<List<SearchResult>> Function() run;
 }

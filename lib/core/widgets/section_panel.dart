@@ -4,7 +4,7 @@ class SectionPanel extends StatelessWidget {
   const SectionPanel({
     super.key,
     required this.title,
-    required this.subtitle,
+    this.subtitle = '',
     required this.child,
     this.padding = const EdgeInsets.all(20),
     this.actionLabel,
@@ -21,6 +21,7 @@ class SectionPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final hasSubtitle = subtitle.trim().isNotEmpty;
     return Container(
       width: double.infinity,
       padding: padding,
@@ -72,13 +73,15 @@ class SectionPanel extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+          if (hasSubtitle) ...[
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
-          ),
+          ],
           const SizedBox(height: 18),
           child,
         ],
