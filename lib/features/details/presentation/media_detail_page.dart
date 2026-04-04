@@ -1087,7 +1087,6 @@ class _PosterArt extends StatelessWidget {
                   )
                 : AppNetworkImage(
                     posterUrl,
-                    debugTitle: 'detail-poster',
                     fit: BoxFit.cover,
                     cacheWidth: 720,
                     filterQuality: FilterQuality.low,
@@ -1462,7 +1461,6 @@ class _EpisodeArtwork extends StatelessWidget {
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         child: AppNetworkImage(
           item.posterUrl,
-          debugTitle: item.title,
           fit: BoxFit.cover,
           errorBuilder: (context, error, stackTrace) => _EpisodeArtworkFallback(
             item: item,
@@ -1679,7 +1677,6 @@ class _ActorAvatar extends StatelessWidget {
             )
           : AppNetworkImage(
               avatarUrl,
-              debugTitle: actor.name,
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) {
                 return Center(

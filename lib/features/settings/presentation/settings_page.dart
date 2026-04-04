@@ -204,9 +204,8 @@ class SettingsPage extends ConsumerWidget {
     BuildContext context, {
     MediaSourceConfig? existing,
   }) {
-    return Navigator.of(context).push<void>(
+    return Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
-        fullscreenDialog: true,
         builder: (context) => MediaSourceEditorPage(initial: existing),
       ),
     );
@@ -216,9 +215,8 @@ class SettingsPage extends ConsumerWidget {
     BuildContext context, {
     SearchProviderConfig? existing,
   }) {
-    return Navigator.of(context).push<void>(
+    return Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
-        fullscreenDialog: true,
         builder: (context) => SearchProviderEditorPage(initial: existing),
       ),
     );
@@ -228,16 +226,15 @@ class SettingsPage extends ConsumerWidget {
     BuildContext context,
     DoubanAccountConfig config,
   ) {
-    return Navigator.of(context).push<void>(
+    return Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
-        fullscreenDialog: true,
         builder: (context) => DoubanAccountEditorPage(initial: config),
       ),
     );
   }
 
   Future<void> _openMetadataMatchSettings(BuildContext context) {
-    return Navigator.of(context).push<void>(
+    return Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
         builder: (context) => const MetadataMatchSettingsPage(),
       ),
@@ -249,7 +246,10 @@ class SettingsPage extends ConsumerWidget {
       final authLine = source.username.trim().isEmpty
           ? '匿名 WebDAV'
           : 'WebDAV · ${source.username}';
-      return '${source.kind.label} · ${source.endpoint}\n$authLine';
+      final pathLine = source.libraryPath.trim().isEmpty
+          ? '媒体目录：根目录'
+          : '媒体目录：${source.libraryPath}';
+      return '${source.kind.label} · ${source.endpoint}\n$authLine\n$pathLine';
     }
 
     final authLine = source.hasActiveSession

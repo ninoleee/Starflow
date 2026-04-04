@@ -21,6 +21,7 @@ class _DoubanAccountEditorPageState
   late final TextEditingController _userIdController;
   late final TextEditingController _sessionController;
   late bool _enabled;
+  bool _skipAutoSaveOnPop = false;
 
   @override
   void initState() {
@@ -38,82 +39,94 @@ class _DoubanAccountEditorPageState
     super.dispose();
   }
 
-  void _onSave() {
-    ref.read(settingsControllerProvider.notifier).saveDoubanAccount(
+  Future<void> _saveDraft({bool popAfterSave = true}) async {
+    await ref.read(settingsControllerProvider.notifier).saveDoubanAccount(
           DoubanAccountConfig(
             enabled: _enabled,
             userId: _userIdController.text.trim(),
             sessionCookie: _sessionController.text.trim(),
           ),
         );
-    Navigator.of(context).pop();
+    if (popAfterSave && mounted) {
+      _skipAutoSaveOnPop = true;
+      Navigator.of(context).pop();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          ListView(
-            padding: overlayToolbarPagePadding(context),
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            children: [
-              _SectionTitle(theme: theme, label: '账号'),
-              TextField(
-                controller: _userIdController,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: 'Douban User ID',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _sessionController,
-                minLines: 3,
-                maxLines: 8,
-                decoration: const InputDecoration(
-                  labelText: 'Cookie / Session',
-                  alignLabelWithHint: true,
-                ),
-              ),
-              const SizedBox(height: 12),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Text(
-                    '推荐与「想看」等模块会携带此会话访问豆瓣。请勿分享 Cookie。',
-                    style: theme.textTheme.bodyMedium,
+    return PopScope<void>(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop || _skipAutoSaveOnPop) {
+          return;
+        }
+        _saveDraft(popAfterSave: false);
+      },
+      child: Scaffold(
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            ListView(
+              padding: overlayToolbarPagePadding(context),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              children: [
+                _SectionTitle(theme: theme, label: '账号'),
+                TextField(
+                  controller: _userIdController,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(
+                    labelText: 'Douban User ID',
                   ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('启用豆瓣模块'),
-                value: _enabled,
-                onChanged: (value) => setState(() => _enabled = value),
-              ),
-            ],
-          ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: OverlayToolbar(
-              trailing: TextButton(
-                onPressed: _onSave,
-                child: const Text('保存'),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _sessionController,
+                  minLines: 3,
+                  maxLines: 8,
+                  decoration: const InputDecoration(
+                    labelText: 'Cookie / Session',
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Text(
+                      '推荐与「想看」等模块会携带此会话访问豆瓣。请勿分享 Cookie。',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('启用豆瓣模块'),
+                  value: _enabled,
+                  onChanged: (value) => setState(() => _enabled = value),
+                ),
+              ],
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: OverlayToolbar(
+                trailing: TextButton(
+                  onPressed: _saveDraft,
+                  child: const Text('保存'),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -34,6 +34,7 @@ class MediaSourceConfig {
     this.userId = '',
     this.serverId = '',
     this.deviceId = '',
+    this.libraryPath = '',
     this.featuredSectionIds = const [],
   });
 
@@ -48,6 +49,7 @@ class MediaSourceConfig {
   final String userId;
   final String serverId;
   final String deviceId;
+  final String libraryPath;
   final List<String> featuredSectionIds;
 
   bool get hasAccessToken => accessToken.trim().isNotEmpty;
@@ -79,6 +81,7 @@ class MediaSourceConfig {
     String? userId,
     String? serverId,
     String? deviceId,
+    String? libraryPath,
     List<String>? featuredSectionIds,
   }) {
     return MediaSourceConfig(
@@ -93,6 +96,7 @@ class MediaSourceConfig {
       userId: userId ?? this.userId,
       serverId: serverId ?? this.serverId,
       deviceId: deviceId ?? this.deviceId,
+      libraryPath: libraryPath ?? this.libraryPath,
       featuredSectionIds: featuredSectionIds ?? this.featuredSectionIds,
     );
   }
@@ -110,6 +114,7 @@ class MediaSourceConfig {
       'userId': userId,
       'serverId': serverId,
       'deviceId': deviceId,
+      'libraryPath': libraryPath,
       'featuredSectionIds': featuredSectionIds,
     };
   }
@@ -127,6 +132,7 @@ class MediaSourceConfig {
       userId: json['userId'] as String? ?? '',
       serverId: json['serverId'] as String? ?? '',
       deviceId: json['deviceId'] as String? ?? '',
+      libraryPath: json['libraryPath'] as String? ?? '',
       featuredSectionIds:
           (json['featuredSectionIds'] as List<dynamic>? ?? const [])
               .map((item) => '$item')

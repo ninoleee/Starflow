@@ -26,7 +26,9 @@ class WebDavNasClient {
     }
 
     final rootUri = Uri.parse(
-      directoryId?.trim().isNotEmpty == true ? directoryId!.trim() : endpoint,
+      directoryId?.trim().isNotEmpty == true
+          ? directoryId!.trim()
+          : _browseRoot(source),
     );
     final entries = await _propfind(rootUri, source: source);
     return entries
@@ -56,7 +58,10 @@ class WebDavNasClient {
     }
 
     final rootUri = Uri.parse(
-        sectionId?.trim().isNotEmpty == true ? sectionId!.trim() : endpoint);
+      sectionId?.trim().isNotEmpty == true
+          ? sectionId!.trim()
+          : _browseRoot(source),
+    );
     final collectionId = rootUri.toString();
     final collectionName = sectionName.trim().isEmpty
         ? _displayNameFromUri(rootUri, fallback: source.name)
@@ -192,6 +197,14 @@ class WebDavNasClient {
       'Accept': '*/*',
       'Authorization': 'Basic $token',
     };
+  }
+
+  String _browseRoot(MediaSourceConfig source) {
+    final selectedPath = source.libraryPath.trim();
+    if (selectedPath.isNotEmpty) {
+      return selectedPath;
+    }
+    return source.endpoint.trim();
   }
 
   bool _isPlayableVideo(_WebDavEntry entry) {

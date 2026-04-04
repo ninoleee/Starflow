@@ -4,7 +4,6 @@ import 'dart:collection';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:starflow/core/utils/douban_cover_debug.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
 
 typedef AppNetworkImageErrorBuilder =
@@ -16,7 +15,6 @@ class AppNetworkImage extends StatefulWidget {
   const AppNetworkImage(
     this.url, {
     super.key,
-    this.debugTitle = '',
     this.headers,
     this.width,
     this.height,
@@ -30,7 +28,6 @@ class AppNetworkImage extends StatefulWidget {
   });
 
   final String url;
-  final String debugTitle;
   final Map<String, String>? headers;
   final double? width;
   final double? height;
@@ -84,18 +81,6 @@ class _AppNetworkImageState extends State<AppNetworkImage> {
       );
     }
 
-    final isDoubanImage = isDoubanImageUrl(trimmedUrl);
-    if (isDoubanImage) {
-      debugLogDoubanCover(
-        'image-request',
-        title: widget.debugTitle,
-        url: trimmedUrl,
-        detail: headers == null
-            ? 'headers=none'
-            : 'headers=${headers.keys.join(',')}',
-      );
-    }
-
     if (!requiresManualNetworkImageFetch(trimmedUrl)) {
       return Image.network(
         trimmedUrl,
@@ -109,29 +94,12 @@ class _AppNetworkImageState extends State<AppNetworkImage> {
         filterQuality: widget.filterQuality,
         loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) {
-            if (isDoubanImage) {
-              debugLogDoubanCover(
-                'image-success',
-                title: widget.debugTitle,
-                url: trimmedUrl,
-                detail: 'network-image',
-              );
-            }
             return child;
           }
           return _buildLoading(context);
         },
-        errorBuilder: (context, error, stackTrace) {
-          if (isDoubanImage) {
-            debugLogDoubanCover(
-              'image-fail',
-              title: widget.debugTitle,
-              url: trimmedUrl,
-              detail: '$error',
-            );
-          }
-          return _buildError(context, error, stackTrace);
-        },
+        errorBuilder: (context, error, stackTrace) =>
+            _buildError(context, error, stackTrace),
       );
     }
 
@@ -139,29 +107,12 @@ class _AppNetworkImageState extends State<AppNetworkImage> {
       future: _manualImageFuture,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          if (isDoubanImage) {
-            debugLogDoubanCover(
-              'image-fail',
-              title: widget.debugTitle,
-              url: trimmedUrl,
-              detail: '${snapshot.error}',
-            );
-          }
           return _buildError(context, snapshot.error!, snapshot.stackTrace);
         }
 
         final bytes = snapshot.data;
         if (bytes == null) {
           return _buildLoading(context);
-        }
-
-        if (isDoubanImage) {
-          debugLogDoubanCover(
-            'image-success',
-            title: widget.debugTitle,
-            url: trimmedUrl,
-            detail: 'manual-bytes=${bytes.length}',
-          );
         }
 
         return Image.memory(

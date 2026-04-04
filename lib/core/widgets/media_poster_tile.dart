@@ -48,7 +48,6 @@ class MediaPosterTile extends StatelessWidget {
     } else {
       posterChild = AppNetworkImage(
         trimmedPoster,
-        debugTitle: title,
         fit: BoxFit.cover,
         cacheWidth: skipResizeForDecode ? null : cacheWidth,
         cacheHeight: skipResizeForDecode ? null : cacheHeight,

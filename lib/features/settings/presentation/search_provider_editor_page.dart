@@ -29,6 +29,8 @@ class _SearchProviderEditorPageState
   late bool _enabled;
   late final String _providerId;
   late bool _advancedAuthExpanded;
+  bool _didDelete = false;
+  bool _skipAutoSaveOnPop = false;
 
   @override
   void initState() {
@@ -59,8 +61,25 @@ class _SearchProviderEditorPageState
     super.dispose();
   }
 
-  void _onSave() {
-    ref.read(settingsControllerProvider.notifier).saveSearchProvider(
+  bool _hasMeaningfulDraft() {
+    return _nameController.text.trim().isNotEmpty ||
+        _endpointController.text.trim().isNotEmpty ||
+        _apiKeyController.text.trim().isNotEmpty ||
+        _usernameController.text.trim().isNotEmpty ||
+        _passwordController.text.trim().isNotEmpty ||
+        _parserHintController.text.trim().isNotEmpty ||
+        widget.initial != null;
+  }
+
+  Future<void> _saveDraft({bool popAfterSave = true}) async {
+    if (_didDelete || !_hasMeaningfulDraft()) {
+      if (popAfterSave && mounted) {
+        Navigator.of(context).pop();
+      }
+      return;
+    }
+
+    await ref.read(settingsControllerProvider.notifier).saveSearchProvider(
           SearchProviderConfig(
             id: _providerId,
             name: _nameController.text.trim().isEmpty
@@ -75,7 +94,10 @@ class _SearchProviderEditorPageState
             password: _passwordController.text.trim(),
           ),
         );
-    Navigator.of(context).pop();
+    if (popAfterSave && mounted) {
+      _skipAutoSaveOnPop = true;
+      Navigator.of(context).pop();
+    }
   }
 
   Future<void> _confirmDeleteSearchProvider() async {
@@ -108,6 +130,8 @@ class _SearchProviderEditorPageState
     await ref.read(settingsControllerProvider.notifier).removeSearchProvider(
           _providerId,
         );
+    _didDelete = true;
+    _skipAutoSaveOnPop = true;
     if (!mounted) {
       return;
     }
@@ -121,165 +145,174 @@ class _SearchProviderEditorPageState
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          ListView(
-            padding: overlayToolbarPagePadding(context),
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            children: [
-              _SectionTitle(theme: theme, label: '基本信息'),
-              TextField(
-                controller: _nameController,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(labelText: '名称'),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<SearchProviderKind>(
-                key: ValueKey(_kind),
-                initialValue: _kind,
-                decoration: const InputDecoration(labelText: '类型'),
-                items: SearchProviderKind.values
-                    .map(
-                      (item) => DropdownMenuItem(
-                        value: item,
-                        child: Text(item.label),
+    return PopScope<void>(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop || _skipAutoSaveOnPop || _didDelete) {
+          return;
+        }
+        _saveDraft(popAfterSave: false);
+      },
+      child: Scaffold(
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            ListView(
+              padding: overlayToolbarPagePadding(context),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              children: [
+                _SectionTitle(theme: theme, label: '基本信息'),
+                TextField(
+                  controller: _nameController,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(labelText: '名称'),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<SearchProviderKind>(
+                  key: ValueKey(_kind),
+                  initialValue: _kind,
+                  decoration: const InputDecoration(labelText: '类型'),
+                  items: SearchProviderKind.values
+                      .map(
+                        (item) => DropdownMenuItem(
+                          value: item,
+                          child: Text(item.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => _kind = value);
+                    }
+                  },
+                ),
+                _SectionTitle(theme: theme, label: '连接'),
+                TextField(
+                  controller: _endpointController,
+                  keyboardType: TextInputType.url,
+                  textInputAction: TextInputAction.next,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Endpoint',
+                    hintText: 'https://search.example.com',
+                  ),
+                ),
+                _SectionTitle(theme: theme, label: '认证（可选）'),
+                ExpansionTile(
+                  initiallyExpanded: _advancedAuthExpanded,
+                  onExpansionChanged: (expanded) {
+                    setState(() => _advancedAuthExpanded = expanded);
+                  },
+                  title: Text(
+                    'Token / 账号',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                  subtitle: Text(
+                    'JWT、API Key，或用户名密码自动登录',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  children: [
+                    TextField(
+                      controller: _apiKeyController,
+                      minLines: 1,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: 'JWT Token / API Key',
+                        alignLabelWithHint: true,
                       ),
-                    )
-                    .toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() => _kind = value);
-                  }
-                },
-              ),
-              _SectionTitle(theme: theme, label: '连接'),
-              TextField(
-                controller: _endpointController,
-                keyboardType: TextInputType.url,
-                textInputAction: TextInputAction.next,
-                autocorrect: false,
-                decoration: const InputDecoration(
-                  labelText: 'Endpoint',
-                  hintText: 'https://search.example.com',
+                    ),
+                    const SizedBox(height: 12),
+                    AutofillGroup(
+                      child: Column(
+                        children: [
+                          TextField(
+                            controller: _usernameController,
+                            textInputAction: TextInputAction.next,
+                            autofillHints: const [AutofillHints.username],
+                            decoration: const InputDecoration(
+                              labelText: '登录用户名',
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _passwordController,
+                            obscureText: true,
+                            textInputAction: TextInputAction.done,
+                            autofillHints: const [AutofillHints.password],
+                            decoration: const InputDecoration(
+                              labelText: '登录密码',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                 ),
-              ),
-              _SectionTitle(theme: theme, label: '认证（可选）'),
-              ExpansionTile(
-                initiallyExpanded: _advancedAuthExpanded,
-                onExpansionChanged: (expanded) {
-                  setState(() => _advancedAuthExpanded = expanded);
-                },
-                title: Text(
-                  'Token / 账号',
-                  style: theme.textTheme.titleSmall,
+                _SectionTitle(theme: theme, label: '其他'),
+                TextField(
+                  controller: _parserHintController,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(
+                    labelText: '解析器提示',
+                    hintText: '例如 pansou-api',
+                  ),
                 ),
-                subtitle: Text(
-                  'JWT、API Key，或用户名密码自动登录',
-                  style: theme.textTheme.bodySmall,
-                ),
-                children: [
-                  TextField(
-                    controller: _apiKeyController,
-                    minLines: 1,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: 'JWT Token / API Key',
-                      alignLabelWithHint: true,
+                const SizedBox(height: 12),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Text(
+                      'PanSou 兼容接口建议将解析器提示填为 pansou-api。'
+                      '若服务启用认证，可直接填写 JWT Token，'
+                      '或填写用户名与密码由应用自动登录。',
+                      style: theme.textTheme.bodyMedium,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  AutofillGroup(
-                    child: Column(
-                      children: [
-                        TextField(
-                          controller: _usernameController,
-                          textInputAction: TextInputAction.next,
-                          autofillHints: const [AutofillHints.username],
-                          decoration: const InputDecoration(
-                            labelText: '登录用户名',
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _passwordController,
-                          obscureText: true,
-                          textInputAction: TextInputAction.done,
-                          autofillHints: const [AutofillHints.password],
-                          decoration: const InputDecoration(
-                            labelText: '登录密码',
-                          ),
-                        ),
-                      ],
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('启用此搜索服务'),
+                  value: _enabled,
+                  onChanged: (value) => setState(() => _enabled = value),
+                ),
+                if (widget.initial != null) ...[
+                  const SizedBox(height: 28),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      icon: Icon(
+                        Icons.delete_outline_rounded,
+                        color: theme.colorScheme.error,
+                      ),
+                      label: Text(
+                        '删除此搜索服务',
+                        style: TextStyle(color: theme.colorScheme.error),
+                      ),
+                      onPressed: _confirmDeleteSearchProvider,
                     ),
                   ),
-                  const SizedBox(height: 8),
                 ],
-              ),
-              _SectionTitle(theme: theme, label: '其他'),
-              TextField(
-                controller: _parserHintController,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: '解析器提示',
-                  hintText: '例如 pansou-api',
-                ),
-              ),
-              const SizedBox(height: 12),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Text(
-                    'PanSou 兼容接口建议将解析器提示填为 pansou-api。'
-                    '若服务启用认证，可直接填写 JWT Token，'
-                    '或填写用户名与密码由应用自动登录。',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('启用此搜索服务'),
-                value: _enabled,
-                onChanged: (value) => setState(() => _enabled = value),
-              ),
-              if (widget.initial != null) ...[
-                const SizedBox(height: 28),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    icon: Icon(
-                      Icons.delete_outline_rounded,
-                      color: theme.colorScheme.error,
-                    ),
-                    label: Text(
-                      '删除此搜索服务',
-                      style: TextStyle(color: theme.colorScheme.error),
-                    ),
-                    onPressed: _confirmDeleteSearchProvider,
-                  ),
-                ),
               ],
-            ],
-          ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: OverlayToolbar(
-              trailing: TextButton(
-                onPressed: _onSave,
-                child: const Text('保存'),
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: OverlayToolbar(
+                trailing: TextButton(
+                  onPressed: _saveDraft,
+                  child: const Text('保存'),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

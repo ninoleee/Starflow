@@ -38,6 +38,9 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   late String _connectionMessage;
   late bool _advancedTokenExpanded;
   late final String _sourceId;
+  late String _selectedNasPath;
+  bool _didDelete = false;
+  bool _skipAutoSaveOnPop = false;
 
   @override
   void initState() {
@@ -59,6 +62,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         e?.kind == MediaSourceKind.emby ? {...?e?.featuredSectionIds} : {};
     _connectionMessage = _initialConnectionMessage(e);
     _advancedTokenExpanded = _tokenController.text.trim().isNotEmpty;
+    _selectedNasPath = e?.libraryPath ?? '';
   }
 
   @override
@@ -86,10 +90,59 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       userId: _resolvedUserId,
       serverId: _resolvedServerId,
       deviceId: _resolvedDeviceId,
+      libraryPath: _kind == MediaSourceKind.nas ? _selectedNasPath.trim() : '',
       featuredSectionIds: _kind == MediaSourceKind.emby
           ? _selectedSectionIds.toList()
           : const [],
     );
+  }
+
+  bool _hasMeaningfulDraft() {
+    return _nameController.text.trim().isNotEmpty ||
+        _endpointController.text.trim().isNotEmpty ||
+        _usernameController.text.trim().isNotEmpty ||
+        _passwordController.text.trim().isNotEmpty ||
+        _tokenController.text.trim().isNotEmpty ||
+        _selectedNasPath.trim().isNotEmpty ||
+        widget.initial != null;
+  }
+
+  Future<void> _saveDraft({bool popAfterSave = true}) async {
+    if (_didDelete || !_hasMeaningfulDraft()) {
+      if (popAfterSave && mounted) {
+        Navigator.of(context).pop();
+      }
+      return;
+    }
+
+    await ref.read(settingsControllerProvider.notifier).saveMediaSource(
+          MediaSourceConfig(
+            id: _sourceId,
+            name: _nameController.text.trim().isEmpty
+                ? '未命名媒体源'
+                : _nameController.text.trim(),
+            kind: _kind,
+            endpoint: _endpointController.text.trim(),
+            enabled: _enabled,
+            username: _usernameController.text.trim(),
+            password: _passwordController.text,
+            accessToken: _kind == MediaSourceKind.emby
+                ? _tokenController.text.trim()
+                : '',
+            userId: _kind == MediaSourceKind.emby ? _resolvedUserId : '',
+            serverId: _kind == MediaSourceKind.emby ? _resolvedServerId : '',
+            deviceId: _kind == MediaSourceKind.emby ? _resolvedDeviceId : '',
+            libraryPath: _kind == MediaSourceKind.nas ? _selectedNasPath : '',
+            featuredSectionIds: _kind == MediaSourceKind.emby
+                ? _selectedSectionIds.toList()
+                : const [],
+          ),
+        );
+
+    if (popAfterSave && mounted) {
+      _skipAutoSaveOnPop = true;
+      Navigator.of(context).pop();
+    }
   }
 
   String _defaultConnectionMessage(MediaSourceKind kind) {
@@ -228,7 +281,6 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
 
     final pickedPath = await Navigator.of(context).push<String>(
       MaterialPageRoute<String>(
-        fullscreenDialog: true,
         builder: (context) => _WebDavPathPickerPage(source: _draftConfig()),
       ),
     );
@@ -237,37 +289,13 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       return;
     }
 
-    _endpointController.text = pickedPath;
+    _selectedNasPath = pickedPath;
     setState(() {
       _connectionMessage = '已选择路径，可继续测试连接。';
     });
   }
 
-  void _onSave() {
-    ref.read(settingsControllerProvider.notifier).saveMediaSource(
-          MediaSourceConfig(
-            id: _sourceId,
-            name: _nameController.text.trim().isEmpty
-                ? '未命名媒体源'
-                : _nameController.text.trim(),
-            kind: _kind,
-            endpoint: _endpointController.text.trim(),
-            enabled: _enabled,
-            username: _usernameController.text.trim(),
-            password: _passwordController.text,
-            accessToken: _kind == MediaSourceKind.emby
-                ? _tokenController.text.trim()
-                : '',
-            userId: _kind == MediaSourceKind.emby ? _resolvedUserId : '',
-            serverId: _kind == MediaSourceKind.emby ? _resolvedServerId : '',
-            deviceId: _kind == MediaSourceKind.emby ? _resolvedDeviceId : '',
-            featuredSectionIds: _kind == MediaSourceKind.emby
-                ? _selectedSectionIds.toList()
-                : const [],
-          ),
-        );
-    Navigator.of(context).pop();
-  }
+  Future<void> _onSave() => _saveDraft();
 
   Future<void> _confirmDeleteMediaSource() async {
     final name = _nameController.text.trim().isEmpty
@@ -299,6 +327,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     await ref.read(settingsControllerProvider.notifier).removeMediaSource(
           _sourceId,
         );
+    _didDelete = true;
+    _skipAutoSaveOnPop = true;
     if (!mounted) {
       return;
     }
@@ -313,263 +343,285 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     final theme = Theme.of(context);
     final isEmby = _kind == MediaSourceKind.emby;
 
-    return Scaffold(
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          ListView(
-            padding: overlayToolbarPagePadding(context),
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            children: [
-              _SectionTitle(theme: theme, label: '基本信息'),
-              TextField(
-                controller: _nameController,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(labelText: '名称'),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<MediaSourceKind>(
-                key: ValueKey(_kind),
-                initialValue: _kind,
-                decoration: const InputDecoration(labelText: '类型'),
-                items: MediaSourceKind.values
-                    .map(
-                      (item) => DropdownMenuItem(
-                        value: item,
-                        child: Text(item.label),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() {
-                      _kind = value;
-                      _availableSections = const [];
-                      _selectedSectionIds.clear();
-                      _connectionMessage = _defaultConnectionMessage(value);
-                    });
-                  }
-                },
-              ),
-              _SectionTitle(theme: theme, label: '连接'),
-              TextField(
-                controller: _endpointController,
-                keyboardType: TextInputType.url,
-                textInputAction: TextInputAction.next,
-                autocorrect: false,
-                decoration: InputDecoration(
-                  labelText: isEmby ? 'Endpoint' : 'WebDAV Endpoint',
-                  hintText: isEmby
-                      ? 'https://emby.example.com'
-                      : 'https://nas.example.com/dav',
+    return PopScope<void>(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop || _skipAutoSaveOnPop || _didDelete) {
+          return;
+        }
+        _saveDraft(popAfterSave: false);
+      },
+      child: Scaffold(
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            ListView(
+              padding: overlayToolbarPagePadding(context),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              children: [
+                _SectionTitle(theme: theme, label: '基本信息'),
+                TextField(
+                  controller: _nameController,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(labelText: '名称'),
                 ),
-              ),
-              const SizedBox(height: 12),
-              AutofillGroup(
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: _usernameController,
-                      textInputAction: TextInputAction.next,
-                      autofillHints: const [AutofillHints.username],
-                      decoration: InputDecoration(
-                        labelText: isEmby ? 'Emby 用户名' : '用户名',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _passwordController,
-                      obscureText: true,
-                      textInputAction: TextInputAction.done,
-                      autofillHints: const [AutofillHints.password],
-                      decoration: InputDecoration(
-                        labelText: isEmby ? 'Emby 密码' : 'WebDAV 密码',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (isEmby) ...[
-                const SizedBox(height: 8),
-                ExpansionTile(
-                  initiallyExpanded: _advancedTokenExpanded,
-                  onExpansionChanged: (expanded) {
-                    setState(() => _advancedTokenExpanded = expanded);
+                const SizedBox(height: 12),
+                DropdownButtonFormField<MediaSourceKind>(
+                  key: ValueKey(_kind),
+                  initialValue: _kind,
+                  decoration: const InputDecoration(labelText: '类型'),
+                  items: MediaSourceKind.values
+                      .map(
+                        (item) => DropdownMenuItem(
+                          value: item,
+                          child: Text(item.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() {
+                        _kind = value;
+                        _availableSections = const [];
+                        _selectedSectionIds.clear();
+                        _selectedNasPath = '';
+                        _connectionMessage = _defaultConnectionMessage(value);
+                      });
+                    }
                   },
-                  title: Text(
-                    '高级（可选）',
-                    style: theme.textTheme.titleSmall,
-                  ),
-                  subtitle: Text(
-                    '手动粘贴 Access Token / API Key',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  children: [
-                    TextField(
-                      controller: _tokenController,
-                      minLines: 1,
-                      maxLines: 4,
-                      decoration: const InputDecoration(
-                        labelText: 'Access Token / API Key',
-                        alignLabelWithHint: true,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
                 ),
-                if (_availableSections.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    '首页展示分区',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                _SectionTitle(theme: theme, label: '连接'),
+                TextField(
+                  controller: _endpointController,
+                  keyboardType: TextInputType.url,
+                  textInputAction: TextInputAction.next,
+                  autocorrect: false,
+                  decoration: InputDecoration(
+                    labelText: isEmby ? 'Endpoint' : 'WebDAV Endpoint',
+                    hintText: isEmby
+                        ? 'https://emby.example.com'
+                        : 'https://nas.example.com/dav',
                   ),
-                  const SizedBox(height: 8),
-                  ..._availableSections.map(
-                    (section) => CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: _selectedSectionIds.contains(section.id),
-                      title: Text(section.title),
-                      subtitle: section.subtitle.trim().isEmpty
-                          ? null
-                          : Text(section.subtitle),
-                      onChanged: (value) {
-                        setState(() {
-                          if (value ?? false) {
-                            _selectedSectionIds.add(section.id);
-                          } else {
-                            _selectedSectionIds.remove(section.id);
-                          }
-                        });
-                      },
+                ),
+                if (!isEmby) ...[
+                  const SizedBox(height: 12),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('媒体目录'),
+                    subtitle: Text(
+                      _selectedNasPath.trim().isEmpty
+                          ? '根目录'
+                          : _selectedNasPath,
                     ),
                   ),
                 ],
-              ] else ...[
                 const SizedBox(height: 12),
-                Text(
-                  '飞牛 NAS 可直接填写 WebDAV 地址、用户名和密码。',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
+                AutofillGroup(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        _connectionMessage,
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                      if (isEmby && _resolvedUserId.trim().isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        SelectableText(
-                          'User ID: $_resolvedUserId',
-                          style: theme.textTheme.bodySmall,
+                      TextField(
+                        controller: _usernameController,
+                        textInputAction: TextInputAction.next,
+                        autofillHints: const [AutofillHints.username],
+                        decoration: InputDecoration(
+                          labelText: isEmby ? 'Emby 用户名' : '用户名',
                         ),
-                      ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _passwordController,
+                        obscureText: true,
+                        textInputAction: TextInputAction.done,
+                        autofillHints: const [AutofillHints.password],
+                        decoration: InputDecoration(
+                          labelText: isEmby ? 'Emby 密码' : 'WebDAV 密码',
+                        ),
+                      ),
                     ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('启用此媒体源'),
-                value: _enabled,
-                onChanged: (value) => setState(() => _enabled = value),
-              ),
-              if (isEmby) ...[
-                const SizedBox(height: 28),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  alignment: WrapAlignment.start,
-                  children: [
-                    OutlinedButton(
-                      onPressed: _isAuthenticating ? null : _onTestEmbyLogin,
-                      child: Text(
-                        _isAuthenticating ? '登录中…' : '测试登录',
+                if (isEmby) ...[
+                  const SizedBox(height: 8),
+                  ExpansionTile(
+                    initiallyExpanded: _advancedTokenExpanded,
+                    onExpansionChanged: (expanded) {
+                      setState(() => _advancedTokenExpanded = expanded);
+                    },
+                    title: Text(
+                      '高级（可选）',
+                      style: theme.textTheme.titleSmall,
+                    ),
+                    subtitle: Text(
+                      '手动粘贴 Access Token / API Key',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    children: [
+                      TextField(
+                        controller: _tokenController,
+                        minLines: 1,
+                        maxLines: 4,
+                        decoration: const InputDecoration(
+                          labelText: 'Access Token / API Key',
+                          alignLabelWithHint: true,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                  ),
+                  if (_availableSections.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      '首页展示分区',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                    OutlinedButton(
-                      onPressed: _isLoadingSections ||
-                              _endpointController.text.trim().isEmpty ||
-                              _tokenController.text.trim().isEmpty ||
-                              _resolvedUserId.trim().isEmpty
-                          ? null
-                          : _onFetchEmbySections,
-                      child: Text(
-                        _isLoadingSections ? '读取中…' : '读取分区',
+                    const SizedBox(height: 8),
+                    ..._availableSections.map(
+                      (section) => CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: _selectedSectionIds.contains(section.id),
+                        title: Text(section.title),
+                        subtitle: section.subtitle.trim().isEmpty
+                            ? null
+                            : Text(section.subtitle),
+                        onChanged: (value) {
+                          setState(() {
+                            if (value ?? false) {
+                              _selectedSectionIds.add(section.id);
+                            } else {
+                              _selectedSectionIds.remove(section.id);
+                            }
+                          });
+                        },
                       ),
                     ),
                   ],
+                ] else ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    '飞牛 NAS 可直接填写 WebDAV 地址、用户名和密码。',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _connectionMessage,
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                        if (isEmby && _resolvedUserId.trim().isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          SelectableText(
+                            'User ID: $_resolvedUserId',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
-              ] else ...[
-                const SizedBox(height: 28),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Wrap(
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('启用此媒体源'),
+                  value: _enabled,
+                  onChanged: (value) => setState(() => _enabled = value),
+                ),
+                if (isEmby) ...[
+                  const SizedBox(height: 28),
+                  Wrap(
                     spacing: 10,
                     runSpacing: 10,
+                    alignment: WrapAlignment.start,
                     children: [
                       OutlinedButton(
-                        onPressed: _isTestingWebDav ||
-                                _endpointController.text.trim().isEmpty
-                            ? null
-                            : _onTestWebDavConnection,
-                        child: Text(_isTestingWebDav ? '测试中…' : '测试连接'),
+                        onPressed: _isAuthenticating ? null : _onTestEmbyLogin,
+                        child: Text(
+                          _isAuthenticating ? '登录中…' : '测试登录',
+                        ),
                       ),
                       OutlinedButton(
-                        onPressed: _endpointController.text.trim().isEmpty
+                        onPressed: _isLoadingSections ||
+                                _endpointController.text.trim().isEmpty ||
+                                _tokenController.text.trim().isEmpty ||
+                                _resolvedUserId.trim().isEmpty
                             ? null
-                            : _pickWebDavPath,
-                        child: const Text('选择路径'),
+                            : _onFetchEmbySections,
+                        child: Text(
+                          _isLoadingSections ? '读取中…' : '读取分区',
+                        ),
                       ),
                     ],
                   ),
-                ),
-              ],
-              if (widget.initial != null) ...[
-                const SizedBox(height: 28),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    icon: Icon(
-                      Icons.delete_outline_rounded,
-                      color: theme.colorScheme.error,
+                ] else ...[
+                  const SizedBox(height: 28),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        OutlinedButton(
+                          onPressed: _isTestingWebDav ||
+                                  _endpointController.text.trim().isEmpty
+                              ? null
+                              : _onTestWebDavConnection,
+                          child: Text(_isTestingWebDav ? '测试中…' : '测试连接'),
+                        ),
+                        OutlinedButton(
+                          onPressed: _endpointController.text.trim().isEmpty
+                              ? null
+                              : _pickWebDavPath,
+                          child: const Text('选择路径'),
+                        ),
+                      ],
                     ),
-                    label: Text(
-                      '删除此媒体源',
-                      style: TextStyle(color: theme.colorScheme.error),
-                    ),
-                    onPressed: _confirmDeleteMediaSource,
                   ),
-                ),
+                ],
+                if (widget.initial != null) ...[
+                  const SizedBox(height: 28),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      icon: Icon(
+                        Icons.delete_outline_rounded,
+                        color: theme.colorScheme.error,
+                      ),
+                      label: Text(
+                        '删除此媒体源',
+                        style: TextStyle(color: theme.colorScheme.error),
+                      ),
+                      onPressed: _confirmDeleteMediaSource,
+                    ),
+                  ),
+                ],
               ],
-            ],
-          ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: OverlayToolbar(
-              trailing: TextButton(
-                onPressed: _onSave,
-                child: const Text('保存'),
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: OverlayToolbar(
+                trailing: TextButton(
+                  onPressed: _onSave,
+                  child: const Text('保存'),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -609,11 +661,16 @@ class _WebDavPathPickerPage extends ConsumerStatefulWidget {
 
 class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
   late String _currentPath;
+  late String _rootPath;
+  bool _skipAutoSaveOnPop = false;
 
   @override
   void initState() {
     super.initState();
-    _currentPath = widget.source.endpoint.trim();
+    _rootPath = widget.source.endpoint.trim();
+    _currentPath = widget.source.libraryPath.trim().isNotEmpty
+        ? widget.source.libraryPath.trim()
+        : _rootPath;
   }
 
   Future<List<MediaCollection>> _loadFolders() {
@@ -634,7 +691,12 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
 
   String? _parentPath(String raw) {
     final uri = Uri.tryParse(raw);
+    final rootUri = Uri.tryParse(_rootPath);
     if (uri == null) {
+      return null;
+    }
+    if (rootUri != null &&
+        _normalizeDirectoryUri(uri) == _normalizeDirectoryUri(rootUri)) {
       return null;
     }
     final segments =
@@ -645,131 +707,162 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
     final parentSegments = segments.take(segments.length - 1).toList();
     final parentPath =
         parentSegments.isEmpty ? '/' : '/${parentSegments.join('/')}/';
-    return uri
-        .replace(path: parentPath, query: null, fragment: null)
-        .toString();
+    final parent =
+        uri.replace(path: parentPath, query: null, fragment: null).toString();
+    if (rootUri == null) {
+      return parent;
+    }
+    final normalizedParent = _normalizeDirectoryUri(Uri.parse(parent));
+    final normalizedRoot = _normalizeDirectoryUri(rootUri);
+    if (!normalizedParent.path.startsWith(normalizedRoot.path)) {
+      return null;
+    }
+    return parent;
+  }
+
+  Uri _normalizeDirectoryUri(Uri uri) {
+    final normalizedPath = uri.path.endsWith('/') ? uri.path : '${uri.path}/';
+    return uri.replace(path: normalizedPath, query: null, fragment: null);
   }
 
   @override
   Widget build(BuildContext context) {
     final parentPath = _parentPath(_currentPath);
-    return Scaffold(
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          FutureBuilder<List<MediaCollection>>(
-            future: _loadFolders(),
-            builder: (context, snapshot) {
-              return ListView(
-                padding: overlayToolbarPagePadding(context),
-                children: [
-                  Text(
-                    '当前路径',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                  const SizedBox(height: 8),
-                  SelectableText(
-                    _pathLabel(_currentPath),
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  if (parentPath != null) ...[
-                    const SizedBox(height: 12),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          setState(() {
-                            _currentPath = parentPath;
-                          });
-                        },
-                        icon: const Icon(Icons.arrow_upward_rounded, size: 18),
-                        label: const Text('返回上一级目录'),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 20),
-                  if (snapshot.connectionState == ConnectionState.waiting)
-                    const Center(
-                      child: Padding(
-                        padding: EdgeInsets.only(top: 48),
-                        child: CircularProgressIndicator(),
-                      ),
-                    )
-                  else if (snapshot.hasError)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: Text('读取路径失败：${snapshot.error}'),
-                    )
-                  else if ((snapshot.data ?? const []).isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 12),
-                      child: Text('当前路径下没有子文件夹，可以直接选择这里作为根路径。'),
-                    )
-                  else ...[
+    return PopScope<String>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop || _skipAutoSaveOnPop) {
+          return;
+        }
+        _skipAutoSaveOnPop = true;
+        Navigator.of(context).pop(_currentPath);
+      },
+      child: Scaffold(
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            FutureBuilder<List<MediaCollection>>(
+              future: _loadFolders(),
+              builder: (context, snapshot) {
+                return ListView(
+                  padding: overlayToolbarPagePadding(context),
+                  children: [
                     Text(
-                      '子文件夹',
+                      '当前路径',
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.w700,
                           ),
                     ),
                     const SizedBox(height: 8),
-                    for (final folder in snapshot.data!)
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.folder_open_rounded),
-                        title: Text(folder.title),
-                        subtitle: Text(folder.id),
-                        onTap: () {
-                          setState(() {
-                            _currentPath = folder.id;
-                          });
-                        },
-                      ),
-                  ],
-                ],
-              );
-            },
-          ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: Material(
-              type: MaterialType.transparency,
-              child: Padding(
-                padding:
-                    EdgeInsets.only(top: MediaQuery.paddingOf(context).top),
-                child: SizedBox(
-                  height: kToolbarHeight,
-                  child: Row(
-                    children: [
-                      IconButton(
-                        onPressed: () => Navigator.of(context).maybePop(),
-                        icon: const Icon(Icons.arrow_back_ios_new_rounded),
-                      ),
-                      Expanded(
-                        child: Text(
-                          '选择 WebDAV 路径',
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                    SelectableText(
+                      _pathLabel(_currentPath),
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    if (parentPath != null) ...[
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _currentPath = parentPath;
+                            });
+                          },
+                          icon:
+                              const Icon(Icons.arrow_upward_rounded, size: 18),
+                          label: const Text('返回上一级目录'),
                         ),
                       ),
-                      TextButton(
-                        onPressed: () =>
-                            Navigator.of(context).pop(_currentPath),
-                        child: const Text('选这里'),
-                      ),
                     ],
+                    const SizedBox(height: 20),
+                    if (snapshot.connectionState == ConnectionState.waiting)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.only(top: 48),
+                          child: CircularProgressIndicator(),
+                        ),
+                      )
+                    else if (snapshot.hasError)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Text('读取路径失败：${snapshot.error}'),
+                      )
+                    else if ((snapshot.data ?? const []).isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 12),
+                        child: Text('当前路径下没有子文件夹，可以直接选择这里作为根路径。'),
+                      )
+                    else ...[
+                      Text(
+                        '子文件夹',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      for (final folder in snapshot.data!)
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.folder_open_rounded),
+                          title: Text(folder.title),
+                          subtitle: Text(folder.id),
+                          onTap: () {
+                            setState(() {
+                              _currentPath = folder.id;
+                            });
+                          },
+                        ),
+                    ],
+                  ],
+                );
+              },
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Material(
+                type: MaterialType.transparency,
+                child: Padding(
+                  padding:
+                      EdgeInsets.only(top: MediaQuery.paddingOf(context).top),
+                  child: SizedBox(
+                    height: kToolbarHeight,
+                    child: Row(
+                      children: [
+                        IconButton(
+                          onPressed: () {
+                            _skipAutoSaveOnPop = true;
+                            Navigator.of(context).pop(_currentPath);
+                          },
+                          icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                        ),
+                        Expanded(
+                          child: Text(
+                            '选择 WebDAV 路径',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            _skipAutoSaveOnPop = true;
+                            Navigator.of(context).pop(_currentPath);
+                          },
+                          child: const Text('选这里'),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
