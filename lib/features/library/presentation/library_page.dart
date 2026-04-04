@@ -87,7 +87,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                 itemsAsync.when(
                   data: (items) {
                     if (items.isEmpty) {
-                      return const Text('当前筛选下没有资源，去设置里检查媒体源是否启用。');
+                      return const Text('无');
                     }
                     return Wrap(
                       spacing: 12,

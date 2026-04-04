@@ -72,17 +72,28 @@ class EmbyApiClient {
   Future<List<MediaItem>> fetchLibrary(
     MediaSourceConfig source, {
     int limit = 200,
+    String? sectionId,
+    String sectionName = '',
   }) async {
     if (!source.hasActiveSession) {
       return const [];
     }
 
-    final rootItems = await _fetchItems(source: source, limit: limit);
+    final rootItems = await _fetchItems(
+      source: source,
+      limit: limit,
+      parentId: sectionId,
+      sectionId: sectionId,
+      sectionName: sectionName,
+    );
+    if (sectionId != null && sectionId.trim().isNotEmpty) {
+      return rootItems;
+    }
     if (rootItems.isNotEmpty) {
       return rootItems;
     }
 
-    final views = await _fetchViews(source);
+    final views = await fetchCollections(source);
     if (views.isEmpty) {
       return rootItems;
     }
@@ -93,6 +104,8 @@ class EmbyApiClient {
           source: source,
           limit: limit,
           parentId: view.id,
+          sectionId: view.id,
+          sectionName: view.title,
         ),
       ),
     );
@@ -107,6 +120,8 @@ class EmbyApiClient {
     required MediaSourceConfig source,
     required int limit,
     String? parentId,
+    String? sectionId,
+    String sectionName = '',
   }) async {
     final response = await _requestJson(
       source.endpoint,
@@ -141,6 +156,8 @@ class EmbyApiClient {
               response.baseUri,
               source,
               Map<String, dynamic>.from(item as Map),
+              sectionId: sectionId,
+              sectionName: sectionName,
             ),
           )
           .whereType<MediaItem>()
@@ -149,7 +166,12 @@ class EmbyApiClient {
     );
   }
 
-  Future<List<_EmbyView>> _fetchViews(MediaSourceConfig source) async {
+  Future<List<MediaCollection>> fetchCollections(
+      MediaSourceConfig source) async {
+    if (!source.hasActiveSession) {
+      return const [];
+    }
+
     final response = await _requestJson(
       source.endpoint,
       path: 'Users/${source.userId}/Views',
@@ -168,10 +190,21 @@ class EmbyApiClient {
         .map(
           (item) => _EmbyView(
             id: item['Id'] as String? ?? '',
+            title: item['Name'] as String? ?? '',
             collectionType: item['CollectionType'] as String? ?? '',
           ),
         )
         .where((view) => view.id.trim().isNotEmpty)
+        .map(
+          (view) => MediaCollection(
+            id: view.id,
+            title: view.title.trim().isEmpty ? '未命名分区' : view.title.trim(),
+            sourceId: source.id,
+            sourceName: source.name,
+            sourceKind: source.kind,
+            subtitle: _viewSubtitle(view),
+          ),
+        )
         .toList();
   }
 
@@ -195,8 +228,10 @@ class EmbyApiClient {
   MediaItem? _mapLibraryItem(
     Uri baseUri,
     MediaSourceConfig source,
-    Map<String, dynamic> item,
-  ) {
+    Map<String, dynamic> item, {
+    String? sectionId,
+    String sectionName = '',
+  }) {
     final id = item['Id'] as String? ?? '';
     final title = item['Name'] as String? ?? '';
     if (id.isEmpty || title.isEmpty) {
@@ -246,6 +281,8 @@ class EmbyApiClient {
       genres: genres,
       directors: directors,
       actors: actors,
+      sectionId: (sectionId ?? '').trim(),
+      sectionName: sectionName.trim(),
       sourceId: source.id,
       sourceName: source.name,
       sourceKind: source.kind,
@@ -490,6 +527,16 @@ class EmbyApiClient {
     };
   }
 
+  String _viewSubtitle(_EmbyView view) {
+    return switch (view.collectionType.trim().toLowerCase()) {
+      'movies' => '电影分区',
+      'tvshows' => '剧集分区',
+      'homevideos' => '家庭视频',
+      'musicvideos' => '音乐视频',
+      _ => 'Emby 分区',
+    };
+  }
+
   static bool _pathEndsWithEmby(String path) {
     final trimmed = _trimTrailingSlash(path);
     final segments = trimmed.split('/').where((segment) => segment.isNotEmpty);
@@ -557,9 +604,11 @@ class _EmbyJsonResponse {
 class _EmbyView {
   const _EmbyView({
     required this.id,
+    required this.title,
     required this.collectionType,
   });
 
   final String id;
+  final String title;
   final String collectionType;
 }

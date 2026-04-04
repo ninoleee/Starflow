@@ -3,13 +3,24 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
 abstract class MediaRepository {
   Future<List<MediaSourceConfig>> fetchSources();
 
-  Future<List<MediaItem>> fetchLibrary({MediaSourceKind? kind});
+  Future<List<MediaCollection>> fetchCollections({
+    MediaSourceKind? kind,
+    String? sourceId,
+  });
+
+  Future<List<MediaItem>> fetchLibrary({
+    MediaSourceKind? kind,
+    String? sourceId,
+    String? sectionId,
+    int limit = 200,
+  });
 
   Future<List<MediaItem>> fetchRecentlyAdded({
     MediaSourceKind? kind,
@@ -25,14 +36,16 @@ final mediaRepositoryProvider = Provider<MediaRepository>(
   (ref) => AppMediaRepository(
     ref,
     ref.read(embyApiClientProvider),
+    ref.read(webDavNasClientProvider),
   ),
 );
 
 class AppMediaRepository implements MediaRepository {
-  AppMediaRepository(this.ref, this._embyApiClient);
+  AppMediaRepository(this.ref, this._embyApiClient, this._webDavNasClient);
 
   final Ref ref;
   final EmbyApiClient _embyApiClient;
+  final WebDavNasClient _webDavNasClient;
 
   List<MediaSourceConfig> get _enabledSources {
     return ref
@@ -56,9 +69,52 @@ class AppMediaRepository implements MediaRepository {
   }
 
   @override
-  Future<List<MediaItem>> fetchLibrary({MediaSourceKind? kind}) async {
+  Future<List<MediaCollection>> fetchCollections({
+    MediaSourceKind? kind,
+    String? sourceId,
+  }) async {
     final sources = _enabledSources
-        .where((item) => kind == null || item.kind == kind)
+        .where(
+          (item) =>
+              (kind == null || item.kind == kind) &&
+              (sourceId == null || sourceId == item.id),
+        )
+        .toList();
+    final collections = await Future.wait(
+      sources.map((source) async {
+        if (source.kind == MediaSourceKind.emby) {
+          if (!source.hasActiveSession) {
+            return const <MediaCollection>[];
+          }
+          return _embyApiClient.fetchCollections(source);
+        }
+        if (source.endpoint.trim().isEmpty) {
+          return const <MediaCollection>[];
+        }
+        try {
+          return await _webDavNasClient.fetchCollections(source);
+        } catch (_) {
+          return const <MediaCollection>[];
+        }
+      }),
+    );
+
+    return collections.expand((item) => item).toList();
+  }
+
+  @override
+  Future<List<MediaItem>> fetchLibrary({
+    MediaSourceKind? kind,
+    String? sourceId,
+    String? sectionId,
+    int limit = 200,
+  }) async {
+    final sources = _enabledSources
+        .where(
+          (item) =>
+              (kind == null || item.kind == kind) &&
+              (sourceId == null || sourceId == item.id),
+        )
         .toList();
     final seededLibrary = _enabledLibrary;
     final sourceResults = await Future.wait(
@@ -69,7 +125,31 @@ class AppMediaRepository implements MediaRepository {
           }
           try {
             return _SourceFetchResult(
-              items: await _embyApiClient.fetchLibrary(source),
+              items: await _embyApiClient.fetchLibrary(
+                source,
+                limit: limit,
+                sectionId: sectionId,
+                sectionName: await _resolveSectionName(source, sectionId),
+              ),
+            );
+          } catch (error, stackTrace) {
+            return _SourceFetchResult(
+              items: const <MediaItem>[],
+              error: error,
+              stackTrace: stackTrace,
+            );
+          }
+        }
+
+        if (source.endpoint.trim().isNotEmpty) {
+          try {
+            return _SourceFetchResult(
+              items: await _webDavNasClient.fetchLibrary(
+                source,
+                sectionId: sectionId,
+                sectionName: await _resolveSectionName(source, sectionId),
+                limit: limit,
+              ),
             );
           } catch (error, stackTrace) {
             return _SourceFetchResult(
@@ -83,6 +163,12 @@ class AppMediaRepository implements MediaRepository {
         return _SourceFetchResult(
           items: seededLibrary
               .where((item) => item.sourceId == source.id)
+              .where(
+                (item) =>
+                    sectionId == null ||
+                    sectionId.trim().isEmpty ||
+                    item.sectionId == sectionId,
+              )
               .toList(),
         );
       }),
@@ -109,7 +195,7 @@ class AppMediaRepository implements MediaRepository {
     MediaSourceKind? kind,
     int limit = 10,
   }) async {
-    final items = await fetchLibrary(kind: kind);
+    final items = await fetchLibrary(kind: kind, limit: limit);
     return items.take(limit).toList();
   }
 
@@ -136,6 +222,24 @@ class AppMediaRepository implements MediaRepository {
 
   String _normalize(String value) {
     return value.toLowerCase().replaceAll(RegExp(r'\s+'), '');
+  }
+
+  Future<String> _resolveSectionName(
+    MediaSourceConfig source,
+    String? sectionId,
+  ) async {
+    final normalized = sectionId?.trim() ?? '';
+    if (normalized.isEmpty) {
+      return '';
+    }
+
+    final collections = await fetchCollections(sourceId: source.id);
+    for (final collection in collections) {
+      if (collection.id == normalized) {
+        return collection.title;
+      }
+    }
+    return '';
   }
 }
 

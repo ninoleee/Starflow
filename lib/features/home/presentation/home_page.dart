@@ -23,41 +23,6 @@ class HomePage extends ConsumerWidget {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
           children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(32),
-                gradient: const LinearGradient(
-                  colors: [
-                    Color(0xFF0F172A),
-                    Color(0xFF1D4ED8),
-                    Color(0xFF93C5FD)
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '把想看的、能播的、还缺资源的，放在同一个首页。',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 26,
-                      height: 1.2,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  SizedBox(height: 12),
-                  Text(
-                    '豆瓣推荐会自动尝试关联你的 Emby 或 NAS 资源；没有资源时，直接跳去在线搜索。',
-                    style: TextStyle(color: Color(0xFFE0ECFF), height: 1.5),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
             sectionsAsync.when(
               data: (sections) {
                 if (sections.isEmpty) {
@@ -72,6 +37,16 @@ class HomePage extends ConsumerWidget {
                           child: SectionPanel(
                             title: section.title,
                             subtitle: section.subtitle,
+                            actionLabel:
+                                section.viewAllTarget == null ? null : '查看全部',
+                            onActionPressed: section.viewAllTarget == null
+                                ? null
+                                : () {
+                                    context.pushNamed(
+                                      'collection',
+                                      extra: section.viewAllTarget,
+                                    );
+                                  },
                             child: section.items.isEmpty
                                 ? _SectionEmptyState(
                                     message: section.emptyMessage)
@@ -130,8 +105,8 @@ class _EmptyHomeState extends StatelessWidget {
   Widget build(BuildContext context) {
     return const SectionPanel(
       title: '还没有首页模块',
-      subtitle: '去设置里启用你想展示的模块',
-      child: _SectionEmptyState(message: '启用豆瓣、媒体源或首页模块后，这里会自动组装。'),
+      subtitle: '无',
+      child: _SectionEmptyState(message: '无'),
     );
   }
 }

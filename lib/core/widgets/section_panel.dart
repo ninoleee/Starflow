@@ -7,12 +7,16 @@ class SectionPanel extends StatelessWidget {
     required this.subtitle,
     required this.child,
     this.padding = const EdgeInsets.all(20),
+    this.actionLabel,
+    this.onActionPressed,
   });
 
   final String title;
   final String subtitle;
   final Widget child;
   final EdgeInsets padding;
+  final String? actionLabel;
+  final VoidCallback? onActionPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +36,21 @@ class SectionPanel extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: theme.textTheme.titleLarge),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(title, style: theme.textTheme.titleLarge),
+                ),
+                if (actionLabel != null &&
+                    actionLabel!.trim().isNotEmpty &&
+                    onActionPressed != null)
+                  TextButton(
+                    onPressed: onActionPressed,
+                    child: Text(actionLabel!),
+                  ),
+              ],
+            ),
             const SizedBox(height: 6),
             Text(
               subtitle,

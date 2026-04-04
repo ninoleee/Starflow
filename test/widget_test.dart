@@ -13,10 +13,13 @@ import 'package:starflow/app/app.dart';
 void main() {
   testWidgets('renders Starflow shell', (WidgetTester tester) async {
     await tester.pumpWidget(const ProviderScope(child: StarflowApp()));
-    await tester.pumpAndSettle();
+
+    expect(find.text('正在唤醒你的片库'), findsOneWidget);
+    expect(find.text('把想看的、能播的、还缺资源的，放在同一个首页。'), findsNothing);
 
     expect(find.text('Starflow'), findsOneWidget);
-    expect(find.text('首页'), findsOneWidget);
-    expect(find.text('搜索'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pumpAndSettle();
   });
 }

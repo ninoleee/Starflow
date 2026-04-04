@@ -82,7 +82,7 @@ class MediaDetailPage extends StatelessWidget {
           if (target.actors.isNotEmpty) const SizedBox(height: 18),
           SectionPanel(
             title: '操作',
-            subtitle: target.isPlayable ? '资源已就绪，可以直接播放' : '当前还没有可播资源',
+            subtitle: target.isPlayable ? '资源已就绪，可以直接播放' : '无',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

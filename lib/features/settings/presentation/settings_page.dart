@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
+import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -173,16 +174,23 @@ class SettingsPage extends ConsumerWidget {
     final usernameController = TextEditingController(
       text: existing?.username ?? '',
     );
+    final passwordController = TextEditingController(
+      text: existing?.password ?? '',
+    );
     final tokenController = TextEditingController(
       text: existing?.accessToken ?? '',
     );
-    final passwordController = TextEditingController();
     var kind = existing?.kind ?? MediaSourceKind.emby;
     var enabled = existing?.enabled ?? true;
     var resolvedUserId = existing?.userId ?? '';
     var resolvedServerId = existing?.serverId ?? '';
     var resolvedDeviceId = existing?.deviceId ?? '';
+    var selectedSectionIds = {
+      ...existing?.featuredSectionIds ?? const <String>[]
+    };
+    var availableSections = <MediaCollection>[];
     var isAuthenticating = false;
+    var isLoadingSections = false;
     var connectionMessage = existing == null
         ? '填写账号密码后可以直接验证 Emby 登录。'
         : _buildEmbyConnectionMessage(existing);
@@ -225,7 +233,11 @@ class SettingsPage extends ConsumerWidget {
                     const SizedBox(height: 12),
                     TextField(
                       controller: endpointController,
-                      decoration: const InputDecoration(labelText: 'Endpoint'),
+                      decoration: InputDecoration(
+                        labelText: kind == MediaSourceKind.emby
+                            ? 'Endpoint'
+                            : 'WebDAV Endpoint',
+                      ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -274,12 +286,50 @@ class SettingsPage extends ConsumerWidget {
                           ],
                         ),
                       ),
+                      if (availableSections.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '首页展示分区',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        ...availableSections.map(
+                          (section) => CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            value: selectedSectionIds.contains(section.id),
+                            title: Text(section.title),
+                            subtitle: section.subtitle.trim().isEmpty
+                                ? null
+                                : Text(section.subtitle),
+                            onChanged: (value) {
+                              setState(() {
+                                if (value ?? false) {
+                                  selectedSectionIds.add(section.id);
+                                } else {
+                                  selectedSectionIds.remove(section.id);
+                                }
+                              });
+                            },
+                          ),
+                        ),
+                      ],
                     ] else ...[
                       const SizedBox(height: 12),
                       TextField(
-                        controller: tokenController,
+                        controller: passwordController,
+                        obscureText: true,
                         decoration:
-                            const InputDecoration(labelText: 'Token / API Key'),
+                            const InputDecoration(labelText: 'WebDAV 密码'),
+                      ),
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '飞牛 NAS 可直接填写它的 WebDAV 地址、用户名和密码。',
+                        ),
                       ),
                     ],
                     const SizedBox(height: 12),
@@ -316,10 +366,12 @@ class SettingsPage extends ConsumerWidget {
                               endpoint: endpointController.text.trim(),
                               enabled: enabled,
                               username: usernameController.text.trim(),
+                              password: passwordController.text,
                               accessToken: tokenController.text.trim(),
                               userId: resolvedUserId,
                               serverId: resolvedServerId,
                               deviceId: resolvedDeviceId,
+                              featuredSectionIds: selectedSectionIds.toList(),
                             );
 
                             setState(() {
@@ -368,6 +420,79 @@ class SettingsPage extends ConsumerWidget {
                           },
                     child: Text(isAuthenticating ? '登录中...' : '测试登录'),
                   ),
+                if (kind == MediaSourceKind.emby)
+                  OutlinedButton(
+                    onPressed: isLoadingSections ||
+                            endpointController.text.trim().isEmpty ||
+                            tokenController.text.trim().isEmpty ||
+                            resolvedUserId.trim().isEmpty
+                        ? null
+                        : () async {
+                            setState(() {
+                              isLoadingSections = true;
+                              connectionMessage = '正在读取 Emby 分区...';
+                            });
+
+                            try {
+                              final sections = await ref
+                                  .read(embyApiClientProvider)
+                                  .fetchCollections(
+                                    MediaSourceConfig(
+                                      id: existing?.id ??
+                                          'media-source-${DateTime.now().millisecondsSinceEpoch}',
+                                      name: nameController.text.trim().isEmpty
+                                          ? '未命名媒体源'
+                                          : nameController.text.trim(),
+                                      kind: kind,
+                                      endpoint: endpointController.text.trim(),
+                                      enabled: enabled,
+                                      username: usernameController.text.trim(),
+                                      password: passwordController.text,
+                                      accessToken: tokenController.text.trim(),
+                                      userId: resolvedUserId,
+                                      serverId: resolvedServerId,
+                                      deviceId: resolvedDeviceId,
+                                      featuredSectionIds:
+                                          selectedSectionIds.toList(),
+                                    ),
+                                  );
+                              if (!context.mounted) {
+                                return;
+                              }
+                              setState(() {
+                                isLoadingSections = false;
+                                availableSections = sections;
+                                connectionMessage =
+                                    '${_buildEmbyConnectionMessage(
+                                  MediaSourceConfig(
+                                    id: existing?.id ?? '',
+                                    name: nameController.text.trim(),
+                                    kind: kind,
+                                    endpoint: endpointController.text.trim(),
+                                    enabled: enabled,
+                                    username: usernameController.text.trim(),
+                                    password: passwordController.text,
+                                    accessToken: tokenController.text.trim(),
+                                    userId: resolvedUserId,
+                                    serverId: resolvedServerId,
+                                    deviceId: resolvedDeviceId,
+                                    featuredSectionIds:
+                                        selectedSectionIds.toList(),
+                                  ),
+                                )}\n已读取 ${sections.length} 个分区。';
+                              });
+                            } catch (error) {
+                              if (!context.mounted) {
+                                return;
+                              }
+                              setState(() {
+                                isLoadingSections = false;
+                                connectionMessage = '读取分区失败：$error';
+                              });
+                            }
+                          },
+                    child: Text(isLoadingSections ? '读取中...' : '读取分区'),
+                  ),
                 FilledButton(
                   onPressed: () {
                     ref
@@ -382,12 +507,11 @@ class SettingsPage extends ConsumerWidget {
                             kind: kind,
                             endpoint: endpointController.text.trim(),
                             enabled: enabled,
-                            username: kind == MediaSourceKind.emby
-                                ? usernameController.text.trim()
-                                : '',
+                            username: usernameController.text.trim(),
+                            password: passwordController.text,
                             accessToken: kind == MediaSourceKind.emby
                                 ? tokenController.text.trim()
-                                : tokenController.text.trim(),
+                                : '',
                             userId: kind == MediaSourceKind.emby
                                 ? resolvedUserId
                                 : '',
@@ -397,6 +521,9 @@ class SettingsPage extends ConsumerWidget {
                             deviceId: kind == MediaSourceKind.emby
                                 ? resolvedDeviceId
                                 : '',
+                            featuredSectionIds: kind == MediaSourceKind.emby
+                                ? selectedSectionIds.toList()
+                                : const [],
                           ),
                         );
                     Navigator.of(context).pop();
@@ -636,13 +763,19 @@ class SettingsPage extends ConsumerWidget {
 
   String _buildMediaSourceSubtitle(MediaSourceConfig source) {
     if (source.kind != MediaSourceKind.emby) {
-      return '${source.kind.label} · ${source.endpoint}';
+      final authLine = source.username.trim().isEmpty
+          ? '匿名 WebDAV'
+          : 'WebDAV · ${source.username}';
+      return '${source.kind.label} · ${source.endpoint}\n$authLine';
     }
 
     final authLine = source.hasActiveSession
         ? '状态：已登录 ${source.username.isEmpty ? '' : '· ${source.username}'}'
         : '状态：${source.connectionStatusLabel}';
-    return 'Emby · ${source.endpoint}\n$authLine';
+    final sectionLine = source.featuredSectionIds.isEmpty
+        ? '首页分区：未选择'
+        : '首页分区：已选 ${source.featuredSectionIds.length} 个';
+    return 'Emby · ${source.endpoint}\n$authLine\n$sectionLine';
   }
 
   String _buildEmbyConnectionMessage(MediaSourceConfig source) {

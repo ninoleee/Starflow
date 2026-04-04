@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/features/bootstrap/presentation/bootstrap_page.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/home/presentation/home_page.dart';
+import 'package:starflow/features/library/domain/library_collection_models.dart';
+import 'package:starflow/features/library/presentation/library_collection_page.dart';
 import 'package:starflow/features/library/presentation/library_page.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/presentation/player_page.dart';
@@ -12,8 +15,13 @@ import 'package:starflow/features/settings/presentation/settings_page.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
-    initialLocation: '/home',
+    initialLocation: '/boot',
     routes: [
+      GoRoute(
+        path: '/boot',
+        name: 'boot',
+        builder: (context, state) => const BootstrapPage(),
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
           return _AppNavigationShell(navigationShell: navigationShell);
@@ -58,6 +66,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             ],
           ),
         ],
+      ),
+      GoRoute(
+        path: '/collection',
+        name: 'collection',
+        builder: (context, state) {
+          final target = state.extra as LibraryCollectionTarget?;
+          if (target == null) {
+            return const _MissingCollectionTargetPage();
+          }
+          return LibraryCollectionPage(target: target);
+        },
       ),
       GoRoute(
         path: '/detail',
@@ -131,6 +150,18 @@ class _MissingDetailTargetPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('详情')),
       body: const Center(child: Text('没有收到可展示的详情数据。')),
+    );
+  }
+}
+
+class _MissingCollectionTargetPage extends StatelessWidget {
+  const _MissingCollectionTargetPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('分区')),
+      body: const Center(child: Text('没有收到可展示的分区数据。')),
     );
   }
 }

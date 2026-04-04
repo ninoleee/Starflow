@@ -28,7 +28,12 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
 
     try {
       final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
-      return AppSettings.fromJson(decoded);
+      final settings = AppSettings.fromJson(decoded);
+      final sanitized = _stripLegacyDemoData(settings);
+      if (jsonEncode(settings.toJson()) != jsonEncode(sanitized.toJson())) {
+        await save(sanitized);
+      }
+      return sanitized;
     } catch (_) {
       return SeedData.defaultSettings;
     }
@@ -38,5 +43,31 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
   Future<void> save(AppSettings settings) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_settingsKey, jsonEncode(settings.toJson()));
+  }
+
+  AppSettings _stripLegacyDemoData(AppSettings settings) {
+    final mediaSources = settings.mediaSources
+        .where(
+          (item) =>
+              item.id != 'emby-main' &&
+              item.id != 'nas-living-room' &&
+              !item.endpoint.contains('example.com'),
+        )
+        .toList();
+    final searchProviders = settings.searchProviders
+        .where(
+          (item) =>
+              item.id == 'pansou-api' || !item.endpoint.contains('example.com'),
+        )
+        .toList();
+    final isDemoDouban = settings.doubanAccount.userId == 'demo-user';
+
+    return settings.copyWith(
+      mediaSources: mediaSources,
+      searchProviders: searchProviders,
+      doubanAccount: isDemoDouban
+          ? SeedData.defaultSettings.doubanAccount
+          : settings.doubanAccount,
+    );
   }
 }

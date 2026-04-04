@@ -3,6 +3,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -36,6 +37,7 @@ class HomeSectionViewModel {
     required this.subtitle,
     required this.emptyMessage,
     required this.items,
+    this.viewAllTarget,
   });
 
   final String id;
@@ -43,6 +45,7 @@ class HomeSectionViewModel {
   final String subtitle;
   final String emptyMessage;
   final List<HomeCardViewModel> items;
+  final LibraryCollectionTarget? viewAllTarget;
 }
 
 final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
@@ -59,6 +62,9 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
   final needsWishList = enabledModules.any(
     (item) => item.type == HomeModuleType.doubanWishList,
   );
+  final needsEmbyModules = enabledModules.any(
+    (item) => item.type == HomeModuleType.embyLibrary,
+  );
 
   final futures = await Future.wait([
     mediaRepository.fetchLibrary(),
@@ -68,11 +74,15 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
     needsWishList
         ? discoveryRepository.fetchWishList()
         : Future.value(const <DoubanEntry>[]),
+    needsEmbyModules
+        ? mediaRepository.fetchCollections(kind: MediaSourceKind.emby)
+        : Future.value(const <MediaCollection>[]),
   ]);
 
   final library = futures[0] as List<MediaItem>;
   final recommendations = futures[1] as List<DoubanEntry>;
   final wishList = futures[2] as List<DoubanEntry>;
+  final embyCollections = futures[3] as List<MediaCollection>;
   final embyItems = library
       .where((item) => item.sourceKind == MediaSourceKind.emby)
       .take(6)
@@ -97,25 +107,77 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
           _buildLibrarySection(
             module,
             recentlyAdded,
-            emptyMessage: '最近还没有新增内容，等同步任务跑起来后这里会很有用。',
+            emptyMessage: '无',
           ),
         );
         break;
       case HomeModuleType.embyLibrary:
-        sections.add(
-          _buildLibrarySection(
-            module,
-            embyItems,
-            emptyMessage: '当前没有启用中的 Emby 资源源。',
-          ),
+        final selectedIds = settings.mediaSources
+            .where((item) => item.kind == MediaSourceKind.emby && item.enabled)
+            .expand((item) => item.featuredSectionIds)
+            .toSet();
+        if (selectedIds.isEmpty) {
+          sections.add(
+            const HomeSectionViewModel(
+              id: 'module-emby-library-empty',
+              title: 'Emby 分区',
+              subtitle: '在媒体源里读取并勾选你想放到首页的分区',
+              emptyMessage: '无',
+              items: [],
+            ),
+          );
+          break;
+        }
+
+        final selectedCollections = embyCollections
+            .where((item) => selectedIds.contains(item.id))
+            .toList();
+        final collectionSections = await Future.wait(
+          selectedCollections.map((collection) async {
+            final sectionItems = await mediaRepository.fetchLibrary(
+              sourceId: collection.sourceId,
+              sectionId: collection.id,
+              limit: 6,
+            );
+            return _buildLibrarySection(
+              HomeModuleConfig(
+                id: 'emby-${collection.id}',
+                type: module.type,
+                title: collection.title,
+                enabled: true,
+              ),
+              sectionItems,
+              subtitle:
+                  '${collection.sourceName} · ${collection.subtitle.isEmpty ? 'Emby 分区' : collection.subtitle}',
+              emptyMessage: '无',
+              viewAllTarget: LibraryCollectionTarget(
+                title: collection.title,
+                sourceId: collection.sourceId,
+                sourceName: collection.sourceName,
+                sourceKind: collection.sourceKind,
+                sectionId: collection.id,
+                subtitle: collection.subtitle,
+              ),
+            );
+          }),
         );
+        sections.addAll(collectionSections);
+        if (collectionSections.isEmpty && embyItems.isNotEmpty) {
+          sections.add(
+            _buildLibrarySection(
+              module,
+              embyItems,
+              emptyMessage: '无',
+            ),
+          );
+        }
         break;
       case HomeModuleType.nasLibrary:
         sections.add(
           _buildLibrarySection(
             module,
             nasItems,
-            emptyMessage: '当前没有可展示的 NAS 资源。',
+            emptyMessage: '无',
           ),
         );
         break;
@@ -135,7 +197,7 @@ HomeSectionViewModel _buildDoubanSection(
     return HomeCardViewModel(
       id: entry.id,
       title: entry.title,
-      subtitle: matched != null ? '${matched.sourceName} 已就绪' : '本地还没有匹配到资源',
+      subtitle: matched != null ? '${matched.sourceName} 已就绪' : '无',
       posterUrl: entry.posterUrl,
       badges: [
         '${entry.year}',
@@ -152,7 +214,7 @@ HomeSectionViewModel _buildDoubanSection(
               genres: const [],
               directors: const [],
               actors: const [],
-              availabilityLabel: '当前还没有关联到本地或服务器资源',
+              availabilityLabel: '无',
               searchQuery: entry.title,
             )
           : MediaDetailTarget.fromMediaItem(
@@ -168,7 +230,7 @@ HomeSectionViewModel _buildDoubanSection(
     id: module.id,
     title: module.title,
     subtitle: module.type.description,
-    emptyMessage: '先在设置里启用豆瓣账号，或者后续接入你的桥接服务。',
+    emptyMessage: '无',
     items: items,
   );
 }
@@ -176,7 +238,9 @@ HomeSectionViewModel _buildDoubanSection(
 HomeSectionViewModel _buildLibrarySection(
   HomeModuleConfig module,
   List<MediaItem> library, {
+  String? subtitle,
   required String emptyMessage,
+  LibraryCollectionTarget? viewAllTarget,
 }) {
   final items = library.map((item) {
     return HomeCardViewModel(
@@ -194,9 +258,10 @@ HomeSectionViewModel _buildLibrarySection(
   return HomeSectionViewModel(
     id: module.id,
     title: module.title,
-    subtitle: module.type.description,
+    subtitle: subtitle ?? module.type.description,
     emptyMessage: emptyMessage,
     items: items,
+    viewAllTarget: viewAllTarget,
   );
 }
 
