@@ -23,6 +23,7 @@ class SeedData {
       sessionCookie: '',
     ),
     homeModules: const [],
+    networkStorage: const NetworkStorageConfig(),
     homeHeroStyle: HomeHeroStyle.normal,
     tmdbMetadataMatchEnabled: false,
     wmdbMetadataMatchEnabled: false,

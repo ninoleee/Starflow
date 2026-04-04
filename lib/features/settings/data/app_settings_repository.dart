@@ -29,7 +29,8 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
     try {
       final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
       final settings = AppSettings.fromJson(decoded);
-      final sanitized = _stripLegacyDemoData(settings);
+      final migrated = _migrateLegacyNetworkStorage(settings);
+      final sanitized = _stripLegacyDemoData(migrated);
       if (jsonEncode(settings.toJson()) != jsonEncode(sanitized.toJson())) {
         await save(sanitized);
       }
@@ -43,6 +44,34 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
   Future<void> save(AppSettings settings) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_settingsKey, jsonEncode(settings.toJson()));
+  }
+
+  AppSettings _migrateLegacyNetworkStorage(AppSettings settings) {
+    if (settings.networkStorage.hasAnyConfigured) {
+      return settings;
+    }
+
+    for (final provider in settings.searchProviders) {
+      final hasLegacyConfig = provider.quarkCookie.trim().isNotEmpty ||
+          provider.smartStrmWebhookUrl.trim().isNotEmpty ||
+          provider.smartStrmTaskName.trim().isNotEmpty ||
+          provider.quarkSaveFolderId.trim() != '0' ||
+          provider.quarkSaveFolderPath.trim() != '/';
+      if (!hasLegacyConfig) {
+        continue;
+      }
+      return settings.copyWith(
+        networkStorage: NetworkStorageConfig(
+          quarkCookie: provider.quarkCookie,
+          quarkSaveFolderId: provider.quarkSaveFolderId,
+          quarkSaveFolderPath: provider.quarkSaveFolderPath,
+          smartStrmWebhookUrl: provider.smartStrmWebhookUrl,
+          smartStrmTaskName: provider.smartStrmTaskName,
+        ),
+      );
+    }
+
+    return settings;
   }
 
   AppSettings _stripLegacyDemoData(AppSettings settings) {

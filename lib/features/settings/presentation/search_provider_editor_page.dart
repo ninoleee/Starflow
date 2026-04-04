@@ -4,11 +4,8 @@ import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/search/data/cloud_saver_api_client.dart';
 import 'package:starflow/features/search/data/pansou_api_client.dart';
-import 'package:starflow/features/search/data/quark_save_client.dart';
-import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
-import 'package:starflow/features/settings/presentation/quark_folder_picker_page.dart';
 
 /// 全屏编辑搜索服务（与 [MediaSourceEditorPage] 同一交互模式）。
 class SearchProviderEditorPage extends ConsumerStatefulWidget {
@@ -28,9 +25,6 @@ class _SearchProviderEditorPageState
   late final TextEditingController _apiKeyController;
   late final TextEditingController _usernameController;
   late final TextEditingController _passwordController;
-  late final TextEditingController _quarkCookieController;
-  late final TextEditingController _smartStrmWebhookController;
-  late final TextEditingController _smartStrmTaskNameController;
   late final TextEditingController _blockedKeywordsController;
 
   late SearchProviderKind _kind;
@@ -42,12 +36,8 @@ class _SearchProviderEditorPageState
   bool _didDelete = false;
   bool _skipAutoSaveOnPop = false;
   bool _isTestingConnection = false;
-  bool _isTestingQuarkConnection = false;
-  bool _isTestingSmartStrm = false;
   bool? _connectionTestSucceeded;
   String _connectionTestMessage = '';
-  String _quarkFolderId = '0';
-  String _quarkFolderPath = '/';
 
   @override
   void initState() {
@@ -60,13 +50,6 @@ class _SearchProviderEditorPageState
     _apiKeyController = TextEditingController(text: e?.apiKey ?? '');
     _usernameController = TextEditingController(text: e?.username ?? '');
     _passwordController = TextEditingController(text: e?.password ?? '');
-    _quarkCookieController = TextEditingController(text: e?.quarkCookie ?? '');
-    _smartStrmWebhookController = TextEditingController(
-      text: e?.smartStrmWebhookUrl ?? '',
-    );
-    _smartStrmTaskNameController = TextEditingController(
-      text: e?.smartStrmTaskName ?? '',
-    );
     _blockedKeywordsController = TextEditingController(
       text: (e?.blockedKeywords ?? const []).join(', '),
     );
@@ -79,12 +62,6 @@ class _SearchProviderEditorPageState
     _selectedCloudTypes = configuredCloudTypes.isEmpty
         ? SearchCloudType.values.toSet()
         : configuredCloudTypes;
-    _quarkFolderId = e?.quarkSaveFolderId.trim().isNotEmpty == true
-        ? e!.quarkSaveFolderId.trim()
-        : '0';
-    _quarkFolderPath = e?.quarkSaveFolderPath.trim().isNotEmpty == true
-        ? e!.quarkSaveFolderPath.trim()
-        : '/';
     _advancedAuthExpanded = _apiKeyController.text.trim().isNotEmpty ||
         _usernameController.text.trim().isNotEmpty;
     _cloudTypesExpanded = false;
@@ -100,9 +77,6 @@ class _SearchProviderEditorPageState
     _apiKeyController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
-    _quarkCookieController.dispose();
-    _smartStrmWebhookController.dispose();
-    _smartStrmTaskNameController.dispose();
     _blockedKeywordsController.dispose();
     super.dispose();
   }
@@ -113,9 +87,6 @@ class _SearchProviderEditorPageState
         _apiKeyController.text.trim().isNotEmpty ||
         _usernameController.text.trim().isNotEmpty ||
         _passwordController.text.trim().isNotEmpty ||
-        _quarkCookieController.text.trim().isNotEmpty ||
-        _smartStrmWebhookController.text.trim().isNotEmpty ||
-        _smartStrmTaskNameController.text.trim().isNotEmpty ||
         _blockedKeywordsController.text.trim().isNotEmpty ||
         widget.initial != null;
   }
@@ -133,11 +104,6 @@ class _SearchProviderEditorPageState
       parserHint: _kind.defaultParserHint,
       username: _usernameController.text.trim(),
       password: _passwordController.text.trim(),
-      quarkCookie: _quarkCookieController.text.trim(),
-      quarkSaveFolderId: _quarkFolderId,
-      quarkSaveFolderPath: _quarkFolderPath,
-      smartStrmWebhookUrl: _smartStrmWebhookController.text.trim(),
-      smartStrmTaskName: _smartStrmTaskNameController.text.trim(),
       allowedCloudTypes:
           _selectedCloudTypes.length == SearchCloudType.values.length
               ? const []
@@ -155,11 +121,6 @@ class _SearchProviderEditorPageState
     _nameController.text = kind.defaultName;
     _endpointController.text = kind.defaultEndpoint;
     _selectedCloudTypes = SearchCloudType.values.toSet();
-    _quarkCookieController.clear();
-    _smartStrmWebhookController.clear();
-    _smartStrmTaskNameController.clear();
-    _quarkFolderId = '0';
-    _quarkFolderPath = '/';
     _blockedKeywordsController.clear();
     _connectionTestSucceeded = null;
     _connectionTestMessage = '';
@@ -321,99 +282,6 @@ class _SearchProviderEditorPageState
     Navigator.of(context).pop();
   }
 
-  Future<void> _testQuarkConnection() async {
-    FocusScope.of(context).unfocus();
-    final cookie = _quarkCookieController.text.trim();
-    if (cookie.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先填写夸克 Cookie')),
-      );
-      return;
-    }
-
-    setState(() => _isTestingQuarkConnection = true);
-    try {
-      final status = await ref.read(quarkSaveClientProvider).testConnection(
-            cookie: cookie,
-          );
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('夸克连接成功 · ${status.summary}')),
-      );
-    } on QuarkSaveException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message)),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isTestingQuarkConnection = false);
-      }
-    }
-  }
-
-  Future<void> _pickQuarkFolder() async {
-    FocusScope.of(context).unfocus();
-    final cookie = _quarkCookieController.text.trim();
-    if (cookie.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先填写夸克 Cookie')),
-      );
-      return;
-    }
-
-    final picked = await Navigator.of(context).push<QuarkDirectoryEntry>(
-      MaterialPageRoute(
-        builder: (context) => QuarkFolderPickerPage(
-          cookie: cookie,
-          initialFid: _quarkFolderId,
-          initialPath: _quarkFolderPath,
-        ),
-      ),
-    );
-    if (picked == null || !mounted) {
-      return;
-    }
-
-    setState(() {
-      _quarkFolderId = picked.fid;
-      _quarkFolderPath = picked.path;
-    });
-  }
-
-  Future<void> _testSmartStrmTask() async {
-    FocusScope.of(context).unfocus();
-    setState(() => _isTestingSmartStrm = true);
-    try {
-      await ref.read(smartStrmWebhookClientProvider).triggerTask(
-            webhookUrl: _smartStrmWebhookController.text.trim(),
-            taskName: _smartStrmTaskNameController.text.trim(),
-            storagePath: _quarkFolderPath == '/' ? '' : _quarkFolderPath,
-          );
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('SmartStrm 任务触发成功')),
-      );
-    } on SmartStrmWebhookException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message)),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isTestingSmartStrm = false);
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -549,80 +417,6 @@ class _SearchProviderEditorPageState
                     ),
                     const SizedBox(height: 8),
                   ],
-                ),
-                _SectionTitle(theme: theme, label: '夸克保存'),
-                TextField(
-                  controller: _quarkCookieController,
-                  minLines: 2,
-                  maxLines: 4,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: '夸克 Cookie',
-                    hintText: '用于夸克搜索结果一键保存到网盘根目录',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed:
-                          _isTestingQuarkConnection ? null : _testQuarkConnection,
-                      icon: _isTestingQuarkConnection
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.cloud_done_outlined),
-                      label: Text(
-                        _isTestingQuarkConnection ? '测试中...' : '测试夸克连接',
-                      ),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _pickQuarkFolder,
-                      icon: const Icon(Icons.folder_open_rounded),
-                      label: const Text('选择默认保存文件夹'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text('默认保存到：$_quarkFolderPath'),
-                _SectionTitle(theme: theme, label: 'SmartStrm（可选）'),
-                TextField(
-                  controller: _smartStrmWebhookController,
-                  keyboardType: TextInputType.url,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'Webhook 地址',
-                    hintText: 'http://yourip:8024/webhook/abcdef123456',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _smartStrmTaskNameController,
-                  decoration: const InputDecoration(
-                    labelText: '任务名',
-                    hintText: 'movie_task',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: _isTestingSmartStrm ? null : _testSmartStrmTask,
-                    icon: _isTestingSmartStrm
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.bolt_rounded),
-                    label: Text(
-                      _isTestingSmartStrm ? '测试中...' : '测试 STRM 任务',
-                    ),
-                  ),
                 ),
                 _SectionTitle(theme: theme, label: '结果筛选'),
                 ExpansionTile(

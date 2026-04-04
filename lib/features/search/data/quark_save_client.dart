@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
@@ -21,33 +22,48 @@ class QuarkSaveClient {
 
   final http.Client _client;
 
+  void _log(String message) {
+    debugPrint('[QuarkSave] $message');
+  }
+
   Future<QuarkSaveResult> saveShareLink({
     required String shareUrl,
     required String cookie,
     String toPdirFid = '0',
   }) async {
+    _log(
+      'saveShareLink start url=$shareUrl targetFolder=${toPdirFid.trim().isEmpty ? '0' : toPdirFid.trim()}',
+    );
     final trimmedCookie = cookie.trim();
     if (trimmedCookie.isEmpty) {
+      _log('saveShareLink aborted: empty cookie');
       throw const QuarkSaveException('请先在搜索设置里填写夸克 Cookie');
     }
 
     final parsed = _parseShareUrl(shareUrl);
     if (parsed == null) {
+      _log('saveShareLink aborted: parseShareUrl failed');
       throw const QuarkSaveException('不是可识别的夸克分享链接');
     }
+    _log(
+      'saveShareLink parsed pwdId=${parsed.pwdId} pdirFid=${parsed.pdirFid} hasPasscode=${parsed.passcode.isNotEmpty}',
+    );
 
     final stoken = await _fetchShareToken(
       pwdId: parsed.pwdId,
       passcode: parsed.passcode,
       cookie: trimmedCookie,
     );
+    _log('saveShareLink fetched share token');
     final sharedEntries = await _fetchShareEntries(
       pwdId: parsed.pwdId,
       stoken: stoken,
       pdirFid: parsed.pdirFid,
       cookie: trimmedCookie,
     );
+    _log('saveShareLink fetched entries count=${sharedEntries.length}');
     if (sharedEntries.isEmpty) {
+      _log('saveShareLink aborted: no savable files in share');
       throw const QuarkSaveException('分享链接里没有可保存的文件');
     }
 
@@ -75,6 +91,9 @@ class QuarkSaveClient {
     );
 
     final payload = _decode(response);
+    _log(
+      'share save response status=${response.statusCode} code=${payload['code']} message=${payload['message'] ?? payload['msg'] ?? ''}',
+    );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
     }
@@ -169,6 +188,9 @@ class QuarkSaveClient {
       }),
     );
     final payload = _decode(response);
+    _log(
+      'share token response status=${response.statusCode} code=${payload['code']} message=${payload['message'] ?? payload['msg'] ?? ''}',
+    );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
     }
@@ -216,6 +238,9 @@ class QuarkSaveClient {
         headers: _headers(cookie),
       );
       final payload = _decode(response);
+      _log(
+        'share detail page=$page status=${response.statusCode} code=${payload['code']} message=${payload['message'] ?? payload['msg'] ?? ''}',
+      );
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
       }
@@ -280,6 +305,7 @@ class QuarkSaveClient {
   _ParsedQuarkShare? _parseShareUrl(String rawUrl) {
     final uri = Uri.tryParse(rawUrl.trim());
     if (uri == null) {
+      _log('parseShareUrl invalid uri');
       return null;
     }
     final segments = uri.pathSegments;

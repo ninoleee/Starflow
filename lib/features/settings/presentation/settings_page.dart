@@ -10,6 +10,7 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/media_source_editor_page.dart';
 import 'package:starflow/features/settings/presentation/metadata_match_settings_page.dart';
+import 'package:starflow/features/settings/presentation/network_storage_settings_page.dart';
 import 'package:starflow/features/settings/presentation/search_provider_editor_page.dart';
 
 class SettingsPage extends ConsumerWidget {
@@ -109,6 +110,19 @@ class SettingsPage extends ConsumerWidget {
             ),
             const SizedBox(height: 18),
             SectionPanel(
+              title: '网络存储',
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('夸克与 STRM'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _openNetworkStorageSettings(
+                  context,
+                  settings.networkStorage,
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            SectionPanel(
               title: '首页模块',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -182,6 +196,17 @@ class SettingsPage extends ConsumerWidget {
     return Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
         builder: (context) => const MetadataMatchSettingsPage(),
+      ),
+    );
+  }
+
+  Future<void> _openNetworkStorageSettings(
+    BuildContext context,
+    NetworkStorageConfig initial,
+  ) {
+    return Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => NetworkStorageSettingsPage(initial: initial),
       ),
     );
   }

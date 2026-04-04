@@ -122,6 +122,11 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(doubanAccount: config));
   }
 
+  Future<void> saveNetworkStorage(NetworkStorageConfig config) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(networkStorage: config));
+  }
+
   Future<void> setTmdbMetadataMatchEnabled(bool enabled) async {
     final current = state.valueOrNull ?? await _repository.load();
     await _persist(current.copyWith(tmdbMetadataMatchEnabled: enabled));

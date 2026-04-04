@@ -291,12 +291,73 @@ class HomeModuleConfig {
   }
 }
 
+class NetworkStorageConfig {
+  const NetworkStorageConfig({
+    this.quarkCookie = '',
+    this.quarkSaveFolderId = '0',
+    this.quarkSaveFolderPath = '/',
+    this.smartStrmWebhookUrl = '',
+    this.smartStrmTaskName = '',
+  });
+
+  final String quarkCookie;
+  final String quarkSaveFolderId;
+  final String quarkSaveFolderPath;
+  final String smartStrmWebhookUrl;
+  final String smartStrmTaskName;
+
+  bool get hasAnyConfigured {
+    return quarkCookie.trim().isNotEmpty ||
+        smartStrmWebhookUrl.trim().isNotEmpty ||
+        smartStrmTaskName.trim().isNotEmpty ||
+        quarkSaveFolderId.trim() != '0' ||
+        quarkSaveFolderPath.trim() != '/';
+  }
+
+  NetworkStorageConfig copyWith({
+    String? quarkCookie,
+    String? quarkSaveFolderId,
+    String? quarkSaveFolderPath,
+    String? smartStrmWebhookUrl,
+    String? smartStrmTaskName,
+  }) {
+    return NetworkStorageConfig(
+      quarkCookie: quarkCookie ?? this.quarkCookie,
+      quarkSaveFolderId: quarkSaveFolderId ?? this.quarkSaveFolderId,
+      quarkSaveFolderPath: quarkSaveFolderPath ?? this.quarkSaveFolderPath,
+      smartStrmWebhookUrl: smartStrmWebhookUrl ?? this.smartStrmWebhookUrl,
+      smartStrmTaskName: smartStrmTaskName ?? this.smartStrmTaskName,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'quarkCookie': quarkCookie,
+      'quarkSaveFolderId': quarkSaveFolderId,
+      'quarkSaveFolderPath': quarkSaveFolderPath,
+      'smartStrmWebhookUrl': smartStrmWebhookUrl,
+      'smartStrmTaskName': smartStrmTaskName,
+    };
+  }
+
+  factory NetworkStorageConfig.fromJson(Map<String, dynamic> json) {
+    return NetworkStorageConfig(
+      quarkCookie: json['quarkCookie'] as String? ?? '',
+      quarkSaveFolderId: json['quarkSaveFolderId'] as String? ?? '0',
+      quarkSaveFolderPath: json['quarkSaveFolderPath'] as String? ?? '/',
+      smartStrmWebhookUrl: json['smartStrmWebhookUrl'] as String? ?? '',
+      smartStrmTaskName: json['smartStrmTaskName'] as String? ?? '',
+    );
+  }
+}
+
 class AppSettings {
   const AppSettings({
     required this.mediaSources,
     required this.searchProviders,
     required this.doubanAccount,
     required this.homeModules,
+    this.networkStorage = const NetworkStorageConfig(),
     this.homeHeroStyle = HomeHeroStyle.normal,
     this.tmdbMetadataMatchEnabled = false,
     this.wmdbMetadataMatchEnabled = false,
@@ -309,6 +370,7 @@ class AppSettings {
   final List<SearchProviderConfig> searchProviders;
   final DoubanAccountConfig doubanAccount;
   final List<HomeModuleConfig> homeModules;
+  final NetworkStorageConfig networkStorage;
   final HomeHeroStyle homeHeroStyle;
   final bool tmdbMetadataMatchEnabled;
   final bool wmdbMetadataMatchEnabled;
@@ -321,6 +383,7 @@ class AppSettings {
     List<SearchProviderConfig>? searchProviders,
     DoubanAccountConfig? doubanAccount,
     List<HomeModuleConfig>? homeModules,
+    NetworkStorageConfig? networkStorage,
     HomeHeroStyle? homeHeroStyle,
     bool? tmdbMetadataMatchEnabled,
     bool? wmdbMetadataMatchEnabled,
@@ -333,6 +396,7 @@ class AppSettings {
       searchProviders: searchProviders ?? this.searchProviders,
       doubanAccount: doubanAccount ?? this.doubanAccount,
       homeModules: homeModules ?? this.homeModules,
+      networkStorage: networkStorage ?? this.networkStorage,
       homeHeroStyle: homeHeroStyle ?? this.homeHeroStyle,
       tmdbMetadataMatchEnabled:
           tmdbMetadataMatchEnabled ?? this.tmdbMetadataMatchEnabled,
@@ -352,6 +416,7 @@ class AppSettings {
       'searchProviders': searchProviders.map((item) => item.toJson()).toList(),
       'doubanAccount': doubanAccount.toJson(),
       'homeModules': homeModules.map((item) => item.toJson()).toList(),
+      'networkStorage': networkStorage.toJson(),
       'homeHeroStyle': homeHeroStyle.name,
       'tmdbMetadataMatchEnabled': tmdbMetadataMatchEnabled,
       'wmdbMetadataMatchEnabled': wmdbMetadataMatchEnabled,
@@ -391,6 +456,11 @@ class AppSettings {
             ),
           )
           .toList(),
+      networkStorage: NetworkStorageConfig.fromJson(
+        Map<String, dynamic>.from(
+          (json['networkStorage'] as Map?) ?? const {},
+        ),
+      ),
       homeHeroStyle: HomeHeroStyleX.fromName(
         json['homeHeroStyle'] as String? ?? '',
       ),

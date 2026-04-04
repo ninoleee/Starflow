@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
+  static const _cjkFontFallback = <String>[
+    'PingFang SC',
+    'Hiragino Sans GB',
+    'Noto Sans CJK SC',
+    'Source Han Sans SC',
+    'Microsoft YaHei',
+  ];
+
   static ThemeData get lightTheme {
     const colorScheme = ColorScheme(
       brightness: Brightness.light,
@@ -69,17 +77,26 @@ class AppTheme {
       textTheme: baseTextTheme.copyWith(
         headlineSmall: baseTextTheme.headlineSmall?.copyWith(
           fontWeight: FontWeight.w800,
-          letterSpacing: -0.6,
+          letterSpacing: 0,
+          fontFamilyFallback: _cjkFontFallback,
           color: colorScheme.onSurface,
         ),
         titleLarge: baseTextTheme.titleLarge?.copyWith(
-          fontWeight: FontWeight.w800,
-          letterSpacing: -0.4,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0,
+          fontFamilyFallback: _cjkFontFallback,
           color: colorScheme.onSurface,
         ),
         titleMedium: baseTextTheme.titleMedium?.copyWith(
           fontWeight: FontWeight.w700,
-          letterSpacing: -0.2,
+          letterSpacing: 0,
+          fontFamilyFallback: _cjkFontFallback,
+          color: colorScheme.onSurface,
+        ),
+        titleSmall: baseTextTheme.titleSmall?.copyWith(
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0,
+          fontFamilyFallback: _cjkFontFallback,
           color: colorScheme.onSurface,
         ),
         bodyLarge: baseTextTheme.bodyLarge?.copyWith(
@@ -102,8 +119,9 @@ class AppTheme {
         centerTitle: false,
         titleTextStyle: baseTextTheme.titleLarge?.copyWith(
           color: colorScheme.onSurface,
-          fontWeight: FontWeight.w800,
-          letterSpacing: -0.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0,
+          fontFamilyFallback: _cjkFontFallback,
         ),
       ),
       cardTheme: CardThemeData(
