@@ -18,7 +18,6 @@ final enrichedDetailTargetProvider =
   ref,
   target,
 ) async {
-  const detailLibraryMatchLimit = 2000;
   final tmdbEnabled = ref.watch(
     appSettingsProvider.select((settings) => settings.tmdbMetadataMatchEnabled),
   );
@@ -37,100 +36,41 @@ final enrichedDetailTargetProvider =
   if (resolved.needsLibraryMatch &&
       tmdbEnabled &&
       tmdbToken.trim().isNotEmpty) {
-    try {
-      tmdbMatch = await ref.read(tmdbMetadataClientProvider).matchTitle(
-            query: query,
-            readAccessToken: tmdbToken,
-            year: resolved.year,
-            preferSeries: resolved.isSeries,
-          );
-    } catch (_) {}
+    tmdbMatch = await _tryTmdbMetadataMatch(
+      tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
+      query: query,
+      readAccessToken: tmdbToken,
+      year: resolved.year,
+      preferSeries: resolved.isSeries,
+    );
   }
 
   if (resolved.needsLibraryMatch) {
-    try {
-      final library = await ref
-          .read(mediaRepositoryProvider)
-          .fetchLibrary(limit: detailLibraryMatchLimit);
-      final matched = matchMediaItemByTitles(
-        library,
-        titles: [
-          resolved.title,
-          query,
-          if (tmdbMatch != null) tmdbMatch.title,
-          if (tmdbMatch != null) tmdbMatch.originalTitle,
-        ],
-        year: resolved.year > 0 ? resolved.year : (tmdbMatch?.year ?? 0),
-      );
-      if (matched != null) {
-        final matchedTarget = MediaDetailTarget.fromMediaItem(
-          matched,
-          availabilityLabel:
-              '资源已就绪：${matched.sourceKind.label} · ${matched.sourceName}',
-          searchQuery: query,
-        );
-        resolved = matchedTarget.copyWith(
-          title: resolved.title,
-          posterUrl:
-              _firstNonEmpty(resolved.posterUrl, matchedTarget.posterUrl),
-          overview: resolved.hasUsefulOverview
-              ? resolved.overview
-              : matchedTarget.overview,
-          year: resolved.year > 0 ? resolved.year : matchedTarget.year,
-          durationLabel: resolved.durationLabel.trim().isNotEmpty
-              ? resolved.durationLabel
-              : matchedTarget.durationLabel,
-          genres: resolved.genres.isNotEmpty
-              ? resolved.genres
-              : matchedTarget.genres,
-          directors: resolved.directors.isNotEmpty
-              ? resolved.directors
-              : matchedTarget.directors,
-          actors: resolved.actors.isNotEmpty
-              ? resolved.actors
-              : matchedTarget.actors,
-          ratingLabels: _mergeLabels(
-            matchedTarget.ratingLabels,
-            resolved.ratingLabels,
-          ),
-          imdbId: resolved.imdbId,
-        );
-      }
-    } catch (_) {}
+    final matchedTarget = await _tryMatchLibraryResource(
+      mediaRepository: ref.read(mediaRepositoryProvider),
+      target: resolved,
+      query: query,
+      tmdbMatch: tmdbMatch,
+    );
+    if (matchedTarget != null) {
+      resolved = matchedTarget;
+    }
   }
 
   if (tmdbEnabled &&
       tmdbToken.trim().isNotEmpty &&
       resolved.needsMetadataMatch) {
-    try {
-      final match = tmdbMatch ??
-          await ref.read(tmdbMetadataClientProvider).matchTitle(
-                query: query,
-                readAccessToken: tmdbToken,
-                year: resolved.year,
-                preferSeries: resolved.isSeries,
-              );
-      if (match != null) {
-        resolved = resolved.copyWith(
-          posterUrl: resolved.posterUrl.trim().isEmpty
-              ? match.posterUrl
-              : resolved.posterUrl,
-          overview:
-              resolved.hasUsefulOverview ? resolved.overview : match.overview,
-          year: resolved.year > 0 ? resolved.year : match.year,
-          durationLabel: resolved.durationLabel.trim().isEmpty
-              ? match.durationLabel
-              : resolved.durationLabel,
-          genres: resolved.genres.isNotEmpty ? resolved.genres : match.genres,
-          directors: resolved.directors.isNotEmpty
-              ? resolved.directors
-              : match.directors,
-          actors: resolved.actors.isNotEmpty ? resolved.actors : match.actors,
-          imdbId:
-              resolved.imdbId.trim().isEmpty ? match.imdbId : resolved.imdbId,
+    final match = tmdbMatch ??
+        await _tryTmdbMetadataMatch(
+          tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
+          query: query,
+          readAccessToken: tmdbToken,
+          year: resolved.year,
+          preferSeries: resolved.isSeries,
         );
-      }
-    } catch (_) {}
+    if (match != null) {
+      resolved = _applyTmdbMetadata(resolved, match);
+    }
   }
 
   if (imdbEnabled && resolved.needsImdbRatingMatch) {
@@ -162,6 +102,121 @@ final enrichedDetailTargetProvider =
 
   return resolved;
 });
+
+Future<TmdbMetadataMatch?> _tryTmdbMetadataMatch({
+  required TmdbMetadataClient tmdbMetadataClient,
+  required String query,
+  required String readAccessToken,
+  required int year,
+  required bool preferSeries,
+}) async {
+  try {
+    return await tmdbMetadataClient.matchTitle(
+      query: query,
+      readAccessToken: readAccessToken,
+      year: year,
+      preferSeries: preferSeries,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<MediaDetailTarget?> _tryMatchLibraryResource({
+  required MediaRepository mediaRepository,
+  required MediaDetailTarget target,
+  required String query,
+  TmdbMetadataMatch? tmdbMatch,
+}) async {
+  const detailLibraryMatchLimit = 2000;
+
+  try {
+    final library =
+        await mediaRepository.fetchLibrary(limit: detailLibraryMatchLimit);
+    final matched = matchMediaItemByTitles(
+      library,
+      titles: [
+        target.title,
+        query,
+        if (tmdbMatch != null) tmdbMatch.title,
+        if (tmdbMatch != null) tmdbMatch.originalTitle,
+      ],
+      year: target.year > 0 ? target.year : (tmdbMatch?.year ?? 0),
+    );
+    if (matched == null) {
+      return null;
+    }
+
+    final matchedTarget = MediaDetailTarget.fromMediaItem(
+      matched,
+      availabilityLabel:
+          '资源已就绪：${matched.sourceKind.label} · ${matched.sourceName}',
+      searchQuery: query,
+    );
+    return _mergeMatchedLibraryTarget(
+      current: target,
+      matched: matchedTarget,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+MediaDetailTarget _mergeMatchedLibraryTarget({
+  required MediaDetailTarget current,
+  required MediaDetailTarget matched,
+}) {
+  return matched.copyWith(
+    title: current.title,
+    posterUrl: _firstNonEmpty(current.posterUrl, matched.posterUrl),
+    overview: current.hasUsefulOverview ? current.overview : matched.overview,
+    year: current.year > 0 ? current.year : matched.year,
+    durationLabel: current.durationLabel.trim().isNotEmpty
+        ? current.durationLabel
+        : matched.durationLabel,
+    genres: current.genres.isNotEmpty ? current.genres : matched.genres,
+    directors:
+        current.directors.isNotEmpty ? current.directors : matched.directors,
+    actors: current.actors.isNotEmpty ? current.actors : matched.actors,
+    actorProfiles: current.actorProfiles.isNotEmpty
+        ? current.actorProfiles
+        : matched.actorProfiles,
+    ratingLabels: _mergeLabels(
+      matched.ratingLabels,
+      current.ratingLabels,
+    ),
+    imdbId: current.imdbId,
+  );
+}
+
+MediaDetailTarget _applyTmdbMetadata(
+  MediaDetailTarget target,
+  TmdbMetadataMatch match,
+) {
+  return target.copyWith(
+    posterUrl:
+        target.posterUrl.trim().isEmpty ? match.posterUrl : target.posterUrl,
+    overview: target.hasUsefulOverview ? target.overview : match.overview,
+    year: target.year > 0 ? target.year : match.year,
+    durationLabel: target.durationLabel.trim().isEmpty
+        ? match.durationLabel
+        : target.durationLabel,
+    genres: target.genres.isNotEmpty ? target.genres : match.genres,
+    directors: target.directors.isNotEmpty ? target.directors : match.directors,
+    actors: target.actors.isNotEmpty ? target.actors : match.actors,
+    actorProfiles: target.actorProfiles.isNotEmpty
+        ? target.actorProfiles
+        : match.actorProfiles
+            .map(
+              (item) => MediaPersonProfile(
+                name: item.name,
+                avatarUrl: item.avatarUrl,
+              ),
+            )
+            .toList(),
+    imdbId: target.imdbId.trim().isEmpty ? match.imdbId : target.imdbId,
+  );
+}
 
 String _firstNonEmpty(String primary, String fallback) {
   final primaryTrimmed = primary.trim();
@@ -272,19 +327,86 @@ class MediaDetailPage extends ConsumerStatefulWidget {
 
 class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   String _selectedSeasonId = '';
+  MediaDetailTarget? _manualOverrideTarget;
+  bool _isMatchingLocalResource = false;
 
   @override
   void didUpdateWidget(covariant MediaDetailPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.target.itemId != widget.target.itemId) {
+    if (oldWidget.target.itemId != widget.target.itemId ||
+        oldWidget.target.title != widget.target.title ||
+        oldWidget.target.searchQuery != widget.target.searchQuery) {
       _selectedSeasonId = '';
+      _manualOverrideTarget = null;
+      _isMatchingLocalResource = false;
     }
+  }
+
+  Future<void> _matchLocalResource(MediaDetailTarget currentTarget) async {
+    if (_isMatchingLocalResource) {
+      return;
+    }
+
+    setState(() {
+      _isMatchingLocalResource = true;
+    });
+
+    final settings = ref.read(appSettingsProvider);
+    final query = currentTarget.searchQuery.trim().isEmpty
+        ? currentTarget.title
+        : currentTarget.searchQuery;
+    TmdbMetadataMatch? tmdbMatch;
+
+    if (settings.tmdbMetadataMatchEnabled &&
+        settings.tmdbReadAccessToken.trim().isNotEmpty) {
+      tmdbMatch = await _tryTmdbMetadataMatch(
+        tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
+        query: query,
+        readAccessToken: settings.tmdbReadAccessToken,
+        year: currentTarget.year,
+        preferSeries: currentTarget.isSeries,
+      );
+    }
+
+    final matched = await _tryMatchLibraryResource(
+      mediaRepository: ref.read(mediaRepositoryProvider),
+      target: currentTarget,
+      query: query,
+      tmdbMatch: tmdbMatch,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isMatchingLocalResource = false;
+      if (matched != null) {
+        _manualOverrideTarget = matched;
+      }
+    });
+
+    final messenger = ScaffoldMessenger.of(context);
+    if (matched == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('没有找到可匹配的本地资源')),
+      );
+      return;
+    }
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+            '已匹配到 ${matched.sourceKind?.label ?? '资源'} · ${matched.sourceName}'),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final targetAsync = ref.watch(enrichedDetailTargetProvider(widget.target));
-    final target = targetAsync.valueOrNull ?? widget.target;
+    final seedTarget = _manualOverrideTarget ?? widget.target;
+    final targetAsync = ref.watch(enrichedDetailTargetProvider(seedTarget));
+    final target = targetAsync.valueOrNull ?? seedTarget;
     final seriesAsync = ref.watch(seriesBrowserProvider(target));
 
     return Scaffold(
@@ -368,7 +490,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                           ),
                         ),
                       if (target.directors.isNotEmpty ||
-                          target.actors.isNotEmpty)
+                          target.resolvedActorProfiles.isNotEmpty)
                         _DetailBlock(
                           title: '演职员',
                           child: Column(
@@ -380,12 +502,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                 _NameRail(names: target.directors),
                               ],
                               if (target.directors.isNotEmpty &&
-                                  target.actors.isNotEmpty)
+                                  target.resolvedActorProfiles.isNotEmpty)
                                 const SizedBox(height: 18),
-                              if (target.actors.isNotEmpty) ...[
+                              if (target.resolvedActorProfiles.isNotEmpty) ...[
                                 const _InfoLabel('演员'),
                                 const SizedBox(height: 10),
-                                _NameRail(names: target.actors),
+                                _ActorRail(
+                                  actors: target.resolvedActorProfiles,
+                                ),
                               ],
                             ],
                           ),
@@ -402,6 +526,43 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                   label: '状态',
                                   value: target.availabilityLabel,
                                 ),
+                              if (_shouldShowLocalResourceMatcher(target)) ...[
+                                const SizedBox(height: 12),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: TextButton.icon(
+                                    onPressed: _isMatchingLocalResource
+                                        ? null
+                                        : () => _matchLocalResource(target),
+                                    icon: _isMatchingLocalResource
+                                        ? const SizedBox(
+                                            width: 14,
+                                            height: 14,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
+                                          )
+                                        : const Icon(
+                                            Icons.link_rounded,
+                                            size: 16,
+                                          ),
+                                    label: Text(
+                                      _isMatchingLocalResource
+                                          ? '匹配中...'
+                                          : '匹配本地资源',
+                                    ),
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 0,
+                                        vertical: 0,
+                                      ),
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                  ),
+                                ),
+                              ],
                               if (target.sourceName.trim().isNotEmpty) ...[
                                 if (target.availabilityLabel.trim().isNotEmpty)
                                   const SizedBox(height: 12),
@@ -445,6 +606,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     }
     return groups.first;
   }
+}
+
+bool _shouldShowLocalResourceMatcher(MediaDetailTarget target) {
+  final availability = target.availabilityLabel.trim();
+  return target.needsLibraryMatch &&
+      !target.isPlayable &&
+      (availability.isEmpty || availability == '无');
 }
 
 class _HeroSection extends StatelessWidget {
@@ -1275,6 +1443,115 @@ class _NameRail extends StatelessWidget {
           .toList(),
     );
   }
+}
+
+class _ActorRail extends StatelessWidget {
+  const _ActorRail({required this.actors});
+
+  final List<MediaPersonProfile> actors;
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleActors = actors
+        .where((item) => item.name.trim().isNotEmpty)
+        .toList(growable: false);
+    if (visibleActors.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return SizedBox(
+      height: 128,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        itemCount: visibleActors.length,
+        separatorBuilder: (context, index) => const SizedBox(width: 14),
+        itemBuilder: (context, index) {
+          final actor = visibleActors[index];
+          return SizedBox(
+            width: 86,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                _ActorAvatar(actor: actor),
+                const SizedBox(height: 10),
+                Text(
+                  actor.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ActorAvatar extends StatelessWidget {
+  const _ActorAvatar({required this.actor});
+
+  final MediaPersonProfile actor;
+
+  @override
+  Widget build(BuildContext context) {
+    final avatarUrl = actor.avatarUrl.trim();
+    return Container(
+      width: 74,
+      height: 74,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: const Color(0xFF162233),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: avatarUrl.isEmpty
+          ? Center(
+              child: Text(
+                _actorInitial(actor.name),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            )
+          : Image.network(
+              avatarUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                return Center(
+                  child: Text(
+                    _actorInitial(actor.name),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+String _actorInitial(String name) {
+  final trimmed = name.trim();
+  if (trimmed.isEmpty) {
+    return '?';
+  }
+  return String.fromCharCode(trimmed.runes.first).toUpperCase();
 }
 
 class _FactRow extends StatelessWidget {

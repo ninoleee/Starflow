@@ -153,7 +153,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     final stopwatch = Stopwatch();
     var completed = false;
     var bytesRead = 0;
-    int? totalBytes;
 
     Future<void> finish() async {
       if (completed) {
@@ -174,7 +173,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       completer.complete(
         _StartupProbeResult(
           estimatedSpeedBytesPerSecond: speedBytesPerSecond,
-          fileSizeBytes: totalBytes,
         ),
       );
     }
@@ -187,10 +185,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       final response = await client.send(request).timeout(
             const Duration(seconds: 4),
           );
-      totalBytes = _resolveResponseTotalBytes(
-        response.headers,
-        fallbackContentLength: response.contentLength,
-      );
 
       subscription = response.stream.listen(
         (chunk) {
@@ -397,15 +391,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                         initialData: player.state.bufferingPercentage,
                         builder: (context, progressSnapshot) {
                           return IgnorePointer(
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.28),
-                              ),
-                              child: _PlayerStartupOverlay(
-                                target: _resolvedTarget ?? widget.target,
-                                probe: _startupProbe,
-                                bufferingProgress: progressSnapshot.data,
-                              ),
+                            child: _PlayerStartupOverlay(
+                              target: _resolvedTarget ?? widget.target,
+                              probe: _startupProbe,
+                              bufferingProgress: progressSnapshot.data,
                             ),
                           );
                         },
@@ -435,111 +424,55 @@ class _PlayerStartupOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final infoItems = <_StartupInfoItem>[
-      _StartupInfoItem(
-        label: '网速',
-        value: probe.speedLabel.isEmpty ? '测速中' : probe.speedLabel,
-      ),
-      _StartupInfoItem(
-        label: '格式',
-        value: _buildFormatValue(target),
-      ),
-      _StartupInfoItem(
-        label: '大小',
-        value: _buildSizeValue(target, probe),
-      ),
-    ];
-    final progressValue = _normalizeBufferProgress(bufferingProgress);
-
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 380),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: const Color(0x78101723),
-              borderRadius: BorderRadius.circular(26),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.1),
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.2,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          '正在准备播放',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    target.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '${target.sourceKind.label} · ${target.sourceName}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: const Color(0xCCFFFFFF),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  if (progressValue != null) ...[
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(999),
-                      child: LinearProgressIndicator(
-                        minHeight: 4,
-                        value: progressValue,
-                        color: Colors.white,
-                        backgroundColor: Colors.white.withValues(alpha: 0.15),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      for (final item in infoItems)
-                        _StartupMetricChip(item: item),
-                    ],
-                  ),
-                ],
-              ),
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const Center(
+          child: SizedBox(
+            width: 28,
+            height: 28,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.4,
+              color: Colors.white,
             ),
           ),
         ),
-      ),
+        Positioned(
+          top: MediaQuery.paddingOf(context).top + kToolbarHeight + 12,
+          right: 18,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _StartupMetricText(
+                label: '网速',
+                value: probe.speedLabel.isEmpty ? '测速中' : probe.speedLabel,
+              ),
+              const SizedBox(height: 6),
+              _StartupMetricText(
+                label: '格式',
+                value: _buildFormatValue(target),
+              ),
+              if (_normalizeBufferProgress(bufferingProgress)
+                  case final progress?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: SizedBox(
+                    width: 108,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        minHeight: 2.5,
+                        value: progress,
+                        color: Colors.white,
+                        backgroundColor: Colors.white.withValues(alpha: 0.16),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -565,54 +498,51 @@ class _PlayerStartupOverlay extends StatelessWidget {
     }
     return parts.join(' · ');
   }
-
-  static String _buildSizeValue(
-    PlaybackTarget target,
-    _StartupProbeResult probe,
-  ) {
-    final label = target.fileSizeLabel.isNotEmpty
-        ? target.fileSizeLabel
-        : probe.fileSizeLabel;
-    return label.isEmpty ? '未知' : label;
-  }
 }
 
-class _StartupMetricChip extends StatelessWidget {
-  const _StartupMetricChip({required this.item});
+class _StartupMetricText extends StatelessWidget {
+  const _StartupMetricText({
+    required this.label,
+    required this.value,
+  });
 
-  final _StartupInfoItem item;
+  final String label;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 96, maxWidth: 164),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+    return RichText(
+      textAlign: TextAlign.right,
+      text: TextSpan(
         children: [
-          Text(
-            item.label,
-            style: const TextStyle(
-              color: Color(0xB3FFFFFF),
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
+          TextSpan(
+            text: '$label ',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.72),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              shadows: const [
+                Shadow(
+                  color: Color(0xA6000000),
+                  blurRadius: 10,
+                  offset: Offset(0, 2),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            item.value,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
+          TextSpan(
+            text: value,
             style: const TextStyle(
               color: Colors.white,
               fontSize: 13,
               fontWeight: FontWeight.w700,
-              height: 1.35,
+              shadows: [
+                Shadow(
+                  color: Color(0xB8000000),
+                  blurRadius: 12,
+                  offset: Offset(0, 2),
+                ),
+              ],
             ),
           ),
         ],
@@ -621,24 +551,12 @@ class _StartupMetricChip extends StatelessWidget {
   }
 }
 
-class _StartupInfoItem {
-  const _StartupInfoItem({
-    required this.label,
-    required this.value,
-  });
-
-  final String label;
-  final String value;
-}
-
 class _StartupProbeResult {
   const _StartupProbeResult({
     this.estimatedSpeedBytesPerSecond,
-    this.fileSizeBytes,
   });
 
   final int? estimatedSpeedBytesPerSecond;
-  final int? fileSizeBytes;
 
   String get speedLabel {
     final speed = estimatedSpeedBytesPerSecond ?? 0;
@@ -647,35 +565,4 @@ class _StartupProbeResult {
     }
     return '${formatByteSize(speed)}/s';
   }
-
-  String get fileSizeLabel => formatByteSize(fileSizeBytes);
-}
-
-int? _resolveResponseTotalBytes(
-  Map<String, String> headers, {
-  int? fallbackContentLength,
-}) {
-  final contentRange = headers['content-range'] ?? headers['Content-Range'];
-  if (contentRange != null) {
-    final slashIndex = contentRange.lastIndexOf('/');
-    if (slashIndex >= 0 && slashIndex < contentRange.length - 1) {
-      final total = int.tryParse(contentRange.substring(slashIndex + 1).trim());
-      if (total != null && total > 0) {
-        return total;
-      }
-    }
-  }
-
-  final contentLength = fallbackContentLength ?? 0;
-  if (contentLength > 0) {
-    return contentLength;
-  }
-
-  final rawHeader = headers['content-length'] ?? headers['Content-Length'];
-  final parsedHeader = int.tryParse((rawHeader ?? '').trim());
-  if (parsedHeader != null && parsedHeader > 0) {
-    return parsedHeader;
-  }
-
-  return null;
 }

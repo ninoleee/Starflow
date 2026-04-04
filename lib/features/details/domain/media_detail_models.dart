@@ -1,6 +1,16 @@
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
+class MediaPersonProfile {
+  const MediaPersonProfile({
+    required this.name,
+    this.avatarUrl = '',
+  });
+
+  final String name;
+  final String avatarUrl;
+}
+
 class MediaDetailTarget {
   const MediaDetailTarget({
     required this.title,
@@ -12,6 +22,7 @@ class MediaDetailTarget {
     this.genres = const [],
     this.directors = const [],
     this.actors = const [],
+    this.actorProfiles = const [],
     this.availabilityLabel = '',
     this.searchQuery = '',
     this.playbackTarget,
@@ -34,6 +45,7 @@ class MediaDetailTarget {
   final List<String> genres;
   final List<String> directors;
   final List<String> actors;
+  final List<MediaPersonProfile> actorProfiles;
   final String availabilityLabel;
   final String searchQuery;
   final PlaybackTarget? playbackTarget;
@@ -64,10 +76,21 @@ class MediaDetailTarget {
 
   bool get needsMetadataMatch {
     final hasPoster = posterUrl.trim().isNotEmpty;
-    final hasPeople = directors.isNotEmpty || actors.isNotEmpty;
+    final hasPeople =
+        directors.isNotEmpty || actors.isNotEmpty || actorProfiles.isNotEmpty;
     final hasGenres = genres.isNotEmpty;
     final hasOverview = hasUsefulOverview;
     return !hasPoster || !(hasOverview || hasPeople || hasGenres);
+  }
+
+  List<MediaPersonProfile> get resolvedActorProfiles {
+    if (actorProfiles.isNotEmpty) {
+      return actorProfiles;
+    }
+    return actors
+        .where((item) => item.trim().isNotEmpty)
+        .map((item) => MediaPersonProfile(name: item.trim()))
+        .toList();
   }
 
   static bool _hasUsefulOverview(String value) {
@@ -92,6 +115,7 @@ class MediaDetailTarget {
     List<String>? genres,
     List<String>? directors,
     List<String>? actors,
+    List<MediaPersonProfile>? actorProfiles,
     String? availabilityLabel,
     String? searchQuery,
     PlaybackTarget? playbackTarget,
@@ -114,6 +138,7 @@ class MediaDetailTarget {
       genres: genres ?? this.genres,
       directors: directors ?? this.directors,
       actors: actors ?? this.actors,
+      actorProfiles: actorProfiles ?? this.actorProfiles,
       availabilityLabel: availabilityLabel ?? this.availabilityLabel,
       searchQuery: searchQuery ?? this.searchQuery,
       playbackTarget: playbackTarget ?? this.playbackTarget,
@@ -143,6 +168,10 @@ class MediaDetailTarget {
       genres: item.genres,
       directors: item.directors,
       actors: item.actors,
+      actorProfiles: item.actors
+          .where((entry) => entry.trim().isNotEmpty)
+          .map((entry) => MediaPersonProfile(name: entry.trim()))
+          .toList(),
       availabilityLabel: availabilityLabel.isEmpty
           ? '资源已就绪：${item.sourceKind.label} · ${item.sourceName}'
           : availabilityLabel,

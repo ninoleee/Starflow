@@ -6,6 +6,7 @@ import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -155,18 +156,39 @@ class SettingsPage extends ConsumerWidget {
                           ? '未配置'
                           : '已配置',
                     ),
-                    trailing: OutlinedButton(
-                      onPressed: () => _openTmdbTokenEditor(
-                        context,
-                        ref,
-                        settings.tmdbReadAccessToken,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      OutlinedButton(
+                        onPressed: () => _openTmdbTokenEditor(
+                          context,
+                          ref,
+                          settings.tmdbReadAccessToken,
+                        ),
+                        child: Text(
+                          settings.tmdbReadAccessToken.trim().isEmpty
+                              ? '填写 Token'
+                              : '编辑 Token',
+                        ),
                       ),
-                      child: Text(
-                        settings.tmdbReadAccessToken.trim().isEmpty
-                            ? '填写'
-                            : '编辑',
+                      OutlinedButton(
+                        onPressed: () => _openTmdbTestDialog(
+                          context,
+                          ref,
+                        ),
+                        child: const Text('测试 TMDB'),
                       ),
-                    ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '可以直接测试一个片名，确认 Token、搜索和详情接口是不是都正常。',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF7F8FAE),
+                        ),
                   ),
                   const Divider(height: 20),
                   SwitchListTile(
@@ -326,6 +348,177 @@ class SettingsPage extends ConsumerWidget {
           .read(settingsControllerProvider.notifier)
           .setTmdbReadAccessToken(controller.text);
     }
+    controller.dispose();
+  }
+
+  Future<void> _openTmdbTestDialog(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final controller = TextEditingController(text: '这个杀手不太冷');
+    var preferSeries = false;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        var loading = false;
+        String message = '';
+        TmdbMetadataMatch? result;
+
+        return StatefulBuilder(
+          builder: (context, setState) {
+            Future<void> runTest() async {
+              final token =
+                  ref.read(appSettingsProvider).tmdbReadAccessToken.trim();
+              final query = controller.text.trim();
+              if (token.isEmpty) {
+                setState(() {
+                  message = '请先填写 TMDB Read Access Token。';
+                  result = null;
+                });
+                return;
+              }
+              if (query.isEmpty) {
+                setState(() {
+                  message = '请先输入要测试的片名。';
+                  result = null;
+                });
+                return;
+              }
+
+              setState(() {
+                loading = true;
+                message = '';
+                result = null;
+              });
+
+              try {
+                final match =
+                    await ref.read(tmdbMetadataClientProvider).matchTitle(
+                          query: query,
+                          readAccessToken: token,
+                          preferSeries: preferSeries,
+                        );
+                setState(() {
+                  loading = false;
+                  result = match;
+                  message = match == null ? '没有匹配到结果。' : '匹配成功。';
+                });
+              } catch (error) {
+                setState(() {
+                  loading = false;
+                  result = null;
+                  message = '$error';
+                });
+              }
+            }
+
+            return AlertDialog(
+              title: const Text('测试 TMDB'),
+              content: SizedBox(
+                width: 420,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                        controller: controller,
+                        autofocus: true,
+                        textInputAction: TextInputAction.search,
+                        decoration: const InputDecoration(
+                          labelText: '测试片名',
+                          hintText: '例如：这个杀手不太冷',
+                          border: OutlineInputBorder(),
+                        ),
+                        onSubmitted: (_) => runTest(),
+                      ),
+                      const SizedBox(height: 10),
+                      CheckboxListTile(
+                        value: preferSeries,
+                        onChanged: (value) {
+                          setState(() {
+                            preferSeries = value ?? false;
+                          });
+                        },
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: const Text('优先按剧集匹配'),
+                      ),
+                      if (loading) ...[
+                        const SizedBox(height: 6),
+                        const LinearProgressIndicator(),
+                      ],
+                      if (message.trim().isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          message,
+                          style: TextStyle(
+                            color: result == null
+                                ? const Color(0xFFE79A9A)
+                                : const Color(0xFF9FD6B3),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                      if (result != null) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.04),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                result!.title,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                  '年份：${result!.year > 0 ? result!.year : '未知'}'),
+                              Text(
+                                '海报：${result!.posterUrl.trim().isEmpty ? '无' : '有'}',
+                              ),
+                              Text(
+                                'IMDb ID：${result!.imdbId.trim().isEmpty ? '无' : result!.imdbId}',
+                              ),
+                              if (result!.overview.trim().isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  result!.overview,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('关闭'),
+                ),
+                FilledButton(
+                  onPressed: loading ? null : runTest,
+                  child: const Text('开始测试'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
     controller.dispose();
   }
 

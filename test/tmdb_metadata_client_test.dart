@@ -47,8 +47,14 @@ void main() {
                   ],
                   'credits': {
                     'cast': [
-                      {'name': 'Keanu Reeves'},
-                      {'name': 'Carrie-Anne Moss'},
+                      {
+                        'name': 'Keanu Reeves',
+                        'profile_path': '/keanu.jpg',
+                      },
+                      {
+                        'name': 'Carrie-Anne Moss',
+                        'profile_path': '/carrie.jpg',
+                      },
                     ],
                     'crew': [
                       {
@@ -92,6 +98,11 @@ void main() {
       expect(result.genres, ['动作', '科幻']);
       expect(result.directors, ['Lana Wachowski', 'Lilly Wachowski']);
       expect(result.actors, ['Keanu Reeves', 'Carrie-Anne Moss']);
+      expect(result.actorProfiles.first.name, 'Keanu Reeves');
+      expect(
+        result.actorProfiles.first.avatarUrl,
+        'https://image.tmdb.org/t/p/w185/keanu.jpg',
+      );
       expect(result.imdbId, 'tt0133093');
     });
 
@@ -142,8 +153,14 @@ void main() {
                   ],
                   'aggregate_credits': {
                     'cast': [
-                      {'name': 'Pedro Pascal'},
-                      {'name': 'Bella Ramsey'},
+                      {
+                        'name': 'Pedro Pascal',
+                        'profile_path': '/pedro.jpg',
+                      },
+                      {
+                        'name': 'Bella Ramsey',
+                        'profile_path': '/bella.jpg',
+                      },
                     ],
                     'crew': const [],
                   },
@@ -170,6 +187,11 @@ void main() {
       expect(result.durationLabel, '55m / 集');
       expect(result.directors, ['Craig Mazin']);
       expect(result.actors, ['Pedro Pascal', 'Bella Ramsey']);
+      expect(result.actorProfiles.first.name, 'Pedro Pascal');
+      expect(
+        result.actorProfiles.first.avatarUrl,
+        'https://image.tmdb.org/t/p/w185/pedro.jpg',
+      );
       expect(result.imdbId, 'tt3581920');
     });
   });

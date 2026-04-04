@@ -187,11 +187,8 @@ class TmdbMetadataClient {
     final castSource = searchResult.isSeries
         ? json['aggregate_credits'] as Map<String, dynamic>? ?? const {}
         : json['credits'] as Map<String, dynamic>? ?? const {};
-    final cast = (castSource['cast'] as List<dynamic>? ?? const [])
-        .map((item) => '${(item as Map?)?['name'] ?? ''}'.trim())
-        .where((item) => item.isNotEmpty)
-        .take(8)
-        .toList();
+    final actorProfiles = _resolveActorProfiles(castSource['cast']);
+    final cast = actorProfiles.map((item) => item.name).toList();
 
     final crew = (castSource['crew'] as List<dynamic>? ?? const [])
         .whereType<Map>()
@@ -245,8 +242,44 @@ class TmdbMetadataClient {
       genres: genres,
       directors: directors,
       actors: cast,
+      actorProfiles: actorProfiles,
       imdbId: imdbId,
     );
+  }
+
+  static List<TmdbPersonProfile> _resolveActorProfiles(Object? raw) {
+    final seen = <String>{};
+    final profiles = <TmdbPersonProfile>[];
+    final items = raw as List<dynamic>? ?? const [];
+
+    for (final entry in items) {
+      if (entry is! Map) {
+        continue;
+      }
+      final json = Map<String, dynamic>.from(entry);
+      final name = '${json['name'] ?? ''}'.trim();
+      if (name.isEmpty) {
+        continue;
+      }
+      final key = name.toLowerCase();
+      if (!seen.add(key)) {
+        continue;
+      }
+      profiles.add(
+        TmdbPersonProfile(
+          name: name,
+          avatarUrl: _resolveImageUrl(
+            '${json['profile_path'] ?? ''}',
+            size: 'w185',
+          ),
+        ),
+      );
+      if (profiles.length >= 8) {
+        break;
+      }
+    }
+
+    return profiles;
   }
 
   static int _resolveEpisodeRuntime(Object? raw) {
@@ -353,6 +386,7 @@ class TmdbMetadataMatch {
     required this.genres,
     required this.directors,
     required this.actors,
+    required this.actorProfiles,
     required this.imdbId,
   });
 
@@ -365,7 +399,18 @@ class TmdbMetadataMatch {
   final List<String> genres;
   final List<String> directors;
   final List<String> actors;
+  final List<TmdbPersonProfile> actorProfiles;
   final String imdbId;
+}
+
+class TmdbPersonProfile {
+  const TmdbPersonProfile({
+    required this.name,
+    this.avatarUrl = '',
+  });
+
+  final String name;
+  final String avatarUrl;
 }
 
 class TmdbMetadataException implements Exception {
