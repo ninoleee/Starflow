@@ -17,13 +17,17 @@ class WebDavNasClient {
   final http.Client _client;
 
   Future<List<MediaCollection>> fetchCollections(
-      MediaSourceConfig source) async {
+    MediaSourceConfig source, {
+    String? directoryId,
+  }) async {
     final endpoint = source.endpoint.trim();
     if (endpoint.isEmpty) {
       return const [];
     }
 
-    final rootUri = Uri.parse(endpoint);
+    final rootUri = Uri.parse(
+      directoryId?.trim().isNotEmpty == true ? directoryId!.trim() : endpoint,
+    );
     final entries = await _propfind(rootUri, source: source);
     return entries
         .where((entry) => !entry.isSelf && entry.isCollection)

@@ -17,6 +17,39 @@ class ImdbRatingClient {
   Future<List<int>>? _ratingsDatasetFuture;
   final Map<String, ImdbRatingMatch?> _lookupCache = {};
 
+  Future<ImdbRatingPreview?> previewMatch({
+    required String query,
+    int year = 0,
+    bool preferSeries = false,
+  }) async {
+    final cleanedQuery = _cleanQuery(query);
+    if (cleanedQuery.isEmpty) {
+      return null;
+    }
+
+    final best = await _matchSuggestion(
+      query: cleanedQuery,
+      year: year,
+      preferSeries: preferSeries,
+    );
+    if (best == null) {
+      return null;
+    }
+
+    final rating = await _lookupRating(best.id);
+    return ImdbRatingPreview(
+      imdbId: best.id,
+      title: best.title,
+      year: best.year,
+      typeLabel: best.type,
+      posterUrl: best.posterUrl,
+      ratingLabel: rating == null
+          ? ''
+          : 'IMDb ${rating.averageRating.toStringAsFixed(1)}',
+      voteCount: rating?.voteCount ?? 0,
+    );
+  }
+
   Future<ImdbRatingMatch?> matchRating({
     required String query,
     int year = 0,
@@ -54,9 +87,22 @@ class ImdbRatingClient {
     required int year,
     required bool preferSeries,
   }) async {
+    final best = await _matchSuggestion(
+      query: query,
+      year: year,
+      preferSeries: preferSeries,
+    );
+    return best?.id ?? '';
+  }
+
+  Future<_ImdbSuggestionItem?> _matchSuggestion({
+    required String query,
+    required int year,
+    required bool preferSeries,
+  }) async {
     final cleanedQuery = _cleanQuery(query);
     if (cleanedQuery.isEmpty) {
-      return '';
+      return null;
     }
 
     final response = await _client.get(
@@ -74,7 +120,7 @@ class ImdbRatingClient {
       utf8.decode(response.bodyBytes, allowMalformed: true),
     );
     if (decoded is! Map<String, dynamic>) {
-      return '';
+      return null;
     }
 
     final matches = (decoded['d'] as List<dynamic>? ?? const [])
@@ -82,16 +128,15 @@ class ImdbRatingClient {
         .whereType<_ImdbSuggestionItem>()
         .toList();
     if (matches.isEmpty) {
-      return '';
+      return null;
     }
 
-    final best = _pickBestMatch(
+    return _pickBestMatch(
       matches,
       query: cleanedQuery,
       year: year,
       preferSeries: preferSeries,
     );
-    return best?.id ?? '';
   }
 
   Future<_ImdbRatingEntry?> _lookupRating(String imdbId) async {
@@ -256,6 +301,26 @@ class ImdbRatingMatch {
   bool get hasRating => ratingLabel.trim().isNotEmpty;
 }
 
+class ImdbRatingPreview {
+  const ImdbRatingPreview({
+    required this.imdbId,
+    required this.title,
+    this.year = 0,
+    this.typeLabel = '',
+    this.posterUrl = '',
+    this.ratingLabel = '',
+    this.voteCount = 0,
+  });
+
+  final String imdbId;
+  final String title;
+  final int year;
+  final String typeLabel;
+  final String posterUrl;
+  final String ratingLabel;
+  final int voteCount;
+}
+
 class ImdbRatingException implements Exception {
   const ImdbRatingException(this.message);
 
@@ -283,6 +348,7 @@ class _ImdbSuggestionItem {
     required this.rank,
     required this.type,
     required this.typeId,
+    this.posterUrl = '',
   });
 
   final String id;
@@ -291,6 +357,7 @@ class _ImdbSuggestionItem {
   final int rank;
   final String type;
   final String typeId;
+  final String posterUrl;
 
   bool get isSeries =>
       typeId.toLowerCase().contains('tv') ||
@@ -318,6 +385,14 @@ class _ImdbSuggestionItem {
       rank: json['rank'] as int? ?? 999999,
       type: '${json['q'] ?? ''}',
       typeId: '${json['qid'] ?? ''}',
+      posterUrl: _resolvePosterUrl(json['i']),
     );
+  }
+
+  static String _resolvePosterUrl(Object? raw) {
+    if (raw is! Map) {
+      return '';
+    }
+    return '${raw['imageUrl'] ?? raw['url'] ?? ''}'.trim();
   }
 }

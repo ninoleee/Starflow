@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/utils/network_image_headers.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
+import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
@@ -163,16 +165,27 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
             SectionPanel(
               title: '评分',
               subtitle: 'IMDb 评分仍然按需补，不会和元数据匹配优先级混在一起。',
-              child: SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('启用 IMDb 自动补评分'),
-                subtitle: const Text('会先匹配 IMDb 条目，再补一个 IMDb 评分标签。'),
-                value: settings.imdbRatingMatchEnabled,
-                onChanged: (value) {
-                  ref
-                      .read(settingsControllerProvider.notifier)
-                      .setImdbRatingMatchEnabled(value);
-                },
+              child: Column(
+                children: [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('启用 IMDb 自动补评分'),
+                    subtitle: const Text('会先匹配 IMDb 条目，再补一个 IMDb 评分标签。'),
+                    value: settings.imdbRatingMatchEnabled,
+                    onChanged: (value) {
+                      ref
+                          .read(settingsControllerProvider.notifier)
+                          .setImdbRatingMatchEnabled(value);
+                    },
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton(
+                      onPressed: () => _openImdbTestDialog(context, ref),
+                      child: const Text('测试 IMDb'),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -343,6 +356,7 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                         const SizedBox(height: 12),
                         _TestResultCard(
                           title: result!.title,
+                          imageUrl: result!.posterUrl,
                           lines: [
                             '年份：${result!.year > 0 ? result!.year : '未知'}',
                             '海报：${result!.posterUrl.trim().isEmpty ? '无' : '有'}',
@@ -500,6 +514,7 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                         const SizedBox(height: 12),
                         _TestResultCard(
                           title: result!.title,
+                          imageUrl: result!.posterUrl,
                           lines: [
                             '来源：${result!.provider.label}',
                             '年份：${result!.year > 0 ? result!.year : '未知'}',
@@ -537,17 +552,173 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
     yearController.dispose();
     doubanIdController.dispose();
   }
+
+  Future<void> _openImdbTestDialog(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final queryController = TextEditingController(text: 'The Godfather');
+    final yearController = TextEditingController(text: '1972');
+    var preferSeries = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        var loading = false;
+        String message = '';
+        ImdbRatingPreview? result;
+
+        return StatefulBuilder(
+          builder: (context, setState) {
+            Future<void> runTest() async {
+              final query = queryController.text.trim();
+              final year = int.tryParse(yearController.text.trim()) ?? 0;
+              if (query.isEmpty) {
+                setState(() {
+                  message = '请先输入要测试的片名。';
+                  result = null;
+                });
+                return;
+              }
+
+              setState(() {
+                loading = true;
+                message = '';
+                result = null;
+              });
+
+              try {
+                final match =
+                    await ref.read(imdbRatingClientProvider).previewMatch(
+                          query: query,
+                          year: year,
+                          preferSeries: preferSeries,
+                        );
+                setState(() {
+                  loading = false;
+                  result = match;
+                  message = match == null ? '没有匹配到结果。' : '匹配成功。';
+                });
+              } catch (error) {
+                setState(() {
+                  loading = false;
+                  result = null;
+                  message = '$error';
+                });
+              }
+            }
+
+            return AlertDialog(
+              title: const Text('测试 IMDb'),
+              content: SizedBox(
+                width: 420,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                        controller: queryController,
+                        autofocus: true,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          labelText: '测试片名',
+                          hintText: '例如：The Godfather',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: yearController,
+                        keyboardType: TextInputType.number,
+                        textInputAction: TextInputAction.done,
+                        decoration: const InputDecoration(
+                          labelText: '年份',
+                          hintText: '可选，例如：1972',
+                          border: OutlineInputBorder(),
+                        ),
+                        onSubmitted: (_) => runTest(),
+                      ),
+                      const SizedBox(height: 10),
+                      CheckboxListTile(
+                        value: preferSeries,
+                        onChanged: (value) {
+                          setState(() {
+                            preferSeries = value ?? false;
+                          });
+                        },
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: const Text('优先按剧集匹配'),
+                      ),
+                      if (loading) ...[
+                        const SizedBox(height: 6),
+                        const LinearProgressIndicator(),
+                      ],
+                      if (message.trim().isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          message,
+                          style: TextStyle(
+                            color: result == null
+                                ? const Color(0xFFE79A9A)
+                                : const Color(0xFF9FD6B3),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                      if (result != null) ...[
+                        const SizedBox(height: 12),
+                        _TestResultCard(
+                          title: result!.title,
+                          imageUrl: result!.posterUrl,
+                          lines: [
+                            '年份：${result!.year > 0 ? result!.year : '未知'}',
+                            '类型：${result!.typeLabel.trim().isEmpty ? '未知' : result!.typeLabel}',
+                            '海报：${result!.posterUrl.trim().isEmpty ? '无' : '有'}',
+                            'IMDb ID：${result!.imdbId}',
+                            '评分：${result!.ratingLabel.trim().isEmpty ? '无' : result!.ratingLabel}',
+                            if (result!.voteCount > 0)
+                              '票数：${result!.voteCount}',
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('关闭'),
+                ),
+                FilledButton(
+                  onPressed: loading ? null : runTest,
+                  child: const Text('开始测试'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    queryController.dispose();
+    yearController.dispose();
+  }
 }
 
 class _TestResultCard extends StatelessWidget {
   const _TestResultCard({
     required this.title,
     required this.lines,
+    this.imageUrl = '',
     this.overview = '',
   });
 
   final String title;
   final List<String> lines;
+  final String imageUrl;
   final String overview;
 
   @override
@@ -559,27 +730,88 @@ class _TestResultCard extends StatelessWidget {
         color: Colors.white.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 6),
-          for (final line in lines) Text(line),
-          if (overview.trim().isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              overview,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
+          if (imageUrl.trim().isNotEmpty) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(
+                imageUrl,
+                headers: networkImageHeadersForUrl(imageUrl),
+                width: 86,
+                height: 124,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  return _TestPosterPlaceholder(title: title);
+                },
+                loadingBuilder: (context, child, progress) {
+                  if (progress == null) {
+                    return child;
+                  }
+                  return const SizedBox(
+                    width: 86,
+                    height: 124,
+                    child: Center(
+                        child: CircularProgressIndicator(strokeWidth: 2)),
+                  );
+                },
+              ),
             ),
+            const SizedBox(width: 12),
           ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                for (final line in lines) Text(line),
+                if (overview.trim().isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    overview,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _TestPosterPlaceholder extends StatelessWidget {
+  const _TestPosterPlaceholder({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final trimmed = title.trim();
+    final letter = trimmed.isEmpty ? '?' : trimmed.substring(0, 1);
+    return Container(
+      width: 86,
+      height: 124,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        letter.toUpperCase(),
+        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
       ),
     );
   }

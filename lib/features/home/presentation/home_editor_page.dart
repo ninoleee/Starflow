@@ -19,6 +19,48 @@ final homeEditorCollectionsProvider = FutureProvider<List<MediaCollection>>((
 
 const _kCustomDoubanListPresetValue = '__custom__';
 
+/// 二级选择底部弹层：四周留白 + 列表过长时可滚动。
+class _HomeEditorSecondarySheetBody extends StatelessWidget {
+  const _HomeEditorSecondarySheetBody({
+    required this.title,
+    required this.tiles,
+  });
+
+  final String title;
+  final List<Widget> tiles;
+
+  static const _edgePadding = 20.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxListHeight = MediaQuery.sizeOf(context).height * 0.72;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(_edgePadding),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 14),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxListHeight),
+              child: ListView(
+                shrinkWrap: true,
+                physics: const BouncingScrollPhysics(),
+                children: tiles,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 const _defaultDoubanListPresets = <_DoubanListPreset>[
   _DoubanListPreset(
     title: '豆瓣热门电影',
@@ -254,15 +296,9 @@ class HomeEditorPage extends ConsumerWidget {
       context: context,
       isScrollControlled: true,
       builder: (context) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '选择来源分类',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 14),
+        return _HomeEditorSecondarySheetBody(
+          title: '选择来源分类',
+          tiles: [
             _AddModuleTile(
               title: '内置',
               subtitle: '最近新增等基础模块',
@@ -304,15 +340,9 @@ class HomeEditorPage extends ConsumerWidget {
       context: context,
       isScrollControlled: true,
       builder: (context) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '内置模块',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 14),
+        return _HomeEditorSecondarySheetBody(
+          title: '内置模块',
+          tiles: [
             _AddModuleTile(
               title: '最近新增',
               subtitle: '把最近同步进来的资源放上首页',
@@ -334,15 +364,9 @@ class HomeEditorPage extends ConsumerWidget {
       context: context,
       isScrollControlled: true,
       builder: (context) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '豆瓣模块',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 14),
+        return _HomeEditorSecondarySheetBody(
+          title: '豆瓣模块',
+          tiles: [
             _AddModuleTile(
               title: '豆瓣我想看',
               subtitle: '来自豆瓣我看列表',
@@ -441,35 +465,31 @@ class HomeEditorPage extends ConsumerWidget {
       context: context,
       isScrollControlled: true,
       builder: (context) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              source.name,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 14),
-            ...sourceCollections.map(
-              (collection) => _AddModuleTile(
-                title: collection.title,
-                subtitle: collection.subtitle.trim().isEmpty
-                    ? '${collection.sourceKind.label} 分区'
-                    : collection.subtitle,
-                onTap: () {
-                  ref.read(settingsControllerProvider.notifier).saveHomeModule(
-                        HomeModuleConfig.libraryCollection(collection),
-                      );
-                  Navigator.of(context).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('已添加 ${collection.title}'),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
+        return _HomeEditorSecondarySheetBody(
+          title: source.name,
+          tiles: sourceCollections
+              .map(
+                (collection) => _AddModuleTile(
+                  title: collection.title,
+                  subtitle: collection.subtitle.trim().isEmpty
+                      ? '${collection.sourceKind.label} 分区'
+                      : collection.subtitle,
+                  onTap: () {
+                    ref
+                        .read(settingsControllerProvider.notifier)
+                        .saveHomeModule(
+                          HomeModuleConfig.libraryCollection(collection),
+                        );
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('已添加 ${collection.title}'),
+                      ),
+                    );
+                  },
+                ),
+              )
+              .toList(),
         );
       },
     );

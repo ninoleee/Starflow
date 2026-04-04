@@ -238,10 +238,14 @@ class DoubanApiClient {
   }
 
   DoubanEntry? _mapInterestEntry(Map<String, dynamic> item) {
+    final payload = Map<String, dynamic>.from(item);
     final subject =
         Map<String, dynamic>.from(item['subject'] as Map? ?? const {});
+    if (subject.isNotEmpty) {
+      payload['subject'] = subject;
+    }
     return _mapDoubanEntry(
-      subject,
+      payload,
       noteFallback: [
         (item['comment'] as String? ?? '').trim(),
       ],
@@ -307,7 +311,7 @@ class DoubanApiClient {
       id: id,
       title: title,
       year: year,
-      posterUrl: posterUrl,
+      posterUrl: _normalizePosterUrl(posterUrl),
       note: note,
       durationLabel: durationLabel,
       genres: genres,
@@ -365,11 +369,12 @@ class DoubanApiClient {
 
   String _resolveId(
       Map<String, dynamic> target, Map<String, dynamic> fallback) {
+    // 片单等列表外层常用 target_id 表示条目；id 有时是列表行 id，需优先 target_id。
     for (final value in [
-      target['id'],
-      target['target_id'],
-      fallback['id'],
       fallback['target_id'],
+      target['target_id'],
+      target['id'],
+      fallback['id'],
     ]) {
       final text = '$value'.trim();
       if (text.isNotEmpty && text != 'null') {
@@ -379,33 +384,26 @@ class DoubanApiClient {
     return '';
   }
 
+  static String _normalizePosterUrl(String url) {
+    final t = url.trim();
+    if (t.isEmpty || t == 'null') {
+      return '';
+    }
+    if (t.startsWith('//')) {
+      return 'https:$t';
+    }
+    return t;
+  }
+
   String _resolvePosterUrl(
     Map<String, dynamic> target,
     Map<String, dynamic> fallback,
   ) {
-    final pic = target['pic'];
-    if (pic is Map) {
-      for (final key in ['large', 'normal']) {
-        final text = '${pic[key] ?? ''}'.trim();
-        if (text.isNotEmpty) {
-          return text;
-        }
-      }
-    }
-    final picText = '$pic'.trim();
+    final picText = _resolveImageValue(target['pic']);
     if (picText.isNotEmpty && picText != 'null') {
       return picText;
     }
-    final cover = target['cover'];
-    if (cover is Map) {
-      for (final key in ['url', 'large', 'normal']) {
-        final text = '${cover[key] ?? ''}'.trim();
-        if (text.isNotEmpty) {
-          return text;
-        }
-      }
-    }
-    final coverText = '$cover'.trim();
+    final coverText = _resolveImageValue(target['cover']);
     if (coverText.isNotEmpty && coverText != 'null') {
       return coverText;
     }
@@ -419,13 +417,25 @@ class DoubanApiClient {
         'pic',
         'thumbnail',
       ]) {
-        final text = '${map[key] ?? ''}'.trim();
+        final text = _resolveImageValue(map[key]);
         if (text.isNotEmpty && text != 'null') {
           return text;
         }
       }
     }
     return '';
+  }
+
+  String _resolveImageValue(Object? raw) {
+    if (raw is Map) {
+      for (final key in ['large', 'normal', 'url', 'medium', 'small']) {
+        final text = '${raw[key] ?? ''}'.trim();
+        if (text.isNotEmpty && text != 'null') {
+          return text;
+        }
+      }
+    }
+    return '$raw'.trim();
   }
 
   int _resolveYear(Map<String, dynamic> target, Map<String, dynamic> fallback) {

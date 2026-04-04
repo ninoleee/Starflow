@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/utils/network_image_headers.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
@@ -226,6 +227,7 @@ class _SearchResultCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(16),
               child: Image.network(
                 result.posterUrl,
+                headers: networkImageHeadersForUrl(result.posterUrl),
                 width: 82,
                 height: 118,
                 fit: BoxFit.cover,

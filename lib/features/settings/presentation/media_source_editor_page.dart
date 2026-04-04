@@ -55,7 +55,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _resolvedUserId = e?.userId ?? '';
     _resolvedServerId = e?.serverId ?? '';
     _resolvedDeviceId = e?.deviceId ?? '';
-    _selectedSectionIds = {...?e?.featuredSectionIds};
+    _selectedSectionIds =
+        e?.kind == MediaSourceKind.emby ? {...?e?.featuredSectionIds} : {};
     _connectionMessage = _initialConnectionMessage(e);
     _advancedTokenExpanded = _tokenController.text.trim().isNotEmpty;
   }
@@ -85,7 +86,9 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       userId: _resolvedUserId,
       serverId: _resolvedServerId,
       deviceId: _resolvedDeviceId,
-      featuredSectionIds: _selectedSectionIds.toList(),
+      featuredSectionIds: _kind == MediaSourceKind.emby
+          ? _selectedSectionIds.toList()
+          : const [],
     );
   }
 
@@ -214,6 +217,32 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     }
   }
 
+  Future<void> _pickWebDavPath() async {
+    final endpoint = _endpointController.text.trim();
+    if (endpoint.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先填写 WebDAV Endpoint')),
+      );
+      return;
+    }
+
+    final pickedPath = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(
+        fullscreenDialog: true,
+        builder: (context) => _WebDavPathPickerPage(source: _draftConfig()),
+      ),
+    );
+
+    if (!mounted || pickedPath == null || pickedPath.trim().isEmpty) {
+      return;
+    }
+
+    _endpointController.text = pickedPath;
+    setState(() {
+      _connectionMessage = '已选择路径，可继续测试连接。';
+    });
+  }
+
   void _onSave() {
     ref.read(settingsControllerProvider.notifier).saveMediaSource(
           MediaSourceConfig(
@@ -315,6 +344,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                   if (value != null) {
                     setState(() {
                       _kind = value;
+                      _availableSections = const [];
+                      _selectedSectionIds.clear();
                       _connectionMessage = _defaultConnectionMessage(value);
                     });
                   }
@@ -487,12 +518,24 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                 const SizedBox(height: 28),
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: OutlinedButton(
-                    onPressed: _isTestingWebDav ||
-                            _endpointController.text.trim().isEmpty
-                        ? null
-                        : _onTestWebDavConnection,
-                    child: Text(_isTestingWebDav ? '测试中…' : '测试连接'),
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      OutlinedButton(
+                        onPressed: _isTestingWebDav ||
+                                _endpointController.text.trim().isEmpty
+                            ? null
+                            : _onTestWebDavConnection,
+                        child: Text(_isTestingWebDav ? '测试中…' : '测试连接'),
+                      ),
+                      OutlinedButton(
+                        onPressed: _endpointController.text.trim().isEmpty
+                            ? null
+                            : _pickWebDavPath,
+                        child: const Text('选择路径'),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -549,6 +592,184 @@ class _SectionTitle extends StatelessWidget {
           letterSpacing: 0.2,
           color: theme.colorScheme.primary,
         ),
+      ),
+    );
+  }
+}
+
+class _WebDavPathPickerPage extends ConsumerStatefulWidget {
+  const _WebDavPathPickerPage({required this.source});
+
+  final MediaSourceConfig source;
+
+  @override
+  ConsumerState<_WebDavPathPickerPage> createState() =>
+      _WebDavPathPickerPageState();
+}
+
+class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
+  late String _currentPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentPath = widget.source.endpoint.trim();
+  }
+
+  Future<List<MediaCollection>> _loadFolders() {
+    return ref.read(webDavNasClientProvider).fetchCollections(
+          widget.source,
+          directoryId: _currentPath,
+        );
+  }
+
+  String _pathLabel(String raw) {
+    final uri = Uri.tryParse(raw);
+    if (uri == null) {
+      return raw;
+    }
+    final path = uri.path.isEmpty ? '/' : uri.path;
+    return '${uri.host}$path';
+  }
+
+  String? _parentPath(String raw) {
+    final uri = Uri.tryParse(raw);
+    if (uri == null) {
+      return null;
+    }
+    final segments =
+        uri.pathSegments.where((segment) => segment.isNotEmpty).toList();
+    if (segments.isEmpty) {
+      return null;
+    }
+    final parentSegments = segments.take(segments.length - 1).toList();
+    final parentPath =
+        parentSegments.isEmpty ? '/' : '/${parentSegments.join('/')}/';
+    return uri
+        .replace(path: parentPath, query: null, fragment: null)
+        .toString();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final parentPath = _parentPath(_currentPath);
+    return Scaffold(
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          FutureBuilder<List<MediaCollection>>(
+            future: _loadFolders(),
+            builder: (context, snapshot) {
+              return ListView(
+                padding: overlayToolbarPagePadding(context),
+                children: [
+                  Text(
+                    '当前路径',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  SelectableText(
+                    _pathLabel(_currentPath),
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  if (parentPath != null) ...[
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            _currentPath = parentPath;
+                          });
+                        },
+                        icon: const Icon(Icons.arrow_upward_rounded, size: 18),
+                        label: const Text('返回上一级目录'),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  if (snapshot.connectionState == ConnectionState.waiting)
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.only(top: 48),
+                        child: CircularProgressIndicator(),
+                      ),
+                    )
+                  else if (snapshot.hasError)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text('读取路径失败：${snapshot.error}'),
+                    )
+                  else if ((snapshot.data ?? const []).isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 12),
+                      child: Text('当前路径下没有子文件夹，可以直接选择这里作为根路径。'),
+                    )
+                  else ...[
+                    Text(
+                      '子文件夹',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    for (final folder in snapshot.data!)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.folder_open_rounded),
+                        title: Text(folder.title),
+                        subtitle: Text(folder.id),
+                        onTap: () {
+                          setState(() {
+                            _currentPath = folder.id;
+                          });
+                        },
+                      ),
+                  ],
+                ],
+              );
+            },
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Material(
+              type: MaterialType.transparency,
+              child: Padding(
+                padding:
+                    EdgeInsets.only(top: MediaQuery.paddingOf(context).top),
+                child: SizedBox(
+                  height: kToolbarHeight,
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                      ),
+                      Expanded(
+                        child: Text(
+                          '选择 WebDAV 路径',
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () =>
+                            Navigator.of(context).pop(_currentPath),
+                        child: const Text('选这里'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

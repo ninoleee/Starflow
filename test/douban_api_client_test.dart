@@ -110,5 +110,114 @@ void main() {
         'https://img9.doubanio.com/view/photo/l/public/p511118051.jpg',
       );
     });
+
+    test('maps interest items when poster only exists on outer interest item',
+        () async {
+      final client = DoubanApiClient(
+        MockClient((request) async {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'interests': [
+                  {
+                    'pic': {
+                      'large':
+                          'https://img9.doubanio.com/view/photo/l/public/p1910902213.jpg',
+                    },
+                    'subject': {
+                      'id': '1291546',
+                      'title': '霸王别姬',
+                      'year': '1993',
+                    },
+                  },
+                ],
+              }),
+            ),
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
+        }),
+      );
+
+      final items = await client.fetchInterestItems(
+        userId: 'demo-user',
+        status: DoubanInterestStatus.mark,
+      );
+
+      expect(items, hasLength(1));
+      expect(
+        items.first.posterUrl,
+        'https://img9.doubanio.com/view/photo/l/public/p1910902213.jpg',
+      );
+    });
+
+    test('doulist items use target_id and cover_url for poster', () async {
+      const cover =
+          'https://qnmob3.doubanio.com/view/photo/large/public/p480747492.jpg'
+          '?imageView2/2/q/80/w/300/h/300/format/jpg';
+      final client = DoubanApiClient(
+        MockClient((request) async {
+          expect(request.url.path, '/rexxar/api/v2/doulist/1518184/items');
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'items': [
+                  {
+                    'title': '肖申克的救赎',
+                    'id': '187074125',
+                    'target_id': '1292052',
+                    'cover_url': cover,
+                    'type': 'movie',
+                  },
+                ],
+              }),
+            ),
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
+        }),
+      );
+
+      final items = await client.fetchListItems(
+        url: 'https://m.douban.com/doulist/1518184',
+      );
+
+      expect(items, hasLength(1));
+      expect(items.first.id, '1292052');
+      expect(items.first.posterUrl, cover);
+      expect(items.first.sourceUrl, 'https://movie.douban.com/subject/1292052/');
+    });
+
+    test('normalizes protocol-relative poster urls', () async {
+      final client = DoubanApiClient(
+        MockClient((request) async {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'items': [
+                  {
+                    'title': '测试',
+                    'id': '1',
+                    'target_id': '2',
+                    'cover_url':
+                        '//img9.doubanio.com/view/photo/l/public/p1.jpg',
+                    'type': 'movie',
+                  },
+                ],
+              }),
+            ),
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
+        }),
+      );
+
+      final items = await client.fetchListItems(
+        url: 'https://www.douban.com/doulist/1',
+      );
+
+      expect(items.first.posterUrl,
+          'https://img9.doubanio.com/view/photo/l/public/p1.jpg');
+    });
   });
 }

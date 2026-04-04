@@ -6,16 +6,17 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
+import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
   group('enrichedDetailTargetProvider', () {
-    test('matches Emby resource after opening detail page', () async {
+    test('keeps unmatched detail target unchanged until manual actions',
+        () async {
       final container = ProviderContainer(
         overrides: [
           appSettingsProvider.overrideWithValue(
@@ -24,6 +25,7 @@ void main() {
               'searchProviders': const [],
               'doubanAccount': const {'enabled': false},
               'homeModules': const [],
+              'wmdbMetadataMatchEnabled': true,
             }),
           ),
           mediaRepositoryProvider.overrideWithValue(
@@ -47,6 +49,13 @@ void main() {
               ],
             ),
           ),
+          wmdbMetadataClientProvider.overrideWithValue(
+            WmdbMetadataClient(
+              MockClient((request) async {
+                throw TestFailure('详情页不应自动请求元数据：${request.url}');
+              }),
+            ),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -66,79 +75,76 @@ void main() {
         enrichedDetailTargetProvider(target).future,
       );
 
-      expect(resolved.sourceId, 'emby-main');
-      expect(resolved.itemId, 'emby-1');
-      expect(resolved.playbackTarget, isNotNull);
-      expect(resolved.availabilityLabel, contains('Home Emby'));
-      expect(resolved.ratingLabels, contains('豆瓣 9.6'));
+      expect(resolved.sourceId, isEmpty);
+      expect(resolved.itemId, isEmpty);
+      expect(resolved.playbackTarget, isNull);
+      expect(resolved.posterUrl, isEmpty);
+      expect(resolved.ratingLabels, ['豆瓣 9.6']);
     });
 
-    test('stops at preferred WMDB metadata match', () async {
+    test('resolves Emby playback details for existing matched target',
+        () async {
       final container = ProviderContainer(
         overrides: [
           appSettingsProvider.overrideWithValue(
             AppSettings.fromJson({
-              'mediaSources': const [],
+              'mediaSources': [
+                {
+                  'id': 'emby-main',
+                  'name': 'Home Emby',
+                  'kind': 'emby',
+                  'endpoint': 'https://media.example.com',
+                  'enabled': true,
+                  'username': 'alice',
+                  'accessToken': 'token-789',
+                  'userId': 'user-123',
+                  'deviceId': 'device-456',
+                },
+              ],
               'searchProviders': const [],
               'doubanAccount': const {'enabled': false},
               'homeModules': const [],
-              'wmdbMetadataMatchEnabled': true,
-              'tmdbMetadataMatchEnabled': true,
-              'tmdbReadAccessToken': 'tmdb-token',
-              'metadataMatchPriority': 'wmdb',
             }),
           ),
-          mediaRepositoryProvider.overrideWithValue(
-            const _FakeMediaRepository(library: []),
-          ),
-          wmdbMetadataClientProvider.overrideWithValue(
-            WmdbMetadataClient(
+          embyApiClientProvider.overrideWithValue(
+            EmbyApiClient(
               MockClient((request) async {
-                expect(request.url.path, '/movie/api');
-                return http.Response.bytes(
-                  utf8.encode(
+                if (request.url.path == '/Items/emby-1/PlaybackInfo') {
+                  return http.Response(
                     jsonEncode({
-                      'data': [
+                      'PlaySessionId': 'play-session-1',
+                      'MediaSources': [
                         {
-                          'poster':
-                              'https://img.wmdb.tv/movie/poster/sample.jpg',
-                          'name': '美丽人生',
-                          'genre': '剧情',
-                          'description': '圭多用幽默守护家人。',
-                          'lang': 'Cn',
-                        },
-                      ],
-                      'actor': [
-                        {
-                          'data': [
-                            {'name': '罗伯托·贝尼尼', 'lang': 'Cn'},
+                          'Id': 'media-source-2',
+                          'Container': 'mkv',
+                          'Size': 25769803776,
+                          'Bitrate': 28400000,
+                          'Width': 3840,
+                          'Height': 2160,
+                          'DirectStreamUrl':
+                              '/Videos/emby-1/stream.mp4?static=true&MediaSourceId=media-source-2',
+                          'AddApiKeyToDirectStreamUrl': true,
+                          'MediaStreams': [
+                            {
+                              'Type': 'Video',
+                              'Codec': 'hevc',
+                              'Width': 3840,
+                              'Height': 2160,
+                              'BitRate': 25200000,
+                            },
+                            {
+                              'Type': 'Audio',
+                              'Codec': 'truehd',
+                              'BitRate': 3200000,
+                            },
                           ],
                         },
                       ],
-                      'director': [
-                        {
-                          'data': [
-                            {'name': '罗伯托·贝尼尼', 'lang': 'Cn'},
-                          ],
-                        },
-                      ],
-                      'originalName': '美丽人生',
-                      'imdbId': 'tt0118799',
-                      'year': '1997',
-                      'duration': 6960,
-                      'doubanId': '1292063',
-                      'doubanRating': '9.6',
                     }),
-                  ),
-                  200,
-                );
-              }),
-            ),
-          ),
-          tmdbMetadataClientProvider.overrideWithValue(
-            TmdbMetadataClient(
-              MockClient((request) async {
-                throw TestFailure('WMDB 命中后不应该继续请求 TMDB：${request.url}');
+                    200,
+                  );
+                }
+                return http.Response('Not found', 404);
               }),
             ),
           ),
@@ -146,29 +152,35 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      const target = MediaDetailTarget(
-        title: '美丽人生',
-        posterUrl: '',
-        overview: '',
-        year: 1997,
-        availabilityLabel: '无',
-        searchQuery: '美丽人生',
-        sourceName: '豆瓣',
-        doubanId: '1292063',
+      final target = MediaDetailTarget.fromMediaItem(
+        MediaItem(
+          id: 'emby-1',
+          title: '美丽人生',
+          overview: '来自 Emby 的条目',
+          posterUrl: 'https://emby.example.com/poster.jpg',
+          year: 1997,
+          durationLabel: '116分钟',
+          genres: const ['剧情'],
+          sourceId: 'emby-main',
+          sourceName: 'Home Emby',
+          sourceKind: MediaSourceKind.emby,
+          streamUrl: '',
+          playbackItemId: 'emby-1',
+          preferredMediaSourceId: 'media-source-2',
+          addedAt: DateTime(2026, 4, 4),
+        ),
       );
 
       final resolved = await container.read(
         enrichedDetailTargetProvider(target).future,
       );
 
-      expect(
-        resolved.posterUrl,
-        'https://img.wmdb.tv/movie/poster/sample.jpg',
-      );
-      expect(resolved.directors, ['罗伯托·贝尼尼']);
-      expect(resolved.actors, ['罗伯托·贝尼尼']);
-      expect(resolved.ratingLabels, ['豆瓣 9.6']);
-      expect(resolved.imdbId, 'tt0118799');
+      final playback = resolved.playbackTarget;
+      expect(playback, isNotNull);
+      expect(playback!.streamUrl, contains('/Videos/emby-1/stream.mp4'));
+      expect(playback.formatLabel, 'MKV · HEVC · TrueHD');
+      expect(playback.fileSizeLabel, '24.0 GB');
+      expect(playback.resolutionLabel, '3840x2160');
     });
   });
 }

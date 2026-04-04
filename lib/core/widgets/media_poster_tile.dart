@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/core/utils/network_image_headers.dart';
 
 class MediaPosterTile extends StatelessWidget {
   const MediaPosterTile({
@@ -21,9 +22,66 @@ class MediaPosterTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final trimmedPoster = posterUrl.trim();
     final pixelRatio = MediaQuery.devicePixelRatioOf(context);
     final cacheWidth = (136 * pixelRatio).round();
     final cacheHeight = (196 * pixelRatio).round();
+    final posterUri = Uri.tryParse(trimmedPoster);
+    final host = posterUri?.host.toLowerCase() ?? '';
+    // 豆瓣带 imageView2 等参数的图在部分设备上与 decode 尺寸限制组合可能解码失败，故不缩采样。
+    final skipResizeForDecode =
+        host.endsWith('.doubanio.com') || host == 'img.douban.com';
+
+    final Widget posterChild;
+    if (trimmedPoster.isEmpty) {
+      posterChild = Container(
+        color: theme.colorScheme.surfaceContainerHighest,
+        alignment: Alignment.center,
+        child: Icon(
+          Icons.movie_creation_outlined,
+          size: 32,
+          color: theme.colorScheme.primary,
+        ),
+      );
+    } else {
+      posterChild = Image.network(
+        trimmedPoster,
+        headers: networkImageHeadersForUrl(trimmedPoster),
+        fit: BoxFit.cover,
+        cacheWidth: skipResizeForDecode ? null : cacheWidth,
+        cacheHeight: skipResizeForDecode ? null : cacheHeight,
+        filterQuality: FilterQuality.low,
+        frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+          if (wasSynchronouslyLoaded || frame != null) {
+            return child;
+          }
+          return Container(
+            color: theme.colorScheme.surfaceContainerHighest,
+            alignment: Alignment.center,
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.1,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+          );
+        },
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            color: theme.colorScheme.surfaceContainerHighest,
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.movie_creation_outlined,
+              size: 32,
+              color: theme.colorScheme.primary,
+            ),
+          );
+        },
+      );
+    }
+
     return InkWell(
       borderRadius: BorderRadius.circular(16),
       onTap: onTap,
@@ -37,42 +95,7 @@ class MediaPosterTile extends StatelessWidget {
               borderRadius: BorderRadius.circular(16),
               child: AspectRatio(
                 aspectRatio: 0.7,
-                child: Image.network(
-                  posterUrl,
-                  fit: BoxFit.cover,
-                  cacheWidth: cacheWidth,
-                  cacheHeight: cacheHeight,
-                  filterQuality: FilterQuality.low,
-                  frameBuilder:
-                      (context, child, frame, wasSynchronouslyLoaded) {
-                    if (wasSynchronouslyLoaded || frame != null) {
-                      return child;
-                    }
-                    return Container(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      alignment: Alignment.center,
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.1,
-                          color: theme.colorScheme.primary,
-                        ),
-                      ),
-                    );
-                  },
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      alignment: Alignment.center,
-                      child: Icon(
-                        Icons.movie_creation_outlined,
-                        size: 32,
-                        color: theme.colorScheme.primary,
-                      ),
-                    );
-                  },
-                ),
+                child: posterChild,
               ),
             ),
             const SizedBox(height: 6),

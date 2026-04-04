@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/utils/network_image_headers.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
@@ -369,6 +370,7 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
                   opacity: 0.72,
                   child: Image.network(
                     imageUrl,
+                    headers: networkImageHeadersForUrl(imageUrl),
                     fit: BoxFit.cover,
                     alignment: Alignment.topCenter,
                     errorBuilder: (context, error, stackTrace) {
@@ -822,6 +824,7 @@ class _FeaturedHeroCard extends StatelessWidget {
                 if (item.imageUrl.trim().isNotEmpty)
                   Image.network(
                     item.imageUrl,
+                    headers: networkImageHeadersForUrl(item.imageUrl),
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) =>
                         const SizedBox.shrink(),
@@ -958,6 +961,7 @@ class _HomeCarousel extends StatelessWidget {
                     if (item.imageUrl.trim().isNotEmpty)
                       Image.network(
                         item.imageUrl,
+                        headers: networkImageHeadersForUrl(item.imageUrl),
                         fit: BoxFit.cover,
                         errorBuilder: (context, error, stackTrace) =>
                             const SizedBox.shrink(),
