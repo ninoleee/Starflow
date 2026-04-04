@@ -27,6 +27,14 @@ abstract class MediaRepository {
     int limit = 10,
   });
 
+  Future<List<MediaItem>> fetchChildren({
+    required String sourceId,
+    required String parentId,
+    String sectionId = '',
+    String sectionName = '',
+    int limit = 200,
+  });
+
   Future<MediaItem?> findById(String id);
 
   Future<MediaItem?> matchTitle(String title);
@@ -197,6 +205,47 @@ class AppMediaRepository implements MediaRepository {
   }) async {
     final items = await fetchLibrary(kind: kind, limit: limit);
     return items.take(limit).toList();
+  }
+
+  @override
+  Future<List<MediaItem>> fetchChildren({
+    required String sourceId,
+    required String parentId,
+    String sectionId = '',
+    String sectionName = '',
+    int limit = 200,
+  }) async {
+    final normalizedSourceId = sourceId.trim();
+    final normalizedParentId = parentId.trim();
+    if (normalizedSourceId.isEmpty || normalizedParentId.isEmpty) {
+      return const [];
+    }
+
+    MediaSourceConfig? source;
+    for (final candidate in _enabledSources) {
+      if (candidate.id == normalizedSourceId) {
+        source = candidate;
+        break;
+      }
+    }
+    if (source == null || !source.enabled) {
+      return const [];
+    }
+
+    if (source.kind == MediaSourceKind.emby) {
+      if (!source.hasActiveSession) {
+        return const [];
+      }
+      return _embyApiClient.fetchChildren(
+        source,
+        parentId: normalizedParentId,
+        sectionId: sectionId,
+        sectionName: sectionName,
+        limit: limit,
+      );
+    }
+
+    return const [];
   }
 
   @override

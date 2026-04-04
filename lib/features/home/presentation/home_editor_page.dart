@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
@@ -27,111 +28,119 @@ class HomeEditorPage extends ConsumerWidget {
         onPressed: () => _showAddModuleSheet(context, ref),
         child: const Icon(Icons.add_rounded),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
-        children: [
-          SectionPanel(
-            title: '当前模块',
-            subtitle: '拖动排序，或在底部加一个新的模块',
-            child: settings.homeModules.isEmpty
-                ? const Text('还没有首页模块。')
-                : ReorderableListView.builder(
-                    shrinkWrap: true,
-                    buildDefaultDragHandles: false,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: settings.homeModules.length,
-                    onReorder: (oldIndex, newIndex) {
-                      ref
-                          .read(settingsControllerProvider.notifier)
-                          .reorderHomeModules(oldIndex, newIndex);
-                    },
-                    itemBuilder: (context, index) {
-                      final module = settings.homeModules[index];
-                      return Container(
-                        key: ValueKey(module.id),
-                        margin: const EdgeInsets.only(bottom: 10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFE),
-                          borderRadius: BorderRadius.circular(22),
-                        ),
-                        child: ListTile(
-                          title: Text(module.title),
-                          subtitle: Text(module.description),
-                          leading: ReorderableDragStartListener(
-                            index: index,
-                            child: const Icon(Icons.drag_indicator_rounded),
+      body: AppPageBackground(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+          children: [
+            SectionPanel(
+              title: '当前模块',
+              subtitle: '拖动排序，或在底部加一个新的模块',
+              child: settings.homeModules.isEmpty
+                  ? const Text('还没有首页模块。')
+                  : ReorderableListView.builder(
+                      shrinkWrap: true,
+                      buildDefaultDragHandles: false,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: settings.homeModules.length,
+                      onReorder: (oldIndex, newIndex) {
+                        ref
+                            .read(settingsControllerProvider.notifier)
+                            .reorderHomeModules(oldIndex, newIndex);
+                      },
+                      itemBuilder: (context, index) {
+                        final module = settings.homeModules[index];
+                        return Container(
+                          key: ValueKey(module.id),
+                          margin: const EdgeInsets.only(bottom: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.72),
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(
+                              color:
+                                  Theme.of(context).colorScheme.outlineVariant,
+                            ),
                           ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                onPressed: () =>
-                                    _showEditModuleDialog(context, ref, module),
-                                icon: const Icon(Icons.edit_outlined),
-                              ),
-                              IconButton(
-                                onPressed: () {
-                                  ref
-                                      .read(settingsControllerProvider.notifier)
-                                      .removeHomeModule(module.id);
-                                },
-                                icon: const Icon(Icons.close_rounded),
-                              ),
-                              Switch(
-                                value: module.enabled,
-                                onChanged: (value) {
-                                  ref
-                                      .read(settingsControllerProvider.notifier)
-                                      .toggleHomeModule(module.id, value);
-                                },
-                              ),
-                            ],
+                          child: ListTile(
+                            title: Text(module.title),
+                            subtitle: Text(module.description),
+                            leading: ReorderableDragStartListener(
+                              index: index,
+                              child: const Icon(Icons.drag_indicator_rounded),
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  onPressed: () => _showEditModuleDialog(
+                                      context, ref, module),
+                                  icon: const Icon(Icons.edit_outlined),
+                                ),
+                                IconButton(
+                                  onPressed: () {
+                                    ref
+                                        .read(
+                                            settingsControllerProvider.notifier)
+                                        .removeHomeModule(module.id);
+                                  },
+                                  icon: const Icon(Icons.close_rounded),
+                                ),
+                                Switch(
+                                  value: module.enabled,
+                                  onChanged: (value) {
+                                    ref
+                                        .read(
+                                            settingsControllerProvider.notifier)
+                                        .toggleHomeModule(module.id, value);
+                                  },
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          const SizedBox(height: 18),
-          SectionPanel(
-            title: '可添加来源',
-            subtitle: '当前已接入的来源分区会出现在这里',
-            child: collectionsAsync.when(
-              data: (collections) {
-                if (collections.isEmpty) {
-                  return const Text('还没有可用分区。先去设置里接入 Emby 或 NAS。');
-                }
-                return Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: collections
-                      .map(
-                        (collection) => ActionChip(
-                          label: Text(
-                              '${collection.sourceName} · ${collection.title}'),
-                          onPressed: () {
-                            ref
-                                .read(settingsControllerProvider.notifier)
-                                .saveHomeModule(
-                                  HomeModuleConfig.libraryCollection(
-                                      collection),
-                                );
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('已添加 ${collection.title}'),
-                              ),
-                            );
-                          },
-                        ),
-                      )
-                      .toList(),
-                );
-              },
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (error, stackTrace) => Text('读取分区失败：$error'),
+                        );
+                      },
+                    ),
             ),
-          ),
-        ],
+            const SizedBox(height: 18),
+            SectionPanel(
+              title: '可添加来源',
+              subtitle: '当前已接入的来源分区会出现在这里',
+              child: collectionsAsync.when(
+                data: (collections) {
+                  if (collections.isEmpty) {
+                    return const Text('还没有可用分区。先去设置里接入 Emby 或 NAS。');
+                  }
+                  return Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: collections
+                        .map(
+                          (collection) => ActionChip(
+                            label: Text(
+                                '${collection.sourceName} · ${collection.title}'),
+                            onPressed: () {
+                              ref
+                                  .read(settingsControllerProvider.notifier)
+                                  .saveHomeModule(
+                                    HomeModuleConfig.libraryCollection(
+                                        collection),
+                                  );
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('已添加 ${collection.title}'),
+                                ),
+                              );
+                            },
+                          ),
+                        )
+                        .toList(),
+                  );
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, stackTrace) => Text('读取分区失败：$error'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -428,12 +437,20 @@ class _AddModuleTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(title),
-      subtitle: Text(subtitle),
-      trailing: const Icon(Icons.add_circle_outline_rounded),
-      onTap: onTap,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        title: Text(title),
+        subtitle: Text(subtitle),
+        trailing: const Icon(Icons.add_circle_outline_rounded),
+        onTap: onTap,
+      ),
     );
   }
 }

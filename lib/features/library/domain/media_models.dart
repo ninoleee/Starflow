@@ -147,6 +147,8 @@ class MediaItem {
     required this.genres,
     this.directors = const [],
     this.actors = const [],
+    this.itemType = '',
+    this.isFolder = false,
     this.sectionId = '',
     this.sectionName = '',
     required this.sourceId,
@@ -154,6 +156,10 @@ class MediaItem {
     required this.sourceKind,
     required this.streamUrl,
     this.streamHeaders = const {},
+    this.playbackItemId = '',
+    this.preferredMediaSourceId = '',
+    this.seasonNumber,
+    this.episodeNumber,
     required this.addedAt,
     this.lastWatchedAt,
   });
@@ -167,6 +173,8 @@ class MediaItem {
   final List<String> genres;
   final List<String> directors;
   final List<String> actors;
+  final String itemType;
+  final bool isFolder;
   final String sectionId;
   final String sectionName;
   final String sourceId;
@@ -174,10 +182,15 @@ class MediaItem {
   final MediaSourceKind sourceKind;
   final String streamUrl;
   final Map<String, String> streamHeaders;
+  final String playbackItemId;
+  final String preferredMediaSourceId;
+  final int? seasonNumber;
+  final int? episodeNumber;
   final DateTime addedAt;
   final DateTime? lastWatchedAt;
 
-  bool get isPlayable => streamUrl.isNotEmpty;
+  bool get isPlayable =>
+      streamUrl.trim().isNotEmpty || playbackItemId.trim().isNotEmpty;
 }
 
 class MediaCollection {

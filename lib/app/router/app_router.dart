@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -118,34 +120,168 @@ class _AppNavigationShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBody: true,
+      backgroundColor: Colors.transparent,
       body: navigationShell,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: navigationShell.currentIndex,
-        onDestinationSelected: (index) => navigationShell.goBranch(index),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.space_dashboard_outlined),
-            selectedIcon: Icon(Icons.space_dashboard_rounded),
-            label: '首页',
+      bottomNavigationBar: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(30),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: const Color(0x28101927),
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 30,
+                    offset: const Offset(0, 18),
+                  ),
+                ],
+              ),
+              child: _FloatingNavigationBar(
+                currentIndex: navigationShell.currentIndex,
+                onDestinationSelected: (index) =>
+                    navigationShell.goBranch(index),
+              ),
+            ),
           ),
-          NavigationDestination(
-            icon: Icon(Icons.search_rounded),
-            label: '搜索',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.video_library_outlined),
-            selectedIcon: Icon(Icons.video_library_rounded),
-            label: '媒体库',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.tune_outlined),
-            selectedIcon: Icon(Icons.tune_rounded),
-            label: '设置',
-          ),
-        ],
+        ),
       ),
     );
   }
+}
+
+class _FloatingNavigationBar extends StatelessWidget {
+  const _FloatingNavigationBar({
+    required this.currentIndex,
+    required this.onDestinationSelected,
+  });
+
+  final int currentIndex;
+  final ValueChanged<int> onDestinationSelected;
+
+  static const _items = [
+    _NavigationItemData(
+      label: '首页',
+      icon: Icons.space_dashboard_outlined,
+      selectedIcon: Icons.space_dashboard_rounded,
+    ),
+    _NavigationItemData(
+      label: '搜索',
+      icon: Icons.search_rounded,
+      selectedIcon: Icons.search_rounded,
+    ),
+    _NavigationItemData(
+      label: '媒体库',
+      icon: Icons.video_library_outlined,
+      selectedIcon: Icons.video_library_rounded,
+    ),
+    _NavigationItemData(
+      label: '设置',
+      icon: Icons.tune_outlined,
+      selectedIcon: Icons.tune_rounded,
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      child: Row(
+        children: List.generate(_items.length, (index) {
+          final item = _items[index];
+          final selected = index == currentIndex;
+          return Expanded(
+            child: _FloatingNavigationButton(
+              item: item,
+              selected: selected,
+              onTap: () => onDestinationSelected(index),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+class _FloatingNavigationButton extends StatelessWidget {
+  const _FloatingNavigationButton({
+    required this.item,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final _NavigationItemData item;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final foregroundColor = selected ? Colors.white : const Color(0xCCFFFFFF);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
+        splashColor: Colors.white.withValues(alpha: 0.12),
+        highlightColor: Colors.white.withValues(alpha: 0.04),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            decoration: BoxDecoration(
+              color: selected
+                  ? Colors.white.withValues(alpha: 0.10)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  selected ? item.selectedIcon : item.icon,
+                  color: foregroundColor,
+                  size: 22,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  item.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: foregroundColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NavigationItemData {
+  const _NavigationItemData({
+    required this.label,
+    required this.icon,
+    required this.selectedIcon,
+  });
+
+  final String label;
+  final IconData icon;
+  final IconData selectedIcon;
 }
 
 class _MissingDetailTargetPage extends StatelessWidget {

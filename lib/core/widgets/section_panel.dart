@@ -21,47 +21,73 @@ class SectionPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
-      child: Container(
-        width: double.infinity,
-        padding: padding,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(28),
-          gradient: const LinearGradient(
-            colors: [Color(0xFFFFFFFF), Color(0xFFF9FBFF)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+    return Container(
+      width: double.infinity,
+      padding: padding,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.92),
+        ),
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFFFFFF), Color(0xFFF7FAFF)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.shadow.withValues(alpha: 0.08),
+            blurRadius: 28,
+            offset: const Offset(0, 16),
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(title, style: theme.textTheme.titleLarge),
-                ),
-                if (actionLabel != null &&
-                    actionLabel!.trim().isNotEmpty &&
-                    onActionPressed != null)
-                  TextButton(
-                    onPressed: onActionPressed,
-                    child: Text(actionLabel!),
-                  ),
-              ],
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 5,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(999),
             ),
-            const SizedBox(height: 6),
-            Text(
-              subtitle,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(title, style: theme.textTheme.titleLarge),
               ),
+              if (actionLabel != null &&
+                  actionLabel!.trim().isNotEmpty &&
+                  onActionPressed != null)
+                TextButton(
+                  onPressed: onActionPressed,
+                  style: TextButton.styleFrom(
+                    backgroundColor:
+                        theme.colorScheme.primary.withValues(alpha: 0.08),
+                    foregroundColor: theme.colorScheme.primary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                  ),
+                  child: Text(actionLabel!),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
             ),
-            const SizedBox(height: 18),
-            child,
-          ],
-        ),
+          ),
+          const SizedBox(height: 18),
+          child,
+        ],
       ),
     );
   }

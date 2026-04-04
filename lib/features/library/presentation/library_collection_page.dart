@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -30,51 +31,46 @@ class LibraryCollectionPage extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(title: Text(target.title)),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-        children: [
-          SectionPanel(
-            title: target.title,
-            subtitle: target.subtitle.trim().isEmpty
-                ? '${target.sourceKind.label} · ${target.sourceName}'
-                : '${target.sourceName} · ${target.subtitle}',
-            child: itemsAsync.when(
-              data: (items) {
-                if (items.isEmpty) {
-                  return const Text('无');
-                }
-                return Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: items
-                      .map(
-                        (item) => MediaPosterTile(
-                          title: item.title,
-                          subtitle: item.durationLabel,
-                          posterUrl: item.posterUrl,
-                          badges: [
-                            item.sourceKind.label,
-                            if (item.sectionName.trim().isNotEmpty)
-                              item.sectionName,
-                          ],
-                          caption: item.overview,
-                          actionLabel: '查看详情',
-                          onTap: () {
-                            context.pushNamed(
-                              'detail',
-                              extra: MediaDetailTarget.fromMediaItem(item),
-                            );
-                          },
-                        ),
-                      )
-                      .toList(),
-                );
-              },
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (error, stackTrace) => Text('加载失败：$error'),
+      body: AppPageBackground(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+          children: [
+            SectionPanel(
+              title: target.title,
+              subtitle: target.subtitle.trim().isEmpty
+                  ? '${target.sourceKind.label} · ${target.sourceName}'
+                  : '${target.sourceName} · ${target.subtitle}',
+              child: itemsAsync.when(
+                data: (items) {
+                  if (items.isEmpty) {
+                    return const Text('无');
+                  }
+                  return Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: items
+                        .map(
+                          (item) => MediaPosterTile(
+                            title: item.title,
+                            subtitle: item.year > 0 ? '${item.year}' : '',
+                            posterUrl: item.posterUrl,
+                            onTap: () {
+                              context.pushNamed(
+                                'detail',
+                                extra: MediaDetailTarget.fromMediaItem(item),
+                              );
+                            },
+                          ),
+                        )
+                        .toList(),
+                  );
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, stackTrace) => Text('加载失败：$error'),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

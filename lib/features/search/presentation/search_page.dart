@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
@@ -111,81 +112,84 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('在线搜索')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-        children: [
-          SectionPanel(
-            title: '搜索服务',
-            subtitle: '你可以在设置页替换成自己的聚合服务或站点模板',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: _controller,
-                  textInputAction: TextInputAction.search,
-                  onSubmitted: (_) => _performSearch(),
-                  decoration: InputDecoration(
-                    hintText: '搜索电影、剧集或番剧资源',
-                    suffixIcon: IconButton(
-                      onPressed: _performSearch,
-                      icon: const Icon(Icons.search_rounded),
+      body: AppPageBackground(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+          children: [
+            SectionPanel(
+              title: '搜索服务',
+              subtitle: '你可以在设置页替换成自己的聚合服务或站点模板',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: _controller,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => _performSearch(),
+                    decoration: InputDecoration(
+                      hintText: '搜索电影、剧集或番剧资源',
+                      suffixIcon: IconButton(
+                        onPressed: _performSearch,
+                        icon: const Icon(Icons.search_rounded),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                if (enabledProviders.isEmpty)
-                  const Text('还没有启用搜索服务，请先去设置页添加。')
-                else
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: enabledProviders
-                        .map(
-                          (provider) => ChoiceChip(
-                            label: Text(provider.name),
-                            selected: activeProvider?.id == provider.id,
-                            onSelected: (_) {
-                              setState(() {
-                                _selectedProviderId = provider.id;
-                              });
-                              if (_controller.text.trim().isNotEmpty) {
-                                _performSearch();
-                              }
-                            },
-                          ),
-                        )
-                        .toList(),
-                  ),
-              ],
+                  const SizedBox(height: 14),
+                  if (enabledProviders.isEmpty)
+                    const Text('还没有启用搜索服务，请先去设置页添加。')
+                  else
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: enabledProviders
+                          .map(
+                            (provider) => ChoiceChip(
+                              label: Text(provider.name),
+                              selected: activeProvider?.id == provider.id,
+                              onSelected: (_) {
+                                setState(() {
+                                  _selectedProviderId = provider.id;
+                                });
+                                if (_controller.text.trim().isNotEmpty) {
+                                  _performSearch();
+                                }
+                              },
+                            ),
+                          )
+                          .toList(),
+                    ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 18),
-          SectionPanel(
-            title: '搜索结果',
-            subtitle: activeProvider == null
-                ? '启用一个搜索服务后就可以开始搜索'
-                : '当前使用 ${activeProvider.name}，后续可以接下载器、离线缓存或收藏流程',
-            child: _isSearching
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 32),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                : _errorMessage != null
-                    ? Text('搜索失败：$_errorMessage')
-                    : _results.isEmpty
-                        ? const Text('输入关键字后开始搜索；这里会展示统一结构的资源结果。')
-                        : Column(
-                            children: _results
-                                .map(
-                                  (item) => Padding(
-                                    padding: const EdgeInsets.only(bottom: 12),
-                                    child: _SearchResultCard(result: item),
-                                  ),
-                                )
-                                .toList(),
-                          ),
-          ),
-        ],
+            const SizedBox(height: 18),
+            SectionPanel(
+              title: '搜索结果',
+              subtitle: activeProvider == null
+                  ? '启用一个搜索服务后就可以开始搜索'
+                  : '当前使用 ${activeProvider.name}，后续可以接下载器、离线缓存或收藏流程',
+              child: _isSearching
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 32),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  : _errorMessage != null
+                      ? Text('搜索失败：$_errorMessage')
+                      : _results.isEmpty
+                          ? const Text('输入关键字后开始搜索；这里会展示统一结构的资源结果。')
+                          : Column(
+                              children: _results
+                                  .map(
+                                    (item) => Padding(
+                                      padding:
+                                          const EdgeInsets.only(bottom: 12),
+                                      child: _SearchResultCard(result: item),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -205,8 +209,11 @@ class _SearchResultCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFE),
+          color: Colors.white.withValues(alpha: 0.72),
           borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.9),
+          ),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -311,10 +318,18 @@ class _MetaChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context)
+            .colorScheme
+            .secondaryContainer
+            .withValues(alpha: 0.58),
         borderRadius: BorderRadius.circular(999),
       ),
-      child: Text(label),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+      ),
     );
   }
 }

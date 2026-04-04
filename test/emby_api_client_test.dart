@@ -5,6 +5,7 @@ import 'package:http/testing.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/domain/playback_models.dart';
 
 void main() {
   group('EmbyApiClient helpers', () {
@@ -44,14 +45,14 @@ void main() {
       );
     });
 
-    test('falls back to user views when root items query is empty', () async {
+    test('aggregates library content from user views first', () async {
       final client = EmbyApiClient(
         MockClient((request) async {
           expect(request.headers['X-Emby-Token'], 'token-789');
 
           if (request.url.path == '/Users/user-123/Items' &&
               !request.url.queryParameters.containsKey('ParentId')) {
-            return http.Response(jsonEncode({'Items': []}), 200);
+            return http.Response('Unexpected root recursive request', 500);
           }
 
           if (request.url.path == '/Users/user-123/Views') {
@@ -159,45 +160,69 @@ void main() {
         items.first.posterUrl,
         'https://media.example.com/Items/movie-1/Images/Primary?maxHeight=720&quality=90&tag=poster-1&api_key=token-789',
       );
-      expect(
-        items.first.streamUrl,
-        'https://media.example.com/Videos/movie-1/stream.mkv?static=true&MediaSourceId=media-source-1&api_key=token-789',
-      );
+      expect(items.first.streamUrl, isEmpty);
+      expect(items.first.playbackItemId, 'movie-1');
+      expect(items.first.preferredMediaSourceId, 'media-source-1');
+      expect(items.first.isPlayable, isTrue);
       expect(items.first.directors, ['Denis Villeneuve']);
       expect(items.first.actors, ['Timothee Chalamet', 'Zendaya']);
     });
 
-    test('returns browseable folder items for emby sections', () async {
+    test('prefers nested series over recursive episodes for tv sections',
+        () async {
       final client = EmbyApiClient(
         MockClient((request) async {
-          if (request.url.path == '/Users/user-123/Items' &&
-              request.url.queryParameters['ParentId'] == 'shows-view') {
-            expect(request.url.queryParameters['Recursive'], isNull);
-            expect(
-              request.url.queryParameters['IncludeItemTypes'],
-              contains('Series'),
-            );
-            expect(request.url.queryParameters['Filters'], isNull);
-            expect(request.url.queryParameters['MediaTypes'], isNull);
+          if (request.url.path.endsWith('/Users/user-123/Items')) {
+            if (request.url.queryParameters['ParentId'] == 'shows-view' &&
+                request.url.queryParameters['Recursive'] == 'false') {
+              expect(request.url.queryParameters['Recursive'], 'false');
+              expect(request.url.queryParameters['IncludeItemTypes'], isNull);
 
-            return http.Response(
-              jsonEncode({
-                'Items': [
-                  {
-                    'Id': 'series-1',
-                    'Name': 'The Last of Us',
-                    'Type': 'Series',
-                    'IsFolder': true,
-                    'Overview': 'Post-apocalyptic drama',
-                    'ProductionYear': 2023,
-                    'DateCreated': '2026-03-15T08:00:00.0000000Z',
-                    'Genres': ['Drama'],
-                    'ImageTags': {'Primary': 'poster-series-1'},
-                  },
-                ],
-              }),
-              200,
-            );
+              return http.Response(
+                jsonEncode({
+                  'Items': [
+                    {
+                      'Id': 'folder-us',
+                      'Name': 'United States',
+                      'Type': 'Folder',
+                      'IsFolder': true,
+                      'Overview': 'Region folder',
+                      'ProductionYear': 0,
+                      'DateCreated': '2026-03-15T08:00:00.0000000Z',
+                      'Genres': [],
+                      'ImageTags': {'Primary': 'poster-folder-us'},
+                    },
+                  ],
+                }),
+                200,
+              );
+            }
+
+            if (request.url.queryParameters['ParentId'] == 'folder-us' &&
+                request.url.queryParameters['Recursive'] == 'false') {
+              return http.Response(
+                jsonEncode({
+                  'Items': [
+                    {
+                      'Id': 'series-1',
+                      'Name': 'The Last of Us',
+                      'Type': 'Series',
+                      'IsFolder': true,
+                      'Overview': 'Post-apocalyptic drama',
+                      'ProductionYear': 2023,
+                      'DateCreated': '2026-03-15T08:00:00.0000000Z',
+                      'Genres': ['Drama'],
+                      'ImageTags': {'Primary': 'poster-series-1'},
+                    },
+                  ],
+                }),
+                200,
+              );
+            }
+
+            if (request.url.queryParameters['Recursive'] == 'true') {
+              return http.Response('Unexpected recursive request', 500);
+            }
           }
 
           return http.Response('Not found', 404);
@@ -224,21 +249,155 @@ void main() {
       expect(items.first.id, 'series-1');
       expect(items.first.sectionId, 'shows-view');
       expect(items.first.sectionName, '剧集');
+      expect(items.first.itemType, 'Series');
       expect(items.first.streamUrl, isEmpty);
-      expect(items.first.streamHeaders, isEmpty);
       expect(
         items.first.posterUrl,
         'https://media.example.com/Items/series-1/Images/Primary?maxHeight=720&quality=90&tag=poster-series-1&api_key=token-789',
       );
     });
 
-    test('falls back to recursive playable query when section browse is empty',
+    test('walks deeper grouped folders before falling back to recursive query',
+        () async {
+      final client = EmbyApiClient(
+        MockClient((request) async {
+          if (request.url.path.endsWith('/Users/user-123/Items')) {
+            if (request.url.queryParameters['ParentId'] == 'shows-view' &&
+                request.url.queryParameters['Recursive'] == 'false') {
+              return http.Response(
+                jsonEncode({
+                  'Items': [
+                    {
+                      'Id': 'folder-country',
+                      'Name': 'United States',
+                      'Type': 'Folder',
+                      'IsFolder': true,
+                      'DateCreated': '2026-03-15T08:00:00.0000000Z',
+                    },
+                  ],
+                }),
+                200,
+              );
+            }
+
+            if (request.url.queryParameters['ParentId'] == 'folder-country' &&
+                request.url.queryParameters['Recursive'] == 'false') {
+              return http.Response(
+                jsonEncode({
+                  'Items': [
+                    {
+                      'Id': 'folder-network',
+                      'Name': 'HBO',
+                      'Type': 'Folder',
+                      'IsFolder': true,
+                      'DateCreated': '2026-03-15T08:00:00.0000000Z',
+                    },
+                  ],
+                }),
+                200,
+              );
+            }
+
+            if (request.url.queryParameters['ParentId'] == 'folder-network' &&
+                request.url.queryParameters['Recursive'] == 'false') {
+              return http.Response(
+                jsonEncode({
+                  'Items': [
+                    {
+                      'Id': 'folder-drama',
+                      'Name': 'Drama',
+                      'Type': 'Folder',
+                      'IsFolder': true,
+                      'DateCreated': '2026-03-15T08:00:00.0000000Z',
+                    },
+                  ],
+                }),
+                200,
+              );
+            }
+
+            if (request.url.queryParameters['ParentId'] == 'folder-drama' &&
+                request.url.queryParameters['Recursive'] == 'false') {
+              return http.Response(
+                jsonEncode({
+                  'Items': [
+                    {
+                      'Id': 'series-1',
+                      'Name': 'The Last of Us',
+                      'Type': 'Series',
+                      'IsFolder': true,
+                      'Overview': 'Post-apocalyptic drama',
+                      'ProductionYear': 2023,
+                      'DateCreated': '2026-03-15T08:00:00.0000000Z',
+                      'ImageTags': {'Primary': 'poster-series-1'},
+                    },
+                  ],
+                }),
+                200,
+              );
+            }
+
+            if (request.url.queryParameters['Recursive'] == 'true') {
+              return http.Response('Unexpected recursive request', 500);
+            }
+          }
+
+          return http.Response('Not found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'emby-main',
+          name: 'Home Emby',
+          kind: MediaSourceKind.emby,
+          endpoint: 'https://media.example.com',
+          enabled: true,
+          username: 'alice',
+          accessToken: 'token-789',
+          userId: 'user-123',
+          deviceId: 'device-456',
+        ),
+        sectionId: 'shows-view',
+        sectionName: '剧集',
+      );
+
+      expect(items, hasLength(1));
+      expect(items.first.id, 'series-1');
+      expect(items.first.itemType, 'Series');
+    });
+
+    test(
+        'falls back to recursive playable query when grouped folders do not resolve to series',
         () async {
       final client = EmbyApiClient(
         MockClient((request) async {
           if (request.url.path == '/Users/user-123/Items' &&
               request.url.queryParameters['ParentId'] == 'shows-view' &&
-              request.url.queryParameters['Recursive'] == null) {
+              request.url.queryParameters['Recursive'] == 'false') {
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {
+                    'Id': 'folder-us',
+                    'Name': 'United States',
+                    'Type': 'Folder',
+                    'IsFolder': true,
+                    'Overview': 'Region folder',
+                    'ProductionYear': 0,
+                    'DateCreated': '2026-03-15T08:00:00.0000000Z',
+                    'Genres': [],
+                    'ImageTags': {'Primary': 'poster-folder-us'},
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          if (request.url.path == '/Users/user-123/Items' &&
+              request.url.queryParameters['ParentId'] == 'folder-us' &&
+              request.url.queryParameters['Recursive'] == 'false') {
             return http.Response(jsonEncode({'Items': []}), 200);
           }
 
@@ -298,10 +457,227 @@ void main() {
 
       expect(items, hasLength(1));
       expect(items.first.id, 'episode-1');
-      expect(
-        items.first.streamUrl,
-        'https://media.example.com/Videos/episode-1/stream.mp4?static=true&MediaSourceId=media-source-2&api_key=token-789',
+      expect(items.first.streamUrl, isEmpty);
+      expect(items.first.playbackItemId, 'episode-1');
+      expect(items.first.preferredMediaSourceId, 'media-source-2');
+      expect(items.first.isPlayable, isTrue);
+    });
+
+    test('returns nested episodes when seasons are the deepest content nodes',
+        () async {
+      final client = EmbyApiClient(
+        MockClient((request) async {
+          if (request.url.path == '/Users/user-123/Items' &&
+              request.url.queryParameters['ParentId'] == 'shows-view' &&
+              request.url.queryParameters['Recursive'] == 'false') {
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {
+                    'Id': 'folder-archive',
+                    'Name': 'Archive',
+                    'Type': 'Folder',
+                    'IsFolder': true,
+                    'DateCreated': '2026-03-15T08:00:00.0000000Z',
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          if (request.url.path == '/Users/user-123/Items' &&
+              request.url.queryParameters['ParentId'] == 'folder-archive' &&
+              request.url.queryParameters['Recursive'] == 'false') {
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {
+                    'Id': 'season-1',
+                    'Name': 'Season 1',
+                    'Type': 'Season',
+                    'IsFolder': true,
+                    'DateCreated': '2026-03-15T08:00:00.0000000Z',
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          if (request.url.path == '/Users/user-123/Items' &&
+              request.url.queryParameters['ParentId'] == 'season-1' &&
+              request.url.queryParameters['Recursive'] == 'false') {
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {
+                    'Id': 'episode-1',
+                    'Name': 'Pilot',
+                    'Type': 'Episode',
+                    'MediaType': 'Video',
+                    'Overview': 'Pilot episode',
+                    'ProductionYear': 2023,
+                    'DateCreated': '2026-03-15T08:00:00.0000000Z',
+                    'ImageTags': {'Primary': 'poster-2'},
+                    'MediaSources': [
+                      {
+                        'Id': 'media-source-2',
+                        'Container': 'mp4',
+                      },
+                    ],
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          if (request.url.queryParameters['Recursive'] == 'true') {
+            return http.Response('Unexpected recursive request', 500);
+          }
+
+          return http.Response('Not found', 404);
+        }),
       );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'emby-main',
+          name: 'Home Emby',
+          kind: MediaSourceKind.emby,
+          endpoint: 'https://media.example.com',
+          enabled: true,
+          username: 'alice',
+          accessToken: 'token-789',
+          userId: 'user-123',
+          deviceId: 'device-456',
+        ),
+        sectionId: 'shows-view',
+        sectionName: '剧集',
+      );
+
+      expect(items, hasLength(1));
+      expect(items.first.id, 'episode-1');
+      expect(items.first.playbackItemId, 'episode-1');
+      expect(items.first.isPlayable, isTrue);
+    });
+
+    test('keeps series items when section already returns content nodes',
+        () async {
+      final client = EmbyApiClient(
+        MockClient((request) async {
+          if (request.url.path == '/Users/user-123/Items' &&
+              request.url.queryParameters['ParentId'] == 'shows-view' &&
+              request.url.queryParameters['Recursive'] == 'false') {
+            return http.Response(
+              jsonEncode({
+                'Items': [
+                  {
+                    'Id': 'series-1',
+                    'Name': 'The Last of Us',
+                    'Type': 'Series',
+                    'IsFolder': true,
+                    'Overview': 'Post-apocalyptic drama',
+                    'ProductionYear': 2023,
+                    'DateCreated': '2026-03-15T08:00:00.0000000Z',
+                    'Genres': ['Drama'],
+                    'ImageTags': {'Primary': 'poster-series-1'},
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          return http.Response('Not found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'emby-main',
+          name: 'Home Emby',
+          kind: MediaSourceKind.emby,
+          endpoint: 'https://media.example.com',
+          enabled: true,
+          username: 'alice',
+          accessToken: 'token-789',
+          userId: 'user-123',
+          deviceId: 'device-456',
+        ),
+        sectionId: 'shows-view',
+        sectionName: '剧集',
+      );
+
+      expect(items, hasLength(1));
+      expect(items.first.id, 'series-1');
+      expect(items.first.itemType, 'Series');
+      expect(items.first.isFolder, isTrue);
+      expect(items.first.streamUrl, isEmpty);
+    });
+
+    test('resolves playback info into the final stream target', () async {
+      final client = EmbyApiClient(
+        MockClient((request) async {
+          if (request.url.path == '/Items/episode-1/PlaybackInfo') {
+            expect(request.url.queryParameters['UserId'], 'user-123');
+            expect(request.url.queryParameters['IsPlayback'], 'true');
+            expect(
+                request.url.queryParameters['MediaSourceId'], 'media-source-2');
+
+            return http.Response(
+              jsonEncode({
+                'PlaySessionId': 'play-session-1',
+                'MediaSources': [
+                  {
+                    'Id': 'media-source-2',
+                    'DirectStreamUrl':
+                        '/Videos/episode-1/stream.mp4?static=true&MediaSourceId=media-source-2',
+                    'AddApiKeyToDirectStreamUrl': true,
+                    'RequiredHttpHeaders': {
+                      'X-Test-Header': 'value-1',
+                    },
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          return http.Response('Not found', 404);
+        }),
+      );
+
+      final target = await client.resolvePlaybackTarget(
+        source: const MediaSourceConfig(
+          id: 'emby-main',
+          name: 'Home Emby',
+          kind: MediaSourceKind.emby,
+          endpoint: 'https://media.example.com',
+          enabled: true,
+          username: 'alice',
+          accessToken: 'token-789',
+          userId: 'user-123',
+          deviceId: 'device-456',
+        ),
+        target: const PlaybackTarget(
+          title: 'Pilot',
+          sourceId: 'emby-main',
+          streamUrl: '',
+          sourceName: 'Home Emby',
+          sourceKind: MediaSourceKind.emby,
+          itemId: 'episode-1',
+          preferredMediaSourceId: 'media-source-2',
+        ),
+      );
+
+      final resolvedUri = Uri.parse(target.streamUrl);
+      expect(resolvedUri.path, '/Videos/episode-1/stream.mp4');
+      expect(resolvedUri.queryParameters['MediaSourceId'], 'media-source-2');
+      expect(resolvedUri.queryParameters['api_key'], 'token-789');
+      expect(target.headers['X-Test-Header'], 'value-1');
+      expect(target.headers['X-Emby-Token'], 'token-789');
     });
   });
 }

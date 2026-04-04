@@ -19,9 +19,6 @@ class HomeCardViewModel {
     required this.title,
     required this.subtitle,
     required this.posterUrl,
-    required this.badges,
-    required this.caption,
-    required this.actionLabel,
     required this.detailTarget,
   });
 
@@ -29,9 +26,6 @@ class HomeCardViewModel {
   final String title;
   final String subtitle;
   final String posterUrl;
-  final List<String> badges;
-  final String caption;
-  final String actionLabel;
   final MediaDetailTarget detailTarget;
 }
 
@@ -196,22 +190,11 @@ HomeSectionViewModel _buildLibrarySection({
   LibraryCollectionTarget? viewAllTarget,
 }) {
   final viewModels = items.map((item) {
-    final cardSubtitle = [
-      if (item.year > 0) '${item.year}',
-      item.durationLabel,
-    ].where((item) => item.trim().isNotEmpty).join(' · ');
-
     return HomeCardViewModel(
       id: item.id,
       title: item.title,
-      subtitle: cardSubtitle.isEmpty ? item.sourceName : cardSubtitle,
+      subtitle: item.year > 0 ? '${item.year}' : '',
       posterUrl: item.posterUrl,
-      badges: [
-        item.sourceKind.label,
-        if (item.sectionName.trim().isNotEmpty) item.sectionName,
-      ],
-      caption: item.overview,
-      actionLabel: '',
       detailTarget: MediaDetailTarget.fromMediaItem(item),
     );
   }).toList();
@@ -238,19 +221,8 @@ HomeSectionViewModel _buildDoubanSection({
     return HomeCardViewModel(
       id: entry.id,
       title: entry.title,
-      subtitle: matched != null
-          ? '${matched.sourceName} 已就绪'
-          : entry.ratingLabel.isEmpty
-              ? '无'
-              : entry.ratingLabel,
+      subtitle: entry.year > 0 ? '${entry.year}' : '',
       posterUrl: entry.posterUrl,
-      badges: [
-        if (entry.year > 0) '${entry.year}',
-        if (entry.subjectType.trim().isNotEmpty) entry.subjectType,
-        matched?.sourceKind.label ?? '待补片',
-      ],
-      caption: entry.note,
-      actionLabel: '',
       detailTarget: matched == null
           ? MediaDetailTarget(
               title: entry.title,

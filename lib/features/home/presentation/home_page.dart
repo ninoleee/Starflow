@@ -1,107 +1,675 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
-import 'package:starflow/core/widgets/section_panel.dart';
+import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 
-class HomePage extends ConsumerWidget {
+class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends ConsumerState<HomePage> {
+  String _focusedHeroId = '';
+
+  @override
+  Widget build(BuildContext context) {
     final sectionsAsync = ref.watch(homeSectionsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Starflow')),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          final future = ref.refresh(homeSectionsProvider.future);
-          await future;
-        },
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-          children: [
-            sectionsAsync.when(
-              data: (sections) {
-                if (sections.isEmpty) {
-                  return const _EmptyHomeState();
-                }
+      backgroundColor: Colors.transparent,
+      body: sectionsAsync.when(
+        data: (sections) {
+          if (sections.isEmpty) {
+            return const _HomeShell(
+              backgroundImageUrl: '',
+              child: _EmptyHomeState(),
+            );
+          }
 
-                return Column(
-                  children: [
-                    ...sections.map(
-                      (section) => Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: SectionPanel(
-                          title: section.title,
-                          subtitle: section.subtitle,
-                          actionLabel:
-                              section.viewAllTarget == null ? null : '查看全部',
-                          onActionPressed: section.viewAllTarget == null
-                              ? null
-                              : () {
-                                  context.pushNamed(
-                                    'collection',
-                                    extra: section.viewAllTarget,
-                                  );
-                                },
-                          child: section.layout == HomeSectionLayout.carousel
-                              ? _HomeCarousel(items: section.carouselItems)
-                              : section.items.isEmpty
-                                  ? _SectionEmptyState(
-                                      message: section.emptyMessage)
-                                  : SizedBox(
-                                      height: 312,
-                                      child: ListView.separated(
-                                        primary: false,
-                                        scrollDirection: Axis.horizontal,
-                                        itemCount: section.items.length,
-                                        separatorBuilder: (context, index) =>
-                                            const SizedBox(width: 8),
-                                        itemBuilder: (context, index) {
-                                          final item = section.items[index];
-                                          return MediaPosterTile(
-                                            title: item.title,
-                                            subtitle: item.subtitle,
-                                            posterUrl: item.posterUrl,
-                                            badges: item.badges,
-                                            caption: item.caption,
-                                            actionLabel: item.actionLabel,
-                                            onTap: () {
-                                              context.pushNamed(
-                                                'detail',
-                                                extra: item.detailTarget,
-                                              );
-                                            },
-                                          );
-                                        },
+          HomeSectionViewModel? featuredSection;
+          for (final section in sections) {
+            if (section.layout == HomeSectionLayout.carousel &&
+                section.carouselItems.isNotEmpty) {
+              featuredSection = section;
+              break;
+            }
+          }
+
+          final featuredItems = featuredSection != null
+              ? featuredSection.carouselItems
+                  .take(5)
+                  .map(_FeaturedHeroItem.fromCarousel)
+                  .toList()
+              : _fallbackFeaturedItems(sections);
+          final activeHero = _resolveActiveHeroItem(featuredItems);
+          final featuredSectionId = featuredSection?.id;
+          final visibleSections = featuredSection == null
+              ? sections
+              : sections
+                  .where((section) => section.id != featuredSectionId)
+                  .toList();
+
+          return _HomeShell(
+            backgroundImageUrl: activeHero?.imageUrl ?? '',
+            child: RefreshIndicator(
+              color: Colors.white,
+              backgroundColor: const Color(0xFF102033),
+              onRefresh: () async {
+                final future = ref.refresh(homeSectionsProvider.future);
+                await future;
+              },
+              child: ListView(
+                physics: const BouncingScrollPhysics(
+                  parent: AlwaysScrollableScrollPhysics(),
+                ),
+                padding: const EdgeInsets.fromLTRB(0, 6, 0, 28),
+                children: [
+                  if (featuredItems.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
+                      child: _FeaturedHero(
+                        items: featuredItems,
+                        onFocusedItemChanged: _handleFocusedHeroChanged,
+                      ),
+                    ),
+                  ...visibleSections.map(
+                    (section) => Padding(
+                      padding: const EdgeInsets.only(bottom: 26),
+                      child: _HomeSection(
+                        title: section.title,
+                        onTitleTap: section.viewAllTarget == null
+                            ? null
+                            : () {
+                                context.pushNamed(
+                                  'collection',
+                                  extra: section.viewAllTarget,
+                                );
+                              },
+                        child: section.layout == HomeSectionLayout.carousel
+                            ? _HomeCarousel(items: section.carouselItems)
+                            : section.items.isEmpty
+                                ? _SectionEmptyState(
+                                    message: section.emptyMessage,
+                                  )
+                                : SizedBox(
+                                    height: 246,
+                                    child: ListView.separated(
+                                      primary: false,
+                                      physics: const BouncingScrollPhysics(),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
                                       ),
+                                      scrollDirection: Axis.horizontal,
+                                      itemCount: section.items.length,
+                                      separatorBuilder: (context, index) =>
+                                          const SizedBox(width: 10),
+                                      itemBuilder: (context, index) {
+                                        final item = section.items[index];
+                                        return MediaPosterTile(
+                                          title: item.title,
+                                          subtitle: item.subtitle,
+                                          posterUrl: item.posterUrl,
+                                          titleColor: Colors.white,
+                                          subtitleColor:
+                                              const Color(0xFF98A7C2),
+                                          onTap: () {
+                                            context.pushNamed(
+                                              'detail',
+                                              extra: item.detailTarget,
+                                            );
+                                          },
+                                        );
+                                      },
                                     ),
+                                  ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const _HomeEditButton(),
+                ],
+              ),
+            ),
+          );
+        },
+        loading: () => const _HomeShell(
+          backgroundImageUrl: '',
+          child: _HomeLoadingState(),
+        ),
+        error: (error, stackTrace) {
+          return _HomeShell(
+            backgroundImageUrl: '',
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 120, 16, 24),
+              children: [
+                _SectionEmptyState(message: '加载首页模块失败：$error'),
+                const SizedBox(height: 12),
+                const _HomeEditButton(),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  _FeaturedHeroItem? _resolveActiveHeroItem(List<_FeaturedHeroItem> items) {
+    if (items.isEmpty) {
+      return null;
+    }
+    for (final item in items) {
+      if (item.id == _focusedHeroId) {
+        return item;
+      }
+    }
+    return items.first;
+  }
+
+  void _handleFocusedHeroChanged(_FeaturedHeroItem item) {
+    if (_focusedHeroId == item.id) {
+      return;
+    }
+    setState(() {
+      _focusedHeroId = item.id;
+    });
+  }
+}
+
+List<_FeaturedHeroItem> _fallbackFeaturedItems(
+    List<HomeSectionViewModel> sections) {
+  for (final section in sections) {
+    if (section.items.isNotEmpty) {
+      return section.items.take(5).map(_FeaturedHeroItem.fromPoster).toList();
+    }
+  }
+  return const [];
+}
+
+class _HomeShell extends StatelessWidget {
+  const _HomeShell({
+    required this.backgroundImageUrl,
+    required this.child,
+  });
+
+  final String backgroundImageUrl;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        _DynamicHeroBackdrop(imageUrl: backgroundImageUrl),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Colors.black.withValues(alpha: 0.08),
+                const Color(0x7A07111D),
+                const Color(0x52030914),
+                Colors.transparent,
+              ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: const [0, 0.42, 0.82, 1],
+            ),
+          ),
+        ),
+        SafeArea(child: child),
+      ],
+    );
+  }
+}
+
+class _DynamicHeroBackdrop extends StatelessWidget {
+  const _DynamicHeroBackdrop({required this.imageUrl});
+
+  final String imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 550),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeOutCubic,
+        transitionBuilder: (child, animation) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+        child: _DynamicHeroBackdropLayer(
+          key: ValueKey(imageUrl.trim().isEmpty ? 'empty' : imageUrl),
+          imageUrl: imageUrl,
+        ),
+      ),
+    );
+  }
+}
+
+class _DynamicHeroBackdropLayer extends StatelessWidget {
+  const _DynamicHeroBackdropLayer({
+    super.key,
+    required this.imageUrl,
+  });
+
+  final String imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(color: Color(0xFF030914)),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (imageUrl.trim().isNotEmpty)
+            Transform.scale(
+              scale: 1.16,
+              child: ImageFiltered(
+                imageFilter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                child: Opacity(
+                  opacity: 0.72,
+                  child: Image.network(
+                    imageUrl,
+                    fit: BoxFit.cover,
+                    alignment: Alignment.topCenter,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const SizedBox.shrink();
+                    },
+                  ),
+                ),
+              ),
+            ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  const Color(0x26000000),
+                  Colors.black.withValues(alpha: 0.16),
+                  Colors.black.withValues(alpha: 0.14),
+                  Colors.transparent,
+                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                stops: const [0, 0.48, 0.84, 1],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeLoadingState extends StatelessWidget {
+  const _HomeLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: const [
+        SizedBox(height: 220),
+        Center(child: CircularProgressIndicator(color: Colors.white)),
+      ],
+    );
+  }
+}
+
+class _HomeSection extends StatelessWidget {
+  const _HomeSection({
+    required this.title,
+    required this.child,
+    this.onTitleTap,
+  });
+
+  final String title;
+  final Widget child;
+  final VoidCallback? onTitleTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final titleWidget = Text(
+      title,
+      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (onTitleTap == null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: titleWidget,
+          )
+        else
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: onTitleTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+                child: Row(
+                  children: [
+                    Expanded(child: titleWidget),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: const Color(0xFF95A4C0),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        const SizedBox(height: 8),
+        child,
+      ],
+    );
+  }
+}
+
+class _FeaturedHeroItem {
+  const _FeaturedHeroItem({
+    required this.id,
+    required this.title,
+    required this.imageUrl,
+    required this.metadata,
+    required this.overview,
+    required this.detailTarget,
+  });
+
+  final String id;
+  final String title;
+  final String imageUrl;
+  final String metadata;
+  final String overview;
+  final MediaDetailTarget detailTarget;
+
+  factory _FeaturedHeroItem.fromCarousel(HomeCarouselItemViewModel item) {
+    return _FeaturedHeroItem(
+      id: item.id,
+      title: item.title,
+      imageUrl: item.imageUrl.trim().isEmpty
+          ? item.detailTarget.posterUrl
+          : item.imageUrl,
+      metadata: _buildHeroMetadata(item.detailTarget, fallback: item.subtitle),
+      overview: item.detailTarget.overview.trim().isEmpty
+          ? item.subtitle
+          : item.detailTarget.overview,
+      detailTarget: item.detailTarget,
+    );
+  }
+
+  factory _FeaturedHeroItem.fromPoster(HomeCardViewModel item) {
+    return _FeaturedHeroItem(
+      id: item.id,
+      title: item.title,
+      imageUrl: item.posterUrl,
+      metadata: _buildHeroMetadata(
+        item.detailTarget,
+        fallback: item.subtitle,
+      ),
+      overview: item.detailTarget.overview,
+      detailTarget: item.detailTarget,
+    );
+  }
+}
+
+String _buildHeroMetadata(
+  MediaDetailTarget target, {
+  String fallback = '',
+}) {
+  final entries = <String>[
+    if (target.year > 0) '${target.year}',
+    if (target.durationLabel.trim().isNotEmpty) target.durationLabel,
+    ...target.genres.take(2).where((item) => item.trim().isNotEmpty),
+  ];
+
+  if (entries.isEmpty && fallback.trim().isNotEmpty) {
+    entries.add(fallback.trim());
+  }
+  return entries.join(' · ');
+}
+
+class _FeaturedHero extends StatefulWidget {
+  const _FeaturedHero({
+    required this.items,
+    this.onFocusedItemChanged,
+  });
+
+  final List<_FeaturedHeroItem> items;
+  final ValueChanged<_FeaturedHeroItem>? onFocusedItemChanged;
+
+  @override
+  State<_FeaturedHero> createState() => _FeaturedHeroState();
+}
+
+class _FeaturedHeroState extends State<_FeaturedHero> {
+  late final PageController _controller;
+  double _page = 0;
+  int _lastReportedIndex = -1;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = PageController(viewportFraction: 0.94)
+      ..addListener(_handlePageChange);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _notifyFocusedItem(0);
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller
+      ..removeListener(_handlePageChange)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _handlePageChange() {
+    if (!mounted) {
+      return;
+    }
+    final double page = _controller.hasClients ? _controller.page ?? 0.0 : 0.0;
+    _notifyFocusedItem(page.round());
+    setState(() {
+      _page = page;
+    });
+  }
+
+  void _notifyFocusedItem(int index) {
+    if (index < 0 || index >= widget.items.length) {
+      return;
+    }
+    if (_lastReportedIndex == index) {
+      return;
+    }
+    _lastReportedIndex = index;
+    widget.onFocusedItemChanged?.call(widget.items[index]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        SizedBox(
+          height: 430,
+          child: PageView.builder(
+            controller: _controller,
+            itemCount: widget.items.length,
+            itemBuilder: (context, index) {
+              final item = widget.items[index];
+              return Padding(
+                padding: EdgeInsets.only(
+                  right: index == widget.items.length - 1 ? 0 : 10,
+                ),
+                child: _FeaturedHeroCard(item: item),
+              );
+            },
+          ),
+        ),
+        if (widget.items.length > 1) ...[
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(widget.items.length, (index) {
+              final isActive = (_page.round() == index);
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                width: isActive ? 18 : 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: isActive
+                      ? Colors.white
+                      : Colors.white.withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              );
+            }),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _FeaturedHeroCard extends StatelessWidget {
+  const _FeaturedHeroCard({required this.item});
+
+  final _FeaturedHeroItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(30),
+        onTap: () => context.pushNamed('detail', extra: item.detailTarget),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(30),
+            color: const Color(0xFF0B1628),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.22),
+                blurRadius: 34,
+                offset: const Offset(0, 18),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(30),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (item.imageUrl.trim().isNotEmpty)
+                  Image.network(
+                    item.imageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) =>
+                        const SizedBox.shrink(),
+                  ),
+                Align(
+                  alignment: Alignment.bottomLeft,
+                  child: IgnorePointer(
+                    child: FractionallySizedBox(
+                      widthFactor: 0.84,
+                      heightFactor: 0.72,
+                      alignment: Alignment.bottomLeft,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: RadialGradient(
+                            center: const Alignment(-0.92, 0.96),
+                            radius: 1.1,
+                            colors: [
+                              Colors.black.withValues(alpha: 0.82),
+                              Colors.black.withValues(alpha: 0.52),
+                              Colors.black.withValues(alpha: 0.18),
+                              Colors.transparent,
+                            ],
+                            stops: const [0, 0.36, 0.72, 1],
+                          ),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    const _HomeEditButton(),
-                  ],
-                );
-              },
-              loading: () => const Padding(
-                padding: EdgeInsets.symmetric(vertical: 48),
-                child: Center(child: CircularProgressIndicator()),
-              ),
-              error: (error, stackTrace) {
-                return Column(
-                  children: [
-                    _SectionEmptyState(message: '加载首页模块失败：$error'),
-                    const SizedBox(height: 12),
-                    const _HomeEditButton(),
-                  ],
-                );
-              },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(26, 28, 26, 26),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Spacer(),
+                      if (item.metadata.trim().isNotEmpty)
+                        Text(
+                          item.metadata,
+                          style: const TextStyle(
+                            color: Color(0xFFDCE7FF),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      if (item.metadata.trim().isNotEmpty)
+                        const SizedBox(height: 10),
+                      Text(
+                        item.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 34,
+                          height: 1.05,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black.withValues(alpha: 0.45),
+                              blurRadius: 20,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      if (item.overview.trim().isNotEmpty)
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 460),
+                          child: Text(
+                            item.overview,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFFE4ECFF),
+                              fontSize: 15,
+                              height: 1.45,
+                              shadows: [
+                                Shadow(
+                                  color: Color(0x9A000000),
+                                  blurRadius: 16,
+                                  offset: Offset(0, 3),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -120,22 +688,22 @@ class _HomeCarousel extends StatelessWidget {
     }
 
     return SizedBox(
-      height: 210,
+      height: 184,
       child: PageView.builder(
-        controller: PageController(viewportFraction: 0.92),
+        controller: PageController(viewportFraction: 0.96),
         itemCount: items.length,
         itemBuilder: (context, index) {
           final item = items[index];
           return Padding(
-            padding: EdgeInsets.only(right: index == items.length - 1 ? 0 : 8),
+            padding: EdgeInsets.only(right: index == items.length - 1 ? 0 : 6),
             child: InkWell(
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(18),
               onTap: () {
                 context.pushNamed('detail', extra: item.detailTarget);
               },
               child: Container(
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius: BorderRadius.circular(18),
                   color: const Color(0xFF0B1631),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -162,7 +730,7 @@ class _HomeCarousel extends StatelessWidget {
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.all(18),
+                      padding: const EdgeInsets.all(14),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -173,7 +741,7 @@ class _HomeCarousel extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context)
                                 .textTheme
-                                .headlineSmall
+                                .titleLarge
                                 ?.copyWith(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w800,
@@ -218,8 +786,10 @@ class _HomeEditButton extends StatelessWidget {
           icon: const Icon(Icons.tune_rounded, size: 14),
           label: const Text('编辑首页'),
           style: TextButton.styleFrom(
-            foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-            textStyle: Theme.of(context).textTheme.labelMedium,
+            foregroundColor: const Color(0xFF8FA0BD),
+            textStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
             minimumSize: const Size(0, 32),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -235,13 +805,20 @@ class _EmptyHomeState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
-      children: [
-        SectionPanel(
-          title: '还没有首页模块',
-          subtitle: '从底部的小入口开始配置首页',
-          child: _SectionEmptyState(message: '无'),
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 120, 16, 24),
+      children: const [
+        Text(
+          '还没有首页模块',
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
         ),
+        SizedBox(height: 10),
+        _SectionEmptyState(message: '无'),
         SizedBox(height: 12),
         _HomeEditButton(),
       ],
@@ -256,19 +833,13 @@ class _SectionEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFE),
-        borderRadius: BorderRadius.circular(22),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       child: Text(
         message,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: const Color(0xFF90A0BD),
+            ),
       ),
     );
   }

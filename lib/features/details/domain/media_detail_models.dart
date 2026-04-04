@@ -14,6 +14,11 @@ class MediaDetailTarget {
     this.availabilityLabel = '',
     this.searchQuery = '',
     this.playbackTarget,
+    this.itemId = '',
+    this.sourceId = '',
+    this.itemType = '',
+    this.sectionId = '',
+    this.sectionName = '',
     this.sourceKind,
     this.sourceName = '',
   });
@@ -29,11 +34,17 @@ class MediaDetailTarget {
   final String availabilityLabel;
   final String searchQuery;
   final PlaybackTarget? playbackTarget;
+  final String itemId;
+  final String sourceId;
+  final String itemType;
+  final String sectionId;
+  final String sectionName;
   final MediaSourceKind? sourceKind;
   final String sourceName;
 
-  bool get isPlayable =>
-      playbackTarget != null && playbackTarget!.streamUrl.trim().isNotEmpty;
+  bool get isPlayable => playbackTarget?.canPlay == true;
+
+  bool get isSeries => itemType.trim().toLowerCase() == 'series';
 
   factory MediaDetailTarget.fromMediaItem(
     MediaItem item, {
@@ -53,7 +64,13 @@ class MediaDetailTarget {
           ? '资源已就绪：${item.sourceKind.label} · ${item.sourceName}'
           : availabilityLabel,
       searchQuery: searchQuery.isEmpty ? item.title : searchQuery,
-      playbackTarget: PlaybackTarget.fromMediaItem(item),
+      playbackTarget:
+          item.isPlayable ? PlaybackTarget.fromMediaItem(item) : null,
+      itemId: item.id,
+      sourceId: item.sourceId,
+      itemType: item.itemType,
+      sectionId: item.sectionId,
+      sectionName: item.sectionName,
       sourceKind: item.sourceKind,
       sourceName: item.sourceName,
     );

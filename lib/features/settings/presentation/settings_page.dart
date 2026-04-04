@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
@@ -18,120 +19,124 @@ class SettingsPage extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-        children: [
-          if (loading) const LinearProgressIndicator(),
-          SectionPanel(
-            title: '媒体源',
-            subtitle: '把 Emby 或 NAS 网关都挂进来，首页和媒体库都会共用这里的配置',
-            child: Column(
-              children: [
-                ...settings.mediaSources.map(
-                  (source) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _SettingsTile(
-                      title: source.name,
-                      subtitle: _buildMediaSourceSubtitle(source),
-                      value: source.enabled,
-                      onChanged: (value) {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .toggleMediaSource(source.id, value);
-                      },
-                      onEdit: () => _showMediaSourceDialog(
-                        context,
-                        ref,
-                        existing: source,
+      body: AppPageBackground(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+          children: [
+            if (loading) const LinearProgressIndicator(),
+            SectionPanel(
+              title: '媒体源',
+              subtitle: '把 Emby 或 NAS 网关都挂进来，首页和媒体库都会共用这里的配置',
+              child: Column(
+                children: [
+                  ...settings.mediaSources.map(
+                    (source) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _SettingsTile(
+                        title: source.name,
+                        subtitle: _buildMediaSourceSubtitle(source),
+                        value: source.enabled,
+                        onChanged: (value) {
+                          ref
+                              .read(settingsControllerProvider.notifier)
+                              .toggleMediaSource(source.id, value);
+                        },
+                        onEdit: () => _showMediaSourceDialog(
+                          context,
+                          ref,
+                          existing: source,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: () => _showMediaSourceDialog(context, ref),
-                    icon: const Icon(Icons.add_rounded),
-                    label: const Text('新增媒体源'),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showMediaSourceDialog(context, ref),
+                      icon: const Icon(Icons.add_rounded),
+                      label: const Text('新增媒体源'),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 18),
-          SectionPanel(
-            title: '搜索服务',
-            subtitle: '可以挂自己的索引服务、聚合接口或站点模板',
-            child: Column(
-              children: [
-                ...settings.searchProviders.map(
-                  (provider) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _SettingsTile(
-                      title: provider.name,
-                      subtitle: _buildSearchProviderSubtitle(provider),
-                      value: provider.enabled,
-                      onChanged: (value) {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .toggleSearchProvider(provider.id, value);
-                      },
-                      onEdit: () => _showSearchProviderDialog(
-                        context,
-                        ref,
-                        existing: provider,
+            const SizedBox(height: 18),
+            SectionPanel(
+              title: '搜索服务',
+              subtitle: '可以挂自己的索引服务、聚合接口或站点模板',
+              child: Column(
+                children: [
+                  ...settings.searchProviders.map(
+                    (provider) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _SettingsTile(
+                        title: provider.name,
+                        subtitle: _buildSearchProviderSubtitle(provider),
+                        value: provider.enabled,
+                        onChanged: (value) {
+                          ref
+                              .read(settingsControllerProvider.notifier)
+                              .toggleSearchProvider(provider.id, value);
+                        },
+                        onEdit: () => _showSearchProviderDialog(
+                          context,
+                          ref,
+                          existing: provider,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: () => _showSearchProviderDialog(context, ref),
-                    icon: const Icon(Icons.add_rounded),
-                    label: const Text('新增搜索服务'),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showSearchProviderDialog(context, ref),
+                      icon: const Icon(Icons.add_rounded),
+                      label: const Text('新增搜索服务'),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 18),
-          SectionPanel(
-            title: '豆瓣',
-            subtitle: '推荐与想看模块会读取这里的账号配置',
-            child: _SettingsTile(
-              title: settings.doubanAccount.enabled ? '豆瓣已启用' : '豆瓣未启用',
-              subtitle: settings.doubanAccount.userId.isEmpty
-                  ? '还没有填写 userId'
-                  : '当前账号：${settings.doubanAccount.userId}',
-              value: settings.doubanAccount.enabled,
-              onChanged: (value) {
-                ref.read(settingsControllerProvider.notifier).saveDoubanAccount(
-                      settings.doubanAccount.copyWith(enabled: value),
-                    );
-              },
-              onEdit: () =>
-                  _showDoubanDialog(context, ref, settings.doubanAccount),
+            const SizedBox(height: 18),
+            SectionPanel(
+              title: '豆瓣',
+              subtitle: '推荐与想看模块会读取这里的账号配置',
+              child: _SettingsTile(
+                title: settings.doubanAccount.enabled ? '豆瓣已启用' : '豆瓣未启用',
+                subtitle: settings.doubanAccount.userId.isEmpty
+                    ? '还没有填写 userId'
+                    : '当前账号：${settings.doubanAccount.userId}',
+                value: settings.doubanAccount.enabled,
+                onChanged: (value) {
+                  ref
+                      .read(settingsControllerProvider.notifier)
+                      .saveDoubanAccount(
+                        settings.doubanAccount.copyWith(enabled: value),
+                      );
+                },
+                onEdit: () =>
+                    _showDoubanDialog(context, ref, settings.doubanAccount),
+              ),
             ),
-          ),
-          const SizedBox(height: 18),
-          SectionPanel(
-            title: '首页模块',
-            subtitle: '首页最底部有一个低调的“编辑首页”入口，用它来选择显示哪些模块',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('当前已配置 ${settings.homeModules.length} 个首页模块。'),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: () => context.pushNamed('home-editor'),
-                  icon: const Icon(Icons.tune_rounded),
-                  label: const Text('去首页编辑器'),
-                ),
-              ],
+            const SizedBox(height: 18),
+            SectionPanel(
+              title: '首页模块',
+              subtitle: '首页最底部有一个低调的“编辑首页”入口，用它来选择显示哪些模块',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('当前已配置 ${settings.homeModules.length} 个首页模块。'),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () => context.pushNamed('home-editor'),
+                    icon: const Icon(Icons.tune_rounded),
+                    label: const Text('去首页编辑器'),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -797,8 +802,11 @@ class _SettingsTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFE),
+        color: Colors.white.withValues(alpha: 0.72),
         borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outlineVariant,
+        ),
       ),
       child: ListTile(
         title: Text(title),

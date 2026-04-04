@@ -1,9 +1,11 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/domain/playback_models.dart';
 
 final embyApiClientProvider = Provider<EmbyApiClient>((ref) {
   final client = http.Client();
@@ -89,36 +91,130 @@ class EmbyApiClient {
       return sectionItems;
     }
 
-    final rootItems = await _fetchItems(
+    final views = await fetchCollections(source);
+    if (views.isNotEmpty) {
+      final groupedItems = await Future.wait(
+        views.map(
+          (view) => _fetchSectionItems(
+            source: source,
+            limit: limit,
+            sectionId: view.id,
+            sectionName: view.title,
+          ),
+        ),
+      );
+
+      final resolved = _dedupeAndSort(
+        groupedItems.expand((items) => items).toList(),
+        limit: limit,
+      );
+      if (resolved.isNotEmpty) {
+        return resolved;
+      }
+    }
+
+    return _fetchItems(
       source: source,
       limit: limit,
       queryMode: _EmbyItemsQueryMode.recursivePlayable,
     );
-    if (rootItems.isNotEmpty) {
-      return rootItems;
+  }
+
+  Future<PlaybackTarget> resolvePlaybackTarget({
+    required MediaSourceConfig source,
+    required PlaybackTarget target,
+  }) async {
+    if (target.streamUrl.trim().isNotEmpty) {
+      return target;
+    }
+    if (target.itemId.trim().isEmpty) {
+      throw const EmbyApiException('没有可解析的 Emby 播放目标');
+    }
+    if (!source.hasActiveSession) {
+      throw const EmbyApiException('Emby 会话已失效，请重新登录');
     }
 
-    final views = await fetchCollections(source);
-    if (views.isEmpty) {
-      return rootItems;
+    final response = await _requestJson(
+      source.endpoint,
+      path: 'Items/${target.itemId}/PlaybackInfo',
+      method: 'GET',
+      token: source.accessToken,
+      deviceId: source.deviceId,
+      query: {
+        'UserId': source.userId,
+        'StartTimeTicks': '0',
+        'IsPlayback': 'true',
+        if (target.preferredMediaSourceId.trim().isNotEmpty)
+          'MediaSourceId': target.preferredMediaSourceId.trim(),
+      },
+    );
+
+    final playSessionId = response.json['PlaySessionId'] as String? ?? '';
+    final mediaSources =
+        (response.json['MediaSources'] as List<dynamic>? ?? const [])
+            .map((entry) => Map<String, dynamic>.from(entry as Map))
+            .toList();
+    final selectedSource = _selectPlaybackMediaSource(
+      mediaSources: mediaSources,
+      preferredMediaSourceId: target.preferredMediaSourceId,
+    );
+
+    if (selectedSource == null) {
+      throw const EmbyApiException('Emby 没有返回可用的播放地址');
     }
 
-    final groupedItems = await Future.wait(
-      views.map(
-        (view) => _fetchItems(
-          source: source,
-          limit: limit,
-          parentId: view.id,
-          sectionId: view.id,
-          sectionName: view.title,
+    final resolvedUri = _resolvePlaybackUri(
+      baseUri: response.baseUri,
+      itemId: target.itemId,
+      mediaSource: selectedSource,
+      accessToken: source.accessToken,
+      playSessionId: playSessionId,
+    );
+    final requiredHeaders = Map<String, dynamic>.from(
+      selectedSource['RequiredHttpHeaders'] as Map? ?? const {},
+    );
+
+    return PlaybackTarget(
+      title: target.title,
+      sourceId: target.sourceId,
+      itemId: target.itemId,
+      preferredMediaSourceId: selectedSource['Id'] as String? ?? '',
+      streamUrl: resolvedUri.toString(),
+      sourceName: target.sourceName,
+      sourceKind: target.sourceKind,
+      subtitle: target.subtitle,
+      headers: {
+        ...requiredHeaders
+            .map((key, value) => MapEntry(key.toString(), value.toString())),
+        'X-Emby-Token': source.accessToken,
+        'X-Emby-Authorization': _authorizationHeader(
+          token: source.accessToken,
+          deviceId: source.deviceId,
         ),
-      ),
+      },
     );
+  }
 
-    return _dedupeAndSort(
-      groupedItems.expand((items) => items).toList(),
+  Future<List<MediaItem>> fetchChildren(
+    MediaSourceConfig source, {
+    required String parentId,
+    String sectionId = '',
+    String sectionName = '',
+    int limit = 200,
+  }) async {
+    if (!source.hasActiveSession || parentId.trim().isEmpty) {
+      return const [];
+    }
+
+    final items = await _fetchItems(
+      source: source,
       limit: limit,
+      parentId: parentId,
+      sectionId: sectionId,
+      sectionName: sectionName,
+      queryMode: _EmbyItemsQueryMode.hierarchyBrowse,
     );
+    return _sortHierarchyItems(items);
   }
 
   Future<List<MediaItem>> _fetchSectionItems({
@@ -133,20 +229,112 @@ class EmbyApiClient {
       parentId: sectionId,
       sectionId: sectionId,
       sectionName: sectionName,
-      queryMode: _EmbyItemsQueryMode.sectionBrowse,
+      queryMode: _EmbyItemsQueryMode.genericBrowse,
     );
-    if (browseItems.isNotEmpty) {
-      return browseItems;
-    }
-
-    return _fetchItems(
+    final sectionTreeItems = await _scanSectionTree(
       source: source,
+      rootItems: browseItems,
       limit: limit,
-      parentId: sectionId,
       sectionId: sectionId,
       sectionName: sectionName,
-      queryMode: _EmbyItemsQueryMode.recursivePlayable,
     );
+    if (sectionTreeItems.isNotEmpty) {
+      return sectionTreeItems;
+    }
+
+    try {
+      final recursiveItems = await _fetchItems(
+        source: source,
+        limit: limit,
+        parentId: sectionId,
+        sectionId: sectionId,
+        sectionName: sectionName,
+        queryMode: _EmbyItemsQueryMode.recursivePlayable,
+      );
+      if (recursiveItems.isNotEmpty) {
+        return recursiveItems;
+      }
+    } catch (_) {
+      if (browseItems.isEmpty) {
+        rethrow;
+      }
+    }
+
+    return browseItems;
+  }
+
+  Future<List<MediaItem>> _scanSectionTree({
+    required MediaSourceConfig source,
+    required List<MediaItem> rootItems,
+    required int limit,
+    required String sectionId,
+    required String sectionName,
+  }) async {
+    final queue = ListQueue<_EmbyFolderCursor>.from(
+      rootItems
+          .where((item) =>
+              _classifyBrowseItem(item) == _EmbyBrowseItemKind.recurse)
+          .take(limit)
+          .map((folder) => _EmbyFolderCursor(folder.id, 1)),
+    );
+    final visited = <String>{sectionId};
+    final preferredItems = <MediaItem>[
+      for (final item in rootItems)
+        if (_classifyBrowseItem(item) == _EmbyBrowseItemKind.preferredContent)
+          item,
+    ];
+    final episodeFallback = <MediaItem>[
+      for (final item in rootItems)
+        if (_classifyBrowseItem(item) == _EmbyBrowseItemKind.episodeFallback)
+          item,
+    ];
+
+    while (queue.isNotEmpty &&
+        preferredItems.length < limit &&
+        episodeFallback.length < limit) {
+      final cursor = queue.removeFirst();
+      if (!visited.add(cursor.parentId)) {
+        continue;
+      }
+
+      try {
+        final items = await _fetchItems(
+          source: source,
+          limit: limit,
+          parentId: cursor.parentId,
+          sectionId: sectionId,
+          sectionName: sectionName,
+          queryMode: _EmbyItemsQueryMode.genericBrowse,
+        );
+        for (final item in items) {
+          switch (_classifyBrowseItem(item)) {
+            case _EmbyBrowseItemKind.preferredContent:
+              preferredItems.add(item);
+              break;
+            case _EmbyBrowseItemKind.episodeFallback:
+              episodeFallback.add(item);
+              break;
+            case _EmbyBrowseItemKind.recurse:
+              if (cursor.depth < 5) {
+                queue.add(_EmbyFolderCursor(item.id, cursor.depth + 1));
+              }
+              break;
+            case _EmbyBrowseItemKind.ignore:
+              break;
+          }
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+
+    if (preferredItems.isNotEmpty) {
+      return _dedupeAndSort(preferredItems, limit: limit);
+    }
+    if (episodeFallback.isNotEmpty) {
+      return _dedupeAndSort(episodeFallback, limit: limit);
+    }
+    return const [];
   }
 
   Future<List<MediaItem>> _fetchItems({
@@ -268,7 +456,7 @@ class EmbyApiClient {
     final mediaType = (item['MediaType'] as String? ?? '').trim().toLowerCase();
     final isFolder =
         item['IsFolder'] as bool? ?? _isFolderLikeItemType(itemType);
-    final isPlayable = !isFolder &&
+    final canResolvePlayback = !isFolder &&
         (mediaSource != null ||
             mediaType == 'video' ||
             _isDirectPlayableItemType(itemType));
@@ -288,15 +476,13 @@ class EmbyApiClient {
     );
     final runTimeTicks = item['RunTimeTicks'] as int?;
     final durationLabel = formatRunTimeTicks(runTimeTicks);
-    final streamUrl = isPlayable
-        ? buildDirectStreamUri(
-            baseUri: baseUri,
-            itemId: id,
-            container: _resolveContainer(item, mediaSource),
-            mediaSourceId: mediaSource?['Id'] as String? ?? '',
-            accessToken: source.accessToken,
-          ).toString()
-        : '';
+    final rawIndexNumber = item['IndexNumber'] as int?;
+    final rawParentIndexNumber = item['ParentIndexNumber'] as int?;
+    final seasonNumber = itemType.trim().toLowerCase() == 'season'
+        ? rawIndexNumber
+        : rawParentIndexNumber;
+    final episodeNumber =
+        itemType.trim().toLowerCase() == 'episode' ? rawIndexNumber : null;
 
     return MediaItem(
       id: id,
@@ -313,21 +499,19 @@ class EmbyApiClient {
       genres: genres,
       directors: directors,
       actors: actors,
+      itemType: itemType,
+      isFolder: isFolder,
       sectionId: (sectionId ?? '').trim(),
       sectionName: sectionName.trim(),
       sourceId: source.id,
       sourceName: source.name,
       sourceKind: source.kind,
-      streamUrl: streamUrl,
-      streamHeaders: isPlayable
-          ? {
-              'X-Emby-Token': source.accessToken,
-              'X-Emby-Authorization': _authorizationHeader(
-                token: source.accessToken,
-                deviceId: source.deviceId,
-              ),
-            }
-          : const {},
+      streamUrl: '',
+      streamHeaders: const {},
+      playbackItemId: canResolvePlayback ? id : '',
+      preferredMediaSourceId: mediaSource?['Id'] as String? ?? '',
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
       addedAt: createdAt,
       lastWatchedAt: lastPlayedAt,
     );
@@ -340,7 +524,7 @@ class EmbyApiClient {
   }) {
     final query = <String, String>{
       'Fields':
-          'DateCreated,Genres,Overview,Path,People,ProductionYear,RunTimeTicks,SortName',
+          'DateCreated,Genres,IndexNumber,Overview,ParentIndexNumber,Path,People,ProductionYear,RunTimeTicks,SortName',
       'EnableImages': 'true',
       'EnableImageTypes': 'Primary',
       'ImageTypeLimit': '1',
@@ -361,9 +545,16 @@ class EmbyApiClient {
           'MediaTypes': 'Video',
         });
         break;
-      case _EmbyItemsQueryMode.sectionBrowse:
+      case _EmbyItemsQueryMode.genericBrowse:
         query.addAll({
-          'IncludeItemTypes': 'Movie,Video,Series,BoxSet,Folder',
+          'Recursive': 'false',
+        });
+        break;
+      case _EmbyItemsQueryMode.hierarchyBrowse:
+        query.addAll({
+          'Recursive': 'false',
+          'SortBy': 'SortName',
+          'SortOrder': 'Ascending',
         });
         break;
     }
@@ -479,6 +670,7 @@ class EmbyApiClient {
     required String container,
     required String mediaSourceId,
     required String accessToken,
+    String playSessionId = '',
   }) {
     final safeContainer = container.trim().isEmpty ? 'mp4' : container.trim();
     return baseUri.replace(
@@ -486,6 +678,7 @@ class EmbyApiClient {
       queryParameters: {
         'static': 'true',
         if (mediaSourceId.trim().isNotEmpty) 'MediaSourceId': mediaSourceId,
+        if (playSessionId.trim().isNotEmpty) 'PlaySessionId': playSessionId,
         if (accessToken.trim().isNotEmpty) 'api_key': accessToken.trim(),
       },
     );
@@ -534,13 +727,110 @@ class EmbyApiClient {
         '';
   }
 
-  String _resolveContainer(
-    Map<String, dynamic> item,
-    Map<String, dynamic>? mediaSource,
-  ) {
-    return mediaSource?['Container'] as String? ??
-        item['Container'] as String? ??
-        'mp4';
+  Map<String, dynamic>? _selectPlaybackMediaSource({
+    required List<Map<String, dynamic>> mediaSources,
+    required String preferredMediaSourceId,
+  }) {
+    if (mediaSources.isEmpty) {
+      return null;
+    }
+
+    final preferredId = preferredMediaSourceId.trim();
+    if (preferredId.isNotEmpty) {
+      for (final source in mediaSources) {
+        if ((source['Id'] as String? ?? '').trim() == preferredId) {
+          return source;
+        }
+      }
+    }
+
+    for (final source in mediaSources) {
+      if ((source['DirectStreamUrl'] as String? ?? '').trim().isNotEmpty) {
+        return source;
+      }
+    }
+
+    for (final source in mediaSources) {
+      if ((source['TranscodingUrl'] as String? ?? '').trim().isNotEmpty) {
+        return source;
+      }
+    }
+
+    return mediaSources.first;
+  }
+
+  Uri _resolvePlaybackUri({
+    required Uri baseUri,
+    required String itemId,
+    required Map<String, dynamic> mediaSource,
+    required String accessToken,
+    required String playSessionId,
+  }) {
+    final directStreamUrl =
+        (mediaSource['DirectStreamUrl'] as String? ?? '').trim();
+    final transcodingUrl =
+        (mediaSource['TranscodingUrl'] as String? ?? '').trim();
+    final addApiKey =
+        mediaSource['AddApiKeyToDirectStreamUrl'] as bool? ?? false;
+
+    if (directStreamUrl.isNotEmpty) {
+      return _resolveRelativeStreamUri(
+        baseUri: baseUri,
+        rawUrl: directStreamUrl,
+        accessToken: accessToken,
+        addApiKey: addApiKey,
+      );
+    }
+
+    if (transcodingUrl.isNotEmpty) {
+      return _resolveRelativeStreamUri(
+        baseUri: baseUri,
+        rawUrl: transcodingUrl,
+        accessToken: accessToken,
+        addApiKey: addApiKey,
+      );
+    }
+
+    return buildDirectStreamUri(
+      baseUri: baseUri,
+      itemId: itemId,
+      container: mediaSource['Container'] as String? ?? 'mp4',
+      mediaSourceId: mediaSource['Id'] as String? ?? '',
+      accessToken: accessToken,
+      playSessionId: playSessionId,
+    );
+  }
+
+  Uri _resolveRelativeStreamUri({
+    required Uri baseUri,
+    required String rawUrl,
+    required String accessToken,
+    required bool addApiKey,
+  }) {
+    final parsed = Uri.parse(rawUrl);
+    final normalizedBasePath = _trimTrailingSlash(baseUri.path);
+    final hasEmbeddedBasePath = normalizedBasePath.isNotEmpty &&
+        (parsed.path == normalizedBasePath ||
+            parsed.path.startsWith('$normalizedBasePath/'));
+    final resolved = parsed.hasScheme
+        ? parsed
+        : baseUri.replace(
+            path: hasEmbeddedBasePath
+                ? parsed.path
+                : _joinPath(baseUri.path, parsed.path),
+            queryParameters: parsed.hasQuery ? parsed.queryParameters : null,
+          );
+
+    if (!addApiKey || accessToken.trim().isEmpty) {
+      return resolved;
+    }
+    if (resolved.queryParameters.containsKey('api_key')) {
+      return resolved;
+    }
+
+    final queryParameters = Map<String, String>.from(resolved.queryParameters)
+      ..['api_key'] = accessToken.trim();
+    return resolved.replace(queryParameters: queryParameters);
   }
 
   List<String> _resolvePeople(
@@ -562,6 +852,58 @@ class EmbyApiClient {
     }
 
     return names;
+  }
+
+  List<MediaItem> _sortHierarchyItems(List<MediaItem> items) {
+    final sorted = [...items]..sort((left, right) {
+        final rankComparison =
+            _hierarchyItemRank(left).compareTo(_hierarchyItemRank(right));
+        if (rankComparison != 0) {
+          return rankComparison;
+        }
+
+        final seasonComparison =
+            (left.seasonNumber ?? 0).compareTo(right.seasonNumber ?? 0);
+        if (seasonComparison != 0) {
+          return seasonComparison;
+        }
+
+        final episodeComparison =
+            (left.episodeNumber ?? 0).compareTo(right.episodeNumber ?? 0);
+        if (episodeComparison != 0) {
+          return episodeComparison;
+        }
+
+        return left.title.toLowerCase().compareTo(right.title.toLowerCase());
+      });
+    return sorted;
+  }
+
+  int _hierarchyItemRank(MediaItem item) {
+    return switch (item.itemType.trim().toLowerCase()) {
+      'season' => 0,
+      'episode' => 1,
+      _ when item.isPlayable => 2,
+      _ => 3,
+    };
+  }
+
+  _EmbyBrowseItemKind _classifyBrowseItem(MediaItem item) {
+    final itemType = item.itemType.trim().toLowerCase();
+    if (item.isPlayable) {
+      return itemType == 'episode'
+          ? _EmbyBrowseItemKind.episodeFallback
+          : _EmbyBrowseItemKind.preferredContent;
+    }
+    if (!item.isFolder) {
+      return _EmbyBrowseItemKind.ignore;
+    }
+
+    return switch (itemType) {
+      'series' || 'boxset' => _EmbyBrowseItemKind.preferredContent,
+      'season' || 'folder' || 'collectionfolder' => _EmbyBrowseItemKind.recurse,
+      _ => _EmbyBrowseItemKind.recurse,
+    };
   }
 
   bool _isDirectPlayableItemType(String itemType) {
@@ -701,5 +1043,20 @@ class _EmbyView {
 
 enum _EmbyItemsQueryMode {
   recursivePlayable,
-  sectionBrowse,
+  genericBrowse,
+  hierarchyBrowse,
+}
+
+enum _EmbyBrowseItemKind {
+  preferredContent,
+  episodeFallback,
+  recurse,
+  ignore,
+}
+
+class _EmbyFolderCursor {
+  const _EmbyFolderCursor(this.parentId, this.depth);
+
+  final String parentId;
+  final int depth;
 }

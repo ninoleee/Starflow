@@ -34,7 +34,6 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
     });
 
     final state = ref.watch(bootstrapControllerProvider);
-    final theme = Theme.of(context);
     final progress = state.progress.clamp(0.0, 1.0).toDouble();
 
     return Scaffold(
@@ -57,119 +56,67 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                 padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 320),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const SizedBox(height: 12),
-                          Center(
-                            child: AnimatedScale(
-                              duration: const Duration(milliseconds: 420),
-                              curve: Curves.easeOutCubic,
-                              scale: 0.94 + progress * 0.08,
-                              child: Container(
-                                width: 156,
-                                height: 156,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  gradient: const LinearGradient(
-                                    colors: [
-                                      Color(0xFFFFFFFF),
-                                      Color(0xFFB7D0FF),
-                                    ],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: const Color(
-                                        0xFF7DB1FF,
-                                      ).withValues(alpha: 0.42),
-                                      blurRadius: 42,
-                                      spreadRadius: 10,
-                                    ),
+                          AnimatedScale(
+                            duration: const Duration(milliseconds: 420),
+                            curve: Curves.easeOutCubic,
+                            scale: 0.94 + progress * 0.08,
+                            child: Container(
+                              width: 156,
+                              height: 156,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFFFFFFFF),
+                                    Color(0xFFB7D0FF),
                                   ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
                                 ),
-                                child: Center(
-                                  child: Transform.rotate(
-                                    angle: progress * 0.18,
-                                    child: const Icon(
-                                      Icons.play_circle_fill_rounded,
-                                      size: 84,
-                                      color: Color(0xFF1141A7),
-                                    ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(
+                                      0xFF7DB1FF,
+                                    ).withValues(alpha: 0.42),
+                                    blurRadius: 42,
+                                    spreadRadius: 10,
+                                  ),
+                                ],
+                              ),
+                              child: Center(
+                                child: Transform.rotate(
+                                  angle: progress * 0.18,
+                                  child: const Icon(
+                                    Icons.play_circle_fill_rounded,
+                                    size: 84,
+                                    color: Color(0xFF1141A7),
                                   ),
                                 ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 32),
-                          Center(
-                            child: Text(
-                              'Starflow',
-                              style: theme.textTheme.displaySmall?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -1.2,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 14),
-                          AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 280),
-                            child: Text(
-                              state.title,
-                              key: ValueKey(state.title),
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.headlineSmall?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 280),
-                            child: Text(
-                              state.subtitle,
-                              key: ValueKey(state.subtitle),
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.bodyLarge?.copyWith(
-                                color: const Color(0xFFD8E6FF),
-                                height: 1.55,
                               ),
                             ),
                           ),
                           const SizedBox(height: 28),
-                          _ProgressBar(progress: progress),
-                          const SizedBox(height: 10),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: Text(
-                              '${(progress * 100).round()}%',
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w800,
-                              ),
+                          const Text(
+                            'Starflow',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 38,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -1.2,
                             ),
                           ),
-                          const SizedBox(height: 18),
-                          _BootstrapSteps(currentStep: state.currentStep),
+                          const SizedBox(height: 24),
+                          _ProgressBar(progress: progress),
                         ],
                       ),
-                      Padding(
-                        padding: const EdgeInsets.only(top: 20),
-                        child: Text(
-                          '启动时先把配置和首页内容预热，避免你看到空白等待。',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: const Color(0xFFBED4FF),
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               );
@@ -218,89 +165,6 @@ class _ProgressBar extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _BootstrapSteps extends StatelessWidget {
-  const _BootstrapSteps({required this.currentStep});
-
-  final int currentStep;
-
-  @override
-  Widget build(BuildContext context) {
-    const steps = [
-      ('唤醒界面', '先让应用壳和导航结构就位'),
-      ('读取配置', '加载媒体源、搜索服务和首页模块'),
-      ('同步首页', '预热首页推荐和片库摘要'),
-      ('完成进入', '整理展示内容并切到首页'),
-    ];
-
-    final theme = Theme.of(context);
-
-    return Column(
-      children: List.generate(steps.length, (index) {
-        final item = steps[index];
-        final isDone = index < currentStep;
-        final isActive = index == currentStep;
-        return AnimatedOpacity(
-          duration: const Duration(milliseconds: 220),
-          opacity: isDone || isActive ? 1 : 0.6,
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isDone
-                        ? const Color(0xFFBFE0FF)
-                        : isActive
-                            ? Colors.white
-                            : Colors.white.withValues(alpha: 0.14),
-                  ),
-                  child: Icon(
-                    isDone ? Icons.check_rounded : Icons.circle,
-                    size: isDone ? 16 : 10,
-                    color: isDone
-                        ? const Color(0xFF0E3D99)
-                        : isActive
-                            ? const Color(0xFF0E3D99)
-                            : Colors.white54,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item.$1,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight:
-                              isActive ? FontWeight.w800 : FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        item.$2,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFFD8E6FF),
-                          height: 1.4,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      }),
     );
   }
 }
