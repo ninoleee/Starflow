@@ -163,3 +163,30 @@ class DoubanCarouselEntry {
   final String ratingLabel;
   final String mediaType;
 }
+
+String resolveDoubanItemType(String raw) {
+  final normalized = raw.trim().toLowerCase();
+  if (normalized.isEmpty) {
+    return '';
+  }
+
+  if (normalized == 'movie' || normalized == 'film') {
+    return 'movie';
+  }
+  if (normalized == 'tv' ||
+      normalized == 'series' ||
+      normalized == 'tvshow' ||
+      normalized == 'tv_show' ||
+      normalized == 'show') {
+    return 'series';
+  }
+  if (normalized.contains('movie') || normalized.contains('film')) {
+    return 'movie';
+  }
+  if (normalized.contains('tv') ||
+      normalized.contains('series') ||
+      normalized.contains('show')) {
+    return 'series';
+  }
+  return '';
+}

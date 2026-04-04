@@ -102,18 +102,43 @@ Future<MediaDetailTarget?> _tryMatchLibraryResource({
   MetadataMatchResult? metadataMatch,
 }) async {
   const detailLibraryMatchLimit = 2000;
+  final titles = _buildManualMatchTitles(
+    target: target,
+    query: query,
+    metadataMatch: metadataMatch,
+  );
+  final year = _resolveManualMatchYear(target, metadataMatch);
+
+  final embyMatch = await _tryMatchEmbyResourceBySections(
+    mediaRepository: mediaRepository,
+    target: target,
+    titles: titles,
+    year: year,
+    metadataMatch: metadataMatch,
+    limit: detailLibraryMatchLimit,
+  );
+  if (embyMatch != null) {
+    final matchedTarget = MediaDetailTarget.fromMediaItem(
+      embyMatch,
+      availabilityLabel:
+          '资源已就绪：${embyMatch.sourceKind.label} · ${embyMatch.sourceName}',
+      searchQuery: query,
+    );
+    return _mergeMatchedLibraryTarget(
+      current: target,
+      matched: matchedTarget,
+    );
+  }
 
   try {
-    final library =
-        await mediaRepository.fetchLibrary(limit: detailLibraryMatchLimit);
+    final library = await mediaRepository.fetchLibrary(
+      kind: MediaSourceKind.nas,
+      limit: detailLibraryMatchLimit,
+    );
     final matched = matchMediaItemByTitles(
       library,
-      titles: [
-        target.title,
-        query,
-        if (metadataMatch != null) ...metadataMatch.titlesForMatching,
-      ],
-      year: target.year > 0 ? target.year : (metadataMatch?.year ?? 0),
+      titles: titles,
+      year: year,
     );
     if (matched == null) {
       return null;
@@ -133,6 +158,281 @@ Future<MediaDetailTarget?> _tryMatchLibraryResource({
     return null;
   }
 }
+
+List<String> _buildManualMatchTitles({
+  required MediaDetailTarget target,
+  required String query,
+  MetadataMatchResult? metadataMatch,
+}) {
+  final seen = <String>{};
+  final titles = <String>[];
+  for (final raw in [
+    target.title,
+    query,
+    if (metadataMatch != null) ...metadataMatch.titlesForMatching,
+  ]) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      continue;
+    }
+    final key = trimmed.toLowerCase();
+    if (seen.add(key)) {
+      titles.add(trimmed);
+    }
+  }
+  return titles;
+}
+
+int _resolveManualMatchYear(
+  MediaDetailTarget target,
+  MetadataMatchResult? metadataMatch,
+) {
+  if (target.year > 0) {
+    return target.year;
+  }
+  return metadataMatch?.year ?? 0;
+}
+
+Future<MediaItem?> _tryMatchEmbyResourceBySections({
+  required MediaRepository mediaRepository,
+  required MediaDetailTarget target,
+  required List<String> titles,
+  required int year,
+  required int limit,
+  MetadataMatchResult? metadataMatch,
+}) async {
+  List<MediaCollection> collections;
+  try {
+    collections = await mediaRepository.fetchCollections(
+      kind: MediaSourceKind.emby,
+    );
+  } catch (_) {
+    return null;
+  }
+  if (collections.isEmpty) {
+    return null;
+  }
+
+  final rankedCollections = collections.toList()
+    ..sort((left, right) {
+      final rightScore = _scoreManualMatchCollection(
+        right,
+        target,
+        metadataMatch: metadataMatch,
+      );
+      final leftScore = _scoreManualMatchCollection(
+        left,
+        target,
+        metadataMatch: metadataMatch,
+      );
+      final scoreDelta = rightScore.compareTo(leftScore);
+      if (scoreDelta != 0) {
+        return scoreDelta;
+      }
+      return left.title.compareTo(right.title);
+    });
+
+  for (final collection in rankedCollections) {
+    try {
+      final items = await mediaRepository.fetchLibrary(
+        kind: MediaSourceKind.emby,
+        sourceId: collection.sourceId,
+        sectionId: collection.id,
+        limit: limit,
+      );
+      final matched = matchMediaItemByTitles(
+        items,
+        titles: titles,
+        year: year,
+      );
+      if (matched != null) {
+        return matched;
+      }
+    } catch (_) {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+int _scoreManualMatchCollection(
+  MediaCollection collection,
+  MediaDetailTarget target, {
+  MetadataMatchResult? metadataMatch,
+}) {
+  final category = _resolveManualMatchCategory(
+    target,
+    metadataMatch: metadataMatch,
+  );
+  final label =
+      '${collection.title} ${collection.subtitle}'.trim().toLowerCase();
+  final isMovieSection = _containsAnyKeyword(label, _movieSectionKeywords);
+  final isSeriesSection = _containsAnyKeyword(label, _seriesSectionKeywords);
+  final isAnimationSection =
+      _containsAnyKeyword(label, _animationSectionKeywords);
+  final isVarietySection = _containsAnyKeyword(label, _varietySectionKeywords);
+
+  return switch (category) {
+    _ManualMatchCategory.movie => isMovieSection
+        ? 300
+        : isAnimationSection
+            ? 150
+            : isSeriesSection || isVarietySection
+                ? 40
+                : 0,
+    _ManualMatchCategory.series => isSeriesSection
+        ? 300
+        : isAnimationSection || isVarietySection
+            ? 220
+            : isMovieSection
+                ? 40
+                : 0,
+    _ManualMatchCategory.animation => isAnimationSection
+        ? 340
+        : isSeriesSection
+            ? 260
+            : isMovieSection
+                ? 140
+                : 0,
+    _ManualMatchCategory.variety => isVarietySection
+        ? 340
+        : isSeriesSection
+            ? 260
+            : isMovieSection
+                ? 40
+                : 0,
+    _ManualMatchCategory.unknown => isMovieSection ||
+            isSeriesSection ||
+            isAnimationSection ||
+            isVarietySection
+        ? 80
+        : 0,
+  };
+}
+
+_ManualMatchCategory _resolveManualMatchCategory(
+  MediaDetailTarget target, {
+  MetadataMatchResult? metadataMatch,
+}) {
+  final itemType = target.itemType.trim().toLowerCase();
+  final signals = <String>[
+    itemType,
+    ...target.genres,
+    if (metadataMatch != null) ...metadataMatch.genres,
+  ].join(' ').toLowerCase();
+
+  if (_containsAnyKeyword(signals, _animationCategoryKeywords)) {
+    return _ManualMatchCategory.animation;
+  }
+  if (_containsAnyKeyword(signals, _varietyCategoryKeywords)) {
+    return _ManualMatchCategory.variety;
+  }
+  if (itemType == 'movie') {
+    return _ManualMatchCategory.movie;
+  }
+  if (itemType == 'series' || itemType == 'season' || itemType == 'episode') {
+    return _ManualMatchCategory.series;
+  }
+  if (_containsAnyKeyword(signals, _seriesCategoryKeywords)) {
+    return _ManualMatchCategory.series;
+  }
+  if (_containsAnyKeyword(signals, _movieCategoryKeywords)) {
+    return _ManualMatchCategory.movie;
+  }
+  return _ManualMatchCategory.unknown;
+}
+
+bool _containsAnyKeyword(String value, List<String> keywords) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized.isEmpty) {
+    return false;
+  }
+  for (final keyword in keywords) {
+    if (normalized.contains(keyword)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+enum _ManualMatchCategory {
+  movie,
+  series,
+  animation,
+  variety,
+  unknown,
+}
+
+const List<String> _movieCategoryKeywords = [
+  '电影',
+  'movie',
+  'film',
+  '院线',
+  '影院',
+];
+
+const List<String> _seriesCategoryKeywords = [
+  '剧',
+  '剧集',
+  '电视剧',
+  '连续剧',
+  'tv',
+  'series',
+  'season',
+  'episode',
+];
+
+const List<String> _animationCategoryKeywords = [
+  '动画',
+  '动漫',
+  '番剧',
+  'anime',
+  'animation',
+  'cartoon',
+];
+
+const List<String> _varietyCategoryKeywords = [
+  '综艺',
+  '真人秀',
+  '脱口秀',
+  '选秀',
+  'variety',
+  'talk show',
+];
+
+const List<String> _movieSectionKeywords = [
+  '电影',
+  'movie',
+  'movies',
+  'film',
+  '影院',
+];
+
+const List<String> _seriesSectionKeywords = [
+  '剧集',
+  '电视剧',
+  '连续剧',
+  'tv',
+  'series',
+  'show',
+  'shows',
+];
+
+const List<String> _animationSectionKeywords = [
+  '动画',
+  '动漫',
+  '番剧',
+  'anime',
+  'animation',
+];
+
+const List<String> _varietySectionKeywords = [
+  '综艺',
+  '真人秀',
+  '脱口秀',
+  'variety',
+];
 
 MediaDetailTarget _mergeMatchedLibraryTarget({
   required MediaDetailTarget current,

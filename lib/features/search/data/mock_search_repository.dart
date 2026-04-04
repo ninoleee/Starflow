@@ -164,8 +164,7 @@ class AppSearchRepository implements SearchRepository {
 
     for (final item in rawResults) {
       final detectedCloudType =
-          detectSearchCloudTypeFromUrl(item.resourceUrl)?.code ??
-              item.cloudType.trim();
+          detectSearchCloudTypeFromUrl(item.resourceUrl)?.code ?? '';
       if (allowedCloudTypes.isNotEmpty &&
           !allowedCloudTypes.contains(detectedCloudType)) {
         filteredCount += 1;

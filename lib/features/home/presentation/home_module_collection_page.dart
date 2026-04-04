@@ -230,6 +230,7 @@ class _DoubanPagedGrid extends StatelessWidget {
                         actors: entry.actors,
                         availabilityLabel: '无',
                         searchQuery: entry.title,
+                        itemType: resolveDoubanItemType(entry.subjectType),
                         doubanId: entry.id,
                         sourceName: '豆瓣',
                       ),

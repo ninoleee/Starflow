@@ -127,5 +127,51 @@ void main() {
       expect(requestedPaths, ['/api/user/login', '/api/search']);
       expect(status.summary, '已完成认证 · 频道 1 · 结果 3');
     });
+
+    test('sanitizes links and resolves chinese cloud type labels', () async {
+      final client = CloudSaverApiClient(
+        MockClient((request) async {
+          return http.Response(
+            jsonEncode({
+              'success': true,
+              'code': 0,
+              'data': [
+                {
+                  'id': 'channel-1',
+                  'list': [
+                    {
+                      'title': '测试资源',
+                      'content': '提取码: 1234',
+                      'cloudLinks': [
+                        '【https://pan.quark.cn/s/test-item】',
+                      ],
+                      'cloudType': '夸克网盘',
+                    },
+                  ],
+                },
+              ],
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      final results = await client.search(
+        '测试资源',
+        provider: const SearchProviderConfig(
+          id: 'cloudsaver-main',
+          name: 'CloudSaver',
+          kind: SearchProviderKind.cloudSaver,
+          endpoint: 'http://localhost:3000',
+          enabled: true,
+        ),
+      );
+
+      expect(results, hasLength(1));
+      expect(results.single.resourceUrl, 'https://pan.quark.cn/s/test-item');
+      expect(results.single.cloudType, 'quark');
+      expect(results.single.quality, '夸克网盘');
+    });
   });
 }

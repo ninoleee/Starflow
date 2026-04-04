@@ -148,26 +148,30 @@ class CloudSaverApiClient {
         final source = (item['channel'] as String? ?? '').trim();
         final publishedAt = (item['pubDate'] as String? ?? '').trim();
         final cloudType = (item['cloudType'] as String? ?? '').trim();
-        final normalizedCloudType =
-            SearchCloudTypeX.fromCode(cloudType)?.code ?? cloudType;
-        final cloudLinks = (item['cloudLinks'] as List<dynamic>? ?? const [])
-            .map((value) => '$value')
-            .where((value) => value.trim().isNotEmpty)
-            .toList(growable: false);
+        final cloudLinks = _extractCloudLinks(item['cloudLinks']);
 
         for (final url in cloudLinks) {
-          if (!seen.add(url)) {
+          final sanitizedUrl = sanitizeSearchResourceUrl(url);
+          if (sanitizedUrl.isEmpty) {
             continue;
           }
-          final password = _extractPassword(url, content);
+          if (!seen.add(sanitizedUrl)) {
+            continue;
+          }
+          final resolvedCloudType = resolveSearchCloudTypeCode(
+                rawUrl: sanitizedUrl,
+                hints: [cloudType, title, content],
+              ) ??
+              cloudType.trim();
+          final password = _extractPassword(sanitizedUrl, content);
           results.add(
             SearchResult(
-              id: url,
-              title: title.isEmpty ? url : title,
+              id: sanitizedUrl,
+              title: title.isEmpty ? sanitizedUrl : title,
               posterUrl: image,
               providerId: provider.id,
               providerName: provider.name,
-              quality: _cloudTypeLabel(cloudType),
+              quality: _cloudTypeLabel(resolvedCloudType),
               sizeLabel: password.isEmpty ? '免提取码' : '提取码 $password',
               seeders: 0,
               summary: [
@@ -177,9 +181,9 @@ class CloudSaverApiClient {
                 if (source.isEmpty && publishedAt.isEmpty && content.isEmpty)
                   'CloudSaver 搜索结果',
               ].join(' · '),
-              resourceUrl: url,
+              resourceUrl: sanitizedUrl,
               password: password,
-              cloudType: normalizedCloudType,
+              cloudType: resolvedCloudType,
               source: source,
               publishedAt: publishedAt,
               imageUrls: image.isEmpty ? const [] : [image],
@@ -190,6 +194,30 @@ class CloudSaverApiClient {
     }
 
     return results;
+  }
+
+  List<String> _extractCloudLinks(dynamic rawValue) {
+    final values = <String>[];
+    for (final rawEntry in rawValue as List<dynamic>? ?? const []) {
+      if (rawEntry is String) {
+        final trimmed = rawEntry.trim();
+        if (trimmed.isNotEmpty) {
+          values.add(trimmed);
+        }
+        continue;
+      }
+      if (rawEntry is Map) {
+        final entry = Map<String, dynamic>.from(rawEntry);
+        for (final key in const ['url', 'link', 'cloudLink', 'shareUrl']) {
+          final value = (entry[key] as String? ?? '').trim();
+          if (value.isNotEmpty) {
+            values.add(value);
+            break;
+          }
+        }
+      }
+    }
+    return values;
   }
 
   Uri _resolveSearchUri(String endpoint, {required String keyword}) {
@@ -254,25 +282,11 @@ class CloudSaverApiClient {
   }
 
   String _cloudTypeLabel(String raw) {
-    switch (raw.toLowerCase()) {
-      case 'quark':
-        return '夸克网盘';
-      case 'cloud115':
-      case '115':
-        return '115 网盘';
-      case 'baidu':
-        return '百度网盘';
-      case 'aliyun':
-        return '阿里云盘';
-      case 'tianyi':
-        return '天翼云盘';
-      case 'uc':
-        return 'UC 网盘';
-      case 'xunlei':
-        return '迅雷云盘';
-      default:
-        return raw.isEmpty ? '网盘资源' : raw;
+    final normalized = SearchCloudTypeX.fromCode(raw);
+    if (normalized != null) {
+      return normalized.label;
     }
+    return raw.isEmpty ? '网盘资源' : raw;
   }
 
   static bool supports(SearchProviderConfig provider) {

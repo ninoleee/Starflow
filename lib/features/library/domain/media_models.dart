@@ -183,6 +183,8 @@ class MediaItem {
     this.seasonNumber,
     this.episodeNumber,
     this.playbackProgress,
+    this.imdbId = '',
+    this.tmdbId = '',
     required this.addedAt,
     this.lastWatchedAt,
   });
@@ -212,6 +214,8 @@ class MediaItem {
   final int? seasonNumber;
   final int? episodeNumber;
   final double? playbackProgress;
+  final String imdbId;
+  final String tmdbId;
   final DateTime addedAt;
   final DateTime? lastWatchedAt;
 

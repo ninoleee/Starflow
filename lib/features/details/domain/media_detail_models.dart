@@ -33,6 +33,7 @@ class MediaDetailTarget {
     this.sectionName = '',
     this.doubanId = '',
     this.imdbId = '',
+    this.tmdbId = '',
     this.sourceKind,
     this.sourceName = '',
   });
@@ -57,6 +58,7 @@ class MediaDetailTarget {
   final String sectionName;
   final String doubanId;
   final String imdbId;
+  final String tmdbId;
   final MediaSourceKind? sourceKind;
   final String sourceName;
 
@@ -128,6 +130,7 @@ class MediaDetailTarget {
     String? sectionName,
     String? doubanId,
     String? imdbId,
+    String? tmdbId,
     MediaSourceKind? sourceKind,
     String? sourceName,
   }) {
@@ -152,6 +155,7 @@ class MediaDetailTarget {
       sectionName: sectionName ?? this.sectionName,
       doubanId: doubanId ?? this.doubanId,
       imdbId: imdbId ?? this.imdbId,
+      tmdbId: tmdbId ?? this.tmdbId,
       sourceKind: sourceKind ?? this.sourceKind,
       sourceName: sourceName ?? this.sourceName,
     );
@@ -188,7 +192,8 @@ class MediaDetailTarget {
       sectionId: item.sectionId,
       sectionName: item.sectionName,
       doubanId: '',
-      imdbId: '',
+      imdbId: item.imdbId,
+      tmdbId: item.tmdbId,
       sourceKind: item.sourceKind,
       sourceName: item.sourceName,
     );

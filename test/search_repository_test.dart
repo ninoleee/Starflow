@@ -246,6 +246,60 @@ void main() {
           'https://pan.baidu.com/s/baidu-item');
       expect(results.filteredCount, 1);
     });
+
+    test(
+        'searchOnline filters CloudSaver result when url does not expose cloud type',
+        () async {
+      final repository = AppSearchRepository(
+        PanSouApiClient(
+          MockClient((request) async => http.Response('{}', 200)),
+        ),
+        CloudSaverApiClient(
+          MockClient((request) async {
+            return http.Response(
+              '''
+              {
+                "success": true,
+                "code": 0,
+                "data": [
+                  {
+                    "id": "channel-1",
+                    "list": [
+                      {
+                        "title": "测试资源",
+                        "content": "提取码: 1234",
+                        "cloudLinks": ["【https://redirect.example.com/quark-share】"],
+                        "cloudType": "夸克网盘",
+                        "channel": "资源频道"
+                      }
+                    ]
+                  }
+                ]
+              }
+              ''',
+              200,
+              headers: const {'content-type': 'application/json'},
+            );
+          }),
+        ),
+        const _FakeMediaRepository(items: []),
+      );
+
+      final results = await repository.searchOnline(
+        '测试资源',
+        provider: const SearchProviderConfig(
+          id: 'cloudsaver-main',
+          name: 'CloudSaver',
+          kind: SearchProviderKind.cloudSaver,
+          endpoint: 'http://localhost:3000',
+          enabled: true,
+          allowedCloudTypes: ['quark'],
+        ),
+      );
+
+      expect(results.items, isEmpty);
+      expect(results.filteredCount, 1);
+    });
   });
 }
 

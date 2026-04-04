@@ -59,6 +59,7 @@ class MetadataMatchResolver {
                   )
                   .toList(),
               imdbId: match.imdbId,
+              tmdbId: match.tmdbId,
             );
           }
         case MetadataMatchProvider.wmdb:

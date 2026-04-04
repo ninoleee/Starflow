@@ -627,7 +627,7 @@ class _SearchResultCard extends StatelessWidget {
   }
 
   Uri? _parseLaunchUri(String rawUrl) {
-    final trimmed = rawUrl.trim();
+    final trimmed = sanitizeSearchResourceUrl(rawUrl);
     if (trimmed.isEmpty) {
       return null;
     }

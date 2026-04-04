@@ -275,6 +275,7 @@ class TmdbMetadataClient {
     final imdbId = '${json['imdb_id'] ?? externalIds['imdb_id'] ?? ''}'.trim();
 
     return TmdbMetadataMatch(
+      tmdbId: '${searchResult.id}',
       title:
           '${json[searchResult.isSeries ? 'name' : 'title'] ?? searchResult.title}'
               .trim(),
@@ -431,6 +432,7 @@ class TmdbMetadataClient {
 
 class TmdbMetadataMatch {
   const TmdbMetadataMatch({
+    required this.tmdbId,
     required this.title,
     required this.originalTitle,
     required this.posterUrl,
@@ -444,6 +446,7 @@ class TmdbMetadataMatch {
     required this.imdbId,
   });
 
+  final String tmdbId;
   final String title;
   final String originalTitle;
   final String posterUrl;

@@ -78,30 +78,58 @@ extension SearchCloudTypeX on SearchCloudType {
     final normalized = raw.trim().toLowerCase();
     switch (normalized) {
       case 'baidu':
+      case '百度':
+      case '百度网盘':
         return SearchCloudType.baidu;
       case 'aliyun':
+      case '阿里':
+      case '阿里云':
+      case '阿里云盘':
+      case '阿里网盘':
         return SearchCloudType.aliyun;
       case 'quark':
+      case '夸克':
+      case '夸克网盘':
         return SearchCloudType.quark;
       case 'tianyi':
+      case '天翼':
+      case '天翼云盘':
         return SearchCloudType.tianyi;
       case 'uc':
+      case 'uc网盘':
+      case 'uc 云盘':
         return SearchCloudType.uc;
       case 'mobile':
+      case '移动':
+      case '移动云':
+      case '移动云盘':
         return SearchCloudType.mobile;
       case '115':
       case 'cloud115':
+      case '115网盘':
+      case '115 网盘':
         return SearchCloudType.cloud115;
       case 'pikpak':
+      case 'pik pak':
         return SearchCloudType.pikpak;
       case 'xunlei':
+      case '迅雷':
+      case '迅雷网盘':
+      case '迅雷云盘':
         return SearchCloudType.xunlei;
       case '123':
       case 'cloud123':
+      case '123云盘':
+      case '123 云盘':
+      case '123pan':
         return SearchCloudType.cloud123;
       case 'magnet':
+      case '磁力':
+      case '磁力链接':
         return SearchCloudType.magnet;
       case 'ed2k':
+      case '电驴':
+      case '电驴链接':
         return SearchCloudType.ed2k;
       default:
         return null;
@@ -324,7 +352,7 @@ List<String> parseSearchBlockedKeywords(String raw) {
 }
 
 String normalizeSearchResourceUrl(String rawUrl) {
-  final trimmed = rawUrl.trim();
+  final trimmed = sanitizeSearchResourceUrl(rawUrl);
   if (trimmed.isEmpty) {
     return '';
   }
@@ -355,8 +383,30 @@ String normalizeSearchResourceUrl(String rawUrl) {
   return normalized.toString();
 }
 
+String sanitizeSearchResourceUrl(String rawUrl) {
+  var sanitized = rawUrl.trim();
+  if (sanitized.isEmpty) {
+    return '';
+  }
+
+  sanitized = sanitized
+      .replaceAll(RegExp("^[<\\[\\(【「『\"']+"), '')
+      .replaceAll(RegExp("[>\\]\\)】」』\"']+\$"), '')
+      .trim();
+
+  final embeddedMatch =
+      RegExp(r'((?:https?|magnet|ed2k):[^\s]+)', caseSensitive: false)
+          .firstMatch(sanitized);
+  if (embeddedMatch != null) {
+    sanitized = embeddedMatch.group(1) ?? sanitized;
+  }
+
+  sanitized = sanitized.replaceAll(RegExp(r'[，。；、]+$'), '').trim();
+  return sanitized;
+}
+
 SearchCloudType? detectSearchCloudTypeFromUrl(String rawUrl) {
-  final uri = Uri.tryParse(rawUrl.trim());
+  final uri = Uri.tryParse(sanitizeSearchResourceUrl(rawUrl));
   if (uri == null) {
     return null;
   }
@@ -365,31 +415,31 @@ SearchCloudType? detectSearchCloudTypeFromUrl(String rawUrl) {
   final path = uri.path.toLowerCase();
   final normalized = '$host$path';
 
-  if (host.contains('pan.baidu.com')) {
+  if (host.contains('baidu')) {
     return SearchCloudType.baidu;
   }
-  if (host.contains('pan.quark.cn')) {
+  if (host.contains('quark')) {
     return SearchCloudType.quark;
   }
-  if (host.contains('alipan.com') || host.contains('aliyundrive.com')) {
+  if (host.contains('alipan') || host.contains('aliyundrive')) {
     return SearchCloudType.aliyun;
   }
-  if (host.contains('cloud.189.cn')) {
+  if (host.contains('189.cn')) {
     return SearchCloudType.tianyi;
   }
-  if (host.contains('drive.uc.cn') || host.contains('pan.uc.cn')) {
+  if (host.contains('uc.cn') || host.contains('pan.uc')) {
     return SearchCloudType.uc;
   }
-  if (host.contains('yun.139.com')) {
+  if (host.contains('139.com')) {
     return SearchCloudType.mobile;
   }
   if (host.contains('115.com')) {
     return SearchCloudType.cloud115;
   }
-  if (host.contains('mypikpak.com') || host.contains('pikpak.me')) {
+  if (host.contains('mypikpak') || host.contains('pikpak')) {
     return SearchCloudType.pikpak;
   }
-  if (host.contains('pan.xunlei.com')) {
+  if (host.contains('xunlei')) {
     return SearchCloudType.xunlei;
   }
   if (host.contains('123684.com') ||
@@ -404,5 +454,63 @@ SearchCloudType? detectSearchCloudTypeFromUrl(String rawUrl) {
   if (normalized.startsWith('ed2k://')) {
     return SearchCloudType.ed2k;
   }
+  return null;
+}
+
+String? resolveSearchCloudTypeCode({
+  required String rawUrl,
+  Iterable<String> hints = const [],
+}) {
+  final fromUrl = detectSearchCloudTypeFromUrl(rawUrl);
+  if (fromUrl != null) {
+    return fromUrl.code;
+  }
+
+  for (final hint in hints) {
+    final normalizedHint = hint.trim();
+    if (normalizedHint.isEmpty) {
+      continue;
+    }
+    final byCode = SearchCloudTypeX.fromCode(normalizedHint);
+    if (byCode != null) {
+      return byCode.code;
+    }
+
+    final lowered = normalizedHint.toLowerCase();
+    if (lowered.contains('夸克')) {
+      return SearchCloudType.quark.code;
+    }
+    if (lowered.contains('百度')) {
+      return SearchCloudType.baidu.code;
+    }
+    if (lowered.contains('阿里')) {
+      return SearchCloudType.aliyun.code;
+    }
+    if (lowered.contains('天翼')) {
+      return SearchCloudType.tianyi.code;
+    }
+    if (lowered.contains('uc')) {
+      return SearchCloudType.uc.code;
+    }
+    if (lowered.contains('115')) {
+      return SearchCloudType.cloud115.code;
+    }
+    if (lowered.contains('123')) {
+      return SearchCloudType.cloud123.code;
+    }
+    if (lowered.contains('迅雷')) {
+      return SearchCloudType.xunlei.code;
+    }
+    if (lowered.contains('pikpak')) {
+      return SearchCloudType.pikpak.code;
+    }
+    if (lowered.contains('磁力')) {
+      return SearchCloudType.magnet.code;
+    }
+    if (lowered.contains('电驴')) {
+      return SearchCloudType.ed2k.code;
+    }
+  }
+
   return null;
 }
