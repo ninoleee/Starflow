@@ -1,33 +1,63 @@
 import 'package:starflow/features/library/domain/media_models.dart';
 
+class ScoredMediaItem {
+  const ScoredMediaItem({required this.item, required this.score});
+
+  final MediaItem item;
+  final double score;
+}
+
 const _seasonSuffixPattern =
     r'(第\s*[0-9一二三四五六七八九十百零两]+\s*[季部篇集])|(season\s*\d+)|(s\d{1,2})|(part\s*\d+)';
 
-MediaItem? matchMediaItemByTitles(
+/// 所有达到阈值的条目，按分数降序；同 [MediaItem.id] 只保留最高分。
+List<ScoredMediaItem> listScoredMediaItemsMatchingTitles(
   List<MediaItem> library, {
   required Iterable<String> titles,
   int year = 0,
+  int maxResults = 32,
 }) {
   final normalizedTargets = _collectNormalizedTitleVariants(titles);
   if (normalizedTargets.isEmpty) {
-    return null;
+    return const [];
   }
 
-  MediaItem? best;
-  var bestScore = double.negativeInfinity;
+  final bestById = <String, ScoredMediaItem>{};
   for (final item in library) {
     final score = _scoreMediaItem(
       item,
       normalizedTargets: normalizedTargets,
       year: year,
     );
-    if (score > bestScore) {
-      best = item;
-      bestScore = score;
+    if (score < 72) {
+      continue;
+    }
+    final existing = bestById[item.id];
+    if (existing == null || score > existing.score) {
+      bestById[item.id] = ScoredMediaItem(item: item, score: score);
     }
   }
 
-  return bestScore >= 72 ? best : null;
+  final ranked = bestById.values.toList()
+    ..sort((a, b) => b.score.compareTo(a.score));
+  if (ranked.length <= maxResults) {
+    return ranked;
+  }
+  return ranked.take(maxResults).toList();
+}
+
+MediaItem? matchMediaItemByTitles(
+  List<MediaItem> library, {
+  required Iterable<String> titles,
+  int year = 0,
+}) {
+  final list = listScoredMediaItemsMatchingTitles(
+    library,
+    titles: titles,
+    year: year,
+    maxResults: 1,
+  );
+  return list.isEmpty ? null : list.first.item;
 }
 
 MediaItem? matchMediaItemByExternalIds(

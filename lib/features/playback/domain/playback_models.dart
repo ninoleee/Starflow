@@ -7,6 +7,7 @@ class PlaybackTarget {
     required this.streamUrl,
     required this.sourceName,
     required this.sourceKind,
+    this.actualAddress = '',
     this.itemId = '',
     this.preferredMediaSourceId = '',
     this.subtitle = '',
@@ -25,6 +26,7 @@ class PlaybackTarget {
   final String streamUrl;
   final String sourceName;
   final MediaSourceKind sourceKind;
+  final String actualAddress;
   final String itemId;
   final String preferredMediaSourceId;
   final String subtitle;
@@ -85,6 +87,7 @@ class PlaybackTarget {
       streamUrl: item.streamUrl,
       sourceName: item.sourceName,
       sourceKind: item.sourceKind,
+      actualAddress: item.actualAddress,
       itemId: item.playbackItemId,
       preferredMediaSourceId: item.preferredMediaSourceId,
       subtitle: item.overview,

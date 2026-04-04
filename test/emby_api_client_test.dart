@@ -98,6 +98,7 @@ void main() {
                     'MediaSources': [
                       {
                         'Id': 'media-source-1',
+                        'Path': '/media/Dune.Part.Two.mkv',
                         'Container': 'mkv',
                       },
                     ],
@@ -129,6 +130,7 @@ void main() {
                     'MediaSources': [
                       {
                         'Id': 'media-source-2',
+                        'Path': '/media/TLOU/s01e01.mp4',
                         'Container': 'mp4',
                       },
                     ],
@@ -163,6 +165,8 @@ void main() {
 
       expect(items, hasLength(2));
       expect(items.map((item) => item.id), ['movie-1', 'episode-1']);
+      expect(items.first.actualAddress, '/media/Dune.Part.Two.mkv');
+      expect(items.last.actualAddress, '/media/TLOU/s01e01.mp4');
       expect(
         items.first.posterUrl,
         'https://media.example.com/Items/movie-1/Images/Primary?maxHeight=720&quality=90&tag=poster-1&api_key=token-789',
@@ -642,6 +646,7 @@ void main() {
                 'MediaSources': [
                   {
                     'Id': 'media-source-2',
+                    'Path': '/srv/media/Pilot.mkv',
                     'Container': 'mkv',
                     'Size': 25769803776,
                     'Bitrate': 28400000,
@@ -714,6 +719,7 @@ void main() {
       expect(target.height, 2160);
       expect(target.bitrate, 28400000);
       expect(target.fileSizeBytes, 25769803776);
+      expect(target.actualAddress, '/srv/media/Pilot.mkv');
     });
   });
 }

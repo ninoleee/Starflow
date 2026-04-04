@@ -181,6 +181,11 @@ class EmbyApiClient {
     final requiredHeaders = Map<String, dynamic>.from(
       selectedSource['RequiredHttpHeaders'] as Map? ?? const {},
     );
+    final resolvedSourcePath =
+        (selectedSource['Path'] as String? ?? '').trim();
+    final actualAddress = target.actualAddress.trim().isNotEmpty
+        ? target.actualAddress
+        : resolvedSourcePath;
 
     return PlaybackTarget(
       title: target.title,
@@ -188,6 +193,7 @@ class EmbyApiClient {
       itemId: target.itemId,
       preferredMediaSourceId: selectedSource['Id'] as String? ?? '',
       streamUrl: resolvedUri.toString(),
+      actualAddress: actualAddress,
       sourceName: target.sourceName,
       sourceKind: target.sourceKind,
       subtitle: target.subtitle,
@@ -513,6 +519,11 @@ class EmbyApiClient {
     final episodeNumber =
         itemType.trim().toLowerCase() == 'episode' ? rawIndexNumber : null;
     final imageTag = _resolvePrimaryImageTag(item);
+    final itemPath = (item['Path'] as String? ?? '').trim();
+    final mediaSourcePath =
+        (mediaSource?['Path'] as String? ?? '').trim();
+    final actualAddress =
+        mediaSourcePath.isNotEmpty ? mediaSourcePath : itemPath;
 
     return MediaItem(
       id: id,
@@ -541,6 +552,7 @@ class EmbyApiClient {
       sourceName: source.name,
       sourceKind: source.kind,
       streamUrl: '',
+      actualAddress: actualAddress,
       streamHeaders: const {},
       playbackItemId: canResolvePlayback ? id : '',
       preferredMediaSourceId: mediaSource?['Id'] as String? ?? '',

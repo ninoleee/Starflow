@@ -93,11 +93,12 @@ class WebDavNasClient {
         if (streamUrl.trim().isEmpty) {
           continue;
         }
+        final resourceUri = entry.uri.toString();
         items.add(
           MediaItem(
-            id: entry.uri.toString(),
+            id: resourceUri,
             title: _stripExtension(entry.name),
-            overview: streamUrl,
+            overview: '',
             posterUrl: '',
             year: 0,
             durationLabel: '文件',
@@ -108,6 +109,8 @@ class WebDavNasClient {
             sourceName: source.name,
             sourceKind: source.kind,
             streamUrl: streamUrl,
+            actualAddress:
+                _relativePathForNasDisplay(entry.uri, source: source),
             streamHeaders: _headers(source),
             addedAt: entry.modifiedAt ?? DateTime.now(),
           ),
@@ -207,6 +210,58 @@ class WebDavNasClient {
     return source.endpoint.trim();
   }
 
+  static String _safeDecodePathSegment(String segment) {
+    try {
+      return Uri.decodeComponent(segment);
+    } catch (_) {
+      return segment;
+    }
+  }
+
+  /// 详情页「地址」用：去掉与 [source.endpoint] 相同的 path 前缀后的相对路径（URL 解码）。
+  String _relativePathForNasDisplay(
+    Uri resource, {
+    required MediaSourceConfig source,
+  }) {
+    try {
+      final baseUri = Uri.tryParse(source.endpoint.trim());
+      if (baseUri == null || !baseUri.hasScheme) {
+        return resource.toString();
+      }
+
+      if (resource.scheme.toLowerCase() != baseUri.scheme.toLowerCase() ||
+          resource.host.toLowerCase() != baseUri.host.toLowerCase() ||
+          resource.port != baseUri.port) {
+        final path = resource.path;
+        return path.isNotEmpty
+            ? path.replaceFirst(RegExp(r'^/'), '')
+            : resource.toString();
+      }
+
+      List<String> decodedSegments(Uri u) => u.pathSegments
+          .where((s) => s.isNotEmpty)
+          .map(_safeDecodePathSegment)
+          .toList();
+
+      final baseSegs = decodedSegments(baseUri);
+      final resSegs = decodedSegments(resource);
+      var i = 0;
+      final minLen =
+          baseSegs.length < resSegs.length ? baseSegs.length : resSegs.length;
+      while (i < minLen && baseSegs[i] == resSegs[i]) {
+        i++;
+      }
+      final tail = resSegs.sublist(i).join('/');
+      if (tail.isNotEmpty) {
+        return tail;
+      }
+      final path = resource.path.replaceFirst(RegExp(r'^/'), '');
+      return path.isNotEmpty ? path : resource.toString();
+    } catch (_) {
+      return resource.toString();
+    }
+  }
+
   bool _isPlayableVideo(_WebDavEntry entry) {
     final type = entry.contentType.toLowerCase();
     if (type.startsWith('video/')) {
@@ -269,7 +324,12 @@ class WebDavNasClient {
     if (trimmed.isEmpty) {
       return requestUri;
     }
-    final decoded = Uri.decodeFull(trimmed);
+    String decoded;
+    try {
+      decoded = Uri.decodeFull(trimmed);
+    } catch (_) {
+      decoded = trimmed;
+    }
     final parsed = Uri.tryParse(decoded);
     if (parsed != null && parsed.hasScheme) {
       return parsed;
@@ -290,7 +350,7 @@ class WebDavNasClient {
     if (segments.isEmpty) {
       return fallback;
     }
-    return Uri.decodeComponent(segments.last);
+    return _safeDecodePathSegment(segments.last);
   }
 
   String _normalizeUri(Uri uri) {

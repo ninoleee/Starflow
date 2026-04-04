@@ -177,6 +177,7 @@ class MediaItem {
     required this.sourceName,
     required this.sourceKind,
     required this.streamUrl,
+    this.actualAddress = '',
     this.streamHeaders = const {},
     this.playbackItemId = '',
     this.preferredMediaSourceId = '',
@@ -208,6 +209,7 @@ class MediaItem {
   final String sourceName;
   final MediaSourceKind sourceKind;
   final String streamUrl;
+  final String actualAddress;
   final Map<String, String> streamHeaders;
   final String playbackItemId;
   final String preferredMediaSourceId;

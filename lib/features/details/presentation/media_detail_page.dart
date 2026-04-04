@@ -99,7 +99,7 @@ bool _shouldAutoEnrichMetadataTarget({
 
   final needsWmdb = settings.wmdbMetadataMatchEnabled &&
       (target.needsMetadataMatch ||
-          _needsRatingLabel(target, prefix: '豆瓣 ') ||
+          _needsRatingLabel(target, keyword: '豆瓣') ||
           target.needsImdbRatingMatch ||
           target.doubanId.trim().isEmpty ||
           target.imdbId.trim().isEmpty ||
@@ -119,10 +119,17 @@ String _detailMetadataQuery(MediaDetailTarget target) {
   return raw.trim();
 }
 
-bool _needsRatingLabel(MediaDetailTarget target, {required String prefix}) {
-  final normalizedPrefix = prefix.toLowerCase();
-  return target.ratingLabels.every(
-    (label) => !label.trim().toLowerCase().startsWith(normalizedPrefix),
+bool _needsRatingLabel(MediaDetailTarget target, {required String keyword}) {
+  return !_hasRatingLabelKeyword(target.ratingLabels, keyword);
+}
+
+bool _hasRatingLabelKeyword(Iterable<String> labels, String keyword) {
+  final normalizedKeyword = keyword.trim().toLowerCase();
+  if (normalizedKeyword.isEmpty) {
+    return false;
+  }
+  return labels.any(
+    (label) => label.trim().toLowerCase().contains(normalizedKeyword),
   );
 }
 
@@ -138,7 +145,7 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
 
   if (settings.wmdbMetadataMatchEnabled &&
       (nextTarget.needsMetadataMatch ||
-          _needsRatingLabel(nextTarget, prefix: '豆瓣 ') ||
+          _needsRatingLabel(nextTarget, keyword: '豆瓣') ||
           nextTarget.needsImdbRatingMatch ||
           nextTarget.doubanId.trim().isEmpty ||
           nextTarget.imdbId.trim().isEmpty ||
@@ -289,13 +296,14 @@ Future<MetadataMatchResult?> _tryPreferredMetadataMatch({
   }
 }
 
-Future<MediaDetailTarget?> _tryMatchLibraryResource({
+Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
   required MediaRepository mediaRepository,
   required MediaDetailTarget target,
   required String query,
   MetadataMatchResult? metadataMatch,
 }) async {
   const detailLibraryMatchLimit = 2000;
+  const maxMatches = 32;
   final titles = _buildManualMatchTitles(
     target: target,
     query: query,
@@ -303,56 +311,161 @@ Future<MediaDetailTarget?> _tryMatchLibraryResource({
   );
   final year = _resolveManualMatchYear(target, metadataMatch);
 
-  final embyMatch = await _tryMatchEmbyResourceBySections(
-    mediaRepository: mediaRepository,
-    target: target,
-    titles: titles,
-    year: year,
-    metadataMatch: metadataMatch,
-    limit: detailLibraryMatchLimit,
-  );
-  if (embyMatch != null) {
-    final matchedTarget = MediaDetailTarget.fromMediaItem(
-      embyMatch.item,
-      availabilityLabel:
-          '资源已就绪：${embyMatch.item.sourceKind.label} · ${embyMatch.item.sourceName}'
-          '${embyMatch.matchReason.isEmpty ? '' : ' · ${embyMatch.matchReason}'}',
-      searchQuery: query,
+  final byId = <String, _LibraryMatchCandidate>{};
+  void upsert(_LibraryMatchCandidate c) {
+    final ex = byId[c.item.id];
+    if (ex == null || c.score > ex.score) {
+      byId[c.item.id] = c;
+    }
+  }
+
+  List<MediaCollection> collections;
+  try {
+    collections = await mediaRepository.fetchCollections(
+      kind: MediaSourceKind.emby,
     );
-    return _mergeMatchedLibraryTarget(
-      current: target,
-      matched: matchedTarget,
-    );
+  } catch (_) {
+    collections = const [];
+  }
+
+  if (collections.isNotEmpty) {
+    final rankedCollections = collections.toList()
+      ..sort((left, right) {
+        final rightScore = _scoreManualMatchCollection(
+          right,
+          target,
+          metadataMatch: metadataMatch,
+        );
+        final leftScore = _scoreManualMatchCollection(
+          left,
+          target,
+          metadataMatch: metadataMatch,
+        );
+        final scoreDelta = rightScore.compareTo(leftScore);
+        if (scoreDelta != 0) {
+          return scoreDelta;
+        }
+        return left.title.compareTo(right.title);
+      });
+
+    final imdbId = _resolveManualMatchImdbId(target, metadataMatch);
+    final tmdbId = _resolveManualMatchTmdbId(target, metadataMatch);
+
+    for (final collection in rankedCollections) {
+      try {
+        final items = await mediaRepository.fetchLibrary(
+          kind: MediaSourceKind.emby,
+          sourceId: collection.sourceId,
+          sectionId: collection.id,
+          limit: detailLibraryMatchLimit,
+        );
+        final exactMatched = matchMediaItemByExternalIds(
+          items,
+          imdbId: imdbId,
+          tmdbId: tmdbId,
+        );
+        if (exactMatched != null) {
+          upsert(
+            _LibraryMatchCandidate(
+              item: exactMatched,
+              matchReason: _externalIdMatchReason(
+                exactMatched,
+                imdbId: imdbId,
+                tmdbId: tmdbId,
+              ),
+              score: 1e9,
+            ),
+          );
+        }
+        for (final scored in listScoredMediaItemsMatchingTitles(
+          items,
+          titles: titles,
+          year: year,
+          maxResults: maxMatches,
+        )) {
+          upsert(
+            _LibraryMatchCandidate(
+              item: scored.item,
+              matchReason: _titleMatchReason(year),
+              score: scored.score,
+            ),
+          );
+        }
+      } catch (_) {}
+    }
   }
 
   try {
-    final library = await mediaRepository.fetchLibrary(
+    final nasLibrary = await mediaRepository.fetchLibrary(
       kind: MediaSourceKind.nas,
       limit: detailLibraryMatchLimit,
     );
-    final matched = matchMediaItemByTitles(
-      library,
+    for (final scored in listScoredMediaItemsMatchingTitles(
+      nasLibrary,
       titles: titles,
       year: year,
-    );
-    if (matched == null) {
-      return null;
+      maxResults: maxMatches,
+    )) {
+      upsert(
+        _LibraryMatchCandidate(
+          item: scored.item,
+          matchReason: _titleMatchReason(year),
+          score: scored.score,
+        ),
+      );
     }
+  } catch (_) {}
 
-    final matchedTarget = MediaDetailTarget.fromMediaItem(
-      matched,
-      availabilityLabel:
-          '资源已就绪：${matched.sourceKind.label} · ${matched.sourceName}'
-          ' · ${_titleMatchReason(year)}',
-      searchQuery: query,
-    );
-    return _mergeMatchedLibraryTarget(
-      current: target,
-      matched: matchedTarget,
-    );
-  } catch (_) {
-    return null;
+  final out = byId.values.toList()
+    ..sort((a, b) => b.score.compareTo(a.score));
+  if (out.length <= maxMatches) {
+    return out;
   }
+  return out.take(maxMatches).toList();
+}
+
+List<MediaDetailTarget> _candidatesToMergedTargets(
+  MediaDetailTarget current,
+  List<_LibraryMatchCandidate> candidates,
+  String query,
+) {
+  return candidates
+      .map(
+        (c) => _mergeMatchedLibraryTarget(
+          current: current,
+          matched: MediaDetailTarget.fromMediaItem(
+            c.item,
+            availabilityLabel:
+                '资源已就绪：${c.item.sourceKind.label} · ${c.item.sourceName}'
+                '${c.matchReason.isEmpty ? '' : ' · ${c.matchReason}'}',
+            searchQuery: query,
+          ),
+        ),
+      )
+      .toList();
+}
+
+String _libraryMatchOptionLabel(MediaDetailTarget t) {
+  final source = t.sourceName.trim();
+  final title = t.title.trim();
+  final section = t.sectionName.trim();
+  final tail = section.isEmpty ? title : '$title · $section';
+  if (source.isEmpty) {
+    return tail;
+  }
+  return '$source · $tail';
+}
+
+class _LibraryMatchCandidate {
+  const _LibraryMatchCandidate({
+    required this.item,
+    required this.matchReason,
+    required this.score,
+  });
+
+  final MediaItem item;
+  final String matchReason;
+  final double score;
 }
 
 List<String> _buildManualMatchTitles({
@@ -387,97 +500,6 @@ int _resolveManualMatchYear(
     return target.year;
   }
   return metadataMatch?.year ?? 0;
-}
-
-Future<_LibraryMatchCandidate?> _tryMatchEmbyResourceBySections({
-  required MediaRepository mediaRepository,
-  required MediaDetailTarget target,
-  required List<String> titles,
-  required int year,
-  required int limit,
-  MetadataMatchResult? metadataMatch,
-}) async {
-  List<MediaCollection> collections;
-  try {
-    collections = await mediaRepository.fetchCollections(
-      kind: MediaSourceKind.emby,
-    );
-  } catch (_) {
-    return null;
-  }
-  if (collections.isEmpty) {
-    return null;
-  }
-
-  final rankedCollections = collections.toList()
-    ..sort((left, right) {
-      final rightScore = _scoreManualMatchCollection(
-        right,
-        target,
-        metadataMatch: metadataMatch,
-      );
-      final leftScore = _scoreManualMatchCollection(
-        left,
-        target,
-        metadataMatch: metadataMatch,
-      );
-      final scoreDelta = rightScore.compareTo(leftScore);
-      if (scoreDelta != 0) {
-        return scoreDelta;
-      }
-      return left.title.compareTo(right.title);
-    });
-
-  for (final collection in rankedCollections) {
-    try {
-      final items = await mediaRepository.fetchLibrary(
-        kind: MediaSourceKind.emby,
-        sourceId: collection.sourceId,
-        sectionId: collection.id,
-        limit: limit,
-      );
-      final exactMatched = matchMediaItemByExternalIds(
-        items,
-        imdbId: _resolveManualMatchImdbId(target, metadataMatch),
-        tmdbId: _resolveManualMatchTmdbId(target, metadataMatch),
-      );
-      if (exactMatched != null) {
-        return _LibraryMatchCandidate(
-          item: exactMatched,
-          matchReason: _externalIdMatchReason(
-            exactMatched,
-            imdbId: _resolveManualMatchImdbId(target, metadataMatch),
-            tmdbId: _resolveManualMatchTmdbId(target, metadataMatch),
-          ),
-        );
-      }
-      final matched = matchMediaItemByTitles(
-        items,
-        titles: titles,
-        year: year,
-      );
-      if (matched != null) {
-        return _LibraryMatchCandidate(
-          item: matched,
-          matchReason: _titleMatchReason(year),
-        );
-      }
-    } catch (_) {
-      continue;
-    }
-  }
-
-  return null;
-}
-
-class _LibraryMatchCandidate {
-  const _LibraryMatchCandidate({
-    required this.item,
-    required this.matchReason,
-  });
-
-  final MediaItem item;
-  final String matchReason;
 }
 
 String _externalIdMatchReason(
@@ -744,6 +766,10 @@ MediaDetailTarget _applyManualMetadataMatch(
   MediaDetailTarget target,
   MetadataMatchResult match,
 ) {
+  final filteredMatchRatingLabels = _filterSupplementalRatingLabels(
+    existing: target.ratingLabels,
+    supplemental: match.ratingLabels,
+  );
   return target.copyWith(
     posterUrl:
         target.posterUrl.trim().isNotEmpty ? target.posterUrl : match.posterUrl,
@@ -771,13 +797,25 @@ MediaDetailTarget _applyManualMetadataMatch(
             )
             .toList()
         : target.actorProfiles,
-    ratingLabels: _mergeLabels(target.ratingLabels, match.ratingLabels),
+    ratingLabels: _mergeLabels(target.ratingLabels, filteredMatchRatingLabels),
     doubanId: target.doubanId.trim().isNotEmpty
         ? target.doubanId
         : match.doubanId,
     imdbId: target.imdbId.trim().isNotEmpty ? target.imdbId : match.imdbId,
     tmdbId: target.tmdbId.trim().isNotEmpty ? target.tmdbId : match.tmdbId,
   );
+}
+
+List<String> _filterSupplementalRatingLabels({
+  required List<String> existing,
+  required List<String> supplemental,
+}) {
+  if (!_hasRatingLabelKeyword(existing, '豆瓣')) {
+    return supplemental;
+  }
+  return supplemental
+      .where((label) => !label.trim().toLowerCase().contains('豆瓣'))
+      .toList(growable: false);
 }
 
 String _firstNonEmpty(String primary, String fallback) {
@@ -892,6 +930,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   MediaDetailTarget? _manualOverrideTarget;
   bool _isMatchingLocalResource = false;
   bool _isRefreshingMetadata = false;
+  bool _autoLibraryMatchConsumed = false;
+  bool _enrichedEntryProbePosted = false;
+  List<MediaDetailTarget> _libraryMatchChoices = const [];
+  int _selectedLibraryMatchIndex = 0;
 
   @override
   void didUpdateWidget(covariant MediaDetailPage oldWidget) {
@@ -903,7 +945,27 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       _manualOverrideTarget = null;
       _isMatchingLocalResource = false;
       _isRefreshingMetadata = false;
+      _autoLibraryMatchConsumed = false;
+      _enrichedEntryProbePosted = false;
+      _libraryMatchChoices = const [];
+      _selectedLibraryMatchIndex = 0;
     }
+  }
+
+  void _maybeAutoMatchLibrary(MediaDetailTarget resolved) {
+    if (_autoLibraryMatchConsumed || _manualOverrideTarget != null) {
+      return;
+    }
+    if (!_shouldShowLocalResourceMatcher(resolved)) {
+      return;
+    }
+    _autoLibraryMatchConsumed = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _matchLocalResource(resolved);
+    });
   }
 
   Future<void> _matchLocalResource(MediaDetailTarget currentTarget) async {
@@ -913,6 +975,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
 
     setState(() {
       _isMatchingLocalResource = true;
+      _libraryMatchChoices = const [];
+      _selectedLibraryMatchIndex = 0;
     });
 
     final settings = ref.read(appSettingsProvider);
@@ -926,7 +990,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       query: query,
     );
 
-    final matched = await _tryMatchLibraryResource(
+    final candidates = await _findAllLibraryMatchCandidates(
       mediaRepository: ref.read(mediaRepositoryProvider),
       target: currentTarget,
       query: query,
@@ -937,28 +1001,53 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       return;
     }
 
+    final merged = _candidatesToMergedTargets(
+      currentTarget,
+      candidates,
+      query,
+    );
+
     setState(() {
       _isMatchingLocalResource = false;
-      if (matched != null) {
-        _manualOverrideTarget = matched;
+      if (merged.isEmpty) {
+        _libraryMatchChoices = const [];
+        _selectedLibraryMatchIndex = 0;
+      } else if (merged.length == 1) {
+        _libraryMatchChoices = const [];
+        _manualOverrideTarget = merged.first;
+        _selectedLibraryMatchIndex = 0;
+      } else {
+        _libraryMatchChoices = merged;
+        _selectedLibraryMatchIndex = 0;
+        _manualOverrideTarget = merged.first;
       }
     });
 
     final messenger = ScaffoldMessenger.of(context);
-    if (matched == null) {
+    if (merged.isEmpty) {
       messenger.showSnackBar(
         const SnackBar(content: Text('没有找到可匹配的本地资源')),
       );
       return;
     }
 
+    if (merged.length == 1) {
+      final matched = merged.first;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            matched.availabilityLabel.trim().isNotEmpty
+                ? '已匹配到 ${matched.availabilityLabel.replaceFirst('资源已就绪：', '')}'
+                : '已匹配到 ${matched.sourceKind?.label ?? '资源'} · ${matched.sourceName}',
+          ),
+        ),
+      );
+      return;
+    }
+
     messenger.showSnackBar(
       SnackBar(
-        content: Text(
-          matched.availabilityLabel.trim().isNotEmpty
-              ? '已匹配到 ${matched.availabilityLabel.replaceFirst('资源已就绪：', '')}'
-              : '已匹配到 ${matched.sourceKind?.label ?? '资源'} · ${matched.sourceName}',
-        ),
+        content: Text('匹配到 ${merged.length} 个本地资源，可在下方选择'),
       ),
     );
   }
@@ -1002,6 +1091,24 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(
+      enrichedDetailTargetProvider(widget.target),
+      (previous, next) {
+        next.whenData(_maybeAutoMatchLibrary);
+      },
+    );
+    if (!_enrichedEntryProbePosted) {
+      _enrichedEntryProbePosted = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        ref
+            .read(enrichedDetailTargetProvider(widget.target))
+            .whenData(_maybeAutoMatchLibrary);
+      });
+    }
+
     final seedTarget = _manualOverrideTarget ?? widget.target;
     final targetAsync = ref.watch(enrichedDetailTargetProvider(seedTarget));
     final target = targetAsync.valueOrNull ?? seedTarget;
@@ -1125,7 +1232,56 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                   label: '状态',
                                   value: target.availabilityLabel,
                                 ),
-                              if (_shouldShowLocalResourceMatcher(target)) ...[
+                              if (_libraryMatchChoices.length > 1) ...[
+                                const SizedBox(height: 12),
+                                const _InfoLabel('本地资源'),
+                                const SizedBox(height: 8),
+                                DropdownButtonHideUnderline(
+                                  child: DropdownButton<int>(
+                                    value: _selectedLibraryMatchIndex.clamp(
+                                      0,
+                                      _libraryMatchChoices.length - 1,
+                                    ),
+                                    isExpanded: true,
+                                    dropdownColor: const Color(0xFF142235),
+                                    iconEnabledColor: Colors.white70,
+                                    style: const TextStyle(
+                                      color: Color(0xFFDCE6F8),
+                                      fontSize: 14,
+                                      height: 1.35,
+                                    ),
+                                    items: List.generate(
+                                      _libraryMatchChoices.length,
+                                      (i) {
+                                        return DropdownMenuItem<int>(
+                                          value: i,
+                                          child: Text(
+                                            _libraryMatchOptionLabel(
+                                              _libraryMatchChoices[i],
+                                            ),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    onChanged: _isMatchingLocalResource
+                                        ? null
+                                        : (i) {
+                                            if (i == null) {
+                                              return;
+                                            }
+                                            setState(() {
+                                              _selectedLibraryMatchIndex = i;
+                                              _manualOverrideTarget =
+                                                  _libraryMatchChoices[i];
+                                            });
+                                          },
+                                  ),
+                                ),
+                              ],
+                              if (_shouldShowLocalResourceMatcher(target) ||
+                                  _libraryMatchChoices.length > 1) ...[
                                 const SizedBox(height: 12),
                                 Align(
                                   alignment: Alignment.centerLeft,
@@ -1148,7 +1304,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                     label: Text(
                                       _isMatchingLocalResource
                                           ? '匹配中...'
-                                          : '匹配本地资源',
+                                          : _libraryMatchChoices.length > 1
+                                              ? '重新匹配本地资源'
+                                              : '匹配本地资源',
                                     ),
                                     style: TextButton.styleFrom(
                                       foregroundColor: Colors.white,
@@ -1268,6 +1426,9 @@ List<_ResourceFact> _buildResourceFacts(MediaDetailTarget target) {
   final playback = target.playbackTarget;
   final facts = <_ResourceFact>[];
   final streamUrl = playback?.streamUrl.trim() ?? '';
+  final actualAddress = playback?.actualAddress.trim() ?? '';
+  final displayAddress =
+      actualAddress.isNotEmpty ? actualAddress : streamUrl;
   final format = playback?.formatLabel.trim() ?? '';
   final fileSize = playback?.fileSizeLabel.trim() ?? '';
   final resolution = playback?.resolutionLabel.trim() ?? '';
@@ -1275,11 +1436,11 @@ List<_ResourceFact> _buildResourceFacts(MediaDetailTarget target) {
   final duration = target.durationLabel.trim();
   final sectionName = target.sectionName.trim();
 
-  if (streamUrl.isNotEmpty) {
+  if (displayAddress.isNotEmpty) {
     facts.add(
       _ResourceFact(
         label: '地址',
-        value: streamUrl,
+        value: displayAddress,
         selectable: true,
       ),
     );

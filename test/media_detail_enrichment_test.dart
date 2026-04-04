@@ -382,6 +382,79 @@ void main() {
       expect(resolved.posterUrl, 'https://emby.example.com/poster.jpg');
       expect(resolved.overview, '来自本地媒体库的简介');
     });
+
+    test('keeps existing douban label when wmdb also returns douban rating',
+        () async {
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'wmdbMetadataMatchEnabled': true,
+              'imdbRatingMatchEnabled': true,
+            }),
+          ),
+          wmdbMetadataClientProvider.overrideWithValue(
+            WmdbMetadataClient(
+              MockClient((request) async {
+                return http.Response(
+                  jsonEncode({
+                    'data': [
+                      {
+                        'data': [
+                          {
+                            'poster':
+                                'https://img.wmdb.tv/movie/poster/life.jpg',
+                            'name': '美丽人生',
+                            'genre': '剧情/喜剧',
+                            'description': '圭多用幽默守护家人。',
+                            'lang': 'Cn',
+                          },
+                        ],
+                        'originalName': 'La vita e bella',
+                        'imdbId': 'tt0118799',
+                        'tmdbId': '637',
+                        'doubanId': '1292063',
+                        'doubanRating': '9.6',
+                        'imdbRating': '8.6',
+                        'year': '1997',
+                      },
+                    ],
+                  }),
+                  200,
+                  headers: const {'content-type': 'application/json'},
+                );
+              }),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const target = MediaDetailTarget(
+        title: '美丽人生',
+        posterUrl: '',
+        overview: '',
+        year: 1997,
+        ratingLabels: ['豆瓣 9.5'],
+        availabilityLabel: '无',
+        searchQuery: '美丽人生',
+        sourceName: '豆瓣',
+      );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(target).future,
+      );
+
+      expect(resolved.ratingLabels, contains('豆瓣 9.5'));
+      expect(resolved.ratingLabels, isNot(contains('豆瓣 9.6')));
+      expect(resolved.ratingLabels, contains('IMDb 8.6'));
+      expect(resolved.imdbId, 'tt0118799');
+      expect(resolved.tmdbId, '637');
+    });
   });
 }
 

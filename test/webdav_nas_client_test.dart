@@ -52,6 +52,7 @@ void main() {
         movie.streamUrl,
         'https://nas.example.com/dav/Movies/Interstellar.mkv',
       );
+      expect(movie.actualAddress, 'Movies/Interstellar.mkv');
       expect(movie.addedAt, DateTime.utc(2026, 4, 2, 8, 30, 0));
 
       final strm = items.firstWhere((item) => item.title == 'One Piece');
@@ -59,7 +60,8 @@ void main() {
         strm.streamUrl,
         'https://media.example.com/streams/one-piece/master.m3u8',
       );
-      expect(strm.overview, strm.streamUrl);
+      expect(strm.actualAddress, 'Shows/One Piece.strm');
+      expect(strm.overview, isEmpty);
       expect(strm.addedAt, DateTime.utc(2026, 4, 3, 9, 0, 0));
     });
   });

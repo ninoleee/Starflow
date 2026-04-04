@@ -59,4 +59,63 @@ void main() {
       expect(matched?.id, 'movie-2');
     });
   });
+
+  group('listScoredMediaItemsMatchingTitles', () {
+    test('returns all items above threshold sorted by score', () {
+      final library = [
+        MediaItem(
+          id: 'a',
+          title: 'Inception',
+          overview: '',
+          posterUrl: '',
+          year: 2010,
+          durationLabel: '',
+          genres: const [],
+          sourceId: 's1',
+          sourceName: 'NAS',
+          sourceKind: MediaSourceKind.nas,
+          streamUrl: '',
+          addedAt: DateTime.utc(2026, 4, 4),
+        ),
+        MediaItem(
+          id: 'b',
+          title: 'Inception Remux',
+          overview: '',
+          posterUrl: '',
+          year: 2010,
+          durationLabel: '',
+          genres: const [],
+          sourceId: 's1',
+          sourceName: 'NAS',
+          sourceKind: MediaSourceKind.nas,
+          streamUrl: '',
+          addedAt: DateTime.utc(2026, 4, 4),
+        ),
+        MediaItem(
+          id: 'c',
+          title: 'Other Movie',
+          overview: '',
+          posterUrl: '',
+          year: 2020,
+          durationLabel: '',
+          genres: const [],
+          sourceId: 's1',
+          sourceName: 'NAS',
+          sourceKind: MediaSourceKind.nas,
+          streamUrl: '',
+          addedAt: DateTime.utc(2026, 4, 4),
+        ),
+      ];
+
+      final list = listScoredMediaItemsMatchingTitles(
+        library,
+        titles: const ['Inception'],
+        year: 2010,
+      );
+
+      expect(list.length, 2);
+      expect(list.map((e) => e.item.id).toList(), ['a', 'b']);
+      expect(list.first.score >= list.last.score, isTrue);
+    });
+  });
 }
