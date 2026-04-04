@@ -17,6 +17,75 @@ final homeEditorCollectionsProvider = FutureProvider<List<MediaCollection>>((
   return ref.read(mediaRepositoryProvider).fetchCollections();
 });
 
+const _kCustomDoubanListPresetValue = '__custom__';
+
+const _defaultDoubanListPresets = <_DoubanListPreset>[
+  _DoubanListPreset(
+    title: '豆瓣热门电影',
+    url: 'https://m.douban.com/subject_collection/movie_hot_gaia',
+  ),
+  _DoubanListPreset(
+    title: '热播新剧',
+    url: 'https://m.douban.com/subject_collection/tv_hot',
+  ),
+  _DoubanListPreset(
+    title: '热播综艺',
+    url: 'https://m.douban.com/subject_collection/show_hot',
+  ),
+  _DoubanListPreset(
+    title: '热播动漫',
+    url: 'https://m.douban.com/subject_collection/tv_animation',
+  ),
+  _DoubanListPreset(
+    title: '影院热映',
+    url: 'https://m.douban.com/subject_collection/movie_showing',
+  ),
+  _DoubanListPreset(
+    title: '实时热门电影',
+    url: 'https://m.douban.com/subject_collection/movie_real_time_hotest',
+  ),
+  _DoubanListPreset(
+    title: '实时热门电视',
+    url: 'https://m.douban.com/subject_collection/tv_real_time_hotest',
+  ),
+  _DoubanListPreset(
+    title: '豆瓣 Top 250',
+    url: 'https://m.douban.com/subject_collection/movie_top250',
+  ),
+  _DoubanListPreset(
+    title: '一周电影口碑榜',
+    url: 'https://m.douban.com/subject_collection/movie_weekly_best',
+  ),
+  _DoubanListPreset(
+    title: '华语口碑剧集榜',
+    url: 'https://m.douban.com/subject_collection/tv_chinese_best_weekly',
+  ),
+  _DoubanListPreset(
+    title: '全球口碑剧集榜',
+    url: 'https://m.douban.com/subject_collection/tv_global_best_weekly',
+  ),
+  _DoubanListPreset(
+    title: '国内综艺口碑榜',
+    url: 'https://m.douban.com/subject_collection/show_chinese_best_weekly',
+  ),
+  _DoubanListPreset(
+    title: '全球综艺口碑榜',
+    url: 'https://m.douban.com/subject_collection/show_global_best_weekly',
+  ),
+  _DoubanListPreset(
+    title: '第97届奥斯卡',
+    url: 'https://m.douban.com/subject_collection/EC7I7ZDRA?type=rank',
+  ),
+  _DoubanListPreset(
+    title: 'IMDB MOVIE TOP 250',
+    url: 'https://m.douban.com/doulist/1518184',
+  ),
+  _DoubanListPreset(
+    title: 'IMDB TV TOP 250',
+    url: 'https://m.douban.com/doulist/41573512',
+  ),
+];
+
 class HomeEditorPage extends ConsumerWidget {
   const HomeEditorPage({super.key});
 
@@ -239,10 +308,10 @@ class HomeEditorPage extends ConsumerWidget {
             ),
             _AddModuleTile(
               title: '豆瓣片单',
-              subtitle: '支持 doulist 和 subject_collection 地址',
+              subtitle: '内置热门片单，也支持 doulist 和 subject_collection 自定义地址',
               onTap: () async {
                 Navigator.of(context).pop();
-                await _showCreateDoubanListDialog(context, ref);
+                await _showDoubanListDialog(context, ref);
               },
             ),
             _AddModuleTile(
@@ -261,58 +330,121 @@ class HomeEditorPage extends ConsumerWidget {
     );
   }
 
-  Future<void> _showCreateDoubanListDialog(
+  Future<void> _showDoubanListDialog(
     BuildContext context,
     WidgetRef ref,
+    [HomeModuleConfig? existing],
   ) {
-    final titleController = TextEditingController(text: '豆瓣片单');
-    final urlController = TextEditingController();
+    final initialPreset = _findDoubanListPreset(existing?.doubanListUrl ?? '');
+    final titleController = TextEditingController(
+      text: existing?.title ?? initialPreset?.title ?? '豆瓣片单',
+    );
+    final urlController = TextEditingController(
+      text: existing?.doubanListUrl ?? initialPreset?.url ?? '',
+    );
+    var selectedPresetUrl = initialPreset?.url ?? _kCustomDoubanListPresetValue;
 
     return showDialog<void>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('新增豆瓣片单'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleController,
-                decoration: const InputDecoration(labelText: '标题'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: urlController,
-                minLines: 2,
-                maxLines: 3,
-                decoration: const InputDecoration(labelText: '片单地址'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final url = urlController.text.trim();
-                if (url.isEmpty) {
-                  return;
-                }
-                ref.read(settingsControllerProvider.notifier).saveHomeModule(
-                      HomeModuleConfig.doubanList(
-                        title: titleController.text.trim().isEmpty
-                            ? '豆瓣片单'
-                            : titleController.text.trim(),
-                        url: url,
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text(existing == null ? '新增豆瓣片单' : '编辑豆瓣片单'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedPresetUrl,
+                      decoration: const InputDecoration(labelText: '默认片单'),
+                      items: [
+                        for (final preset in _defaultDoubanListPresets)
+                          DropdownMenuItem<String>(
+                            value: preset.url,
+                            child: Text(preset.title),
+                          ),
+                        const DropdownMenuItem<String>(
+                          value: _kCustomDoubanListPresetValue,
+                          child: Text('自定义输入'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) {
+                          return;
+                        }
+                        setState(() {
+                          selectedPresetUrl = value;
+                          if (value == _kCustomDoubanListPresetValue) {
+                            return;
+                          }
+                          final preset = _findDoubanListPreset(value);
+                          if (preset == null) {
+                            return;
+                          }
+                          titleController.text = preset.title;
+                          urlController.text = preset.url;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(labelText: '标题'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: urlController,
+                      minLines: 2,
+                      maxLines: 3,
+                      decoration: const InputDecoration(labelText: '片单地址'),
+                    ),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '支持 `subject_collection` 和 `doulist` 地址，也可以先选默认片单再手动改。',
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
-                    );
-                Navigator.of(context).pop();
-              },
-              child: const Text('保存'),
-            ),
-          ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final url = urlController.text.trim();
+                    if (url.isEmpty) {
+                      return;
+                    }
+                    ref
+                        .read(settingsControllerProvider.notifier)
+                        .saveHomeModule(
+                          existing == null
+                              ? HomeModuleConfig.doubanList(
+                                  title: titleController.text.trim().isEmpty
+                                      ? '豆瓣片单'
+                                      : titleController.text.trim(),
+                                  url: url,
+                                )
+                              : existing.copyWith(
+                                  title: titleController.text.trim().isEmpty
+                                      ? existing.title
+                                      : titleController.text.trim(),
+                                  doubanListUrl: url,
+                                ),
+                        );
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('保存'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -324,9 +456,16 @@ class HomeEditorPage extends ConsumerWidget {
     HomeModuleConfig module,
   ) {
     final titleController = TextEditingController(text: module.title);
-    final urlController = TextEditingController(text: module.doubanListUrl);
     var interestStatus = module.doubanInterestStatus;
     var suggestionType = module.doubanSuggestionType;
+
+    if (module.type == HomeModuleType.doubanList) {
+      return _showDoubanListDialog(
+        context,
+        ref,
+        module,
+      );
+    }
 
     return showDialog<void>(
       context: context,
@@ -387,15 +526,6 @@ class HomeEditorPage extends ConsumerWidget {
                         },
                       ),
                     ],
-                    if (module.type == HomeModuleType.doubanList) ...[
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: urlController,
-                        minLines: 2,
-                        maxLines: 3,
-                        decoration: const InputDecoration(labelText: '片单地址'),
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -415,7 +545,6 @@ class HomeEditorPage extends ConsumerWidget {
                                 : titleController.text.trim(),
                             doubanInterestStatus: interestStatus,
                             doubanSuggestionType: suggestionType,
-                            doubanListUrl: urlController.text.trim(),
                           ),
                         );
                     Navigator.of(context).pop();
@@ -429,6 +558,30 @@ class HomeEditorPage extends ConsumerWidget {
       },
     );
   }
+}
+
+_DoubanListPreset? _findDoubanListPreset(String url) {
+  final normalizedUrl = url.trim();
+  if (normalizedUrl.isEmpty) {
+    return null;
+  }
+
+  for (final preset in _defaultDoubanListPresets) {
+    if (preset.url == normalizedUrl) {
+      return preset;
+    }
+  }
+  return null;
+}
+
+class _DoubanListPreset {
+  const _DoubanListPreset({
+    required this.title,
+    required this.url,
+  });
+
+  final String title;
+  final String url;
 }
 
 class _AddModuleTile extends StatelessWidget {

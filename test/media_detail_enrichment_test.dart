@@ -95,38 +95,41 @@ void main() {
             WmdbMetadataClient(
               MockClient((request) async {
                 expect(request.url.path, '/movie/api');
-                return http.Response(
-                  jsonEncode({
-                    'data': [
-                      {
-                        'poster': 'https://img.wmdb.tv/movie/poster/sample.jpg',
-                        'name': '美丽人生',
-                        'genre': '剧情',
-                        'description': '圭多用幽默守护家人。',
-                        'lang': 'Cn',
-                      },
-                    ],
-                    'actor': [
-                      {
-                        'data': [
-                          {'name': '罗伯托·贝尼尼', 'lang': 'Cn'},
-                        ],
-                      },
-                    ],
-                    'director': [
-                      {
-                        'data': [
-                          {'name': '罗伯托·贝尼尼', 'lang': 'Cn'},
-                        ],
-                      },
-                    ],
-                    'originalName': '美丽人生',
-                    'imdbId': 'tt0118799',
-                    'year': '1997',
-                    'duration': 6960,
-                    'doubanId': '1292063',
-                    'doubanRating': '9.6',
-                  }),
+                return http.Response.bytes(
+                  utf8.encode(
+                    jsonEncode({
+                      'data': [
+                        {
+                          'poster':
+                              'https://img.wmdb.tv/movie/poster/sample.jpg',
+                          'name': '美丽人生',
+                          'genre': '剧情',
+                          'description': '圭多用幽默守护家人。',
+                          'lang': 'Cn',
+                        },
+                      ],
+                      'actor': [
+                        {
+                          'data': [
+                            {'name': '罗伯托·贝尼尼', 'lang': 'Cn'},
+                          ],
+                        },
+                      ],
+                      'director': [
+                        {
+                          'data': [
+                            {'name': '罗伯托·贝尼尼', 'lang': 'Cn'},
+                          ],
+                        },
+                      ],
+                      'originalName': '美丽人生',
+                      'imdbId': 'tt0118799',
+                      'year': '1997',
+                      'duration': 6960,
+                      'doubanId': '1292063',
+                      'doubanRating': '9.6',
+                    }),
+                  ),
                   200,
                 );
               }),
