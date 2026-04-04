@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
@@ -32,6 +33,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   late Set<String> _selectedSectionIds;
   List<MediaCollection> _availableSections = [];
   bool _isAuthenticating = false;
+  bool _isTestingWebDav = false;
   bool _isLoadingSections = false;
   late String _connectionMessage;
   late bool _advancedTokenExpanded;
@@ -54,8 +56,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _resolvedServerId = e?.serverId ?? '';
     _resolvedDeviceId = e?.deviceId ?? '';
     _selectedSectionIds = {...?e?.featuredSectionIds};
-    _connectionMessage =
-        e == null ? '填写账号密码后可以直接验证 Emby 登录。' : e.embyEditorStatusMessage;
+    _connectionMessage = _initialConnectionMessage(e);
     _advancedTokenExpanded = _tokenController.text.trim().isNotEmpty;
   }
 
@@ -86,6 +87,25 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       deviceId: _resolvedDeviceId,
       featuredSectionIds: _selectedSectionIds.toList(),
     );
+  }
+
+  String _defaultConnectionMessage(MediaSourceKind kind) {
+    switch (kind) {
+      case MediaSourceKind.emby:
+        return '填写账号密码后可以直接验证 Emby 登录。';
+      case MediaSourceKind.nas:
+        return '填写 WebDAV 地址、用户名和密码后可以直接验证连接。';
+    }
+  }
+
+  String _initialConnectionMessage(MediaSourceConfig? source) {
+    if (source == null) {
+      return _defaultConnectionMessage(_kind);
+    }
+    if (source.kind == MediaSourceKind.emby) {
+      return source.embyEditorStatusMessage;
+    }
+    return _defaultConnectionMessage(source.kind);
   }
 
   Future<void> _onTestEmbyLogin() async {
@@ -126,6 +146,41 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Emby 登录失败：$error')),
+      );
+    }
+  }
+
+  Future<void> _onTestWebDavConnection() async {
+    final draft = _draftConfig();
+    setState(() {
+      _isTestingWebDav = true;
+      _connectionMessage = '正在连接 WebDAV...';
+    });
+    try {
+      final collections =
+          await ref.read(webDavNasClientProvider).fetchCollections(draft);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isTestingWebDav = false;
+        _connectionMessage = collections.isEmpty
+            ? 'WebDAV 连接成功，已连通服务器，但顶层目录为空或当前账号没有列出权限。'
+            : 'WebDAV 连接成功，读取到 ${collections.length} 个顶层目录。';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('WebDAV 连接成功')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isTestingWebDav = false;
+        _connectionMessage = '连接失败：$error';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('WebDAV 连接失败：$error')),
       );
     }
   }
@@ -258,7 +313,10 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                     .toList(),
                 onChanged: (value) {
                   if (value != null) {
-                    setState(() => _kind = value);
+                    setState(() {
+                      _kind = value;
+                      _connectionMessage = _defaultConnectionMessage(value);
+                    });
                   }
                 },
               ),
@@ -328,32 +386,6 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                     const SizedBox(height: 8),
                   ],
                 ),
-                const SizedBox(height: 12),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _connectionMessage,
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                        if (_resolvedUserId.trim().isNotEmpty) ...[
-                          const SizedBox(height: 6),
-                          SelectableText(
-                            'User ID: $_resolvedUserId',
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
                 if (_availableSections.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   Text(
@@ -392,6 +424,32 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                   ),
                 ),
               ],
+              const SizedBox(height: 12),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _connectionMessage,
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                      if (isEmby && _resolvedUserId.trim().isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        SelectableText(
+                          'User ID: $_resolvedUserId',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
               const SizedBox(height: 8),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -424,6 +482,18 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                       ),
                     ),
                   ],
+                ),
+              ] else ...[
+                const SizedBox(height: 28),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton(
+                    onPressed: _isTestingWebDav ||
+                            _endpointController.text.trim().isEmpty
+                        ? null
+                        : _onTestWebDavConnection,
+                    child: Text(_isTestingWebDav ? '测试中…' : '测试连接'),
+                  ),
                 ),
               ],
               if (widget.initial != null) ...[

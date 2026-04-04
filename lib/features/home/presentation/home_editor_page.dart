@@ -92,7 +92,8 @@ class HomeEditorPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(appSettingsProvider);
-    final collectionsAsync = ref.watch(homeEditorCollectionsProvider);
+    final enabledSources =
+        settings.mediaSources.where((item) => item.enabled).toList();
 
     return Scaffold(
       floatingActionButton: FloatingActionButton.small(
@@ -181,41 +182,50 @@ class HomeEditorPage extends ConsumerWidget {
                 const SizedBox(height: 18),
                 SectionPanel(
                   title: '可添加来源',
-                  subtitle: '当前已接入的来源分区会出现在这里',
-                  child: collectionsAsync.when(
-                    data: (collections) {
-                      if (collections.isEmpty) {
-                        return const Text('还没有可用分区。先去设置里接入 Emby 或 NAS。');
-                      }
-                      return Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: collections
-                            .map(
-                              (collection) => ActionChip(
-                                label: Text(
-                                    '${collection.sourceName} · ${collection.title}'),
-                                onPressed: () {
-                                  ref
-                                      .read(settingsControllerProvider.notifier)
-                                      .saveHomeModule(
-                                        HomeModuleConfig.libraryCollection(
-                                            collection),
-                                      );
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('已添加 ${collection.title}'),
-                                    ),
-                                  );
-                                },
+                  subtitle: '先按来源分类，再进入具体模块或分区',
+                  child: Column(
+                    children: [
+                      _SourceCategoryTile(
+                        title: '内置',
+                        subtitle: '最近新增等基础模块',
+                        icon: Icons.auto_awesome_rounded,
+                        onTap: () => _showBuiltinModuleSheet(context, ref),
+                      ),
+                      const SizedBox(height: 10),
+                      _SourceCategoryTile(
+                        title: '豆瓣',
+                        subtitle: '我想看、推荐、片单和轮播',
+                        icon: Icons.movie_filter_rounded,
+                        onTap: () => _showDoubanModuleSheet(context, ref),
+                      ),
+                      if (enabledSources.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        ...enabledSources.map(
+                          (source) => Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _SourceCategoryTile(
+                              title: source.name,
+                              subtitle: '${source.kind.label} · 点击后选择具体分区',
+                              icon: source.kind == MediaSourceKind.emby
+                                  ? Icons.video_library_rounded
+                                  : Icons.storage_rounded,
+                              onTap: () => _showMediaSourceModuleSheet(
+                                context,
+                                ref,
+                                source,
                               ),
-                            )
-                            .toList(),
-                      );
-                    },
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (error, stackTrace) => Text('读取分区失败：$error'),
+                            ),
+                          ),
+                        ),
+                      ] else
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Text(
+                            '还没有启用的 Emby 或 NAS 来源，先去设置里接入后，这里就会出现。',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ],
@@ -235,6 +245,11 @@ class HomeEditorPage extends ConsumerWidget {
   }
 
   Future<void> _showAddModuleSheet(BuildContext context, WidgetRef ref) {
+    final enabledSources = ref
+        .read(appSettingsProvider)
+        .mediaSources
+        .where((item) => item.enabled)
+        .toList();
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -244,7 +259,57 @@ class HomeEditorPage extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '添加模块',
+              '选择来源分类',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 14),
+            _AddModuleTile(
+              title: '内置',
+              subtitle: '最近新增等基础模块',
+              onTap: () async {
+                Navigator.of(context).pop();
+                await _showBuiltinModuleSheet(context, ref);
+              },
+            ),
+            _AddModuleTile(
+              title: '豆瓣',
+              subtitle: '我想看、推荐、片单和轮播',
+              onTap: () async {
+                Navigator.of(context).pop();
+                await _showDoubanModuleSheet(context, ref);
+              },
+            ),
+            ...enabledSources.map(
+              (source) => _AddModuleTile(
+                title: source.name,
+                subtitle: '${source.kind.label} · 点击后选择具体分区',
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  await _showMediaSourceModuleSheet(
+                    context,
+                    ref,
+                    source,
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showBuiltinModuleSheet(BuildContext context, WidgetRef ref) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '内置模块',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 14),
@@ -258,6 +323,26 @@ class HomeEditorPage extends ConsumerWidget {
                 Navigator.of(context).pop();
               },
             ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showDoubanModuleSheet(BuildContext context, WidgetRef ref) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '豆瓣模块',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 14),
             _AddModuleTile(
               title: '豆瓣我想看',
               subtitle: '来自豆瓣我看列表',
@@ -330,11 +415,71 @@ class HomeEditorPage extends ConsumerWidget {
     );
   }
 
-  Future<void> _showDoubanListDialog(
+  Future<void> _showMediaSourceModuleSheet(
     BuildContext context,
     WidgetRef ref,
-    [HomeModuleConfig? existing],
-  ) {
+    MediaSourceConfig source,
+  ) async {
+    final collections = await ref.read(homeEditorCollectionsProvider.future);
+    if (!context.mounted) {
+      return;
+    }
+
+    final sourceCollections = collections
+        .where((collection) => collection.sourceId == source.id)
+        .toList();
+    if (sourceCollections.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${source.name} 还没有可用分区'),
+        ),
+      );
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              source.name,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 14),
+            ...sourceCollections.map(
+              (collection) => _AddModuleTile(
+                title: collection.title,
+                subtitle: collection.subtitle.trim().isEmpty
+                    ? '${collection.sourceKind.label} 分区'
+                    : collection.subtitle,
+                onTap: () {
+                  ref.read(settingsControllerProvider.notifier).saveHomeModule(
+                        HomeModuleConfig.libraryCollection(collection),
+                      );
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('已添加 ${collection.title}'),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showDoubanListDialog(
+    BuildContext context,
+    WidgetRef ref, {
+    HomeModuleConfig? existing,
+  }) {
     final initialPreset = _findDoubanListPreset(existing?.doubanListUrl ?? '');
     final titleController = TextEditingController(
       text: existing?.title ?? initialPreset?.title ?? '豆瓣片单',
@@ -463,7 +608,7 @@ class HomeEditorPage extends ConsumerWidget {
       return _showDoubanListDialog(
         context,
         ref,
-        module,
+        existing: module,
       );
     }
 
@@ -611,6 +756,49 @@ class _AddModuleTile extends StatelessWidget {
         subtitle: Text(subtitle),
         trailing: const Icon(Icons.add_circle_outline_rounded),
         onTap: onTap,
+      ),
+    );
+  }
+}
+
+class _SourceCategoryTile extends StatelessWidget {
+  const _SourceCategoryTile({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: Ink(
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          child: ListTile(
+            leading: CircleAvatar(
+              backgroundColor: scheme.primary.withValues(alpha: 0.12),
+              foregroundColor: scheme.primary,
+              child: Icon(icon),
+            ),
+            title: Text(title),
+            subtitle: Text(subtitle),
+            trailing: const Icon(Icons.chevron_right_rounded),
+          ),
+        ),
       ),
     );
   }
