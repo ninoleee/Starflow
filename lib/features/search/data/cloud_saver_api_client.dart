@@ -148,6 +148,8 @@ class CloudSaverApiClient {
         final source = (item['channel'] as String? ?? '').trim();
         final publishedAt = (item['pubDate'] as String? ?? '').trim();
         final cloudType = (item['cloudType'] as String? ?? '').trim();
+        final normalizedCloudType =
+            SearchCloudTypeX.fromCode(cloudType)?.code ?? cloudType;
         final cloudLinks = (item['cloudLinks'] as List<dynamic>? ?? const [])
             .map((value) => '$value')
             .where((value) => value.trim().isNotEmpty)
@@ -177,6 +179,7 @@ class CloudSaverApiClient {
               ].join(' · '),
               resourceUrl: url,
               password: password,
+              cloudType: normalizedCloudType,
               source: source,
               publishedAt: publishedAt,
               imageUrls: image.isEmpty ? const [] : [image],

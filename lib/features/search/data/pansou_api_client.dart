@@ -141,6 +141,8 @@ class PanSouApiClient {
     final seen = <String>{};
 
     mergedByType.forEach((cloudType, entries) {
+      final normalizedCloudType =
+          SearchCloudTypeX.fromCode(cloudType)?.code ?? cloudType.trim();
       final links = entries as List<dynamic>? ?? const [];
       for (final entry in links) {
         final item = Map<String, dynamic>.from(entry as Map);
@@ -176,6 +178,7 @@ class PanSouApiClient {
             ].join(' · '),
             resourceUrl: url,
             password: password,
+            cloudType: normalizedCloudType,
             source: source,
             publishedAt: publishedAt,
             imageUrls: images,
@@ -208,6 +211,8 @@ class PanSouApiClient {
         }
         final password = (link['password'] as String? ?? '').trim();
         final cloudType = (link['type'] as String? ?? '').trim();
+        final normalizedCloudType =
+            SearchCloudTypeX.fromCode(cloudType)?.code ?? cloudType;
         final workTitle = (link['work_title'] as String? ?? '').trim();
         final resolvedTitle =
             workTitle.isNotEmpty ? workTitle : (title.isNotEmpty ? title : url);
@@ -231,6 +236,7 @@ class PanSouApiClient {
             ].join(' · '),
             resourceUrl: url,
             password: password,
+            cloudType: normalizedCloudType,
             source: channel.isEmpty ? '' : 'tg:$channel',
             publishedAt: publishedAt,
             imageUrls: images,

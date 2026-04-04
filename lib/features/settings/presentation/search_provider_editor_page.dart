@@ -25,11 +25,13 @@ class _SearchProviderEditorPageState
   late final TextEditingController _apiKeyController;
   late final TextEditingController _usernameController;
   late final TextEditingController _passwordController;
+  late final TextEditingController _blockedKeywordsController;
 
   late SearchProviderKind _kind;
   late bool _enabled;
   late final String _providerId;
   late bool _advancedAuthExpanded;
+  late Set<SearchCloudType> _selectedCloudTypes;
   bool _didDelete = false;
   bool _skipAutoSaveOnPop = false;
   bool _isTestingConnection = false;
@@ -47,8 +49,18 @@ class _SearchProviderEditorPageState
     _apiKeyController = TextEditingController(text: e?.apiKey ?? '');
     _usernameController = TextEditingController(text: e?.username ?? '');
     _passwordController = TextEditingController(text: e?.password ?? '');
+    _blockedKeywordsController = TextEditingController(
+      text: (e?.blockedKeywords ?? const []).join(', '),
+    );
     _kind = e?.kind ?? SearchProviderKind.panSou;
     _enabled = e?.enabled ?? true;
+    final configuredCloudTypes = (e?.allowedCloudTypes ?? const [])
+        .map(SearchCloudTypeX.fromCode)
+        .whereType<SearchCloudType>()
+        .toSet();
+    _selectedCloudTypes = configuredCloudTypes.isEmpty
+        ? SearchCloudType.values.toSet()
+        : configuredCloudTypes;
     _advancedAuthExpanded = _apiKeyController.text.trim().isNotEmpty ||
         _usernameController.text.trim().isNotEmpty;
     if (e == null) {
@@ -63,6 +75,7 @@ class _SearchProviderEditorPageState
     _apiKeyController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
+    _blockedKeywordsController.dispose();
     super.dispose();
   }
 
@@ -72,6 +85,7 @@ class _SearchProviderEditorPageState
         _apiKeyController.text.trim().isNotEmpty ||
         _usernameController.text.trim().isNotEmpty ||
         _passwordController.text.trim().isNotEmpty ||
+        _blockedKeywordsController.text.trim().isNotEmpty ||
         widget.initial != null;
   }
 
@@ -88,6 +102,15 @@ class _SearchProviderEditorPageState
       parserHint: _kind.defaultParserHint,
       username: _usernameController.text.trim(),
       password: _passwordController.text.trim(),
+      allowedCloudTypes:
+          _selectedCloudTypes.length == SearchCloudType.values.length
+              ? const []
+              : _selectedCloudTypes
+                  .map((item) => item.code)
+                  .toList(growable: false),
+      blockedKeywords: parseSearchBlockedKeywords(
+        _blockedKeywordsController.text,
+      ),
     );
   }
 
@@ -95,6 +118,8 @@ class _SearchProviderEditorPageState
     _kind = kind;
     _nameController.text = kind.defaultName;
     _endpointController.text = kind.defaultEndpoint;
+    _selectedCloudTypes = SearchCloudType.values.toSet();
+    _blockedKeywordsController.clear();
     _connectionTestSucceeded = null;
     _connectionTestMessage = '';
   }
@@ -373,6 +398,37 @@ class _SearchProviderEditorPageState
                     ),
                     const SizedBox(height: 8),
                   ],
+                ),
+                _SectionTitle(theme: theme, label: '结果筛选'),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: SearchCloudType.values
+                      .map(
+                        (item) => FilterChip(
+                          label: Text(item.label),
+                          selected: _selectedCloudTypes.contains(item),
+                          onSelected: (selected) {
+                            setState(() {
+                              if (selected) {
+                                _selectedCloudTypes.add(item);
+                              } else {
+                                _selectedCloudTypes.remove(item);
+                              }
+                            });
+                          },
+                        ),
+                      )
+                      .toList(),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _blockedKeywordsController,
+                  minLines: 1,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: '过滤词',
+                  ),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,

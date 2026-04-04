@@ -31,6 +31,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   int _activeSearchRequestId = 0;
   int _totalSearchTaskCount = 0;
   int _completedSearchTaskCount = 0;
+  int _filteredResultCount = 0;
 
   @override
   void initState() {
@@ -86,6 +87,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       _errorMessage = null;
       _totalSearchTaskCount = 0;
       _completedSearchTaskCount = 0;
+      _filteredResultCount = 0;
     });
 
     final repository = ref.read(searchRepositoryProvider);
@@ -115,8 +117,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     });
 
     final aggregated = <SearchResult>[];
+    final seenResourceKeys = <String>{};
     final errors = <String>[];
     var completed = 0;
+    var filteredCount = 0;
 
     for (final operation in operations) {
       unawaited(
@@ -126,8 +130,11 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           aggregated: aggregated,
           errors: errors,
           totalCount: operations.length,
+          seenResourceKeys: seenResourceKeys,
           onCompleted: () => completed += 1,
           getCompleted: () => completed,
+          onFiltered: (count) => filteredCount += count,
+          getFiltered: () => filteredCount,
         ),
       );
     }
@@ -221,13 +228,22 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                     ),
                     const SizedBox(height: 14),
                   ],
+                  if (_controller.text.trim().isNotEmpty &&
+                      (_results.isNotEmpty || _filteredResultCount > 0)) ...[
+                    Text(
+                      '结果 ${_results.length} 条 · 过滤 $_filteredResultCount 条',
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   if (_errorMessage != null)
                     Text('搜索失败：$_errorMessage')
                   else if (_results.isEmpty)
                     Text(
                       _controller.text.trim().isEmpty
                           ? '输入关键字后开始搜索。'
-                          : '没有找到结果。',
+                          : _filteredResultCount > 0
+                              ? '没有可用结果，已过滤 $_filteredResultCount 条失效链接。'
+                              : '没有找到结果。',
                     )
                   else
                     Column(
@@ -316,15 +332,29 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     required List<SearchResult> aggregated,
     required List<String> errors,
     required int totalCount,
+    required Set<String> seenResourceKeys,
     required VoidCallback onCompleted,
     required int Function() getCompleted,
+    required ValueChanged<int> onFiltered,
+    required int Function() getFiltered,
   }) async {
     try {
       final result = await operation.run();
       if (!mounted || requestId != _activeSearchRequestId) {
         return;
       }
-      aggregated.addAll(result);
+      var duplicateCount = 0;
+      for (final item in result.items) {
+        final key = normalizeSearchResourceUrl(item.resourceUrl).isEmpty
+            ? item.id
+            : normalizeSearchResourceUrl(item.resourceUrl);
+        if (!seenResourceKeys.add(key)) {
+          duplicateCount += 1;
+          continue;
+        }
+        aggregated.add(item);
+      }
+      onFiltered(result.filteredCount + duplicateCount);
     } catch (error) {
       if (!mounted || requestId != _activeSearchRequestId) {
         return;
@@ -337,6 +367,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         final hasFinished = completed >= totalCount;
         setState(() {
           _completedSearchTaskCount = completed;
+          _filteredResultCount = getFiltered();
           _results = _sortResults(aggregated);
           _isSearching = !hasFinished;
           _errorMessage = aggregated.isEmpty && errors.isNotEmpty && hasFinished
@@ -703,5 +734,5 @@ class _SearchOperation {
   });
 
   final String label;
-  final Future<List<SearchResult>> Function() run;
+  final Future<SearchFetchResult> Function() run;
 }

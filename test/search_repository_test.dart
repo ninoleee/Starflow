@@ -6,6 +6,7 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/cloud_saver_api_client.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
 import 'package:starflow/features/search/data/pansou_api_client.dart';
+import 'package:starflow/features/search/data/search_link_validator.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 
 void main() {
@@ -17,6 +18,9 @@ void main() {
         ),
         CloudSaverApiClient(
           MockClient((request) async => http.Response('{}', 200)),
+        ),
+        SearchLinkValidator(
+          MockClient((request) async => http.Response('', 200)),
         ),
         _FakeMediaRepository(
           items: [
@@ -63,12 +67,15 @@ void main() {
       );
       final allResults = await repository.searchLocal('黑客');
 
-      expect(embyResults, hasLength(1));
-      expect(embyResults.first.title, '黑客帝国');
-      expect(embyResults.first.detailTarget, isNotNull);
+      expect(embyResults.items, hasLength(1));
+      expect(embyResults.items.first.title, '黑客帝国');
+      expect(embyResults.items.first.detailTarget, isNotNull);
+      expect(embyResults.filteredCount, 0);
 
       expect(
-          allResults.map((item) => item.title), containsAll(['黑客帝国', '黑客军团']));
+        allResults.items.map((item) => item.title),
+        containsAll(['黑客帝国', '黑客军团']),
+      );
     });
 
     test('searchOnline returns empty for unsupported providers', () async {
@@ -78,6 +85,9 @@ void main() {
         ),
         CloudSaverApiClient(
           MockClient((request) async => http.Response('{}', 200)),
+        ),
+        SearchLinkValidator(
+          MockClient((request) async => http.Response('', 200)),
         ),
         const _FakeMediaRepository(items: []),
       );
@@ -93,7 +103,116 @@ void main() {
         ),
       );
 
-      expect(results, isEmpty);
+      expect(results.items, isEmpty);
+      expect(results.filteredCount, 0);
+    });
+
+    test('searchOnline filters invalid share links', () async {
+      final repository = AppSearchRepository(
+        PanSouApiClient(
+          MockClient((request) async {
+            return http.Response(
+              '''
+              {
+                "code": 0,
+                "data": {
+                  "merged_by_type": {
+                    "quark": [
+                      {"url":"https://pan.quark.cn/s/valid","note":"有效资源","password":""},
+                      {"url":"https://pan.quark.cn/s/invalid","note":"失效资源","password":""}
+                    ]
+                  }
+                }
+              }
+              ''',
+              200,
+              headers: const {'content-type': 'application/json'},
+            );
+          }),
+        ),
+        CloudSaverApiClient(
+          MockClient((request) async => http.Response('{}', 200)),
+        ),
+        SearchLinkValidator(
+          MockClient((request) async {
+            if (request.url.toString().endsWith('/invalid')) {
+              return http.Response('分享已失效', 200);
+            }
+            return http.Response('<html>资源仍可访问</html>', 200);
+          }),
+        ),
+        const _FakeMediaRepository(items: []),
+      );
+
+      final results = await repository.searchOnline(
+        '测试资源',
+        provider: const SearchProviderConfig(
+          id: 'pansou-api',
+          name: 'PanSou',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'https://so.252035.xyz',
+          enabled: true,
+        ),
+      );
+
+      expect(results.items, hasLength(1));
+      expect(results.items.single.title, '有效资源');
+      expect(results.filteredCount, 1);
+      expect(results.rawCount, 2);
+    });
+
+    test('searchOnline filters by cloud type and blocked keywords', () async {
+      final repository = AppSearchRepository(
+        PanSouApiClient(
+          MockClient((request) async {
+            return http.Response(
+              '''
+              {
+                "code": 0,
+                "data": {
+                  "merged_by_type": {
+                    "quark": [
+                      {"url":"https://pan.quark.cn/s/good","note":"正式版","password":""},
+                      {"url":"https://pan.quark.cn/s/badword","note":"枪版资源","password":""}
+                    ],
+                    "baidu": [
+                      {"url":"https://pan.baidu.com/s/other","note":"百度资源","password":""}
+                    ]
+                  }
+                }
+              }
+              ''',
+              200,
+              headers: const {'content-type': 'application/json'},
+            );
+          }),
+        ),
+        CloudSaverApiClient(
+          MockClient((request) async => http.Response('{}', 200)),
+        ),
+        SearchLinkValidator(
+          MockClient((request) async => http.Response('<html>ok</html>', 200)),
+        ),
+        const _FakeMediaRepository(items: []),
+      );
+
+      final results = await repository.searchOnline(
+        '测试资源',
+        provider: const SearchProviderConfig(
+          id: 'pansou-api',
+          name: 'PanSou',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'https://so.252035.xyz',
+          enabled: true,
+          allowedCloudTypes: ['quark'],
+          blockedKeywords: ['枪版'],
+        ),
+      );
+
+      expect(results.items, hasLength(1));
+      expect(results.items.single.resourceUrl, 'https://pan.quark.cn/s/good');
+      expect(results.filteredCount, 2);
+      expect(results.rawCount, 3);
     });
   });
 }

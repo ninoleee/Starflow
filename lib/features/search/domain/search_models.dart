@@ -1,5 +1,114 @@
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 
+enum SearchCloudType {
+  baidu,
+  aliyun,
+  quark,
+  tianyi,
+  uc,
+  mobile,
+  cloud115,
+  pikpak,
+  xunlei,
+  cloud123,
+  magnet,
+  ed2k,
+}
+
+extension SearchCloudTypeX on SearchCloudType {
+  String get code {
+    switch (this) {
+      case SearchCloudType.baidu:
+        return 'baidu';
+      case SearchCloudType.aliyun:
+        return 'aliyun';
+      case SearchCloudType.quark:
+        return 'quark';
+      case SearchCloudType.tianyi:
+        return 'tianyi';
+      case SearchCloudType.uc:
+        return 'uc';
+      case SearchCloudType.mobile:
+        return 'mobile';
+      case SearchCloudType.cloud115:
+        return '115';
+      case SearchCloudType.pikpak:
+        return 'pikpak';
+      case SearchCloudType.xunlei:
+        return 'xunlei';
+      case SearchCloudType.cloud123:
+        return '123';
+      case SearchCloudType.magnet:
+        return 'magnet';
+      case SearchCloudType.ed2k:
+        return 'ed2k';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case SearchCloudType.baidu:
+        return '百度网盘';
+      case SearchCloudType.aliyun:
+        return '阿里云盘';
+      case SearchCloudType.quark:
+        return '夸克网盘';
+      case SearchCloudType.tianyi:
+        return '天翼云盘';
+      case SearchCloudType.uc:
+        return 'UC 网盘';
+      case SearchCloudType.mobile:
+        return '移动云盘';
+      case SearchCloudType.cloud115:
+        return '115 网盘';
+      case SearchCloudType.pikpak:
+        return 'PikPak';
+      case SearchCloudType.xunlei:
+        return '迅雷云盘';
+      case SearchCloudType.cloud123:
+        return '123 云盘';
+      case SearchCloudType.magnet:
+        return '磁力链接';
+      case SearchCloudType.ed2k:
+        return '电驴链接';
+    }
+  }
+
+  static SearchCloudType? fromCode(String raw) {
+    final normalized = raw.trim().toLowerCase();
+    switch (normalized) {
+      case 'baidu':
+        return SearchCloudType.baidu;
+      case 'aliyun':
+        return SearchCloudType.aliyun;
+      case 'quark':
+        return SearchCloudType.quark;
+      case 'tianyi':
+        return SearchCloudType.tianyi;
+      case 'uc':
+        return SearchCloudType.uc;
+      case 'mobile':
+        return SearchCloudType.mobile;
+      case '115':
+      case 'cloud115':
+        return SearchCloudType.cloud115;
+      case 'pikpak':
+        return SearchCloudType.pikpak;
+      case 'xunlei':
+        return SearchCloudType.xunlei;
+      case '123':
+      case 'cloud123':
+        return SearchCloudType.cloud123;
+      case 'magnet':
+        return SearchCloudType.magnet;
+      case 'ed2k':
+        return SearchCloudType.ed2k;
+      default:
+        return null;
+    }
+  }
+}
+
 enum SearchProviderKind {
   panSou,
   cloudSaver,
@@ -70,6 +179,8 @@ class SearchProviderConfig {
     this.parserHint = '',
     this.username = '',
     this.password = '',
+    this.allowedCloudTypes = const [],
+    this.blockedKeywords = const [],
   });
 
   final String id;
@@ -81,6 +192,8 @@ class SearchProviderConfig {
   final String parserHint;
   final String username;
   final String password;
+  final List<String> allowedCloudTypes;
+  final List<String> blockedKeywords;
 
   SearchProviderConfig copyWith({
     String? id,
@@ -92,6 +205,8 @@ class SearchProviderConfig {
     String? parserHint,
     String? username,
     String? password,
+    List<String>? allowedCloudTypes,
+    List<String>? blockedKeywords,
   }) {
     return SearchProviderConfig(
       id: id ?? this.id,
@@ -103,6 +218,8 @@ class SearchProviderConfig {
       parserHint: parserHint ?? this.parserHint,
       username: username ?? this.username,
       password: password ?? this.password,
+      allowedCloudTypes: allowedCloudTypes ?? this.allowedCloudTypes,
+      blockedKeywords: blockedKeywords ?? this.blockedKeywords,
     );
   }
 
@@ -117,6 +234,8 @@ class SearchProviderConfig {
       'parserHint': parserHint,
       'username': username,
       'password': password,
+      'allowedCloudTypes': allowedCloudTypes,
+      'blockedKeywords': blockedKeywords,
     };
   }
 
@@ -131,6 +250,16 @@ class SearchProviderConfig {
       parserHint: json['parserHint'] as String? ?? '',
       username: json['username'] as String? ?? '',
       password: json['password'] as String? ?? '',
+      allowedCloudTypes:
+          (json['allowedCloudTypes'] as List<dynamic>? ?? const [])
+              .map((value) => '$value')
+              .where((value) => SearchCloudTypeX.fromCode(value) != null)
+              .map((value) => SearchCloudTypeX.fromCode(value)!.code)
+              .toList(growable: false),
+      blockedKeywords: (json['blockedKeywords'] as List<dynamic>? ?? const [])
+          .map((value) => '$value')
+          .where((value) => value.trim().isNotEmpty)
+          .toList(growable: false),
     );
   }
 }
@@ -148,6 +277,7 @@ class SearchResult {
     required this.summary,
     required this.resourceUrl,
     this.password = '',
+    this.cloudType = '',
     this.source = '',
     this.publishedAt = '',
     this.imageUrls = const [],
@@ -165,8 +295,60 @@ class SearchResult {
   final String summary;
   final String resourceUrl;
   final String password;
+  final String cloudType;
   final String source;
   final String publishedAt;
   final List<String> imageUrls;
   final MediaDetailTarget? detailTarget;
+}
+
+class SearchFetchResult {
+  SearchFetchResult({
+    required this.items,
+    required this.filteredCount,
+    int? rawCount,
+  }) : rawCount = rawCount ?? items.length + filteredCount;
+
+  final List<SearchResult> items;
+  final int rawCount;
+  final int filteredCount;
+}
+
+List<String> parseSearchBlockedKeywords(String raw) {
+  return raw
+      .split(RegExp(r'[\n,，;；]+'))
+      .map((item) => item.trim())
+      .where((item) => item.isNotEmpty)
+      .toSet()
+      .toList(growable: false);
+}
+
+String normalizeSearchResourceUrl(String rawUrl) {
+  final trimmed = rawUrl.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+
+  final uri = Uri.tryParse(trimmed);
+  if (uri == null || !uri.hasScheme) {
+    return trimmed;
+  }
+
+  final queryParameters = Map<String, String>.from(uri.queryParameters)
+    ..removeWhere((key, value) {
+      final normalizedKey = key.trim().toLowerCase();
+      return normalizedKey == 'pwd' ||
+          normalizedKey == 'password' ||
+          normalizedKey == 'passcode' ||
+          normalizedKey == 'extractcode' ||
+          normalizedKey == 'code';
+    });
+  final normalized = uri.replace(
+    scheme: uri.scheme.toLowerCase(),
+    host: uri.host.toLowerCase(),
+    path: uri.path == '/' ? uri.path : uri.path.replaceFirst(RegExp(r'/$'), ''),
+    queryParameters: queryParameters.isEmpty ? null : queryParameters,
+    fragment: null,
+  );
+  return normalized.toString();
 }

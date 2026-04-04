@@ -239,5 +239,46 @@ void main() {
       expect(status.channelsCount, 1);
       expect(status.summary, '已启用认证 · 插件 16 · 频道 1');
     });
+
+    test('keeps request body minimal and filters on client side', () async {
+      final client = PanSouApiClient(
+        MockClient((request) async {
+          expect(jsonDecode(request.body), {
+            'kw': '英雄本色',
+            'res': 'merge',
+          });
+          return http.Response.bytes(
+            Uint8List.fromList(
+              utf8.encode(
+                jsonEncode({
+                  'code': 0,
+                  'data': {
+                    'merged_by_type': {
+                      'quark': [],
+                    },
+                  },
+                }),
+              ),
+            ),
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
+        }),
+      );
+
+      await client.search(
+        '英雄本色',
+        provider: const SearchProviderConfig(
+          id: 'self-hosted-pansou',
+          name: '自建 PanSou',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'http://localhost:8888',
+          enabled: true,
+          parserHint: 'pansou-api',
+          allowedCloudTypes: ['quark', 'aliyun'],
+          blockedKeywords: ['枪版', '预告'],
+        ),
+      );
+    });
   });
 }
