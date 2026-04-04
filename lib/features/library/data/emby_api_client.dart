@@ -170,6 +170,14 @@ class EmbyApiClient {
       accessToken: source.accessToken,
       playSessionId: playSessionId,
     );
+    final videoStream = _selectMediaStream(
+      selectedSource,
+      type: 'Video',
+    );
+    final audioStream = _selectMediaStream(
+      selectedSource,
+      type: 'Audio',
+    );
     final requiredHeaders = Map<String, dynamic>.from(
       selectedSource['RequiredHttpHeaders'] as Map? ?? const {},
     );
@@ -183,6 +191,20 @@ class EmbyApiClient {
       sourceName: target.sourceName,
       sourceKind: target.sourceKind,
       subtitle: target.subtitle,
+      container: selectedSource['Container'] as String? ?? '',
+      videoCodec: videoStream?['Codec'] as String? ?? '',
+      audioCodec: audioStream?['Codec'] as String? ?? '',
+      width:
+          ((selectedSource['Width'] as num?) ?? (videoStream?['Width'] as num?))
+              ?.toInt(),
+      height: ((selectedSource['Height'] as num?) ??
+              (videoStream?['Height'] as num?))
+          ?.toInt(),
+      bitrate: ((selectedSource['Bitrate'] as num?) ??
+              (videoStream?['BitRate'] as num?) ??
+              (audioStream?['BitRate'] as num?))
+          ?.toInt(),
+      fileSizeBytes: (selectedSource['Size'] as num?)?.toInt(),
       headers: {
         ...requiredHeaders
             .map((key, value) => MapEntry(key.toString(), value.toString())),
@@ -760,6 +782,24 @@ class EmbyApiClient {
     return imageTags['Primary'] as String? ??
         item['PrimaryImageTag'] as String? ??
         '';
+  }
+
+  Map<String, dynamic>? _selectMediaStream(
+    Map<String, dynamic> mediaSource, {
+    required String type,
+  }) {
+    final normalizedType = type.trim().toLowerCase();
+    final streams = (mediaSource['MediaStreams'] as List<dynamic>? ?? const [])
+        .map((entry) => Map<String, dynamic>.from(entry as Map));
+
+    for (final stream in streams) {
+      if ((stream['Type'] as String? ?? '').trim().toLowerCase() ==
+          normalizedType) {
+        return stream;
+      }
+    }
+
+    return null;
   }
 
   Map<String, dynamic>? _selectPlaybackMediaSource({

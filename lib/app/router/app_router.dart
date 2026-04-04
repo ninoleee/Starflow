@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/features/bootstrap/presentation/bootstrap_page.dart';
@@ -104,58 +105,116 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/player',
         name: 'player',
-        builder: (context, state) {
+        pageBuilder: (context, state) {
           final target = state.extra as PlaybackTarget?;
           if (target == null) {
-            return const _MissingPlayerTargetPage();
+            return MaterialPage<void>(
+              key: state.pageKey,
+              fullscreenDialog: true,
+              child: const _MissingPlayerTargetPage(),
+            );
           }
-          return PlayerPage(target: target);
+          return MaterialPage<void>(
+            key: state.pageKey,
+            fullscreenDialog: true,
+            child: PlayerPage(target: target),
+          );
         },
       ),
     ],
   );
 });
 
-class _AppNavigationShell extends StatelessWidget {
+class _AppNavigationShell extends StatefulWidget {
   const _AppNavigationShell({required this.navigationShell});
 
   final StatefulNavigationShell navigationShell;
+
+  @override
+  State<_AppNavigationShell> createState() => _AppNavigationShellState();
+}
+
+class _AppNavigationShellState extends State<_AppNavigationShell> {
+  bool _isBottomBarVisible = true;
+
+  bool _handleScrollNotification(ScrollNotification notification) {
+    if (notification.metrics.axis != Axis.vertical) {
+      return false;
+    }
+
+    if (notification is UserScrollNotification) {
+      if (notification.direction == ScrollDirection.reverse) {
+        _setBottomBarVisible(false);
+      } else if (notification.direction == ScrollDirection.forward) {
+        _setBottomBarVisible(true);
+      }
+    }
+
+    return false;
+  }
+
+  void _setBottomBarVisible(bool visible) {
+    if (_isBottomBarVisible == visible || !mounted) {
+      return;
+    }
+    setState(() {
+      _isBottomBarVisible = visible;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       extendBody: true,
       backgroundColor: Colors.transparent,
-      body: navigationShell,
-      bottomNavigationBar: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
-          child: Material(
-            color: Colors.transparent,
-            elevation: 0,
-            shadowColor: Colors.transparent,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(_kBottomNavShellRadius),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius:
-                        BorderRadius.circular(_kBottomNavShellRadius),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.2),
+      body: NotificationListener<ScrollNotification>(
+        onNotification: _handleScrollNotification,
+        child: widget.navigationShell,
+      ),
+      bottomNavigationBar: IgnorePointer(
+        ignoring: !_isBottomBarVisible,
+        child: AnimatedSlide(
+          offset: _isBottomBarVisible ? Offset.zero : const Offset(0, 1.2),
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          child: AnimatedOpacity(
+            opacity: _isBottomBarVisible ? 1 : 0,
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+              child: Material(
+                color: Colors.transparent,
+                elevation: 0,
+                shadowColor: Colors.transparent,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(_kBottomNavShellRadius),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius:
+                            BorderRadius.circular(_kBottomNavShellRadius),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.2),
+                        ),
+                        color: const Color(0x1A0F1622),
+                      ),
+                      child: _FloatingNavigationBar(
+                        currentIndex: widget.navigationShell.currentIndex,
+                        onDestinationSelected: (index) {
+                          _setBottomBarVisible(true);
+                          widget.navigationShell.goBranch(index);
+                        },
+                      ),
                     ),
-                    color: const Color(0x1A0F1622),
-                  ),
-                  child: _FloatingNavigationBar(
-                    currentIndex: navigationShell.currentIndex,
-                    onDestinationSelected: (index) =>
-                        navigationShell.goBranch(index),
                   ),
                 ),
               ),
             ),
           ),
         ),
+      ),
     );
   }
 }

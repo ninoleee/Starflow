@@ -47,6 +47,29 @@ extension HomeModuleTypeX on HomeModuleType {
   }
 }
 
+enum HomeHeroStyle {
+  normal,
+  borderless,
+}
+
+extension HomeHeroStyleX on HomeHeroStyle {
+  String get label {
+    switch (this) {
+      case HomeHeroStyle.normal:
+        return '正常';
+      case HomeHeroStyle.borderless:
+        return '无边';
+    }
+  }
+
+  static HomeHeroStyle fromName(String raw) {
+    return switch (raw) {
+      'borderless' => HomeHeroStyle.borderless,
+      _ => HomeHeroStyle.normal,
+    };
+  }
+}
+
 class HomeModuleConfig {
   const HomeModuleConfig({
     required this.id,
@@ -273,6 +296,7 @@ class AppSettings {
     required this.searchProviders,
     required this.doubanAccount,
     required this.homeModules,
+    this.homeHeroStyle = HomeHeroStyle.normal,
     this.tmdbMetadataMatchEnabled = false,
     this.imdbRatingMatchEnabled = false,
     this.tmdbReadAccessToken = '',
@@ -282,6 +306,7 @@ class AppSettings {
   final List<SearchProviderConfig> searchProviders;
   final DoubanAccountConfig doubanAccount;
   final List<HomeModuleConfig> homeModules;
+  final HomeHeroStyle homeHeroStyle;
   final bool tmdbMetadataMatchEnabled;
   final bool imdbRatingMatchEnabled;
   final String tmdbReadAccessToken;
@@ -291,6 +316,7 @@ class AppSettings {
     List<SearchProviderConfig>? searchProviders,
     DoubanAccountConfig? doubanAccount,
     List<HomeModuleConfig>? homeModules,
+    HomeHeroStyle? homeHeroStyle,
     bool? tmdbMetadataMatchEnabled,
     bool? imdbRatingMatchEnabled,
     String? tmdbReadAccessToken,
@@ -300,6 +326,7 @@ class AppSettings {
       searchProviders: searchProviders ?? this.searchProviders,
       doubanAccount: doubanAccount ?? this.doubanAccount,
       homeModules: homeModules ?? this.homeModules,
+      homeHeroStyle: homeHeroStyle ?? this.homeHeroStyle,
       tmdbMetadataMatchEnabled:
           tmdbMetadataMatchEnabled ?? this.tmdbMetadataMatchEnabled,
       imdbRatingMatchEnabled:
@@ -314,6 +341,7 @@ class AppSettings {
       'searchProviders': searchProviders.map((item) => item.toJson()).toList(),
       'doubanAccount': doubanAccount.toJson(),
       'homeModules': homeModules.map((item) => item.toJson()).toList(),
+      'homeHeroStyle': homeHeroStyle.name,
       'tmdbMetadataMatchEnabled': tmdbMetadataMatchEnabled,
       'imdbRatingMatchEnabled': imdbRatingMatchEnabled,
       'tmdbReadAccessToken': tmdbReadAccessToken,
@@ -350,6 +378,9 @@ class AppSettings {
             ),
           )
           .toList(),
+      homeHeroStyle: HomeHeroStyleX.fromName(
+        json['homeHeroStyle'] as String? ?? '',
+      ),
       tmdbMetadataMatchEnabled: json['tmdbMetadataMatchEnabled'] as bool? ??
           legacyImdbAutoMatchEnabled,
       imdbRatingMatchEnabled: json['imdbRatingMatchEnabled'] as bool? ?? false,

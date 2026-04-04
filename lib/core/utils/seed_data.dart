@@ -22,6 +22,7 @@ class SeedData {
       sessionCookie: '',
     ),
     homeModules: const [],
+    homeHeroStyle: HomeHeroStyle.normal,
     tmdbMetadataMatchEnabled: false,
     imdbRatingMatchEnabled: false,
     tmdbReadAccessToken: '',

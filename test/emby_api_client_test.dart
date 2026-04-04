@@ -636,9 +636,28 @@ void main() {
                 'MediaSources': [
                   {
                     'Id': 'media-source-2',
+                    'Container': 'mkv',
+                    'Size': 25769803776,
+                    'Bitrate': 28400000,
+                    'Width': 3840,
+                    'Height': 2160,
                     'DirectStreamUrl':
                         '/Videos/episode-1/stream.mp4?static=true&MediaSourceId=media-source-2',
                     'AddApiKeyToDirectStreamUrl': true,
+                    'MediaStreams': [
+                      {
+                        'Type': 'Video',
+                        'Codec': 'hevc',
+                        'Width': 3840,
+                        'Height': 2160,
+                        'BitRate': 25200000,
+                      },
+                      {
+                        'Type': 'Audio',
+                        'Codec': 'truehd',
+                        'BitRate': 3200000,
+                      },
+                    ],
                     'RequiredHttpHeaders': {
                       'X-Test-Header': 'value-1',
                     },
@@ -682,6 +701,13 @@ void main() {
       expect(resolvedUri.queryParameters['api_key'], 'token-789');
       expect(target.headers['X-Test-Header'], 'value-1');
       expect(target.headers['X-Emby-Token'], 'token-789');
+      expect(target.container, 'mkv');
+      expect(target.videoCodec, 'hevc');
+      expect(target.audioCodec, 'truehd');
+      expect(target.width, 3840);
+      expect(target.height, 2160);
+      expect(target.bitrate, 28400000);
+      expect(target.fileSizeBytes, 25769803776);
     });
   });
 }

@@ -8,6 +8,7 @@ import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/media_source_editor_page.dart';
 import 'package:starflow/features/settings/presentation/douban_account_editor_page.dart';
 import 'package:starflow/features/settings/presentation/search_provider_editor_page.dart';
@@ -189,6 +190,44 @@ class SettingsPage extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Text(
+                    'Hero 样式',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 10),
+                  SegmentedButton<HomeHeroStyle>(
+                    showSelectedIcon: false,
+                    segments: [
+                      for (final style in HomeHeroStyle.values)
+                        ButtonSegment<HomeHeroStyle>(
+                          value: style,
+                          label: Text(style.label),
+                        ),
+                    ],
+                    selected: {settings.homeHeroStyle},
+                    onSelectionChanged: (selection) {
+                      if (selection.isEmpty) {
+                        return;
+                      }
+                      final style = selection.first;
+                      ref
+                          .read(settingsControllerProvider.notifier)
+                          .setHomeHeroStyle(style);
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    settings.homeHeroStyle == HomeHeroStyle.normal
+                        ? '正常模式保留顶部安全区和原来的卡片感。'
+                        : '无边模式会把 Hero 放大，并让封面左右贴到屏幕边缘。',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF7F8FAE),
+                          height: 1.45,
+                        ),
+                  ),
+                  const SizedBox(height: 14),
                   Text('当前已配置 ${settings.homeModules.length} 个首页模块。'),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(

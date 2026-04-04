@@ -7,6 +7,8 @@ import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -21,6 +23,9 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   Widget build(BuildContext context) {
     final sectionsAsync = ref.watch(homeSectionsProvider);
+    final heroStyle = ref.watch(
+      appSettingsProvider.select((settings) => settings.homeHeroStyle),
+    );
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -73,9 +78,10 @@ class _HomePageState extends ConsumerState<HomePage> {
                 children: [
                   if (featuredItems.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 6, 12, 24),
+                      padding: heroStyle.heroPadding(context),
                       child: _FeaturedHero(
                         items: featuredItems,
+                        style: heroStyle,
                         onFocusedItemChanged: _handleFocusedHeroChanged,
                       ),
                     ),
@@ -191,6 +197,35 @@ List<_FeaturedHeroItem> _fallbackFeaturedItems(
     }
   }
   return const [];
+}
+
+extension _HomeHeroStyleLayoutX on HomeHeroStyle {
+  EdgeInsets heroPadding(BuildContext context) {
+    return EdgeInsets.fromLTRB(
+      this == HomeHeroStyle.normal ? 12 : 0,
+      this == HomeHeroStyle.normal ? MediaQuery.paddingOf(context).top + 6 : 0,
+      this == HomeHeroStyle.normal ? 12 : 0,
+      24,
+    );
+  }
+
+  double get heroHeight => this == HomeHeroStyle.normal ? 430 : 500;
+
+  double get viewportFraction => this == HomeHeroStyle.normal ? 0.94 : 1;
+
+  double get cardGap => this == HomeHeroStyle.normal ? 10 : 0;
+
+  double get cardBorderRadius => this == HomeHeroStyle.normal ? 30 : 0;
+
+  bool get showShadow => this == HomeHeroStyle.normal;
+
+  double get textWidthFactor => this == HomeHeroStyle.normal ? 0.84 : 0.9;
+
+  EdgeInsets get textPadding => this == HomeHeroStyle.normal
+      ? const EdgeInsets.fromLTRB(26, 28, 26, 26)
+      : const EdgeInsets.fromLTRB(20, 28, 20, 22);
+
+  double get titleFontSize => this == HomeHeroStyle.normal ? 34 : 38;
 }
 
 class _HomeShell extends StatelessWidget {
@@ -456,10 +491,12 @@ String _buildHeroMetadata(
 class _FeaturedHero extends StatefulWidget {
   const _FeaturedHero({
     required this.items,
+    required this.style,
     this.onFocusedItemChanged,
   });
 
   final List<_FeaturedHeroItem> items;
+  final HomeHeroStyle style;
   final ValueChanged<_FeaturedHeroItem>? onFocusedItemChanged;
 
   @override
@@ -467,18 +504,39 @@ class _FeaturedHero extends StatefulWidget {
 }
 
 class _FeaturedHeroState extends State<_FeaturedHero> {
-  late final PageController _controller;
+  late PageController _controller;
   double _page = 0;
   int _lastReportedIndex = -1;
 
   @override
   void initState() {
     super.initState();
-    _controller = PageController(viewportFraction: 0.94)
-      ..addListener(_handlePageChange);
+    _controller = _buildController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _notifyFocusedItem(0);
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant _FeaturedHero oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.style != widget.style) {
+      final int nextPage = widget.items.isEmpty
+          ? 0
+          : _page.round().clamp(0, widget.items.length - 1);
+      _controller
+        ..removeListener(_handlePageChange)
+        ..dispose();
+      _controller = _buildController(initialPage: nextPage);
+      _page = nextPage.toDouble();
+      _lastReportedIndex = -1;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        _notifyFocusedItem(nextPage);
+      });
+    }
   }
 
   @override
@@ -487,6 +545,13 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
       ..removeListener(_handlePageChange)
       ..dispose();
     super.dispose();
+  }
+
+  PageController _buildController({int initialPage = 0}) {
+    return PageController(
+      initialPage: initialPage,
+      viewportFraction: widget.style.viewportFraction,
+    )..addListener(_handlePageChange);
   }
 
   void _handlePageChange() {
@@ -516,7 +581,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     return Column(
       children: [
         SizedBox(
-          height: 430,
+          height: widget.style.heroHeight,
           child: PageView.builder(
             controller: _controller,
             itemCount: widget.items.length,
@@ -524,9 +589,14 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
               final item = widget.items[index];
               return Padding(
                 padding: EdgeInsets.only(
-                  right: index == widget.items.length - 1 ? 0 : 10,
+                  right: index == widget.items.length - 1
+                      ? 0
+                      : widget.style.cardGap,
                 ),
-                child: _FeaturedHeroCard(item: item),
+                child: _FeaturedHeroCard(
+                  item: item,
+                  style: widget.style,
+                ),
               );
             },
           ),
@@ -558,31 +628,39 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
 }
 
 class _FeaturedHeroCard extends StatelessWidget {
-  const _FeaturedHeroCard({required this.item});
+  const _FeaturedHeroCard({
+    required this.item,
+    required this.style,
+  });
 
   final _FeaturedHeroItem item;
+  final HomeHeroStyle style;
 
   @override
   Widget build(BuildContext context) {
+    final borderRadius = BorderRadius.circular(style.cardBorderRadius);
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(30),
+        borderRadius: borderRadius,
         onTap: () => context.pushNamed('detail', extra: item.detailTarget),
         child: Ink(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(30),
+            borderRadius: borderRadius,
             color: const Color(0xFF0B1628),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.22),
-                blurRadius: 34,
-                offset: const Offset(0, 18),
-              ),
-            ],
+            boxShadow: style.showShadow
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.22),
+                      blurRadius: 34,
+                      offset: const Offset(0, 18),
+                    ),
+                  ]
+                : null,
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(30),
+            borderRadius: borderRadius,
             child: Stack(
               fit: StackFit.expand,
               children: [
@@ -597,7 +675,7 @@ class _FeaturedHeroCard extends StatelessWidget {
                   alignment: Alignment.bottomLeft,
                   child: IgnorePointer(
                     child: FractionallySizedBox(
-                      widthFactor: 0.84,
+                      widthFactor: style.textWidthFactor,
                       heightFactor: 0.72,
                       alignment: Alignment.bottomLeft,
                       child: DecoratedBox(
@@ -619,7 +697,7 @@ class _FeaturedHeroCard extends StatelessWidget {
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(26, 28, 26, 26),
+                  padding: style.textPadding,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -643,7 +721,7 @@ class _FeaturedHeroCard extends StatelessWidget {
                             Theme.of(context).textTheme.headlineSmall?.copyWith(
                           color: Colors.white,
                           fontWeight: FontWeight.w800,
-                          fontSize: 34,
+                          fontSize: style.titleFontSize,
                           height: 1.05,
                           shadows: [
                             Shadow(

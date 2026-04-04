@@ -73,5 +73,42 @@ void main() {
       expect(items.first.directors, ['罗伯托·贝尼尼']);
       expect(items.first.actors, ['罗伯托·贝尼尼', '尼可莱塔·布拉斯基']);
     });
+
+    test('maps interest items when pic is a direct string url', () async {
+      final client = DoubanApiClient(
+        MockClient((request) async {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'interests': [
+                  {
+                    'subject': {
+                      'id': '1295644',
+                      'title': '这个杀手不太冷',
+                      'year': '1994',
+                      'pic':
+                          'https://img9.doubanio.com/view/photo/l/public/p511118051.jpg',
+                    },
+                  },
+                ],
+              }),
+            ),
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
+        }),
+      );
+
+      final items = await client.fetchInterestItems(
+        userId: 'demo-user',
+        status: DoubanInterestStatus.mark,
+      );
+
+      expect(items, hasLength(1));
+      expect(
+        items.first.posterUrl,
+        'https://img9.doubanio.com/view/photo/l/public/p511118051.jpg',
+      );
+    });
   });
 }

@@ -13,14 +13,20 @@ double appPageTopInset(BuildContext context) => 0;
 double appPageBottomInset(
   BuildContext context, {
   bool includeBottomNavigationBar = false,
-}) => 0;
+}) =>
+    0;
 
 EdgeInsets appPageContentPadding(
   BuildContext context, {
   bool includeBottomNavigationBar = false,
   bool includeTopSafeArea = true,
 }) {
-  return const EdgeInsets.symmetric(horizontal: kAppPageHorizontalPadding);
+  return EdgeInsets.fromLTRB(
+    kAppPageHorizontalPadding,
+    includeTopSafeArea ? MediaQuery.paddingOf(context).top : 0,
+    kAppPageHorizontalPadding,
+    0,
+  );
 }
 
 double overlayToolbarTotalHeight(BuildContext context) {

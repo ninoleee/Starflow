@@ -15,7 +15,7 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
   group('homeSectionsProvider Douban poster fallback', () {
-    test('does not pre-match library resources before opening detail',
+    test('uses matched library poster without pre-binding the resource',
         () async {
       final container = ProviderContainer(
         overrides: [
@@ -73,9 +73,16 @@ void main() {
 
       final sections = await container.read(homeSectionsProvider.future);
       expect(sections, hasLength(1));
-      expect(sections.first.items.first.posterUrl, isEmpty);
+      expect(
+        sections.first.items.first.posterUrl,
+        'https://emby.example.com/poster.jpg',
+      );
       expect(sections.first.items.first.detailTarget.sourceId, isEmpty);
       expect(sections.first.items.first.detailTarget.itemId, isEmpty);
+      expect(
+        sections.first.items.first.detailTarget.posterUrl,
+        'https://emby.example.com/poster.jpg',
+      );
       expect(
         sections.first.items.first.detailTarget.ratingLabels,
         ['豆瓣 9.6'],

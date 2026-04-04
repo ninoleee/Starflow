@@ -392,6 +392,10 @@ class DoubanApiClient {
         }
       }
     }
+    final picText = '$pic'.trim();
+    if (picText.isNotEmpty && picText != 'null') {
+      return picText;
+    }
     final cover = target['cover'];
     if (cover is Map) {
       for (final key in ['url', 'large', 'normal']) {
@@ -401,9 +405,20 @@ class DoubanApiClient {
         }
       }
     }
+    final coverText = '$cover'.trim();
+    if (coverText.isNotEmpty && coverText != 'null') {
+      return coverText;
+    }
 
     for (final map in [target, fallback]) {
-      for (final key in ['cover_url', 'poster', 'poster_url', 'image']) {
+      for (final key in [
+        'cover_url',
+        'poster',
+        'poster_url',
+        'image',
+        'pic',
+        'thumbnail',
+      ]) {
         final text = '${map[key] ?? ''}'.trim();
         if (text.isNotEmpty && text != 'null') {
           return text;

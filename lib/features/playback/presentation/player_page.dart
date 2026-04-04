@@ -1,15 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:starflow/app/shell_layout.dart';
-import 'package:starflow/core/widgets/app_page_background.dart';
+import 'package:http/http.dart' as http;
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
-import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
-import 'package:video_player/video_player.dart';
 
 class PlayerPage extends ConsumerStatefulWidget {
   const PlayerPage({super.key, required this.target});
@@ -21,8 +22,11 @@ class PlayerPage extends ConsumerStatefulWidget {
 }
 
 class _PlayerPageState extends ConsumerState<PlayerPage> {
-  VideoPlayerController? _controller;
+  Player? _player;
+  VideoController? _videoController;
+  StreamSubscription<String>? _playerErrorSubscription;
   PlaybackTarget? _resolvedTarget;
+  _StartupProbeResult _startupProbe = const _StartupProbeResult();
   Object? _error;
   bool _isReady = false;
 
@@ -34,7 +38,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   @override
   void dispose() {
-    _controller?.dispose();
+    unawaited(_playerErrorSubscription?.cancel());
+    final player = _player;
+    _player = null;
+    unawaited(player?.dispose());
     super.dispose();
   }
 
@@ -48,24 +55,41 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
     try {
       final resolvedTarget = await _resolveTarget(widget.target);
-      final controller = VideoPlayerController.networkUrl(
-        Uri.parse(resolvedTarget.streamUrl),
-        httpHeaders: resolvedTarget.headers,
-      );
-      controller.addListener(() {
-        if (mounted) {
-          setState(() {});
+      if (mounted) {
+        setState(() {
+          _resolvedTarget = resolvedTarget;
+        });
+      }
+      unawaited(_runStartupProbe(resolvedTarget));
+
+      final player = Player();
+      final videoController = VideoController(player);
+      _playerErrorSubscription = player.stream.error.listen((message) {
+        if (!mounted || message.trim().isEmpty) {
+          return;
         }
+        setState(() {
+          _error = message.trim();
+        });
       });
-      await controller.initialize();
-      await controller.play();
+
+      await player.open(
+        Media(
+          resolvedTarget.streamUrl,
+          httpHeaders: resolvedTarget.headers,
+        ),
+        play: true,
+      );
+
       if (!mounted) {
-        await controller.dispose();
+        await _playerErrorSubscription?.cancel();
+        await player.dispose();
         return;
       }
+
       setState(() {
-        _resolvedTarget = resolvedTarget;
-        _controller = controller;
+        _player = player;
+        _videoController = videoController;
         _isReady = true;
       });
     } catch (error) {
@@ -102,82 +126,192 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         );
   }
 
+  Future<void> _runStartupProbe(PlaybackTarget target) async {
+    final probe = await _probeStartup(target);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _startupProbe = probe;
+    });
+  }
+
+  Future<_StartupProbeResult> _probeStartup(PlaybackTarget target) async {
+    final streamUrl = target.streamUrl.trim();
+    if (streamUrl.isEmpty) {
+      return const _StartupProbeResult();
+    }
+
+    final uri = Uri.tryParse(streamUrl);
+    if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https')) {
+      return const _StartupProbeResult();
+    }
+
+    final client = http.Client();
+    StreamSubscription<List<int>>? subscription;
+    final completer = Completer<_StartupProbeResult>();
+    final stopwatch = Stopwatch();
+    var completed = false;
+    var bytesRead = 0;
+    int? totalBytes;
+
+    Future<void> finish() async {
+      if (completed) {
+        return;
+      }
+      completed = true;
+      stopwatch.stop();
+      await subscription?.cancel();
+      client.close();
+
+      final elapsedSeconds = stopwatch.elapsedMilliseconds <= 0
+          ? 0.0
+          : stopwatch.elapsedMilliseconds / 1000;
+      final speedBytesPerSecond = elapsedSeconds <= 0 || bytesRead <= 0
+          ? null
+          : (bytesRead / elapsedSeconds).round();
+
+      completer.complete(
+        _StartupProbeResult(
+          estimatedSpeedBytesPerSecond: speedBytesPerSecond,
+          fileSizeBytes: totalBytes,
+        ),
+      );
+    }
+
+    try {
+      final request = http.Request('GET', uri)
+        ..headers.addAll(target.headers)
+        ..headers['Range'] = 'bytes=0-262143';
+      stopwatch.start();
+      final response = await client.send(request).timeout(
+            const Duration(seconds: 4),
+          );
+      totalBytes = _resolveResponseTotalBytes(
+        response.headers,
+        fallbackContentLength: response.contentLength,
+      );
+
+      subscription = response.stream.listen(
+        (chunk) {
+          bytesRead += chunk.length;
+          if (bytesRead >= 192 * 1024 ||
+              stopwatch.elapsedMilliseconds >= 1400) {
+            unawaited(finish());
+          }
+        },
+        onError: (_) {
+          unawaited(finish());
+        },
+        onDone: () {
+          unawaited(finish());
+        },
+        cancelOnError: true,
+      );
+
+      return completer.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () async {
+          await finish();
+          return completer.future;
+        },
+      );
+    } catch (_) {
+      await subscription?.cancel();
+      client.close();
+      return const _StartupProbeResult();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final controller = _controller;
     final activeTarget = _resolvedTarget ?? widget.target;
 
     return Scaffold(
+      backgroundColor: Colors.black,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          AppPageBackground(
-            child: ListView(
-              padding: overlayToolbarPagePadding(context),
-              children: [
-                Container(
-                  clipBehavior: Clip.antiAlias,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF081120),
-                    borderRadius: BorderRadius.circular(32),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.18),
-                        blurRadius: 28,
-                        offset: const Offset(0, 16),
-                      ),
-                    ],
-                  ),
-                  child: Builder(
-                    builder: (context) {
-                      final aspectRatio = controller != null &&
-                              controller.value.isInitialized &&
-                              controller.value.aspectRatio > 0
-                          ? controller.value.aspectRatio
-                          : 16 / 9;
-                      return AspectRatio(
-                        aspectRatio: aspectRatio,
-                        child: _buildVideoSurface(theme, controller),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SectionPanel(
-                  title: '播放目标',
-                  subtitle: '当前会直接使用系统播放器播放流地址',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _InfoRow(
-                        label: '来源',
-                        value:
-                            '${activeTarget.sourceKind.label} · ${activeTarget.sourceName}',
-                      ),
-                      const SizedBox(height: 12),
-                      _InfoRow(
-                        label: '流地址',
-                        value: activeTarget.streamUrl.trim().isEmpty
-                            ? '正在向 Emby 申请播放地址'
-                            : activeTarget.streamUrl,
-                      ),
-                      if (activeTarget.subtitle.trim().isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        _InfoRow(label: '简介', value: activeTarget.subtitle),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
+          ColoredBox(
+            color: Colors.black,
+            child: Center(
+              child: AspectRatio(
+                aspectRatio: _currentAspectRatio(),
+                child: _buildVideoSurface(theme),
+              ),
             ),
           ),
           Positioned(
             top: 0,
             left: 0,
             right: 0,
-            child: OverlayToolbar(
-              onBack: () => context.pop(),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.black.withValues(alpha: 0.62),
+                    Colors.black.withValues(alpha: 0.22),
+                    Colors.transparent,
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+              child: OverlayToolbar(
+                onBack: () => context.pop(),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.16),
+                      Colors.black.withValues(alpha: 0.62),
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 40, 18, 18),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          activeTarget.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '${activeTarget.sourceKind.label} · ${activeTarget.sourceName}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: const Color(0xCCFFFFFF),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
         ],
@@ -185,10 +319,21 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     );
   }
 
-  Widget _buildVideoSurface(
-    ThemeData theme,
-    VideoPlayerController? controller,
-  ) {
+  double _currentAspectRatio() {
+    final player = _player;
+    if (!_isReady || player == null) {
+      return 16 / 9;
+    }
+
+    final width = player.state.width ?? 0;
+    final height = player.state.height ?? 0;
+    if (width <= 0 || height <= 0) {
+      return 16 / 9;
+    }
+    return width / height;
+  }
+
+  Widget _buildVideoSurface(ThemeData theme) {
     if (_error != null) {
       return Center(
         child: Padding(
@@ -202,138 +347,335 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       );
     }
 
-    if (!_isReady || controller == null) {
-      return const Center(child: CircularProgressIndicator());
+    final player = _player;
+    final videoController = _videoController;
+    if (!_isReady || player == null || videoController == null) {
+      return _PlayerStartupOverlay(
+        target: _resolvedTarget ?? widget.target,
+        probe: _startupProbe,
+      );
     }
 
-    return Stack(
-      children: [
-        Positioned.fill(child: VideoPlayer(controller)),
-        Positioned.fill(
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () {
-                setState(() {
-                  if (controller.value.isPlaying) {
-                    controller.pause();
-                  } else {
-                    controller.play();
-                  }
-                });
-              },
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 180),
-                opacity: controller.value.isPlaying ? 0 : 1,
-                child: Center(
-                  child: Container(
-                    width: 72,
-                    height: 72,
-                    decoration: BoxDecoration(
-                      color: Colors.black45,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: const Icon(
-                      Icons.play_arrow_rounded,
-                      size: 42,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-        Positioned(
-          left: 12,
-          right: 12,
-          bottom: 12,
-          child: Column(
-            children: [
-              VideoProgressIndicator(
-                controller,
-                allowScrubbing: true,
-                colors: VideoProgressColors(
-                  playedColor: theme.colorScheme.primary,
-                  bufferedColor: Colors.white38,
-                  backgroundColor: Colors.white24,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
+    return StreamBuilder<int?>(
+      stream: player.stream.width,
+      initialData: player.state.width,
+      builder: (context, widthSnapshot) {
+        return StreamBuilder<int?>(
+          stream: player.stream.height,
+          initialData: player.state.height,
+          builder: (context, heightSnapshot) {
+            final width = widthSnapshot.data ?? 0;
+            final height = heightSnapshot.data ?? 0;
+            final aspectRatio =
+                width > 0 && height > 0 ? width / height : 16 / 9;
+            return ColoredBox(
+              color: Colors.black,
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  IconButton(
-                    onPressed: () {
-                      setState(() {
-                        if (controller.value.isPlaying) {
-                          controller.pause();
-                        } else {
-                          controller.play();
-                        }
-                      });
-                    },
-                    icon: Icon(
-                      controller.value.isPlaying
-                          ? Icons.pause_circle_filled_rounded
-                          : Icons.play_circle_fill_rounded,
-                      color: Colors.white,
-                      size: 28,
+                  Center(
+                    child: AspectRatio(
+                      aspectRatio: aspectRatio,
+                      child: Video(
+                        controller: videoController,
+                        controls: AdaptiveVideoControls,
+                        fill: Colors.black,
+                        fit: BoxFit.contain,
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '${_formatDuration(controller.value.position)} / ${_formatDuration(controller.value.duration)}',
-                      style: const TextStyle(color: Colors.white),
-                    ),
+                  StreamBuilder<bool>(
+                    stream: player.stream.buffering,
+                    initialData: player.state.buffering,
+                    builder: (context, bufferingSnapshot) {
+                      final isBuffering = bufferingSnapshot.data ?? false;
+                      if (!isBuffering) {
+                        return const SizedBox.shrink();
+                      }
+                      return StreamBuilder<double>(
+                        stream: player.stream.bufferingPercentage,
+                        initialData: player.state.bufferingPercentage,
+                        builder: (context, progressSnapshot) {
+                          return IgnorePointer(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.28),
+                              ),
+                              child: _PlayerStartupOverlay(
+                                target: _resolvedTarget ?? widget.target,
+                                probe: _startupProbe,
+                                bufferingProgress: progressSnapshot.data,
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
                   ),
                 ],
               ),
-            ],
-          ),
-        ),
-      ],
+            );
+          },
+        );
+      },
     );
-  }
-
-  String _formatDuration(Duration duration) {
-    if (duration.inMilliseconds <= 0) {
-      return '00:00';
-    }
-    final hours = duration.inHours;
-    final minutes = duration.inMinutes.remainder(60);
-    final seconds = duration.inSeconds.remainder(60);
-    if (hours > 0) {
-      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-    }
-    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 }
 
-class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.label, required this.value});
+class _PlayerStartupOverlay extends StatelessWidget {
+  const _PlayerStartupOverlay({
+    required this.target,
+    required this.probe,
+    this.bufferingProgress,
+  });
 
-  final String label;
-  final String value;
+  final PlaybackTarget target;
+  final _StartupProbeResult probe;
+  final double? bufferingProgress;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: theme.textTheme.labelLarge?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+    final infoItems = <_StartupInfoItem>[
+      _StartupInfoItem(
+        label: '网速',
+        value: probe.speedLabel.isEmpty ? '测速中' : probe.speedLabel,
+      ),
+      _StartupInfoItem(
+        label: '格式',
+        value: _buildFormatValue(target),
+      ),
+      _StartupInfoItem(
+        label: '大小',
+        value: _buildSizeValue(target, probe),
+      ),
+    ];
+    final progressValue = _normalizeBufferProgress(bufferingProgress);
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 380),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: const Color(0x78101723),
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.1),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          '正在准备播放',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    target.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${target.sourceKind.label} · ${target.sourceName}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xCCFFFFFF),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (progressValue != null) ...[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        minHeight: 4,
+                        value: progressValue,
+                        color: Colors.white,
+                        backgroundColor: Colors.white.withValues(alpha: 0.15),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      for (final item in infoItems)
+                        _StartupMetricChip(item: item),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
-        const SizedBox(height: 6),
-        SelectableText(
-          value,
-          style: theme.textTheme.bodyLarge?.copyWith(height: 1.5),
-        ),
-      ],
+      ),
     );
   }
+
+  static double? _normalizeBufferProgress(double? value) {
+    final progress = value ?? 0;
+    if (progress <= 0) {
+      return null;
+    }
+    if (progress > 1) {
+      return (progress / 100).clamp(0.0, 1.0);
+    }
+    return progress.clamp(0.0, 1.0);
+  }
+
+  static String _buildFormatValue(PlaybackTarget target) {
+    final parts = <String>[
+      if (target.resolutionLabel.isNotEmpty) target.resolutionLabel,
+      if (target.formatLabel.isNotEmpty) target.formatLabel,
+      if (target.bitrateLabel.isNotEmpty) target.bitrateLabel,
+    ];
+    if (parts.isEmpty) {
+      return '识别中';
+    }
+    return parts.join(' · ');
+  }
+
+  static String _buildSizeValue(
+    PlaybackTarget target,
+    _StartupProbeResult probe,
+  ) {
+    final label = target.fileSizeLabel.isNotEmpty
+        ? target.fileSizeLabel
+        : probe.fileSizeLabel;
+    return label.isEmpty ? '未知' : label;
+  }
+}
+
+class _StartupMetricChip extends StatelessWidget {
+  const _StartupMetricChip({required this.item});
+
+  final _StartupInfoItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 96, maxWidth: 164),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            item.label,
+            style: const TextStyle(
+              color: Color(0xB3FFFFFF),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            item.value,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StartupInfoItem {
+  const _StartupInfoItem({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+}
+
+class _StartupProbeResult {
+  const _StartupProbeResult({
+    this.estimatedSpeedBytesPerSecond,
+    this.fileSizeBytes,
+  });
+
+  final int? estimatedSpeedBytesPerSecond;
+  final int? fileSizeBytes;
+
+  String get speedLabel {
+    final speed = estimatedSpeedBytesPerSecond ?? 0;
+    if (speed <= 0) {
+      return '';
+    }
+    return '${formatByteSize(speed)}/s';
+  }
+
+  String get fileSizeLabel => formatByteSize(fileSizeBytes);
+}
+
+int? _resolveResponseTotalBytes(
+  Map<String, String> headers, {
+  int? fallbackContentLength,
+}) {
+  final contentRange = headers['content-range'] ?? headers['Content-Range'];
+  if (contentRange != null) {
+    final slashIndex = contentRange.lastIndexOf('/');
+    if (slashIndex >= 0 && slashIndex < contentRange.length - 1) {
+      final total = int.tryParse(contentRange.substring(slashIndex + 1).trim());
+      if (total != null && total > 0) {
+        return total;
+      }
+    }
+  }
+
+  final contentLength = fallbackContentLength ?? 0;
+  if (contentLength > 0) {
+    return contentLength;
+  }
+
+  final rawHeader = headers['content-length'] ?? headers['Content-Length'];
+  final parsedHeader = int.tryParse((rawHeader ?? '').trim());
+  if (parsedHeader != null && parsedHeader > 0) {
+    return parsedHeader;
+  }
+
+  return null;
 }

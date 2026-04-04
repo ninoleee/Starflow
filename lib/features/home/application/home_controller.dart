@@ -5,6 +5,7 @@ import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -83,6 +84,13 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
   final needsCarousel = enabledModules.any(
     (item) => item.type == HomeModuleType.doubanCarousel,
   );
+  final needsDoubanPosterCandidates = enabledModules.any(
+    (item) =>
+        item.type == HomeModuleType.doubanInterest ||
+        item.type == HomeModuleType.doubanSuggestion ||
+        item.type == HomeModuleType.doubanList ||
+        item.type == HomeModuleType.doubanCarousel,
+  );
 
   final warmups = await Future.wait([
     needsRecentlyAdded
@@ -91,10 +99,16 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
     needsCarousel
         ? discoveryRepository.fetchCarouselItems()
         : Future.value(const <DoubanCarouselEntry>[]),
+    needsDoubanPosterCandidates
+        ? mediaRepository.fetchLibrary(limit: 2000)
+        : Future.value(const <MediaItem>[]),
   ]);
 
   final recentItems = warmups[0] as List<MediaItem>;
   final carouselItems = warmups[1] as List<DoubanCarouselEntry>;
+  final posterCandidates = (warmups[2] as List<MediaItem>)
+      .where((item) => item.posterUrl.trim().isNotEmpty)
+      .toList();
 
   final sections = await Future.wait(
     enabledModules.map(
@@ -106,6 +120,7 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
         tmdbMetadataClient: tmdbMetadataClient,
         recentItems: recentItems,
         carouselItems: carouselItems,
+        posterCandidates: posterCandidates,
       ),
     ),
   );
@@ -121,6 +136,7 @@ Future<HomeSectionViewModel?> _buildSectionForModule({
   required TmdbMetadataClient tmdbMetadataClient,
   required List<MediaItem> recentItems,
   required List<DoubanCarouselEntry> carouselItems,
+  required List<MediaItem> posterCandidates,
 }) async {
   switch (module.type) {
     case HomeModuleType.recentlyAdded:
@@ -161,6 +177,7 @@ Future<HomeSectionViewModel?> _buildSectionForModule({
         settings: settings,
         tmdbMetadataClient: tmdbMetadataClient,
         entries: entries,
+        posterCandidates: posterCandidates,
         emptyMessage:
             _resolveDoubanEmptyMessage(module, settings.doubanAccount),
       );
@@ -170,6 +187,7 @@ Future<HomeSectionViewModel?> _buildSectionForModule({
         settings: settings,
         tmdbMetadataClient: tmdbMetadataClient,
         items: carouselItems,
+        posterCandidates: posterCandidates,
         emptyMessage:
             _resolveDoubanEmptyMessage(module, settings.doubanAccount),
       );
@@ -208,6 +226,7 @@ Future<HomeSectionViewModel> _buildDoubanSection({
   required AppSettings settings,
   required TmdbMetadataClient tmdbMetadataClient,
   required List<DoubanEntry> entries,
+  required List<MediaItem> posterCandidates,
   required String emptyMessage,
 }) async {
   final items = await Future.wait(entries.map((entry) async {
@@ -218,6 +237,7 @@ Future<HomeSectionViewModel> _buildDoubanSection({
       preferSeries: _preferSeriesForEntry(
         subjectType: entry.subjectType,
       ),
+      posterCandidates: posterCandidates,
       settings: settings,
       tmdbMetadataClient: tmdbMetadataClient,
     );
@@ -263,6 +283,7 @@ Future<HomeSectionViewModel> _buildCarouselSection({
   required AppSettings settings,
   required TmdbMetadataClient tmdbMetadataClient,
   required List<DoubanCarouselEntry> items,
+  required List<MediaItem> posterCandidates,
   required String emptyMessage,
 }) async {
   final carouselItems = await Future.wait(items.map((item) async {
@@ -271,6 +292,7 @@ Future<HomeSectionViewModel> _buildCarouselSection({
       title: item.title,
       year: item.year,
       preferSeries: _preferSeriesForEntry(subjectType: item.mediaType),
+      posterCandidates: posterCandidates,
       settings: settings,
       tmdbMetadataClient: tmdbMetadataClient,
     );
@@ -344,12 +366,22 @@ Future<String> _resolveDoubanPosterUrl({
   required String title,
   required int year,
   required bool preferSeries,
+  required List<MediaItem> posterCandidates,
   required AppSettings settings,
   required TmdbMetadataClient tmdbMetadataClient,
 }) async {
   final preferredPosterUrl = primaryPosterUrl.trim();
   if (preferredPosterUrl.isNotEmpty) {
     return preferredPosterUrl;
+  }
+
+  final matchedPoster = matchMediaItemByTitles(
+    posterCandidates,
+    titles: [title],
+    year: year,
+  )?.posterUrl.trim();
+  if ((matchedPoster ?? '').isNotEmpty) {
+    return matchedPoster!;
   }
 
   if (!settings.tmdbMetadataMatchEnabled ||
