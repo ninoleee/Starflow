@@ -313,9 +313,10 @@ Future<MediaDetailTarget?> _tryMatchLibraryResource({
   );
   if (embyMatch != null) {
     final matchedTarget = MediaDetailTarget.fromMediaItem(
-      embyMatch,
+      embyMatch.item,
       availabilityLabel:
-          '资源已就绪：${embyMatch.sourceKind.label} · ${embyMatch.sourceName}',
+          '资源已就绪：${embyMatch.item.sourceKind.label} · ${embyMatch.item.sourceName}'
+          '${embyMatch.matchReason.isEmpty ? '' : ' · ${embyMatch.matchReason}'}',
       searchQuery: query,
     );
     return _mergeMatchedLibraryTarget(
@@ -341,7 +342,8 @@ Future<MediaDetailTarget?> _tryMatchLibraryResource({
     final matchedTarget = MediaDetailTarget.fromMediaItem(
       matched,
       availabilityLabel:
-          '资源已就绪：${matched.sourceKind.label} · ${matched.sourceName}',
+          '资源已就绪：${matched.sourceKind.label} · ${matched.sourceName}'
+          ' · ${_titleMatchReason(year)}',
       searchQuery: query,
     );
     return _mergeMatchedLibraryTarget(
@@ -387,7 +389,7 @@ int _resolveManualMatchYear(
   return metadataMatch?.year ?? 0;
 }
 
-Future<MediaItem?> _tryMatchEmbyResourceBySections({
+Future<_LibraryMatchCandidate?> _tryMatchEmbyResourceBySections({
   required MediaRepository mediaRepository,
   required MediaDetailTarget target,
   required List<String> titles,
@@ -440,7 +442,14 @@ Future<MediaItem?> _tryMatchEmbyResourceBySections({
         tmdbId: _resolveManualMatchTmdbId(target, metadataMatch),
       );
       if (exactMatched != null) {
-        return exactMatched;
+        return _LibraryMatchCandidate(
+          item: exactMatched,
+          matchReason: _externalIdMatchReason(
+            exactMatched,
+            imdbId: _resolveManualMatchImdbId(target, metadataMatch),
+            tmdbId: _resolveManualMatchTmdbId(target, metadataMatch),
+          ),
+        );
       }
       final matched = matchMediaItemByTitles(
         items,
@@ -448,7 +457,10 @@ Future<MediaItem?> _tryMatchEmbyResourceBySections({
         year: year,
       );
       if (matched != null) {
-        return matched;
+        return _LibraryMatchCandidate(
+          item: matched,
+          matchReason: _titleMatchReason(year),
+        );
       }
     } catch (_) {
       continue;
@@ -456,6 +468,47 @@ Future<MediaItem?> _tryMatchEmbyResourceBySections({
   }
 
   return null;
+}
+
+class _LibraryMatchCandidate {
+  const _LibraryMatchCandidate({
+    required this.item,
+    required this.matchReason,
+  });
+
+  final MediaItem item;
+  final String matchReason;
+}
+
+String _externalIdMatchReason(
+  MediaItem item, {
+  required String imdbId,
+  required String tmdbId,
+}) {
+  final reasons = <String>[];
+  final normalizedImdbId = imdbId.trim().toLowerCase();
+  final normalizedTmdbId = tmdbId.trim().toLowerCase();
+
+  if (normalizedImdbId.isNotEmpty &&
+      item.imdbId.trim().toLowerCase() == normalizedImdbId) {
+    reasons.add('IMDb ID');
+  }
+  if (normalizedTmdbId.isNotEmpty &&
+      item.tmdbId.trim().toLowerCase() == normalizedTmdbId) {
+    reasons.add('TMDB ID');
+  }
+
+  if (reasons.isEmpty) {
+    return '按外部 ID 匹配';
+  }
+  if (reasons.length == 1) {
+    return '按 ${reasons.first} 匹配';
+  }
+  return '按 ${reasons.join(' + ')} 匹配';
+}
+
+String _titleMatchReason(int year) {
+  return year > 0 ? '按标题 + 年份匹配' : '按标题匹配';
 }
 
 String _resolveManualMatchImdbId(
@@ -693,17 +746,22 @@ MediaDetailTarget _applyManualMetadataMatch(
 ) {
   return target.copyWith(
     posterUrl:
-        match.posterUrl.trim().isNotEmpty ? match.posterUrl : target.posterUrl,
-    overview:
-        match.overview.trim().isNotEmpty ? match.overview : target.overview,
-    year: match.year > 0 ? match.year : target.year,
+        target.posterUrl.trim().isNotEmpty ? target.posterUrl : match.posterUrl,
+    overview: target.hasUsefulOverview
+        ? target.overview
+        : (match.overview.trim().isNotEmpty ? match.overview : target.overview),
+    year: target.year > 0 ? target.year : match.year,
     durationLabel: match.durationLabel.trim().isNotEmpty
-        ? match.durationLabel
+        ? (target.durationLabel.trim().isNotEmpty
+            ? target.durationLabel
+            : match.durationLabel)
         : target.durationLabel,
-    genres: match.genres.isNotEmpty ? match.genres : target.genres,
-    directors: match.directors.isNotEmpty ? match.directors : target.directors,
-    actors: match.actors.isNotEmpty ? match.actors : target.actors,
-    actorProfiles: match.actorProfiles.isNotEmpty
+    genres: target.genres.isNotEmpty ? target.genres : match.genres,
+    directors: target.directors.isNotEmpty ? target.directors : match.directors,
+    actors: target.actors.isNotEmpty ? target.actors : match.actors,
+    actorProfiles: target.actorProfiles.isNotEmpty
+        ? target.actorProfiles
+        : match.actorProfiles.isNotEmpty
         ? match.actorProfiles
             .map(
               (item) => MediaPersonProfile(
@@ -714,10 +772,11 @@ MediaDetailTarget _applyManualMetadataMatch(
             .toList()
         : target.actorProfiles,
     ratingLabels: _mergeLabels(target.ratingLabels, match.ratingLabels),
-    doubanId:
-        match.doubanId.trim().isNotEmpty ? match.doubanId : target.doubanId,
-    imdbId: match.imdbId.trim().isNotEmpty ? match.imdbId : target.imdbId,
-    tmdbId: match.tmdbId.trim().isNotEmpty ? match.tmdbId : target.tmdbId,
+    doubanId: target.doubanId.trim().isNotEmpty
+        ? target.doubanId
+        : match.doubanId,
+    imdbId: target.imdbId.trim().isNotEmpty ? target.imdbId : match.imdbId,
+    tmdbId: target.tmdbId.trim().isNotEmpty ? target.tmdbId : match.tmdbId,
   );
 }
 
@@ -896,7 +955,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-            '已匹配到 ${matched.sourceKind?.label ?? '资源'} · ${matched.sourceName}'),
+          matched.availabilityLabel.trim().isNotEmpty
+              ? '已匹配到 ${matched.availabilityLabel.replaceFirst('资源已就绪：', '')}'
+              : '已匹配到 ${matched.sourceKind?.label ?? '资源'} · ${matched.sourceName}',
+        ),
       ),
     );
   }
@@ -1259,7 +1321,7 @@ class _HeroSection extends StatelessWidget {
     final screenHeight = MediaQuery.sizeOf(context).height;
     final heroHeight = math.max(560.0, math.min(screenHeight * 0.76, 760.0));
     final metadata = <String>[
-      ...target.ratingLabels.where((item) => item.trim().isNotEmpty).take(2),
+      ...target.ratingLabels.where((item) => item.trim().isNotEmpty),
       if (target.year > 0) '${target.year}',
       if (target.durationLabel.trim().isNotEmpty) target.durationLabel,
       ...target.genres.take(3).where((item) => item.trim().isNotEmpty),
@@ -1421,19 +1483,6 @@ class _HeroContent extends StatelessWidget {
                 color: Color(0xFFD7E2F8),
                 fontSize: 14,
                 height: 1.45,
-              ),
-            ),
-          ],
-          if (target.overview.trim().isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Text(
-              target.overview,
-              maxLines: 4,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Color(0xFFE7EEFF),
-                fontSize: 15,
-                height: 1.6,
               ),
             ),
           ],

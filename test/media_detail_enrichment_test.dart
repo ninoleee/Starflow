@@ -360,8 +360,8 @@ void main() {
 
       const target = MediaDetailTarget(
         title: '美丽人生',
-        posterUrl: '',
-        overview: '',
+        posterUrl: 'https://emby.example.com/poster.jpg',
+        overview: '来自本地媒体库的简介',
         year: 1997,
         availabilityLabel: '无',
         searchQuery: '美丽人生',
@@ -379,6 +379,8 @@ void main() {
       expect(resolved.tmdbId, '637');
       expect(resolved.ratingLabels, contains('豆瓣 9.6'));
       expect(resolved.ratingLabels, contains('IMDb 8.6'));
+      expect(resolved.posterUrl, 'https://emby.example.com/poster.jpg');
+      expect(resolved.overview, '来自本地媒体库的简介');
     });
   });
 }

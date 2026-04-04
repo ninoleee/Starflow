@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -469,14 +468,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     required SearchResult result,
     required AppSettings settings,
   }) async {
-    developer.log(
-      'save button tapped id=${result.id} title=${result.title} url=${result.resourceUrl}',
-      name: 'QuarkSaveUI',
-    );
     final storage = settings.networkStorage;
     final cookie = storage.quarkCookie.trim();
     if (cookie.isEmpty) {
-      developer.log('save aborted: empty quark cookie', name: 'QuarkSaveUI');
       if (!mounted) {
         return;
       }
@@ -496,10 +490,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             cookie: cookie,
             toPdirFid: storage.quarkSaveFolderId,
           );
-      developer.log(
-        'save success taskId=${response.taskId} savedCount=${response.savedCount}',
-        name: 'QuarkSaveUI',
-      );
       var triggeredTask = false;
       if (storage.smartStrmWebhookUrl.trim().isNotEmpty &&
           storage.smartStrmTaskName.trim().isNotEmpty) {
@@ -511,7 +501,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   : storage.quarkSaveFolderPath,
             );
         triggeredTask = true;
-        developer.log('smart strm triggered after quark save', name: 'QuarkSaveUI');
       }
       if (!mounted) {
         return;
@@ -527,11 +516,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         ),
       );
     } on QuarkSaveException catch (error) {
-      developer.log(
-        'save failed with QuarkSaveException: ${error.message}',
-        name: 'QuarkSaveUI',
-        level: 1000,
-      );
       if (!mounted) {
         return;
       }
@@ -539,11 +523,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         SnackBar(content: Text(error.message)),
       );
     } on SmartStrmWebhookException catch (error) {
-      developer.log(
-        'smart strm failed after save: ${error.message}',
-        name: 'QuarkSaveUI',
-        level: 1000,
-      );
       if (!mounted) {
         return;
       }
@@ -551,11 +530,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         SnackBar(content: Text('夸克保存成功，但 STRM 触发失败：${error.message}')),
       );
     } catch (error) {
-      developer.log(
-        'save failed with unexpected error: $error',
-        name: 'QuarkSaveUI',
-        level: 1000,
-      );
       if (!mounted) {
         return;
       }
