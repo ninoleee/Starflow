@@ -23,6 +23,7 @@ class DoubanApiClient {
     required String userId,
     required DoubanInterestStatus status,
     int page = 1,
+    int? pageSize,
   }) async {
     final trimmedUserId = userId.trim();
     if (trimmedUserId.isEmpty) {
@@ -55,12 +56,12 @@ class DoubanApiClient {
       return deduped.take(min(9, deduped.length)).toList();
     }
 
-    const pageSize = 20;
+    final resolvedPageSize = pageSize ?? 20;
     return _fetchInterestPage(
       userId: trimmedUserId,
       status: status,
-      start: (page - 1) * pageSize,
-      count: pageSize,
+      start: (page - 1) * resolvedPageSize,
+      count: resolvedPageSize,
     );
   }
 
@@ -68,12 +69,13 @@ class DoubanApiClient {
     required String cookie,
     required DoubanSuggestionMediaType mediaType,
     int page = 1,
+    int? pageSize,
   }) async {
-    const pageSize = 20;
+    final resolvedPageSize = pageSize ?? 20;
     final ckValue = _extractCookieValue(cookie, 'ck');
     final uri = Uri.parse(
       'https://m.douban.com/rexxar/api/v2/${mediaType.value}/suggestion'
-      '?start=${(page - 1) * pageSize}&count=$pageSize&new_struct=1&with_review=1&ck=$ckValue',
+      '?start=${(page - 1) * resolvedPageSize}&count=$resolvedPageSize&new_struct=1&with_review=1&ck=$ckValue',
     );
 
     final payload = await _getJson(
@@ -93,6 +95,7 @@ class DoubanApiClient {
   Future<List<DoubanEntry>> fetchListItems({
     required String url,
     int page = 1,
+    int? pageSize,
   }) async {
     final normalized = url.trim();
     if (normalized.isEmpty) {
@@ -100,10 +103,18 @@ class DoubanApiClient {
     }
 
     if (normalized.contains('douban.com/doulist/')) {
-      return _fetchDouListItems(normalized, page: page);
+      return _fetchDouListItems(
+        normalized,
+        page: page,
+        pageSize: pageSize,
+      );
     }
     if (normalized.contains('douban.com/subject_collection/')) {
-      return _fetchSubjectCollectionItems(normalized, page: page);
+      return _fetchSubjectCollectionItems(
+        normalized,
+        page: page,
+        pageSize: pageSize,
+      );
     }
     throw const DoubanApiException('暂不支持这个豆瓣片单地址');
   }
@@ -158,16 +169,17 @@ class DoubanApiClient {
   Future<List<DoubanEntry>> _fetchDouListItems(
     String url, {
     required int page,
+    int? pageSize,
   }) async {
     final listId = RegExp(r'doulist/(\d+)').firstMatch(url)?.group(1);
     if (listId == null || listId.isEmpty) {
       throw const DoubanApiException('无法解析豆瓣片单 ID');
     }
 
-    const pageSize = 25;
+    final resolvedPageSize = pageSize ?? 25;
     final uri = Uri.parse(
       'https://m.douban.com/rexxar/api/v2/doulist/$listId/items'
-      '?start=${(page - 1) * pageSize}&count=$pageSize&updated_at&items_only=1&type_tag&for_mobile=1',
+      '?start=${(page - 1) * resolvedPageSize}&count=$resolvedPageSize&updated_at&items_only=1&type_tag&for_mobile=1',
     );
     final payload = await _getJson(
       uri,
@@ -185,6 +197,7 @@ class DoubanApiClient {
   Future<List<DoubanEntry>> _fetchSubjectCollectionItems(
     String url, {
     required int page,
+    int? pageSize,
   }) async {
     final collectionId =
         RegExp(r'subject_collection/(\w+)').firstMatch(url)?.group(1);
@@ -192,10 +205,10 @@ class DoubanApiClient {
       throw const DoubanApiException('无法解析豆瓣合集 ID');
     }
 
-    const pageSize = 20;
+    final resolvedPageSize = pageSize ?? 20;
     final uri = Uri.parse(
       'https://m.douban.com/rexxar/api/v2/subject_collection/$collectionId/items'
-      '?start=${(page - 1) * pageSize}&count=$pageSize&updated_at&items_only=1&type_tag&for_mobile=1',
+      '?start=${(page - 1) * resolvedPageSize}&count=$resolvedPageSize&updated_at&items_only=1&type_tag&for_mobile=1',
     );
     final payload = await _getJson(
       uri,

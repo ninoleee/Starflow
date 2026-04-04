@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
-import 'package:starflow/core/utils/network_image_headers.dart';
+import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
@@ -368,14 +368,10 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
                 imageFilter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
                 child: Opacity(
                   opacity: 0.72,
-                  child: Image.network(
+                  child: AppNetworkImage(
                     imageUrl,
-                    headers: networkImageHeadersForUrl(imageUrl),
                     fit: BoxFit.cover,
                     alignment: Alignment.topCenter,
-                    errorBuilder: (context, error, stackTrace) {
-                      return const SizedBox.shrink();
-                    },
                   ),
                 ),
               ),
@@ -822,12 +818,9 @@ class _FeaturedHeroCard extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 if (item.imageUrl.trim().isNotEmpty)
-                  Image.network(
+                  AppNetworkImage(
                     item.imageUrl,
-                    headers: networkImageHeadersForUrl(item.imageUrl),
                     fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) =>
-                        const SizedBox.shrink(),
                   ),
                 Align(
                   alignment: Alignment.bottomLeft,
@@ -959,12 +952,9 @@ class _HomeCarousel extends StatelessWidget {
                   fit: StackFit.expand,
                   children: [
                     if (item.imageUrl.trim().isNotEmpty)
-                      Image.network(
+                      AppNetworkImage(
                         item.imageUrl,
-                        headers: networkImageHeadersForUrl(item.imageUrl),
                         fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) =>
-                            const SizedBox.shrink(),
                       ),
                     DecoratedBox(
                       decoration: BoxDecoration(

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -21,7 +23,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   late final TextEditingController _controller;
   List<SearchResult> _results = const [];
   bool _isSearching = false;
-  String? _selectedProviderId;
+  String _selectedTargetId = _SearchTarget.allId;
   String? _errorMessage;
 
   @override
@@ -55,7 +57,13 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final settings = ref.read(appSettingsProvider);
     final enabledProviders =
         settings.searchProviders.where((item) => item.enabled).toList();
-    if (enabledProviders.isEmpty) {
+    final enabledSources =
+        settings.mediaSources.where((item) => item.enabled).toList();
+    final targets = _buildTargets(
+      sources: enabledSources,
+      providers: enabledProviders,
+    );
+    if (targets.length == 1) {
       setState(() {
         _results = const [];
         _errorMessage = null;
@@ -63,28 +71,55 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       return;
     }
 
-    final provider = enabledProviders.firstWhere(
-      (item) => item.id == _selectedProviderId,
-      orElse: () => enabledProviders.first,
+    final target = targets.firstWhere(
+      (item) => item.id == _selectedTargetId,
+      orElse: () => targets.first,
     );
 
     setState(() {
-      _selectedProviderId = provider.id;
+      _selectedTargetId = target.id;
       _isSearching = true;
       _errorMessage = null;
     });
 
     try {
-      final result = await ref
-          .read(searchRepositoryProvider)
-          .search(_controller.text, provider: provider);
+      final repository = ref.read(searchRepositoryProvider);
+      final keyword = _controller.text.trim();
+      late final List<SearchResult> result;
+      switch (target.kind) {
+        case _SearchTargetKind.all:
+          final groups = await Future.wait([
+            repository.searchLocal(keyword, limit: 80),
+            ...enabledProviders.map(
+              (provider) => repository.searchOnline(
+                keyword,
+                provider: provider,
+              ),
+            ),
+          ]);
+          result = groups.expand((items) => items).toList(growable: false);
+          break;
+        case _SearchTargetKind.mediaSource:
+          result = await repository.searchLocal(
+            keyword,
+            sourceId: target.mediaSource!.id,
+            limit: 80,
+          );
+          break;
+        case _SearchTargetKind.provider:
+          result = await repository.searchOnline(
+            keyword,
+            provider: target.provider!,
+          );
+          break;
+      }
 
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _results = result;
+        _results = _sortResults(result);
         _isSearching = false;
       });
     } catch (error) {
@@ -105,12 +140,16 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final settings = ref.watch(appSettingsProvider);
     final enabledProviders =
         settings.searchProviders.where((item) => item.enabled).toList();
-    final selectedProvider = enabledProviders.where(
-      (item) => item.id == _selectedProviderId,
+    final enabledSources =
+        settings.mediaSources.where((item) => item.enabled).toList();
+    final targets = _buildTargets(
+      sources: enabledSources,
+      providers: enabledProviders,
     );
-    final activeProvider = selectedProvider.isEmpty
-        ? (enabledProviders.isEmpty ? null : enabledProviders.first)
-        : selectedProvider.first;
+    final activeTarget = targets.firstWhere(
+      (item) => item.id == _selectedTargetId,
+      orElse: () => targets.first,
+    );
 
     return Scaffold(
       body: AppPageBackground(
@@ -122,8 +161,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           padding: EdgeInsets.zero,
           children: [
             SectionPanel(
-              title: '搜索服务',
-              subtitle: '你可以在设置页替换成自己的聚合服务或站点模板',
+              title: '搜索',
+              subtitle: '可选全部、指定 Emby/WebDAV 来源，或指定在线搜索服务',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -140,20 +179,20 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  if (enabledProviders.isEmpty)
-                    const Text('还没有启用搜索服务，请先去设置页添加。')
+                  if (targets.length == 1)
+                    const Text('还没有启用可搜索的来源，请先去设置页添加媒体源或搜索服务。')
                   else
                     Wrap(
                       spacing: 10,
                       runSpacing: 10,
-                      children: enabledProviders
+                      children: targets
                           .map(
-                            (provider) => ChoiceChip(
-                              label: Text(provider.name),
-                              selected: activeProvider?.id == provider.id,
+                            (target) => ChoiceChip(
+                              label: Text(target.label),
+                              selected: activeTarget.id == target.id,
                               onSelected: (_) {
                                 setState(() {
-                                  _selectedProviderId = provider.id;
+                                  _selectedTargetId = target.id;
                                 });
                                 if (_controller.text.trim().isNotEmpty) {
                                   _performSearch();
@@ -169,9 +208,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             const SizedBox(height: 18),
             SectionPanel(
               title: '搜索结果',
-              subtitle: activeProvider == null
-                  ? '启用一个搜索服务后就可以开始搜索'
-                  : '当前使用 ${activeProvider.name}，后续可以接下载器、离线缓存或收藏流程',
+              subtitle: targets.length == 1
+                  ? '启用来源后就可以开始搜索'
+                  : '当前范围：${activeTarget.label}',
               child: _isSearching
                   ? const Padding(
                       padding: EdgeInsets.symmetric(vertical: 32),
@@ -180,7 +219,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   : _errorMessage != null
                       ? Text('搜索失败：$_errorMessage')
                       : _results.isEmpty
-                          ? const Text('输入关键字后开始搜索；这里会展示统一结构的资源结果。')
+                          ? const Text('输入关键字后开始搜索。')
                           : Column(
                               children: _results
                                   .map(
@@ -198,6 +237,30 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       ),
     );
   }
+
+  List<_SearchTarget> _buildTargets({
+    required List<MediaSourceConfig> sources,
+    required List<SearchProviderConfig> providers,
+  }) {
+    return [
+      const _SearchTarget.all(),
+      ...sources.map(_SearchTarget.mediaSource),
+      ...providers.map(_SearchTarget.provider),
+    ];
+  }
+
+  List<SearchResult> _sortResults(List<SearchResult> items) {
+    final sorted = [...items];
+    sorted.sort((left, right) {
+      final localBoost = (right.detailTarget != null ? 1 : 0) -
+          (left.detailTarget != null ? 1 : 0);
+      if (localBoost != 0) {
+        return localBoost;
+      }
+      return left.title.compareTo(right.title);
+    });
+    return sorted;
+  }
 }
 
 class _SearchResultCard extends StatelessWidget {
@@ -208,9 +271,16 @@ class _SearchResultCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final posterUrl = result.posterUrl.trim();
     return InkWell(
       borderRadius: BorderRadius.circular(24),
-      onTap: () => _showDetailDialog(context, result),
+      onTap: () {
+        if (result.detailTarget != null) {
+          context.pushNamed('detail', extra: result.detailTarget);
+          return;
+        }
+        _showDetailDialog(context, result);
+      },
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -225,22 +295,18 @@ class _SearchResultCard extends StatelessWidget {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              child: Image.network(
-                result.posterUrl,
-                headers: networkImageHeadersForUrl(result.posterUrl),
-                width: 82,
-                height: 118,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return Container(
-                    width: 82,
-                    height: 118,
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    alignment: Alignment.center,
-                    child: const Icon(Icons.link_rounded),
-                  );
-                },
-              ),
+              child: posterUrl.isEmpty
+                  ? _SearchPosterPlaceholder(theme: theme)
+                  : Image.network(
+                      posterUrl,
+                      headers: networkImageHeadersForUrl(posterUrl),
+                      width: 82,
+                      height: 118,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return _SearchPosterPlaceholder(theme: theme);
+                      },
+                    ),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -314,6 +380,23 @@ class _SearchResultCard extends StatelessWidget {
   }
 }
 
+class _SearchPosterPlaceholder extends StatelessWidget {
+  const _SearchPosterPlaceholder({required this.theme});
+
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 82,
+      height: 118,
+      color: theme.colorScheme.surfaceContainerHighest,
+      alignment: Alignment.center,
+      child: const Icon(Icons.link_rounded),
+    );
+  }
+}
+
 class _MetaChip extends StatelessWidget {
   const _MetaChip({required this.label});
 
@@ -338,4 +421,39 @@ class _MetaChip extends StatelessWidget {
       ),
     );
   }
+}
+
+enum _SearchTargetKind {
+  all,
+  mediaSource,
+  provider,
+}
+
+class _SearchTarget {
+  const _SearchTarget.all()
+      : id = allId,
+        label = '全部',
+        kind = _SearchTargetKind.all,
+        mediaSource = null,
+        provider = null;
+
+  _SearchTarget.mediaSource(this.mediaSource)
+      : id = 'source:${mediaSource!.id}',
+        label = mediaSource.name,
+        kind = _SearchTargetKind.mediaSource,
+        provider = null;
+
+  _SearchTarget.provider(this.provider)
+      : id = 'provider:${provider!.id}',
+        label = provider.name,
+        kind = _SearchTargetKind.provider,
+        mediaSource = null;
+
+  static const allId = 'all';
+
+  final String id;
+  final String label;
+  final _SearchTargetKind kind;
+  final MediaSourceConfig? mediaSource;
+  final SearchProviderConfig? provider;
 }

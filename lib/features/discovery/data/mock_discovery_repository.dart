@@ -5,7 +5,11 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 abstract class DiscoveryRepository {
-  Future<List<DoubanEntry>> fetchEntries(HomeModuleConfig module);
+  Future<List<DoubanEntry>> fetchEntries(
+    HomeModuleConfig module, {
+    int page = 1,
+    int? pageSize,
+  });
 
   Future<List<DoubanCarouselEntry>> fetchCarouselItems();
 }
@@ -27,7 +31,11 @@ class AppDiscoveryRepository implements DiscoveryRepository {
       ref.read(appSettingsProvider).doubanAccount;
 
   @override
-  Future<List<DoubanEntry>> fetchEntries(HomeModuleConfig module) async {
+  Future<List<DoubanEntry>> fetchEntries(
+    HomeModuleConfig module, {
+    int page = 1,
+    int? pageSize,
+  }) async {
     if (!_config.enabled) {
       return const [];
     }
@@ -37,14 +45,22 @@ class AppDiscoveryRepository implements DiscoveryRepository {
         return _apiClient.fetchInterestItems(
           userId: _config.userId,
           status: module.doubanInterestStatus,
+          page: page,
+          pageSize: pageSize,
         );
       case HomeModuleType.doubanSuggestion:
         return _apiClient.fetchSuggestionItems(
           cookie: _config.sessionCookie,
           mediaType: module.doubanSuggestionType,
+          page: page,
+          pageSize: pageSize,
         );
       case HomeModuleType.doubanList:
-        return _apiClient.fetchListItems(url: module.doubanListUrl);
+        return _apiClient.fetchListItems(
+          url: module.doubanListUrl,
+          page: page,
+          pageSize: pageSize,
+        );
       case HomeModuleType.recentlyAdded:
       case HomeModuleType.librarySection:
       case HomeModuleType.doubanCarousel:

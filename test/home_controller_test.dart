@@ -275,7 +275,11 @@ class _FakeDiscoveryRepository implements DiscoveryRepository {
   }
 
   @override
-  Future<List<DoubanEntry>> fetchEntries(HomeModuleConfig module) async {
+  Future<List<DoubanEntry>> fetchEntries(
+    HomeModuleConfig module, {
+    int page = 1,
+    int? pageSize,
+  }) async {
     return entries;
   }
 }

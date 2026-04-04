@@ -1,3 +1,5 @@
+import 'package:starflow/features/details/domain/media_detail_models.dart';
+
 enum SearchProviderKind {
   torrent,
   direct,
@@ -116,6 +118,7 @@ class SearchResult {
     this.source = '',
     this.publishedAt = '',
     this.imageUrls = const [],
+    this.detailTarget,
   });
 
   final String id;
@@ -132,4 +135,5 @@ class SearchResult {
   final String source;
   final String publishedAt;
   final List<String> imageUrls;
+  final MediaDetailTarget? detailTarget;
 }

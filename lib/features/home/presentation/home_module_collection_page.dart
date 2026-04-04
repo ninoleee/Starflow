@@ -24,11 +24,15 @@ class HomeModuleCollectionPage extends ConsumerStatefulWidget {
 
 class _HomeModuleCollectionPageState
     extends ConsumerState<HomeModuleCollectionPage> {
-  int _currentPage = 0;
+  int _currentPage = 1;
 
   @override
   Widget build(BuildContext context) {
-    final entriesAsync = ref.watch(_homeModuleEntriesProvider(widget.module));
+    final pageRequest = _HomeModulePageRequest(
+      module: widget.module,
+      page: _currentPage,
+    );
+    final pageAsync = ref.watch(_homeModulePageProvider(pageRequest));
 
     return Scaffold(
       body: Stack(
@@ -37,9 +41,8 @@ class _HomeModuleCollectionPageState
           AppPageBackground(
             child: RefreshIndicator(
               onRefresh: () async {
-                ref.invalidate(_homeModuleEntriesProvider(widget.module));
-                await ref
-                    .read(_homeModuleEntriesProvider(widget.module).future);
+                ref.invalidate(_homeModulePageProvider(pageRequest));
+                await ref.read(_homeModulePageProvider(pageRequest).future);
               },
               child: ListView(
                 padding: overlayToolbarPagePadding(context),
@@ -60,10 +63,11 @@ class _HomeModuleCollectionPageState
                         ),
                   ),
                   const SizedBox(height: 20),
-                  entriesAsync.when(
-                    data: (entries) => _DoubanPagedGrid(
-                      entries: entries,
+                  pageAsync.when(
+                    data: (pageData) => _DoubanPagedGrid(
+                      entries: pageData.entries,
                       currentPage: _currentPage,
+                      hasNextPage: pageData.hasNextPage,
                       onPageChanged: (page) {
                         setState(() {
                           _currentPage = page;
@@ -92,10 +96,32 @@ class _HomeModuleCollectionPageState
   }
 }
 
-final _homeModuleEntriesProvider =
-    FutureProvider.family<List<DoubanEntry>, HomeModuleConfig>((ref, module) {
-  return ref.read(discoveryRepositoryProvider).fetchEntries(module);
-});
+final _homeModulePageProvider =
+    FutureProvider.family<_HomeModulePageData, _HomeModulePageRequest>(
+  (ref, request) async {
+    final repository = ref.read(discoveryRepositoryProvider);
+    final entries = await repository.fetchEntries(
+      request.module,
+      page: request.page,
+      pageSize: 50,
+    );
+    if (!_supportsPagedViewAll(request.module)) {
+      return _HomeModulePageData(
+        entries: entries,
+        hasNextPage: false,
+      );
+    }
+    final nextPageEntries = await repository.fetchEntries(
+      request.module,
+      page: request.page + 1,
+      pageSize: 50,
+    );
+    return _HomeModulePageData(
+      entries: entries,
+      hasNextPage: nextPageEntries.isNotEmpty,
+    );
+  },
+);
 
 String _moduleSubtitle(HomeModuleConfig module) {
   switch (module.type) {
@@ -114,21 +140,27 @@ String _moduleSubtitle(HomeModuleConfig module) {
   }
 }
 
+bool _supportsPagedViewAll(HomeModuleConfig module) {
+  return !(module.type == HomeModuleType.doubanInterest &&
+      module.doubanInterestStatus == DoubanInterestStatus.randomMark);
+}
+
 class _DoubanPagedGrid extends StatelessWidget {
   const _DoubanPagedGrid({
     required this.entries,
     required this.currentPage,
+    required this.hasNextPage,
     required this.onPageChanged,
   });
 
   final List<DoubanEntry> entries;
   final int currentPage;
+  final bool hasNextPage;
   final ValueChanged<int> onPageChanged;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    const normalizedPageSize = 24;
     if (entries.isEmpty) {
       return Text(
         '无',
@@ -138,21 +170,13 @@ class _DoubanPagedGrid extends StatelessWidget {
       );
     }
 
-    final totalPages =
-        math.max(1, (entries.length / normalizedPageSize).ceil());
-    final safePage = currentPage.clamp(0, totalPages - 1);
-    final pageItems = entries
-        .skip(safePage * normalizedPageSize)
-        .take(normalizedPageSize)
-        .toList(growable: false);
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _DoubanPagerSummary(
-          totalItems: entries.length,
-          currentPage: safePage,
-          totalPages: totalPages,
+          currentPage: currentPage,
+          currentItemCount: entries.length,
+          hasNextPage: hasNextPage,
           onPageChanged: onPageChanged,
         ),
         const SizedBox(height: 14),
@@ -171,7 +195,7 @@ class _DoubanPagedGrid extends StatelessWidget {
               padding: EdgeInsets.zero,
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: pageItems.length,
+              itemCount: entries.length,
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: crossAxisCount,
                 crossAxisSpacing: spacing,
@@ -179,7 +203,7 @@ class _DoubanPagedGrid extends StatelessWidget {
                 childAspectRatio: childAspectRatio,
               ),
               itemBuilder: (context, index) {
-                final entry = pageItems[index];
+                final entry = entries[index];
                 return MediaPosterTile(
                   title: entry.title,
                   subtitle: entry.year > 0 ? '${entry.year}' : '',
@@ -216,12 +240,12 @@ class _DoubanPagedGrid extends StatelessWidget {
             );
           },
         ),
-        if (totalPages > 1) ...[
+        if (currentPage > 1 || hasNextPage) ...[
           const SizedBox(height: 18),
           _DoubanPagerSummary(
-            totalItems: entries.length,
-            currentPage: safePage,
-            totalPages: totalPages,
+            currentPage: currentPage,
+            currentItemCount: entries.length,
+            hasNextPage: hasNextPage,
             onPageChanged: onPageChanged,
             compact: true,
           ),
@@ -233,24 +257,24 @@ class _DoubanPagedGrid extends StatelessWidget {
 
 class _DoubanPagerSummary extends StatelessWidget {
   const _DoubanPagerSummary({
-    required this.totalItems,
     required this.currentPage,
-    required this.totalPages,
+    required this.currentItemCount,
+    required this.hasNextPage,
     required this.onPageChanged,
     this.compact = false,
   });
 
-  final int totalItems;
   final int currentPage;
-  final int totalPages;
+  final int currentItemCount;
+  final bool hasNextPage;
   final ValueChanged<int> onPageChanged;
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final canGoPrevious = currentPage > 0;
-    final canGoNext = currentPage < totalPages - 1;
+    final canGoPrevious = currentPage > 1;
+    final canGoNext = hasNextPage;
 
     return Row(
       children: [
@@ -259,9 +283,7 @@ class _DoubanPagerSummary extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                compact
-                    ? '第 ${currentPage + 1} / $totalPages 页'
-                    : '共 $totalItems 部内容',
+                compact ? '第 $currentPage 页' : '本页 $currentItemCount 部内容',
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
@@ -270,7 +292,7 @@ class _DoubanPagerSummary extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(top: 3),
                   child: Text(
-                    '第 ${currentPage + 1} / $totalPages 页',
+                    '第 $currentPage 页 · 每页 50 个',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                       fontWeight: FontWeight.w600,
@@ -329,4 +351,34 @@ class _PagerButton extends StatelessWidget {
       ),
     );
   }
+}
+
+class _HomeModulePageRequest {
+  const _HomeModulePageRequest({
+    required this.module,
+    required this.page,
+  });
+
+  final HomeModuleConfig module;
+  final int page;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _HomeModulePageRequest &&
+        other.module.id == module.id &&
+        other.page == page;
+  }
+
+  @override
+  int get hashCode => Object.hash(module.id, page);
+}
+
+class _HomeModulePageData {
+  const _HomeModulePageData({
+    required this.entries,
+    required this.hasNextPage,
+  });
+
+  final List<DoubanEntry> entries;
+  final bool hasNextPage;
 }
