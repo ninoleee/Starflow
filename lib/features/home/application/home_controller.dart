@@ -45,6 +45,17 @@ class HomeCarouselItemViewModel {
   final MediaDetailTarget detailTarget;
 }
 
+class HomeSectionViewAllTarget {
+  const HomeSectionViewAllTarget.collection(this.extra)
+      : routeName = 'collection';
+
+  const HomeSectionViewAllTarget.module(this.extra)
+      : routeName = 'home-module-list';
+
+  final String routeName;
+  final Object extra;
+}
+
 class HomeSectionViewModel {
   const HomeSectionViewModel({
     required this.id,
@@ -64,12 +75,16 @@ class HomeSectionViewModel {
   final HomeSectionLayout layout;
   final List<HomeCardViewModel> items;
   final List<HomeCarouselItemViewModel> carouselItems;
-  final LibraryCollectionTarget? viewAllTarget;
+  final HomeSectionViewAllTarget? viewAllTarget;
 }
 
 final homeEnabledModulesProvider = Provider<List<HomeModuleConfig>>((ref) {
   final settings = ref.watch(appSettingsProvider);
-  return settings.homeModules.where((item) => item.enabled).toList();
+  return settings.homeModules
+      .where(
+        (item) => item.enabled && item.type != HomeModuleType.doubanCarousel,
+      )
+      .toList();
 });
 
 final homeModuleByIdProvider =
@@ -241,7 +256,9 @@ HomeSectionViewModel _buildLibrarySection({
     emptyMessage: '无',
     layout: HomeSectionLayout.posterRail,
     items: viewModels,
-    viewAllTarget: viewAllTarget,
+    viewAllTarget: viewAllTarget == null
+        ? null
+        : HomeSectionViewAllTarget.collection(viewAllTarget),
   );
 }
 
@@ -287,6 +304,7 @@ HomeSectionViewModel _buildDoubanSection({
     emptyMessage: emptyMessage,
     layout: HomeSectionLayout.posterRail,
     items: items,
+    viewAllTarget: HomeSectionViewAllTarget.module(module),
   );
 }
 

@@ -58,8 +58,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _resolvedUserId = e?.userId ?? '';
     _resolvedServerId = e?.serverId ?? '';
     _resolvedDeviceId = e?.deviceId ?? '';
-    _selectedSectionIds =
-        e?.kind == MediaSourceKind.emby ? {...?e?.featuredSectionIds} : {};
+    _selectedSectionIds = {...?e?.featuredSectionIds};
     _connectionMessage = _initialConnectionMessage(e);
     _advancedTokenExpanded = _tokenController.text.trim().isNotEmpty;
     _selectedNasPath = e?.libraryPath ?? '';
@@ -91,10 +90,18 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       serverId: _resolvedServerId,
       deviceId: _resolvedDeviceId,
       libraryPath: _kind == MediaSourceKind.nas ? _selectedNasPath.trim() : '',
-      featuredSectionIds: _kind == MediaSourceKind.emby
-          ? _selectedSectionIds.toList()
-          : const [],
+      featuredSectionIds: _selectedSectionIdsForSave(),
     );
+  }
+
+  List<String> _selectedSectionIdsForSave() {
+    if (_selectedSectionIds.isNotEmpty) {
+      return _selectedSectionIds.toList();
+    }
+    if (_availableSections.isEmpty) {
+      return const [];
+    }
+    return _availableSections.map((section) => section.id).toList();
   }
 
   bool _hasMeaningfulDraft() {
@@ -133,9 +140,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
             serverId: _kind == MediaSourceKind.emby ? _resolvedServerId : '',
             deviceId: _kind == MediaSourceKind.emby ? _resolvedDeviceId : '',
             libraryPath: _kind == MediaSourceKind.nas ? _selectedNasPath : '',
-            featuredSectionIds: _kind == MediaSourceKind.emby
-                ? _selectedSectionIds.toList()
-                : const [],
+            featuredSectionIds: _selectedSectionIdsForSave(),
           ),
         );
 
@@ -256,8 +261,44 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       setState(() {
         _isLoadingSections = false;
         _availableSections = sections;
+        if (_selectedSectionIds.isEmpty) {
+          _selectedSectionIds = sections.map((section) => section.id).toSet();
+        }
         _connectionMessage =
             '${_draftConfig().embyEditorStatusMessage}\n已读取 ${sections.length} 个分区。';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingSections = false;
+        _connectionMessage = '读取分区失败：$error';
+      });
+    }
+  }
+
+  Future<void> _onFetchNasSections() async {
+    setState(() {
+      _isLoadingSections = true;
+      _connectionMessage = '正在读取 WebDAV 分区...';
+    });
+    try {
+      final sections = await ref.read(webDavNasClientProvider).fetchCollections(
+            _draftConfig(),
+          );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingSections = false;
+        _availableSections = sections;
+        if (_selectedSectionIds.isEmpty) {
+          _selectedSectionIds = sections.map((section) => section.id).toSet();
+        }
+        _connectionMessage = sections.isEmpty
+            ? '当前路径下没有可直接展示的子目录。'
+            : '已读取 ${sections.length} 个 WebDAV 分区。';
       });
     } catch (error) {
       if (!mounted) {
@@ -291,6 +332,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
 
     _selectedNasPath = pickedPath;
     setState(() {
+      _availableSections = const [];
+      _selectedSectionIds.clear();
       _connectionMessage = '已选择路径，可继续测试连接。';
     });
   }
@@ -468,42 +511,53 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                       const SizedBox(height: 8),
                     ],
                   ),
-                  if (_availableSections.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      '首页展示分区',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                ] else ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    '可直接填写 WebDAV 地址、用户名和密码。',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
-                    const SizedBox(height: 8),
-                    ..._availableSections.map(
-                      (section) => CheckboxListTile(
+                  ),
+                ],
+                if (_availableSections.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    '展示分区',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ..._availableSections.map(
+                    (section) {
+                      final currentSelection = _selectedSectionIds.isEmpty
+                          ? _availableSections.map((item) => item.id).toSet()
+                          : {..._selectedSectionIds};
+                      return CheckboxListTile(
                         contentPadding: EdgeInsets.zero,
-                        value: _selectedSectionIds.contains(section.id),
+                        value: currentSelection.contains(section.id),
                         title: Text(section.title),
                         subtitle: section.subtitle.trim().isEmpty
                             ? null
                             : Text(section.subtitle),
                         onChanged: (value) {
                           setState(() {
+                            final nextSelection = _selectedSectionIds.isEmpty
+                                ? _availableSections
+                                    .map((item) => item.id)
+                                    .toSet()
+                                : {..._selectedSectionIds};
                             if (value ?? false) {
-                              _selectedSectionIds.add(section.id);
+                              nextSelection.add(section.id);
                             } else {
-                              _selectedSectionIds.remove(section.id);
+                              nextSelection.remove(section.id);
                             }
+                            _selectedSectionIds = nextSelection;
                           });
                         },
-                      ),
-                    ),
-                  ],
-                ] else ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    '飞牛 NAS 可直接填写 WebDAV 地址、用户名和密码。',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                      );
+                    },
                   ),
                 ],
                 const SizedBox(height: 12),
@@ -585,6 +639,13 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                               ? null
                               : _pickWebDavPath,
                           child: const Text('选择路径'),
+                        ),
+                        OutlinedButton(
+                          onPressed: _isLoadingSections ||
+                                  _endpointController.text.trim().isEmpty
+                              ? null
+                              : _onFetchNasSections,
+                          child: Text(_isLoadingSections ? '读取中…' : '读取分区'),
                         ),
                       ],
                     ),

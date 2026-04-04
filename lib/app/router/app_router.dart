@@ -8,6 +8,7 @@ import 'package:starflow/features/bootstrap/presentation/bootstrap_page.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/home/presentation/home_editor_page.dart';
+import 'package:starflow/features/home/presentation/home_module_collection_page.dart';
 import 'package:starflow/features/home/presentation/home_page.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/presentation/library_collection_page.dart';
@@ -16,6 +17,7 @@ import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/presentation/player_page.dart';
 import 'package:starflow/features/search/presentation/search_page.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/settings_page.dart';
 
 const _kBottomNavShellRadius = 34.0;
@@ -79,6 +81,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/home-editor',
         name: 'home-editor',
         builder: (context, state) => const HomeEditorPage(),
+      ),
+      GoRoute(
+        path: '/home-module-list',
+        name: 'home-module-list',
+        builder: (context, state) {
+          final module = state.extra as HomeModuleConfig?;
+          if (module == null) {
+            return const _MissingHomeModuleTargetPage();
+          }
+          return HomeModuleCollectionPage(module: module);
+        },
       ),
       GoRoute(
         path: '/collection',
@@ -390,6 +403,19 @@ class _MissingCollectionTargetPage extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MissingHomeModuleTargetPage extends StatelessWidget {
+  const _MissingHomeModuleTargetPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(
+        child: Text('缺少首页模块目标'),
       ),
     );
   }

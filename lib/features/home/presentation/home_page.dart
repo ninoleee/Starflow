@@ -175,8 +175,8 @@ class _HomePageState extends ConsumerState<HomePage> {
           ? null
           : () {
               context.pushNamed(
-                'collection',
-                extra: section.viewAllTarget,
+                section.viewAllTarget!.routeName,
+                extra: section.viewAllTarget!.extra,
               );
             },
       child: section.layout == HomeSectionLayout.carousel

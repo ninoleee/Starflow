@@ -68,6 +68,9 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
           module.id == 'module-nas-library') {
         return false;
       }
+      if (module.type == HomeModuleType.doubanCarousel) {
+        return false;
+      }
       if (module.type == HomeModuleType.librarySection &&
           (!module.enabled ||
               module.sectionId.trim().isEmpty ||

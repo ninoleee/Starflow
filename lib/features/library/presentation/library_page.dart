@@ -22,7 +22,7 @@ extension LibraryFilterX on LibraryFilter {
       case LibraryFilter.emby:
         return 'Emby';
       case LibraryFilter.nas:
-        return 'NAS';
+        return 'WebDAV';
     }
   }
 

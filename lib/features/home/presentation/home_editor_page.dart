@@ -236,7 +236,7 @@ class HomeEditorPage extends ConsumerWidget {
                       const SizedBox(height: 10),
                       _SourceCategoryTile(
                         title: '豆瓣',
-                        subtitle: '我想看、推荐、片单和轮播',
+                        subtitle: '我想看、推荐和片单',
                         icon: Icons.movie_filter_rounded,
                         onTap: () => _showDoubanModuleSheet(context, ref),
                       ),
@@ -263,7 +263,7 @@ class HomeEditorPage extends ConsumerWidget {
                         Padding(
                           padding: const EdgeInsets.only(top: 10),
                           child: Text(
-                            '还没有启用的 Emby 或 NAS 来源，先去设置里接入后，这里就会出现。',
+                            '还没有启用的 Emby 或 WebDAV 来源，先去设置里接入后，这里就会出现。',
                             style: Theme.of(context).textTheme.bodyMedium,
                           ),
                         ),
@@ -309,7 +309,7 @@ class HomeEditorPage extends ConsumerWidget {
             ),
             _AddModuleTile(
               title: '豆瓣',
-              subtitle: '我想看、推荐、片单和轮播',
+              subtitle: '我想看、推荐和片单',
               onTap: () async {
                 Navigator.of(context).pop();
                 await _showDoubanModuleSheet(context, ref);
@@ -421,16 +421,6 @@ class HomeEditorPage extends ConsumerWidget {
               onTap: () async {
                 Navigator.of(context).pop();
                 await _showDoubanListDialog(context, ref);
-              },
-            ),
-            _AddModuleTile(
-              title: '豆瓣首页轮播',
-              subtitle: '使用 ForwardWidgets 同源轮播数据',
-              onTap: () {
-                ref
-                    .read(settingsControllerProvider.notifier)
-                    .saveHomeModule(HomeModuleConfig.doubanCarousel());
-                Navigator.of(context).pop();
               },
             ),
           ],

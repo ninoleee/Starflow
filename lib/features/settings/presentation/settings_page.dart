@@ -35,7 +35,7 @@ class SettingsPage extends ConsumerWidget {
             if (loading) const LinearProgressIndicator(),
             SectionPanel(
               title: '媒体源',
-              subtitle: '把 Emby 或 NAS 网关都挂进来，首页和媒体库都会共用这里的配置',
+              subtitle: '把 Emby 或 WebDAV 来源都挂进来，首页和媒体库都会共用这里的配置',
               child: Column(
                 children: [
                   ...settings.mediaSources.map(
@@ -249,15 +249,18 @@ class SettingsPage extends ConsumerWidget {
       final pathLine = source.libraryPath.trim().isEmpty
           ? '媒体目录：根目录'
           : '媒体目录：${source.libraryPath}';
-      return '${source.kind.label} · ${source.endpoint}\n$authLine\n$pathLine';
+      final sectionLine = source.featuredSectionIds.isEmpty
+          ? '展示分区：全部'
+          : '展示分区：已选 ${source.featuredSectionIds.length} 个';
+      return '${source.kind.label} · ${source.endpoint}\n$authLine\n$pathLine\n$sectionLine';
     }
 
     final authLine = source.hasActiveSession
         ? '状态：已登录 ${source.username.isEmpty ? '' : '· ${source.username}'}'
         : '状态：${source.connectionStatusLabel}';
     final sectionLine = source.featuredSectionIds.isEmpty
-        ? '首页分区：未选择'
-        : '首页分区：已选 ${source.featuredSectionIds.length} 个';
+        ? '展示分区：全部'
+        : '展示分区：已选 ${source.featuredSectionIds.length} 个';
     return 'Emby · ${source.endpoint}\n$authLine\n$sectionLine';
   }
 

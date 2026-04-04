@@ -9,7 +9,7 @@ extension MediaSourceKindX on MediaSourceKind {
       case MediaSourceKind.emby:
         return 'Emby';
       case MediaSourceKind.nas:
-        return 'NAS';
+        return 'WebDAV';
     }
   }
 

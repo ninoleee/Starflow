@@ -91,17 +91,8 @@ class AppMediaRepository implements MediaRepository {
         .toList();
     final collections = await Future.wait(
       sources.map((source) async {
-        if (source.kind == MediaSourceKind.emby) {
-          if (!source.hasActiveSession) {
-            return const <MediaCollection>[];
-          }
-          return _embyApiClient.fetchCollections(source);
-        }
-        if (source.endpoint.trim().isEmpty) {
-          return const <MediaCollection>[];
-        }
         try {
-          return await _webDavNasClient.fetchCollections(source);
+          return await _fetchCollectionsForSource(source);
         } catch (_) {
           return const <MediaCollection>[];
         }
@@ -127,60 +118,14 @@ class AppMediaRepository implements MediaRepository {
         .toList();
     final seededLibrary = _enabledLibrary;
     final sourceResults = await Future.wait(
-      sources.map((source) async {
-        if (source.kind == MediaSourceKind.emby) {
-          if (!source.hasActiveSession) {
-            return const _SourceFetchResult(items: <MediaItem>[]);
-          }
-          try {
-            return _SourceFetchResult(
-              items: await _embyApiClient.fetchLibrary(
-                source,
-                limit: limit,
-                sectionId: sectionId,
-                sectionName: await _resolveSectionName(source, sectionId),
-              ),
-            );
-          } catch (error, stackTrace) {
-            return _SourceFetchResult(
-              items: const <MediaItem>[],
-              error: error,
-              stackTrace: stackTrace,
-            );
-          }
-        }
-
-        if (source.endpoint.trim().isNotEmpty) {
-          try {
-            return _SourceFetchResult(
-              items: await _webDavNasClient.fetchLibrary(
-                source,
-                sectionId: sectionId,
-                sectionName: await _resolveSectionName(source, sectionId),
-                limit: limit,
-              ),
-            );
-          } catch (error, stackTrace) {
-            return _SourceFetchResult(
-              items: const <MediaItem>[],
-              error: error,
-              stackTrace: stackTrace,
-            );
-          }
-        }
-
-        return _SourceFetchResult(
-          items: seededLibrary
-              .where((item) => item.sourceId == source.id)
-              .where(
-                (item) =>
-                    sectionId == null ||
-                    sectionId.trim().isEmpty ||
-                    item.sectionId == sectionId,
-              )
-              .toList(),
-        );
-      }),
+      sources.map(
+        (source) => _fetchLibraryForSource(
+          source,
+          sectionId: sectionId,
+          limit: limit,
+          seededLibrary: seededLibrary,
+        ),
+      ),
     );
     final items = sourceResults.expand((group) => group.items).toList();
 
@@ -270,13 +215,191 @@ class AppMediaRepository implements MediaRepository {
       return '';
     }
 
-    final collections = await fetchCollections(sourceId: source.id);
+    final collections = await _fetchCollectionsForSource(
+      source,
+      applySelection: false,
+    );
     for (final collection in collections) {
       if (collection.id == normalized) {
         return collection.title;
       }
     }
     return '';
+  }
+
+  Future<_SourceFetchResult> _fetchLibraryForSource(
+    MediaSourceConfig source, {
+    required String? sectionId,
+    required int limit,
+    required List<MediaItem> seededLibrary,
+  }) async {
+    try {
+      final hasScopedSections = _hasScopedSections(source);
+      if (source.kind == MediaSourceKind.emby) {
+        if (!source.hasActiveSession) {
+          return const _SourceFetchResult(items: <MediaItem>[]);
+        }
+        if (sectionId?.trim().isNotEmpty == true) {
+          return _SourceFetchResult(
+            items: await _embyApiClient.fetchLibrary(
+              source,
+              limit: limit,
+              sectionId: sectionId,
+              sectionName: await _resolveSectionName(source, sectionId),
+            ),
+          );
+        }
+
+        final selectedCollections = await _selectedCollectionsForSource(source);
+        if (hasScopedSections) {
+          if (selectedCollections.isEmpty) {
+            return const _SourceFetchResult(items: <MediaItem>[]);
+          }
+          return _SourceFetchResult(
+            items: await _fetchLibraryFromCollections(
+              source,
+              selectedCollections,
+              limit: limit,
+            ),
+          );
+        }
+
+        return _SourceFetchResult(
+          items: await _embyApiClient.fetchLibrary(
+            source,
+            limit: limit,
+          ),
+        );
+      }
+
+      if (source.endpoint.trim().isNotEmpty) {
+        if (sectionId?.trim().isNotEmpty == true) {
+          return _SourceFetchResult(
+            items: await _webDavNasClient.fetchLibrary(
+              source,
+              sectionId: sectionId,
+              sectionName: await _resolveSectionName(source, sectionId),
+              limit: limit,
+            ),
+          );
+        }
+
+        final selectedCollections = await _selectedCollectionsForSource(source);
+        if (hasScopedSections) {
+          if (selectedCollections.isEmpty) {
+            return const _SourceFetchResult(items: <MediaItem>[]);
+          }
+          return _SourceFetchResult(
+            items: await _fetchLibraryFromCollections(
+              source,
+              selectedCollections,
+              limit: limit,
+            ),
+          );
+        }
+
+        return _SourceFetchResult(
+          items: await _webDavNasClient.fetchLibrary(
+            source,
+            limit: limit,
+          ),
+        );
+      }
+
+      return _SourceFetchResult(
+        items: seededLibrary
+            .where((item) => item.sourceId == source.id)
+            .where(
+              (item) =>
+                  sectionId == null ||
+                  sectionId.trim().isEmpty ||
+                  item.sectionId == sectionId,
+            )
+            .where(
+              (item) =>
+                  source.featuredSectionIds.isEmpty ||
+                  source.featuredSectionIds.contains(item.sectionId),
+            )
+            .toList(),
+      );
+    } catch (error, stackTrace) {
+      return _SourceFetchResult(
+        items: const <MediaItem>[],
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  Future<List<MediaItem>> _fetchLibraryFromCollections(
+    MediaSourceConfig source,
+    List<MediaCollection> collections, {
+    required int limit,
+  }) async {
+    final groups = await Future.wait(
+      collections.map((collection) async {
+        if (source.kind == MediaSourceKind.emby) {
+          return _embyApiClient.fetchLibrary(
+            source,
+            limit: limit,
+            sectionId: collection.id,
+            sectionName: collection.title,
+          );
+        }
+        return _webDavNasClient.fetchLibrary(
+          source,
+          sectionId: collection.id,
+          sectionName: collection.title,
+          limit: limit,
+        );
+      }),
+    );
+    return groups.expand((group) => group).toList();
+  }
+
+  Future<List<MediaCollection>> _selectedCollectionsForSource(
+    MediaSourceConfig source,
+  ) async {
+    if (!_hasScopedSections(source)) {
+      return const [];
+    }
+    return _fetchCollectionsForSource(source);
+  }
+
+  bool _hasScopedSections(MediaSourceConfig source) {
+    return source.featuredSectionIds.any((item) => item.trim().isNotEmpty);
+  }
+
+  Future<List<MediaCollection>> _fetchCollectionsForSource(
+    MediaSourceConfig source, {
+    bool applySelection = true,
+  }) async {
+    late final List<MediaCollection> collections;
+    if (source.kind == MediaSourceKind.emby) {
+      if (!source.hasActiveSession) {
+        return const [];
+      }
+      collections = await _embyApiClient.fetchCollections(source);
+    } else {
+      if (source.endpoint.trim().isEmpty) {
+        return const [];
+      }
+      collections = await _webDavNasClient.fetchCollections(source);
+    }
+
+    if (!applySelection) {
+      return collections;
+    }
+    final selectedIds = source.featuredSectionIds
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toSet();
+    if (selectedIds.isEmpty) {
+      return collections;
+    }
+    return collections
+        .where((collection) => selectedIds.contains(collection.id))
+        .toList();
   }
 }
 

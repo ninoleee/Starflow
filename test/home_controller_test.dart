@@ -147,6 +147,54 @@ void main() {
       expect(mediaRepository.fetchRecentlyAddedCallCount, 1);
       expect(sections.first.items.first.title, '最近新增影片');
     });
+
+    test('douban section exposes view-all target for title tap', () async {
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings(
+              mediaSources: const [],
+              searchProviders: const [],
+              doubanAccount: const DoubanAccountConfig(
+                enabled: true,
+                userId: 'demo-user',
+              ),
+              homeModules: [
+                HomeModuleConfig.doubanInterest(DoubanInterestStatus.mark),
+              ],
+            ),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            _FakeMediaRepository(library: const []),
+          ),
+          discoveryRepositoryProvider.overrideWithValue(
+            const _FakeDiscoveryRepository(
+              entries: [
+                DoubanEntry(
+                  id: '1292052',
+                  title: '肖申克的救赎',
+                  year: 1994,
+                  posterUrl: 'https://img.example.com/p.jpg',
+                  note: '希望让人自由。',
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final section = await container.read(
+        homeSectionProvider(
+          container.read(appSettingsProvider).homeModules.first.id,
+        ).future,
+      );
+
+      expect(section, isNotNull);
+      expect(section!.viewAllTarget, isNotNull);
+      expect(section.viewAllTarget!.routeName, 'home-module-list');
+      expect(section.viewAllTarget!.extra, isA<HomeModuleConfig>());
+    });
   });
 }
 
