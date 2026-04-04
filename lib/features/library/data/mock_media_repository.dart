@@ -5,6 +5,7 @@ import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
 abstract class MediaRepository {
@@ -256,21 +257,8 @@ class AppMediaRepository implements MediaRepository {
 
   @override
   Future<MediaItem?> matchTitle(String title) async {
-    final library = await fetchLibrary();
-    final target = _normalize(title);
-    for (final item in library) {
-      final sourceTitle = _normalize(item.title);
-      if (sourceTitle == target ||
-          sourceTitle.contains(target) ||
-          target.contains(sourceTitle)) {
-        return item;
-      }
-    }
-    return null;
-  }
-
-  String _normalize(String value) {
-    return value.toLowerCase().replaceAll(RegExp(r'\s+'), '');
+    final library = await fetchLibrary(limit: 2000);
+    return matchMediaItemByTitles(library, titles: [title]);
   }
 
   Future<String> _resolveSectionName(

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -33,8 +34,8 @@ class _SearchProviderEditorPageState
   void initState() {
     super.initState();
     final e = widget.initial;
-    _providerId = e?.id ??
-        'search-provider-${DateTime.now().millisecondsSinceEpoch}';
+    _providerId =
+        e?.id ?? 'search-provider-${DateTime.now().millisecondsSinceEpoch}';
     _nameController = TextEditingController(text: e?.name ?? '');
     _endpointController = TextEditingController(text: e?.endpoint ?? '');
     _apiKeyController = TextEditingController(text: e?.apiKey ?? '');
@@ -125,147 +126,147 @@ class _SearchProviderEditorPageState
         fit: StackFit.expand,
         children: [
           ListView(
-        padding: const EdgeInsets.only(top: kToolbarHeight),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        children: [
-                _SectionTitle(theme: theme, label: '基本信息'),
-                TextField(
-                  controller: _nameController,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(labelText: '名称'),
+            padding: overlayToolbarPagePadding(context),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            children: [
+              _SectionTitle(theme: theme, label: '基本信息'),
+              TextField(
+                controller: _nameController,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: '名称'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<SearchProviderKind>(
+                key: ValueKey(_kind),
+                initialValue: _kind,
+                decoration: const InputDecoration(labelText: '类型'),
+                items: SearchProviderKind.values
+                    .map(
+                      (item) => DropdownMenuItem(
+                        value: item,
+                        child: Text(item.label),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _kind = value);
+                  }
+                },
+              ),
+              _SectionTitle(theme: theme, label: '连接'),
+              TextField(
+                controller: _endpointController,
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.next,
+                autocorrect: false,
+                decoration: const InputDecoration(
+                  labelText: 'Endpoint',
+                  hintText: 'https://search.example.com',
                 ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<SearchProviderKind>(
-                  key: ValueKey(_kind),
-                  initialValue: _kind,
-                  decoration: const InputDecoration(labelText: '类型'),
-                  items: SearchProviderKind.values
-                      .map(
-                        (item) => DropdownMenuItem(
-                          value: item,
-                          child: Text(item.label),
+              ),
+              _SectionTitle(theme: theme, label: '认证（可选）'),
+              ExpansionTile(
+                initiallyExpanded: _advancedAuthExpanded,
+                onExpansionChanged: (expanded) {
+                  setState(() => _advancedAuthExpanded = expanded);
+                },
+                title: Text(
+                  'Token / 账号',
+                  style: theme.textTheme.titleSmall,
+                ),
+                subtitle: Text(
+                  'JWT、API Key，或用户名密码自动登录',
+                  style: theme.textTheme.bodySmall,
+                ),
+                children: [
+                  TextField(
+                    controller: _apiKeyController,
+                    minLines: 1,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'JWT Token / API Key',
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  AutofillGroup(
+                    child: Column(
+                      children: [
+                        TextField(
+                          controller: _usernameController,
+                          textInputAction: TextInputAction.next,
+                          autofillHints: const [AutofillHints.username],
+                          decoration: const InputDecoration(
+                            labelText: '登录用户名',
+                          ),
                         ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() => _kind = value);
-                    }
-                  },
-                ),
-                _SectionTitle(theme: theme, label: '连接'),
-                TextField(
-                  controller: _endpointController,
-                  keyboardType: TextInputType.url,
-                  textInputAction: TextInputAction.next,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'Endpoint',
-                    hintText: 'https://search.example.com',
-                  ),
-                ),
-                _SectionTitle(theme: theme, label: '认证（可选）'),
-                ExpansionTile(
-                  initiallyExpanded: _advancedAuthExpanded,
-                  onExpansionChanged: (expanded) {
-                    setState(() => _advancedAuthExpanded = expanded);
-                  },
-                  title: Text(
-                    'Token / 账号',
-                    style: theme.textTheme.titleSmall,
-                  ),
-                  subtitle: Text(
-                    'JWT、API Key，或用户名密码自动登录',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  children: [
-                    TextField(
-                      controller: _apiKeyController,
-                      minLines: 1,
-                      maxLines: 4,
-                      decoration: const InputDecoration(
-                        labelText: 'JWT Token / API Key',
-                        alignLabelWithHint: true,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    AutofillGroup(
-                      child: Column(
-                        children: [
-                          TextField(
-                            controller: _usernameController,
-                            textInputAction: TextInputAction.next,
-                            autofillHints: const [AutofillHints.username],
-                            decoration: const InputDecoration(
-                              labelText: '登录用户名',
-                            ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _passwordController,
+                          obscureText: true,
+                          textInputAction: TextInputAction.done,
+                          autofillHints: const [AutofillHints.password],
+                          decoration: const InputDecoration(
+                            labelText: '登录密码',
                           ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: _passwordController,
-                            obscureText: true,
-                            textInputAction: TextInputAction.done,
-                            autofillHints: const [AutofillHints.password],
-                            decoration: const InputDecoration(
-                              labelText: '登录密码',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                ),
-                _SectionTitle(theme: theme, label: '其他'),
-                TextField(
-                  controller: _parserHintController,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: '解析器提示',
-                    hintText: '例如 pansou-api',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Text(
-                      'PanSou 兼容接口建议将解析器提示填为 pansou-api。'
-                      '若服务启用认证，可直接填写 JWT Token，'
-                      '或填写用户名与密码由应用自动登录。',
-                      style: theme.textTheme.bodyMedium,
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('启用此搜索服务'),
-                  value: _enabled,
-                  onChanged: (value) => setState(() => _enabled = value),
-                ),
-                if (widget.initial != null) ...[
-                  const SizedBox(height: 28),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      icon: Icon(
-                        Icons.delete_outline_rounded,
-                        color: theme.colorScheme.error,
-                      ),
-                      label: Text(
-                        '删除此搜索服务',
-                        style: TextStyle(color: theme.colorScheme.error),
-                      ),
-                      onPressed: _confirmDeleteSearchProvider,
-                    ),
-                  ),
+                  const SizedBox(height: 8),
                 ],
-        ],
+              ),
+              _SectionTitle(theme: theme, label: '其他'),
+              TextField(
+                controller: _parserHintController,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                  labelText: '解析器提示',
+                  hintText: '例如 pansou-api',
+                ),
+              ),
+              const SizedBox(height: 12),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Text(
+                    'PanSou 兼容接口建议将解析器提示填为 pansou-api。'
+                    '若服务启用认证，可直接填写 JWT Token，'
+                    '或填写用户名与密码由应用自动登录。',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('启用此搜索服务'),
+                value: _enabled,
+                onChanged: (value) => setState(() => _enabled = value),
+              ),
+              if (widget.initial != null) ...[
+                const SizedBox(height: 28),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    icon: Icon(
+                      Icons.delete_outline_rounded,
+                      color: theme.colorScheme.error,
+                    ),
+                    label: Text(
+                      '删除此搜索服务',
+                      style: TextStyle(color: theme.colorScheme.error),
+                    ),
+                    onPressed: _confirmDeleteSearchProvider,
+                  ),
+                ),
+              ],
+            ],
           ),
           Positioned(
             top: 0,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
@@ -21,6 +22,10 @@ class SettingsPage extends ConsumerWidget {
 
     return Scaffold(
       body: AppPageBackground(
+        contentPadding: appPageContentPadding(
+          context,
+          includeBottomNavigationBar: true,
+        ),
         child: ListView(
           padding: EdgeInsets.zero,
           children: [

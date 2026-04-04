@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
@@ -72,7 +73,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 children: [
                   if (featuredItems.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
+                      padding: const EdgeInsets.fromLTRB(12, 6, 12, 24),
                       child: _FeaturedHero(
                         items: featuredItems,
                         onFocusedItemChanged: _handleFocusedHeroChanged,
@@ -203,6 +204,14 @@ class _HomeShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final verticalInsets = EdgeInsets.only(
+      top: appPageTopInset(context),
+      bottom: appPageBottomInset(
+        context,
+        includeBottomNavigationBar: true,
+      ),
+    );
+
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -222,7 +231,10 @@ class _HomeShell extends StatelessWidget {
             ),
           ),
         ),
-        child,
+        Padding(
+          padding: verticalInsets,
+          child: child,
+        ),
       ],
     );
   }
@@ -778,21 +790,24 @@ class _HomeEditButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Opacity(
-        opacity: 0.46,
-        child: TextButton.icon(
-          onPressed: () => context.pushNamed('home-editor'),
-          icon: const Icon(Icons.tune_rounded, size: 14),
-          label: const Text('编辑首页'),
-          style: TextButton.styleFrom(
-            foregroundColor: const Color(0xFF8FA0BD),
-            textStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-            minimumSize: const Size(0, 32),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Center(
+        child: Opacity(
+          opacity: 0.46,
+          child: TextButton.icon(
+            onPressed: () => context.pushNamed('home-editor'),
+            icon: const Icon(Icons.tune_rounded, size: 14),
+            label: const Text('编辑首页'),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF8FA0BD),
+              textStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+              minimumSize: const Size(0, 32),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
           ),
         ),
       ),

@@ -52,6 +52,10 @@ class MediaDetailTarget {
 
   bool get hasUsefulOverview => _hasUsefulOverview(overview);
 
+  bool get needsLibraryMatch {
+    return sourceId.trim().isEmpty || itemId.trim().isEmpty;
+  }
+
   bool get needsImdbRatingMatch {
     return ratingLabels.every(
       (label) => !label.toLowerCase().startsWith('imdb '),

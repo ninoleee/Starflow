@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
@@ -36,43 +37,45 @@ class LibraryCollectionPage extends ConsumerWidget {
         children: [
           AppPageBackground(
             child: ListView(
-          padding: const EdgeInsets.only(top: kToolbarHeight),
-          children: [
-            SectionPanel(
-              title: target.title,
-              subtitle: target.subtitle.trim().isEmpty
-                  ? '${target.sourceKind.label} · ${target.sourceName}'
-                  : '${target.sourceName} · ${target.subtitle}',
-              child: itemsAsync.when(
-                data: (items) {
-                  if (items.isEmpty) {
-                    return const Text('无');
-                  }
-                  return Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: items
-                        .map(
-                          (item) => MediaPosterTile(
-                            title: item.title,
-                            subtitle: item.year > 0 ? '${item.year}' : '',
-                            posterUrl: item.posterUrl,
-                            onTap: () {
-                              context.pushNamed(
-                                'detail',
-                                extra: MediaDetailTarget.fromMediaItem(item),
-                              );
-                            },
-                          ),
-                        )
-                        .toList(),
-                  );
-                },
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (error, stackTrace) => Text('加载失败：$error'),
-              ),
-            ),
-          ],
+              padding: overlayToolbarPagePadding(context),
+              children: [
+                SectionPanel(
+                  title: target.title,
+                  subtitle: target.subtitle.trim().isEmpty
+                      ? '${target.sourceKind.label} · ${target.sourceName}'
+                      : '${target.sourceName} · ${target.subtitle}',
+                  child: itemsAsync.when(
+                    data: (items) {
+                      if (items.isEmpty) {
+                        return const Text('无');
+                      }
+                      return Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: items
+                            .map(
+                              (item) => MediaPosterTile(
+                                title: item.title,
+                                subtitle: item.year > 0 ? '${item.year}' : '',
+                                posterUrl: item.posterUrl,
+                                onTap: () {
+                                  context.pushNamed(
+                                    'detail',
+                                    extra:
+                                        MediaDetailTarget.fromMediaItem(item),
+                                  );
+                                },
+                              ),
+                            )
+                            .toList(),
+                      );
+                    },
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (error, stackTrace) => Text('加载失败：$error'),
+                  ),
+                ),
+              ],
             ),
           ),
           Positioned(

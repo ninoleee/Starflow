@@ -16,21 +16,25 @@ class OverlayToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = leadingColor ?? Theme.of(context).colorScheme.onSurface;
+    final topInset = MediaQuery.paddingOf(context).top;
     return Material(
       type: MaterialType.transparency,
-      child: SizedBox(
-        height: kToolbarHeight,
-        width: double.infinity,
-        child: Row(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.arrow_back_rounded),
-              color: color,
-              onPressed: onBack ?? () => Navigator.maybePop(context),
-            ),
-            const Spacer(),
-            if (trailing != null) trailing!,
-          ],
+      child: Padding(
+        padding: EdgeInsets.only(top: topInset),
+        child: SizedBox(
+          height: kToolbarHeight,
+          width: double.infinity,
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back_rounded),
+                color: color,
+                onPressed: onBack ?? () => Navigator.maybePop(context),
+              ),
+              const Spacer(),
+              if (trailing != null) trailing!,
+            ],
+          ),
         ),
       ),
     );

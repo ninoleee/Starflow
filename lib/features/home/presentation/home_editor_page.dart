@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
@@ -34,118 +35,121 @@ class HomeEditorPage extends ConsumerWidget {
         children: [
           AppPageBackground(
             child: ListView(
-          padding: const EdgeInsets.only(top: kToolbarHeight),
-          children: [
-            SectionPanel(
-              title: '当前模块',
-              subtitle: '拖动排序，或在底部加一个新的模块',
-              child: settings.homeModules.isEmpty
-                  ? const Text('还没有首页模块。')
-                  : ReorderableListView.builder(
-                      shrinkWrap: true,
-                      buildDefaultDragHandles: false,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: settings.homeModules.length,
-                      onReorder: (oldIndex, newIndex) {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .reorderHomeModules(oldIndex, newIndex);
-                      },
-                      itemBuilder: (context, index) {
-                        final module = settings.homeModules[index];
-                        return Container(
-                          key: ValueKey(module.id),
-                          margin: const EdgeInsets.only(bottom: 10),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHigh,
-                            borderRadius: BorderRadius.circular(22),
-                            border: Border.all(
-                              color:
-                                  Theme.of(context).colorScheme.outlineVariant,
-                            ),
-                          ),
-                          child: ListTile(
-                            title: Text(module.title),
-                            subtitle: Text(module.description),
-                            leading: ReorderableDragStartListener(
-                              index: index,
-                              child: const Icon(Icons.drag_indicator_rounded),
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  onPressed: () => _showEditModuleDialog(
-                                      context, ref, module),
-                                  icon: const Icon(Icons.edit_outlined),
+              padding: overlayToolbarPagePadding(context),
+              children: [
+                SectionPanel(
+                  title: '当前模块',
+                  subtitle: '拖动排序，或在底部加一个新的模块',
+                  child: settings.homeModules.isEmpty
+                      ? const Text('还没有首页模块。')
+                      : ReorderableListView.builder(
+                          shrinkWrap: true,
+                          buildDefaultDragHandles: false,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: settings.homeModules.length,
+                          onReorder: (oldIndex, newIndex) {
+                            ref
+                                .read(settingsControllerProvider.notifier)
+                                .reorderHomeModules(oldIndex, newIndex);
+                          },
+                          itemBuilder: (context, index) {
+                            final module = settings.homeModules[index];
+                            return Container(
+                              key: ValueKey(module.id),
+                              margin: const EdgeInsets.only(bottom: 10),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHigh,
+                                borderRadius: BorderRadius.circular(22),
+                                border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant,
                                 ),
-                                IconButton(
-                                  onPressed: () {
-                                    ref
-                                        .read(
-                                            settingsControllerProvider.notifier)
-                                        .removeHomeModule(module.id);
-                                  },
-                                  icon: const Icon(Icons.close_rounded),
+                              ),
+                              child: ListTile(
+                                title: Text(module.title),
+                                subtitle: Text(module.description),
+                                leading: ReorderableDragStartListener(
+                                  index: index,
+                                  child:
+                                      const Icon(Icons.drag_indicator_rounded),
                                 ),
-                                Switch(
-                                  value: module.enabled,
-                                  onChanged: (value) {
-                                    ref
-                                        .read(
-                                            settingsControllerProvider.notifier)
-                                        .toggleHomeModule(module.id, value);
-                                  },
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      onPressed: () => _showEditModuleDialog(
+                                          context, ref, module),
+                                      icon: const Icon(Icons.edit_outlined),
+                                    ),
+                                    IconButton(
+                                      onPressed: () {
+                                        ref
+                                            .read(settingsControllerProvider
+                                                .notifier)
+                                            .removeHomeModule(module.id);
+                                      },
+                                      icon: const Icon(Icons.close_rounded),
+                                    ),
+                                    Switch(
+                                      value: module.enabled,
+                                      onChanged: (value) {
+                                        ref
+                                            .read(settingsControllerProvider
+                                                .notifier)
+                                            .toggleHomeModule(module.id, value);
+                                      },
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-            const SizedBox(height: 18),
-            SectionPanel(
-              title: '可添加来源',
-              subtitle: '当前已接入的来源分区会出现在这里',
-              child: collectionsAsync.when(
-                data: (collections) {
-                  if (collections.isEmpty) {
-                    return const Text('还没有可用分区。先去设置里接入 Emby 或 NAS。');
-                  }
-                  return Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: collections
-                        .map(
-                          (collection) => ActionChip(
-                            label: Text(
-                                '${collection.sourceName} · ${collection.title}'),
-                            onPressed: () {
-                              ref
-                                  .read(settingsControllerProvider.notifier)
-                                  .saveHomeModule(
-                                    HomeModuleConfig.libraryCollection(
-                                        collection),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+                const SizedBox(height: 18),
+                SectionPanel(
+                  title: '可添加来源',
+                  subtitle: '当前已接入的来源分区会出现在这里',
+                  child: collectionsAsync.when(
+                    data: (collections) {
+                      if (collections.isEmpty) {
+                        return const Text('还没有可用分区。先去设置里接入 Emby 或 NAS。');
+                      }
+                      return Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: collections
+                            .map(
+                              (collection) => ActionChip(
+                                label: Text(
+                                    '${collection.sourceName} · ${collection.title}'),
+                                onPressed: () {
+                                  ref
+                                      .read(settingsControllerProvider.notifier)
+                                      .saveHomeModule(
+                                        HomeModuleConfig.libraryCollection(
+                                            collection),
+                                      );
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('已添加 ${collection.title}'),
+                                    ),
                                   );
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('已添加 ${collection.title}'),
-                                ),
-                              );
-                            },
-                          ),
-                        )
-                        .toList(),
-                  );
-                },
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (error, stackTrace) => Text('读取分区失败：$error'),
-              ),
-            ),
-          ],
+                                },
+                              ),
+                            )
+                            .toList(),
+                      );
+                    },
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (error, stackTrace) => Text('读取分区失败：$error'),
+                  ),
+                ),
+              ],
             ),
           ),
           Positioned(
@@ -167,100 +171,92 @@ class HomeEditorPage extends ConsumerWidget {
       isScrollControlled: true,
       builder: (context) {
         return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '添加模块',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 14),
-                _AddModuleTile(
-                  title: '最近新增',
-                  subtitle: '把最近同步进来的资源放上首页',
-                  onTap: () {
-                    ref
-                        .read(settingsControllerProvider.notifier)
-                        .saveHomeModule(HomeModuleConfig.recentlyAdded());
-                    Navigator.of(context).pop();
-                  },
-                ),
-                _AddModuleTile(
-                  title: '豆瓣我想看',
-                  subtitle: '来自豆瓣我看列表',
-                  onTap: () {
-                    ref
-                        .read(settingsControllerProvider.notifier)
-                        .saveHomeModule(
-                          HomeModuleConfig.doubanInterest(
-                            DoubanInterestStatus.mark,
-                          ),
-                        );
-                    Navigator.of(context).pop();
-                  },
-                ),
-                _AddModuleTile(
-                  title: '豆瓣随机想看',
-                  subtitle: '从想看列表随机抽取 9 个条目',
-                  onTap: () {
-                    ref
-                        .read(settingsControllerProvider.notifier)
-                        .saveHomeModule(
-                          HomeModuleConfig.doubanInterest(
-                            DoubanInterestStatus.randomMark,
-                          ),
-                        );
-                    Navigator.of(context).pop();
-                  },
-                ),
-                _AddModuleTile(
-                  title: '豆瓣个性化推荐 · 电影',
-                  subtitle: '需要设置里配置 Cookie',
-                  onTap: () {
-                    ref
-                        .read(settingsControllerProvider.notifier)
-                        .saveHomeModule(
-                          HomeModuleConfig.doubanSuggestion(
-                            DoubanSuggestionMediaType.movie,
-                          ),
-                        );
-                    Navigator.of(context).pop();
-                  },
-                ),
-                _AddModuleTile(
-                  title: '豆瓣个性化推荐 · 电视',
-                  subtitle: '需要设置里配置 Cookie',
-                  onTap: () {
-                    ref
-                        .read(settingsControllerProvider.notifier)
-                        .saveHomeModule(
-                          HomeModuleConfig.doubanSuggestion(
-                            DoubanSuggestionMediaType.tv,
-                          ),
-                        );
-                    Navigator.of(context).pop();
-                  },
-                ),
-                _AddModuleTile(
-                  title: '豆瓣片单',
-                  subtitle: '支持 doulist 和 subject_collection 地址',
-                  onTap: () async {
-                    Navigator.of(context).pop();
-                    await _showCreateDoubanListDialog(context, ref);
-                  },
-                ),
-                _AddModuleTile(
-                  title: '豆瓣首页轮播',
-                  subtitle: '使用 ForwardWidgets 同源轮播数据',
-                  onTap: () {
-                    ref
-                        .read(settingsControllerProvider.notifier)
-                        .saveHomeModule(HomeModuleConfig.doubanCarousel());
-                    Navigator.of(context).pop();
-                  },
-                ),
-              ],
-            );
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '添加模块',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 14),
+            _AddModuleTile(
+              title: '最近新增',
+              subtitle: '把最近同步进来的资源放上首页',
+              onTap: () {
+                ref
+                    .read(settingsControllerProvider.notifier)
+                    .saveHomeModule(HomeModuleConfig.recentlyAdded());
+                Navigator.of(context).pop();
+              },
+            ),
+            _AddModuleTile(
+              title: '豆瓣我想看',
+              subtitle: '来自豆瓣我看列表',
+              onTap: () {
+                ref.read(settingsControllerProvider.notifier).saveHomeModule(
+                      HomeModuleConfig.doubanInterest(
+                        DoubanInterestStatus.mark,
+                      ),
+                    );
+                Navigator.of(context).pop();
+              },
+            ),
+            _AddModuleTile(
+              title: '豆瓣随机想看',
+              subtitle: '从想看列表随机抽取 9 个条目',
+              onTap: () {
+                ref.read(settingsControllerProvider.notifier).saveHomeModule(
+                      HomeModuleConfig.doubanInterest(
+                        DoubanInterestStatus.randomMark,
+                      ),
+                    );
+                Navigator.of(context).pop();
+              },
+            ),
+            _AddModuleTile(
+              title: '豆瓣个性化推荐 · 电影',
+              subtitle: '需要设置里配置 Cookie',
+              onTap: () {
+                ref.read(settingsControllerProvider.notifier).saveHomeModule(
+                      HomeModuleConfig.doubanSuggestion(
+                        DoubanSuggestionMediaType.movie,
+                      ),
+                    );
+                Navigator.of(context).pop();
+              },
+            ),
+            _AddModuleTile(
+              title: '豆瓣个性化推荐 · 电视',
+              subtitle: '需要设置里配置 Cookie',
+              onTap: () {
+                ref.read(settingsControllerProvider.notifier).saveHomeModule(
+                      HomeModuleConfig.doubanSuggestion(
+                        DoubanSuggestionMediaType.tv,
+                      ),
+                    );
+                Navigator.of(context).pop();
+              },
+            ),
+            _AddModuleTile(
+              title: '豆瓣片单',
+              subtitle: '支持 doulist 和 subject_collection 地址',
+              onTap: () async {
+                Navigator.of(context).pop();
+                await _showCreateDoubanListDialog(context, ref);
+              },
+            ),
+            _AddModuleTile(
+              title: '豆瓣首页轮播',
+              subtitle: '使用 ForwardWidgets 同源轮播数据',
+              onTap: () {
+                ref
+                    .read(settingsControllerProvider.notifier)
+                    .saveHomeModule(HomeModuleConfig.doubanCarousel());
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
       },
     );
   }

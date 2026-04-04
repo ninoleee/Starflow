@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
@@ -113,62 +114,62 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         children: [
           AppPageBackground(
             child: ListView(
-          padding: const EdgeInsets.only(top: kToolbarHeight),
-          children: [
-            Container(
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                color: const Color(0xFF081120),
-                borderRadius: BorderRadius.circular(32),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.18),
-                    blurRadius: 28,
-                    offset: const Offset(0, 16),
+              padding: overlayToolbarPagePadding(context),
+              children: [
+                Container(
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF081120),
+                    borderRadius: BorderRadius.circular(32),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        blurRadius: 28,
+                        offset: const Offset(0, 16),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: Builder(
-                builder: (context) {
-                  final aspectRatio = controller != null &&
-                          controller.value.isInitialized &&
-                          controller.value.aspectRatio > 0
-                      ? controller.value.aspectRatio
-                      : 16 / 9;
-                  return AspectRatio(
-                    aspectRatio: aspectRatio,
-                    child: _buildVideoSurface(theme, controller),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 12),
-            SectionPanel(
-              title: '播放目标',
-              subtitle: '当前会直接使用系统播放器播放流地址',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _InfoRow(
-                    label: '来源',
-                    value:
-                        '${activeTarget.sourceKind.label} · ${activeTarget.sourceName}',
+                  child: Builder(
+                    builder: (context) {
+                      final aspectRatio = controller != null &&
+                              controller.value.isInitialized &&
+                              controller.value.aspectRatio > 0
+                          ? controller.value.aspectRatio
+                          : 16 / 9;
+                      return AspectRatio(
+                        aspectRatio: aspectRatio,
+                        child: _buildVideoSurface(theme, controller),
+                      );
+                    },
                   ),
-                  const SizedBox(height: 12),
-                  _InfoRow(
-                    label: '流地址',
-                    value: activeTarget.streamUrl.trim().isEmpty
-                        ? '正在向 Emby 申请播放地址'
-                        : activeTarget.streamUrl,
+                ),
+                const SizedBox(height: 12),
+                SectionPanel(
+                  title: '播放目标',
+                  subtitle: '当前会直接使用系统播放器播放流地址',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _InfoRow(
+                        label: '来源',
+                        value:
+                            '${activeTarget.sourceKind.label} · ${activeTarget.sourceName}',
+                      ),
+                      const SizedBox(height: 12),
+                      _InfoRow(
+                        label: '流地址',
+                        value: activeTarget.streamUrl.trim().isEmpty
+                            ? '正在向 Emby 申请播放地址'
+                            : activeTarget.streamUrl,
+                      ),
+                      if (activeTarget.subtitle.trim().isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        _InfoRow(label: '简介', value: activeTarget.subtitle),
+                      ],
+                    ],
                   ),
-                  if (activeTarget.subtitle.trim().isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    _InfoRow(label: '简介', value: activeTarget.subtitle),
-                  ],
-                ],
-              ),
-            ),
-          ],
+                ),
+              ],
             ),
           ),
           Positioned(

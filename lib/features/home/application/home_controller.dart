@@ -5,6 +5,7 @@ import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -73,15 +74,9 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
   final settings = ref.watch(appSettingsProvider);
   final mediaRepository = ref.read(mediaRepositoryProvider);
   final discoveryRepository = ref.read(discoveryRepositoryProvider);
+  final tmdbMetadataClient = ref.read(tmdbMetadataClientProvider);
   final enabledModules =
       settings.homeModules.where((item) => item.enabled).toList();
-  final needsLibraryMatching = enabledModules.any(
-    (item) =>
-        item.type == HomeModuleType.doubanInterest ||
-        item.type == HomeModuleType.doubanSuggestion ||
-        item.type == HomeModuleType.doubanList ||
-        item.type == HomeModuleType.doubanCarousel,
-  );
   final needsRecentlyAdded = enabledModules.any(
     (item) => item.type == HomeModuleType.recentlyAdded,
   );
@@ -90,9 +85,6 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
   );
 
   final warmups = await Future.wait([
-    needsLibraryMatching
-        ? mediaRepository.fetchLibrary()
-        : Future.value(const <MediaItem>[]),
     needsRecentlyAdded
         ? mediaRepository.fetchRecentlyAdded(limit: 6)
         : Future.value(const <MediaItem>[]),
@@ -101,9 +93,8 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
         : Future.value(const <DoubanCarouselEntry>[]),
   ]);
 
-  final library = warmups[0] as List<MediaItem>;
-  final recentItems = warmups[1] as List<MediaItem>;
-  final carouselItems = warmups[2] as List<DoubanCarouselEntry>;
+  final recentItems = warmups[0] as List<MediaItem>;
+  final carouselItems = warmups[1] as List<DoubanCarouselEntry>;
 
   final sections = await Future.wait(
     enabledModules.map(
@@ -112,7 +103,7 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
         settings: settings,
         mediaRepository: mediaRepository,
         discoveryRepository: discoveryRepository,
-        library: library,
+        tmdbMetadataClient: tmdbMetadataClient,
         recentItems: recentItems,
         carouselItems: carouselItems,
       ),
@@ -127,7 +118,7 @@ Future<HomeSectionViewModel?> _buildSectionForModule({
   required AppSettings settings,
   required MediaRepository mediaRepository,
   required DiscoveryRepository discoveryRepository,
-  required List<MediaItem> library,
+  required TmdbMetadataClient tmdbMetadataClient,
   required List<MediaItem> recentItems,
   required List<DoubanCarouselEntry> carouselItems,
 }) async {
@@ -167,16 +158,18 @@ Future<HomeSectionViewModel?> _buildSectionForModule({
       final entries = await discoveryRepository.fetchEntries(module);
       return _buildDoubanSection(
         module: module,
+        settings: settings,
+        tmdbMetadataClient: tmdbMetadataClient,
         entries: entries,
-        library: library,
         emptyMessage:
             _resolveDoubanEmptyMessage(module, settings.doubanAccount),
       );
     case HomeModuleType.doubanCarousel:
       return _buildCarouselSection(
         module: module,
+        settings: settings,
+        tmdbMetadataClient: tmdbMetadataClient,
         items: carouselItems,
-        library: library,
         emptyMessage:
             _resolveDoubanEmptyMessage(module, settings.doubanAccount),
       );
@@ -210,48 +203,50 @@ HomeSectionViewModel _buildLibrarySection({
   );
 }
 
-HomeSectionViewModel _buildDoubanSection({
+Future<HomeSectionViewModel> _buildDoubanSection({
   required HomeModuleConfig module,
+  required AppSettings settings,
+  required TmdbMetadataClient tmdbMetadataClient,
   required List<DoubanEntry> entries,
-  required List<MediaItem> library,
   required String emptyMessage,
-}) {
-  final items = entries.map((entry) {
-    final matched = _matchByTitle(library, entry.title);
+}) async {
+  final items = await Future.wait(entries.map((entry) async {
+    final resolvedPosterUrl = await _resolveDoubanPosterUrl(
+      primaryPosterUrl: entry.posterUrl,
+      title: entry.title,
+      year: entry.year,
+      preferSeries: _preferSeriesForEntry(
+        subjectType: entry.subjectType,
+      ),
+      settings: settings,
+      tmdbMetadataClient: tmdbMetadataClient,
+    );
     return HomeCardViewModel(
       id: entry.id,
       title: entry.title,
       subtitle: entry.year > 0 ? '${entry.year}' : '',
-      posterUrl: entry.posterUrl,
-      detailTarget: matched == null
-          ? MediaDetailTarget(
-              title: entry.title,
-              posterUrl: entry.posterUrl,
-              overview: entry.note,
-              year: entry.year,
-              durationLabel: entry.durationLabel,
-              ratingLabels: entry.ratingLabel.trim().isEmpty
-                  ? const []
-                  : [entry.ratingLabel],
-              genres: entry.genres.isNotEmpty
-                  ? entry.genres
-                  : (entry.subjectType.trim().isEmpty
-                      ? const []
-                      : [entry.subjectType]),
-              directors: entry.directors,
-              actors: entry.actors,
-              availabilityLabel: '无',
-              searchQuery: entry.title,
-              sourceName: '豆瓣',
-            )
-          : MediaDetailTarget.fromMediaItem(
-              matched,
-              availabilityLabel:
-                  '豆瓣条目已关联到 ${matched.sourceKind.label} · ${matched.sourceName}',
-              searchQuery: entry.title,
-            ),
+      posterUrl: resolvedPosterUrl,
+      detailTarget: MediaDetailTarget(
+        title: entry.title,
+        posterUrl: resolvedPosterUrl,
+        overview: entry.note,
+        year: entry.year,
+        durationLabel: entry.durationLabel,
+        ratingLabels:
+            entry.ratingLabel.trim().isEmpty ? const [] : [entry.ratingLabel],
+        genres: entry.genres.isNotEmpty
+            ? entry.genres
+            : (entry.subjectType.trim().isEmpty
+                ? const []
+                : [entry.subjectType]),
+        directors: entry.directors,
+        actors: entry.actors,
+        availabilityLabel: '无',
+        searchQuery: entry.title,
+        sourceName: '豆瓣',
+      ),
     );
-  }).toList();
+  }));
 
   return HomeSectionViewModel(
     id: module.id,
@@ -263,44 +258,46 @@ HomeSectionViewModel _buildDoubanSection({
   );
 }
 
-HomeSectionViewModel _buildCarouselSection({
+Future<HomeSectionViewModel> _buildCarouselSection({
   required HomeModuleConfig module,
+  required AppSettings settings,
+  required TmdbMetadataClient tmdbMetadataClient,
   required List<DoubanCarouselEntry> items,
-  required List<MediaItem> library,
   required String emptyMessage,
-}) {
-  final carouselItems = items.map((item) {
-    final matched = _matchByTitle(library, item.title);
+}) async {
+  final carouselItems = await Future.wait(items.map((item) async {
+    final resolvedPosterUrl = await _resolveDoubanPosterUrl(
+      primaryPosterUrl: item.posterUrl,
+      title: item.title,
+      year: item.year,
+      preferSeries: _preferSeriesForEntry(subjectType: item.mediaType),
+      settings: settings,
+      tmdbMetadataClient: tmdbMetadataClient,
+    );
+    final resolvedImageUrl = _firstNonEmpty(
+      item.imageUrl,
+      resolvedPosterUrl,
+    );
     return HomeCarouselItemViewModel(
       id: item.id,
       title: item.title,
       subtitle: [
         if (item.ratingLabel.trim().isNotEmpty) item.ratingLabel,
         if (item.year > 0) '${item.year}',
-        if (matched != null) '${matched.sourceKind.label} 已就绪',
       ].join(' · '),
-      imageUrl: item.imageUrl,
-      detailTarget: matched == null
-          ? MediaDetailTarget(
-              title: item.title,
-              posterUrl:
-                  item.posterUrl.isEmpty ? item.imageUrl : item.posterUrl,
-              overview: item.overview,
-              year: item.year,
-              ratingLabels: item.ratingLabel.trim().isEmpty
-                  ? const []
-                  : [item.ratingLabel],
-              availabilityLabel: '无',
-              searchQuery: item.title,
-            )
-          : MediaDetailTarget.fromMediaItem(
-              matched,
-              availabilityLabel:
-                  '豆瓣轮播条目已关联到 ${matched.sourceKind.label} · ${matched.sourceName}',
-              searchQuery: item.title,
-            ),
+      imageUrl: resolvedImageUrl,
+      detailTarget: MediaDetailTarget(
+        title: item.title,
+        posterUrl: resolvedPosterUrl,
+        overview: item.overview,
+        year: item.year,
+        ratingLabels:
+            item.ratingLabel.trim().isEmpty ? const [] : [item.ratingLabel],
+        availabilityLabel: '无',
+        searchQuery: item.title,
+      ),
     );
-  }).toList();
+  }));
 
   return HomeSectionViewModel(
     id: module.id,
@@ -342,19 +339,49 @@ MediaSourceKind _resolveSourceKind(AppSettings settings, String sourceId) {
   return source?.kind ?? MediaSourceKind.emby;
 }
 
-MediaItem? _matchByTitle(List<MediaItem> library, String title) {
-  final normalized = _normalize(title);
-  for (final item in library) {
-    final candidate = _normalize(item.title);
-    if (candidate == normalized ||
-        candidate.contains(normalized) ||
-        normalized.contains(candidate)) {
-      return item;
-    }
+Future<String> _resolveDoubanPosterUrl({
+  required String primaryPosterUrl,
+  required String title,
+  required int year,
+  required bool preferSeries,
+  required AppSettings settings,
+  required TmdbMetadataClient tmdbMetadataClient,
+}) async {
+  final preferredPosterUrl = primaryPosterUrl.trim();
+  if (preferredPosterUrl.isNotEmpty) {
+    return preferredPosterUrl;
   }
-  return null;
+
+  if (!settings.tmdbMetadataMatchEnabled ||
+      settings.tmdbReadAccessToken.trim().isEmpty) {
+    return '';
+  }
+
+  try {
+    final match = await tmdbMetadataClient.matchTitle(
+      query: title,
+      readAccessToken: settings.tmdbReadAccessToken,
+      year: year,
+      preferSeries: preferSeries,
+    );
+    return match?.posterUrl.trim() ?? '';
+  } catch (_) {
+    return '';
+  }
 }
 
-String _normalize(String value) {
-  return value.toLowerCase().replaceAll(RegExp(r'\s+'), '');
+bool _preferSeriesForEntry({required String subjectType}) {
+  final normalized = subjectType.trim().toLowerCase();
+  return normalized.contains('tv') ||
+      normalized.contains('series') ||
+      normalized.contains('剧') ||
+      normalized.contains('电视');
+}
+
+String _firstNonEmpty(String primary, String fallback) {
+  final primaryTrimmed = primary.trim();
+  if (primaryTrimmed.isNotEmpty) {
+    return primaryTrimmed;
+  }
+  return fallback.trim();
 }

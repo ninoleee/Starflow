@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
@@ -112,6 +113,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
     return Scaffold(
       body: AppPageBackground(
+        contentPadding: appPageContentPadding(
+          context,
+          includeBottomNavigationBar: true,
+        ),
         child: ListView(
           padding: EdgeInsets.zero,
           children: [

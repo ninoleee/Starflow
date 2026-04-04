@@ -140,8 +140,7 @@ extension MediaSourceConfigEditorX on MediaSourceConfig {
   /// 编辑页「连接状态」说明文案（仅 Emby）。
   String get embyEditorStatusMessage {
     if (hasActiveSession) {
-      final serverPart =
-          serverId.trim().isEmpty ? '' : '，Server ID: $serverId';
+      final serverPart = serverId.trim().isEmpty ? '' : '，Server ID: $serverId';
       return '当前会话可用，登录用户 $username$serverPart';
     }
     if (accessToken.trim().isNotEmpty) {
@@ -155,6 +154,8 @@ class MediaItem {
   const MediaItem({
     required this.id,
     required this.title,
+    this.originalTitle = '',
+    this.sortTitle = '',
     required this.overview,
     required this.posterUrl,
     required this.year,
@@ -182,6 +183,8 @@ class MediaItem {
 
   final String id;
   final String title;
+  final String originalTitle;
+  final String sortTitle;
   final String overview;
   final String posterUrl;
   final int year;

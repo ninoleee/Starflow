@@ -227,6 +227,9 @@ class TmdbMetadataClient {
       title:
           '${json[searchResult.isSeries ? 'name' : 'title'] ?? searchResult.title}'
               .trim(),
+      originalTitle:
+          '${json[searchResult.isSeries ? 'original_name' : 'original_title'] ?? searchResult.originalTitle}'
+              .trim(),
       posterUrl: _resolveImageUrl(
         '${json['poster_path'] ?? searchResult.posterPath}',
         size: 'w500',
@@ -342,6 +345,7 @@ class TmdbMetadataClient {
 class TmdbMetadataMatch {
   const TmdbMetadataMatch({
     required this.title,
+    required this.originalTitle,
     required this.posterUrl,
     required this.overview,
     required this.year,
@@ -353,6 +357,7 @@ class TmdbMetadataMatch {
   });
 
   final String title;
+  final String originalTitle;
   final String posterUrl;
   final String overview;
   final int year;

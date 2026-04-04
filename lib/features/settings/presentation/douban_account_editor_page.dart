@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -57,49 +58,49 @@ class _DoubanAccountEditorPageState
         fit: StackFit.expand,
         children: [
           ListView(
-        padding: const EdgeInsets.only(top: kToolbarHeight),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        children: [
-                _SectionTitle(theme: theme, label: '账号'),
-                TextField(
-                  controller: _userIdController,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Douban User ID',
+            padding: overlayToolbarPagePadding(context),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            children: [
+              _SectionTitle(theme: theme, label: '账号'),
+              TextField(
+                controller: _userIdController,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                  labelText: 'Douban User ID',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _sessionController,
+                minLines: 3,
+                maxLines: 8,
+                decoration: const InputDecoration(
+                  labelText: 'Cookie / Session',
+                  alignLabelWithHint: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Text(
+                    '推荐与「想看」等模块会携带此会话访问豆瓣。请勿分享 Cookie。',
+                    style: theme.textTheme.bodyMedium,
                   ),
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _sessionController,
-                  minLines: 3,
-                  maxLines: 8,
-                  decoration: const InputDecoration(
-                    labelText: 'Cookie / Session',
-                    alignLabelWithHint: true,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Text(
-                      '推荐与「想看」等模块会携带此会话访问豆瓣。请勿分享 Cookie。',
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('启用豆瓣模块'),
-                  value: _enabled,
-                  onChanged: (value) => setState(() => _enabled = value),
-                ),
-        ],
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('启用豆瓣模块'),
+                value: _enabled,
+                onChanged: (value) => setState(() => _enabled = value),
+              ),
+            ],
           ),
           Positioned(
             top: 0,

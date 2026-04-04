@@ -454,6 +454,8 @@ class EmbyApiClient {
     final mediaSource = mediaSources.isEmpty ? null : mediaSources.first;
     final itemType = (item['Type'] as String? ?? '').trim();
     final mediaType = (item['MediaType'] as String? ?? '').trim().toLowerCase();
+    final originalTitle = (item['OriginalTitle'] as String? ?? '').trim();
+    final sortTitle = (item['SortName'] as String? ?? '').trim();
     final isFolder =
         item['IsFolder'] as bool? ?? _isFolderLikeItemType(itemType);
     final canResolvePlayback = !isFolder &&
@@ -489,6 +491,8 @@ class EmbyApiClient {
     return MediaItem(
       id: id,
       title: title,
+      originalTitle: originalTitle,
+      sortTitle: sortTitle,
       overview: overview,
       posterUrl: imageTag.isEmpty
           ? ''
@@ -529,7 +533,7 @@ class EmbyApiClient {
   }) {
     final query = <String, String>{
       'Fields':
-          'DateCreated,Genres,IndexNumber,Overview,ParentIndexNumber,Path,People,ProductionYear,RunTimeTicks,SortName',
+          'DateCreated,Genres,IndexNumber,OriginalTitle,Overview,ParentIndexNumber,Path,People,ProductionYear,RunTimeTicks,SortName',
       'EnableImages': 'true',
       'EnableImageTypes': 'Primary',
       'ImageTypeLimit': '1',

@@ -7,6 +7,7 @@ import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -17,6 +18,7 @@ final enrichedDetailTargetProvider =
   ref,
   target,
 ) async {
+  const detailLibraryMatchLimit = 2000;
   final tmdbEnabled = ref.watch(
     appSettingsProvider.select((settings) => settings.tmdbMetadataMatchEnabled),
   );
@@ -30,17 +32,84 @@ final enrichedDetailTargetProvider =
       target.searchQuery.trim().isEmpty ? target.title : target.searchQuery;
 
   var resolved = target;
+  TmdbMetadataMatch? tmdbMatch;
 
-  if (tmdbEnabled &&
-      tmdbToken.trim().isNotEmpty &&
-      resolved.needsMetadataMatch) {
+  if (resolved.needsLibraryMatch &&
+      tmdbEnabled &&
+      tmdbToken.trim().isNotEmpty) {
     try {
-      final match = await ref.read(tmdbMetadataClientProvider).matchTitle(
+      tmdbMatch = await ref.read(tmdbMetadataClientProvider).matchTitle(
             query: query,
             readAccessToken: tmdbToken,
             year: resolved.year,
             preferSeries: resolved.isSeries,
           );
+    } catch (_) {}
+  }
+
+  if (resolved.needsLibraryMatch) {
+    try {
+      final library = await ref
+          .read(mediaRepositoryProvider)
+          .fetchLibrary(limit: detailLibraryMatchLimit);
+      final matched = matchMediaItemByTitles(
+        library,
+        titles: [
+          resolved.title,
+          query,
+          if (tmdbMatch != null) tmdbMatch.title,
+          if (tmdbMatch != null) tmdbMatch.originalTitle,
+        ],
+        year: resolved.year > 0 ? resolved.year : (tmdbMatch?.year ?? 0),
+      );
+      if (matched != null) {
+        final matchedTarget = MediaDetailTarget.fromMediaItem(
+          matched,
+          availabilityLabel:
+              '资源已就绪：${matched.sourceKind.label} · ${matched.sourceName}',
+          searchQuery: query,
+        );
+        resolved = matchedTarget.copyWith(
+          title: resolved.title,
+          posterUrl:
+              _firstNonEmpty(resolved.posterUrl, matchedTarget.posterUrl),
+          overview: resolved.hasUsefulOverview
+              ? resolved.overview
+              : matchedTarget.overview,
+          year: resolved.year > 0 ? resolved.year : matchedTarget.year,
+          durationLabel: resolved.durationLabel.trim().isNotEmpty
+              ? resolved.durationLabel
+              : matchedTarget.durationLabel,
+          genres: resolved.genres.isNotEmpty
+              ? resolved.genres
+              : matchedTarget.genres,
+          directors: resolved.directors.isNotEmpty
+              ? resolved.directors
+              : matchedTarget.directors,
+          actors: resolved.actors.isNotEmpty
+              ? resolved.actors
+              : matchedTarget.actors,
+          ratingLabels: _mergeLabels(
+            matchedTarget.ratingLabels,
+            resolved.ratingLabels,
+          ),
+          imdbId: resolved.imdbId,
+        );
+      }
+    } catch (_) {}
+  }
+
+  if (tmdbEnabled &&
+      tmdbToken.trim().isNotEmpty &&
+      resolved.needsMetadataMatch) {
+    try {
+      final match = tmdbMatch ??
+          await ref.read(tmdbMetadataClientProvider).matchTitle(
+                query: query,
+                readAccessToken: tmdbToken,
+                year: resolved.year,
+                preferSeries: resolved.isSeries,
+              );
       if (match != null) {
         resolved = resolved.copyWith(
           posterUrl: resolved.posterUrl.trim().isEmpty
@@ -93,6 +162,30 @@ final enrichedDetailTargetProvider =
 
   return resolved;
 });
+
+String _firstNonEmpty(String primary, String fallback) {
+  final primaryTrimmed = primary.trim();
+  if (primaryTrimmed.isNotEmpty) {
+    return primaryTrimmed;
+  }
+  return fallback.trim();
+}
+
+List<String> _mergeLabels(List<String> primary, List<String> secondary) {
+  final seen = <String>{};
+  final merged = <String>[];
+  for (final value in [...primary, ...secondary]) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      continue;
+    }
+    final key = trimmed.toLowerCase();
+    if (seen.add(key)) {
+      merged.add(trimmed);
+    }
+  }
+  return merged;
+}
 
 final seriesBrowserProvider =
     FutureProvider.family<_SeriesBrowserState?, MediaDetailTarget>((
@@ -192,7 +285,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   Widget build(BuildContext context) {
     final targetAsync = ref.watch(enrichedDetailTargetProvider(widget.target));
     final target = targetAsync.valueOrNull ?? widget.target;
-    final seriesAsync = ref.watch(seriesBrowserProvider(widget.target));
+    final seriesAsync = ref.watch(seriesBrowserProvider(target));
 
     return Scaffold(
       backgroundColor: const Color(0xFF030914),

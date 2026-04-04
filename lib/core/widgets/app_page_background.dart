@@ -4,9 +4,11 @@ class AppPageBackground extends StatelessWidget {
   const AppPageBackground({
     super.key,
     required this.child,
+    this.contentPadding = EdgeInsets.zero,
   });
 
   final Widget child;
+  final EdgeInsets contentPadding;
 
   @override
   Widget build(BuildContext context) {
@@ -59,7 +61,10 @@ class AppPageBackground extends StatelessWidget {
               ],
             ),
           ),
-          child,
+          Padding(
+            padding: contentPadding,
+            child: child,
+          ),
         ],
       ),
     );
