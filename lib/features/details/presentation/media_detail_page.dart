@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:starflow/core/utils/network_image_headers.dart';
+import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
@@ -1036,9 +1036,8 @@ class _BackdropImage extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        Image.network(
+        AppNetworkImage(
           imageUrl,
-          headers: networkImageHeadersForUrl(imageUrl),
           fit: BoxFit.cover,
           alignment: Alignment.topCenter,
           errorBuilder: (context, error, stackTrace) {
@@ -1086,9 +1085,9 @@ class _PosterArt extends StatelessWidget {
                     size: 42,
                     color: Colors.white70,
                   )
-                : Image.network(
+                : AppNetworkImage(
                     posterUrl,
-                    headers: networkImageHeadersForUrl(posterUrl),
+                    debugTitle: 'detail-poster',
                     fit: BoxFit.cover,
                     cacheWidth: 720,
                     filterQuality: FilterQuality.low,
@@ -1461,9 +1460,9 @@ class _EpisodeArtwork extends StatelessWidget {
     if (item.posterUrl.trim().isNotEmpty) {
       return ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        child: Image.network(
+        child: AppNetworkImage(
           item.posterUrl,
-          headers: networkImageHeadersForUrl(item.posterUrl),
+          debugTitle: item.title,
           fit: BoxFit.cover,
           errorBuilder: (context, error, stackTrace) => _EpisodeArtworkFallback(
             item: item,
@@ -1678,9 +1677,9 @@ class _ActorAvatar extends StatelessWidget {
                 ),
               ),
             )
-          : Image.network(
+          : AppNetworkImage(
               avatarUrl,
-              headers: networkImageHeadersForUrl(avatarUrl),
+              debugTitle: actor.name,
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) {
                 return Center(

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:starflow/core/utils/network_image_headers.dart';
+import 'package:starflow/core/widgets/app_network_image.dart';
 
 class MediaPosterTile extends StatelessWidget {
   const MediaPosterTile({
@@ -8,6 +8,7 @@ class MediaPosterTile extends StatelessWidget {
     required this.subtitle,
     required this.posterUrl,
     required this.onTap,
+    this.width = 140,
     this.titleColor,
     this.subtitleColor,
   });
@@ -16,6 +17,7 @@ class MediaPosterTile extends StatelessWidget {
   final String subtitle;
   final String posterUrl;
   final VoidCallback onTap;
+  final double? width;
   final Color? titleColor;
   final Color? subtitleColor;
 
@@ -44,17 +46,14 @@ class MediaPosterTile extends StatelessWidget {
         ),
       );
     } else {
-      posterChild = Image.network(
+      posterChild = AppNetworkImage(
         trimmedPoster,
-        headers: networkImageHeadersForUrl(trimmedPoster),
+        debugTitle: title,
         fit: BoxFit.cover,
         cacheWidth: skipResizeForDecode ? null : cacheWidth,
         cacheHeight: skipResizeForDecode ? null : cacheHeight,
         filterQuality: FilterQuality.low,
-        frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-          if (wasSynchronouslyLoaded || frame != null) {
-            return child;
-          }
+        loadingBuilder: (context) {
           return Container(
             color: theme.colorScheme.surfaceContainerHighest,
             alignment: Alignment.center,
@@ -86,7 +85,7 @@ class MediaPosterTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       onTap: onTap,
       child: SizedBox(
-        width: 140,
+        width: width,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,

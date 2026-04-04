@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/utils/douban_cover_debug.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
@@ -252,6 +253,14 @@ HomeSectionViewModel _buildDoubanSection({
 }) {
   final items = entries.map((entry) {
     final posterUrl = entry.posterUrl.trim();
+    debugLogDoubanCover(
+      'home-card',
+      moduleTitle: module.title,
+      title: entry.title,
+      doubanId: entry.id,
+      url: posterUrl,
+      detail: posterUrl.isEmpty ? 'posterUrl=empty' : null,
+    );
     return HomeCardViewModel(
       id: entry.id,
       title: entry.title,

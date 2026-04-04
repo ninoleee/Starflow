@@ -4,12 +4,10 @@ import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
-import 'package:starflow/core/widgets/media_poster_tile.dart';
-import 'package:starflow/core/widgets/section_panel.dart';
-import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/presentation/widgets/library_paged_grid.dart';
 
 final libraryCollectionItemsProvider =
     FutureProvider.family<List<MediaItem>, LibraryCollectionTarget>((
@@ -22,13 +20,22 @@ final libraryCollectionItemsProvider =
       );
 });
 
-class LibraryCollectionPage extends ConsumerWidget {
+class LibraryCollectionPage extends ConsumerStatefulWidget {
   const LibraryCollectionPage({super.key, required this.target});
 
   final LibraryCollectionTarget target;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LibraryCollectionPage> createState() =>
+      _LibraryCollectionPageState();
+}
+
+class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage> {
+  int _currentPage = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final target = widget.target;
     final itemsAsync = ref.watch(libraryCollectionItemsProvider(target));
 
     return Scaffold(
@@ -39,41 +46,40 @@ class LibraryCollectionPage extends ConsumerWidget {
             child: ListView(
               padding: overlayToolbarPagePadding(context),
               children: [
-                SectionPanel(
-                  title: target.title,
-                  subtitle: target.subtitle.trim().isEmpty
+                Text(
+                  target.title,
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  target.subtitle.trim().isEmpty
                       ? '${target.sourceKind.label} · ${target.sourceName}'
                       : '${target.sourceName} · ${target.subtitle}',
-                  child: itemsAsync.when(
-                    data: (items) {
-                      if (items.isEmpty) {
-                        return const Text('无');
-                      }
-                      return Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: items
-                            .map(
-                              (item) => MediaPosterTile(
-                                title: item.title,
-                                subtitle: item.year > 0 ? '${item.year}' : '',
-                                posterUrl: item.posterUrl,
-                                onTap: () {
-                                  context.pushNamed(
-                                    'detail',
-                                    extra:
-                                        MediaDetailTarget.fromMediaItem(item),
-                                  );
-                                },
-                              ),
-                            )
-                            .toList(),
-                      );
-                    },
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (error, stackTrace) => Text('加载失败：$error'),
-                  ),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: const Color(0xFF90A0BD),
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                const SizedBox(height: 20),
+                itemsAsync.when(
+                  data: (items) {
+                    return LibraryPagedGrid(
+                      items: items,
+                      currentPage: _currentPage,
+                      onPageChanged: (page) {
+                        setState(() {
+                          _currentPage = page;
+                        });
+                      },
+                      emptyMessage: '无',
+                    );
+                  },
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (error, stackTrace) => Text('加载失败：$error'),
                 ),
               ],
             ),

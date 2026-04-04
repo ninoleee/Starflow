@@ -3,11 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
-import 'package:starflow/core/widgets/media_poster_tile.dart';
-import 'package:starflow/core/widgets/section_panel.dart';
-import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/presentation/widgets/library_paged_grid.dart';
 
 enum LibraryFilter {
   all,
@@ -44,6 +43,11 @@ final libraryItemsProvider =
   return ref.read(mediaRepositoryProvider).fetchLibrary(kind: filter.kind);
 });
 
+final libraryCollectionsProvider =
+    FutureProvider.family<List<MediaCollection>, LibraryFilter>((ref, filter) {
+  return ref.read(mediaRepositoryProvider).fetchCollections(kind: filter.kind);
+});
+
 class LibraryPage extends ConsumerStatefulWidget {
   const LibraryPage({super.key});
 
@@ -53,10 +57,12 @@ class LibraryPage extends ConsumerStatefulWidget {
 
 class _LibraryPageState extends ConsumerState<LibraryPage> {
   LibraryFilter _filter = LibraryFilter.all;
+  int _currentPage = 0;
 
   @override
   Widget build(BuildContext context) {
     final itemsAsync = ref.watch(libraryItemsProvider(_filter));
+    final collectionsAsync = ref.watch(libraryCollectionsProvider(_filter));
 
     return Scaffold(
       body: AppPageBackground(
@@ -67,61 +73,92 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            SectionPanel(
-              title: '你的媒体源',
-              subtitle: '首页模块来自同一套媒体库抽象，所以这里和首页能保持一致',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SegmentedButton<LibraryFilter>(
-                    segments: LibraryFilter.values
-                        .map(
-                          (filter) => ButtonSegment(
-                            value: filter,
-                            label: Text(filter.label),
+            SegmentedButton<LibraryFilter>(
+              segments: LibraryFilter.values
+                  .map(
+                    (filter) => ButtonSegment(
+                      value: filter,
+                      label: Text(filter.label),
+                    ),
+                  )
+                  .toList(),
+              selected: {_filter},
+              onSelectionChanged: (value) {
+                setState(() {
+                  _filter = value.first;
+                  _currentPage = 0;
+                });
+              },
+            ),
+            const SizedBox(height: 18),
+            collectionsAsync.when(
+              data: (collections) {
+                if (collections.isEmpty) {
+                  return const SizedBox.shrink();
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 18),
+                  child: SizedBox(
+                    height: 42,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: collections.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(width: 8),
+                      itemBuilder: (context, index) {
+                        final collection = collections[index];
+                        return ActionChip(
+                          backgroundColor: Colors.white.withValues(alpha: 0.06),
+                          side: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.06),
                           ),
-                        )
-                        .toList(),
-                    selected: {_filter},
-                    onSelectionChanged: (value) {
-                      setState(() {
-                        _filter = value.first;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 18),
-                  itemsAsync.when(
-                    data: (items) {
-                      if (items.isEmpty) {
-                        return const Text('无');
-                      }
-                      return Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: items
-                            .map(
-                              (item) => MediaPosterTile(
-                                title: item.title,
-                                subtitle: item.year > 0 ? '${item.year}' : '',
-                                posterUrl: item.posterUrl,
-                                onTap: () {
-                                  context.pushNamed(
-                                    'detail',
-                                    extra:
-                                        MediaDetailTarget.fromMediaItem(item),
-                                  );
-                                },
+                          label: Text(collection.title),
+                          onPressed: () {
+                            context.pushNamed(
+                              'collection',
+                              extra: LibraryCollectionTarget(
+                                title: collection.title,
+                                sourceId: collection.sourceId,
+                                sourceName: collection.sourceName,
+                                sourceKind: collection.sourceKind,
+                                sectionId: collection.id,
+                                subtitle: collection.subtitle,
                               ),
-                            )
-                            .toList(),
-                      );
-                    },
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (error, stackTrace) => Text('加载失败：$error'),
+                            );
+                          },
+                        );
+                      },
+                    ),
                   ),
-                ],
-              ),
+                );
+              },
+              loading: () => const SizedBox.shrink(),
+              error: (error, stackTrace) => const SizedBox.shrink(),
+            ),
+            itemsAsync.when(
+              data: (items) {
+                return LibraryPagedGrid(
+                  items: items,
+                  currentPage: _currentPage,
+                  onPageChanged: (page) {
+                    setState(() {
+                      _currentPage = page;
+                    });
+                  },
+                  emptyMessage: '无',
+                  header: Text(
+                    _filter == LibraryFilter.all
+                        ? '全部内容'
+                        : '${_filter.label} 内容',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                  ),
+                );
+              },
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (error, stackTrace) => Text('加载失败：$error'),
             ),
           ],
         ),

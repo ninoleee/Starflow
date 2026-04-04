@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:starflow/core/utils/douban_cover_debug.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 
 final doubanApiClientProvider = Provider<DoubanApiClient>((ref) {
@@ -273,6 +274,7 @@ class DoubanApiClient {
 
     final year = _resolveYear(target, item);
     final posterUrl = _resolvePosterUrl(target, item);
+    final normalizedPosterUrl = _normalizePosterUrl(posterUrl);
     final ratingLabel = _resolveRating(target, item);
     final description = _resolveString(
       target,
@@ -307,11 +309,19 @@ class DoubanApiClient {
     ].firstWhere((value) => value.trim().isNotEmpty, orElse: () => '');
     final subjectType = _resolveString(target, const ['type', 'type_name']);
 
+    debugLogDoubanCover(
+      'api-map',
+      title: title,
+      doubanId: id,
+      url: normalizedPosterUrl,
+      detail: _debugPosterCandidates(target, item),
+    );
+
     return DoubanEntry(
       id: id,
       title: title,
       year: year,
-      posterUrl: _normalizePosterUrl(posterUrl),
+      posterUrl: normalizedPosterUrl,
       note: note,
       durationLabel: durationLabel,
       genres: genres,
@@ -436,6 +446,36 @@ class DoubanApiClient {
       }
     }
     return '$raw'.trim();
+  }
+
+  String _debugPosterCandidates(
+    Map<String, dynamic> target,
+    Map<String, dynamic> fallback,
+  ) {
+    final segments = <String>[];
+    void addSegment(String label, Object? raw) {
+      final value = _resolveImageValue(raw).trim();
+      if (value.isEmpty || value == 'null') {
+        return;
+      }
+      final shortened =
+          value.length > 96 ? '${value.substring(0, 96)}...' : value;
+      segments.add('$label=$shortened');
+    }
+
+    addSegment('target.pic', target['pic']);
+    addSegment('target.cover', target['cover']);
+    addSegment('target.cover_url', target['cover_url']);
+    addSegment('target.poster', target['poster']);
+    addSegment('fallback.pic', fallback['pic']);
+    addSegment('fallback.cover', fallback['cover']);
+    addSegment('fallback.cover_url', fallback['cover_url']);
+    addSegment('fallback.poster', fallback['poster']);
+
+    if (segments.isEmpty) {
+      return 'posterCandidates=empty';
+    }
+    return segments.join(' ; ');
   }
 
   int _resolveYear(Map<String, dynamic> target, Map<String, dynamic> fallback) {

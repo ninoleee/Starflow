@@ -84,11 +84,15 @@ class WebDavNasClient {
         if (!_isPlayableVideo(entry)) {
           continue;
         }
+        final streamUrl = await _resolvePlayableUrl(entry, source: source);
+        if (streamUrl.trim().isEmpty) {
+          continue;
+        }
         items.add(
           MediaItem(
             id: entry.uri.toString(),
             title: _stripExtension(entry.name),
-            overview: entry.uri.toString(),
+            overview: streamUrl,
             posterUrl: '',
             year: 0,
             durationLabel: '文件',
@@ -98,7 +102,7 @@ class WebDavNasClient {
             sourceId: source.id,
             sourceName: source.name,
             sourceKind: source.kind,
-            streamUrl: entry.uri.toString(),
+            streamUrl: streamUrl,
             streamHeaders: _headers(source),
             addedAt: entry.modifiedAt ?? DateTime.now(),
           ),
@@ -159,7 +163,7 @@ class WebDavNasClient {
           .any((element) => element.name.local == 'collection');
       final displayName = _childText(prop, 'displayname');
       final contentType = _childText(prop, 'getcontenttype');
-      final modifiedAt = DateTime.tryParse(_childText(prop, 'getlastmodified'));
+      final modifiedAt = _parseModifiedAt(_childText(prop, 'getlastmodified'));
 
       return _WebDavEntry(
         uri: resolvedUri,
@@ -209,7 +213,42 @@ class WebDavNasClient {
       '.wmv',
       '.mpg',
       '.mpeg',
+      '.strm',
     ].any(path.endsWith);
+  }
+
+  bool _isStrmFile(_WebDavEntry entry) {
+    return entry.uri.path.toLowerCase().endsWith('.strm');
+  }
+
+  Future<String> _resolvePlayableUrl(
+    _WebDavEntry entry, {
+    required MediaSourceConfig source,
+  }) async {
+    if (!_isStrmFile(entry)) {
+      return entry.uri.toString();
+    }
+
+    final response = await _client.get(entry.uri, headers: _headers(source));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw WebDavNasException(
+        'STRM 读取失败：HTTP ${response.statusCode} (${entry.uri})',
+      );
+    }
+
+    final rawBody = utf8.decode(response.bodyBytes, allowMalformed: true);
+    for (final line in const LineSplitter().convert(rawBody)) {
+      final normalized = line.trim().replaceFirst('\uFEFF', '');
+      if (normalized.isEmpty || normalized.startsWith('#')) {
+        continue;
+      }
+      final parsed = Uri.tryParse(normalized);
+      if (parsed != null && parsed.hasScheme) {
+        return normalized;
+      }
+      return entry.uri.resolve(normalized).toString();
+    }
+    return '';
   }
 
   Uri _resolveHref(Uri requestUri, String href) {
@@ -246,6 +285,70 @@ class WebDavNasClient {
         ? uri.path.substring(0, uri.path.length - 1)
         : uri.path;
     return uri.replace(path: path, query: null, fragment: null).toString();
+  }
+
+  DateTime? _parseModifiedAt(String raw) {
+    final text = raw.trim();
+    if (text.isEmpty) {
+      return null;
+    }
+
+    final iso = DateTime.tryParse(text);
+    if (iso != null) {
+      return iso;
+    }
+
+    final match = RegExp(
+      r'^[A-Za-z]{3},\s+(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s+'
+      r'(\d{2}):(\d{2}):(\d{2})\s+GMT$',
+    ).firstMatch(text);
+    if (match == null) {
+      return null;
+    }
+
+    final month = _httpMonthIndex(match.group(2)!);
+    if (month == null) {
+      return null;
+    }
+
+    return DateTime.utc(
+      int.parse(match.group(3)!),
+      month,
+      int.parse(match.group(1)!),
+      int.parse(match.group(4)!),
+      int.parse(match.group(5)!),
+      int.parse(match.group(6)!),
+    );
+  }
+
+  int? _httpMonthIndex(String value) {
+    switch (value.toLowerCase()) {
+      case 'jan':
+        return 1;
+      case 'feb':
+        return 2;
+      case 'mar':
+        return 3;
+      case 'apr':
+        return 4;
+      case 'may':
+        return 5;
+      case 'jun':
+        return 6;
+      case 'jul':
+        return 7;
+      case 'aug':
+        return 8;
+      case 'sep':
+        return 9;
+      case 'oct':
+        return 10;
+      case 'nov':
+        return 11;
+      case 'dec':
+        return 12;
+    }
+    return null;
   }
 
   String _stripExtension(String fileName) {

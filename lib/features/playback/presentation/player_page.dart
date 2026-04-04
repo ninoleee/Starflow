@@ -62,8 +62,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       }
       unawaited(_runStartupProbe(resolvedTarget));
 
-      final player = Player();
-      final videoController = VideoController(player);
+      final player = Player(
+        configuration: const PlayerConfiguration(
+          title: 'Starflow',
+          logLevel: MPVLogLevel.warn,
+        ),
+      );
+      final videoController = VideoController(
+        player,
+        configuration: const VideoControllerConfiguration(
+          hwdec: 'auto-safe',
+          enableHardwareAcceleration: true,
+        ),
+      );
       _playerErrorSubscription = player.stream.error.listen((message) {
         if (!mounted || message.trim().isEmpty) {
           return;

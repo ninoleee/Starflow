@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 Map<String, String>? networkImageHeadersForUrl(String url) {
   final uri = Uri.tryParse(url.trim());
   if (uri == null) {
@@ -23,4 +25,18 @@ Map<String, String>? networkImageHeadersForUrl(String url) {
   }
 
   return null;
+}
+
+bool requiresManualNetworkImageFetch(String url) {
+  if (kIsWeb) {
+    return false;
+  }
+
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null) {
+    return false;
+  }
+
+  final host = uri.host.toLowerCase();
+  return host == 'img.douban.com' || host.endsWith('.doubanio.com');
 }
