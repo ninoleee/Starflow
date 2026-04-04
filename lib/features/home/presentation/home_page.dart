@@ -3,7 +3,6 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
@@ -69,12 +68,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 physics: const BouncingScrollPhysics(
                   parent: AlwaysScrollableScrollPhysics(),
                 ),
-                padding: const EdgeInsets.fromLTRB(
-                  0,
-                  6,
-                  0,
-                  kShellScrollContentBottomPadding,
-                ),
+                padding: EdgeInsets.zero,
                 children: [
                   if (featuredItems.isNotEmpty)
                     Padding(
@@ -153,7 +147,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             backgroundImageUrl: '',
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 120, 16, 24),
+              padding: EdgeInsets.zero,
               children: [
                 _SectionEmptyState(message: '加载首页模块失败：$error'),
                 const SizedBox(height: 12),
@@ -228,11 +222,7 @@ class _HomeShell extends StatelessWidget {
             ),
           ),
         ),
-        SafeArea(
-          top: true,
-          bottom: false,
-          child: child,
-        ),
+        child,
       ],
     );
   }
@@ -817,7 +807,7 @@ class _EmptyHomeState extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 120, 16, 24),
+      padding: EdgeInsets.zero,
       children: const [
         Text(
           '还没有首页模块',

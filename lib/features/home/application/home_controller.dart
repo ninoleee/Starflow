@@ -230,6 +230,9 @@ HomeSectionViewModel _buildDoubanSection({
               overview: entry.note,
               year: entry.year,
               durationLabel: entry.durationLabel,
+              ratingLabels: entry.ratingLabel.trim().isEmpty
+                  ? const []
+                  : [entry.ratingLabel],
               genres: entry.genres.isNotEmpty
                   ? entry.genres
                   : (entry.subjectType.trim().isEmpty
@@ -284,6 +287,9 @@ HomeSectionViewModel _buildCarouselSection({
                   item.posterUrl.isEmpty ? item.imageUrl : item.posterUrl,
               overview: item.overview,
               year: item.year,
+              ratingLabels: item.ratingLabel.trim().isEmpty
+                  ? const []
+                  : [item.ratingLabel],
               availabilityLabel: '无',
               searchQuery: item.title,
             )

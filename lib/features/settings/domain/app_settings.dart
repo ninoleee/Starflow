@@ -273,28 +273,38 @@ class AppSettings {
     required this.searchProviders,
     required this.doubanAccount,
     required this.homeModules,
-    this.imdbAutoMatchEnabled = false,
+    this.tmdbMetadataMatchEnabled = false,
+    this.imdbRatingMatchEnabled = false,
+    this.tmdbReadAccessToken = '',
   });
 
   final List<MediaSourceConfig> mediaSources;
   final List<SearchProviderConfig> searchProviders;
   final DoubanAccountConfig doubanAccount;
   final List<HomeModuleConfig> homeModules;
-  final bool imdbAutoMatchEnabled;
+  final bool tmdbMetadataMatchEnabled;
+  final bool imdbRatingMatchEnabled;
+  final String tmdbReadAccessToken;
 
   AppSettings copyWith({
     List<MediaSourceConfig>? mediaSources,
     List<SearchProviderConfig>? searchProviders,
     DoubanAccountConfig? doubanAccount,
     List<HomeModuleConfig>? homeModules,
-    bool? imdbAutoMatchEnabled,
+    bool? tmdbMetadataMatchEnabled,
+    bool? imdbRatingMatchEnabled,
+    String? tmdbReadAccessToken,
   }) {
     return AppSettings(
       mediaSources: mediaSources ?? this.mediaSources,
       searchProviders: searchProviders ?? this.searchProviders,
       doubanAccount: doubanAccount ?? this.doubanAccount,
       homeModules: homeModules ?? this.homeModules,
-      imdbAutoMatchEnabled: imdbAutoMatchEnabled ?? this.imdbAutoMatchEnabled,
+      tmdbMetadataMatchEnabled:
+          tmdbMetadataMatchEnabled ?? this.tmdbMetadataMatchEnabled,
+      imdbRatingMatchEnabled:
+          imdbRatingMatchEnabled ?? this.imdbRatingMatchEnabled,
+      tmdbReadAccessToken: tmdbReadAccessToken ?? this.tmdbReadAccessToken,
     );
   }
 
@@ -304,11 +314,15 @@ class AppSettings {
       'searchProviders': searchProviders.map((item) => item.toJson()).toList(),
       'doubanAccount': doubanAccount.toJson(),
       'homeModules': homeModules.map((item) => item.toJson()).toList(),
-      'imdbAutoMatchEnabled': imdbAutoMatchEnabled,
+      'tmdbMetadataMatchEnabled': tmdbMetadataMatchEnabled,
+      'imdbRatingMatchEnabled': imdbRatingMatchEnabled,
+      'tmdbReadAccessToken': tmdbReadAccessToken,
     };
   }
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
+    final legacyImdbAutoMatchEnabled =
+        json['imdbAutoMatchEnabled'] as bool? ?? false;
     return AppSettings(
       mediaSources: (json['mediaSources'] as List<dynamic>? ?? [])
           .map(
@@ -336,7 +350,10 @@ class AppSettings {
             ),
           )
           .toList(),
-      imdbAutoMatchEnabled: json['imdbAutoMatchEnabled'] as bool? ?? false,
+      tmdbMetadataMatchEnabled: json['tmdbMetadataMatchEnabled'] as bool? ??
+          legacyImdbAutoMatchEnabled,
+      imdbRatingMatchEnabled: json['imdbRatingMatchEnabled'] as bool? ?? false,
+      tmdbReadAccessToken: json['tmdbReadAccessToken'] as String? ?? '',
     );
   }
 }

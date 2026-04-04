@@ -3,10 +3,12 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/metadata/data/imdb_metadata_client.dart';
+import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
+import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
@@ -15,35 +17,81 @@ final enrichedDetailTargetProvider =
   ref,
   target,
 ) async {
-  final imdbEnabled = ref.watch(
-    appSettingsProvider.select((settings) => settings.imdbAutoMatchEnabled),
+  final tmdbEnabled = ref.watch(
+    appSettingsProvider.select((settings) => settings.tmdbMetadataMatchEnabled),
   );
-  if (!imdbEnabled || !target.needsMetadataMatch) {
-    return target;
+  final tmdbToken = ref.watch(
+    appSettingsProvider.select((settings) => settings.tmdbReadAccessToken),
+  );
+  final imdbEnabled = ref.watch(
+    appSettingsProvider.select((settings) => settings.imdbRatingMatchEnabled),
+  );
+  final query =
+      target.searchQuery.trim().isEmpty ? target.title : target.searchQuery;
+
+  var resolved = target;
+
+  if (tmdbEnabled &&
+      tmdbToken.trim().isNotEmpty &&
+      resolved.needsMetadataMatch) {
+    try {
+      final match = await ref.read(tmdbMetadataClientProvider).matchTitle(
+            query: query,
+            readAccessToken: tmdbToken,
+            year: resolved.year,
+            preferSeries: resolved.isSeries,
+          );
+      if (match != null) {
+        resolved = resolved.copyWith(
+          posterUrl: resolved.posterUrl.trim().isEmpty
+              ? match.posterUrl
+              : resolved.posterUrl,
+          overview:
+              resolved.hasUsefulOverview ? resolved.overview : match.overview,
+          year: resolved.year > 0 ? resolved.year : match.year,
+          durationLabel: resolved.durationLabel.trim().isEmpty
+              ? match.durationLabel
+              : resolved.durationLabel,
+          genres: resolved.genres.isNotEmpty ? resolved.genres : match.genres,
+          directors: resolved.directors.isNotEmpty
+              ? resolved.directors
+              : match.directors,
+          actors: resolved.actors.isNotEmpty ? resolved.actors : match.actors,
+          imdbId:
+              resolved.imdbId.trim().isEmpty ? match.imdbId : resolved.imdbId,
+        );
+      }
+    } catch (_) {}
   }
 
-  try {
-    final match = await ref.read(imdbMetadataClientProvider).matchTitle(
-          query: target.searchQuery.trim().isEmpty
-              ? target.title
-              : target.searchQuery,
-          year: target.year,
-          preferSeries: target.isSeries,
+  if (imdbEnabled && resolved.needsImdbRatingMatch) {
+    try {
+      final ratingMatch = await ref.read(imdbRatingClientProvider).matchRating(
+            query: query,
+            year: resolved.year,
+            preferSeries: resolved.isSeries,
+            imdbId: resolved.imdbId,
+          );
+      if (ratingMatch != null) {
+        final nextRatings = [...resolved.ratingLabels];
+        final nextRatingLabel = ratingMatch.ratingLabel.trim();
+        final hasSameRating = nextRatings.any(
+          (label) => label.toLowerCase() == nextRatingLabel.toLowerCase(),
         );
-    if (match == null) {
-      return target;
-    }
-    return target.copyWith(
-      posterUrl:
-          match.posterUrl.trim().isEmpty ? target.posterUrl : match.posterUrl,
-      overview:
-          target.overview.trim().isEmpty ? match.overview : target.overview,
-      year: target.year > 0 ? target.year : match.year,
-      actors: target.actors.isNotEmpty ? target.actors : match.actors,
-    );
-  } catch (_) {
-    return target;
+        if (nextRatingLabel.isNotEmpty && !hasSameRating) {
+          nextRatings.add(nextRatingLabel);
+        }
+        resolved = resolved.copyWith(
+          imdbId: resolved.imdbId.trim().isEmpty
+              ? ratingMatch.imdbId
+              : resolved.imdbId,
+          ratingLabels: nextRatings,
+        );
+      }
+    } catch (_) {}
   }
+
+  return resolved;
 });
 
 final seriesBrowserProvider =
@@ -148,139 +196,148 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF030914),
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        foregroundColor: Colors.white,
-        title: const SizedBox.shrink(),
-      ),
-      body: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Color(0xFF07121F),
-              Color(0xFF08101A),
-              Color(0xFF030914),
-            ],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            _HeroSection(target: target),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 40),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (target.isSeries)
-                    seriesAsync.when(
-                      data: (browser) {
-                        if (browser == null || browser.groups.isEmpty) {
-                          return const SizedBox.shrink();
-                        }
-                        final selectedGroup =
-                            _resolveSelectedGroup(browser.groups);
-                        return _DetailBlock(
-                          title: '剧集',
-                          child: _EpisodeBrowser(
-                            groups: browser.groups,
-                            selectedGroupId: selectedGroup.id,
-                            onSeasonSelected: (groupId) {
-                              setState(() {
-                                _selectedSeasonId = groupId;
-                              });
-                            },
-                          ),
-                        );
-                      },
-                      loading: () => const _DetailBlock(
-                        title: '剧集',
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Center(
-                            child:
-                                CircularProgressIndicator(color: Colors.white),
-                          ),
-                        ),
-                      ),
-                      error: (error, stackTrace) => _DetailBlock(
-                        title: '剧集',
-                        child: Text(
-                          '加载剧集失败：$error',
-                          style: const TextStyle(
-                            color: Color(0xFF90A0BD),
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (target.overview.trim().isNotEmpty)
-                    _DetailBlock(
-                      title: '剧情简介',
-                      child: Text(
-                        target.overview,
-                        style: const TextStyle(
-                          color: Color(0xFFDCE6F8),
-                          fontSize: 15,
-                          height: 1.7,
-                        ),
-                      ),
-                    ),
-                  if (target.directors.isNotEmpty || target.actors.isNotEmpty)
-                    _DetailBlock(
-                      title: '演职员',
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (target.directors.isNotEmpty) ...[
-                            const _InfoLabel('导演'),
-                            const SizedBox(height: 10),
-                            _NameRail(names: target.directors),
-                          ],
-                          if (target.directors.isNotEmpty &&
-                              target.actors.isNotEmpty)
-                            const SizedBox(height: 18),
-                          if (target.actors.isNotEmpty) ...[
-                            const _InfoLabel('演员'),
-                            const SizedBox(height: 10),
-                            _NameRail(names: target.actors),
-                          ],
-                        ],
-                      ),
-                    ),
-                  if (target.sourceName.trim().isNotEmpty ||
-                      target.availabilityLabel.trim().isNotEmpty)
-                    _DetailBlock(
-                      title: '资源信息',
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (target.availabilityLabel.trim().isNotEmpty)
-                            _FactRow(
-                              label: '状态',
-                              value: target.availabilityLabel,
-                            ),
-                          if (target.sourceName.trim().isNotEmpty) ...[
-                            if (target.availabilityLabel.trim().isNotEmpty)
-                              const SizedBox(height: 12),
-                            _FactRow(
-                              label: '来源',
-                              value: target.sourceKind == null
-                                  ? target.sourceName
-                                  : '${target.sourceKind!.label} · ${target.sourceName}',
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Color(0xFF07121F),
+                  Color(0xFF08101A),
+                  Color(0xFF030914),
                 ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
               ),
             ),
-          ],
-        ),
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                _HeroSection(target: target),
+                Padding(
+                  padding: EdgeInsets.zero,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (target.isSeries)
+                        seriesAsync.when(
+                          data: (browser) {
+                            if (browser == null || browser.groups.isEmpty) {
+                              return const SizedBox.shrink();
+                            }
+                            final selectedGroup =
+                                _resolveSelectedGroup(browser.groups);
+                            return _DetailBlock(
+                              title: '剧集',
+                              child: _EpisodeBrowser(
+                                groups: browser.groups,
+                                selectedGroupId: selectedGroup.id,
+                                onSeasonSelected: (groupId) {
+                                  setState(() {
+                                    _selectedSeasonId = groupId;
+                                  });
+                                },
+                              ),
+                            );
+                          },
+                          loading: () => const _DetailBlock(
+                            title: '剧集',
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Center(
+                                child: CircularProgressIndicator(
+                                    color: Colors.white),
+                              ),
+                            ),
+                          ),
+                          error: (error, stackTrace) => _DetailBlock(
+                            title: '剧集',
+                            child: Text(
+                              '加载剧集失败：$error',
+                              style: const TextStyle(
+                                color: Color(0xFF90A0BD),
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (target.overview.trim().isNotEmpty)
+                        _DetailBlock(
+                          title: '剧情简介',
+                          child: Text(
+                            target.overview,
+                            style: const TextStyle(
+                              color: Color(0xFFDCE6F8),
+                              fontSize: 15,
+                              height: 1.7,
+                            ),
+                          ),
+                        ),
+                      if (target.directors.isNotEmpty ||
+                          target.actors.isNotEmpty)
+                        _DetailBlock(
+                          title: '演职员',
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (target.directors.isNotEmpty) ...[
+                                const _InfoLabel('导演'),
+                                const SizedBox(height: 10),
+                                _NameRail(names: target.directors),
+                              ],
+                              if (target.directors.isNotEmpty &&
+                                  target.actors.isNotEmpty)
+                                const SizedBox(height: 18),
+                              if (target.actors.isNotEmpty) ...[
+                                const _InfoLabel('演员'),
+                                const SizedBox(height: 10),
+                                _NameRail(names: target.actors),
+                              ],
+                            ],
+                          ),
+                        ),
+                      if (target.sourceName.trim().isNotEmpty ||
+                          target.availabilityLabel.trim().isNotEmpty)
+                        _DetailBlock(
+                          title: '资源信息',
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (target.availabilityLabel.trim().isNotEmpty)
+                                _FactRow(
+                                  label: '状态',
+                                  value: target.availabilityLabel,
+                                ),
+                              if (target.sourceName.trim().isNotEmpty) ...[
+                                if (target.availabilityLabel.trim().isNotEmpty)
+                                  const SizedBox(height: 12),
+                                _FactRow(
+                                  label: '来源',
+                                  value: target.sourceKind == null
+                                      ? target.sourceName
+                                      : '${target.sourceKind!.label} · ${target.sourceName}',
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: OverlayToolbar(
+              leadingColor: Colors.white,
+              onBack: () => context.pop(),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -305,9 +362,9 @@ class _HeroSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.sizeOf(context).height;
-    final topInset = MediaQuery.paddingOf(context).top;
     final heroHeight = math.max(560.0, math.min(screenHeight * 0.76, 760.0));
     final metadata = <String>[
+      ...target.ratingLabels.where((item) => item.trim().isNotEmpty).take(2),
       if (target.year > 0) '${target.year}',
       if (target.durationLabel.trim().isNotEmpty) target.durationLabel,
       ...target.genres.take(3).where((item) => item.trim().isNotEmpty),
@@ -357,7 +414,7 @@ class _HeroSection extends StatelessWidget {
             right: 16,
             bottom: 24,
             child: Padding(
-              padding: EdgeInsets.only(top: topInset + 44),
+              padding: EdgeInsets.only(top: kToolbarHeight),
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final isCompact = constraints.maxWidth < 760;

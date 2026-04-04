@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
@@ -76,22 +77,55 @@ class _SearchProviderEditorPageState
     Navigator.of(context).pop();
   }
 
+  Future<void> _confirmDeleteSearchProvider() async {
+    final name = _nameController.text.trim().isEmpty
+        ? '此搜索服务'
+        : _nameController.text.trim();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除搜索服务'),
+        content: Text('确定删除「$name」？该操作无法撤销。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) {
+      return;
+    }
+    await ref.read(settingsControllerProvider.notifier).removeSearchProvider(
+          _providerId,
+        );
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已删除搜索服务')),
+    );
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.initial == null ? '新增搜索服务' : '编辑搜索服务'),
-        actions: [
-          TextButton(
-            onPressed: _onSave,
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          ListView(
+        padding: const EdgeInsets.only(top: kToolbarHeight),
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: [
                 _SectionTitle(theme: theme, label: '基本信息'),
@@ -214,6 +248,36 @@ class _SearchProviderEditorPageState
                   value: _enabled,
                   onChanged: (value) => setState(() => _enabled = value),
                 ),
+                if (widget.initial != null) ...[
+                  const SizedBox(height: 28),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      icon: Icon(
+                        Icons.delete_outline_rounded,
+                        color: theme.colorScheme.error,
+                      ),
+                      label: Text(
+                        '删除此搜索服务',
+                        style: TextStyle(color: theme.colorScheme.error),
+                      ),
+                      onPressed: _confirmDeleteSearchProvider,
+                    ),
+                  ),
+                ],
+        ],
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: OverlayToolbar(
+              trailing: TextButton(
+                onPressed: _onSave,
+                child: const Text('保存'),
+              ),
+            ),
+          ),
         ],
       ),
     );

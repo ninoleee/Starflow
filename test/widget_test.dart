@@ -38,6 +38,7 @@ void main() {
               overview: 'After a global pandemic, survivors keep moving.',
               year: 2023,
               durationLabel: '1h 20m',
+              ratingLabels: ['IMDb 8.7'],
               genres: ['Drama'],
               directors: ['Craig Mazin'],
               actors: ['Pedro Pascal'],
@@ -68,6 +69,7 @@ void main() {
       find.text('After a global pandemic, survivors keep moving.'),
       findsAtLeastNWidgets(1),
     );
+    expect(find.text('IMDb 8.7'), findsOneWidget);
     expect(find.text('立即播放'), findsOneWidget);
   });
 }

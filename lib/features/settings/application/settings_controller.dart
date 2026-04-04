@@ -53,6 +53,15 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(next);
   }
 
+  Future<void> removeMediaSource(String id) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    final next = current.copyWith(
+      mediaSources:
+          current.mediaSources.where((item) => item.id != id).toList(),
+    );
+    await _persist(next);
+  }
+
   Future<MediaSourceConfig> authenticateEmby({
     required MediaSourceConfig source,
     required String password,
@@ -98,14 +107,33 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(next);
   }
 
+  Future<void> removeSearchProvider(String id) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    final next = current.copyWith(
+      searchProviders:
+          current.searchProviders.where((item) => item.id != id).toList(),
+    );
+    await _persist(next);
+  }
+
   Future<void> saveDoubanAccount(DoubanAccountConfig config) async {
     final current = state.valueOrNull ?? await _repository.load();
     await _persist(current.copyWith(doubanAccount: config));
   }
 
-  Future<void> setImdbAutoMatchEnabled(bool enabled) async {
+  Future<void> setTmdbMetadataMatchEnabled(bool enabled) async {
     final current = state.valueOrNull ?? await _repository.load();
-    await _persist(current.copyWith(imdbAutoMatchEnabled: enabled));
+    await _persist(current.copyWith(tmdbMetadataMatchEnabled: enabled));
+  }
+
+  Future<void> setImdbRatingMatchEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(imdbRatingMatchEnabled: enabled));
+  }
+
+  Future<void> setTmdbReadAccessToken(String token) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(tmdbReadAccessToken: token.trim()));
   }
 
   Future<void> toggleHomeModule(String id, bool enabled) async {

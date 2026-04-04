@@ -33,4 +33,28 @@ void main() {
       expect(target.needsMetadataMatch, isFalse);
     });
   });
+
+  group('MediaDetailTarget.needsImdbRatingMatch', () {
+    test('returns true when only non-IMDb ratings exist', () {
+      const target = MediaDetailTarget(
+        title: 'Inception',
+        posterUrl: '',
+        overview: '',
+        ratingLabels: ['豆瓣 8.8'],
+      );
+
+      expect(target.needsImdbRatingMatch, isTrue);
+    });
+
+    test('returns false when IMDb rating already exists', () {
+      const target = MediaDetailTarget(
+        title: 'Inception',
+        posterUrl: '',
+        overview: '',
+        ratingLabels: ['IMDb 8.7', '豆瓣 8.8'],
+      );
+
+      expect(target.needsImdbRatingMatch, isFalse);
+    });
+  });
 }

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
@@ -112,15 +111,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         : selectedProvider.first;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('在线搜索')),
       body: AppPageBackground(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(
-            20,
-            8,
-            20,
-            kShellScrollContentBottomPadding,
-          ),
+          padding: EdgeInsets.zero,
           children: [
             SectionPanel(
               title: '搜索服务',

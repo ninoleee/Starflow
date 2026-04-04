@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
@@ -52,17 +53,11 @@ class _DoubanAccountEditorPageState
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('豆瓣配置'),
-        actions: [
-          TextButton(
-            onPressed: _onSave,
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          ListView(
+        padding: const EdgeInsets.only(top: kToolbarHeight),
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: [
                 _SectionTitle(theme: theme, label: '账号'),
@@ -104,6 +99,19 @@ class _DoubanAccountEditorPageState
                   value: _enabled,
                   onChanged: (value) => setState(() => _enabled = value),
                 ),
+        ],
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: OverlayToolbar(
+              trailing: TextButton(
+                onPressed: _onSave,
+                child: const Text('保存'),
+              ),
+            ),
+          ),
         ],
       ),
     );

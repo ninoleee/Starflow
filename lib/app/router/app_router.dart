@@ -1,7 +1,8 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/features/bootstrap/presentation/bootstrap_page.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
@@ -13,6 +14,7 @@ import 'package:starflow/features/library/presentation/library_page.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/presentation/player_page.dart';
 import 'package:starflow/features/search/presentation/search_page.dart';
+import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/settings/presentation/settings_page.dart';
 
 const _kBottomNavShellRadius = 34.0;
@@ -124,42 +126,36 @@ class _AppNavigationShell extends StatelessWidget {
     return Scaffold(
       extendBody: true,
       backgroundColor: Colors.transparent,
-      body: Padding(
-        padding: EdgeInsets.only(
-          bottom: shellTabBodyBottomInset(context),
-        ),
-        child: navigationShell,
-      ),
-      bottomNavigationBar: SafeArea(
-        top: false,
-        minimum: EdgeInsets.zero,
-        child: Padding(
+      body: navigationShell,
+      bottomNavigationBar: Padding(
           padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
           child: Material(
-            type: MaterialType.transparency,
+            color: Colors.transparent,
             elevation: 0,
             shadowColor: Colors.transparent,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(_kBottomNavShellRadius),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius:
-                      BorderRadius.circular(_kBottomNavShellRadius),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.24),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius:
+                        BorderRadius.circular(_kBottomNavShellRadius),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.2),
+                    ),
+                    color: const Color(0x1A0F1622),
                   ),
-                  color: Colors.transparent,
-                ),
-                child: _FloatingNavigationBar(
-                  currentIndex: navigationShell.currentIndex,
-                  onDestinationSelected: (index) =>
-                      navigationShell.goBranch(index),
+                  child: _FloatingNavigationBar(
+                    currentIndex: navigationShell.currentIndex,
+                    onDestinationSelected: (index) =>
+                        navigationShell.goBranch(index),
+                  ),
                 ),
               ),
             ),
           ),
         ),
-      ),
     );
   }
 }
@@ -298,8 +294,20 @@ class _MissingDetailTargetPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('详情')),
-      body: const Center(child: Text('没有收到可展示的详情数据。')),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          const Center(child: Text('没有收到可展示的详情数据。')),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: OverlayToolbar(
+              onBack: () => context.pop(),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -310,8 +318,20 @@ class _MissingCollectionTargetPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('分区')),
-      body: const Center(child: Text('没有收到可展示的分区数据。')),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          const Center(child: Text('没有收到可展示的分区数据。')),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: OverlayToolbar(
+              onBack: () => context.pop(),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -322,8 +342,20 @@ class _MissingPlayerTargetPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('播放器')),
-      body: const Center(child: Text('没有收到可播放目标。')),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          const Center(child: Text('没有收到可播放目标。')),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: OverlayToolbar(
+              onBack: () => context.pop(),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -22,7 +22,9 @@ class SeedData {
       sessionCookie: '',
     ),
     homeModules: const [],
-    imdbAutoMatchEnabled: false,
+    tmdbMetadataMatchEnabled: false,
+    imdbRatingMatchEnabled: false,
+    tmdbReadAccessToken: '',
   );
 
   static const List<MediaItem> seedLibrary = [];

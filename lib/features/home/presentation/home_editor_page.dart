@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
+import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
@@ -23,14 +25,16 @@ class HomeEditorPage extends ConsumerWidget {
     final collectionsAsync = ref.watch(homeEditorCollectionsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('编辑首页')),
       floatingActionButton: FloatingActionButton.small(
         onPressed: () => _showAddModuleSheet(context, ref),
         child: const Icon(Icons.add_rounded),
       ),
-      body: AppPageBackground(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          AppPageBackground(
+            child: ListView(
+          padding: const EdgeInsets.only(top: kToolbarHeight),
           children: [
             SectionPanel(
               title: '当前模块',
@@ -142,7 +146,17 @@ class HomeEditorPage extends ConsumerWidget {
               ),
             ),
           ],
-        ),
+            ),
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: OverlayToolbar(
+              onBack: () => context.pop(),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -152,10 +166,7 @@ class HomeEditorPage extends ConsumerWidget {
       context: context,
       isScrollControlled: true,
       builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-            child: Column(
+        return Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -249,9 +260,7 @@ class HomeEditorPage extends ConsumerWidget {
                   },
                 ),
               ],
-            ),
-          ),
-        );
+            );
       },
     );
   }

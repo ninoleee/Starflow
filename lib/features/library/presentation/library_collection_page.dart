@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
+import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -30,10 +31,12 @@ class LibraryCollectionPage extends ConsumerWidget {
     final itemsAsync = ref.watch(libraryCollectionItemsProvider(target));
 
     return Scaffold(
-      appBar: AppBar(title: Text(target.title)),
-      body: AppPageBackground(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          AppPageBackground(
+            child: ListView(
+          padding: const EdgeInsets.only(top: kToolbarHeight),
           children: [
             SectionPanel(
               title: target.title,
@@ -70,7 +73,17 @@ class LibraryCollectionPage extends ConsumerWidget {
               ),
             ),
           ],
-        ),
+            ),
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: OverlayToolbar(
+              onBack: () => context.pop(),
+            ),
+          ),
+        ],
       ),
     );
   }

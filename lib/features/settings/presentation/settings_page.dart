@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
@@ -21,15 +20,9 @@ class SettingsPage extends ConsumerWidget {
     final loading = ref.watch(settingsControllerProvider).isLoading;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('设置')),
       body: AppPageBackground(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(
-            20,
-            8,
-            20,
-            kShellScrollContentBottomPadding,
-          ),
+          padding: EdgeInsets.zero,
           children: [
             if (loading) const LinearProgressIndicator(),
             SectionPanel(
@@ -128,18 +121,60 @@ class SettingsPage extends ConsumerWidget {
             ),
             const SizedBox(height: 18),
             SectionPanel(
-              title: '元数据匹配',
-              subtitle: '当影片缺少海报、简介、演员等信息时，可自动尝试用 IMDb 搜索补全',
-              child: SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('启用 IMDb 自动匹配'),
-                subtitle: const Text('当前先在详情页按需触发，避免拖慢首页和媒体库加载。'),
-                value: settings.imdbAutoMatchEnabled,
-                onChanged: (value) {
-                  ref
-                      .read(settingsControllerProvider.notifier)
-                      .setImdbAutoMatchEnabled(value);
-                },
+              title: '元数据与评分',
+              subtitle: 'TMDB 补影片信息，IMDb 补评分；都只在详情页按需触发，不拖慢首页和媒体库',
+              child: Column(
+                children: [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('启用 TMDB 自动补全影片信息'),
+                    subtitle: Text(
+                      settings.tmdbReadAccessToken.trim().isEmpty
+                          ? '当前未配置 TMDB Read Access Token，打开开关后也不会触发。'
+                          : '缺少海报、简介、导演、演员等信息时自动补全。',
+                    ),
+                    value: settings.tmdbMetadataMatchEnabled,
+                    onChanged: (value) {
+                      ref
+                          .read(settingsControllerProvider.notifier)
+                          .setTmdbMetadataMatchEnabled(value);
+                    },
+                  ),
+                  const SizedBox(height: 6),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('TMDB Read Access Token'),
+                    subtitle: Text(
+                      settings.tmdbReadAccessToken.trim().isEmpty
+                          ? '未配置'
+                          : '已配置',
+                    ),
+                    trailing: OutlinedButton(
+                      onPressed: () => _openTmdbTokenEditor(
+                        context,
+                        ref,
+                        settings.tmdbReadAccessToken,
+                      ),
+                      child: Text(
+                        settings.tmdbReadAccessToken.trim().isEmpty
+                            ? '填写'
+                            : '编辑',
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 20),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('启用 IMDb 自动补评分'),
+                    subtitle: const Text('会先匹配 IMDb 条目，再补一个 IMDb 评分标签。'),
+                    value: settings.imdbRatingMatchEnabled,
+                    onChanged: (value) {
+                      ref
+                          .read(settingsControllerProvider.notifier)
+                          .setImdbRatingMatchEnabled(value);
+                    },
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 18),
@@ -199,6 +234,55 @@ class SettingsPage extends ConsumerWidget {
         builder: (context) => DoubanAccountEditorPage(initial: config),
       ),
     );
+  }
+
+  Future<void> _openTmdbTokenEditor(
+    BuildContext context,
+    WidgetRef ref,
+    String currentToken,
+  ) async {
+    final controller = TextEditingController(text: currentToken);
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('TMDB Read Access Token'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            minLines: 2,
+            maxLines: 4,
+            decoration: const InputDecoration(
+              hintText: '粘贴 TMDB 的 Read Access Token',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () {
+                controller.clear();
+                Navigator.of(dialogContext).pop(true);
+              },
+              child: const Text('清空'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
+    );
+    if (saved == true) {
+      await ref
+          .read(settingsControllerProvider.notifier)
+          .setTmdbReadAccessToken(controller.text);
+    }
+    controller.dispose();
   }
 
   String _buildMediaSourceSubtitle(MediaSourceConfig source) {

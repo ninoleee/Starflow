@@ -49,11 +49,10 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
             end: Alignment.bottomRight,
           ),
         ),
-        child: SafeArea(
-          child: LayoutBuilder(
+        child: LayoutBuilder(
             builder: (context, constraints) {
               return SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
+                padding: EdgeInsets.zero,
                 child: ConstrainedBox(
                   constraints: BoxConstraints(minHeight: constraints.maxHeight),
                   child: Center(
@@ -122,7 +121,6 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
               );
             },
           ),
-        ),
       ),
     );
   }
