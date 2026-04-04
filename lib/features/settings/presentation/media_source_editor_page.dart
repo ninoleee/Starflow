@@ -538,9 +538,6 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                         contentPadding: EdgeInsets.zero,
                         value: currentSelection.contains(section.id),
                         title: Text(section.title),
-                        subtitle: section.subtitle.trim().isEmpty
-                            ? null
-                            : Text(section.subtitle),
                         onChanged: (value) {
                           setState(() {
                             final nextSelection = _selectedSectionIds.isEmpty

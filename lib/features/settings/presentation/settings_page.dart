@@ -5,7 +5,6 @@ import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -104,7 +103,6 @@ class SettingsPage extends ConsumerWidget {
               child: ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('打开匹配与评分设置'),
-                subtitle: Text(_buildMetadataMatchSubtitle(settings)),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => _openMetadataMatchSettings(context),
               ),
@@ -141,16 +139,6 @@ class SettingsPage extends ConsumerWidget {
                           .read(settingsControllerProvider.notifier)
                           .setHomeHeroStyle(style);
                     },
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    settings.homeHeroStyle == HomeHeroStyle.normal
-                        ? '正常模式保留顶部安全区和原来的卡片感。'
-                        : '无边模式会把 Hero 放大，并让封面左右贴到屏幕边缘。',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF7F8FAE),
-                          height: 1.45,
-                        ),
                   ),
                   const SizedBox(height: 14),
                   ListTile(
@@ -196,14 +184,6 @@ class SettingsPage extends ConsumerWidget {
         builder: (context) => const MetadataMatchSettingsPage(),
       ),
     );
-  }
-
-  String _buildMetadataMatchSubtitle(AppSettings settings) {
-    final tmdbStatus = settings.tmdbMetadataMatchEnabled ? 'TMDB 开' : 'TMDB 关';
-    final wmdbStatus = settings.wmdbMetadataMatchEnabled ? 'WMDB 开' : 'WMDB 关';
-    final imdbStatus =
-        settings.imdbRatingMatchEnabled ? 'IMDb 评分开' : 'IMDb 评分关';
-    return '${settings.metadataMatchPriority.label} 优先 · $tmdbStatus · $wmdbStatus · $imdbStatus';
   }
 }
 

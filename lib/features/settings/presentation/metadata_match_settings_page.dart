@@ -25,7 +25,6 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
           children: [
             SectionPanel(
               title: '匹配策略',
-              subtitle: '豆瓣条目会优先带着 Douban ID 直查 WMDB；非豆瓣条目按你选的优先级依次尝试，命中就停。',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -55,31 +54,17 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                           .setMetadataMatchPriority(selection.first);
                     },
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '如果优先源没有结果，才会继续尝试另一个源；首页补封面和详情补信息都会共用这套顺序。',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF7F8FAE),
-                          height: 1.45,
-                        ),
-                  ),
                 ],
               ),
             ),
             const SizedBox(height: 18),
             SectionPanel(
               title: 'TMDB',
-              subtitle: '适合补海报、简介、导演、演员和头像。',
               child: Column(
                 children: [
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('启用 TMDB 自动补全影片信息'),
-                    subtitle: Text(
-                      settings.tmdbReadAccessToken.trim().isEmpty
-                          ? '当前未配置 TMDB Read Access Token，打开开关后也不会触发。'
-                          : '缺少海报、简介、导演、演员等信息时自动补全。',
-                    ),
                     value: settings.tmdbMetadataMatchEnabled,
                     onChanged: (value) {
                       ref
@@ -91,7 +76,7 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('TMDB Read Access Token'),
-                    subtitle: Text(
+                    trailing: Text(
                       settings.tmdbReadAccessToken.trim().isEmpty
                           ? '未配置'
                           : '已配置',
@@ -126,13 +111,11 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
             const SizedBox(height: 18),
             SectionPanel(
               title: 'WMDB',
-              subtitle: '豆瓣条目会直接用 Douban ID 查询，其他条目会按片名、主演和年份搜索。',
               child: Column(
                 children: [
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('启用 WMDB 自动补全影片信息'),
-                    subtitle: const Text('更适合中文片名、豆瓣条目和需要豆瓣分数的场景。'),
                     value: settings.wmdbMetadataMatchEnabled,
                     onChanged: (value) {
                       ref
@@ -140,17 +123,6 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                           .setWmdbMetadataMatchEnabled(value);
                     },
                   ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'WMDB 不需要单独 token。填了 Douban ID 时会直查，不填就按搜索接口匹配。',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: const Color(0xFF7F8FAE),
-                            height: 1.45,
-                          ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
                   Align(
                     alignment: Alignment.centerLeft,
                     child: OutlinedButton(
@@ -164,13 +136,11 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
             const SizedBox(height: 18),
             SectionPanel(
               title: '评分',
-              subtitle: 'IMDb 评分仍然按需补，不会和元数据匹配优先级混在一起。',
               child: Column(
                 children: [
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('启用 IMDb 自动补评分'),
-                    subtitle: const Text('会先匹配 IMDb 条目，再补一个 IMDb 评分标签。'),
                     value: settings.imdbRatingMatchEnabled,
                     onChanged: (value) {
                       ref

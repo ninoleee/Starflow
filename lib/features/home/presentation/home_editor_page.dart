@@ -152,7 +152,6 @@ class HomeEditorPage extends ConsumerWidget {
               children: [
                 SectionPanel(
                   title: '当前模块',
-                  subtitle: '拖动排序，或在底部加一个新的模块',
                   child: settings.homeModules.isEmpty
                       ? const Text('还没有首页模块。')
                       : ReorderableListView.builder(
@@ -183,7 +182,6 @@ class HomeEditorPage extends ConsumerWidget {
                               ),
                               child: ListTile(
                                 title: Text(module.title),
-                                subtitle: Text(module.description),
                                 leading: ReorderableDragStartListener(
                                   index: index,
                                   child:
@@ -225,19 +223,16 @@ class HomeEditorPage extends ConsumerWidget {
                 const SizedBox(height: 18),
                 SectionPanel(
                   title: '可添加来源',
-                  subtitle: '先按来源分类，再进入具体模块或分区',
                   child: Column(
                     children: [
                       _SourceCategoryTile(
                         title: '内置',
-                        subtitle: '最近新增等基础模块',
                         icon: Icons.auto_awesome_rounded,
                         onTap: () => _showBuiltinModuleSheet(context, ref),
                       ),
                       const SizedBox(height: 10),
                       _SourceCategoryTile(
                         title: '豆瓣',
-                        subtitle: '我想看、推荐、片单和账号配置',
                         icon: Icons.movie_filter_rounded,
                         onTap: () => _showDoubanModuleSheet(context, ref),
                       ),
@@ -248,7 +243,6 @@ class HomeEditorPage extends ConsumerWidget {
                             padding: const EdgeInsets.only(bottom: 10),
                             child: _SourceCategoryTile(
                               title: source.name,
-                              subtitle: '${source.kind.label} · 点击后选择具体分区',
                               icon: source.kind == MediaSourceKind.emby
                                   ? Icons.video_library_rounded
                                   : Icons.storage_rounded,
@@ -302,7 +296,6 @@ class HomeEditorPage extends ConsumerWidget {
           tiles: [
             _AddModuleTile(
               title: '内置',
-              subtitle: '最近新增等基础模块',
               onTap: () async {
                 Navigator.of(context).pop();
                 await _showBuiltinModuleSheet(context, ref);
@@ -310,7 +303,6 @@ class HomeEditorPage extends ConsumerWidget {
             ),
             _AddModuleTile(
               title: '豆瓣',
-              subtitle: '我想看、推荐和片单',
               onTap: () async {
                 Navigator.of(context).pop();
                 await _showDoubanModuleSheet(context, ref);
@@ -319,7 +311,6 @@ class HomeEditorPage extends ConsumerWidget {
             ...enabledSources.map(
               (source) => _AddModuleTile(
                 title: source.name,
-                subtitle: '${source.kind.label} · 点击后选择具体分区',
                 onTap: () async {
                   Navigator.of(context).pop();
                   await _showMediaSourceModuleSheet(
@@ -346,7 +337,6 @@ class HomeEditorPage extends ConsumerWidget {
           tiles: [
             _AddModuleTile(
               title: '最近新增',
-              subtitle: '把最近同步进来的资源放上首页',
               onTap: () {
                 ref
                     .read(settingsControllerProvider.notifier)
@@ -371,9 +361,6 @@ class HomeEditorPage extends ConsumerWidget {
           tiles: [
             _AddModuleTile(
               title: '豆瓣账号设置',
-              subtitle: doubanAccount.userId.trim().isEmpty
-                  ? '配置 User ID 和 Cookie'
-                  : '当前账号：${doubanAccount.userId}',
               onTap: () async {
                 Navigator.of(context).pop();
                 await Navigator.of(context, rootNavigator: true).push<void>(
@@ -387,7 +374,6 @@ class HomeEditorPage extends ConsumerWidget {
             ),
             _AddModuleTile(
               title: '豆瓣我想看',
-              subtitle: '来自豆瓣我看列表',
               onTap: () {
                 ref.read(settingsControllerProvider.notifier).saveHomeModule(
                       HomeModuleConfig.doubanInterest(
@@ -399,7 +385,6 @@ class HomeEditorPage extends ConsumerWidget {
             ),
             _AddModuleTile(
               title: '豆瓣随机想看',
-              subtitle: '从想看列表随机抽取 9 个条目',
               onTap: () {
                 ref.read(settingsControllerProvider.notifier).saveHomeModule(
                       HomeModuleConfig.doubanInterest(
@@ -411,7 +396,6 @@ class HomeEditorPage extends ConsumerWidget {
             ),
             _AddModuleTile(
               title: '豆瓣个性化推荐 · 电影',
-              subtitle: '需要设置里配置 Cookie',
               onTap: () {
                 ref.read(settingsControllerProvider.notifier).saveHomeModule(
                       HomeModuleConfig.doubanSuggestion(
@@ -423,7 +407,6 @@ class HomeEditorPage extends ConsumerWidget {
             ),
             _AddModuleTile(
               title: '豆瓣个性化推荐 · 电视',
-              subtitle: '需要设置里配置 Cookie',
               onTap: () {
                 ref.read(settingsControllerProvider.notifier).saveHomeModule(
                       HomeModuleConfig.doubanSuggestion(
@@ -435,7 +418,6 @@ class HomeEditorPage extends ConsumerWidget {
             ),
             _AddModuleTile(
               title: '豆瓣片单',
-              subtitle: '内置热门片单，也支持 doulist 和 subject_collection 自定义地址',
               onTap: () async {
                 Navigator.of(context).pop();
                 await _showDoubanListDialog(context, ref);
@@ -479,9 +461,6 @@ class HomeEditorPage extends ConsumerWidget {
               .map(
                 (collection) => _AddModuleTile(
                   title: collection.title,
-                  subtitle: collection.subtitle.trim().isEmpty
-                      ? '${collection.sourceKind.label} 分区'
-                      : collection.subtitle,
                   onTap: () {
                     ref
                         .read(settingsControllerProvider.notifier)
@@ -571,14 +550,6 @@ class HomeEditorPage extends ConsumerWidget {
                       minLines: 2,
                       maxLines: 3,
                       decoration: const InputDecoration(labelText: '片单地址'),
-                    ),
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '支持 `subject_collection` 和 `doulist` 地址，也可以先选默认片单再手动改。',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
                     ),
                   ],
                 ),
@@ -760,12 +731,10 @@ class _DoubanListPreset {
 class _AddModuleTile extends StatelessWidget {
   const _AddModuleTile({
     required this.title,
-    required this.subtitle,
     required this.onTap,
   });
 
   final String title;
-  final String subtitle;
   final VoidCallback onTap;
 
   @override
@@ -781,7 +750,6 @@ class _AddModuleTile extends StatelessWidget {
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         title: Text(title),
-        subtitle: Text(subtitle),
         trailing: const Icon(Icons.add_circle_outline_rounded),
         onTap: onTap,
       ),
@@ -792,13 +760,11 @@ class _AddModuleTile extends StatelessWidget {
 class _SourceCategoryTile extends StatelessWidget {
   const _SourceCategoryTile({
     required this.title,
-    required this.subtitle,
     required this.icon,
     required this.onTap,
   });
 
   final String title;
-  final String subtitle;
   final IconData icon;
   final VoidCallback onTap;
 
@@ -823,7 +789,6 @@ class _SourceCategoryTile extends StatelessWidget {
               child: Icon(icon),
             ),
             title: Text(title),
-            subtitle: Text(subtitle),
             trailing: const Icon(Icons.chevron_right_rounded),
           ),
         ),
