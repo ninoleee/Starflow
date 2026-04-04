@@ -8,6 +8,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/widgets/starflow_logo.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -19,8 +20,9 @@ void main() {
   testWidgets('renders Starflow shell', (WidgetTester tester) async {
     await tester.pumpWidget(const ProviderScope(child: StarflowApp()));
 
-    expect(find.text('Starflow'), findsOneWidget);
-    expect(find.byIcon(Icons.play_circle_fill_rounded), findsOneWidget);
+    expect(find.byType(StarflowLogo), findsOneWidget);
+    expect(find.text('Star'), findsOneWidget);
+    expect(find.text('flow'), findsOneWidget);
     expect(find.text('正在唤醒你的片库'), findsNothing);
 
     await tester.pump(const Duration(seconds: 10));

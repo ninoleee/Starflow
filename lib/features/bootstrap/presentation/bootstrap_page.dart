@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/core/widgets/starflow_logo.dart';
 import 'package:starflow/features/bootstrap/application/bootstrap_controller.dart';
 
 class BootstrapPage extends ConsumerStatefulWidget {
@@ -50,77 +51,37 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
           ),
         ),
         child: LayoutBuilder(
-            builder: (context, constraints) {
-              return SingleChildScrollView(
-                padding: EdgeInsets.zero,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 320),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          AnimatedScale(
-                            duration: const Duration(milliseconds: 420),
-                            curve: Curves.easeOutCubic,
-                            scale: 0.94 + progress * 0.08,
-                            child: Container(
-                              width: 156,
-                              height: 156,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: const LinearGradient(
-                                  colors: [
-                                    Color(0xFFFFFFFF),
-                                    Color(0xFFB7D0FF),
-                                  ],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: const Color(
-                                      0xFF7DB1FF,
-                                    ).withValues(alpha: 0.42),
-                                    blurRadius: 42,
-                                    spreadRadius: 10,
-                                  ),
-                                ],
-                              ),
-                              child: Center(
-                                child: Transform.rotate(
-                                  angle: progress * 0.18,
-                                  child: const Icon(
-                                    Icons.play_circle_fill_rounded,
-                                    size: 84,
-                                    color: Color(0xFF1141A7),
-                                  ),
-                                ),
-                              ),
-                            ),
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: EdgeInsets.zero,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 320),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        AnimatedScale(
+                          duration: const Duration(milliseconds: 420),
+                          curve: Curves.easeOutCubic,
+                          scale: 0.94 + progress * 0.08,
+                          child: const StarflowLogo(
+                            iconSize: 108,
+                            showWordmark: true,
+                            wordmarkSize: 34,
                           ),
-                          const SizedBox(height: 28),
-                          const Text(
-                            'Starflow',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 38,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -1.2,
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-                          _ProgressBar(progress: progress),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(height: 24),
+                        _ProgressBar(progress: progress),
+                      ],
                     ),
                   ),
                 ),
-              );
-            },
-          ),
+              ),
+            );
+          },
+        ),
       ),
     );
   }

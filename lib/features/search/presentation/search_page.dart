@@ -11,6 +11,7 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SearchPage extends ConsumerStatefulWidget {
   const SearchPage({super.key, this.initialQuery});
@@ -233,7 +234,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                       children: _results
                           .map(
                             (item) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.only(bottom: 8),
                               child: _SearchResultCard(result: item),
                             ),
                           )
@@ -442,43 +443,42 @@ class _SearchResultCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final posterUrl = result.posterUrl.trim();
+    final resourceUri = _parseLaunchUri(result.resourceUrl);
     return InkWell(
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: BorderRadius.circular(18),
       onTap: () {
         if (result.detailTarget != null) {
           context.pushNamed('detail', extra: result.detailTarget);
           return;
         }
+        if (resourceUri != null) {
+          _openResourceUrl(context, resourceUri);
+          return;
+        }
         _showDetailDialog(context, result);
       },
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.9),
-          ),
-        ),
+      onLongPress: () => _showDetailDialog(context, result),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(14),
               child: posterUrl.isEmpty
                   ? _SearchPosterPlaceholder(theme: theme)
                   : Image.network(
                       posterUrl,
                       headers: networkImageHeadersForUrl(posterUrl),
-                      width: 82,
-                      height: 118,
+                      width: 76,
+                      height: 108,
                       fit: BoxFit.cover,
                       errorBuilder: (context, error, stackTrace) {
                         return _SearchPosterPlaceholder(theme: theme);
                       },
                     ),
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -491,14 +491,16 @@ class _SearchResultCard extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Text(
                     result.summary,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -520,6 +522,7 @@ class _SearchResultCard extends StatelessWidget {
   }
 
   Future<void> _showDetailDialog(BuildContext context, SearchResult result) {
+    final resourceUri = _parseLaunchUri(result.resourceUrl);
     final detailLines = <String>[
       'Provider: ${result.providerName}',
       'Type: ${result.quality}',
@@ -527,20 +530,61 @@ class _SearchResultCard extends StatelessWidget {
       'Password: ${result.password.isEmpty ? '无' : result.password}',
       if (result.publishedAt.isNotEmpty) 'Published At: ${result.publishedAt}',
       if (result.seeders > 0) 'Seeders: ${result.seeders}',
-      '',
-      result.summary,
-      '',
-      'Resource URL:',
-      result.resourceUrl,
+      if (result.summary.trim().isNotEmpty) '',
+      if (result.summary.trim().isNotEmpty) result.summary,
     ];
 
     return showDialog<void>(
       context: context,
       builder: (context) {
+        final theme = Theme.of(context);
         return AlertDialog(
-          title: Text(result.title),
-          content: SelectableText(detailLines.join('\n')),
+          title: Text(
+            result.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SelectableText(detailLines.join('\n')),
+                if (result.resourceUrl.trim().isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    'Resource URL:',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  InkWell(
+                    onTap: resourceUri == null
+                        ? null
+                        : () => _openResourceUrl(context, resourceUri),
+                    child: Text(
+                      result.resourceUrl,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: resourceUri == null
+                            ? theme.colorScheme.onSurfaceVariant
+                            : theme.colorScheme.primary,
+                        decoration: resourceUri == null
+                            ? TextDecoration.none
+                            : TextDecoration.underline,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
           actions: [
+            if (resourceUri != null)
+              TextButton(
+                onPressed: () => _openResourceUrl(context, resourceUri),
+                child: const Text('打开链接'),
+              ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
               child: const Text('关闭'),
@@ -548,6 +592,28 @@ class _SearchResultCard extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+
+  Uri? _parseLaunchUri(String rawUrl) {
+    final trimmed = rawUrl.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null || !uri.hasScheme) {
+      return null;
+    }
+    return uri;
+  }
+
+  Future<void> _openResourceUrl(BuildContext context, Uri uri) async {
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!context.mounted || launched) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('无法打开链接')),
     );
   }
 }
