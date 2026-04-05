@@ -237,8 +237,6 @@ class NasMediaIndexer {
           clearProgressWhenDone: !shouldStageMetadata,
           phaseLabel: '建立索引中',
           collectEnrichmentCandidates: shouldStageMetadata,
-          requiredSidecarMetadata: requiresSidecarMetadata,
-          requiredOnlineMetadata: requiresOnlineMetadata,
         );
         if (shouldStageMetadata) {
           if (phaseResult.enrichmentCandidates.isEmpty) {
@@ -478,8 +476,6 @@ class NasMediaIndexer {
     required bool clearProgressWhenDone,
     required String phaseLabel,
     bool collectEnrichmentCandidates = false,
-    bool requiredSidecarMetadata = false,
-    bool requiredOnlineMetadata = false,
   }) async {
     final now = DateTime.now();
     final normalizedSourceId = source.id.trim();
@@ -524,14 +520,10 @@ class NasMediaIndexer {
           existing.fingerprint == fingerprint &&
           hasRequiredSidecar &&
           hasRequiredOnlineMetadata;
-      final needsFurtherEnrichment = collectEnrichmentCandidates &&
-          ((existing == null) ||
-              existing.fingerprint != fingerprint ||
-              (requiredSidecarMetadata && !(existing.sidecarMatched)) ||
-              (requiredOnlineMetadata &&
-                  !(existing.wmdbMatched ||
-                      existing.tmdbMatched ||
-                      existing.imdbMatched)));
+      final isIncrementalCandidate =
+          existing == null || existing.fingerprint != fingerprint;
+      final needsFurtherEnrichment =
+          collectEnrichmentCandidates && isIncrementalCandidate;
       if (needsFurtherEnrichment) {
         enrichmentCandidates.add(scannedItem);
       }
