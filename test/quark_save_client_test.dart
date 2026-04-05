@@ -191,5 +191,175 @@ void main() {
       expect(result.savedCount, 1);
       expect(result.targetFolderPath, '/电影/三体');
     });
+
+    test('does not create a duplicate child folder when target already matches',
+        () async {
+      var createDirectoryCalled = false;
+      final client = QuarkSaveClient(
+        MockClient((request) async {
+          if (request.url.path == '/1/clouddrive/share/sharepage/token') {
+            return http.Response(
+              jsonEncode({
+                'code': 0,
+                'data': {'stoken': 'st-3'}
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/1/clouddrive/share/sharepage/detail') {
+            return http.Response(
+              jsonEncode({
+                'code': 0,
+                'data': {
+                  'list': [
+                    {'fid': 'fid-11', 'share_fid_token': 'token-11'},
+                  ],
+                },
+                'metadata': {'_total': 1},
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/1/clouddrive/file') {
+            createDirectoryCalled = true;
+            return http.Response('unexpected', 500);
+          }
+          if (request.url.path == '/1/clouddrive/share/sharepage/save') {
+            final body = jsonDecode(request.body) as Map<String, dynamic>;
+            expect(body['to_pdir_fid'], 'dir-santi');
+            expect(body['fid_list'], ['fid-11']);
+            return http.Response(
+              jsonEncode({
+                'code': 0,
+                'data': {'task_id': 'task-11'}
+              }),
+              200,
+            );
+          }
+          return http.Response('Not found', 404);
+        }),
+      );
+
+      final result = await client.saveShareLink(
+        shareUrl: 'https://pan.quark.cn/s/abc123',
+        cookie: 'kps=test; sign=test; vcode=test;',
+        toPdirFid: 'dir-santi',
+        toPdirPath: '/电影/三体',
+        saveFolderName: '三体',
+      );
+
+      expect(createDirectoryCalled, isFalse);
+      expect(result.taskId, 'task-11');
+      expect(result.targetFolderPath, '/电影/三体');
+    });
+
+    test('flattens a single top-level shared folder into the target folder',
+        () async {
+      final detailRequests = <String>[];
+      final client = QuarkSaveClient(
+        MockClient((request) async {
+          if (request.url.path == '/1/clouddrive/share/sharepage/token') {
+            return http.Response(
+              jsonEncode({
+                'code': 0,
+                'data': {'stoken': 'st-4'}
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/1/clouddrive/file/sort') {
+            return http.Response(
+              jsonEncode({
+                'code': 0,
+                'data': {'list': []},
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/1/clouddrive/file') {
+            return http.Response(
+              jsonEncode({
+                'code': 0,
+                'data': {'fid': 'dir-child'}
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/1/clouddrive/share/sharepage/detail') {
+            final pdirFid = request.url.queryParameters['pdir_fid'] ?? '';
+            detailRequests.add(pdirFid);
+            if (pdirFid == '0') {
+              return http.Response(
+                jsonEncode({
+                  'code': 0,
+                  'data': {
+                    'list': [
+                      {
+                        'fid': 'root-folder',
+                        'share_fid_token': 'root-token',
+                        'dir': true,
+                      },
+                    ],
+                  },
+                  'metadata': {'_total': 1},
+                }),
+                200,
+              );
+            }
+            if (pdirFid == 'root-folder') {
+              return http.Response(
+                jsonEncode({
+                  'code': 0,
+                  'data': {
+                    'list': [
+                      {
+                        'fid': 'nested-file',
+                        'share_fid_token': 'nested-token',
+                        'dir': false,
+                      },
+                      {
+                        'fid': 'nested-dir',
+                        'share_fid_token': 'nested-dir-token',
+                        'dir': true,
+                      },
+                    ],
+                  },
+                  'metadata': {'_total': 2},
+                }),
+                200,
+              );
+            }
+          }
+          if (request.url.path == '/1/clouddrive/share/sharepage/save') {
+            final body = jsonDecode(request.body) as Map<String, dynamic>;
+            expect(body['to_pdir_fid'], 'dir-child');
+            expect(body['fid_list'], ['nested-file', 'nested-dir']);
+            expect(
+                body['fid_token_list'], ['nested-token', 'nested-dir-token']);
+            return http.Response(
+              jsonEncode({
+                'code': 0,
+                'data': {'task_id': 'task-12'}
+              }),
+              200,
+            );
+          }
+          return http.Response('Not found', 404);
+        }),
+      );
+
+      final result = await client.saveShareLink(
+        shareUrl: 'https://pan.quark.cn/s/abc123',
+        cookie: 'kps=test; sign=test; vcode=test;',
+        toPdirFid: 'dir-parent',
+        toPdirPath: '/电影',
+        saveFolderName: '流浪地球',
+      );
+
+      expect(detailRequests, ['0', 'root-folder']);
+      expect(result.taskId, 'task-12');
+      expect(result.savedCount, 2);
+      expect(result.targetFolderPath, '/电影/流浪地球');
+    });
   });
 }

@@ -57,7 +57,12 @@ class QuarkSaveClient {
     var resolvedTargetDirectoryId =
         toPdirFid.trim().isEmpty ? '0' : toPdirFid.trim();
     final sanitizedFolderName = _sanitizeDirectoryName(saveFolderName);
-    if (sanitizedFolderName.isNotEmpty) {
+    final currentTargetDirectoryName = _sanitizeDirectoryName(
+        _lastDirectoryName(normalizedTargetDirectoryPath));
+    final shouldCreateNamedDirectory = sanitizedFolderName.isNotEmpty &&
+        currentTargetDirectoryName.toLowerCase() !=
+            sanitizedFolderName.toLowerCase();
+    if (shouldCreateNamedDirectory) {
       resolvedTargetDirectoryId = await _ensureDirectory(
         cookie: trimmedCookie,
         parentFid: resolvedTargetDirectoryId,
@@ -65,11 +70,21 @@ class QuarkSaveClient {
         folderName: sanitizedFolderName,
       );
     }
-    final resolvedTargetDirectoryPath = sanitizedFolderName.isEmpty
+    final effectiveSharedEntries = sanitizedFolderName.isEmpty
+        ? sharedEntries
+        : await _flattenTopDirectory(
+            pwdId: parsed.pwdId,
+            stoken: stoken,
+            cookie: trimmedCookie,
+            entries: sharedEntries,
+          );
+    final resolvedTargetDirectoryPath = !shouldCreateNamedDirectory
         ? normalizedTargetDirectoryPath
-        : normalizedTargetDirectoryPath == '/'
-            ? '/$sanitizedFolderName'
-            : '$normalizedTargetDirectoryPath/$sanitizedFolderName';
+        : sanitizedFolderName.isEmpty
+            ? normalizedTargetDirectoryPath
+            : normalizedTargetDirectoryPath == '/'
+                ? '/$sanitizedFolderName'
+                : '$normalizedTargetDirectoryPath/$sanitizedFolderName';
 
     final response = await _client.post(
       Uri.parse('$_baseUrl/1/clouddrive/share/sharepage/save').replace(
@@ -84,9 +99,9 @@ class QuarkSaveClient {
       ),
       headers: _headers(trimmedCookie),
       body: jsonEncode({
-        'fid_list': sharedEntries.map((item) => item.fid).toList(),
+        'fid_list': effectiveSharedEntries.map((item) => item.fid).toList(),
         'fid_token_list':
-            sharedEntries.map((item) => item.shareFidToken).toList(),
+            effectiveSharedEntries.map((item) => item.shareFidToken).toList(),
         'to_pdir_fid': resolvedTargetDirectoryId,
         'pwd_id': parsed.pwdId,
         'stoken': stoken,
@@ -110,7 +125,7 @@ class QuarkSaveClient {
     final taskId = '${data['task_id'] ?? ''}'.trim();
     return QuarkSaveResult(
       taskId: taskId,
-      savedCount: sharedEntries.length,
+      savedCount: effectiveSharedEntries.length,
       targetFolderPath: resolvedTargetDirectoryPath,
     );
   }
@@ -342,6 +357,27 @@ class QuarkSaveClient {
     return entries;
   }
 
+  Future<List<_QuarkShareEntry>> _flattenTopDirectory({
+    required String pwdId,
+    required String stoken,
+    required String cookie,
+    required List<_QuarkShareEntry> entries,
+  }) async {
+    if (entries.length != 1 || !entries.single.isDirectory) {
+      return entries;
+    }
+    final nestedEntries = await _fetchShareEntries(
+      pwdId: pwdId,
+      stoken: stoken,
+      pdirFid: entries.single.fid,
+      cookie: cookie,
+    );
+    if (nestedEntries.isEmpty) {
+      return entries;
+    }
+    return nestedEntries;
+  }
+
   Map<String, String> _headers(String cookie) {
     return {
       'Accept': 'application/json',
@@ -391,6 +427,19 @@ class QuarkSaveClient {
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
     return sanitized == '.' || sanitized == '..' ? '' : sanitized;
+  }
+
+  String _lastDirectoryName(String path) {
+    final normalized = _normalizeDirectoryPath(path);
+    if (normalized == '/') {
+      return '';
+    }
+    final segments = normalized
+        .split('/')
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+    return segments.isEmpty ? '' : segments.last;
   }
 
   _ParsedQuarkShare? _parseShareUrl(String rawUrl) {
@@ -499,10 +548,12 @@ class _QuarkShareEntry {
   const _QuarkShareEntry({
     required this.fid,
     required this.shareFidToken,
+    required this.isDirectory,
   });
 
   final String fid;
   final String shareFidToken;
+  final bool isDirectory;
 
   static _QuarkShareEntry? fromJson(Map<String, dynamic> json) {
     final fid = '${json['fid'] ?? ''}'.trim();
@@ -513,6 +564,7 @@ class _QuarkShareEntry {
     return _QuarkShareEntry(
       fid: fid,
       shareFidToken: shareFidToken,
+      isDirectory: json['dir'] == true,
     );
   }
 }
