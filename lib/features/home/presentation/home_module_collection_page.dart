@@ -208,6 +208,7 @@ class _DoubanPagedGrid extends StatelessWidget {
                   title: entry.title,
                   subtitle: entry.year > 0 ? '${entry.year}' : '',
                   posterUrl: entry.posterUrl,
+                  posterHeaders: const {},
                   width: null,
                   onTap: () {
                     context.pushNamed(

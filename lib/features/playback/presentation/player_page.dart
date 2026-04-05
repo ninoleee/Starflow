@@ -22,6 +22,8 @@ class PlayerPage extends ConsumerStatefulWidget {
 }
 
 class _PlayerPageState extends ConsumerState<PlayerPage> {
+  static const int _maxPlaybackAttempts = 3;
+
   Player? _player;
   VideoController? _videoController;
   StreamSubscription<String>? _playerErrorSubscription;
@@ -61,56 +63,141 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         });
       }
       unawaited(_runStartupProbe(resolvedTarget));
-
-      final player = Player(
-        configuration: const PlayerConfiguration(
-          title: 'Starflow',
-          logLevel: MPVLogLevel.warn,
-        ),
-      );
-      final videoController = VideoController(
-        player,
-        configuration: const VideoControllerConfiguration(
-          hwdec: 'auto-safe',
-          enableHardwareAcceleration: true,
-        ),
-      );
-      _playerErrorSubscription = player.stream.error.listen((message) {
-        if (!mounted || message.trim().isEmpty) {
-          return;
-        }
-        setState(() {
-          _error = message.trim();
-        });
-      });
-
-      await player.open(
-        Media(
-          resolvedTarget.streamUrl,
-          httpHeaders: resolvedTarget.headers,
-        ),
-        play: true,
+      final timeoutSeconds = ref
+          .read(appSettingsProvider)
+          .playbackOpenTimeoutSeconds
+          .clamp(1, 600);
+      final playback = await _openWithRetry(
+        resolvedTarget,
+        timeout: Duration(seconds: timeoutSeconds),
       );
 
       if (!mounted) {
-        await _playerErrorSubscription?.cancel();
-        await player.dispose();
+        await playback.errorSubscription.cancel();
+        await playback.player.dispose();
         return;
       }
 
+      _playerErrorSubscription = playback.errorSubscription;
       setState(() {
-        _player = player;
-        _videoController = videoController;
+        _player = playback.player;
+        _videoController = playback.videoController;
         _isReady = true;
+        _error = null;
       });
     } catch (error) {
       if (!mounted) {
         return;
       }
       setState(() {
-        _error = error;
+        _error = _buildPlaybackErrorMessage(error);
       });
     }
+  }
+
+  Future<_OpenedPlayback> _openWithRetry(
+    PlaybackTarget resolvedTarget, {
+    required Duration timeout,
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    Object? lastError;
+
+    for (var attempt = 1; attempt <= _maxPlaybackAttempts; attempt++) {
+      final remaining = deadline.difference(DateTime.now());
+      if (remaining <= Duration.zero) {
+        break;
+      }
+
+      try {
+        return await _openSingleAttempt(
+          resolvedTarget,
+          timeout: remaining,
+        );
+      } catch (error) {
+        lastError = error;
+        if (attempt >= _maxPlaybackAttempts) {
+          break;
+        }
+      }
+    }
+
+    if (deadline.difference(DateTime.now()) <= Duration.zero) {
+      throw TimeoutException('超过最大等待时间，已停止尝试播放');
+    }
+    throw lastError ?? const _PlayerOpenException('播放打开失败');
+  }
+
+  Future<_OpenedPlayback> _openSingleAttempt(
+    PlaybackTarget resolvedTarget, {
+    required Duration timeout,
+  }) async {
+    final player = Player(
+      configuration: const PlayerConfiguration(
+        title: 'Starflow',
+        logLevel: MPVLogLevel.warn,
+      ),
+    );
+    final videoController = VideoController(
+      player,
+      configuration: const VideoControllerConfiguration(
+        hwdec: 'auto-safe',
+        enableHardwareAcceleration: true,
+      ),
+    );
+    final startupError = Completer<String>();
+    var awaitingStartup = true;
+    late final StreamSubscription<String> errorSubscription;
+    errorSubscription = player.stream.error.listen((message) {
+      final normalized = message.trim();
+      if (normalized.isEmpty) {
+        return;
+      }
+      if (awaitingStartup && !startupError.isCompleted) {
+        startupError.complete(normalized);
+        return;
+      }
+      if (!mounted || _player != player) {
+        return;
+      }
+      setState(() {
+        _error = normalized;
+      });
+    });
+
+    try {
+      await Future.any<void>([
+        player.open(
+          Media(
+            resolvedTarget.streamUrl,
+            httpHeaders: resolvedTarget.headers,
+          ),
+          play: true,
+        ),
+        startupError.future.then<void>((message) {
+          throw _PlayerOpenException(message);
+        }),
+      ]).timeout(timeout);
+      awaitingStartup = false;
+      return _OpenedPlayback(
+        player: player,
+        videoController: videoController,
+        errorSubscription: errorSubscription,
+      );
+    } catch (_) {
+      await errorSubscription.cancel();
+      await player.dispose();
+      rethrow;
+    }
+  }
+
+  String _buildPlaybackErrorMessage(Object error) {
+    if (error is TimeoutException) {
+      return error.message ?? '超过最大等待时间，已停止尝试播放';
+    }
+    if (error is _PlayerOpenException) {
+      return error.message;
+    }
+    return '$error';
   }
 
   Future<PlaybackTarget> _resolveTarget(PlaybackTarget target) async {
@@ -576,4 +663,25 @@ class _StartupProbeResult {
     }
     return '${formatByteSize(speed)}/s';
   }
+}
+
+class _OpenedPlayback {
+  const _OpenedPlayback({
+    required this.player,
+    required this.videoController,
+    required this.errorSubscription,
+  });
+
+  final Player player;
+  final VideoController videoController;
+  final StreamSubscription<String> errorSubscription;
+}
+
+class _PlayerOpenException implements Exception {
+  const _PlayerOpenException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }

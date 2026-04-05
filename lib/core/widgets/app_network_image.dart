@@ -1,9 +1,8 @@
 import 'dart:async';
-import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:starflow/core/storage/persistent_image_cache.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
 
 typedef AppNetworkImageErrorBuilder =
@@ -62,44 +61,20 @@ class _AppNetworkImageState extends State<AppNetworkImage> {
 
   Future<Uint8List>? _resolveManualImageFuture() {
     final url = widget.url.trim();
-    if (!requiresManualNetworkImageFetch(url)) {
+    if (url.isEmpty) {
       return null;
     }
-
     final headers = widget.headers ?? networkImageHeadersForUrl(url);
-    return _ManualNetworkImageCache.instance.load(url, headers);
+    return persistentImageCache.load(url, headers: headers);
   }
 
   @override
   Widget build(BuildContext context) {
     final trimmedUrl = widget.url.trim();
-    final headers = widget.headers ?? networkImageHeadersForUrl(trimmedUrl);
     if (trimmedUrl.isEmpty) {
       return _buildError(
         context,
         StateError('Image URL is empty.'),
-      );
-    }
-
-    if (!requiresManualNetworkImageFetch(trimmedUrl)) {
-      return Image.network(
-        trimmedUrl,
-        headers: headers,
-        width: widget.width,
-        height: widget.height,
-        fit: widget.fit,
-        alignment: widget.alignment,
-        cacheWidth: widget.cacheWidth,
-        cacheHeight: widget.cacheHeight,
-        filterQuality: widget.filterQuality,
-        loadingBuilder: (context, child, loadingProgress) {
-          if (loadingProgress == null) {
-            return child;
-          }
-          return _buildLoading(context);
-        },
-        errorBuilder: (context, error, stackTrace) =>
-            _buildError(context, error, stackTrace),
       );
     }
 
@@ -141,60 +116,5 @@ class _AppNetworkImageState extends State<AppNetworkImage> {
   ]) {
     return widget.errorBuilder?.call(context, error, stackTrace) ??
         const SizedBox.shrink();
-  }
-}
-
-class _ManualNetworkImageCache {
-  _ManualNetworkImageCache._();
-
-  static final _ManualNetworkImageCache instance = _ManualNetworkImageCache._();
-
-  static final http.Client _client = http.Client();
-  static const int _maxEntries = 96;
-
-  final LinkedHashMap<String, Uint8List> _cache = LinkedHashMap();
-  final Map<String, Future<Uint8List>> _inflight = <String, Future<Uint8List>>{};
-
-  Future<Uint8List> load(String url, Map<String, String>? headers) {
-    final trimmedUrl = url.trim();
-    final cached = _cache.remove(trimmedUrl);
-    if (cached != null) {
-      _cache[trimmedUrl] = cached;
-      return SynchronousFuture<Uint8List>(cached);
-    }
-
-    final inflight = _inflight[trimmedUrl];
-    if (inflight != null) {
-      return inflight;
-    }
-
-    final future = _fetch(trimmedUrl, headers);
-    _inflight[trimmedUrl] = future;
-    future.whenComplete(() {
-      _inflight.remove(trimmedUrl);
-    });
-    return future;
-  }
-
-  Future<Uint8List> _fetch(String url, Map<String, String>? headers) async {
-    final uri = Uri.parse(url);
-    final response = await _client.get(uri, headers: headers);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError(
-        'HTTP request failed, statusCode: ${response.statusCode}, $url',
-      );
-    }
-
-    final bytes = response.bodyBytes;
-    if (bytes.isEmpty) {
-      throw StateError('Image response body is empty: $url');
-    }
-
-    _cache.remove(url);
-    _cache[url] = bytes;
-    if (_cache.length > _maxEntries) {
-      _cache.remove(_cache.keys.first);
-    }
-    return bytes;
   }
 }

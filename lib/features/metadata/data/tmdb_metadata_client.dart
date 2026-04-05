@@ -16,6 +16,11 @@ class TmdbMetadataClient {
   final Map<String, TmdbMetadataMatch?> _resolvedMatches = {};
   final Map<String, Future<TmdbMetadataMatch?>> _inflightMatches = {};
 
+  void clearCache() {
+    _resolvedMatches.clear();
+    _inflightMatches.clear();
+  }
+
   Future<TmdbMetadataMatch?> matchTitle({
     required String query,
     required String readAccessToken,

@@ -17,6 +17,11 @@ class WmdbMetadataClient {
   final Map<String, MetadataMatchResult?> _resolvedMatches = {};
   final Map<String, Future<MetadataMatchResult?>> _inflightMatches = {};
 
+  void clearCache() {
+    _resolvedMatches.clear();
+    _inflightMatches.clear();
+  }
+
   Future<MetadataMatchResult?> matchByDoubanId({
     required String doubanId,
   }) async {
@@ -275,10 +280,25 @@ class WmdbMetadataClient {
       tmdbId: tmdbId,
       doubanId: doubanId,
       ratingLabels: [
-        if (doubanRating.isNotEmpty) '豆瓣 $doubanRating',
+        _formatDoubanRatingLabel(doubanRating),
         if (imdbRating.isNotEmpty) 'IMDb $imdbRating',
       ],
     );
+  }
+
+  String _formatDoubanRatingLabel(String raw) {
+    final text = raw.trim();
+    if (text.isEmpty || text == 'null') {
+      return '豆瓣 0';
+    }
+    final parsed = double.tryParse(text);
+    if (parsed == null) {
+      return '豆瓣 $text';
+    }
+    if (parsed <= 0) {
+      return '豆瓣 0';
+    }
+    return '豆瓣 ${parsed.toStringAsFixed(1)}';
   }
 
   Map<String, String> _resolveLocalizedEntry(Map<String, dynamic> json) {

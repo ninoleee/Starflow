@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
@@ -15,6 +16,12 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   group('enrichedDetailTargetProvider', () {
     test('keeps detail target unchanged when auto enrichment is disabled',
         () async {
@@ -304,8 +311,7 @@ void main() {
       expect(resolved.ratingLabels, contains('IMDb 7.4'));
     });
 
-    test('auto enriches non-douban detail with wmdb ratings and ids',
-        () async {
+    test('auto enriches non-douban detail with wmdb ratings and ids', () async {
       final container = ProviderContainer(
         overrides: [
           appSettingsProvider.overrideWithValue(
@@ -504,6 +510,12 @@ class _FakeMediaRepository implements MediaRepository {
   }) async {
     return const [];
   }
+
+  @override
+  Future<void> refreshSource({
+    required String sourceId,
+    bool forceFullRescan = false,
+  }) async {}
 
   @override
   Future<List<MediaSourceConfig>> fetchSources() async {

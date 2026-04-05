@@ -17,6 +17,7 @@ abstract class SearchRepository {
   Future<SearchFetchResult> searchLocal(
     String query, {
     String? sourceId,
+    String? sectionId,
     int limit = 60,
   });
 }
@@ -64,7 +65,11 @@ class AppSearchRepository implements SearchRepository {
       return SearchFetchResult(items: [], filteredCount: 0);
     }
 
-    final filtered = _applyProviderFilters(rawResults, provider: provider);
+    final filtered = _applyProviderFilters(
+      rawResults,
+      provider: provider,
+      query: keyword,
+    );
     return filtered;
   }
 
@@ -72,6 +77,7 @@ class AppSearchRepository implements SearchRepository {
   Future<SearchFetchResult> searchLocal(
     String query, {
     String? sourceId,
+    String? sectionId,
     int limit = 60,
   }) async {
     final keyword = query.trim();
@@ -81,6 +87,7 @@ class AppSearchRepository implements SearchRepository {
 
     final library = await _mediaRepository.fetchLibrary(
       sourceId: sourceId,
+      sectionId: sectionId,
       limit: 2000,
     );
     final normalizedKeyword = _normalizeSearchText(keyword);
@@ -128,6 +135,7 @@ class AppSearchRepository implements SearchRepository {
       id: 'local-${item.id}',
       title: item.title,
       posterUrl: item.posterUrl,
+      posterHeaders: item.posterHeaders,
       providerId: item.sourceId,
       providerName: item.sourceName,
       quality: item.sectionName.trim().isEmpty
@@ -148,6 +156,7 @@ class AppSearchRepository implements SearchRepository {
   SearchFetchResult _applyProviderFilters(
     List<SearchResult> rawResults, {
     required SearchProviderConfig provider,
+    required String query,
   }) {
     final blockedKeywords = provider.blockedKeywords
         .map((item) => item.trim().toLowerCase())
@@ -157,12 +166,25 @@ class AppSearchRepository implements SearchRepository {
         .map((item) => SearchCloudTypeX.fromCode(item)?.code ?? item.trim())
         .where((item) => item.isNotEmpty)
         .toSet();
+    final maxTitleLength = provider.maxTitleLength.clamp(1, 500);
 
     final filtered = <SearchResult>[];
     final seen = <String>{};
     var filteredCount = 0;
 
     for (final item in rawResults) {
+      if (provider.strongMatchEnabled) {
+        if (!_matchesStrongQuery(item.title, query)) {
+          filteredCount += 1;
+          continue;
+        }
+      }
+
+      if (item.title.trim().runes.length > maxTitleLength) {
+        filteredCount += 1;
+        continue;
+      }
+
       final detectedCloudType =
           detectSearchCloudTypeFromUrl(item.resourceUrl)?.code ?? '';
       if (allowedCloudTypes.isNotEmpty &&
@@ -256,6 +278,42 @@ class AppSearchRepository implements SearchRepository {
         .replaceAll(RegExp(r'[^a-z0-9\u4e00-\u9fff]+'), ' ')
         .trim();
     return normalized;
+  }
+
+  bool _matchesStrongQuery(String title, String query) {
+    final normalizedTitle = _normalizeSearchText(title).replaceAll(' ', '');
+    final normalizedQuery = _normalizeSearchText(query);
+    if (normalizedTitle.isEmpty || normalizedQuery.isEmpty) {
+      return true;
+    }
+
+    final tokenParts = normalizedQuery
+        .split(' ')
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+    if (tokenParts.length > 1) {
+      return tokenParts.every(
+        (token) => normalizedTitle.contains(token.replaceAll(' ', '')),
+      );
+    }
+
+    final compactQuery = normalizedQuery.replaceAll(' ', '');
+    if (_looksLikeChineseText(compactQuery)) {
+      for (final rune in compactQuery.runes) {
+        final character = String.fromCharCode(rune);
+        if (!normalizedTitle.contains(character)) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    return normalizedTitle.contains(compactQuery);
+  }
+
+  bool _looksLikeChineseText(String value) {
+    return RegExp(r'[\u4e00-\u9fff]').hasMatch(value);
   }
 }
 

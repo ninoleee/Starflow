@@ -3,10 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
+import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/presentation/widgets/library_paged_grid.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 
 enum LibraryFilter {
   all,
@@ -40,11 +43,13 @@ extension LibraryFilterX on LibraryFilter {
 
 final libraryItemsProvider =
     FutureProvider.family<List<MediaItem>, LibraryFilter>((ref, filter) {
+  ref.watch(appSettingsProvider);
   return ref.read(mediaRepositoryProvider).fetchLibrary(kind: filter.kind);
 });
 
 final libraryCollectionsProvider =
     FutureProvider.family<List<MediaCollection>, LibraryFilter>((ref, filter) {
+  ref.watch(appSettingsProvider);
   return ref.read(mediaRepositoryProvider).fetchCollections(kind: filter.kind);
 });
 
@@ -58,11 +63,14 @@ class LibraryPage extends ConsumerStatefulWidget {
 class _LibraryPageState extends ConsumerState<LibraryPage> {
   LibraryFilter _filter = LibraryFilter.all;
   int _currentPage = 0;
+  bool _isForceRescanning = false;
 
   @override
   Widget build(BuildContext context) {
+    final settings = ref.watch(appSettingsProvider);
     final itemsAsync = ref.watch(libraryItemsProvider(_filter));
     final collectionsAsync = ref.watch(libraryCollectionsProvider(_filter));
+    final rebuildableSourceIds = _rebuildableWebDavSourceIds(settings);
 
     return Scaffold(
       body: AppPageBackground(
@@ -91,6 +99,27 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
               },
             ),
             const SizedBox(height: 18),
+            if (rebuildableSourceIds.isNotEmpty) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: _isForceRescanning
+                      ? null
+                      : () => _confirmForceRescan(rebuildableSourceIds),
+                  icon: _isForceRescanning
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.restart_alt_rounded),
+                  label: Text(
+                    _isForceRescanning ? '重建中...' : '重建 WebDAV 索引',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             collectionsAsync.when(
               data: (collections) {
                 if (collections.isEmpty) {
@@ -164,5 +193,80 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
         ),
       ),
     );
+  }
+
+  List<String> _rebuildableWebDavSourceIds(AppSettings settings) {
+    if (_filter == LibraryFilter.emby) {
+      return const [];
+    }
+    return settings.mediaSources
+        .where(
+          (source) => source.enabled && source.kind == MediaSourceKind.nas,
+        )
+        .map((source) => source.id.trim())
+        .where((sourceId) => sourceId.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+  }
+
+  Future<void> _confirmForceRescan(List<String> sourceIds) async {
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('重建 WebDAV 索引'),
+            content: const Text(
+              '这会对当前启用的 WebDAV 媒体源执行全量重扫，忽略已有指纹并重新抓取 sidecar、WMDB、TMDB 和 IMDb 信息。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('开始重扫'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) {
+      return;
+    }
+    await _runForceRescan(sourceIds);
+  }
+
+  Future<void> _runForceRescan(List<String> sourceIds) async {
+    setState(() {
+      _isForceRescanning = true;
+    });
+    try {
+      await ref.read(mediaRefreshCoordinatorProvider).refreshSelectedSources(
+            sourceIds: sourceIds,
+            forceFullRescan: true,
+          );
+      for (final filter in LibraryFilter.values) {
+        ref.invalidate(libraryItemsProvider(filter));
+        ref.invalidate(libraryCollectionsProvider(filter));
+      }
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            sourceIds.length == 1
+                ? '已完成 WebDAV 索引重建'
+                : '已完成 ${sourceIds.length} 个 WebDAV 媒体源的全量重扫',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isForceRescanning = false;
+        });
+      }
+    }
   }
 }

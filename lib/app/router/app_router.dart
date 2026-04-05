@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:starflow/features/bootstrap/presentation/bootstrap_page.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
+import 'package:starflow/features/details/presentation/metadata_index_management_page.dart';
 import 'package:starflow/features/home/presentation/home_editor_page.dart';
 import 'package:starflow/features/home/presentation/home_module_collection_page.dart';
 import 'package:starflow/features/home/presentation/home_page.dart';
@@ -113,6 +114,25 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             return const _MissingDetailTargetPage();
           }
           return MediaDetailPage(target: target);
+        },
+      ),
+      GoRoute(
+        path: '/metadata-index',
+        name: 'metadata-index',
+        pageBuilder: (context, state) {
+          final target = state.extra as MediaDetailTarget?;
+          if (target == null) {
+            return MaterialPage<void>(
+              key: state.pageKey,
+              fullscreenDialog: true,
+              child: const _MissingDetailTargetPage(),
+            );
+          }
+          return MaterialPage<void>(
+            key: state.pageKey,
+            fullscreenDialog: true,
+            child: MetadataIndexManagementPage(target: target),
+          );
         },
       ),
       GoRoute(

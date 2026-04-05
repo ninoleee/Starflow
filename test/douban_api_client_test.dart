@@ -109,6 +109,7 @@ void main() {
         items.first.posterUrl,
         'https://img9.doubanio.com/view/photo/l/public/p511118051.jpg',
       );
+      expect(items.first.ratingLabel, '豆瓣 0');
     });
 
     test('maps interest items when poster only exists on outer interest item',

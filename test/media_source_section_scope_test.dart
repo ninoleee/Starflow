@@ -2,9 +2,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:sembast/sembast_memory.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/nas_media_index_store.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -115,6 +117,13 @@ void main() {
               },
             ),
           ),
+          nasMediaIndexStoreProvider.overrideWithValue(
+            SembastNasMediaIndexStore(
+              databaseOpener: () => databaseFactoryMemory.openDatabase(
+                'media-source-section-scope-test-1',
+              ),
+            ),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -188,6 +197,13 @@ void main() {
                   ),
                 ],
               },
+            ),
+          ),
+          nasMediaIndexStoreProvider.overrideWithValue(
+            SembastNasMediaIndexStore(
+              databaseOpener: () => databaseFactoryMemory.openDatabase(
+                'media-source-section-scope-test-2',
+              ),
             ),
           ),
         ],
@@ -285,5 +301,56 @@ class _FakeWebDavNasClient extends WebDavNasClient {
       return itemsBySection[sectionId] ?? const [];
     }
     return itemsBySection.values.expand((items) => items).toList();
+  }
+
+  @override
+  Future<List<WebDavScannedItem>> scanLibrary(
+    MediaSourceConfig source, {
+    String? sectionId,
+    String sectionName = '',
+    int limit = 200,
+  }) async {
+    final items = sectionId?.trim().isNotEmpty == true
+        ? (itemsBySection[sectionId] ?? const <MediaItem>[])
+        : itemsBySection.values.expand((entries) => entries).toList();
+    return items
+        .take(limit)
+        .map(
+          (item) => WebDavScannedItem(
+            resourceId: item.id,
+            fileName: item.actualAddress.trim().isNotEmpty
+                ? item.actualAddress.split('/').last
+                : '${item.title}.strm',
+            actualAddress: item.actualAddress.trim().isNotEmpty
+                ? item.actualAddress
+                : '${item.sectionName}/${item.title}.strm',
+            sectionId: item.sectionId,
+            sectionName: item.sectionName,
+            streamUrl: item.streamUrl,
+            streamHeaders: item.streamHeaders,
+            addedAt: item.addedAt,
+            modifiedAt: item.addedAt,
+            fileSizeBytes: 0,
+            metadataSeed: WebDavMetadataSeed(
+              title: item.title,
+              overview: item.overview,
+              posterUrl: item.posterUrl,
+              posterHeaders: item.posterHeaders,
+              year: item.year,
+              durationLabel:
+                  item.durationLabel.trim().isEmpty ? '文件' : item.durationLabel,
+              genres: item.genres,
+              directors: item.directors,
+              actors: item.actors,
+              itemType: item.itemType,
+              seasonNumber: item.seasonNumber,
+              episodeNumber: item.episodeNumber,
+              imdbId: item.imdbId,
+              tmdbId: item.tmdbId,
+              hasSidecarMatch: item.title.trim().isNotEmpty,
+            ),
+          ),
+        )
+        .toList(growable: false);
   }
 }

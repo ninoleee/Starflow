@@ -3,6 +3,8 @@ enum MediaSourceKind {
   nas,
 }
 
+const kNoSectionsSelectedSentinel = '__none__';
+
 extension MediaSourceKindX on MediaSourceKind {
   String get label {
     switch (this) {
@@ -36,6 +38,7 @@ class MediaSourceConfig {
     this.deviceId = '',
     this.libraryPath = '',
     this.featuredSectionIds = const [],
+    this.webDavStructureInferenceEnabled = false,
   });
 
   final String id;
@@ -51,6 +54,7 @@ class MediaSourceConfig {
   final String deviceId;
   final String libraryPath;
   final List<String> featuredSectionIds;
+  final bool webDavStructureInferenceEnabled;
 
   bool get hasAccessToken => accessToken.trim().isNotEmpty;
 
@@ -83,6 +87,7 @@ class MediaSourceConfig {
     String? deviceId,
     String? libraryPath,
     List<String>? featuredSectionIds,
+    bool? webDavStructureInferenceEnabled,
   }) {
     return MediaSourceConfig(
       id: id ?? this.id,
@@ -98,6 +103,8 @@ class MediaSourceConfig {
       deviceId: deviceId ?? this.deviceId,
       libraryPath: libraryPath ?? this.libraryPath,
       featuredSectionIds: featuredSectionIds ?? this.featuredSectionIds,
+      webDavStructureInferenceEnabled: webDavStructureInferenceEnabled ??
+          this.webDavStructureInferenceEnabled,
     );
   }
 
@@ -116,6 +123,7 @@ class MediaSourceConfig {
       'deviceId': deviceId,
       'libraryPath': libraryPath,
       'featuredSectionIds': featuredSectionIds,
+      'webDavStructureInferenceEnabled': webDavStructureInferenceEnabled,
     };
   }
 
@@ -138,7 +146,26 @@ class MediaSourceConfig {
               .map((item) => '$item')
               .where((item) => item.trim().isNotEmpty)
               .toList(),
+      webDavStructureInferenceEnabled:
+          json['webDavStructureInferenceEnabled'] as bool? ?? false,
     );
+  }
+}
+
+extension MediaSourceConfigScopeX on MediaSourceConfig {
+  bool get hasExplicitNoSectionsSelected {
+    return featuredSectionIds.any(
+      (item) => item.trim() == kNoSectionsSelectedSentinel,
+    );
+  }
+
+  Set<String> get selectedSectionIds {
+    return featuredSectionIds
+        .map((item) => item.trim())
+        .where(
+          (item) => item.isNotEmpty && item != kNoSectionsSelectedSentinel,
+        )
+        .toSet();
   }
 }
 
@@ -164,6 +191,7 @@ class MediaItem {
     this.sortTitle = '',
     required this.overview,
     required this.posterUrl,
+    this.posterHeaders = const {},
     required this.year,
     required this.durationLabel,
     required this.genres,
@@ -184,8 +212,10 @@ class MediaItem {
     this.seasonNumber,
     this.episodeNumber,
     this.playbackProgress,
+    this.doubanId = '',
     this.imdbId = '',
     this.tmdbId = '',
+    this.ratingLabels = const [],
     required this.addedAt,
     this.lastWatchedAt,
   });
@@ -196,6 +226,7 @@ class MediaItem {
   final String sortTitle;
   final String overview;
   final String posterUrl;
+  final Map<String, String> posterHeaders;
   final int year;
   final String durationLabel;
   final List<String> genres;
@@ -216,13 +247,178 @@ class MediaItem {
   final int? seasonNumber;
   final int? episodeNumber;
   final double? playbackProgress;
+  final String doubanId;
   final String imdbId;
   final String tmdbId;
+  final List<String> ratingLabels;
   final DateTime addedAt;
   final DateTime? lastWatchedAt;
 
   bool get isPlayable =>
       streamUrl.trim().isNotEmpty || playbackItemId.trim().isNotEmpty;
+
+  MediaItem copyWith({
+    String? id,
+    String? title,
+    String? originalTitle,
+    String? sortTitle,
+    String? overview,
+    String? posterUrl,
+    Map<String, String>? posterHeaders,
+    int? year,
+    String? durationLabel,
+    List<String>? genres,
+    List<String>? directors,
+    List<String>? actors,
+    String? itemType,
+    bool? isFolder,
+    String? sectionId,
+    String? sectionName,
+    String? sourceId,
+    String? sourceName,
+    MediaSourceKind? sourceKind,
+    String? streamUrl,
+    String? actualAddress,
+    Map<String, String>? streamHeaders,
+    String? playbackItemId,
+    String? preferredMediaSourceId,
+    int? seasonNumber,
+    int? episodeNumber,
+    double? playbackProgress,
+    String? doubanId,
+    String? imdbId,
+    String? tmdbId,
+    List<String>? ratingLabels,
+    DateTime? addedAt,
+    DateTime? lastWatchedAt,
+  }) {
+    return MediaItem(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      originalTitle: originalTitle ?? this.originalTitle,
+      sortTitle: sortTitle ?? this.sortTitle,
+      overview: overview ?? this.overview,
+      posterUrl: posterUrl ?? this.posterUrl,
+      posterHeaders: posterHeaders ?? this.posterHeaders,
+      year: year ?? this.year,
+      durationLabel: durationLabel ?? this.durationLabel,
+      genres: genres ?? this.genres,
+      directors: directors ?? this.directors,
+      actors: actors ?? this.actors,
+      itemType: itemType ?? this.itemType,
+      isFolder: isFolder ?? this.isFolder,
+      sectionId: sectionId ?? this.sectionId,
+      sectionName: sectionName ?? this.sectionName,
+      sourceId: sourceId ?? this.sourceId,
+      sourceName: sourceName ?? this.sourceName,
+      sourceKind: sourceKind ?? this.sourceKind,
+      streamUrl: streamUrl ?? this.streamUrl,
+      actualAddress: actualAddress ?? this.actualAddress,
+      streamHeaders: streamHeaders ?? this.streamHeaders,
+      playbackItemId: playbackItemId ?? this.playbackItemId,
+      preferredMediaSourceId:
+          preferredMediaSourceId ?? this.preferredMediaSourceId,
+      seasonNumber: seasonNumber ?? this.seasonNumber,
+      episodeNumber: episodeNumber ?? this.episodeNumber,
+      playbackProgress: playbackProgress ?? this.playbackProgress,
+      doubanId: doubanId ?? this.doubanId,
+      imdbId: imdbId ?? this.imdbId,
+      tmdbId: tmdbId ?? this.tmdbId,
+      ratingLabels: ratingLabels ?? this.ratingLabels,
+      addedAt: addedAt ?? this.addedAt,
+      lastWatchedAt: lastWatchedAt ?? this.lastWatchedAt,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'originalTitle': originalTitle,
+      'sortTitle': sortTitle,
+      'overview': overview,
+      'posterUrl': posterUrl,
+      'posterHeaders': posterHeaders,
+      'year': year,
+      'durationLabel': durationLabel,
+      'genres': genres,
+      'directors': directors,
+      'actors': actors,
+      'itemType': itemType,
+      'isFolder': isFolder,
+      'sectionId': sectionId,
+      'sectionName': sectionName,
+      'sourceId': sourceId,
+      'sourceName': sourceName,
+      'sourceKind': sourceKind.name,
+      'streamUrl': streamUrl,
+      'actualAddress': actualAddress,
+      'streamHeaders': streamHeaders,
+      'playbackItemId': playbackItemId,
+      'preferredMediaSourceId': preferredMediaSourceId,
+      'seasonNumber': seasonNumber,
+      'episodeNumber': episodeNumber,
+      'playbackProgress': playbackProgress,
+      'doubanId': doubanId,
+      'imdbId': imdbId,
+      'tmdbId': tmdbId,
+      'ratingLabels': ratingLabels,
+      'addedAt': addedAt.toIso8601String(),
+      'lastWatchedAt': lastWatchedAt?.toIso8601String(),
+    };
+  }
+
+  factory MediaItem.fromJson(Map<String, dynamic> json) {
+    return MediaItem(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      originalTitle: json['originalTitle'] as String? ?? '',
+      sortTitle: json['sortTitle'] as String? ?? '',
+      overview: json['overview'] as String? ?? '',
+      posterUrl: json['posterUrl'] as String? ?? '',
+      posterHeaders:
+          (json['posterHeaders'] as Map<dynamic, dynamic>? ?? const {})
+              .map((key, value) => MapEntry('$key', '$value')),
+      year: (json['year'] as num?)?.toInt() ?? 0,
+      durationLabel: json['durationLabel'] as String? ?? '',
+      genres: (json['genres'] as List<dynamic>? ?? const [])
+          .whereType<String>()
+          .toList(growable: false),
+      directors: (json['directors'] as List<dynamic>? ?? const [])
+          .whereType<String>()
+          .toList(growable: false),
+      actors: (json['actors'] as List<dynamic>? ?? const [])
+          .whereType<String>()
+          .toList(growable: false),
+      itemType: json['itemType'] as String? ?? '',
+      isFolder: json['isFolder'] as bool? ?? false,
+      sectionId: json['sectionId'] as String? ?? '',
+      sectionName: json['sectionName'] as String? ?? '',
+      sourceId: json['sourceId'] as String? ?? '',
+      sourceName: json['sourceName'] as String? ?? '',
+      sourceKind:
+          MediaSourceKindX.fromName(json['sourceKind'] as String? ?? ''),
+      streamUrl: json['streamUrl'] as String? ?? '',
+      actualAddress: json['actualAddress'] as String? ?? '',
+      streamHeaders:
+          (json['streamHeaders'] as Map<dynamic, dynamic>? ?? const {})
+              .map((key, value) => MapEntry('$key', '$value')),
+      playbackItemId: json['playbackItemId'] as String? ?? '',
+      preferredMediaSourceId: json['preferredMediaSourceId'] as String? ?? '',
+      seasonNumber: (json['seasonNumber'] as num?)?.toInt(),
+      episodeNumber: (json['episodeNumber'] as num?)?.toInt(),
+      playbackProgress: (json['playbackProgress'] as num?)?.toDouble(),
+      doubanId: json['doubanId'] as String? ?? '',
+      imdbId: json['imdbId'] as String? ?? '',
+      tmdbId: json['tmdbId'] as String? ?? '',
+      ratingLabels: (json['ratingLabels'] as List<dynamic>? ?? const [])
+          .whereType<String>()
+          .toList(growable: false),
+      addedAt:
+          DateTime.tryParse(json['addedAt'] as String? ?? '') ?? DateTime.now(),
+      lastWatchedAt: DateTime.tryParse(json['lastWatchedAt'] as String? ?? ''),
+    );
+  }
 }
 
 class MediaCollection {

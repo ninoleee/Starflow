@@ -17,6 +17,13 @@ class ImdbRatingClient {
   Future<List<int>>? _ratingsDatasetFuture;
   final Map<String, ImdbRatingMatch?> _lookupCache = {};
 
+  void clearCache({bool includeDataset = false}) {
+    _lookupCache.clear();
+    if (includeDataset) {
+      _ratingsDatasetFuture = null;
+    }
+  }
+
   Future<ImdbRatingPreview?> previewMatch({
     required String query,
     int year = 0,

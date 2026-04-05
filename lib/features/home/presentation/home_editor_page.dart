@@ -15,6 +15,7 @@ import 'package:starflow/features/settings/presentation/douban_account_editor_pa
 final homeEditorCollectionsProvider = FutureProvider<List<MediaCollection>>((
   ref,
 ) {
+  ref.watch(appSettingsProvider);
   return ref.read(mediaRepositoryProvider).fetchCollections();
 });
 
@@ -135,8 +136,15 @@ class HomeEditorPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(appSettingsProvider);
+    final collectionsAsync = ref.watch(homeEditorCollectionsProvider);
+    final visibleSourceIds = (collectionsAsync.valueOrNull ?? const <MediaCollection>[])
+        .map((item) => item.sourceId)
+        .toSet();
     final enabledSources =
         settings.mediaSources.where((item) => item.enabled).toList();
+    final scopedSources = enabledSources
+        .where((item) => visibleSourceIds.contains(item.id))
+        .toList();
 
     return Scaffold(
       floatingActionButton: FloatingActionButton.small(
@@ -236,9 +244,9 @@ class HomeEditorPage extends ConsumerWidget {
                         icon: Icons.movie_filter_rounded,
                         onTap: () => _showDoubanModuleSheet(context, ref),
                       ),
-                      if (enabledSources.isNotEmpty) ...[
+                      if (scopedSources.isNotEmpty) ...[
                         const SizedBox(height: 10),
-                        ...enabledSources.map(
+                        ...scopedSources.map(
                           (source) => Padding(
                             padding: const EdgeInsets.only(bottom: 10),
                             child: _SourceCategoryTile(
@@ -287,16 +295,24 @@ class HomeEditorPage extends ConsumerWidget {
         .mediaSources
         .where((item) => item.enabled)
         .toList();
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return _HomeEditorSecondarySheetBody(
-          title: '选择来源分类',
-          tiles: [
-            _AddModuleTile(
-              title: '内置',
-              onTap: () async {
+    return ref.read(homeEditorCollectionsProvider.future).then((collections) {
+      if (!context.mounted) {
+        return Future<void>.value();
+      }
+      final visibleSourceIds = collections.map((item) => item.sourceId).toSet();
+      final scopedSources = enabledSources
+          .where((item) => visibleSourceIds.contains(item.id))
+          .toList();
+      return showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) {
+          return _HomeEditorSecondarySheetBody(
+            title: '选择来源分类',
+            tiles: [
+              _AddModuleTile(
+                title: '内置',
+                onTap: () async {
                 Navigator.of(context).pop();
                 await _showBuiltinModuleSheet(context, ref);
               },
@@ -308,7 +324,7 @@ class HomeEditorPage extends ConsumerWidget {
                 await _showDoubanModuleSheet(context, ref);
               },
             ),
-            ...enabledSources.map(
+            ...scopedSources.map(
               (source) => _AddModuleTile(
                 title: source.name,
                 onTap: () async {
@@ -320,11 +336,12 @@ class HomeEditorPage extends ConsumerWidget {
                   );
                 },
               ),
-            ),
-          ],
-        );
-      },
-    );
+              ),
+            ],
+          );
+        },
+      );
+    });
   }
 
   Future<void> _showBuiltinModuleSheet(BuildContext context, WidgetRef ref) {

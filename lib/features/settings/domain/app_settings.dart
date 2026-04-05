@@ -298,6 +298,8 @@ class NetworkStorageConfig {
     this.quarkSaveFolderPath = '/',
     this.smartStrmWebhookUrl = '',
     this.smartStrmTaskName = '',
+    this.refreshMediaSourceIds = const [],
+    this.refreshDelaySeconds = 0,
   });
 
   final String quarkCookie;
@@ -305,13 +307,17 @@ class NetworkStorageConfig {
   final String quarkSaveFolderPath;
   final String smartStrmWebhookUrl;
   final String smartStrmTaskName;
+  final List<String> refreshMediaSourceIds;
+  final int refreshDelaySeconds;
 
   bool get hasAnyConfigured {
     return quarkCookie.trim().isNotEmpty ||
         smartStrmWebhookUrl.trim().isNotEmpty ||
         smartStrmTaskName.trim().isNotEmpty ||
         quarkSaveFolderId.trim() != '0' ||
-        quarkSaveFolderPath.trim() != '/';
+        quarkSaveFolderPath.trim() != '/' ||
+        refreshMediaSourceIds.isNotEmpty ||
+        refreshDelaySeconds > 0;
   }
 
   NetworkStorageConfig copyWith({
@@ -320,6 +326,8 @@ class NetworkStorageConfig {
     String? quarkSaveFolderPath,
     String? smartStrmWebhookUrl,
     String? smartStrmTaskName,
+    List<String>? refreshMediaSourceIds,
+    int? refreshDelaySeconds,
   }) {
     return NetworkStorageConfig(
       quarkCookie: quarkCookie ?? this.quarkCookie,
@@ -327,6 +335,9 @@ class NetworkStorageConfig {
       quarkSaveFolderPath: quarkSaveFolderPath ?? this.quarkSaveFolderPath,
       smartStrmWebhookUrl: smartStrmWebhookUrl ?? this.smartStrmWebhookUrl,
       smartStrmTaskName: smartStrmTaskName ?? this.smartStrmTaskName,
+      refreshMediaSourceIds:
+          refreshMediaSourceIds ?? this.refreshMediaSourceIds,
+      refreshDelaySeconds: refreshDelaySeconds ?? this.refreshDelaySeconds,
     );
   }
 
@@ -337,6 +348,8 @@ class NetworkStorageConfig {
       'quarkSaveFolderPath': quarkSaveFolderPath,
       'smartStrmWebhookUrl': smartStrmWebhookUrl,
       'smartStrmTaskName': smartStrmTaskName,
+      'refreshMediaSourceIds': refreshMediaSourceIds,
+      'refreshDelaySeconds': refreshDelaySeconds,
     };
   }
 
@@ -347,6 +360,13 @@ class NetworkStorageConfig {
       quarkSaveFolderPath: json['quarkSaveFolderPath'] as String? ?? '/',
       smartStrmWebhookUrl: json['smartStrmWebhookUrl'] as String? ?? '',
       smartStrmTaskName: json['smartStrmTaskName'] as String? ?? '',
+      refreshMediaSourceIds:
+          (json['refreshMediaSourceIds'] as List<dynamic>? ?? const [])
+              .whereType<String>()
+              .map((item) => item.trim())
+              .where((item) => item.isNotEmpty)
+              .toList(growable: false),
+      refreshDelaySeconds: (json['refreshDelaySeconds'] as num?)?.toInt() ?? 0,
     );
   }
 }
@@ -364,6 +384,7 @@ class AppSettings {
     this.metadataMatchPriority = MetadataMatchProvider.tmdb,
     this.imdbRatingMatchEnabled = false,
     this.tmdbReadAccessToken = '',
+    this.playbackOpenTimeoutSeconds = 20,
   });
 
   final List<MediaSourceConfig> mediaSources;
@@ -377,6 +398,7 @@ class AppSettings {
   final MetadataMatchProvider metadataMatchPriority;
   final bool imdbRatingMatchEnabled;
   final String tmdbReadAccessToken;
+  final int playbackOpenTimeoutSeconds;
 
   AppSettings copyWith({
     List<MediaSourceConfig>? mediaSources,
@@ -390,6 +412,7 @@ class AppSettings {
     MetadataMatchProvider? metadataMatchPriority,
     bool? imdbRatingMatchEnabled,
     String? tmdbReadAccessToken,
+    int? playbackOpenTimeoutSeconds,
   }) {
     return AppSettings(
       mediaSources: mediaSources ?? this.mediaSources,
@@ -407,6 +430,8 @@ class AppSettings {
       imdbRatingMatchEnabled:
           imdbRatingMatchEnabled ?? this.imdbRatingMatchEnabled,
       tmdbReadAccessToken: tmdbReadAccessToken ?? this.tmdbReadAccessToken,
+      playbackOpenTimeoutSeconds:
+          playbackOpenTimeoutSeconds ?? this.playbackOpenTimeoutSeconds,
     );
   }
 
@@ -423,6 +448,7 @@ class AppSettings {
       'metadataMatchPriority': metadataMatchPriority.name,
       'imdbRatingMatchEnabled': imdbRatingMatchEnabled,
       'tmdbReadAccessToken': tmdbReadAccessToken,
+      'playbackOpenTimeoutSeconds': playbackOpenTimeoutSeconds,
     };
   }
 
@@ -473,6 +499,9 @@ class AppSettings {
       ),
       imdbRatingMatchEnabled: json['imdbRatingMatchEnabled'] as bool? ?? false,
       tmdbReadAccessToken: json['tmdbReadAccessToken'] as String? ?? '',
+      playbackOpenTimeoutSeconds:
+          ((json['playbackOpenTimeoutSeconds'] as num?)?.toInt() ?? 20)
+              .clamp(1, 600),
     );
   }
 }

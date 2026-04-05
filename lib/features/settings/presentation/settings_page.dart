@@ -10,7 +10,9 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/media_source_editor_page.dart';
 import 'package:starflow/features/settings/presentation/metadata_match_settings_page.dart';
+import 'package:starflow/features/settings/presentation/local_storage_settings_page.dart';
 import 'package:starflow/features/settings/presentation/network_storage_settings_page.dart';
+import 'package:starflow/features/settings/presentation/playback_settings_page.dart';
 import 'package:starflow/features/settings/presentation/search_provider_editor_page.dart';
 
 class SettingsPage extends ConsumerWidget {
@@ -123,6 +125,36 @@ class SettingsPage extends ConsumerWidget {
             ),
             const SizedBox(height: 18),
             SectionPanel(
+              title: '本地存储',
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('查看与清理缓存'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _openLocalStorageSettings(context),
+              ),
+            ),
+            const SizedBox(height: 18),
+            SectionPanel(
+              title: '播放',
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('最大超时时间'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('${settings.playbackOpenTimeoutSeconds}s'),
+                    const SizedBox(width: 6),
+                    const Icon(Icons.chevron_right_rounded),
+                  ],
+                ),
+                onTap: () => _openPlaybackSettings(
+                  context,
+                  settings.playbackOpenTimeoutSeconds,
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            SectionPanel(
               title: '首页模块',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -207,6 +239,27 @@ class SettingsPage extends ConsumerWidget {
     return Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
         builder: (context) => NetworkStorageSettingsPage(initial: initial),
+      ),
+    );
+  }
+
+  Future<void> _openPlaybackSettings(
+    BuildContext context,
+    int initialTimeoutSeconds,
+  ) {
+    return Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => PlaybackSettingsPage(
+          initialTimeoutSeconds: initialTimeoutSeconds,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openLocalStorageSettings(BuildContext context) {
+    return Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => const LocalStorageSettingsPage(),
       ),
     );
   }

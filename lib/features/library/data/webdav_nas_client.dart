@@ -15,6 +15,10 @@ class WebDavNasClient {
   WebDavNasClient(this._client);
 
   final http.Client _client;
+  final Map<String, Future<_ParsedNfoMetadata?>> _nfoInflight =
+      <String, Future<_ParsedNfoMetadata?>>{};
+  final Map<String, Future<List<_WebDavEntry>>> _directoryInflight =
+      <String, Future<List<_WebDavEntry>>>{};
 
   Future<List<MediaCollection>> fetchCollections(
     MediaSourceConfig source, {
@@ -52,6 +56,23 @@ class WebDavNasClient {
     String sectionName = '',
     int limit = 200,
   }) async {
+    final scannedItems = await scanLibrary(
+      source,
+      sectionId: sectionId,
+      sectionName: sectionName,
+      limit: limit,
+    );
+    return scannedItems
+        .map((item) => item.toMediaItem(source))
+        .toList(growable: false);
+  }
+
+  Future<List<WebDavScannedItem>> scanLibrary(
+    MediaSourceConfig source, {
+    String? sectionId,
+    String sectionName = '',
+    int limit = 200,
+  }) async {
     final endpoint = source.endpoint.trim();
     if (endpoint.isEmpty) {
       return const [];
@@ -66,21 +87,22 @@ class WebDavNasClient {
     final collectionName = sectionName.trim().isEmpty
         ? _displayNameFromUri(rootUri, fallback: source.name)
         : sectionName.trim();
-    final items = <MediaItem>[];
+    final pendingItems = <_PendingWebDavScannedItem>[];
     final visited = <String>{};
 
     Future<void> walk(Uri uri, int depth) async {
-      if (items.length >= limit || depth > 8 || !visited.add(uri.toString())) {
+      if (pendingItems.length >= limit ||
+          depth > 8 ||
+          !visited.add(uri.toString())) {
         return;
       }
 
       final entries = await _propfind(uri, source: source);
-      for (final entry in entries) {
-        if (items.length >= limit) {
+      final directoryEntries =
+          entries.where((entry) => !entry.isSelf).toList(growable: false);
+      for (final entry in directoryEntries) {
+        if (pendingItems.length >= limit) {
           return;
-        }
-        if (entry.isSelf) {
-          continue;
         }
         if (entry.isCollection) {
           await walk(entry.uri, depth + 1);
@@ -89,38 +111,143 @@ class WebDavNasClient {
         if (!_isPlayableVideo(entry)) {
           continue;
         }
+        final metadata = await _resolveSidecarMetadata(
+          entry,
+          siblings: directoryEntries,
+          source: source,
+        );
         final streamUrl = await _resolvePlayableUrl(entry, source: source);
         if (streamUrl.trim().isEmpty) {
           continue;
         }
-        final resourceUri = entry.uri.toString();
-        items.add(
-          MediaItem(
-            id: resourceUri,
-            title: _stripExtension(entry.name),
-            overview: '',
-            posterUrl: '',
-            year: 0,
-            durationLabel: '文件',
-            genres: const [],
-            sectionId: collectionId,
-            sectionName: collectionName,
-            sourceId: source.id,
-            sourceName: source.name,
-            sourceKind: source.kind,
-            streamUrl: streamUrl,
+        pendingItems.add(
+          _PendingWebDavScannedItem(
+            resourceId: entry.uri.toString(),
+            fileName: entry.name,
             actualAddress:
                 _relativePathForNasDisplay(entry.uri, source: source),
-            streamHeaders: _headers(source),
+            sectionId: collectionId,
+            sectionName: collectionName,
+            streamUrl: streamUrl,
+            streamHeaders: _headersForResolvedStream(source, streamUrl),
             addedAt: entry.modifiedAt ?? DateTime.now(),
+            modifiedAt: entry.modifiedAt,
+            fileSizeBytes: entry.sizeBytes,
+            metadataSeed: metadata,
+            relativeDirectories: _relativeDirectorySegmentsFromRoot(
+              fileUri: entry.uri,
+              rootUri: rootUri,
+            ),
           ),
         );
       }
     }
 
     await walk(rootUri, 0);
+    final items = (source.webDavStructureInferenceEnabled
+            ? _applyDirectoryStructureInference(pendingItems)
+            : pendingItems)
+        .map((item) => item.toScannedItem())
+        .toList(growable: false);
     items.sort((left, right) => right.addedAt.compareTo(left.addedAt));
     return items;
+  }
+
+  Future<WebDavMetadataSeed> _resolveSidecarMetadata(
+    _WebDavEntry videoEntry, {
+    required List<_WebDavEntry> siblings,
+    required MediaSourceConfig source,
+  }) async {
+    final currentDirectoryUri = _parentDirectoryUri(videoEntry.uri);
+    final parentDirectoryUri = currentDirectoryUri == null
+        ? null
+        : _parentDirectoryUri(currentDirectoryUri);
+    final grandParentDirectoryUri = parentDirectoryUri == null
+        ? null
+        : _parentDirectoryUri(parentDirectoryUri);
+
+    final parentEntries = parentDirectoryUri == null
+        ? const <_WebDavEntry>[]
+        : await _loadDirectoryEntries(parentDirectoryUri, source: source);
+    final grandParentEntries = grandParentDirectoryUri == null
+        ? const <_WebDavEntry>[]
+        : await _loadDirectoryEntries(grandParentDirectoryUri, source: source);
+
+    final primaryNfoEntry = _findBestNfoEntry(videoEntry, siblings);
+    final seasonNfoEntry = _findNamedNfoEntry(
+      siblings,
+      const ['season.nfo', 'index.nfo'],
+      excluding: primaryNfoEntry,
+    );
+    final seriesNfoEntry = _findNamedNfoEntry(
+          parentEntries,
+          const ['tvshow.nfo', 'index.nfo'],
+        ) ??
+        _findNamedNfoEntry(
+          grandParentEntries,
+          const ['tvshow.nfo', 'index.nfo'],
+        );
+
+    final primaryNfoMetadata = primaryNfoEntry == null
+        ? null
+        : await _loadNfoMetadata(primaryNfoEntry, source: source);
+    final seasonNfoMetadata = seasonNfoEntry == null
+        ? null
+        : await _loadNfoMetadata(seasonNfoEntry, source: source);
+    final seriesNfoMetadata = seriesNfoEntry == null
+        ? null
+        : await _loadNfoMetadata(seriesNfoEntry, source: source);
+    final nfoMetadata = _mergeNfoMetadata(
+      primary: primaryNfoMetadata,
+      secondary: _mergeNfoMetadata(
+        primary: seasonNfoMetadata,
+        secondary: seriesNfoMetadata,
+      ),
+    );
+
+    final localPosterEntry = _findBestPosterEntry(videoEntry, siblings) ??
+        _findSeasonPosterEntry(
+          videoEntry,
+          siblings,
+          seasonHint: nfoMetadata?.seasonNumber,
+        ) ??
+        _findPosterByRole(parentEntries) ??
+        _findPosterByRole(grandParentEntries);
+
+    String posterUrl = '';
+    Map<String, String> posterHeaders = const {};
+    if (localPosterEntry != null) {
+      posterUrl = localPosterEntry.uri.toString();
+      posterHeaders = _headers(source);
+    } else if (nfoMetadata?.thumbUrl.trim().isNotEmpty == true) {
+      posterUrl = nfoMetadata!.thumbUrl.trim();
+      final posterUri = Uri.tryParse(posterUrl);
+      if (posterUri != null &&
+          _shouldUseSourceHeadersForUri(posterUri, source)) {
+        posterHeaders = _headers(source);
+      }
+    }
+
+    final hasSidecarMatch = nfoMetadata != null || localPosterEntry != null;
+    return WebDavMetadataSeed(
+      title: nfoMetadata?.title.trim().isNotEmpty == true
+          ? nfoMetadata!.title.trim()
+          : _stripExtension(videoEntry.name),
+      overview: nfoMetadata?.overview ?? '',
+      posterUrl: posterUrl,
+      posterHeaders: posterHeaders,
+      year: nfoMetadata?.year ?? 0,
+      durationLabel: nfoMetadata?.durationLabel ?? '文件',
+      genres: nfoMetadata?.genres ?? const [],
+      directors: nfoMetadata?.directors ?? const [],
+      actors: nfoMetadata?.actors ?? const [],
+      itemType: nfoMetadata?.itemType ?? '',
+      seasonNumber: nfoMetadata?.seasonNumber,
+      episodeNumber: nfoMetadata?.episodeNumber,
+      imdbId: nfoMetadata?.imdbId ?? '',
+      tmdbId: nfoMetadata?.tmdbId ?? '',
+      hasSidecarMatch: hasSidecarMatch,
+    );
   }
 
   Future<List<_WebDavEntry>> _propfind(
@@ -171,6 +298,8 @@ class WebDavNasClient {
           .any((element) => element.name.local == 'collection');
       final displayName = _childText(prop, 'displayname');
       final contentType = _childText(prop, 'getcontenttype');
+      final contentLength =
+          _tryParseInt(_childText(prop, 'getcontentlength')) ?? 0;
       final modifiedAt = _parseModifiedAt(_childText(prop, 'getlastmodified'));
 
       return _WebDavEntry(
@@ -180,6 +309,7 @@ class WebDavNasClient {
             : displayName.trim(),
         isCollection: isCollection,
         contentType: contentType.trim(),
+        sizeBytes: contentLength,
         modifiedAt: modifiedAt,
         isSelf: _normalizeUri(resolvedUri) == normalizedSelf,
       );
@@ -210,56 +340,37 @@ class WebDavNasClient {
     return source.endpoint.trim();
   }
 
-  static String _safeDecodePathSegment(String segment) {
-    try {
-      return Uri.decodeComponent(segment);
-    } catch (_) {
-      return segment;
-    }
-  }
-
-  /// 详情页「地址」用：去掉与 [source.endpoint] 相同的 path 前缀后的相对路径（URL 解码）。
+  /// 详情页「地址」用：去掉与 [source.endpoint] 相同的前缀（避免 `/dav` 误匹配 `/dav2`）。
   String _relativePathForNasDisplay(
     Uri resource, {
     required MediaSourceConfig source,
   }) {
-    try {
-      final baseUri = Uri.tryParse(source.endpoint.trim());
-      if (baseUri == null || !baseUri.hasScheme) {
-        return resource.toString();
+    final base = source.endpoint.trim();
+    final full = resource.toString();
+    final baseOk = base.isNotEmpty &&
+        full.startsWith(base) &&
+        (full.length == base.length ||
+            base.endsWith('/') ||
+            '/?#'.contains(full[base.length]));
+    if (baseOk) {
+      var tail = full.substring(base.length);
+      if (tail.startsWith('/')) {
+        tail = tail.substring(1);
       }
-
-      if (resource.scheme.toLowerCase() != baseUri.scheme.toLowerCase() ||
-          resource.host.toLowerCase() != baseUri.host.toLowerCase() ||
-          resource.port != baseUri.port) {
-        final path = resource.path;
-        return path.isNotEmpty
-            ? path.replaceFirst(RegExp(r'^/'), '')
-            : resource.toString();
+      if (tail.isEmpty) {
+        return full;
       }
-
-      List<String> decodedSegments(Uri u) => u.pathSegments
-          .where((s) => s.isNotEmpty)
-          .map(_safeDecodePathSegment)
-          .toList();
-
-      final baseSegs = decodedSegments(baseUri);
-      final resSegs = decodedSegments(resource);
-      var i = 0;
-      final minLen =
-          baseSegs.length < resSegs.length ? baseSegs.length : resSegs.length;
-      while (i < minLen && baseSegs[i] == resSegs[i]) {
-        i++;
-      }
-      final tail = resSegs.sublist(i).join('/');
-      if (tail.isNotEmpty) {
+      try {
+        return Uri.decodeComponent(tail);
+      } catch (_) {
         return tail;
       }
-      final path = resource.path.replaceFirst(RegExp(r'^/'), '');
-      return path.isNotEmpty ? path : resource.toString();
-    } catch (_) {
-      return resource.toString();
     }
+    var path = resource.path;
+    if (path.startsWith('/')) {
+      path = path.substring(1);
+    }
+    return path.isNotEmpty ? path : full;
   }
 
   bool _isPlayableVideo(_WebDavEntry entry) {
@@ -319,6 +430,320 @@ class WebDavNasClient {
     return '';
   }
 
+  _WebDavEntry? _findBestNfoEntry(
+    _WebDavEntry videoEntry,
+    List<_WebDavEntry> siblings,
+  ) {
+    final baseName = _stripExtension(videoEntry.name).toLowerCase();
+    final loweredEntries = siblings
+        .where((entry) => !entry.isCollection)
+        .where((entry) => entry.name.toLowerCase().endsWith('.nfo'))
+        .toList(growable: false);
+    for (final preferredName in [
+      '$baseName.nfo',
+      'movie.nfo',
+      'tvshow.nfo',
+      'index.nfo',
+    ]) {
+      for (final entry in loweredEntries) {
+        if (entry.name.toLowerCase() == preferredName) {
+          return entry;
+        }
+      }
+    }
+    return null;
+  }
+
+  _WebDavEntry? _findNamedNfoEntry(
+    List<_WebDavEntry> entries,
+    List<String> preferredNames, {
+    _WebDavEntry? excluding,
+  }) {
+    final loweredEntries = entries
+        .where((entry) => !entry.isCollection)
+        .where((entry) => entry.name.toLowerCase().endsWith('.nfo'))
+        .toList(growable: false);
+    for (final preferredName in preferredNames) {
+      for (final entry in loweredEntries) {
+        if (excluding != null && entry.uri == excluding.uri) {
+          continue;
+        }
+        if (entry.name.toLowerCase() == preferredName.toLowerCase()) {
+          return entry;
+        }
+      }
+    }
+    return null;
+  }
+
+  _WebDavEntry? _findBestPosterEntry(
+    _WebDavEntry videoEntry,
+    List<_WebDavEntry> siblings,
+  ) {
+    final baseName = _stripExtension(videoEntry.name).toLowerCase();
+    final imageEntries = siblings
+        .where((entry) => !entry.isCollection)
+        .where(_isLikelyPosterImage)
+        .toList(growable: false);
+    for (final preferredName in [
+      '$baseName-poster.jpg',
+      '$baseName-poster.jpeg',
+      '$baseName-poster.png',
+      '$baseName.jpg',
+      '$baseName.jpeg',
+      '$baseName.png',
+      'poster.jpg',
+      'poster.jpeg',
+      'poster.png',
+      'folder.jpg',
+      'folder.jpeg',
+      'folder.png',
+      'cover.jpg',
+      'cover.jpeg',
+      'cover.png',
+    ]) {
+      for (final entry in imageEntries) {
+        if (entry.name.toLowerCase() == preferredName) {
+          return entry;
+        }
+      }
+    }
+    return null;
+  }
+
+  _WebDavEntry? _findSeasonPosterEntry(
+    _WebDavEntry videoEntry,
+    List<_WebDavEntry> siblings, {
+    int? seasonHint,
+  }) {
+    if (seasonHint == null || seasonHint < 0) {
+      return null;
+    }
+    final imageEntries = siblings
+        .where((entry) => !entry.isCollection)
+        .where(_isLikelyPosterImage)
+        .toList(growable: false);
+    final preferredNames = <String>[
+      if (seasonHint == 0) ...[
+        'season-specials-poster.jpg',
+        'season-specials-poster.jpeg',
+        'season-specials-poster.png',
+      ],
+      'season${seasonHint.toString().padLeft(2, '0')}-poster.jpg',
+      'season${seasonHint.toString().padLeft(2, '0')}-poster.jpeg',
+      'season${seasonHint.toString().padLeft(2, '0')}-poster.png',
+    ];
+    for (final preferredName in preferredNames) {
+      for (final entry in imageEntries) {
+        if (entry.name.toLowerCase() == preferredName) {
+          return entry;
+        }
+      }
+    }
+    return null;
+  }
+
+  _WebDavEntry? _findPosterByRole(List<_WebDavEntry> entries) {
+    final imageEntries = entries
+        .where((entry) => !entry.isCollection)
+        .where(_isLikelyPosterImage)
+        .toList(growable: false);
+    for (final preferredName in const [
+      'poster.jpg',
+      'poster.jpeg',
+      'poster.png',
+      'folder.jpg',
+      'folder.jpeg',
+      'folder.png',
+      'cover.jpg',
+      'cover.jpeg',
+      'cover.png',
+    ]) {
+      for (final entry in imageEntries) {
+        if (entry.name.toLowerCase() == preferredName) {
+          return entry;
+        }
+      }
+    }
+    return null;
+  }
+
+  bool _isLikelyPosterImage(_WebDavEntry entry) {
+    final type = entry.contentType.toLowerCase();
+    if (type.startsWith('image/')) {
+      return true;
+    }
+    final path = entry.uri.path.toLowerCase();
+    return path.endsWith('.jpg') ||
+        path.endsWith('.jpeg') ||
+        path.endsWith('.png') ||
+        path.endsWith('.webp');
+  }
+
+  Future<_ParsedNfoMetadata?> _loadNfoMetadata(
+    _WebDavEntry entry, {
+    required MediaSourceConfig source,
+  }) {
+    final key = entry.uri.toString();
+    final inflight = _nfoInflight[key];
+    if (inflight != null) {
+      return inflight;
+    }
+
+    final future = _loadNfoMetadataUncached(entry, source: source);
+    _nfoInflight[key] = future;
+    future.whenComplete(() {
+      _nfoInflight.remove(key);
+    });
+    return future;
+  }
+
+  Future<_ParsedNfoMetadata?> _loadNfoMetadataUncached(
+    _WebDavEntry entry, {
+    required MediaSourceConfig source,
+  }) async {
+    final response = await _client.get(entry.uri, headers: _headers(source));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      return null;
+    }
+    final body = utf8.decode(response.bodyBytes, allowMalformed: true).trim();
+    if (body.isEmpty) {
+      return null;
+    }
+
+    try {
+      final document = XmlDocument.parse(body);
+      final root = document.rootElement;
+      final title = _xmlSingleText(root, 'title');
+      final plot = _xmlSingleText(root, 'plot');
+      final outline = _xmlSingleText(root, 'outline');
+      final year = _parseNfoYear(
+        _xmlSingleText(root, 'year'),
+        fallbackDateText: _xmlSingleText(root, 'premiered'),
+      );
+      final runtime = _formatRuntimeLabel(
+        _xmlSingleText(root, 'runtime'),
+        durationSeconds:
+            _tryParseInt(_xmlSingleText(root, 'durationinseconds')),
+      );
+      final genres = _xmlTexts(root, 'genre');
+      final directors = _xmlTexts(root, 'director');
+      final actors = root
+          .findElements('actor')
+          .map((element) => _xmlSingleText(element, 'name'))
+          .where((item) => item.trim().isNotEmpty)
+          .toList(growable: false);
+      final imdbId = _resolveNfoExternalId(
+        root,
+        type: 'imdb',
+        fallbackTag: 'imdbid',
+      );
+      final tmdbId = _resolveNfoExternalId(
+        root,
+        type: 'tmdb',
+        fallbackTag: 'tmdbid',
+      );
+      final thumbUrl = _resolveThumbUrl(
+        entry.uri,
+        _xmlSingleText(root, 'thumb'),
+      );
+      return _ParsedNfoMetadata(
+        title: title,
+        overview: plot.trim().isNotEmpty ? plot : outline,
+        thumbUrl: thumbUrl,
+        year: year,
+        durationLabel: runtime,
+        genres: genres,
+        directors: directors,
+        actors: actors,
+        itemType: _resolveNfoItemType(root.name.local),
+        seasonNumber: _tryParseInt(_xmlSingleText(root, 'season')),
+        episodeNumber: _tryParseInt(_xmlSingleText(root, 'episode')),
+        imdbId: imdbId,
+        tmdbId: tmdbId,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<_WebDavEntry>> _loadDirectoryEntries(
+    Uri uri, {
+    required MediaSourceConfig source,
+  }) {
+    final key = uri.toString();
+    final inflight = _directoryInflight[key];
+    if (inflight != null) {
+      return inflight;
+    }
+    final future = _propfind(uri, source: source).catchError((_) {
+      return const <_WebDavEntry>[];
+    });
+    _directoryInflight[key] = future;
+    future.whenComplete(() {
+      _directoryInflight.remove(key);
+    });
+    return future;
+  }
+
+  Uri? _parentDirectoryUri(Uri uri) {
+    final segments = uri.pathSegments.toList(growable: true);
+    while (segments.isNotEmpty && segments.last.isEmpty) {
+      segments.removeLast();
+    }
+    if (segments.isNotEmpty) {
+      segments.removeLast();
+    }
+    if (segments.isEmpty) {
+      return null;
+    }
+    return uri.replace(
+      pathSegments: [...segments, ''],
+      query: null,
+      fragment: null,
+    );
+  }
+
+  _ParsedNfoMetadata? _mergeNfoMetadata({
+    required _ParsedNfoMetadata? primary,
+    required _ParsedNfoMetadata? secondary,
+  }) {
+    if (primary == null) {
+      return secondary;
+    }
+    if (secondary == null) {
+      return primary;
+    }
+    return _ParsedNfoMetadata(
+      title: primary.title.trim().isNotEmpty ? primary.title : secondary.title,
+      overview: primary.overview.trim().isNotEmpty
+          ? primary.overview
+          : secondary.overview,
+      thumbUrl: primary.thumbUrl.trim().isNotEmpty
+          ? primary.thumbUrl
+          : secondary.thumbUrl,
+      year: primary.year > 0 ? primary.year : secondary.year,
+      durationLabel: primary.durationLabel.trim().isNotEmpty &&
+              primary.durationLabel.trim() != '文件'
+          ? primary.durationLabel
+          : secondary.durationLabel,
+      genres: primary.genres.isNotEmpty ? primary.genres : secondary.genres,
+      directors: primary.directors.isNotEmpty
+          ? primary.directors
+          : secondary.directors,
+      actors: primary.actors.isNotEmpty ? primary.actors : secondary.actors,
+      itemType: primary.itemType.trim().isNotEmpty
+          ? primary.itemType
+          : secondary.itemType,
+      seasonNumber: primary.seasonNumber ?? secondary.seasonNumber,
+      episodeNumber: primary.episodeNumber ?? secondary.episodeNumber,
+      imdbId:
+          primary.imdbId.trim().isNotEmpty ? primary.imdbId : secondary.imdbId,
+      tmdbId:
+          primary.tmdbId.trim().isNotEmpty ? primary.tmdbId : secondary.tmdbId,
+    );
+  }
+
   Uri _resolveHref(Uri requestUri, String href) {
     final trimmed = href.trim();
     if (trimmed.isEmpty) {
@@ -350,7 +775,12 @@ class WebDavNasClient {
     if (segments.isEmpty) {
       return fallback;
     }
-    return _safeDecodePathSegment(segments.last);
+    final raw = segments.last;
+    try {
+      return Uri.decodeComponent(raw);
+    } catch (_) {
+      return raw;
+    }
   }
 
   String _normalizeUri(Uri uri) {
@@ -431,6 +861,324 @@ class WebDavNasClient {
     }
     return fileName.substring(0, dotIndex);
   }
+
+  String _xmlSingleText(XmlElement node, String localName) {
+    final match = node.children.whereType<XmlElement>().firstWhere(
+          (element) => element.name.local == localName,
+          orElse: () => XmlElement(XmlName(localName)),
+        );
+    return match.innerText.trim();
+  }
+
+  List<String> _xmlTexts(XmlElement node, String localName) {
+    return node.children
+        .whereType<XmlElement>()
+        .where((element) => element.name.local == localName)
+        .map((element) => element.innerText.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  int _parseNfoYear(String raw, {String fallbackDateText = ''}) {
+    final parsed = _tryParseInt(raw);
+    if (parsed != null && parsed > 0) {
+      return parsed;
+    }
+    final match = RegExp(r'(\d{4})').firstMatch(fallbackDateText);
+    return match == null ? 0 : int.parse(match.group(1)!);
+  }
+
+  int? _tryParseInt(String raw) {
+    return int.tryParse(raw.trim());
+  }
+
+  String _formatRuntimeLabel(String raw, {int? durationSeconds}) {
+    final minutes = int.tryParse(raw.trim());
+    if (minutes != null && minutes > 0) {
+      return '$minutes分钟';
+    }
+    final resolvedSeconds = durationSeconds ?? 0;
+    if (resolvedSeconds > 0) {
+      final roundedMinutes = (resolvedSeconds / 60).round();
+      if (roundedMinutes > 0) {
+        return '$roundedMinutes分钟';
+      }
+    }
+    return '文件';
+  }
+
+  String _resolveNfoExternalId(
+    XmlElement root, {
+    required String type,
+    required String fallbackTag,
+  }) {
+    for (final element in root.children.whereType<XmlElement>()) {
+      if (element.name.local != 'uniqueid') {
+        continue;
+      }
+      final idType = element.getAttribute('type')?.trim().toLowerCase() ?? '';
+      if (idType == type) {
+        final value = element.innerText.trim();
+        if (value.isNotEmpty) {
+          return value;
+        }
+      }
+    }
+    return _xmlSingleText(root, fallbackTag);
+  }
+
+  String _resolveThumbUrl(Uri nfoUri, String rawThumb) {
+    final trimmed = rawThumb.trim();
+    if (trimmed.isEmpty) {
+      return '';
+    }
+    final parsed = Uri.tryParse(trimmed);
+    if (parsed != null && parsed.hasScheme) {
+      return trimmed;
+    }
+    return nfoUri.resolve(trimmed).toString();
+  }
+
+  String _resolveNfoItemType(String rawRootName) {
+    switch (rawRootName.trim().toLowerCase()) {
+      case 'movie':
+        return 'movie';
+      case 'tvshow':
+        return 'series';
+      case 'episodedetails':
+        return 'episode';
+      default:
+        return '';
+    }
+  }
+
+  bool _shouldUseSourceHeadersForUri(Uri uri, MediaSourceConfig source) {
+    final endpoint = Uri.tryParse(source.endpoint.trim());
+    if (endpoint == null) {
+      return false;
+    }
+    return uri.scheme == endpoint.scheme &&
+        uri.host == endpoint.host &&
+        uri.port == endpoint.port;
+  }
+
+  Map<String, String> _headersForResolvedStream(
+    MediaSourceConfig source,
+    String streamUrl,
+  ) {
+    final resolvedUri = Uri.tryParse(streamUrl.trim());
+    if (resolvedUri == null) {
+      return const {};
+    }
+    if (_shouldUseSourceHeadersForUri(resolvedUri, source)) {
+      return _headers(source);
+    }
+    return const {};
+  }
+
+  List<_PendingWebDavScannedItem> _applyDirectoryStructureInference(
+    List<_PendingWebDavScannedItem> items,
+  ) {
+    if (items.isEmpty) {
+      return items;
+    }
+
+    final filesByDirectory = <String, List<_PendingWebDavScannedItem>>{};
+    final childVideoCountsByDirectory = <String, Map<String, int>>{};
+    for (final item in items) {
+      final directoryKey = _segmentsKey(item.relativeDirectories);
+      filesByDirectory.putIfAbsent(directoryKey, () => []).add(item);
+      for (var depth = 0; depth < item.relativeDirectories.length; depth++) {
+        final parentKey = _segmentsKey(item.relativeDirectories.take(depth));
+        final childName = item.relativeDirectories[depth];
+        final counts = childVideoCountsByDirectory.putIfAbsent(
+          parentKey,
+          () => <String, int>{},
+        );
+        counts[childName] = (counts[childName] ?? 0) + 1;
+      }
+    }
+
+    bool isSeriesRoot(String directoryKey) {
+      final directVideoCount = filesByDirectory[directoryKey]?.length ?? 0;
+      final childVideoCounts =
+          childVideoCountsByDirectory[directoryKey] ?? const <String, int>{};
+      if (childVideoCounts.isEmpty) {
+        return false;
+      }
+      if (directVideoCount > 0) {
+        return true;
+      }
+      final multiEpisodeChildCount =
+          childVideoCounts.values.where((count) => count >= 2).length;
+      return multiEpisodeChildCount >= 2;
+    }
+
+    final seriesRootKeys = <String>{
+      for (final key in childVideoCountsByDirectory.keys)
+        if (isSeriesRoot(key)) key,
+    };
+    final seriesRootForResource = <String, String>{};
+    for (final item in items) {
+      for (var length = item.relativeDirectories.length;
+          length >= 0;
+          length--) {
+        final candidateKey =
+            _segmentsKey(item.relativeDirectories.take(length));
+        if (seriesRootKeys.contains(candidateKey)) {
+          seriesRootForResource[item.resourceId] = candidateKey;
+          break;
+        }
+      }
+    }
+
+    final nextItems = <_PendingWebDavScannedItem>[];
+    final episodeItemsByGroup = <String, List<_PendingWebDavScannedItem>>{};
+    final seasonOrderByRoot = <String, List<String>>{};
+
+    for (final item in items) {
+      final seriesRootKey = seriesRootForResource[item.resourceId];
+      final seed = item.metadataSeed;
+      if (seriesRootKey != null) {
+        final rootDepth = _segmentsFromKey(seriesRootKey).length;
+        final seasonGroupKey = item.relativeDirectories.length == rootDepth
+            ? _directSeasonGroupKey
+            : item.relativeDirectories[rootDepth];
+        final seasonOrder = seasonOrderByRoot.putIfAbsent(
+          seriesRootKey,
+          () => <String>[],
+        );
+        if (!seasonOrder.contains(seasonGroupKey)) {
+          seasonOrder.add(seasonGroupKey);
+        }
+        final nextSeed = seed.copyWith(
+          itemType: seed.itemType.trim().isEmpty ? 'episode' : null,
+        );
+        final nextItem = item.copyWith(metadataSeed: nextSeed);
+        episodeItemsByGroup
+            .putIfAbsent('$seriesRootKey::$seasonGroupKey', () => [])
+            .add(nextItem);
+        nextItems.add(nextItem);
+        continue;
+      }
+
+      final parentDirectoryKey = _segmentsKey(item.relativeDirectories);
+      final directVideoCount =
+          filesByDirectory[parentDirectoryKey]?.length ?? 0;
+      final childDirectoryCount =
+          childVideoCountsByDirectory[parentDirectoryKey]?.length ?? 0;
+      if (seed.itemType.trim().isEmpty &&
+          directVideoCount == 1 &&
+          childDirectoryCount == 0) {
+        nextItems.add(
+          item.copyWith(metadataSeed: seed.copyWith(itemType: 'movie')),
+        );
+      } else {
+        nextItems.add(item);
+      }
+    }
+
+    final seasonNumberByGroup = <String, int>{};
+    for (final entry in seasonOrderByRoot.entries) {
+      final orderedGroups = <String>[
+        if (entry.value.contains(_directSeasonGroupKey)) _directSeasonGroupKey,
+        ...entry.value
+            .where((group) => group != _directSeasonGroupKey)
+            .toList(growable: false)
+          ..sort((left, right) => left.toLowerCase().compareTo(
+                right.toLowerCase(),
+              )),
+      ];
+      for (var index = 0; index < orderedGroups.length; index++) {
+        seasonNumberByGroup['${entry.key}::${orderedGroups[index]}'] =
+            index + 1;
+      }
+    }
+
+    final episodeOverrides = <String, WebDavMetadataSeed>{};
+    for (final entry in episodeItemsByGroup.entries) {
+      final seasonNumber = seasonNumberByGroup[entry.key];
+      final orderedEpisodes = [...entry.value]..sort(
+          (left, right) => left.actualAddress.toLowerCase().compareTo(
+                right.actualAddress.toLowerCase(),
+              ),
+        );
+      for (var index = 0; index < orderedEpisodes.length; index++) {
+        final item = orderedEpisodes[index];
+        episodeOverrides[item.resourceId] = item.metadataSeed.copyWith(
+          seasonNumber:
+              item.metadataSeed.seasonNumber ?? (seasonNumber ?? index + 1),
+          episodeNumber: item.metadataSeed.episodeNumber ?? index + 1,
+        );
+      }
+    }
+
+    return nextItems
+        .map(
+          (item) => item.copyWith(
+            metadataSeed:
+                episodeOverrides[item.resourceId] ?? item.metadataSeed,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  List<String> _relativeDirectorySegmentsFromRoot({
+    required Uri fileUri,
+    required Uri rootUri,
+  }) {
+    final rootSegments = rootUri.pathSegments
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    final fileSegments = fileUri.pathSegments
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
+
+    var index = 0;
+    while (index < rootSegments.length &&
+        index < fileSegments.length &&
+        rootSegments[index] == fileSegments[index]) {
+      index += 1;
+    }
+    if (index >= fileSegments.length) {
+      return const [];
+    }
+    final relativeSegments = fileSegments.skip(index).toList(growable: false);
+    if (relativeSegments.length <= 1) {
+      return const [];
+    }
+    return relativeSegments
+        .take(relativeSegments.length - 1)
+        .map(_decodePathSegment)
+        .toList(growable: false);
+  }
+
+  String _decodePathSegment(String raw) {
+    try {
+      return Uri.decodeComponent(raw);
+    } catch (_) {
+      return raw;
+    }
+  }
+
+  String _segmentsKey(Iterable<String> segments) {
+    return segments
+        .map((segment) => segment.trim())
+        .where((segment) => segment.isNotEmpty)
+        .join('/');
+  }
+
+  List<String> _segmentsFromKey(String key) {
+    final trimmed = key.trim();
+    if (trimmed.isEmpty) {
+      return const [];
+    }
+    return trimmed
+        .split('/')
+        .map((segment) => segment.trim())
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
+  }
 }
 
 class WebDavNasException implements Exception {
@@ -448,6 +1196,7 @@ class _WebDavEntry {
     required this.name,
     required this.isCollection,
     required this.contentType,
+    required this.sizeBytes,
     required this.modifiedAt,
     required this.isSelf,
   });
@@ -456,6 +1205,245 @@ class _WebDavEntry {
   final String name;
   final bool isCollection;
   final String contentType;
+  final int sizeBytes;
   final DateTime? modifiedAt;
   final bool isSelf;
+}
+
+class WebDavMetadataSeed {
+  const WebDavMetadataSeed({
+    required this.title,
+    required this.overview,
+    required this.posterUrl,
+    required this.posterHeaders,
+    required this.year,
+    required this.durationLabel,
+    required this.genres,
+    required this.directors,
+    required this.actors,
+    required this.itemType,
+    required this.seasonNumber,
+    required this.episodeNumber,
+    required this.imdbId,
+    required this.tmdbId,
+    required this.hasSidecarMatch,
+  });
+
+  final String title;
+  final String overview;
+  final String posterUrl;
+  final Map<String, String> posterHeaders;
+  final int year;
+  final String durationLabel;
+  final List<String> genres;
+  final List<String> directors;
+  final List<String> actors;
+  final String itemType;
+  final int? seasonNumber;
+  final int? episodeNumber;
+  final String imdbId;
+  final String tmdbId;
+  final bool hasSidecarMatch;
+
+  WebDavMetadataSeed copyWith({
+    String? title,
+    String? overview,
+    String? posterUrl,
+    Map<String, String>? posterHeaders,
+    int? year,
+    String? durationLabel,
+    List<String>? genres,
+    List<String>? directors,
+    List<String>? actors,
+    String? itemType,
+    int? seasonNumber,
+    int? episodeNumber,
+    String? imdbId,
+    String? tmdbId,
+    bool? hasSidecarMatch,
+  }) {
+    return WebDavMetadataSeed(
+      title: title ?? this.title,
+      overview: overview ?? this.overview,
+      posterUrl: posterUrl ?? this.posterUrl,
+      posterHeaders: posterHeaders ?? this.posterHeaders,
+      year: year ?? this.year,
+      durationLabel: durationLabel ?? this.durationLabel,
+      genres: genres ?? this.genres,
+      directors: directors ?? this.directors,
+      actors: actors ?? this.actors,
+      itemType: itemType ?? this.itemType,
+      seasonNumber: seasonNumber ?? this.seasonNumber,
+      episodeNumber: episodeNumber ?? this.episodeNumber,
+      imdbId: imdbId ?? this.imdbId,
+      tmdbId: tmdbId ?? this.tmdbId,
+      hasSidecarMatch: hasSidecarMatch ?? this.hasSidecarMatch,
+    );
+  }
+}
+
+class WebDavScannedItem {
+  const WebDavScannedItem({
+    required this.resourceId,
+    required this.fileName,
+    required this.actualAddress,
+    required this.sectionId,
+    required this.sectionName,
+    required this.streamUrl,
+    required this.streamHeaders,
+    required this.addedAt,
+    required this.modifiedAt,
+    required this.fileSizeBytes,
+    required this.metadataSeed,
+  });
+
+  final String resourceId;
+  final String fileName;
+  final String actualAddress;
+  final String sectionId;
+  final String sectionName;
+  final String streamUrl;
+  final Map<String, String> streamHeaders;
+  final DateTime addedAt;
+  final DateTime? modifiedAt;
+  final int fileSizeBytes;
+  final WebDavMetadataSeed metadataSeed;
+
+  MediaItem toMediaItem(MediaSourceConfig source) {
+    return MediaItem(
+      id: resourceId,
+      title: metadataSeed.title.trim().isEmpty
+          ? _fallbackTitle(fileName)
+          : metadataSeed.title,
+      overview: metadataSeed.overview,
+      posterUrl: metadataSeed.posterUrl,
+      posterHeaders: metadataSeed.posterHeaders,
+      year: metadataSeed.year,
+      durationLabel: metadataSeed.durationLabel,
+      genres: metadataSeed.genres,
+      directors: metadataSeed.directors,
+      actors: metadataSeed.actors,
+      itemType: metadataSeed.itemType,
+      sectionId: sectionId,
+      sectionName: sectionName,
+      sourceId: source.id,
+      sourceName: source.name,
+      sourceKind: source.kind,
+      streamUrl: streamUrl,
+      actualAddress: actualAddress,
+      streamHeaders: streamHeaders,
+      seasonNumber: metadataSeed.seasonNumber,
+      episodeNumber: metadataSeed.episodeNumber,
+      imdbId: metadataSeed.imdbId,
+      tmdbId: metadataSeed.tmdbId,
+      addedAt: addedAt,
+    );
+  }
+
+  static String _fallbackTitle(String fileName) {
+    final dotIndex = fileName.lastIndexOf('.');
+    if (dotIndex <= 0) {
+      return fileName;
+    }
+    return fileName.substring(0, dotIndex);
+  }
+}
+
+class _ParsedNfoMetadata {
+  const _ParsedNfoMetadata({
+    required this.title,
+    required this.overview,
+    required this.thumbUrl,
+    required this.year,
+    required this.durationLabel,
+    required this.genres,
+    required this.directors,
+    required this.actors,
+    required this.itemType,
+    required this.seasonNumber,
+    required this.episodeNumber,
+    required this.imdbId,
+    required this.tmdbId,
+  });
+
+  final String title;
+  final String overview;
+  final String thumbUrl;
+  final int year;
+  final String durationLabel;
+  final List<String> genres;
+  final List<String> directors;
+  final List<String> actors;
+  final String itemType;
+  final int? seasonNumber;
+  final int? episodeNumber;
+  final String imdbId;
+  final String tmdbId;
+}
+
+const String _directSeasonGroupKey = '__root__';
+
+class _PendingWebDavScannedItem {
+  const _PendingWebDavScannedItem({
+    required this.resourceId,
+    required this.fileName,
+    required this.actualAddress,
+    required this.sectionId,
+    required this.sectionName,
+    required this.streamUrl,
+    required this.streamHeaders,
+    required this.addedAt,
+    required this.modifiedAt,
+    required this.fileSizeBytes,
+    required this.metadataSeed,
+    required this.relativeDirectories,
+  });
+
+  final String resourceId;
+  final String fileName;
+  final String actualAddress;
+  final String sectionId;
+  final String sectionName;
+  final String streamUrl;
+  final Map<String, String> streamHeaders;
+  final DateTime addedAt;
+  final DateTime? modifiedAt;
+  final int fileSizeBytes;
+  final WebDavMetadataSeed metadataSeed;
+  final List<String> relativeDirectories;
+
+  _PendingWebDavScannedItem copyWith({
+    WebDavMetadataSeed? metadataSeed,
+  }) {
+    return _PendingWebDavScannedItem(
+      resourceId: resourceId,
+      fileName: fileName,
+      actualAddress: actualAddress,
+      sectionId: sectionId,
+      sectionName: sectionName,
+      streamUrl: streamUrl,
+      streamHeaders: streamHeaders,
+      addedAt: addedAt,
+      modifiedAt: modifiedAt,
+      fileSizeBytes: fileSizeBytes,
+      metadataSeed: metadataSeed ?? this.metadataSeed,
+      relativeDirectories: relativeDirectories,
+    );
+  }
+
+  WebDavScannedItem toScannedItem() {
+    return WebDavScannedItem(
+      resourceId: resourceId,
+      fileName: fileName,
+      actualAddress: actualAddress,
+      sectionId: sectionId,
+      sectionName: sectionName,
+      streamUrl: streamUrl,
+      streamHeaders: streamHeaders,
+      addedAt: addedAt,
+      modifiedAt: modifiedAt,
+      fileSizeBytes: fileSizeBytes,
+      metadataSeed: metadataSeed,
+    );
+  }
 }

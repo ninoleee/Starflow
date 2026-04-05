@@ -247,6 +247,202 @@ void main() {
       expect(results.filteredCount, 1);
     });
 
+    test('searchOnline keeps 115 results for schemeless 115 url', () async {
+      final repository = AppSearchRepository(
+        PanSouApiClient(
+          MockClient((request) async {
+            return http.Response(
+              '''
+              {
+                "code": 0,
+                "data": {
+                  "merged_by_type": {
+                    "115": [
+                      {"url":"115.com/s/share115","note":"115资源","password":""}
+                    ],
+                    "baidu": [
+                      {"url":"https://pan.baidu.com/s/baidu-item","note":"百度资源","password":""}
+                    ]
+                  }
+                }
+              }
+              ''',
+              200,
+              headers: const {'content-type': 'application/json'},
+            );
+          }),
+        ),
+        CloudSaverApiClient(
+          MockClient((request) async => http.Response('{}', 200)),
+        ),
+        const _FakeMediaRepository(items: []),
+      );
+
+      final results = await repository.searchOnline(
+        '测试资源',
+        provider: const SearchProviderConfig(
+          id: 'pansou-api',
+          name: 'PanSou',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'https://so.252035.xyz',
+          enabled: true,
+          allowedCloudTypes: ['115'],
+        ),
+      );
+
+      expect(results.items, hasLength(1));
+      expect(results.items.single.resourceUrl, '115.com/s/share115');
+      expect(results.filteredCount, 1);
+    });
+
+    test('searchOnline keeps 115 results for anxia url', () async {
+      final repository = AppSearchRepository(
+        PanSouApiClient(
+          MockClient((request) async {
+            return http.Response(
+              '''
+              {
+                "code": 0,
+                "data": {
+                  "merged_by_type": {
+                    "115": [
+                      {"url":"https://anxia.com/s/share115","note":"115资源","password":""}
+                    ],
+                    "quark": [
+                      {"url":"https://pan.quark.cn/s/quark-item","note":"夸克资源","password":""}
+                    ]
+                  }
+                }
+              }
+              ''',
+              200,
+              headers: const {'content-type': 'application/json'},
+            );
+          }),
+        ),
+        CloudSaverApiClient(
+          MockClient((request) async => http.Response('{}', 200)),
+        ),
+        const _FakeMediaRepository(items: []),
+      );
+
+      final results = await repository.searchOnline(
+        '测试资源',
+        provider: const SearchProviderConfig(
+          id: 'pansou-api',
+          name: 'PanSou',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'https://so.252035.xyz',
+          enabled: true,
+          allowedCloudTypes: ['115'],
+        ),
+      );
+
+      expect(results.items, hasLength(1));
+      expect(results.items.single.resourceUrl, 'https://anxia.com/s/share115');
+      expect(results.filteredCount, 1);
+    });
+
+    test('searchOnline strong match keeps titles containing query characters',
+        () async {
+      final repository = AppSearchRepository(
+        PanSouApiClient(
+          MockClient((request) async {
+            return http.Response(
+              '''
+              {
+                "code": 0,
+                "data": {
+                  "merged_by_type": {
+                    "quark": [
+                      {"url":"https://pan.quark.cn/s/full-match","note":"英雄本色 4K修复版","password":""},
+                      {"url":"https://pan.quark.cn/s/partial-match","note":"英雄 4K 本色","password":""},
+                      {"url":"https://pan.quark.cn/s/reverse-match","note":"本色英雄","password":""}
+                    ]
+                  }
+                }
+              }
+              ''',
+              200,
+              headers: const {'content-type': 'application/json'},
+            );
+          }),
+        ),
+        CloudSaverApiClient(
+          MockClient((request) async => http.Response('{}', 200)),
+        ),
+        const _FakeMediaRepository(items: []),
+      );
+
+      final results = await repository.searchOnline(
+        '英雄本色',
+        provider: const SearchProviderConfig(
+          id: 'pansou-api',
+          name: 'PanSou',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'https://so.252035.xyz',
+          enabled: true,
+          strongMatchEnabled: true,
+        ),
+      );
+
+      expect(results.items, hasLength(3));
+      expect(
+        results.items.map((item) => item.title),
+        containsAll(['英雄本色 4K修复版', '英雄 4K 本色', '本色英雄']),
+      );
+      expect(results.filteredCount, 0);
+      expect(results.rawCount, 3);
+    });
+
+    test('searchOnline filters titles longer than configured max length',
+        () async {
+      final repository = AppSearchRepository(
+        PanSouApiClient(
+          MockClient((request) async {
+            return http.Response(
+              '''
+              {
+                "code": 0,
+                "data": {
+                  "merged_by_type": {
+                    "quark": [
+                      {"url":"https://pan.quark.cn/s/short-title","note":"英雄本色","password":""},
+                      {"url":"https://pan.quark.cn/s/long-title","note":"英雄本色导演剪辑版超清收藏全集国语粤语双音轨杜比视界蓝光原盘高码率版本","password":""}
+                    ]
+                  }
+                }
+              }
+              ''',
+              200,
+              headers: const {'content-type': 'application/json'},
+            );
+          }),
+        ),
+        CloudSaverApiClient(
+          MockClient((request) async => http.Response('{}', 200)),
+        ),
+        const _FakeMediaRepository(items: []),
+      );
+
+      final results = await repository.searchOnline(
+        '英雄本色',
+        provider: const SearchProviderConfig(
+          id: 'pansou-api',
+          name: 'PanSou',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'https://so.252035.xyz',
+          enabled: true,
+          maxTitleLength: 10,
+        ),
+      );
+
+      expect(results.items, hasLength(1));
+      expect(results.items.single.title, '英雄本色');
+      expect(results.filteredCount, 1);
+      expect(results.rawCount, 2);
+    });
+
     test(
         'searchOnline filters CloudSaver result when url does not expose cloud type',
         () async {
@@ -341,6 +537,12 @@ class _FakeMediaRepository implements MediaRepository {
   }) async {
     return fetchLibrary(kind: kind, limit: limit);
   }
+
+  @override
+  Future<void> refreshSource({
+    required String sourceId,
+    bool forceFullRescan = false,
+  }) async {}
 
   @override
   Future<List<MediaItem>> fetchChildren({

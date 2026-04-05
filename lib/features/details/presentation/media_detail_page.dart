@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -16,11 +17,12 @@ import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
+import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 final enrichedDetailTargetProvider =
-    FutureProvider.family<MediaDetailTarget, MediaDetailTarget>((
+    FutureProvider.autoDispose.family<MediaDetailTarget, MediaDetailTarget>((
   ref,
   target,
 ) async {
@@ -37,7 +39,18 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
   required AppSettings settings,
   required MediaDetailTarget target,
 }) async {
-  var nextTarget = target;
+  final localStorageCacheRepository = ref.read(
+    localStorageCacheRepositoryProvider,
+  );
+
+  final cachedTarget =
+      await localStorageCacheRepository.loadDetailTarget(target);
+  var nextTarget = cachedTarget == null
+      ? target
+      : _mergeCachedDetailTarget(
+          current: target,
+          cached: cachedTarget,
+        );
   if (_shouldAutoEnrichMetadataTarget(
     settings: settings,
     target: nextTarget,
@@ -51,8 +64,20 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
     );
   }
 
+  Future<void> saveResolvedTarget() async {
+    try {
+      await localStorageCacheRepository.saveDetailTarget(
+        seedTarget: target,
+        resolvedTarget: nextTarget,
+      );
+    } catch (_) {
+      // Ignore cache persistence failures.
+    }
+  }
+
   final playback = nextTarget.playbackTarget;
   if (playback == null) {
+    await saveResolvedTarget();
     return nextTarget;
   }
 
@@ -63,6 +88,7 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
           playback.resolutionLabel.trim().isEmpty ||
           playback.fileSizeLabel.trim().isEmpty);
   if (!shouldResolve) {
+    await saveResolvedTarget();
     return nextTarget;
   }
 
@@ -74,6 +100,7 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
     }
   }
   if (source == null || !source.hasActiveSession) {
+    await saveResolvedTarget();
     return nextTarget;
   }
 
@@ -83,16 +110,24 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
               source: source,
               target: playback,
             );
-    return nextTarget.copyWith(playbackTarget: resolvedPlayback);
+    nextTarget = nextTarget.copyWith(playbackTarget: resolvedPlayback);
   } catch (_) {
+    await saveResolvedTarget();
     return nextTarget;
   }
+
+  await saveResolvedTarget();
+  return nextTarget;
 }
 
 bool _shouldAutoEnrichMetadataTarget({
   required AppSettings settings,
   required MediaDetailTarget target,
 }) {
+  if (target.sourceKind == MediaSourceKind.nas &&
+      target.sourceId.trim().isNotEmpty) {
+    return false;
+  }
   if (_detailMetadataQuery(target).isEmpty && target.doubanId.trim().isEmpty) {
     return false;
   }
@@ -109,13 +144,14 @@ bool _shouldAutoEnrichMetadataTarget({
       (target.needsMetadataMatch ||
           target.imdbId.trim().isEmpty ||
           target.tmdbId.trim().isEmpty);
-  final needsImdb = settings.imdbRatingMatchEnabled &&
-      target.needsImdbRatingMatch;
+  final needsImdb =
+      settings.imdbRatingMatchEnabled && target.needsImdbRatingMatch;
   return needsWmdb || needsTmdb || needsImdb;
 }
 
 String _detailMetadataQuery(MediaDetailTarget target) {
-  final raw = target.searchQuery.trim().isEmpty ? target.title : target.searchQuery;
+  final raw =
+      target.searchQuery.trim().isEmpty ? target.title : target.searchQuery;
   return raw.trim();
 }
 
@@ -175,11 +211,11 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
     try {
       final currentQuery = _detailMetadataQuery(nextTarget);
       final tmdbMatch = await tmdbMetadataClient.matchTitle(
-            query: currentQuery.isEmpty ? initialQuery : currentQuery,
-            readAccessToken: settings.tmdbReadAccessToken.trim(),
-            year: nextTarget.year,
-            preferSeries: nextTarget.isSeries,
-          );
+        query: currentQuery.isEmpty ? initialQuery : currentQuery,
+        readAccessToken: settings.tmdbReadAccessToken.trim(),
+        year: nextTarget.year,
+        preferSeries: nextTarget.isSeries,
+      );
       if (tmdbMatch != null) {
         nextTarget = _applyManualMetadataMatch(
           nextTarget,
@@ -216,11 +252,11 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
     try {
       final currentQuery = _detailMetadataQuery(nextTarget);
       final ratingMatch = await imdbRatingClient.matchRating(
-            query: currentQuery.isEmpty ? initialQuery : currentQuery,
-            year: nextTarget.year,
-            preferSeries: nextTarget.isSeries,
-            imdbId: nextTarget.imdbId,
-          );
+        query: currentQuery.isEmpty ? initialQuery : currentQuery,
+        year: nextTarget.year,
+        preferSeries: nextTarget.isSeries,
+        imdbId: nextTarget.imdbId,
+      );
       if (ratingMatch != null) {
         final nextRatings = [...nextTarget.ratingLabels];
         final nextRatingLabel = ratingMatch.ratingLabel.trim();
@@ -243,6 +279,109 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
   }
 
   return nextTarget;
+}
+
+MediaDetailTarget _mergeCachedDetailTarget({
+  required MediaDetailTarget current,
+  required MediaDetailTarget cached,
+}) {
+  return current.copyWith(
+    posterUrl: current.posterUrl.trim().isNotEmpty
+        ? current.posterUrl
+        : cached.posterUrl,
+    posterHeaders: current.posterHeaders.isNotEmpty
+        ? current.posterHeaders
+        : cached.posterHeaders,
+    overview: current.hasUsefulOverview ? current.overview : cached.overview,
+    year: current.year > 0 ? current.year : cached.year,
+    durationLabel: current.durationLabel.trim().isNotEmpty
+        ? current.durationLabel
+        : cached.durationLabel,
+    ratingLabels: _mergeLabels(current.ratingLabels, cached.ratingLabels),
+    genres: current.genres.isNotEmpty ? current.genres : cached.genres,
+    directors:
+        current.directors.isNotEmpty ? current.directors : cached.directors,
+    actors: current.actors.isNotEmpty ? current.actors : cached.actors,
+    actorProfiles: current.actorProfiles.isNotEmpty
+        ? current.actorProfiles
+        : cached.actorProfiles,
+    availabilityLabel: current.availabilityLabel.trim().isNotEmpty
+        ? current.availabilityLabel
+        : cached.availabilityLabel,
+    searchQuery: current.searchQuery.trim().isNotEmpty
+        ? current.searchQuery
+        : cached.searchQuery,
+    playbackTarget: _mergeCachedPlaybackTarget(
+      current.playbackTarget,
+      cached.playbackTarget,
+    ),
+    itemId: current.itemId.trim().isNotEmpty ? current.itemId : cached.itemId,
+    sourceId:
+        current.sourceId.trim().isNotEmpty ? current.sourceId : cached.sourceId,
+    itemType:
+        current.itemType.trim().isNotEmpty ? current.itemType : cached.itemType,
+    sectionId: current.sectionId.trim().isNotEmpty
+        ? current.sectionId
+        : cached.sectionId,
+    sectionName: current.sectionName.trim().isNotEmpty
+        ? current.sectionName
+        : cached.sectionName,
+    doubanId:
+        current.doubanId.trim().isNotEmpty ? current.doubanId : cached.doubanId,
+    imdbId: current.imdbId.trim().isNotEmpty ? current.imdbId : cached.imdbId,
+    tmdbId: current.tmdbId.trim().isNotEmpty ? current.tmdbId : cached.tmdbId,
+    sourceKind: current.sourceKind ?? cached.sourceKind,
+    sourceName: current.sourceName.trim().isNotEmpty
+        ? current.sourceName
+        : cached.sourceName,
+  );
+}
+
+PlaybackTarget? _mergeCachedPlaybackTarget(
+  PlaybackTarget? current,
+  PlaybackTarget? cached,
+) {
+  if (current == null) {
+    return cached;
+  }
+  if (cached == null) {
+    return current;
+  }
+  return PlaybackTarget(
+    title: current.title.trim().isNotEmpty ? current.title : cached.title,
+    sourceId:
+        current.sourceId.trim().isNotEmpty ? current.sourceId : cached.sourceId,
+    streamUrl: current.streamUrl.trim().isNotEmpty
+        ? current.streamUrl
+        : cached.streamUrl,
+    sourceName: current.sourceName.trim().isNotEmpty
+        ? current.sourceName
+        : cached.sourceName,
+    sourceKind: current.sourceKind,
+    actualAddress: current.actualAddress.trim().isNotEmpty
+        ? current.actualAddress
+        : cached.actualAddress,
+    itemId: current.itemId.trim().isNotEmpty ? current.itemId : cached.itemId,
+    preferredMediaSourceId: current.preferredMediaSourceId.trim().isNotEmpty
+        ? current.preferredMediaSourceId
+        : cached.preferredMediaSourceId,
+    subtitle:
+        current.subtitle.trim().isNotEmpty ? current.subtitle : cached.subtitle,
+    headers: current.headers.isNotEmpty ? current.headers : cached.headers,
+    container: current.container.trim().isNotEmpty
+        ? current.container
+        : cached.container,
+    videoCodec: current.videoCodec.trim().isNotEmpty
+        ? current.videoCodec
+        : cached.videoCodec,
+    audioCodec: current.audioCodec.trim().isNotEmpty
+        ? current.audioCodec
+        : cached.audioCodec,
+    width: current.width ?? cached.width,
+    height: current.height ?? cached.height,
+    bitrate: current.bitrate ?? cached.bitrate,
+    fileSizeBytes: current.fileSizeBytes ?? cached.fileSizeBytes,
+  );
 }
 
 bool _hasMetadataChanged(
@@ -416,8 +555,7 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
     }
   } catch (_) {}
 
-  final out = byId.values.toList()
-    ..sort((a, b) => b.score.compareTo(a.score));
+  final out = byId.values.toList()..sort((a, b) => b.score.compareTo(a.score));
   if (out.length <= maxMatches) {
     return out;
   }
@@ -740,6 +878,9 @@ MediaDetailTarget _mergeMatchedLibraryTarget({
   return matched.copyWith(
     title: current.title,
     posterUrl: _firstNonEmpty(current.posterUrl, matched.posterUrl),
+    posterHeaders: current.posterHeaders.isNotEmpty
+        ? current.posterHeaders
+        : matched.posterHeaders,
     overview: current.hasUsefulOverview ? current.overview : matched.overview,
     year: current.year > 0 ? current.year : matched.year,
     durationLabel: current.durationLabel.trim().isNotEmpty
@@ -773,6 +914,7 @@ MediaDetailTarget _applyManualMetadataMatch(
   return target.copyWith(
     posterUrl:
         target.posterUrl.trim().isNotEmpty ? target.posterUrl : match.posterUrl,
+    posterHeaders: target.posterHeaders,
     overview: target.hasUsefulOverview
         ? target.overview
         : (match.overview.trim().isNotEmpty ? match.overview : target.overview),
@@ -788,19 +930,18 @@ MediaDetailTarget _applyManualMetadataMatch(
     actorProfiles: target.actorProfiles.isNotEmpty
         ? target.actorProfiles
         : match.actorProfiles.isNotEmpty
-        ? match.actorProfiles
-            .map(
-              (item) => MediaPersonProfile(
-                name: item.name,
-                avatarUrl: item.avatarUrl,
-              ),
-            )
-            .toList()
-        : target.actorProfiles,
+            ? match.actorProfiles
+                .map(
+                  (item) => MediaPersonProfile(
+                    name: item.name,
+                    avatarUrl: item.avatarUrl,
+                  ),
+                )
+                .toList()
+            : target.actorProfiles,
     ratingLabels: _mergeLabels(target.ratingLabels, filteredMatchRatingLabels),
-    doubanId: target.doubanId.trim().isNotEmpty
-        ? target.doubanId
-        : match.doubanId,
+    doubanId:
+        target.doubanId.trim().isNotEmpty ? target.doubanId : match.doubanId,
     imdbId: target.imdbId.trim().isNotEmpty ? target.imdbId : match.imdbId,
     tmdbId: target.tmdbId.trim().isNotEmpty ? target.tmdbId : match.tmdbId,
   );
@@ -843,7 +984,7 @@ List<String> _mergeLabels(List<String> primary, List<String> secondary) {
 }
 
 final seriesBrowserProvider =
-    FutureProvider.family<_SeriesBrowserState?, MediaDetailTarget>((
+    FutureProvider.autoDispose.family<_SeriesBrowserState?, MediaDetailTarget>((
   ref,
   target,
 ) async {
@@ -930,10 +1071,15 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   MediaDetailTarget? _manualOverrideTarget;
   bool _isMatchingLocalResource = false;
   bool _isRefreshingMetadata = false;
-  bool _autoLibraryMatchConsumed = false;
-  bool _enrichedEntryProbePosted = false;
   List<MediaDetailTarget> _libraryMatchChoices = const [];
   int _selectedLibraryMatchIndex = 0;
+  int _detailSessionId = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _startDetailTasks();
+  }
 
   @override
   void didUpdateWidget(covariant MediaDetailPage oldWidget) {
@@ -945,31 +1091,58 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       _manualOverrideTarget = null;
       _isMatchingLocalResource = false;
       _isRefreshingMetadata = false;
-      _autoLibraryMatchConsumed = false;
-      _enrichedEntryProbePosted = false;
       _libraryMatchChoices = const [];
       _selectedLibraryMatchIndex = 0;
+      _startDetailTasks();
     }
   }
 
-  void _maybeAutoMatchLibrary(MediaDetailTarget resolved) {
-    if (_autoLibraryMatchConsumed || _manualOverrideTarget != null) {
-      return;
-    }
-    if (!_shouldShowLocalResourceMatcher(resolved)) {
-      return;
-    }
-    _autoLibraryMatchConsumed = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
+  @override
+  void dispose() {
+    _detailSessionId += 1;
+    super.dispose();
+  }
+
+  void _startDetailTasks() {
+    final sessionId = ++_detailSessionId;
+    Future<void>.microtask(() async {
+      if (!_isSessionActive(sessionId)) {
         return;
       }
-      _matchLocalResource(resolved);
+
+      final currentTarget = _manualOverrideTarget ?? widget.target;
+      unawaited(ref.read(enrichedDetailTargetProvider(currentTarget).future));
+      if (currentTarget.isSeries) {
+        unawaited(ref.read(seriesBrowserProvider(currentTarget).future));
+      }
+
+      final resolved =
+          await ref.read(enrichedDetailTargetProvider(widget.target).future);
+      if (!_isSessionActive(sessionId) || _manualOverrideTarget != null) {
+        return;
+      }
+      if (!_shouldShowLocalResourceMatcher(resolved)) {
+        return;
+      }
+      await _matchLocalResource(
+        resolved,
+        sessionId: sessionId,
+        showFeedback: false,
+      );
     });
   }
 
-  Future<void> _matchLocalResource(MediaDetailTarget currentTarget) async {
-    if (_isMatchingLocalResource) {
+  bool _isSessionActive(int sessionId) {
+    return mounted && _detailSessionId == sessionId;
+  }
+
+  Future<void> _matchLocalResource(
+    MediaDetailTarget currentTarget, {
+    int? sessionId,
+    bool showFeedback = true,
+  }) async {
+    final activeSessionId = sessionId ?? _detailSessionId;
+    if (_isMatchingLocalResource || !_isSessionActive(activeSessionId)) {
       return;
     }
 
@@ -997,7 +1170,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       metadataMatch: metadataMatch,
     );
 
-    if (!mounted) {
+    if (!_isSessionActive(activeSessionId)) {
       return;
     }
 
@@ -1023,6 +1196,22 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       }
     });
 
+    if (merged.length == 1) {
+      unawaited(
+        ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+              seedTarget: currentTarget,
+              resolvedTarget: merged.first,
+            ),
+      );
+    }
+
+    if (!_isSessionActive(activeSessionId) || !showFeedback) {
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
     final messenger = ScaffoldMessenger.of(context);
     if (merged.isEmpty) {
       messenger.showSnackBar(
@@ -1052,8 +1241,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     );
   }
 
-  Future<void> _refreshMetadata(MediaDetailTarget currentTarget) async {
-    if (_isRefreshingMetadata) {
+  Future<void> _refreshMetadata(
+    MediaDetailTarget currentTarget, {
+    int? sessionId,
+  }) async {
+    final activeSessionId = sessionId ?? _detailSessionId;
+    if (_isRefreshingMetadata || !_isSessionActive(activeSessionId)) {
       return;
     }
 
@@ -1071,7 +1264,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     );
     final changed = _hasMetadataChanged(currentTarget, nextTarget);
 
-    if (!mounted) {
+    if (!_isSessionActive(activeSessionId)) {
       return;
     }
 
@@ -1082,6 +1275,18 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       }
     });
 
+    if (changed) {
+      unawaited(
+        ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+              seedTarget: currentTarget,
+              resolvedTarget: nextTarget,
+            ),
+      );
+    }
+
+    if (!mounted) {
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(changed ? '已更新影片信息' : '没有可更新的信息'),
@@ -1089,26 +1294,33 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    ref.listen(
-      enrichedDetailTargetProvider(widget.target),
-      (previous, next) {
-        next.whenData(_maybeAutoMatchLibrary);
-      },
+  Future<void> _openMetadataIndexManager(
+      MediaDetailTarget currentTarget) async {
+    if (!_canManageMetadataIndex(currentTarget)) {
+      return;
+    }
+    final updatedTarget = await context.pushNamed<MediaDetailTarget>(
+      'metadata-index',
+      extra: currentTarget,
     );
-    if (!_enrichedEntryProbePosted) {
-      _enrichedEntryProbePosted = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) {
-          return;
-        }
-        ref
-            .read(enrichedDetailTargetProvider(widget.target))
-            .whenData(_maybeAutoMatchLibrary);
-      });
+    if (!mounted || updatedTarget == null) {
+      return;
     }
 
+    setState(() {
+      _manualOverrideTarget = updatedTarget;
+    });
+
+    unawaited(
+      ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+            seedTarget: widget.target,
+            resolvedTarget: updatedTarget,
+          ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final seedTarget = _manualOverrideTarget ?? widget.target;
     final targetAsync = ref.watch(enrichedDetailTargetProvider(seedTarget));
     final target = targetAsync.valueOrNull ?? seedTarget;
@@ -1276,6 +1488,17 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                               _manualOverrideTarget =
                                                   _libraryMatchChoices[i];
                                             });
+                                            unawaited(
+                                              ref
+                                                  .read(
+                                                    localStorageCacheRepositoryProvider,
+                                                  )
+                                                  .saveDetailTarget(
+                                                    seedTarget: widget.target,
+                                                    resolvedTarget:
+                                                        _libraryMatchChoices[i],
+                                                  ),
+                                            );
                                           },
                                   ),
                                 ),
@@ -1308,6 +1531,30 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                               ? '重新匹配本地资源'
                                               : '匹配本地资源',
                                     ),
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 0,
+                                        vertical: 0,
+                                      ),
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              if (_canManageMetadataIndex(target)) ...[
+                                const SizedBox(height: 12),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: TextButton.icon(
+                                    onPressed: () =>
+                                        _openMetadataIndexManager(target),
+                                    icon: const Icon(
+                                      Icons.manage_search_rounded,
+                                      size: 16,
+                                    ),
+                                    label: const Text('建立/管理索引'),
                                     style: TextButton.styleFrom(
                                       foregroundColor: Colors.white,
                                       padding: const EdgeInsets.symmetric(
@@ -1418,7 +1665,17 @@ bool _shouldShowLocalResourceMatcher(MediaDetailTarget target) {
       (availability.isEmpty || availability == '无');
 }
 
+bool _canManageMetadataIndex(MediaDetailTarget target) {
+  return target.sourceKind == MediaSourceKind.nas &&
+      target.sourceId.trim().isNotEmpty &&
+      target.itemId.trim().isNotEmpty;
+}
+
 bool _canManuallyRefreshMetadata(MediaDetailTarget target) {
+  if (target.sourceKind == MediaSourceKind.nas &&
+      target.sourceId.trim().isNotEmpty) {
+    return false;
+  }
   return target.title.trim().isNotEmpty || target.searchQuery.trim().isNotEmpty;
 }
 
@@ -1427,8 +1684,7 @@ List<_ResourceFact> _buildResourceFacts(MediaDetailTarget target) {
   final facts = <_ResourceFact>[];
   final streamUrl = playback?.streamUrl.trim() ?? '';
   final actualAddress = playback?.actualAddress.trim() ?? '';
-  final displayAddress =
-      actualAddress.isNotEmpty ? actualAddress : streamUrl;
+  final displayAddress = actualAddress.isNotEmpty ? actualAddress : streamUrl;
   final format = playback?.formatLabel.trim() ?? '';
   final fileSize = playback?.fileSizeLabel.trim() ?? '';
   final resolution = playback?.resolutionLabel.trim() ?? '';
@@ -1499,7 +1755,10 @@ class _HeroSection extends StatelessWidget {
         fit: StackFit.expand,
         clipBehavior: Clip.none,
         children: [
-          _BackdropImage(imageUrl: target.posterUrl),
+          _BackdropImage(
+            imageUrl: target.posterUrl,
+            imageHeaders: target.posterHeaders,
+          ),
           DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -1536,7 +1795,10 @@ class _HeroSection extends StatelessWidget {
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final isCompact = constraints.maxWidth < 760;
-                  final poster = _PosterArt(posterUrl: target.posterUrl);
+                  final poster = _PosterArt(
+                    posterUrl: target.posterUrl,
+                    posterHeaders: target.posterHeaders,
+                  );
                   final content = _HeroContent(
                     target: target,
                     metadata: metadata,
@@ -1718,9 +1980,13 @@ class _HeroContent extends StatelessWidget {
 }
 
 class _BackdropImage extends StatelessWidget {
-  const _BackdropImage({required this.imageUrl});
+  const _BackdropImage({
+    required this.imageUrl,
+    this.imageHeaders = const {},
+  });
 
   final String imageUrl;
+  final Map<String, String> imageHeaders;
 
   @override
   Widget build(BuildContext context) {
@@ -1733,6 +1999,7 @@ class _BackdropImage extends StatelessWidget {
       children: [
         AppNetworkImage(
           imageUrl,
+          headers: imageHeaders,
           fit: BoxFit.cover,
           alignment: Alignment.topCenter,
           errorBuilder: (context, error, stackTrace) {
@@ -1750,9 +2017,13 @@ class _BackdropImage extends StatelessWidget {
 }
 
 class _PosterArt extends StatelessWidget {
-  const _PosterArt({required this.posterUrl});
+  const _PosterArt({
+    required this.posterUrl,
+    this.posterHeaders = const {},
+  });
 
   final String posterUrl;
+  final Map<String, String> posterHeaders;
 
   @override
   Widget build(BuildContext context) {
@@ -1782,6 +2053,7 @@ class _PosterArt extends StatelessWidget {
                   )
                 : AppNetworkImage(
                     posterUrl,
+                    headers: posterHeaders,
                     fit: BoxFit.cover,
                     cacheWidth: 720,
                     filterQuality: FilterQuality.low,
@@ -2156,6 +2428,7 @@ class _EpisodeArtwork extends StatelessWidget {
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         child: AppNetworkImage(
           item.posterUrl,
+          headers: item.posterHeaders,
           fit: BoxFit.cover,
           errorBuilder: (context, error, stackTrace) => _EpisodeArtworkFallback(
             item: item,

@@ -214,6 +214,8 @@ class SearchProviderConfig {
     this.smartStrmTaskName = '',
     this.allowedCloudTypes = const [],
     this.blockedKeywords = const [],
+    this.strongMatchEnabled = false,
+    this.maxTitleLength = 50,
   });
 
   final String id;
@@ -232,6 +234,8 @@ class SearchProviderConfig {
   final String smartStrmTaskName;
   final List<String> allowedCloudTypes;
   final List<String> blockedKeywords;
+  final bool strongMatchEnabled;
+  final int maxTitleLength;
 
   SearchProviderConfig copyWith({
     String? id,
@@ -250,6 +254,8 @@ class SearchProviderConfig {
     String? smartStrmTaskName,
     List<String>? allowedCloudTypes,
     List<String>? blockedKeywords,
+    bool? strongMatchEnabled,
+    int? maxTitleLength,
   }) {
     return SearchProviderConfig(
       id: id ?? this.id,
@@ -268,6 +274,8 @@ class SearchProviderConfig {
       smartStrmTaskName: smartStrmTaskName ?? this.smartStrmTaskName,
       allowedCloudTypes: allowedCloudTypes ?? this.allowedCloudTypes,
       blockedKeywords: blockedKeywords ?? this.blockedKeywords,
+      strongMatchEnabled: strongMatchEnabled ?? this.strongMatchEnabled,
+      maxTitleLength: maxTitleLength ?? this.maxTitleLength,
     );
   }
 
@@ -289,6 +297,8 @@ class SearchProviderConfig {
       'smartStrmTaskName': smartStrmTaskName,
       'allowedCloudTypes': allowedCloudTypes,
       'blockedKeywords': blockedKeywords,
+      'strongMatchEnabled': strongMatchEnabled,
+      'maxTitleLength': maxTitleLength,
     };
   }
 
@@ -318,6 +328,9 @@ class SearchProviderConfig {
           .map((value) => '$value')
           .where((value) => value.trim().isNotEmpty)
           .toList(growable: false),
+      strongMatchEnabled: json['strongMatchEnabled'] as bool? ?? false,
+      maxTitleLength:
+          ((json['maxTitleLength'] as num?)?.toInt() ?? 50).clamp(1, 500),
     );
   }
 }
@@ -327,6 +340,7 @@ class SearchResult {
     required this.id,
     required this.title,
     required this.posterUrl,
+    this.posterHeaders = const {},
     required this.providerId,
     required this.providerName,
     required this.quality,
@@ -345,6 +359,7 @@ class SearchResult {
   final String id;
   final String title;
   final String posterUrl;
+  final Map<String, String> posterHeaders;
   final String providerId;
   final String providerName;
   final String quality;
@@ -436,8 +451,13 @@ String sanitizeSearchResourceUrl(String rawUrl) {
 }
 
 SearchCloudType? detectSearchCloudTypeFromUrl(String rawUrl) {
-  final uri = Uri.tryParse(sanitizeSearchResourceUrl(rawUrl));
+  final sanitized = sanitizeSearchResourceUrl(rawUrl);
+  final normalizedRaw = sanitized.toLowerCase();
+  final uri = Uri.tryParse(sanitized);
   if (uri == null) {
+    if (_looksLike115Url(normalizedRaw)) {
+      return SearchCloudType.cloud115;
+    }
     return null;
   }
 
@@ -463,7 +483,7 @@ SearchCloudType? detectSearchCloudTypeFromUrl(String rawUrl) {
   if (host.contains('139.com')) {
     return SearchCloudType.mobile;
   }
-  if (host.contains('115.com')) {
+  if (_looksLike115Url(normalizedRaw) || host.contains('115.com')) {
     return SearchCloudType.cloud115;
   }
   if (host.contains('mypikpak') || host.contains('pikpak')) {
@@ -485,6 +505,18 @@ SearchCloudType? detectSearchCloudTypeFromUrl(String rawUrl) {
     return SearchCloudType.ed2k;
   }
   return null;
+}
+
+bool _looksLike115Url(String normalizedRaw) {
+  final raw = normalizedRaw.trim();
+  if (raw.isEmpty) {
+    return false;
+  }
+  return raw.contains('115.com/') ||
+      raw.contains('.115.com/') ||
+      raw.contains('anxia.com/') ||
+      raw.contains('.anxia.com/') ||
+      raw.startsWith('115://');
 }
 
 String? resolveSearchCloudTypeCode({

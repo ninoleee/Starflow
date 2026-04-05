@@ -153,6 +153,41 @@ void main() {
       expect(result.titlesForMatching, contains('A Better Tomorrow'));
     });
 
+    test('falls back to 豆瓣 0 when wmdb does not return douban rating',
+        () async {
+      final client = WmdbMetadataClient(
+        MockClient((request) async {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'data': [
+                  {
+                    'poster': 'https://img.wmdb.tv/movie/poster/sample.jpg',
+                    'name': '无名之辈',
+                    'genre': '剧情',
+                    'description': '小人物故事。',
+                    'lang': 'Cn',
+                  },
+                ],
+                'originalName': '无名之辈',
+                'imdbId': 'tt9378778',
+                'tmdbId': '543320',
+                'year': '2018',
+                'duration': 6480,
+                'doubanId': '27110296',
+                'imdbRating': '6.6',
+              }),
+            ),
+            200,
+          );
+        }),
+      );
+
+      final result = await client.matchByDoubanId(doubanId: '27110296');
+      expect(result, isNotNull);
+      expect(result!.ratingLabels, ['豆瓣 0', 'IMDb 6.6']);
+    });
+
     test('reuses identical lookups from in-memory cache', () async {
       final gate = Completer<void>();
       var requestCount = 0;

@@ -152,6 +152,13 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(tmdbReadAccessToken: token.trim()));
   }
 
+  Future<void> setPlaybackOpenTimeoutSeconds(int seconds) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(
+      current.copyWith(playbackOpenTimeoutSeconds: seconds.clamp(1, 600)),
+    );
+  }
+
   Future<void> setHomeHeroStyle(HomeHeroStyle style) async {
     final current = state.valueOrNull ?? await _repository.load();
     await _persist(current.copyWith(homeHeroStyle: style));

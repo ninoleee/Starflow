@@ -50,6 +50,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       body: enabledModules.isEmpty
           ? const _HomeShell(
               backgroundImageUrl: '',
+              backgroundImageHeaders: {},
               child: _EmptyHomeState(),
             )
           : _buildLoadedHome(
@@ -91,6 +92,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     return _HomeShell(
       backgroundImageUrl: activeHero?.imageUrl ?? '',
+      backgroundImageHeaders: activeHero?.detailTarget.posterHeaders ?? const {},
       child: RefreshIndicator(
         color: Colors.white,
         backgroundColor: const Color(0xFF102033),
@@ -199,6 +201,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                         title: item.title,
                         subtitle: item.subtitle,
                         posterUrl: item.posterUrl,
+                        posterHeaders: item.detailTarget.posterHeaders,
                         titleColor: Colors.white,
                         subtitleColor: const Color(0xFF98A7C2),
                         onTap: () {
@@ -278,10 +281,12 @@ extension _HomeHeroStyleLayoutX on HomeHeroStyle {
 class _HomeShell extends StatelessWidget {
   const _HomeShell({
     required this.backgroundImageUrl,
+    this.backgroundImageHeaders = const {},
     required this.child,
   });
 
   final String backgroundImageUrl;
+  final Map<String, String> backgroundImageHeaders;
   final Widget child;
 
   @override
@@ -297,7 +302,10 @@ class _HomeShell extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        _DynamicHeroBackdrop(imageUrl: backgroundImageUrl),
+        _DynamicHeroBackdrop(
+          imageUrl: backgroundImageUrl,
+          imageHeaders: backgroundImageHeaders,
+        ),
         DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -323,9 +331,13 @@ class _HomeShell extends StatelessWidget {
 }
 
 class _DynamicHeroBackdrop extends StatelessWidget {
-  const _DynamicHeroBackdrop({required this.imageUrl});
+  const _DynamicHeroBackdrop({
+    required this.imageUrl,
+    this.imageHeaders = const {},
+  });
 
   final String imageUrl;
+  final Map<String, String> imageHeaders;
 
   @override
   Widget build(BuildContext context) {
@@ -340,6 +352,7 @@ class _DynamicHeroBackdrop extends StatelessWidget {
         child: _DynamicHeroBackdropLayer(
           key: ValueKey(imageUrl.trim().isEmpty ? 'empty' : imageUrl),
           imageUrl: imageUrl,
+          imageHeaders: imageHeaders,
         ),
       ),
     );
@@ -350,9 +363,11 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
   const _DynamicHeroBackdropLayer({
     super.key,
     required this.imageUrl,
+    this.imageHeaders = const {},
   });
 
   final String imageUrl;
+  final Map<String, String> imageHeaders;
 
   @override
   Widget build(BuildContext context) {
@@ -370,6 +385,7 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
                   opacity: 0.72,
                   child: AppNetworkImage(
                     imageUrl,
+                    headers: imageHeaders,
                     fit: BoxFit.cover,
                     alignment: Alignment.topCenter,
                   ),

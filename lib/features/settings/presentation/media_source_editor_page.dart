@@ -31,14 +31,17 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   String _resolvedServerId = '';
   String _resolvedDeviceId = '';
   late Set<String> _selectedSectionIds;
+  late List<String> _savedFeaturedSectionIds;
   List<MediaCollection> _availableSections = [];
   bool _isAuthenticating = false;
   bool _isTestingWebDav = false;
   bool _isLoadingSections = false;
+  bool _didHydrateSectionSelection = false;
   late String _connectionMessage;
   late bool _advancedTokenExpanded;
   late final String _sourceId;
   late String _selectedNasPath;
+  late bool _webDavStructureInferenceEnabled;
   bool _didDelete = false;
   bool _skipAutoSaveOnPop = false;
 
@@ -58,10 +61,15 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _resolvedUserId = e?.userId ?? '';
     _resolvedServerId = e?.serverId ?? '';
     _resolvedDeviceId = e?.deviceId ?? '';
-    _selectedSectionIds = {...?e?.featuredSectionIds};
+    _savedFeaturedSectionIds = e == null
+        ? const [kNoSectionsSelectedSentinel]
+        : [...e.featuredSectionIds];
+    _selectedSectionIds = e?.selectedSectionIds.toSet() ?? <String>{};
     _connectionMessage = _initialConnectionMessage(e);
     _advancedTokenExpanded = _tokenController.text.trim().isNotEmpty;
     _selectedNasPath = e?.libraryPath ?? '';
+    _webDavStructureInferenceEnabled =
+        e?.webDavStructureInferenceEnabled ?? false;
   }
 
   @override
@@ -91,17 +99,19 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       deviceId: _resolvedDeviceId,
       libraryPath: _kind == MediaSourceKind.nas ? _selectedNasPath.trim() : '',
       featuredSectionIds: _selectedSectionIdsForSave(),
+      webDavStructureInferenceEnabled:
+          _kind == MediaSourceKind.nas && _webDavStructureInferenceEnabled,
     );
   }
 
   List<String> _selectedSectionIdsForSave() {
+    if (!_didHydrateSectionSelection && _availableSections.isEmpty) {
+      return _savedFeaturedSectionIds;
+    }
     if (_selectedSectionIds.isNotEmpty) {
-      return _selectedSectionIds.toList();
+      return _selectedSectionIds.toList(growable: false);
     }
-    if (_availableSections.isEmpty) {
-      return const [];
-    }
-    return _availableSections.map((section) => section.id).toList();
+    return const [kNoSectionsSelectedSentinel];
   }
 
   bool _hasMeaningfulDraft() {
@@ -122,27 +132,28 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       return;
     }
 
-    await ref.read(settingsControllerProvider.notifier).saveMediaSource(
-          MediaSourceConfig(
-            id: _sourceId,
-            name: _nameController.text.trim().isEmpty
-                ? '未命名媒体源'
-                : _nameController.text.trim(),
-            kind: _kind,
-            endpoint: _endpointController.text.trim(),
-            enabled: _enabled,
-            username: _usernameController.text.trim(),
-            password: _passwordController.text,
-            accessToken: _kind == MediaSourceKind.emby
-                ? _tokenController.text.trim()
-                : '',
-            userId: _kind == MediaSourceKind.emby ? _resolvedUserId : '',
-            serverId: _kind == MediaSourceKind.emby ? _resolvedServerId : '',
-            deviceId: _kind == MediaSourceKind.emby ? _resolvedDeviceId : '',
-            libraryPath: _kind == MediaSourceKind.nas ? _selectedNasPath : '',
-            featuredSectionIds: _selectedSectionIdsForSave(),
-          ),
-        );
+    final config = MediaSourceConfig(
+      id: _sourceId,
+      name: _nameController.text.trim().isEmpty
+          ? '未命名媒体源'
+          : _nameController.text.trim(),
+      kind: _kind,
+      endpoint: _endpointController.text.trim(),
+      enabled: _enabled,
+      username: _usernameController.text.trim(),
+      password: _passwordController.text,
+      accessToken:
+          _kind == MediaSourceKind.emby ? _tokenController.text.trim() : '',
+      userId: _kind == MediaSourceKind.emby ? _resolvedUserId : '',
+      serverId: _kind == MediaSourceKind.emby ? _resolvedServerId : '',
+      deviceId: _kind == MediaSourceKind.emby ? _resolvedDeviceId : '',
+      libraryPath: _kind == MediaSourceKind.nas ? _selectedNasPath : '',
+      featuredSectionIds: _selectedSectionIdsForSave(),
+      webDavStructureInferenceEnabled:
+          _kind == MediaSourceKind.nas && _webDavStructureInferenceEnabled,
+    );
+    await ref.read(settingsControllerProvider.notifier).saveMediaSource(config);
+    _savedFeaturedSectionIds = [...config.featuredSectionIds];
 
     if (popAfterSave && mounted) {
       _skipAutoSaveOnPop = true;
@@ -260,10 +271,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       }
       setState(() {
         _isLoadingSections = false;
-        _availableSections = sections;
-        if (_selectedSectionIds.isEmpty) {
-          _selectedSectionIds = sections.map((section) => section.id).toSet();
-        }
+        _applyFetchedSections(sections);
         _connectionMessage =
             '${_draftConfig().embyEditorStatusMessage}\n已读取 ${sections.length} 个分区。';
       });
@@ -292,10 +300,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       }
       setState(() {
         _isLoadingSections = false;
-        _availableSections = sections;
-        if (_selectedSectionIds.isEmpty) {
-          _selectedSectionIds = sections.map((section) => section.id).toSet();
-        }
+        _applyFetchedSections(sections);
         _connectionMessage = sections.isEmpty
             ? '当前路径下没有可直接展示的子目录。'
             : '已读取 ${sections.length} 个 WebDAV 分区。';
@@ -332,9 +337,53 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
 
     _selectedNasPath = pickedPath;
     setState(() {
+      _savedFeaturedSectionIds = const [kNoSectionsSelectedSentinel];
       _availableSections = const [];
       _selectedSectionIds.clear();
+      _didHydrateSectionSelection = false;
       _connectionMessage = '已选择路径，可继续测试连接。';
+    });
+  }
+
+  void _applyFetchedSections(List<MediaCollection> sections) {
+    _availableSections = sections;
+    final availableIds = sections.map((section) => section.id).toSet();
+    if (!_didHydrateSectionSelection) {
+      final persistedSelection = _savedFeaturedSectionIds
+          .map((item) => item.trim())
+          .where(
+            (item) => item.isNotEmpty && item != kNoSectionsSelectedSentinel,
+          )
+          .toSet()
+          .intersection(availableIds);
+      if (_savedFeaturedSectionIds.any(
+        (item) => item.trim() == kNoSectionsSelectedSentinel,
+      )) {
+        _selectedSectionIds = <String>{};
+      } else if (_savedFeaturedSectionIds.isNotEmpty) {
+        _selectedSectionIds = persistedSelection;
+      } else {
+        _selectedSectionIds = availableIds;
+      }
+      _didHydrateSectionSelection = true;
+      return;
+    }
+
+    _selectedSectionIds = _selectedSectionIds.intersection(availableIds);
+  }
+
+  void _selectAllSections() {
+    setState(() {
+      _didHydrateSectionSelection = true;
+      _selectedSectionIds =
+          _availableSections.map((section) => section.id).toSet();
+    });
+  }
+
+  void _clearAllSections() {
+    setState(() {
+      _didHydrateSectionSelection = true;
+      _selectedSectionIds = <String>{};
     });
   }
 
@@ -425,9 +474,14 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                     if (value != null) {
                       setState(() {
                         _kind = value;
+                        _savedFeaturedSectionIds = const [
+                          kNoSectionsSelectedSentinel,
+                        ];
+                        _didHydrateSectionSelection = false;
                         _availableSections = const [];
                         _selectedSectionIds.clear();
                         _selectedNasPath = '';
+                        _webDavStructureInferenceEnabled = false;
                         _connectionMessage = _defaultConnectionMessage(value);
                       });
                     }
@@ -450,7 +504,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                   const SizedBox(height: 12),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('媒体目录'),
+                    title: const Text('当前路径'),
                     subtitle: Text(
                       _selectedNasPath.trim().isEmpty
                           ? '根目录'
@@ -520,43 +574,53 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                     ),
                   ),
                 ],
-                if (_availableSections.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    '展示分区',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+                _SectionTitle(theme: theme, label: '内容范围'),
+                if (_availableSections.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      children: [
+                        TextButton(
+                          onPressed: _selectAllSections,
+                          child: const Text('全选'),
+                        ),
+                        TextButton(
+                          onPressed: _clearAllSections,
+                          child: const Text('清空'),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 8),
+                if (_availableSections.isNotEmpty)
                   ..._availableSections.map(
-                    (section) {
-                      final currentSelection = _selectedSectionIds.isEmpty
-                          ? _availableSections.map((item) => item.id).toSet()
-                          : {..._selectedSectionIds};
-                      return CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        value: currentSelection.contains(section.id),
-                        title: Text(section.title),
-                        onChanged: (value) {
-                          setState(() {
-                            final nextSelection = _selectedSectionIds.isEmpty
-                                ? _availableSections
-                                    .map((item) => item.id)
-                                    .toSet()
-                                : {..._selectedSectionIds};
-                            if (value ?? false) {
-                              nextSelection.add(section.id);
-                            } else {
-                              nextSelection.remove(section.id);
-                            }
-                            _selectedSectionIds = nextSelection;
-                          });
-                        },
-                      );
-                    },
+                    (section) => CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: _selectedSectionIds.contains(section.id),
+                      title: Text(section.title),
+                      onChanged: (value) {
+                        setState(() {
+                          _didHydrateSectionSelection = true;
+                          final nextSelection = {..._selectedSectionIds};
+                          if (value ?? false) {
+                            nextSelection.add(section.id);
+                          } else {
+                            nextSelection.remove(section.id);
+                          }
+                          _selectedSectionIds = nextSelection;
+                        });
+                      },
+                    ),
+                  )
+                else
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      '未读取分区',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                   ),
-                ],
                 const SizedBox(height: 12),
                 DecoratedBox(
                   decoration: BoxDecoration(
@@ -677,6 +741,16 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                   child: const Text('保存'),
                 ),
               ),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('目录结构推断'),
+              value: _webDavStructureInferenceEnabled,
+              onChanged: (value) {
+                setState(() {
+                  _webDavStructureInferenceEnabled = value;
+                });
+              },
             ),
           ],
         ),

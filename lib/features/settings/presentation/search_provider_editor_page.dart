@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
@@ -26,9 +27,11 @@ class _SearchProviderEditorPageState
   late final TextEditingController _usernameController;
   late final TextEditingController _passwordController;
   late final TextEditingController _blockedKeywordsController;
+  late final TextEditingController _maxTitleLengthController;
 
   late SearchProviderKind _kind;
   late bool _enabled;
+  late bool _strongMatchEnabled;
   late final String _providerId;
   late bool _advancedAuthExpanded;
   late bool _cloudTypesExpanded;
@@ -53,8 +56,12 @@ class _SearchProviderEditorPageState
     _blockedKeywordsController = TextEditingController(
       text: (e?.blockedKeywords ?? const []).join(', '),
     );
+    _maxTitleLengthController = TextEditingController(
+      text: '${(e?.maxTitleLength ?? 50).clamp(1, 500)}',
+    );
     _kind = e?.kind ?? SearchProviderKind.panSou;
     _enabled = e?.enabled ?? true;
+    _strongMatchEnabled = e?.strongMatchEnabled ?? false;
     final configuredCloudTypes = (e?.allowedCloudTypes ?? const [])
         .map(SearchCloudTypeX.fromCode)
         .whereType<SearchCloudType>()
@@ -78,6 +85,7 @@ class _SearchProviderEditorPageState
     _usernameController.dispose();
     _passwordController.dispose();
     _blockedKeywordsController.dispose();
+    _maxTitleLengthController.dispose();
     super.dispose();
   }
 
@@ -88,7 +96,14 @@ class _SearchProviderEditorPageState
         _usernameController.text.trim().isNotEmpty ||
         _passwordController.text.trim().isNotEmpty ||
         _blockedKeywordsController.text.trim().isNotEmpty ||
+        _strongMatchEnabled ||
+        _maxTitleLengthController.text.trim() != '50' ||
         widget.initial != null;
+  }
+
+  int _resolveMaxTitleLength() {
+    final parsed = int.tryParse(_maxTitleLengthController.text.trim()) ?? 50;
+    return parsed.clamp(1, 500);
   }
 
   SearchProviderConfig _buildDraftConfig() {
@@ -113,6 +128,8 @@ class _SearchProviderEditorPageState
       blockedKeywords: parseSearchBlockedKeywords(
         _blockedKeywordsController.text,
       ),
+      strongMatchEnabled: _strongMatchEnabled,
+      maxTitleLength: _resolveMaxTitleLength(),
     );
   }
 
@@ -122,6 +139,8 @@ class _SearchProviderEditorPageState
     _endpointController.text = kind.defaultEndpoint;
     _selectedCloudTypes = SearchCloudType.values.toSet();
     _blockedKeywordsController.clear();
+    _strongMatchEnabled = false;
+    _maxTitleLengthController.text = '50';
     _connectionTestSucceeded = null;
     _connectionTestMessage = '';
   }
@@ -485,6 +504,38 @@ class _SearchProviderEditorPageState
                   maxLines: 3,
                   decoration: const InputDecoration(
                     labelText: '过滤词',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('强匹配'),
+                  value: _strongMatchEnabled,
+                  onChanged: (value) {
+                    setState(() => _strongMatchEnabled = value);
+                  },
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '开启后，标题只要包含搜索词拆分后的词组，或中文搜索词中这些字的任意组合，就会保留。',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _maxTitleLengthController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    labelText: '标题长度上限',
+                    hintText: '50',
                   ),
                 ),
                 SwitchListTile(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -23,8 +24,10 @@ class _NetworkStorageSettingsPageState
   late final TextEditingController _quarkCookieController;
   late final TextEditingController _smartStrmWebhookController;
   late final TextEditingController _smartStrmTaskNameController;
+  late final TextEditingController _refreshDelayController;
   late String _quarkFolderId;
   late String _quarkFolderPath;
+  late Set<String> _refreshSourceIds;
   bool _skipAutoSaveOnPop = false;
   bool _isTestingQuarkConnection = false;
   bool _isTestingSmartStrm = false;
@@ -41,12 +44,18 @@ class _NetworkStorageSettingsPageState
     _smartStrmTaskNameController = TextEditingController(
       text: widget.initial.smartStrmTaskName,
     );
+    _refreshDelayController = TextEditingController(
+      text: widget.initial.refreshDelaySeconds > 0
+          ? '${widget.initial.refreshDelaySeconds}'
+          : '',
+    );
     _quarkFolderId = widget.initial.quarkSaveFolderId.trim().isEmpty
         ? '0'
         : widget.initial.quarkSaveFolderId.trim();
     _quarkFolderPath = widget.initial.quarkSaveFolderPath.trim().isEmpty
         ? '/'
         : widget.initial.quarkSaveFolderPath.trim();
+    _refreshSourceIds = widget.initial.refreshMediaSourceIds.toSet();
   }
 
   @override
@@ -54,16 +63,40 @@ class _NetworkStorageSettingsPageState
     _quarkCookieController.dispose();
     _smartStrmWebhookController.dispose();
     _smartStrmTaskNameController.dispose();
+    _refreshDelayController.dispose();
     super.dispose();
   }
 
+  List<MediaSourceConfig> _refreshableMediaSources(AppSettings settings) {
+    return settings.mediaSources
+        .where(
+          (source) =>
+              source.enabled &&
+              (source.kind == MediaSourceKind.emby ||
+                  source.kind == MediaSourceKind.nas),
+        )
+        .toList(growable: false);
+  }
+
+  int _refreshDelaySeconds() {
+    final parsed = int.tryParse(_refreshDelayController.text.trim()) ?? 0;
+    return parsed < 0 ? 0 : parsed;
+  }
+
   NetworkStorageConfig _buildDraft() {
+    final refreshableSourceIds = _refreshableMediaSources(
+      ref.read(appSettingsProvider),
+    ).map((source) => source.id).toSet();
     return NetworkStorageConfig(
       quarkCookie: _quarkCookieController.text.trim(),
       quarkSaveFolderId: _quarkFolderId,
       quarkSaveFolderPath: _quarkFolderPath,
       smartStrmWebhookUrl: _smartStrmWebhookController.text.trim(),
       smartStrmTaskName: _smartStrmTaskNameController.text.trim(),
+      refreshMediaSourceIds: _refreshSourceIds
+          .where(refreshableSourceIds.contains)
+          .toList(growable: false),
+      refreshDelaySeconds: _refreshDelaySeconds(),
     );
   }
 
@@ -173,6 +206,13 @@ class _NetworkStorageSettingsPageState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final settings = ref.watch(appSettingsProvider);
+    final refreshableSources = _refreshableMediaSources(settings);
+    final refreshableSourceIds = refreshableSources
+        .map((source) => source.id)
+        .toSet();
+    final selectedRefreshSourceIds =
+        _refreshSourceIds.intersection(refreshableSourceIds);
 
     return PopScope<void>(
       canPop: true,
@@ -264,6 +304,60 @@ class _NetworkStorageSettingsPageState
                     ),
                   ),
                 ),
+                _SectionTitle(theme: theme, label: '刷新媒体源'),
+                TextField(
+                  controller: _refreshDelayController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: '延迟刷新秒数',
+                    hintText: '0',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (refreshableSources.isNotEmpty) ...[
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _refreshSourceIds = refreshableSourceIds;
+                          });
+                        },
+                        child: const Text('全选'),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _refreshSourceIds.clear();
+                          });
+                        },
+                        child: const Text('清空'),
+                      ),
+                    ],
+                  ),
+                  ...refreshableSources.map(
+                    (source) => CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: selectedRefreshSourceIds.contains(source.id),
+                      title: Text(source.name),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      onChanged: (value) {
+                        setState(() {
+                          final next = {..._refreshSourceIds};
+                          if (value == true) {
+                            next.add(source.id);
+                          } else {
+                            next.remove(source.id);
+                          }
+                          _refreshSourceIds = next;
+                        });
+                      },
+                    ),
+                  ),
+                ] else
+                  const Text('无'),
               ],
             ),
             Positioned(

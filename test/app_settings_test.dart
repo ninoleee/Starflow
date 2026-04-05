@@ -6,16 +6,20 @@ void main() {
   test('app settings persist home hero style', () {
     final settings = AppSettings.fromJson({
       'homeHeroStyle': 'borderless',
+      'playbackOpenTimeoutSeconds': 45,
     });
 
     expect(settings.homeHeroStyle, HomeHeroStyle.borderless);
+    expect(settings.playbackOpenTimeoutSeconds, 45);
     expect(settings.toJson()['homeHeroStyle'], 'borderless');
+    expect(settings.toJson()['playbackOpenTimeoutSeconds'], 45);
   });
 
   test('app settings default hero style is normal', () {
     final settings = AppSettings.fromJson(const {});
 
     expect(settings.homeHeroStyle, HomeHeroStyle.normal);
+    expect(settings.playbackOpenTimeoutSeconds, 20);
   });
 
   test('app settings persist metadata match preferences', () {
@@ -39,6 +43,8 @@ void main() {
         'quarkSaveFolderPath': '/影视',
         'smartStrmWebhookUrl': 'http://localhost:8024/webhook/abc',
         'smartStrmTaskName': 'movie_task',
+        'refreshMediaSourceIds': ['emby-a', 'webdav-b'],
+        'refreshDelaySeconds': 8,
       },
     });
 
@@ -50,6 +56,11 @@ void main() {
       'http://localhost:8024/webhook/abc',
     );
     expect(settings.networkStorage.smartStrmTaskName, 'movie_task');
+    expect(
+      settings.networkStorage.refreshMediaSourceIds,
+      ['emby-a', 'webdav-b'],
+    );
+    expect(settings.networkStorage.refreshDelaySeconds, 8);
 
     final json = settings.toJson()['networkStorage'] as Map<String, dynamic>;
     expect(json['quarkCookie'], 'foo=bar');
@@ -57,6 +68,8 @@ void main() {
     expect(json['quarkSaveFolderPath'], '/影视');
     expect(json['smartStrmWebhookUrl'], 'http://localhost:8024/webhook/abc');
     expect(json['smartStrmTaskName'], 'movie_task');
+    expect(json['refreshMediaSourceIds'], ['emby-a', 'webdav-b']);
+    expect(json['refreshDelaySeconds'], 8);
   });
 
   test('app settings default network storage config is empty', () {
@@ -67,6 +80,8 @@ void main() {
     expect(settings.networkStorage.quarkSaveFolderPath, '/');
     expect(settings.networkStorage.smartStrmWebhookUrl, isEmpty);
     expect(settings.networkStorage.smartStrmTaskName, isEmpty);
+    expect(settings.networkStorage.refreshMediaSourceIds, isEmpty);
+    expect(settings.networkStorage.refreshDelaySeconds, 0);
     expect(settings.networkStorage.hasAnyConfigured, isFalse);
   });
 }

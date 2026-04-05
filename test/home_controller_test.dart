@@ -254,6 +254,12 @@ class _FakeMediaRepository implements MediaRepository {
   }
 
   @override
+  Future<void> refreshSource({
+    required String sourceId,
+    bool forceFullRescan = false,
+  }) async {}
+
+  @override
   Future<List<MediaSourceConfig>> fetchSources() async {
     return const [];
   }

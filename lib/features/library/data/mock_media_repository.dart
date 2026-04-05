@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
@@ -28,6 +29,11 @@ abstract class MediaRepository {
     int limit = 10,
   });
 
+  Future<void> refreshSource({
+    required String sourceId,
+    bool forceFullRescan = false,
+  });
+
   Future<List<MediaItem>> fetchChildren({
     required String sourceId,
     required String parentId,
@@ -46,15 +52,22 @@ final mediaRepositoryProvider = Provider<MediaRepository>(
     ref,
     ref.read(embyApiClientProvider),
     ref.read(webDavNasClientProvider),
+    ref.read(nasMediaIndexerProvider),
   ),
 );
 
 class AppMediaRepository implements MediaRepository {
-  AppMediaRepository(this.ref, this._embyApiClient, this._webDavNasClient);
+  AppMediaRepository(
+    this.ref,
+    this._embyApiClient,
+    this._webDavNasClient,
+    this._nasMediaIndexer,
+  );
 
   final Ref ref;
   final EmbyApiClient _embyApiClient;
   final WebDavNasClient _webDavNasClient;
+  final NasMediaIndexer _nasMediaIndexer;
 
   List<MediaSourceConfig> get _enabledSources {
     return ref
@@ -154,6 +167,64 @@ class AppMediaRepository implements MediaRepository {
   }
 
   @override
+  Future<void> refreshSource({
+    required String sourceId,
+    bool forceFullRescan = false,
+  }) async {
+    final normalizedSourceId = sourceId.trim();
+    if (normalizedSourceId.isEmpty) {
+      return;
+    }
+    MediaSourceConfig? source;
+    for (final candidate in _enabledSources) {
+      if (candidate.id == normalizedSourceId) {
+        source = candidate;
+        break;
+      }
+    }
+    if (source == null) {
+      return;
+    }
+
+    if (source.kind == MediaSourceKind.emby) {
+      if (!source.hasActiveSession) {
+        return;
+      }
+      final selectedCollections = await _selectedCollectionsForSource(source);
+      if (_hasScopedSections(source) && selectedCollections.isEmpty) {
+        return;
+      }
+      if (_hasScopedSections(source)) {
+        await _fetchLibraryFromCollections(
+          source,
+          selectedCollections,
+          limit: 200,
+        );
+        return;
+      }
+      await _embyApiClient.fetchCollections(source);
+      await _embyApiClient.fetchLibrary(source, limit: 200);
+      return;
+    }
+
+    if (source.hasExplicitNoSectionsSelected) {
+      await _nasMediaIndexer.clearSource(source.id);
+      return;
+    }
+    final selectedCollections = await _selectedCollectionsForSource(source);
+    if (_hasScopedSections(source) && selectedCollections.isEmpty) {
+      await _nasMediaIndexer.clearSource(source.id);
+      return;
+    }
+    await _nasMediaIndexer.refreshSource(
+      source,
+      scopedCollections:
+          _hasScopedSections(source) ? selectedCollections : null,
+      forceFullRescan: forceFullRescan,
+    );
+  }
+
+  @override
   Future<List<MediaItem>> fetchChildren({
     required String sourceId,
     required String parentId,
@@ -190,8 +261,16 @@ class AppMediaRepository implements MediaRepository {
         limit: limit,
       );
     }
-
-    return const [];
+    final scopedCollections = _hasScopedSections(source)
+        ? await _selectedCollectionsForSource(source)
+        : null;
+    return _nasMediaIndexer.loadChildren(
+      source,
+      parentId: normalizedParentId,
+      sectionId: sectionId,
+      scopedCollections: scopedCollections,
+      limit: limit,
+    );
   }
 
   @override
@@ -273,12 +352,27 @@ class AppMediaRepository implements MediaRepository {
       }
 
       if (source.endpoint.trim().isNotEmpty) {
+        if (source.hasExplicitNoSectionsSelected) {
+          await _nasMediaIndexer.clearSource(source.id);
+          return const _SourceFetchResult(items: <MediaItem>[]);
+        }
         if (sectionId?.trim().isNotEmpty == true) {
+          final resolvedSectionId = sectionId!.trim();
+          final resolvedSectionName =
+              await _resolveSectionName(source, sectionId);
           return _SourceFetchResult(
-            items: await _webDavNasClient.fetchLibrary(
+            items: await _nasMediaIndexer.loadLibrary(
               source,
-              sectionId: sectionId,
-              sectionName: await _resolveSectionName(source, sectionId),
+              sectionId: resolvedSectionId,
+              scopedCollections: [
+                MediaCollection(
+                  id: resolvedSectionId,
+                  title: resolvedSectionName,
+                  sourceId: source.id,
+                  sourceName: source.name,
+                  sourceKind: source.kind,
+                ),
+              ],
               limit: limit,
             ),
           );
@@ -287,19 +381,20 @@ class AppMediaRepository implements MediaRepository {
         final selectedCollections = await _selectedCollectionsForSource(source);
         if (hasScopedSections) {
           if (selectedCollections.isEmpty) {
+            await _nasMediaIndexer.clearSource(source.id);
             return const _SourceFetchResult(items: <MediaItem>[]);
           }
           return _SourceFetchResult(
-            items: await _fetchLibraryFromCollections(
+            items: await _nasMediaIndexer.loadLibrary(
               source,
-              selectedCollections,
+              scopedCollections: selectedCollections,
               limit: limit,
             ),
           );
         }
 
         return _SourceFetchResult(
-          items: await _webDavNasClient.fetchLibrary(
+          items: await _nasMediaIndexer.loadLibrary(
             source,
             limit: limit,
           ),
@@ -346,10 +441,10 @@ class AppMediaRepository implements MediaRepository {
             sectionName: collection.title,
           );
         }
-        return _webDavNasClient.fetchLibrary(
+        return _nasMediaIndexer.loadLibrary(
           source,
           sectionId: collection.id,
-          sectionName: collection.title,
+          scopedCollections: [collection],
           limit: limit,
         );
       }),
@@ -390,10 +485,10 @@ class AppMediaRepository implements MediaRepository {
     if (!applySelection) {
       return collections;
     }
-    final selectedIds = source.featuredSectionIds
-        .map((item) => item.trim())
-        .where((item) => item.isNotEmpty)
-        .toSet();
+    if (source.hasExplicitNoSectionsSelected) {
+      return const [];
+    }
+    final selectedIds = source.selectedSectionIds;
     if (selectedIds.isEmpty) {
       return collections;
     }

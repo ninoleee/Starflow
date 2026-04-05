@@ -86,6 +86,7 @@ class LibraryPagedGrid extends StatelessWidget {
                   title: item.title,
                   subtitle: item.year > 0 ? '${item.year}' : '',
                   posterUrl: item.posterUrl,
+                  posterHeaders: item.posterHeaders,
                   width: null,
                   onTap: () {
                     context.pushNamed(

@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
-import 'package:starflow/core/utils/network_image_headers.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
+import 'package:starflow/core/widgets/app_network_image.dart';
+import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
+import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
@@ -14,6 +16,11 @@ import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+final searchCollectionsProvider = FutureProvider<List<MediaCollection>>((ref) {
+  ref.watch(appSettingsProvider);
+  return ref.read(mediaRepositoryProvider).fetchCollections();
+});
 
 class SearchPage extends ConsumerStatefulWidget {
   const SearchPage({super.key, this.initialQuery});
@@ -67,10 +74,13 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final settings = ref.read(appSettingsProvider);
     final enabledProviders =
         settings.searchProviders.where((item) => item.enabled).toList();
-    final enabledSources =
-        settings.mediaSources.where((item) => item.enabled).toList();
+    final scopedCollections = await ref.read(searchCollectionsProvider.future);
+    final localSources = _visibleLocalSources(
+      settings: settings,
+      collections: scopedCollections,
+    );
     final targets = _buildTargets(
-      sources: enabledSources,
+      localSources: localSources,
       providers: enabledProviders,
     );
     if (targets.length == 1) {
@@ -100,7 +110,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       repository: repository,
       keyword: keyword,
       targets: selectedTargets,
-      enabledSources: enabledSources,
+      localSources: localSources,
       enabledProviders: enabledProviders,
     );
 
@@ -148,10 +158,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final settings = ref.watch(appSettingsProvider);
     final enabledProviders =
         settings.searchProviders.where((item) => item.enabled).toList();
-    final enabledSources =
-        settings.mediaSources.where((item) => item.enabled).toList();
+    final collectionsAsync = ref.watch(searchCollectionsProvider);
+    final scopedCollections =
+        collectionsAsync.valueOrNull ?? const <MediaCollection>[];
+    final localSources = _visibleLocalSources(
+      settings: settings,
+      collections: scopedCollections,
+    );
     final targets = _buildTargets(
-      sources: enabledSources,
+      localSources: localSources,
       providers: enabledProviders,
     );
 
@@ -189,23 +204,27 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   if (targets.length == 1)
                     const Text('还没有启用可搜索的来源，请先去设置页添加媒体源或搜索服务。')
                   else
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: targets
-                          .map(
-                            (target) => FilterChip(
-                              label: Text(target.label),
-                              selected: _selectedTargetIds.contains(target.id),
-                              onSelected: (_) {
-                                _toggleTargetSelection(target, targets);
-                                if (_controller.text.trim().isNotEmpty) {
-                                  _performSearch();
-                                }
-                              },
-                            ),
-                          )
-                          .toList(),
+                    SizedBox(
+                      height: 40,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: targets.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(width: 8),
+                        itemBuilder: (context, index) {
+                          final target = targets[index];
+                          return FilterChip(
+                            label: Text(target.label),
+                            selected: _selectedTargetIds.contains(target.id),
+                            onSelected: (_) {
+                              _toggleTargetSelection(target, targets);
+                              if (_controller.text.trim().isNotEmpty) {
+                                _performSearch();
+                              }
+                            },
+                          );
+                        },
+                      ),
                     ),
                   const SizedBox(height: 12),
                   if (_isSearching) ...[
@@ -275,7 +294,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     required SearchRepository repository,
     required String keyword,
     required List<_SearchTarget> targets,
-    required List<MediaSourceConfig> enabledSources,
+    required List<MediaSourceConfig> localSources,
     required List<SearchProviderConfig> enabledProviders,
   }) {
     final operations = <_SearchOperation>[];
@@ -283,7 +302,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       switch (target.kind) {
         case _SearchTargetKind.all:
           operations.addAll([
-            ...enabledSources.map(
+            ...localSources.map(
               (source) => _SearchOperation(
                 label: source.name,
                 run: () => repository.searchLocal(
@@ -385,14 +404,33 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   }
 
   List<_SearchTarget> _buildTargets({
-    required List<MediaSourceConfig> sources,
+    required List<MediaSourceConfig> localSources,
     required List<SearchProviderConfig> providers,
   }) {
     return [
       const _SearchTarget.all(),
-      ...sources.map(_SearchTarget.mediaSource),
+      ...localSources.map(_SearchTarget.mediaSource),
       ...providers.map(_SearchTarget.provider),
     ];
+  }
+
+  List<MediaSourceConfig> _visibleLocalSources({
+    required AppSettings settings,
+    required List<MediaCollection> collections,
+  }) {
+    final visibleSourceIds = collections
+        .map((collection) => collection.sourceId.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    return settings.mediaSources
+        .where(
+          (source) =>
+              source.enabled &&
+              (source.kind == MediaSourceKind.emby ||
+                  source.kind == MediaSourceKind.nas) &&
+              visibleSourceIds.contains(source.id),
+        )
+        .toList(growable: false);
   }
 
   List<_SearchTarget> _resolveSelectedTargets(List<_SearchTarget> targets) {
@@ -502,16 +540,35 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             );
         triggeredTask = true;
       }
+      final refreshSourceIds = storage.refreshMediaSourceIds
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
+          .toList(growable: false);
+      final refreshDelaySeconds =
+          storage.refreshDelaySeconds < 0 ? 0 : storage.refreshDelaySeconds;
+      if (refreshSourceIds.isNotEmpty) {
+        unawaited(
+          ref.read(mediaRefreshCoordinatorProvider).refreshSelectedSources(
+                sourceIds: refreshSourceIds,
+                delaySeconds: refreshDelaySeconds,
+              ),
+        );
+      }
       if (!mounted) {
         return;
       }
       final message = response.taskId.isEmpty
           ? '已提交到夸克，保存 ${response.savedCount} 个文件'
           : '已提交到夸克，任务 ${response.taskId}';
+      final refreshMessage = refreshSourceIds.isEmpty
+          ? ''
+          : refreshDelaySeconds > 0
+              ? '，$refreshDelaySeconds 秒后刷新媒体源'
+              : '，即将刷新媒体源';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            triggeredTask ? '$message，已触发 STRM 任务' : message,
+            '${triggeredTask ? '$message，已触发 STRM 任务' : message}$refreshMessage',
           ),
         ),
       );
@@ -588,9 +645,9 @@ class _SearchResultCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                   child: posterUrl.isEmpty
                       ? _SearchPosterPlaceholder(theme: theme)
-                      : Image.network(
+                      : AppNetworkImage(
                           posterUrl,
-                          headers: networkImageHeadersForUrl(posterUrl),
+                          headers: result.posterHeaders,
                           width: 72,
                           height: 102,
                           fit: BoxFit.cover,

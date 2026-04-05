@@ -7,6 +7,7 @@ class MediaPosterTile extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.posterUrl,
+    this.posterHeaders = const {},
     required this.onTap,
     this.width = 140,
     this.titleColor,
@@ -16,6 +17,7 @@ class MediaPosterTile extends StatelessWidget {
   final String title;
   final String subtitle;
   final String posterUrl;
+  final Map<String, String> posterHeaders;
   final VoidCallback onTap;
   final double? width;
   final Color? titleColor;
@@ -48,6 +50,7 @@ class MediaPosterTile extends StatelessWidget {
     } else {
       posterChild = AppNetworkImage(
         trimmedPoster,
+        headers: posterHeaders,
         fit: BoxFit.cover,
         cacheWidth: skipResizeForDecode ? null : cacheWidth,
         cacheHeight: skipResizeForDecode ? null : cacheHeight,

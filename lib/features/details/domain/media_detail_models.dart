@@ -9,12 +9,27 @@ class MediaPersonProfile {
 
   final String name;
   final String avatarUrl;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'avatarUrl': avatarUrl,
+    };
+  }
+
+  factory MediaPersonProfile.fromJson(Map<String, dynamic> json) {
+    return MediaPersonProfile(
+      name: json['name'] as String? ?? '',
+      avatarUrl: json['avatarUrl'] as String? ?? '',
+    );
+  }
 }
 
 class MediaDetailTarget {
   const MediaDetailTarget({
     required this.title,
     required this.posterUrl,
+    this.posterHeaders = const {},
     required this.overview,
     this.year = 0,
     this.durationLabel = '',
@@ -40,6 +55,7 @@ class MediaDetailTarget {
 
   final String title;
   final String posterUrl;
+  final Map<String, String> posterHeaders;
   final String overview;
   final int year;
   final String durationLabel;
@@ -112,6 +128,7 @@ class MediaDetailTarget {
   MediaDetailTarget copyWith({
     String? title,
     String? posterUrl,
+    Map<String, String>? posterHeaders,
     String? overview,
     int? year,
     String? durationLabel,
@@ -137,6 +154,7 @@ class MediaDetailTarget {
     return MediaDetailTarget(
       title: title ?? this.title,
       posterUrl: posterUrl ?? this.posterUrl,
+      posterHeaders: posterHeaders ?? this.posterHeaders,
       overview: overview ?? this.overview,
       year: year ?? this.year,
       durationLabel: durationLabel ?? this.durationLabel,
@@ -169,10 +187,11 @@ class MediaDetailTarget {
     return MediaDetailTarget(
       title: item.title,
       posterUrl: item.posterUrl,
+      posterHeaders: item.posterHeaders,
       overview: item.overview,
       year: item.year,
       durationLabel: item.durationLabel,
-      ratingLabels: const [],
+      ratingLabels: item.ratingLabels,
       genres: item.genres,
       directors: item.directors,
       actors: item.actors,
@@ -191,11 +210,91 @@ class MediaDetailTarget {
       itemType: item.itemType,
       sectionId: item.sectionId,
       sectionName: item.sectionName,
-      doubanId: '',
+      doubanId: item.doubanId,
       imdbId: item.imdbId,
       tmdbId: item.tmdbId,
       sourceKind: item.sourceKind,
       sourceName: item.sourceName,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'title': title,
+      'posterUrl': posterUrl,
+      'posterHeaders': posterHeaders,
+      'overview': overview,
+      'year': year,
+      'durationLabel': durationLabel,
+      'ratingLabels': ratingLabels,
+      'genres': genres,
+      'directors': directors,
+      'actors': actors,
+      'actorProfiles': actorProfiles.map((item) => item.toJson()).toList(),
+      'availabilityLabel': availabilityLabel,
+      'searchQuery': searchQuery,
+      'playbackTarget': playbackTarget?.toJson(),
+      'itemId': itemId,
+      'sourceId': sourceId,
+      'itemType': itemType,
+      'sectionId': sectionId,
+      'sectionName': sectionName,
+      'doubanId': doubanId,
+      'imdbId': imdbId,
+      'tmdbId': tmdbId,
+      'sourceKind': sourceKind?.name,
+      'sourceName': sourceName,
+    };
+  }
+
+  factory MediaDetailTarget.fromJson(Map<String, dynamic> json) {
+    return MediaDetailTarget(
+      title: json['title'] as String? ?? '',
+      posterUrl: json['posterUrl'] as String? ?? '',
+      posterHeaders:
+          (json['posterHeaders'] as Map<dynamic, dynamic>? ?? const {})
+              .map((key, value) => MapEntry('$key', '$value')),
+      overview: json['overview'] as String? ?? '',
+      year: (json['year'] as num?)?.toInt() ?? 0,
+      durationLabel: json['durationLabel'] as String? ?? '',
+      ratingLabels: (json['ratingLabels'] as List<dynamic>? ?? const [])
+          .whereType<String>()
+          .toList(growable: false),
+      genres: (json['genres'] as List<dynamic>? ?? const [])
+          .whereType<String>()
+          .toList(growable: false),
+      directors: (json['directors'] as List<dynamic>? ?? const [])
+          .whereType<String>()
+          .toList(growable: false),
+      actors: (json['actors'] as List<dynamic>? ?? const [])
+          .whereType<String>()
+          .toList(growable: false),
+      actorProfiles: (json['actorProfiles'] as List<dynamic>? ?? const [])
+          .map(
+            (item) => MediaPersonProfile.fromJson(
+              Map<String, dynamic>.from(item as Map),
+            ),
+          )
+          .toList(growable: false),
+      availabilityLabel: json['availabilityLabel'] as String? ?? '',
+      searchQuery: json['searchQuery'] as String? ?? '',
+      playbackTarget: (json['playbackTarget'] as Map?) == null
+          ? null
+          : PlaybackTarget.fromJson(
+              Map<String, dynamic>.from(json['playbackTarget'] as Map),
+            ),
+      itemId: json['itemId'] as String? ?? '',
+      sourceId: json['sourceId'] as String? ?? '',
+      itemType: json['itemType'] as String? ?? '',
+      sectionId: json['sectionId'] as String? ?? '',
+      sectionName: json['sectionName'] as String? ?? '',
+      doubanId: json['doubanId'] as String? ?? '',
+      imdbId: json['imdbId'] as String? ?? '',
+      tmdbId: json['tmdbId'] as String? ?? '',
+      sourceKind: (json['sourceKind'] as String?) == null
+          ? null
+          : MediaSourceKindX.fromName(json['sourceKind'] as String? ?? ''),
+      sourceName: json['sourceName'] as String? ?? '',
     );
   }
 }

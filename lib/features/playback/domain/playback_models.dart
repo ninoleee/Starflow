@@ -95,6 +95,52 @@ class PlaybackTarget {
       container: _inferContainerFromUrl(item.streamUrl),
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'title': title,
+      'sourceId': sourceId,
+      'streamUrl': streamUrl,
+      'sourceName': sourceName,
+      'sourceKind': sourceKind.name,
+      'actualAddress': actualAddress,
+      'itemId': itemId,
+      'preferredMediaSourceId': preferredMediaSourceId,
+      'subtitle': subtitle,
+      'headers': headers,
+      'container': container,
+      'videoCodec': videoCodec,
+      'audioCodec': audioCodec,
+      'width': width,
+      'height': height,
+      'bitrate': bitrate,
+      'fileSizeBytes': fileSizeBytes,
+    };
+  }
+
+  factory PlaybackTarget.fromJson(Map<String, dynamic> json) {
+    return PlaybackTarget(
+      title: json['title'] as String? ?? '',
+      sourceId: json['sourceId'] as String? ?? '',
+      streamUrl: json['streamUrl'] as String? ?? '',
+      sourceName: json['sourceName'] as String? ?? '',
+      sourceKind: MediaSourceKindX.fromName(json['sourceKind'] as String? ?? ''),
+      actualAddress: json['actualAddress'] as String? ?? '',
+      itemId: json['itemId'] as String? ?? '',
+      preferredMediaSourceId: json['preferredMediaSourceId'] as String? ?? '',
+      subtitle: json['subtitle'] as String? ?? '',
+      headers:
+          (json['headers'] as Map<dynamic, dynamic>? ?? const {})
+              .map((key, value) => MapEntry('$key', '$value')),
+      container: json['container'] as String? ?? '',
+      videoCodec: json['videoCodec'] as String? ?? '',
+      audioCodec: json['audioCodec'] as String? ?? '',
+      width: (json['width'] as num?)?.toInt(),
+      height: (json['height'] as num?)?.toInt(),
+      bitrate: (json['bitrate'] as num?)?.toInt(),
+      fileSizeBytes: (json['fileSizeBytes'] as num?)?.toInt(),
+    );
+  }
 }
 
 String formatByteSize(int? bytes) {

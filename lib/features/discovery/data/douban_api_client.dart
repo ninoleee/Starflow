@@ -362,9 +362,7 @@ class DoubanApiClient {
           : 'https://image.tmdb.org/t/p/w500$posterPath',
       overview: '${item['description'] ?? ''}'.trim(),
       year: year,
-      ratingLabel: rating.isEmpty
-          ? ''
-          : '豆瓣 ${double.tryParse(rating)?.toStringAsFixed(1) ?? rating}',
+      ratingLabel: _formatDoubanRatingLabel(rating),
       mediaType: mediaType,
     );
   }
@@ -477,18 +475,31 @@ class DoubanApiClient {
       if (rating is Map) {
         final value = rating['value'] ?? rating['star_count'] ?? '';
         final text = '$value'.trim();
-        if (text.isNotEmpty && text != 'null' && text != '0') {
-          final parsed = double.tryParse(text);
-          return parsed == null ? text : '豆瓣 ${parsed.toStringAsFixed(1)}';
+        if (text.isNotEmpty && text != 'null') {
+          return _formatDoubanRatingLabel(text);
         }
       }
       final text = '${map['rating'] ?? ''}'.trim();
-      if (text.isNotEmpty && text != 'null' && text != '0') {
-        final parsed = double.tryParse(text);
-        return parsed == null ? text : '豆瓣 ${parsed.toStringAsFixed(1)}';
+      if (text.isNotEmpty && text != 'null') {
+        return _formatDoubanRatingLabel(text);
       }
     }
-    return '';
+    return '豆瓣 0';
+  }
+
+  String _formatDoubanRatingLabel(String raw) {
+    final text = raw.trim();
+    if (text.isEmpty || text == 'null') {
+      return '豆瓣 0';
+    }
+    final parsed = double.tryParse(text);
+    if (parsed == null) {
+      return '豆瓣 $text';
+    }
+    if (parsed <= 0) {
+      return '豆瓣 0';
+    }
+    return '豆瓣 ${parsed.toStringAsFixed(1)}';
   }
 
   String _resolveString(Map<String, dynamic> map, List<String> keys) {
