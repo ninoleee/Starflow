@@ -65,7 +65,7 @@ class BootstrapController extends Notifier<BootstrapState> {
       currentStep: 0,
       title: '正在唤醒你的片库',
       subtitle: '先把应用外壳、路由和首页容器准备好。',
-      minDelay: const Duration(milliseconds: 180),
+      minDelay: const Duration(milliseconds: 40),
     );
 
     await _runStage(
@@ -78,6 +78,7 @@ class BootstrapController extends Notifier<BootstrapState> {
             .read(settingsControllerProvider.future)
             .timeout(const Duration(seconds: 3));
       },
+      stageDelay: const Duration(milliseconds: 40),
     );
 
     await _runStage(
@@ -86,10 +87,14 @@ class BootstrapController extends Notifier<BootstrapState> {
       title: '正在同步首页内容',
       subtitle: '预热首页模块，把可展示的资源先准备出来。',
       task: () async {
-        primeHomeModules(ref);
-        await Future<void>.delayed(const Duration(milliseconds: 220));
+        unawaited(
+          Future<void>(() async {
+            primeHomeModules(ref);
+          }),
+        );
       },
       nonBlockingErrorSubtitle: '媒体源响应偏慢，先进入应用，资源会继续在后台补齐。',
+      stageDelay: const Duration(milliseconds: 30),
     );
 
     await _setStage(
@@ -97,7 +102,7 @@ class BootstrapController extends Notifier<BootstrapState> {
       currentStep: 3,
       title: '正在整理展示内容',
       subtitle: '马上进入首页。',
-      minDelay: const Duration(milliseconds: 180),
+      minDelay: const Duration(milliseconds: 40),
     );
 
     state = state.copyWith(
@@ -116,13 +121,14 @@ class BootstrapController extends Notifier<BootstrapState> {
     required String subtitle,
     required Future<void> Function() task,
     String? nonBlockingErrorSubtitle,
+    Duration stageDelay = const Duration(milliseconds: 24),
   }) async {
     await _setStage(
       progress: progress,
       currentStep: currentStep,
       title: title,
       subtitle: subtitle,
-      minDelay: const Duration(milliseconds: 140),
+      minDelay: stageDelay,
     );
 
     try {

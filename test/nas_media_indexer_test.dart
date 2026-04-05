@@ -582,6 +582,121 @@ void main() {
     expect(movie.streamUrl, isNotEmpty);
     expect(movie.title, '星球大战：最后的绝地武士 2160p remux (2017)');
   });
+
+  test(
+      'NasMediaIndexer does not start duplicate NAS refresh while one is active',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-dedupe',
+      name: 'WebDAV Dedupe',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Shows/',
+      enabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'dedupe-1',
+          path: 'Shows/Test Episode 01.mkv',
+          title: 'Test Episode 01',
+          itemType: 'episode',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+      ],
+      scanDelay: const Duration(milliseconds: 120),
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await Future.wait([
+      indexer.refreshSource(source),
+      indexer.refreshSource(source),
+    ]);
+
+    expect(client.scanCallCount, 1);
+  });
+
+  test(
+      'NasMediaIndexer incremental refresh only enriches changed or missing-metadata items',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-incremental',
+      name: 'WebDAV Incremental',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Shows/',
+      enabled: true,
+      webDavSidecarScrapingEnabled: true,
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'incremental-1',
+          path: 'Shows/Test Show/Test Episode 01.mkv',
+          title: 'Test Episode 01',
+          itemType: 'episode',
+          seasonNumber: 1,
+          episodeNumber: 1,
+          hasSidecarMatch: true,
+        ),
+      ],
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    await _drainAsyncTasks();
+    expect(client.scanCallCount, 1);
+    expect(client.scanResourceCallCount, 1);
+
+    await indexer.refreshSource(source);
+    await _drainAsyncTasks();
+    expect(client.scanCallCount, 2);
+    expect(
+      client.scanResourceCallCount,
+      1,
+      reason:
+          'Second incremental refresh should not re-read sidecar for unchanged items.',
+    );
+  });
 }
 
 _PendingTestItem _episodeItem({
@@ -610,6 +725,7 @@ class _PendingTestItem {
     required this.seasonNumber,
     required this.episodeNumber,
     this.imdbId = '',
+    this.hasSidecarMatch = true,
   });
 
   final String id;
@@ -619,13 +735,19 @@ class _PendingTestItem {
   final int seasonNumber;
   final int episodeNumber;
   final String imdbId;
+  final bool hasSidecarMatch;
 }
 
 class _FakeWebDavNasClient extends WebDavNasClient {
-  _FakeWebDavNasClient({required this.scannedItems})
-      : super(MockClient((request) async => http.Response('', 200)));
+  _FakeWebDavNasClient({
+    required this.scannedItems,
+    this.scanDelay = Duration.zero,
+  }) : super(MockClient((request) async => http.Response('', 200)));
 
   final List<_PendingTestItem> scannedItems;
+  final Duration scanDelay;
+  int scanCallCount = 0;
+  int scanResourceCallCount = 0;
 
   @override
   Future<List<WebDavScannedItem>> scanLibrary(
@@ -636,6 +758,10 @@ class _FakeWebDavNasClient extends WebDavNasClient {
     bool? loadSidecarMetadata,
     bool resetCaches = true,
   }) async {
+    scanCallCount += 1;
+    if (scanDelay > Duration.zero) {
+      await Future<void>.delayed(scanDelay);
+    }
     return scannedItems
         .take(limit)
         .map(
@@ -678,11 +804,77 @@ class _FakeWebDavNasClient extends WebDavNasClient {
               width: null,
               height: null,
               bitrate: null,
-              hasSidecarMatch: true,
+              hasSidecarMatch:
+                  loadSidecarMetadata == true ? item.hasSidecarMatch : false,
             ),
           ),
         )
         .toList(growable: false);
+  }
+
+  @override
+  Future<WebDavScannedItem?> scanResource(
+    MediaSourceConfig source, {
+    required String resourceId,
+    required String sectionId,
+    required String sectionName,
+    bool? loadSidecarMetadata,
+  }) async {
+    scanResourceCallCount += 1;
+    final matched = scannedItems.where((item) => item.id == resourceId);
+    if (matched.isEmpty) {
+      return null;
+    }
+    final item = matched.first;
+    return WebDavScannedItem(
+      resourceId: item.id,
+      fileName: item.path.split('/').last,
+      actualAddress: item.path,
+      sectionId: sectionId,
+      sectionName: sectionName.isEmpty ? '剧集' : sectionName,
+      streamUrl: 'https://media.example.com/${item.id}.mkv',
+      streamHeaders: const {},
+      addedAt: DateTime.utc(2026, 4, 5, 12, item.episodeNumber),
+      modifiedAt: DateTime.utc(2026, 4, 5, 12, item.episodeNumber),
+      fileSizeBytes: 1024,
+      metadataSeed: WebDavMetadataSeed(
+        title: item.title,
+        overview: '',
+        posterUrl: '',
+        posterHeaders: const {},
+        backdropUrl: '',
+        backdropHeaders: const {},
+        logoUrl: '',
+        logoHeaders: const {},
+        bannerUrl: '',
+        bannerHeaders: const {},
+        extraBackdropUrls: const [],
+        extraBackdropHeaders: const {},
+        year: 0,
+        durationLabel: '剧集',
+        genres: const [],
+        directors: const [],
+        actors: const [],
+        itemType: item.itemType,
+        seasonNumber: item.seasonNumber,
+        episodeNumber: item.episodeNumber,
+        imdbId: item.imdbId,
+        container: 'mkv',
+        videoCodec: '',
+        audioCodec: '',
+        width: null,
+        height: null,
+        bitrate: null,
+        hasSidecarMatch:
+            loadSidecarMetadata == true ? item.hasSidecarMatch : false,
+      ),
+    );
+  }
+}
+
+Future<void> _drainAsyncTasks([int turns = 6]) async {
+  for (var index = 0; index < turns; index++) {
+    await Future<void>.delayed(Duration.zero);
   }
 }
 

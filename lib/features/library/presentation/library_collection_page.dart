@@ -4,22 +4,30 @@ import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/features/library/application/library_cached_items.dart';
 import 'package:starflow/features/library/application/nas_media_index_revision.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/presentation/widgets/library_paged_grid.dart';
+import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
+import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 final libraryCollectionItemsProvider =
     FutureProvider.family<List<MediaItem>, LibraryCollectionTarget>((
   ref,
   target,
-) {
+) async {
   ref.watch(nasMediaIndexRevisionProvider);
-  return ref.read(mediaRepositoryProvider).fetchLibrary(
+  ref.watch(localStorageDetailCacheRevisionProvider);
+  final items = await ref.read(mediaRepositoryProvider).fetchLibrary(
         sourceId: target.sourceId,
         sectionId: target.sectionId,
       );
+  return resolveLibraryItemsWithCachedDetails(
+    items: items,
+    localStorageCacheRepository: ref.read(localStorageCacheRepositoryProvider),
+  );
 });
 
 class LibraryCollectionPage extends ConsumerStatefulWidget {

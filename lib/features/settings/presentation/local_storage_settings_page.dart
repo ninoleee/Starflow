@@ -19,11 +19,18 @@ final localStorageSummariesProvider =
   ];
 });
 
-class LocalStorageSettingsPage extends ConsumerWidget {
+class LocalStorageSettingsPage extends ConsumerStatefulWidget {
   const LocalStorageSettingsPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LocalStorageSettingsPage> createState() =>
+      _LocalStorageSettingsPageState();
+}
+
+class _LocalStorageSettingsPageState
+    extends ConsumerState<LocalStorageSettingsPage> {
+  @override
+  Widget build(BuildContext context) {
     final summariesAsync = ref.watch(localStorageSummariesProvider);
 
     return Scaffold(
@@ -36,7 +43,8 @@ class LocalStorageSettingsPage extends ConsumerWidget {
               padding: EdgeInsets.zero,
               children: [
                 SizedBox(
-                  height: MediaQuery.paddingOf(context).top + kToolbarHeight + 12,
+                  height:
+                      MediaQuery.paddingOf(context).top + kToolbarHeight + 12,
                 ),
                 SectionPanel(
                   title: '本地存储',
@@ -51,8 +59,8 @@ class LocalStorageSettingsPage extends ConsumerWidget {
                               ),
                               child: _LocalStorageTile(
                                 summary: summaries[index],
-                                onClear: () =>
-                                    _clearCache(context, ref, summaries[index].type),
+                                onClear: () => _clearCache(
+                                    context, ref, summaries[index].type),
                               ),
                             ),
                           const SizedBox(height: 12),

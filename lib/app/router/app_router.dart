@@ -31,9 +31,30 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/boot',
         name: 'boot',
-        builder: (context, state) => const BootstrapPage(),
+        pageBuilder: (context, state) => const NoTransitionPage<void>(
+          child: BootstrapPage(),
+        ),
       ),
       StatefulShellRoute.indexedStack(
+        pageBuilder: (context, state, navigationShell) {
+          return CustomTransitionPage<void>(
+            key: state.pageKey,
+            child: _AppNavigationShell(navigationShell: navigationShell),
+            transitionDuration: const Duration(milliseconds: 260),
+            reverseTransitionDuration: const Duration(milliseconds: 200),
+            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+              final curved = CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOutCubic,
+                reverseCurve: Curves.easeInCubic,
+              );
+              return FadeTransition(
+                opacity: Tween<double>(begin: 0.2, end: 1).animate(curved),
+                child: child,
+              );
+            },
+          );
+        },
         builder: (context, state, navigationShell) {
           return _AppNavigationShell(navigationShell: navigationShell);
         },
