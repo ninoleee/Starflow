@@ -17,6 +17,7 @@ namespace {
 #endif
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
+constexpr COLORREF kWindowBackgroundColor = RGB(0x07, 0x13, 0x27);
 
 /// Registry key for app theme preference.
 ///
@@ -28,6 +29,7 @@ constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme"
 
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
+static HBRUSH g_window_background_brush = CreateSolidBrush(kWindowBackgroundColor);
 
 using EnableNonClientDpiScaling = BOOL __stdcall(HWND hwnd);
 
@@ -97,7 +99,7 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
     window_class.hInstance = GetModuleHandle(nullptr);
     window_class.hIcon =
         LoadIcon(window_class.hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
-    window_class.hbrBackground = 0;
+    window_class.hbrBackground = g_window_background_brush;
     window_class.lpszMenuName = nullptr;
     window_class.lpfnWndProc = Win32Window::WndProc;
     RegisterClass(&window_class);

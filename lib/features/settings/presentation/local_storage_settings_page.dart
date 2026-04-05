@@ -3,9 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/core/storage/persistent_image_cache.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 final localStorageSummariesProvider =
@@ -32,6 +34,7 @@ class _LocalStorageSettingsPageState
   @override
   Widget build(BuildContext context) {
     final summariesAsync = ref.watch(localStorageSummariesProvider);
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -66,11 +69,19 @@ class _LocalStorageSettingsPageState
                           const SizedBox(height: 12),
                           Align(
                             alignment: Alignment.centerLeft,
-                            child: TextButton.icon(
-                              onPressed: () => _clearAll(context, ref),
-                              icon: const Icon(Icons.delete_sweep_rounded),
-                              label: const Text('清空全部缓存'),
-                            ),
+                            child: isTelevision
+                                ? TvAdaptiveButton(
+                                    label: '清空全部缓存',
+                                    icon: Icons.delete_sweep_rounded,
+                                    onPressed: () => _clearAll(context, ref),
+                                    variant: TvButtonVariant.text,
+                                  )
+                                : TextButton.icon(
+                                    onPressed: () => _clearAll(context, ref),
+                                    icon:
+                                        const Icon(Icons.delete_sweep_rounded),
+                                    label: const Text('清空全部缓存'),
+                                  ),
                           ),
                         ],
                       );
@@ -82,6 +93,7 @@ class _LocalStorageSettingsPageState
                     error: (error, _) => Text('读取本地缓存失败：$error'),
                   ),
                 ),
+                const SizedBox(height: kBottomReservedSpacing),
               ],
             ),
             OverlayToolbar(
@@ -128,7 +140,7 @@ class _LocalStorageSettingsPageState
   }
 }
 
-class _LocalStorageTile extends StatelessWidget {
+class _LocalStorageTile extends ConsumerWidget {
   const _LocalStorageTile({
     required this.summary,
     required this.onClear,
@@ -138,7 +150,28 @@ class _LocalStorageTile extends StatelessWidget {
   final VoidCallback onClear;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    if (isTelevision) {
+      return TvFocusableAction(
+        onPressed: onClear,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+            title: Text(summary.type.label),
+            subtitle: Text(
+              '${summary.entryCount} 项 · ${_formatBytes(summary.totalBytes)}',
+            ),
+            trailing: const Text('删除'),
+          ),
+        ),
+      );
+    }
     return ListTile(
       contentPadding: EdgeInsets.zero,
       title: Text(summary.type.label),

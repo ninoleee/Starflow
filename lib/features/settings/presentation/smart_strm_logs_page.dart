@@ -55,6 +55,7 @@ class SmartStrmLogsPage extends ConsumerWidget {
                     error: (error, _) => Text('读取 STRM 日志失败：$error'),
                   ),
                 ),
+                const SizedBox(height: kBottomReservedSpacing),
               ],
             ),
             OverlayToolbar(

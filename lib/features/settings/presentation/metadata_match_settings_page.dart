@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
+import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
@@ -16,152 +19,203 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(appSettingsProvider);
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
 
     return Scaffold(
       body: AppPageBackground(
         contentPadding: appPageContentPadding(context),
-        child: ListView(
-          padding: EdgeInsets.zero,
+        child: Stack(
           children: [
-            SectionPanel(
-              title: '匹配策略',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '优先顺序',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                  const SizedBox(height: 10),
-                  SegmentedButton<MetadataMatchProvider>(
-                    showSelectedIcon: false,
-                    segments: [
-                      for (final provider in MetadataMatchProvider.values)
-                        ButtonSegment<MetadataMatchProvider>(
-                          value: provider,
-                          label: Text('${provider.label} 优先'),
-                        ),
-                    ],
-                    selected: {settings.metadataMatchPriority},
-                    onSelectionChanged: (selection) {
-                      if (selection.isEmpty) {
-                        return;
-                      }
-                      ref
-                          .read(settingsControllerProvider.notifier)
-                          .setMetadataMatchPriority(selection.first);
-                    },
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 18),
-            SectionPanel(
-              title: 'TMDB',
-              child: Column(
-                children: [
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('启用 TMDB 自动补全影片信息'),
-                    value: settings.tmdbMetadataMatchEnabled,
-                    onChanged: (value) {
-                      ref
-                          .read(settingsControllerProvider.notifier)
-                          .setTmdbMetadataMatchEnabled(value);
-                    },
-                  ),
-                  const SizedBox(height: 6),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('TMDB Read Access Token'),
-                    trailing: Text(
-                      settings.tmdbReadAccessToken.trim().isEmpty
-                          ? '未配置'
-                          : '已配置',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
+            ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                SizedBox(
+                  height:
+                      MediaQuery.paddingOf(context).top + kToolbarHeight + 12,
+                ),
+                SectionPanel(
+                  title: '匹配策略',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      OutlinedButton(
-                        onPressed: () => _openTmdbTokenEditor(
-                          context,
-                          ref,
-                          settings.tmdbReadAccessToken,
+                      Text(
+                        '优先顺序',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 10),
+                      if (isTelevision)
+                        TvSelectionTile(
+                          title: '优先顺序',
+                          value: '${settings.metadataMatchPriority.label} 优先',
+                          onPressed: () => _openPriorityPicker(
+                            context,
+                            ref,
+                            settings.metadataMatchPriority,
+                          ),
+                        )
+                      else
+                        SegmentedButton<MetadataMatchProvider>(
+                          showSelectedIcon: false,
+                          segments: [
+                            for (final provider in MetadataMatchProvider.values)
+                              ButtonSegment<MetadataMatchProvider>(
+                                value: provider,
+                                label: Text('${provider.label} 优先'),
+                              ),
+                          ],
+                          selected: {settings.metadataMatchPriority},
+                          onSelectionChanged: (selection) {
+                            if (selection.isEmpty) {
+                              return;
+                            }
+                            ref
+                                .read(settingsControllerProvider.notifier)
+                                .setMetadataMatchPriority(selection.first);
+                          },
                         ),
-                        child: Text(
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
+                SectionPanel(
+                  title: 'TMDB',
+                  child: Column(
+                    children: [
+                      _MetadataToggleTile(
+                        title: '启用 TMDB 自动补全影片信息',
+                        value: settings.tmdbMetadataMatchEnabled,
+                        onChanged: (value) {
+                          ref
+                              .read(settingsControllerProvider.notifier)
+                              .setTmdbMetadataMatchEnabled(value);
+                        },
+                      ),
+                      const SizedBox(height: 6),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('TMDB Read Access Token'),
+                        trailing: Text(
                           settings.tmdbReadAccessToken.trim().isEmpty
-                              ? '填写 Token'
-                              : '编辑 Token',
+                              ? '未配置'
+                              : '已配置',
                         ),
                       ),
-                      OutlinedButton(
-                        onPressed: () => _openTmdbTestDialog(context, ref),
-                        child: const Text('测试 TMDB'),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          OutlinedButton(
+                            onPressed: () => _openTmdbTokenEditor(
+                              context,
+                              ref,
+                              settings.tmdbReadAccessToken,
+                            ),
+                            child: Text(
+                              settings.tmdbReadAccessToken.trim().isEmpty
+                                  ? '填写 Token'
+                                  : '编辑 Token',
+                            ),
+                          ),
+                          OutlinedButton(
+                            onPressed: () => _openTmdbTestDialog(context, ref),
+                            child: const Text('测试 TMDB'),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 18),
+                SectionPanel(
+                  title: 'WMDB',
+                  child: Column(
+                    children: [
+                      _MetadataToggleTile(
+                        title: '启用 WMDB 自动补全影片信息',
+                        value: settings.wmdbMetadataMatchEnabled,
+                        onChanged: (value) {
+                          ref
+                              .read(settingsControllerProvider.notifier)
+                              .setWmdbMetadataMatchEnabled(value);
+                        },
+                      ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: OutlinedButton(
+                          onPressed: () => _openWmdbTestDialog(context, ref),
+                          child: const Text('测试 WMDB'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
+                SectionPanel(
+                  title: '评分',
+                  child: Column(
+                    children: [
+                      _MetadataToggleTile(
+                        title: '启用 IMDb 自动补评分',
+                        value: settings.imdbRatingMatchEnabled,
+                        onChanged: (value) {
+                          ref
+                              .read(settingsControllerProvider.notifier)
+                              .setImdbRatingMatchEnabled(value);
+                        },
+                      ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: OutlinedButton(
+                          onPressed: () => _openImdbTestDialog(context, ref),
+                          child: const Text('测试 IMDb'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: kBottomReservedSpacing),
+              ],
             ),
-            const SizedBox(height: 18),
-            SectionPanel(
-              title: 'WMDB',
-              child: Column(
-                children: [
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('启用 WMDB 自动补全影片信息'),
-                    value: settings.wmdbMetadataMatchEnabled,
-                    onChanged: (value) {
-                      ref
-                          .read(settingsControllerProvider.notifier)
-                          .setWmdbMetadataMatchEnabled(value);
-                    },
-                  ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: OutlinedButton(
-                      onPressed: () => _openWmdbTestDialog(context, ref),
-                      child: const Text('测试 WMDB'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 18),
-            SectionPanel(
-              title: '评分',
-              child: Column(
-                children: [
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('启用 IMDb 自动补评分'),
-                    value: settings.imdbRatingMatchEnabled,
-                    onChanged: (value) {
-                      ref
-                          .read(settingsControllerProvider.notifier)
-                          .setImdbRatingMatchEnabled(value);
-                    },
-                  ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: OutlinedButton(
-                      onPressed: () => _openImdbTestDialog(context, ref),
-                      child: const Text('测试 IMDb'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            const OverlayToolbar(),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _openPriorityPicker(
+    BuildContext context,
+    WidgetRef ref,
+    MetadataMatchProvider current,
+  ) async {
+    final selected = await showDialog<MetadataMatchProvider>(
+      context: context,
+      builder: (context) {
+        return SimpleDialog(
+          title: const Text('选择优先顺序'),
+          children: [
+            for (final provider in MetadataMatchProvider.values)
+              SimpleDialogOption(
+                onPressed: () => Navigator.of(context).pop(provider),
+                child: Text(
+                  provider == current
+                      ? '${provider.label} 优先  当前'
+                      : '${provider.label} 优先',
+                ),
+              ),
+          ],
+        );
+      },
+    );
+    if (selected == null) {
+      return;
+    }
+    await ref
+        .read(settingsControllerProvider.notifier)
+        .setMetadataMatchPriority(selected);
   }
 
   Future<void> _openTmdbTokenEditor(
@@ -675,6 +729,36 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
 
     queryController.dispose();
     yearController.dispose();
+  }
+}
+
+class _MetadataToggleTile extends ConsumerWidget {
+  const _MetadataToggleTile({
+    required this.title,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String title;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    if (isTelevision) {
+      return TvSelectionTile(
+        title: title,
+        value: value ? '已开启' : '已关闭',
+        onPressed: () => onChanged(!value),
+      );
+    }
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(title),
+      value: value,
+      onChanged: onChanged,
+    );
   }
 }
 

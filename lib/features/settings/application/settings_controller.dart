@@ -159,6 +159,10 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     );
   }
 
+  Future<void> replaceAllSettings(AppSettings settings) async {
+    await _persist(settings);
+  }
+
   Future<void> setHomeHeroStyle(HomeHeroStyle style) async {
     final current = state.valueOrNull ?? await _repository.load();
     await _persist(current.copyWith(homeHeroStyle: style));
@@ -166,12 +170,24 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   Future<void> setHomeHeroEnabled(bool enabled) async {
     final current = state.valueOrNull ?? await _repository.load();
-    await _persist(current.copyWith(homeHeroEnabled: enabled));
+    await saveHomeModule(
+      _resolveHeroModule(current).copyWith(enabled: enabled),
+    );
   }
 
   Future<void> setHomeHeroSourceModuleId(String moduleId) async {
     final current = state.valueOrNull ?? await _repository.load();
     await _persist(current.copyWith(homeHeroSourceModuleId: moduleId.trim()));
+  }
+
+  Future<void> setHomeHeroBackgroundEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(homeHeroBackgroundEnabled: enabled));
+  }
+
+  Future<void> setTranslucentEffectsEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(translucentEffectsEnabled: enabled));
   }
 
   Future<void> toggleHomeModule(String id, bool enabled) async {
@@ -221,5 +237,18 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   Future<void> _persist(AppSettings next) async {
     state = AsyncData(next);
     await _repository.save(next);
+  }
+
+  HomeModuleConfig _resolveHeroModule(AppSettings settings) {
+    for (final module in settings.homeModules) {
+      if (module.type == HomeModuleType.hero ||
+          module.id == HomeModuleConfig.heroModuleId) {
+        return module.copyWith(
+          id: HomeModuleConfig.heroModuleId,
+          type: HomeModuleType.hero,
+        );
+      }
+    }
+    return HomeModuleConfig.hero();
   }
 }

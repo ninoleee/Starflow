@@ -4,15 +4,21 @@ import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
-  test('app settings persist home hero style', () {
+  test('app settings persist home hero style and visual effect switches', () {
     final settings = AppSettings.fromJson({
       'homeHeroStyle': 'borderless',
+      'homeHeroBackgroundEnabled': false,
+      'translucentEffectsEnabled': false,
       'playbackOpenTimeoutSeconds': 45,
     });
 
     expect(settings.homeHeroStyle, HomeHeroStyle.borderless);
+    expect(settings.homeHeroBackgroundEnabled, isFalse);
+    expect(settings.translucentEffectsEnabled, isFalse);
     expect(settings.playbackOpenTimeoutSeconds, 45);
     expect(settings.toJson()['homeHeroStyle'], 'borderless');
+    expect(settings.toJson()['homeHeroBackgroundEnabled'], isFalse);
+    expect(settings.toJson()['translucentEffectsEnabled'], isFalse);
     expect(settings.toJson()['playbackOpenTimeoutSeconds'], 45);
   });
 
@@ -20,7 +26,29 @@ void main() {
     final settings = AppSettings.fromJson(const {});
 
     expect(settings.homeHeroStyle, HomeHeroStyle.normal);
+    expect(settings.homeHeroBackgroundEnabled, isTrue);
+    expect(settings.translucentEffectsEnabled, isTrue);
+    expect(
+      settings.homeModules
+          .firstWhere((item) => item.type == HomeModuleType.hero)
+          .enabled,
+      isTrue,
+    );
     expect(settings.playbackOpenTimeoutSeconds, 20);
+  });
+
+  test('legacy hero settings migrate to hero module', () {
+    final settings = AppSettings.fromJson({
+      'homeHeroEnabled': false,
+      'homeHeroStyle': 'borderless',
+      'homeModules': const [],
+    });
+
+    final heroModule = settings.homeModules
+        .firstWhere((item) => item.type == HomeModuleType.hero);
+
+    expect(heroModule.enabled, isFalse);
+    expect(settings.homeHeroStyle, HomeHeroStyle.borderless);
   });
 
   test('app settings persist metadata match preferences', () {
@@ -82,7 +110,7 @@ void main() {
     expect(settings.networkStorage.smartStrmWebhookUrl, isEmpty);
     expect(settings.networkStorage.smartStrmTaskName, isEmpty);
     expect(settings.networkStorage.refreshMediaSourceIds, isEmpty);
-    expect(settings.networkStorage.refreshDelaySeconds, 0);
+    expect(settings.networkStorage.refreshDelaySeconds, 1);
     expect(settings.networkStorage.hasAnyConfigured, isFalse);
   });
 
@@ -90,13 +118,14 @@ void main() {
     final settings = SeedData.defaultSettings;
 
     expect(settings.doubanAccount.enabled, isTrue);
-    expect(settings.homeModules.length, 3);
+    expect(settings.homeModules.length, 4);
+    expect(settings.homeModules.first.type, HomeModuleType.hero);
     expect(
-      settings.homeModules.map((item) => item.title).toList(),
+      settings.homeModules.skip(1).map((item) => item.title).toList(),
       ['热播新剧', '豆瓣热门电影', '热播综艺'],
     );
     expect(
-      settings.homeModules.map((item) => item.doubanListUrl).toList(),
+      settings.homeModules.skip(1).map((item) => item.doubanListUrl).toList(),
       [
         'https://m.douban.com/subject_collection/tv_hot',
         'https://m.douban.com/subject_collection/movie_hot_gaia',

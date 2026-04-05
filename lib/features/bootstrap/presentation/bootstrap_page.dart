@@ -128,6 +128,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                           const StarflowLogo(
                             iconSize: 132,
                             showWordmark: false,
+                            showIconPlate: false,
                           ),
                         ],
                       ),

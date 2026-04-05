@@ -2461,23 +2461,21 @@ class _SeasonChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: Ink(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          decoration: BoxDecoration(
-            color:
-                selected ? Colors.white : Colors.white.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: selected
-                  ? Colors.white
-                  : Colors.white.withValues(alpha: 0.08),
-            ),
+    return TvFocusableAction(
+      onPressed: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: selected ? Colors.white : Colors.white.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected
+                ? Colors.white
+                : Colors.white.withValues(alpha: 0.08),
           ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
           child: Text(
             label,
             style: TextStyle(
@@ -2501,19 +2499,18 @@ class _EpisodeCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final badgeText = _episodeBadgeText(item);
     final summary = _episodeSummary(item);
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(24),
-        onTap: item.isPlayable
-            ? () {
-                context.pushNamed(
-                  'player',
-                  extra: item.isPlayable ? _itemToPlaybackTarget(item) : null,
-                );
-              }
-            : null,
-        child: Ink(
+    final onOpen = item.isPlayable
+        ? () {
+            context.pushNamed(
+              'player',
+              extra: item.isPlayable ? _itemToPlaybackTarget(item) : null,
+            );
+          }
+        : null;
+    return TvFocusableAction(
+      onPressed: onOpen,
+      borderRadius: BorderRadius.circular(24),
+      child: DecoratedBox(
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.06),
             borderRadius: BorderRadius.circular(24),
@@ -2635,7 +2632,6 @@ class _EpisodeCard extends StatelessWidget {
               ),
             ],
           ),
-        ),
       ),
     );
   }

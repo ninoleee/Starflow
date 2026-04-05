@@ -7,6 +7,7 @@ import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
@@ -125,6 +126,8 @@ final _homeModulePageProvider =
 
 String _moduleSubtitle(HomeModuleConfig module) {
   switch (module.type) {
+    case HomeModuleType.hero:
+      return '首页 Hero';
     case HomeModuleType.doubanInterest:
       return '豆瓣 · ${module.doubanInterestStatus.label}';
     case HomeModuleType.doubanSuggestion:
@@ -333,9 +336,9 @@ class _PagerButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return TvFocusableAction(
+      onPressed: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(999),
-      onTap: enabled ? onTap : null,
       child: Container(
         width: 38,
         height: 38,

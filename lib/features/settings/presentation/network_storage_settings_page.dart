@@ -1,7 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
@@ -115,6 +119,54 @@ class _NetworkStorageSettingsPageState
     }
   }
 
+  bool _hasUnsavedChanges() {
+    return jsonEncode(_buildDraft().toJson()) !=
+        jsonEncode(widget.initial.toJson());
+  }
+
+  Future<void> _discardAndClose() async {
+    _skipAutoSaveOnPop = true;
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _handleCloseRequest() async {
+    if (_skipAutoSaveOnPop) {
+      return;
+    }
+    if (!_hasUnsavedChanges()) {
+      await _discardAndClose();
+      return;
+    }
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('保存修改？'),
+        content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('cancel'),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('discard'),
+            child: const Text('不保存'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop('save'),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (action == 'discard') {
+      await _discardAndClose();
+    } else if (action == 'save') {
+      await _saveDraft();
+    }
+  }
+
   Future<void> _testQuarkConnection() async {
     FocusScope.of(context).unfocus();
     final cookie = _quarkCookieController.text.trim();
@@ -218,6 +270,7 @@ class _NetworkStorageSettingsPageState
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final settings = ref.watch(appSettingsProvider);
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final refreshableSources = _refreshableMediaSources(settings);
     final refreshableSourceIds =
         refreshableSources.map((source) => source.id).toSet();
@@ -225,12 +278,12 @@ class _NetworkStorageSettingsPageState
         _refreshSourceIds.intersection(refreshableSourceIds);
 
     return PopScope<void>(
-      canPop: true,
+      canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop || _skipAutoSaveOnPop) {
+        if (didPop || _skipAutoSaveOnPop) {
           return;
         }
-        _saveDraft(popAfterSave: false);
+        _handleCloseRequest();
       },
       child: Scaffold(
         body: Stack(
@@ -241,16 +294,25 @@ class _NetworkStorageSettingsPageState
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               children: [
                 _SectionTitle(theme: theme, label: '夸克保存'),
-                TextField(
-                  controller: _quarkCookieController,
-                  minLines: 2,
-                  maxLines: 4,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: '夸克 Cookie',
-                    hintText: '用于搜索结果一键保存到夸克网盘',
+                if (isTelevision)
+                  TvSelectionTile(
+                    title: '夸克 Cookie',
+                    value: _quarkCookieController.text.trim().isEmpty
+                        ? '未填写'
+                        : '已填写',
+                    onPressed: _openQuarkCookieEditor,
+                  )
+                else
+                  TextField(
+                    controller: _quarkCookieController,
+                    minLines: 2,
+                    maxLines: 4,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: '夸克 Cookie',
+                      hintText: '用于搜索结果一键保存到夸克网盘',
+                    ),
                   ),
-                ),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 12,
@@ -281,23 +343,41 @@ class _NetworkStorageSettingsPageState
                 const SizedBox(height: 8),
                 Text('默认保存到：$_quarkFolderPath'),
                 _SectionTitle(theme: theme, label: 'SmartStrm'),
-                TextField(
-                  controller: _smartStrmWebhookController,
-                  keyboardType: TextInputType.url,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'Webhook 地址',
-                    hintText: 'http://yourip:8024/webhook/abcdef123456',
+                if (isTelevision)
+                  TvSelectionTile(
+                    title: 'Webhook 地址',
+                    value: _smartStrmWebhookController.text.trim().isEmpty
+                        ? '未填写'
+                        : _smartStrmWebhookController.text.trim(),
+                    onPressed: _openSmartStrmWebhookEditor,
+                  )
+                else
+                  TextField(
+                    controller: _smartStrmWebhookController,
+                    keyboardType: TextInputType.url,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Webhook 地址',
+                      hintText: 'http://yourip:8024/webhook/abcdef123456',
+                    ),
                   ),
-                ),
                 const SizedBox(height: 12),
-                TextField(
-                  controller: _smartStrmTaskNameController,
-                  decoration: const InputDecoration(
-                    labelText: '任务名',
-                    hintText: 'movie_task',
+                if (isTelevision)
+                  TvSelectionTile(
+                    title: '任务名',
+                    value: _smartStrmTaskNameController.text.trim().isEmpty
+                        ? '未填写'
+                        : _smartStrmTaskNameController.text.trim(),
+                    onPressed: _openSmartStrmTaskNameEditor,
+                  )
+                else
+                  TextField(
+                    controller: _smartStrmTaskNameController,
+                    decoration: const InputDecoration(
+                      labelText: '任务名',
+                      hintText: 'movie_task',
+                    ),
                   ),
-                ),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 12,
@@ -331,14 +411,21 @@ class _NetworkStorageSettingsPageState
                   ],
                 ),
                 _SectionTitle(theme: theme, label: '刷新媒体源'),
-                TextField(
-                  controller: _refreshDelayController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: '延迟刷新秒数',
-                    hintText: '1',
+                if (isTelevision)
+                  TvSelectionTile(
+                    title: '延迟刷新秒数',
+                    value: '${_refreshDelaySeconds()} 秒',
+                    onPressed: _openRefreshDelayPicker,
+                  )
+                else
+                  TextField(
+                    controller: _refreshDelayController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: '延迟刷新秒数',
+                      hintText: '1',
+                    ),
                   ),
-                ),
                 const SizedBox(height: 12),
                 if (refreshableSources.isNotEmpty) ...[
                   Wrap(
@@ -364,26 +451,49 @@ class _NetworkStorageSettingsPageState
                     ],
                   ),
                   ...refreshableSources.map(
-                    (source) => CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: selectedRefreshSourceIds.contains(source.id),
-                      title: Text(source.name),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      onChanged: (value) {
-                        setState(() {
-                          final next = {..._refreshSourceIds};
-                          if (value == true) {
-                            next.add(source.id);
-                          } else {
-                            next.remove(source.id);
-                          }
-                          _refreshSourceIds = next;
-                        });
-                      },
-                    ),
+                    (source) => isTelevision
+                        ? Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: TvSelectionTile(
+                              title: source.name,
+                              value:
+                                  selectedRefreshSourceIds.contains(source.id)
+                                      ? '已选中'
+                                      : '未选中',
+                              onPressed: () {
+                                setState(() {
+                                  final next = {..._refreshSourceIds};
+                                  if (next.contains(source.id)) {
+                                    next.remove(source.id);
+                                  } else {
+                                    next.add(source.id);
+                                  }
+                                  _refreshSourceIds = next;
+                                });
+                              },
+                            ),
+                          )
+                        : CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            value: selectedRefreshSourceIds.contains(source.id),
+                            title: Text(source.name),
+                            controlAffinity: ListTileControlAffinity.leading,
+                            onChanged: (value) {
+                              setState(() {
+                                final next = {..._refreshSourceIds};
+                                if (value == true) {
+                                  next.add(source.id);
+                                } else {
+                                  next.remove(source.id);
+                                }
+                                _refreshSourceIds = next;
+                              });
+                            },
+                          ),
                   ),
                 ] else
                   const Text('无'),
+                const SizedBox(height: kBottomReservedSpacing),
               ],
             ),
             Positioned(
@@ -391,6 +501,7 @@ class _NetworkStorageSettingsPageState
               left: 0,
               right: 0,
               child: OverlayToolbar(
+                onBack: _handleCloseRequest,
                 trailing: TextButton(
                   onPressed: _saveDraft,
                   child: const Text('保存'),
@@ -401,6 +512,107 @@ class _NetworkStorageSettingsPageState
         ),
       ),
     );
+  }
+
+  Future<void> _openQuarkCookieEditor() async {
+    final result = await _openTextEditorDialog(
+      title: '夸克 Cookie',
+      initialValue: _quarkCookieController.text,
+      hintText: '用于搜索结果一键保存到夸克网盘',
+      minLines: 2,
+      maxLines: 4,
+    );
+    if (result == null) return;
+    setState(() {
+      _quarkCookieController.text = result;
+    });
+  }
+
+  Future<void> _openSmartStrmWebhookEditor() async {
+    final result = await _openTextEditorDialog(
+      title: 'Webhook 地址',
+      initialValue: _smartStrmWebhookController.text,
+      hintText: 'http://yourip:8024/webhook/abcdef123456',
+    );
+    if (result == null) return;
+    setState(() {
+      _smartStrmWebhookController.text = result;
+    });
+  }
+
+  Future<void> _openSmartStrmTaskNameEditor() async {
+    final result = await _openTextEditorDialog(
+      title: '任务名',
+      initialValue: _smartStrmTaskNameController.text,
+      hintText: 'movie_task',
+    );
+    if (result == null) return;
+    setState(() {
+      _smartStrmTaskNameController.text = result;
+    });
+  }
+
+  Future<void> _openRefreshDelayPicker() async {
+    const options = [1, 3, 5, 10, 15, 30, 60];
+    final current = _refreshDelaySeconds();
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (context) {
+        return SimpleDialog(
+          title: const Text('选择延迟刷新秒数'),
+          children: [
+            for (final seconds in options)
+              SimpleDialogOption(
+                onPressed: () => Navigator.of(context).pop(seconds),
+                child:
+                    Text(seconds == current ? '$seconds 秒  当前' : '$seconds 秒'),
+              ),
+          ],
+        );
+      },
+    );
+    if (selected == null) return;
+    setState(() {
+      _refreshDelayController.text = '$selected';
+    });
+  }
+
+  Future<String?> _openTextEditorDialog({
+    required String title,
+    required String initialValue,
+    required String hintText,
+    int minLines = 1,
+    int maxLines = 1,
+  }) async {
+    final controller = TextEditingController(text: initialValue);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(title),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            minLines: minLines,
+            maxLines: maxLines,
+            decoration: InputDecoration(hintText: hintText),
+            onSubmitted: (value) => Navigator.of(context).pop(value),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(controller.text),
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    return result;
   }
 }
 

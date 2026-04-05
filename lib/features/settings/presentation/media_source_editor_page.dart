@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
@@ -42,6 +44,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   late bool _advancedTokenExpanded;
   late final String _sourceId;
   late String _selectedNasPath;
+  late String _boundWebDavEndpoint;
   late bool _webDavStructureInferenceEnabled;
   late bool _webDavSidecarScrapingEnabled;
   bool _didDelete = false;
@@ -73,13 +76,17 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _connectionMessage = _initialConnectionMessage(e);
     _advancedTokenExpanded = _tokenController.text.trim().isNotEmpty;
     _selectedNasPath = e?.libraryPath ?? '';
+    _boundWebDavEndpoint =
+        (e?.kind == MediaSourceKind.nas ? (e?.endpoint ?? '') : '').trim();
     _webDavStructureInferenceEnabled =
         e?.webDavStructureInferenceEnabled ?? false;
     _webDavSidecarScrapingEnabled = e?.webDavSidecarScrapingEnabled ?? true;
+    _endpointController.addListener(_handleEndpointChanged);
   }
 
   @override
   void dispose() {
+    _endpointController.removeListener(_handleEndpointChanged);
     _nameController.dispose();
     _endpointController.dispose();
     _usernameController.dispose();
@@ -210,6 +217,35 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       return source.embyEditorStatusMessage;
     }
     return _defaultConnectionMessage(source.kind);
+  }
+
+  void _handleEndpointChanged() {
+    if (_kind != MediaSourceKind.nas) {
+      return;
+    }
+    final normalizedEndpoint = _endpointController.text.trim();
+    if (normalizedEndpoint == _boundWebDavEndpoint) {
+      return;
+    }
+
+    final hadBoundWebDavState = _selectedNasPath.trim().isNotEmpty ||
+        _availableSections.isNotEmpty ||
+        _didHydrateSectionSelection;
+
+    setState(() {
+      _boundWebDavEndpoint = normalizedEndpoint;
+      if (!hadBoundWebDavState) {
+        return;
+      }
+      _selectedNasPath = '';
+      _savedFeaturedSectionIds = const [kNoSectionsSelectedSentinel];
+      _availableSections = const [];
+      _selectedSectionIds.clear();
+      _didHydrateSectionSelection = false;
+      _connectionMessage = normalizedEndpoint.isEmpty
+          ? _defaultConnectionMessage(MediaSourceKind.nas)
+          : 'WebDAV 地址已变更，请重新选择路径并测试连接。';
+    });
   }
 
   Future<void> _onTestEmbyLogin() async {
@@ -369,6 +405,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
 
     _selectedNasPath = pickedPath;
     setState(() {
+      _boundWebDavEndpoint = endpoint;
       _savedFeaturedSectionIds = const [kNoSectionsSelectedSentinel];
       _availableSections = const [];
       _selectedSectionIds.clear();
@@ -421,6 +458,60 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
 
   Future<void> _onSave() => _saveDraft();
 
+  bool _hasUnsavedChanges() {
+    if (_didDelete) {
+      return false;
+    }
+    final initial = widget.initial;
+    if (initial == null) {
+      return _hasMeaningfulDraft();
+    }
+    return jsonEncode(_draftConfig().toJson()) != jsonEncode(initial.toJson());
+  }
+
+  Future<void> _discardAndClose() async {
+    _skipAutoSaveOnPop = true;
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _handleCloseRequest() async {
+    if (_skipAutoSaveOnPop || _didDelete) {
+      return;
+    }
+    if (!_hasUnsavedChanges()) {
+      await _discardAndClose();
+      return;
+    }
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('保存修改？'),
+        content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('cancel'),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('discard'),
+            child: const Text('不保存'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop('save'),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (action == 'discard') {
+      await _discardAndClose();
+    } else if (action == 'save') {
+      await _saveDraft();
+    }
+  }
+
   Future<void> _confirmDeleteMediaSource() async {
     final name = _nameController.text.trim().isEmpty
         ? '此媒体源'
@@ -468,12 +559,12 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     final isEmby = _kind == MediaSourceKind.emby;
 
     return PopScope<void>(
-      canPop: true,
+      canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop || _skipAutoSaveOnPop || _didDelete) {
+        if (didPop || _skipAutoSaveOnPop || _didDelete) {
           return;
         }
-        _saveDraft(popAfterSave: false);
+        _handleCloseRequest();
       },
       child: Scaffold(
         body: Stack(
@@ -513,6 +604,9 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                         _availableSections = const [];
                         _selectedSectionIds.clear();
                         _selectedNasPath = '';
+                        _boundWebDavEndpoint = value == MediaSourceKind.nas
+                            ? _endpointController.text.trim()
+                            : '';
                         _webDavStructureInferenceEnabled = false;
                         _webDavSidecarScrapingEnabled = true;
                         _webDavExcludedKeywordsController.clear();
@@ -798,6 +892,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                     ),
                   ),
                 ],
+                const SizedBox(height: kBottomReservedSpacing),
               ],
             ),
             Positioned(
@@ -805,6 +900,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
               left: 0,
               right: 0,
               child: OverlayToolbar(
+                onBack: _handleCloseRequest,
                 trailing: TextButton(
                   onPressed: _onSave,
                   child: const Text('保存'),
@@ -1003,7 +1099,12 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
                             });
                           },
                         ),
+                      const SizedBox(height: kBottomReservedSpacing),
                     ],
+                    if (snapshot.connectionState == ConnectionState.waiting ||
+                        snapshot.hasError ||
+                        (snapshot.data ?? const []).isEmpty)
+                      const SizedBox(height: kBottomReservedSpacing),
                   ],
                 );
               },

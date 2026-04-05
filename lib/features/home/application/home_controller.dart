@@ -84,12 +84,27 @@ final homeEnabledModulesProvider = Provider<List<HomeModuleConfig>>((ref) {
   final settings = ref.watch(appSettingsProvider);
   return settings.homeModules
       .where(
-        (item) => item.enabled && item.type != HomeModuleType.doubanCarousel,
+        (item) =>
+            item.enabled &&
+            item.type != HomeModuleType.doubanCarousel &&
+            item.type != HomeModuleType.hero,
       )
       .toList();
 });
 
-final homeHeroModuleCandidatesProvider = Provider<List<HomeModuleConfig>>((ref) {
+final homeHeroModuleProvider = Provider<HomeModuleConfig?>((ref) {
+  final settings = ref.watch(appSettingsProvider);
+  for (final module in settings.homeModules) {
+    if (module.type == HomeModuleType.hero ||
+        module.id == HomeModuleConfig.heroModuleId) {
+      return module;
+    }
+  }
+  return null;
+});
+
+final homeHeroModuleCandidatesProvider =
+    Provider<List<HomeModuleConfig>>((ref) {
   return ref.watch(homeEnabledModulesProvider);
 });
 
@@ -142,6 +157,8 @@ final homeSectionProvider =
       ref.read(localStorageCacheRepositoryProvider);
 
   switch (module.type) {
+    case HomeModuleType.hero:
+      return null;
     case HomeModuleType.recentlyAdded:
       final recentItems = await ref.watch(homeRecentItemsProvider.future);
       return _buildLibrarySection(

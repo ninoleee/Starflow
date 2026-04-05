@@ -8,44 +8,58 @@ class StarflowLogo extends StatelessWidget {
     this.iconSize = 96,
     this.showWordmark = true,
     this.wordmarkSize,
+    this.showIconPlate = true,
   });
 
   final double iconSize;
   final bool showWordmark;
   final double? wordmarkSize;
+  final bool showIconPlate;
 
   @override
   Widget build(BuildContext context) {
     final resolvedWordmarkSize = wordmarkSize ?? iconSize * 0.29;
+    final borderRadius = BorderRadius.circular(iconSize * 0.24);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
+        SizedBox(
           width: iconSize,
           height: iconSize,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(iconSize * 0.24),
-            gradient: const LinearGradient(
-              colors: [
-                Color(0xFF0D1117),
-                Color(0xFF161B27),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: borderRadius,
+              gradient: showIconPlate
+                  ? const LinearGradient(
+                      colors: [
+                        Color(0xFF0D1117),
+                        Color(0xFF161B27),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    )
+                  : null,
+              border: showIconPlate
+                  ? Border.all(
+                      color: Colors.white.withValues(alpha: 0.06),
+                    )
+                  : null,
+              boxShadow: showIconPlate
+                  ? [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.38),
+                        blurRadius: iconSize * 0.22,
+                        offset: Offset(0, iconSize * 0.07),
+                      ),
+                    ]
+                  : null,
             ),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.06),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.38),
-                blurRadius: iconSize * 0.22,
-                offset: Offset(0, iconSize * 0.07),
+            child: ClipRRect(
+              borderRadius: borderRadius,
+              child: CustomPaint(
+                painter: _StarflowIconPainter(),
               ),
-            ],
-          ),
-          child: CustomPaint(
-            painter: _StarflowIconPainter(),
+            ),
           ),
         ),
         if (showWordmark) ...[

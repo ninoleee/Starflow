@@ -17,6 +17,7 @@ import 'package:starflow/features/settings/presentation/local_storage_settings_p
 import 'package:starflow/features/settings/presentation/network_storage_settings_page.dart';
 import 'package:starflow/features/settings/presentation/playback_settings_page.dart';
 import 'package:starflow/features/settings/presentation/search_provider_editor_page.dart';
+import 'package:starflow/features/settings/presentation/settings_management_page.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -26,7 +27,9 @@ class SettingsPage extends ConsumerWidget {
     final settings = ref.watch(appSettingsProvider);
     final loading = ref.watch(settingsControllerProvider).isLoading;
     final heroCandidates = ref.watch(homeHeroModuleCandidatesProvider);
+    final heroModule = ref.watch(homeHeroModuleProvider);
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final heroEnabled = heroModule?.enabled ?? false;
 
     return Scaffold(
       body: AppPageBackground(
@@ -140,22 +143,61 @@ class SettingsPage extends ConsumerWidget {
             ),
             const SizedBox(height: 18),
             SectionPanel(
-              title: '播放',
+              title: '配置管理',
               child: ListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('最大超时时间'),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('${settings.playbackOpenTimeoutSeconds}s'),
-                    const SizedBox(width: 6),
-                    const Icon(Icons.chevron_right_rounded),
-                  ],
-                ),
-                onTap: () => _openPlaybackSettings(
-                  context,
-                  settings.playbackOpenTimeoutSeconds,
-                ),
+                title: const Text('导入与导出配置'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _openSettingsManagement(context),
+              ),
+            ),
+            const SizedBox(height: 18),
+            SectionPanel(
+              title: '播放',
+              child: Column(
+                children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('最大超时时间'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('${settings.playbackOpenTimeoutSeconds}s'),
+                        const SizedBox(width: 6),
+                        const Icon(Icons.chevron_right_rounded),
+                      ],
+                    ),
+                    onTap: () => _openPlaybackSettings(
+                      context,
+                      settings.playbackOpenTimeoutSeconds,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (isTelevision)
+                    TvSelectionTile(
+                      title: '透明磨砂效果',
+                      value: settings.translucentEffectsEnabled ? '已开启' : '已关闭',
+                      onPressed: () {
+                        ref
+                            .read(settingsControllerProvider.notifier)
+                            .setTranslucentEffectsEnabled(
+                              !settings.translucentEffectsEnabled,
+                            );
+                      },
+                    )
+                  else
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('透明磨砂效果'),
+                      subtitle: const Text('关闭后减少模糊和毛玻璃效果，提高性能'),
+                      value: settings.translucentEffectsEnabled,
+                      onChanged: (value) {
+                        ref
+                            .read(settingsControllerProvider.notifier)
+                            .setTranslucentEffectsEnabled(value);
+                      },
+                    ),
+                ],
               ),
             ),
             const SizedBox(height: 18),
@@ -165,7 +207,7 @@ class SettingsPage extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Hero 样式',
+                    'Hero 模块',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
@@ -173,13 +215,37 @@ class SettingsPage extends ConsumerWidget {
                   const SizedBox(height: 10),
                   if (isTelevision)
                     TvSelectionTile(
+                      title: '启用 Hero',
+                      value: heroEnabled ? '已开启' : '已关闭',
+                      onPressed: () {
+                        ref
+                            .read(settingsControllerProvider.notifier)
+                            .setHomeHeroEnabled(!heroEnabled);
+                      },
+                    )
+                  else
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('启用 Hero'),
+                      value: heroEnabled,
+                      onChanged: (value) {
+                        ref
+                            .read(settingsControllerProvider.notifier)
+                            .setHomeHeroEnabled(value);
+                      },
+                    ),
+                  const SizedBox(height: 10),
+                  if (isTelevision)
+                    TvSelectionTile(
                       title: 'Hero 样式',
                       value: settings.homeHeroStyle.label,
-                      onPressed: () => _openHeroStylePicker(
-                        context,
-                        ref,
-                        settings.homeHeroStyle,
-                      ),
+                      onPressed: heroEnabled
+                          ? () => _openHeroStylePicker(
+                                context,
+                                ref,
+                                settings.homeHeroStyle,
+                              )
+                          : null,
                     )
                   else
                     SegmentedButton<HomeHeroStyle>(
@@ -192,36 +258,40 @@ class SettingsPage extends ConsumerWidget {
                           ),
                       ],
                       selected: {settings.homeHeroStyle},
-                      onSelectionChanged: (selection) {
-                        if (selection.isEmpty) {
-                          return;
-                        }
-                        final style = selection.first;
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .setHomeHeroStyle(style);
-                      },
+                      onSelectionChanged: heroEnabled
+                          ? (selection) {
+                              if (selection.isEmpty) {
+                                return;
+                              }
+                              final style = selection.first;
+                              ref
+                                  .read(settingsControllerProvider.notifier)
+                                  .setHomeHeroStyle(style);
+                            }
+                          : null,
                     ),
                   const SizedBox(height: 14),
                   if (isTelevision)
                     TvSelectionTile(
-                      title: '显示首页 Hero',
-                      value: settings.homeHeroEnabled ? '已开启' : '已关闭',
+                      title: '全屏背景图',
+                      value: settings.homeHeroBackgroundEnabled ? '已开启' : '已关闭',
                       onPressed: () {
                         ref
                             .read(settingsControllerProvider.notifier)
-                            .setHomeHeroEnabled(!settings.homeHeroEnabled);
+                            .setHomeHeroBackgroundEnabled(
+                              !settings.homeHeroBackgroundEnabled,
+                            );
                       },
                     )
                   else
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('显示首页 Hero'),
-                      value: settings.homeHeroEnabled,
+                      title: const Text('启用 Hero 全屏背景图'),
+                      value: settings.homeHeroBackgroundEnabled,
                       onChanged: (value) {
                         ref
                             .read(settingsControllerProvider.notifier)
-                            .setHomeHeroEnabled(value);
+                            .setHomeHeroBackgroundEnabled(value);
                       },
                     ),
                   const SizedBox(height: 10),
@@ -232,7 +302,7 @@ class SettingsPage extends ConsumerWidget {
                         settings: settings,
                         heroCandidates: heroCandidates,
                       ),
-                      onPressed: settings.homeHeroEnabled
+                      onPressed: heroEnabled
                           ? () => _openHeroSourcePicker(
                                 context,
                                 ref,
@@ -262,7 +332,7 @@ class SettingsPage extends ConsumerWidget {
                           ),
                         ),
                       ],
-                      onChanged: settings.homeHeroEnabled
+                      onChanged: heroEnabled
                           ? (value) {
                               ref
                                   .read(settingsControllerProvider.notifier)
@@ -280,6 +350,7 @@ class SettingsPage extends ConsumerWidget {
                 ],
               ),
             ),
+            const SizedBox(height: kBottomReservedSpacing),
           ],
         ),
       ),
@@ -348,6 +419,14 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
+  Future<void> _openSettingsManagement(BuildContext context) {
+    return Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => const SettingsManagementPage(),
+      ),
+    );
+  }
+
   Future<void> _openHeroStylePicker(
     BuildContext context,
     WidgetRef ref,
@@ -362,7 +441,8 @@ class SettingsPage extends ConsumerWidget {
             for (final style in HomeHeroStyle.values)
               SimpleDialogOption(
                 onPressed: () => Navigator.of(context).pop(style),
-                child: Text(style == current ? '${style.label}  当前' : style.label),
+                child:
+                    Text(style == current ? '${style.label}  当前' : style.label),
               ),
           ],
         );
@@ -371,7 +451,9 @@ class SettingsPage extends ConsumerWidget {
     if (selection == null) {
       return;
     }
-    await ref.read(settingsControllerProvider.notifier).setHomeHeroStyle(selection);
+    await ref
+        .read(settingsControllerProvider.notifier)
+        .setHomeHeroStyle(selection);
   }
 
   Future<void> _openHeroSourcePicker(
@@ -389,7 +471,9 @@ class SettingsPage extends ConsumerWidget {
             SimpleDialogOption(
               onPressed: () => Navigator.of(context).pop(''),
               child: Text(
-                settings.homeHeroSourceModuleId.trim().isEmpty ? '自动选择  当前' : '自动选择',
+                settings.homeHeroSourceModuleId.trim().isEmpty
+                    ? '自动选择  当前'
+                    : '自动选择',
               ),
             ),
             for (final module in heroCandidates)

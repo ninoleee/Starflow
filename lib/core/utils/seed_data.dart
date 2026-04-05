@@ -24,6 +24,12 @@ class SeedData {
     ),
     homeModules: const [
       HomeModuleConfig(
+        id: HomeModuleConfig.heroModuleId,
+        type: HomeModuleType.hero,
+        title: 'Hero',
+        enabled: true,
+      ),
+      HomeModuleConfig(
         id: 'default-douban-tv-hot',
         type: HomeModuleType.doubanList,
         title: '热播新剧',
@@ -46,9 +52,10 @@ class SeedData {
       ),
     ],
     networkStorage: const NetworkStorageConfig(),
-    homeHeroEnabled: true,
     homeHeroSourceModuleId: '',
     homeHeroStyle: HomeHeroStyle.normal,
+    homeHeroBackgroundEnabled: true,
+    translucentEffectsEnabled: true,
     tmdbMetadataMatchEnabled: false,
     wmdbMetadataMatchEnabled: false,
     metadataMatchPriority: MetadataMatchProvider.tmdb,

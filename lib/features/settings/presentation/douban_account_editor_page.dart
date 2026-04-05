@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
@@ -53,17 +55,69 @@ class _DoubanAccountEditorPageState
     }
   }
 
+  bool _hasUnsavedChanges() {
+    final draft = DoubanAccountConfig(
+      enabled: _enabled,
+      userId: _userIdController.text.trim(),
+      sessionCookie: _sessionController.text.trim(),
+    );
+    return jsonEncode(draft.toJson()) != jsonEncode(widget.initial.toJson());
+  }
+
+  Future<void> _discardAndClose() async {
+    _skipAutoSaveOnPop = true;
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _handleCloseRequest() async {
+    if (_skipAutoSaveOnPop) {
+      return;
+    }
+    if (!_hasUnsavedChanges()) {
+      await _discardAndClose();
+      return;
+    }
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('保存修改？'),
+        content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('cancel'),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('discard'),
+            child: const Text('不保存'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop('save'),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (action == 'discard') {
+      await _discardAndClose();
+    } else if (action == 'save') {
+      await _saveDraft();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     return PopScope<void>(
-      canPop: true,
+      canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop || _skipAutoSaveOnPop) {
+        if (didPop || _skipAutoSaveOnPop) {
           return;
         }
-        _saveDraft(popAfterSave: false);
+        _handleCloseRequest();
       },
       child: Scaffold(
         body: Stack(
@@ -112,6 +166,7 @@ class _DoubanAccountEditorPageState
                   value: _enabled,
                   onChanged: (value) => setState(() => _enabled = value),
                 ),
+                const SizedBox(height: kBottomReservedSpacing),
               ],
             ),
             Positioned(
@@ -119,6 +174,7 @@ class _DoubanAccountEditorPageState
               left: 0,
               right: 0,
               child: OverlayToolbar(
+                onBack: _handleCloseRequest,
                 trailing: TextButton(
                   onPressed: _saveDraft,
                   child: const Text('保存'),

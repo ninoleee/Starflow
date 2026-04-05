@@ -34,7 +34,8 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
       QuarkDirectoryEntry(
         fid: widget.initialFid.trim().isEmpty ? '0' : widget.initialFid.trim(),
         name: '根目录',
-        path: widget.initialPath.trim().isEmpty ? '/' : widget.initialPath.trim(),
+        path:
+            widget.initialPath.trim().isEmpty ? '/' : widget.initialPath.trim(),
       ),
     ];
     _loadCurrent();
@@ -146,6 +147,7 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
                     onTap: () => _goToEntry(entry),
                   ),
                 ),
+              const SizedBox(height: kBottomReservedSpacing),
             ],
           ),
           Positioned(

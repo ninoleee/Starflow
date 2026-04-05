@@ -18,6 +18,7 @@ import 'package:starflow/features/library/presentation/library_page.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/presentation/player_page.dart';
 import 'package:starflow/features/search/presentation/search_page.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/settings_page.dart';
@@ -43,7 +44,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             child: _AppNavigationShell(navigationShell: navigationShell),
             transitionDuration: const Duration(milliseconds: 260),
             reverseTransitionDuration: const Duration(milliseconds: 200),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            transitionsBuilder:
+                (context, animation, secondaryAnimation, child) {
               final curved = CurvedAnimation(
                 parent: animation,
                 curve: Curves.easeOutCubic,
@@ -221,6 +223,11 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final translucentEffectsEnabled = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.translucentEffectsEnabled,
+      ),
+    );
 
     return Scaffold(
       extendBody: true,
@@ -240,7 +247,8 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
           : IgnorePointer(
               ignoring: !_isBottomBarVisible,
               child: AnimatedSlide(
-                offset: _isBottomBarVisible ? Offset.zero : const Offset(0, 1.2),
+                offset:
+                    _isBottomBarVisible ? Offset.zero : const Offset(0, 1.2),
                 duration: const Duration(milliseconds: 220),
                 curve: Curves.easeOutCubic,
                 child: AnimatedOpacity(
@@ -254,27 +262,52 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
                       elevation: 0,
                       shadowColor: Colors.transparent,
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(_kBottomNavShellRadius),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              borderRadius:
-                                  BorderRadius.circular(_kBottomNavShellRadius),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.2),
+                        borderRadius:
+                            BorderRadius.circular(_kBottomNavShellRadius),
+                        child: translucentEffectsEnabled
+                            ? BackdropFilter(
+                                filter:
+                                    ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(
+                                      _kBottomNavShellRadius,
+                                    ),
+                                    border: Border.all(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.2),
+                                    ),
+                                    color: const Color(0x1A0F1622),
+                                  ),
+                                  child: _FloatingNavigationBar(
+                                    currentIndex:
+                                        widget.navigationShell.currentIndex,
+                                    onDestinationSelected: (index) {
+                                      _setBottomBarVisible(true);
+                                      widget.navigationShell.goBranch(index);
+                                    },
+                                  ),
+                                ),
+                              )
+                            : DecoratedBox(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(
+                                    _kBottomNavShellRadius,
+                                  ),
+                                  border: Border.all(
+                                    color: Colors.white.withValues(alpha: 0.12),
+                                  ),
+                                  color: const Color(0xE1141F30),
+                                ),
+                                child: _FloatingNavigationBar(
+                                  currentIndex:
+                                      widget.navigationShell.currentIndex,
+                                  onDestinationSelected: (index) {
+                                    _setBottomBarVisible(true);
+                                    widget.navigationShell.goBranch(index);
+                                  },
+                                ),
                               ),
-                              color: const Color(0x1A0F1622),
-                            ),
-                            child: _FloatingNavigationBar(
-                              currentIndex: widget.navigationShell.currentIndex,
-                              onDestinationSelected: (index) {
-                                _setBottomBarVisible(true);
-                                widget.navigationShell.goBranch(index);
-                              },
-                            ),
-                          ),
-                        ),
                       ),
                     ),
                   ),

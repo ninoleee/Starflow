@@ -4,6 +4,7 @@ import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 
 enum HomeModuleType {
+  hero,
   recentlyAdded,
   librarySection,
   doubanInterest,
@@ -15,6 +16,8 @@ enum HomeModuleType {
 extension HomeModuleTypeX on HomeModuleType {
   String get label {
     switch (this) {
+      case HomeModuleType.hero:
+        return 'Hero';
       case HomeModuleType.recentlyAdded:
         return '最近新增';
       case HomeModuleType.librarySection:
@@ -32,6 +35,7 @@ extension HomeModuleTypeX on HomeModuleType {
 
   static HomeModuleType fromName(String raw) {
     return switch (raw) {
+      'hero' => HomeModuleType.hero,
       'recentlyAdded' => HomeModuleType.recentlyAdded,
       'librarySection' => HomeModuleType.librarySection,
       'doubanInterest' => HomeModuleType.doubanInterest,
@@ -57,15 +61,16 @@ extension HomeHeroStyleX on HomeHeroStyle {
   String get label {
     switch (this) {
       case HomeHeroStyle.normal:
-        return '正常';
+        return 'normal';
       case HomeHeroStyle.borderless:
-        return '无边';
+        return 'borderless';
     }
   }
 
   static HomeHeroStyle fromName(String raw) {
     return switch (raw) {
       'borderless' => HomeHeroStyle.borderless,
+      'normal' => HomeHeroStyle.normal,
       _ => HomeHeroStyle.normal,
     };
   }
@@ -98,8 +103,12 @@ class HomeModuleConfig {
   final DoubanSuggestionMediaType doubanSuggestionType;
   final String doubanListUrl;
 
+  static const heroModuleId = 'home-module-hero';
+
   String get description {
     switch (type) {
+      case HomeModuleType.hero:
+        return '首页 Hero';
       case HomeModuleType.recentlyAdded:
         return '展示最近同步进来的内容';
       case HomeModuleType.librarySection:
@@ -195,6 +204,7 @@ class HomeModuleConfig {
 
   static String _fallbackTitle(HomeModuleType type, Map<String, dynamic> json) {
     return switch (type) {
+      HomeModuleType.hero => 'Hero',
       HomeModuleType.recentlyAdded => '最近新增',
       HomeModuleType.librarySection =>
         (json['sectionName'] as String? ?? '').trim().isEmpty
@@ -289,6 +299,15 @@ class HomeModuleConfig {
       enabled: true,
     );
   }
+
+  static HomeModuleConfig hero({bool enabled = true}) {
+    return HomeModuleConfig(
+      id: heroModuleId,
+      type: HomeModuleType.hero,
+      title: 'Hero',
+      enabled: enabled,
+    );
+  }
 }
 
 class NetworkStorageConfig {
@@ -381,9 +400,10 @@ class AppSettings {
     required this.doubanAccount,
     required this.homeModules,
     this.networkStorage = const NetworkStorageConfig(),
-    this.homeHeroEnabled = true,
     this.homeHeroSourceModuleId = '',
     this.homeHeroStyle = HomeHeroStyle.normal,
+    this.homeHeroBackgroundEnabled = true,
+    this.translucentEffectsEnabled = true,
     this.tmdbMetadataMatchEnabled = false,
     this.wmdbMetadataMatchEnabled = false,
     this.metadataMatchPriority = MetadataMatchProvider.tmdb,
@@ -397,9 +417,10 @@ class AppSettings {
   final DoubanAccountConfig doubanAccount;
   final List<HomeModuleConfig> homeModules;
   final NetworkStorageConfig networkStorage;
-  final bool homeHeroEnabled;
   final String homeHeroSourceModuleId;
   final HomeHeroStyle homeHeroStyle;
+  final bool homeHeroBackgroundEnabled;
+  final bool translucentEffectsEnabled;
   final bool tmdbMetadataMatchEnabled;
   final bool wmdbMetadataMatchEnabled;
   final MetadataMatchProvider metadataMatchPriority;
@@ -413,9 +434,10 @@ class AppSettings {
     DoubanAccountConfig? doubanAccount,
     List<HomeModuleConfig>? homeModules,
     NetworkStorageConfig? networkStorage,
-    bool? homeHeroEnabled,
     String? homeHeroSourceModuleId,
     HomeHeroStyle? homeHeroStyle,
+    bool? homeHeroBackgroundEnabled,
+    bool? translucentEffectsEnabled,
     bool? tmdbMetadataMatchEnabled,
     bool? wmdbMetadataMatchEnabled,
     MetadataMatchProvider? metadataMatchPriority,
@@ -429,9 +451,13 @@ class AppSettings {
       doubanAccount: doubanAccount ?? this.doubanAccount,
       homeModules: homeModules ?? this.homeModules,
       networkStorage: networkStorage ?? this.networkStorage,
-      homeHeroEnabled: homeHeroEnabled ?? this.homeHeroEnabled,
-      homeHeroSourceModuleId: homeHeroSourceModuleId ?? this.homeHeroSourceModuleId,
+      homeHeroSourceModuleId:
+          homeHeroSourceModuleId ?? this.homeHeroSourceModuleId,
       homeHeroStyle: homeHeroStyle ?? this.homeHeroStyle,
+      homeHeroBackgroundEnabled:
+          homeHeroBackgroundEnabled ?? this.homeHeroBackgroundEnabled,
+      translucentEffectsEnabled:
+          translucentEffectsEnabled ?? this.translucentEffectsEnabled,
       tmdbMetadataMatchEnabled:
           tmdbMetadataMatchEnabled ?? this.tmdbMetadataMatchEnabled,
       wmdbMetadataMatchEnabled:
@@ -453,9 +479,10 @@ class AppSettings {
       'doubanAccount': doubanAccount.toJson(),
       'homeModules': homeModules.map((item) => item.toJson()).toList(),
       'networkStorage': networkStorage.toJson(),
-      'homeHeroEnabled': homeHeroEnabled,
       'homeHeroSourceModuleId': homeHeroSourceModuleId,
       'homeHeroStyle': homeHeroStyle.name,
+      'homeHeroBackgroundEnabled': homeHeroBackgroundEnabled,
+      'translucentEffectsEnabled': translucentEffectsEnabled,
       'tmdbMetadataMatchEnabled': tmdbMetadataMatchEnabled,
       'wmdbMetadataMatchEnabled': wmdbMetadataMatchEnabled,
       'metadataMatchPriority': metadataMatchPriority.name,
@@ -468,6 +495,14 @@ class AppSettings {
   factory AppSettings.fromJson(Map<String, dynamic> json) {
     final legacyImdbAutoMatchEnabled =
         json['imdbAutoMatchEnabled'] as bool? ?? false;
+    final legacyHeroEnabled = json['homeHeroEnabled'] as bool? ?? true;
+    final rawHomeModules = (json['homeModules'] as List<dynamic>? ?? [])
+        .map(
+          (item) => HomeModuleConfig.fromJson(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .toList();
     return AppSettings(
       mediaSources: (json['mediaSources'] as List<dynamic>? ?? [])
           .map(
@@ -488,23 +523,23 @@ class AppSettings {
           (json['doubanAccount'] as Map?) ?? const {},
         ),
       ),
-      homeModules: (json['homeModules'] as List<dynamic>? ?? [])
-          .map(
-            (item) => HomeModuleConfig.fromJson(
-              Map<String, dynamic>.from(item as Map),
-            ),
-          )
-          .toList(),
+      homeModules: _normalizeHomeModules(
+        rawHomeModules,
+        legacyHeroEnabled: legacyHeroEnabled,
+      ),
       networkStorage: NetworkStorageConfig.fromJson(
         Map<String, dynamic>.from(
           (json['networkStorage'] as Map?) ?? const {},
         ),
       ),
-      homeHeroEnabled: json['homeHeroEnabled'] as bool? ?? true,
       homeHeroSourceModuleId: json['homeHeroSourceModuleId'] as String? ?? '',
       homeHeroStyle: HomeHeroStyleX.fromName(
         json['homeHeroStyle'] as String? ?? '',
       ),
+      homeHeroBackgroundEnabled:
+          json['homeHeroBackgroundEnabled'] as bool? ?? true,
+      translucentEffectsEnabled:
+          json['translucentEffectsEnabled'] as bool? ?? true,
       tmdbMetadataMatchEnabled: json['tmdbMetadataMatchEnabled'] as bool? ??
           legacyImdbAutoMatchEnabled,
       wmdbMetadataMatchEnabled:
@@ -519,4 +554,30 @@ class AppSettings {
               .clamp(1, 600),
     );
   }
+}
+
+List<HomeModuleConfig> _normalizeHomeModules(
+  List<HomeModuleConfig> modules, {
+  required bool legacyHeroEnabled,
+}) {
+  final normalized = <HomeModuleConfig>[];
+  HomeModuleConfig? heroModule;
+
+  for (final module in modules) {
+    if (module.type == HomeModuleType.hero ||
+        module.id == HomeModuleConfig.heroModuleId) {
+      heroModule = module.copyWith(
+        id: HomeModuleConfig.heroModuleId,
+        type: HomeModuleType.hero,
+      );
+      continue;
+    }
+    normalized.add(module);
+  }
+
+  normalized.insert(
+    0,
+    heroModule ?? HomeModuleConfig.hero(enabled: legacyHeroEnabled),
+  );
+  return normalized;
 }

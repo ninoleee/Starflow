@@ -137,9 +137,10 @@ class HomeEditorPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(appSettingsProvider);
     final collectionsAsync = ref.watch(homeEditorCollectionsProvider);
-    final visibleSourceIds = (collectionsAsync.valueOrNull ?? const <MediaCollection>[])
-        .map((item) => item.sourceId)
-        .toSet();
+    final visibleSourceIds =
+        (collectionsAsync.valueOrNull ?? const <MediaCollection>[])
+            .map((item) => item.sourceId)
+            .toSet();
     final enabledSources =
         settings.mediaSources.where((item) => item.enabled).toList();
     final scopedSources = enabledSources
@@ -313,29 +314,29 @@ class HomeEditorPage extends ConsumerWidget {
               _AddModuleTile(
                 title: '内置',
                 onTap: () async {
-                Navigator.of(context).pop();
-                await _showBuiltinModuleSheet(context, ref);
-              },
-            ),
-            _AddModuleTile(
-              title: '豆瓣',
-              onTap: () async {
-                Navigator.of(context).pop();
-                await _showDoubanModuleSheet(context, ref);
-              },
-            ),
-            ...scopedSources.map(
-              (source) => _AddModuleTile(
-                title: source.name,
-                onTap: () async {
                   Navigator.of(context).pop();
-                  await _showMediaSourceModuleSheet(
-                    context,
-                    ref,
-                    source,
-                  );
+                  await _showBuiltinModuleSheet(context, ref);
                 },
               ),
+              _AddModuleTile(
+                title: '豆瓣',
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  await _showDoubanModuleSheet(context, ref);
+                },
+              ),
+              ...scopedSources.map(
+                (source) => _AddModuleTile(
+                  title: source.name,
+                  onTap: () async {
+                    Navigator.of(context).pop();
+                    await _showMediaSourceModuleSheet(
+                      context,
+                      ref,
+                      source,
+                    );
+                  },
+                ),
               ),
             ],
           );
@@ -352,6 +353,15 @@ class HomeEditorPage extends ConsumerWidget {
         return _HomeEditorSecondarySheetBody(
           title: '内置模块',
           tiles: [
+            _AddModuleTile(
+              title: 'Hero',
+              onTap: () {
+                ref
+                    .read(settingsControllerProvider.notifier)
+                    .saveHomeModule(HomeModuleConfig.hero());
+                Navigator.of(context).pop();
+              },
+            ),
             _AddModuleTile(
               title: '最近新增',
               onTap: () {

@@ -1,12 +1,16 @@
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/starflow_logo.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -22,8 +26,22 @@ class HomePage extends ConsumerStatefulWidget {
 class _HomePageState extends ConsumerState<HomePage> {
   String _focusedHeroId = '';
 
+  bool get _showHeroPagerButtons {
+    if (kIsWeb) {
+      return true;
+    }
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.windows => true,
+      TargetPlatform.macOS => true,
+      TargetPlatform.linux => true,
+      _ => false,
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final heroModule = ref.watch(homeHeroModuleProvider);
     final enabledModules = ref.watch(homeEnabledModulesProvider);
     final sectionStates = <String, AsyncValue<HomeSectionViewModel?>>{
       for (final module in enabledModules)
@@ -32,11 +50,18 @@ class _HomePageState extends ConsumerState<HomePage> {
     final heroStyle = ref.watch(
       appSettingsProvider.select((settings) => settings.homeHeroStyle),
     );
-    final heroEnabled = ref.watch(
-      appSettingsProvider.select((settings) => settings.homeHeroEnabled),
-    );
     final heroSourceModuleId = ref.watch(
       appSettingsProvider.select((settings) => settings.homeHeroSourceModuleId),
+    );
+    final heroBackgroundEnabled = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.homeHeroBackgroundEnabled,
+      ),
+    );
+    final translucentEffectsEnabled = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.translucentEffectsEnabled,
+      ),
     );
     final resolvedSections = <HomeSectionViewModel>[];
     var hasPendingSections = false;
@@ -66,8 +91,11 @@ class _HomePageState extends ConsumerState<HomePage> {
               sectionStates: sectionStates,
               resolvedSections: resolvedSections,
               hasPendingSections: hasPendingSections,
-              heroEnabled: heroEnabled,
+              heroEnabled: heroModule?.enabled ?? false,
               heroSourceModuleId: heroSourceModuleId,
+              heroBackgroundEnabled: heroBackgroundEnabled,
+              translucentEffectsEnabled: translucentEffectsEnabled,
+              isTelevision: isTelevision,
               heroStyle: heroStyle,
             ),
     );
@@ -81,6 +109,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     required bool hasPendingSections,
     required bool heroEnabled,
     required String heroSourceModuleId,
+    required bool heroBackgroundEnabled,
+    required bool translucentEffectsEnabled,
+    required bool isTelevision,
     required HomeHeroStyle heroStyle,
   }) {
     final featuredSection = heroEnabled
@@ -101,9 +132,12 @@ class _HomePageState extends ConsumerState<HomePage> {
     final featuredSectionId = featuredSection?.id;
 
     return _HomeShell(
-      backgroundImageUrl: activeHero?.imageUrl ?? '',
-      backgroundImageHeaders:
-          activeHero?.detailTarget.posterHeaders ?? const {},
+      backgroundImageUrl:
+          heroBackgroundEnabled ? activeHero?.imageUrl ?? '' : '',
+      backgroundImageHeaders: heroBackgroundEnabled
+          ? activeHero?.detailTarget.posterHeaders ?? const {}
+          : const {},
+      translucentEffectsEnabled: translucentEffectsEnabled,
       child: RefreshIndicator(
         color: Colors.white,
         backgroundColor: const Color(0xFF102033),
@@ -119,6 +153,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                 padding: heroStyle.heroPadding(context),
                 child: _FeaturedHero(
                   items: featuredItems,
+                  isTelevision: isTelevision,
+                  showPagerButtons: _showHeroPagerButtons && !isTelevision,
+                  translucentEffectsEnabled: translucentEffectsEnabled,
                   style: heroStyle,
                   onFocusedItemChanged: _handleFocusedHeroChanged,
                 ),
@@ -128,11 +165,16 @@ class _HomePageState extends ConsumerState<HomePage> {
                 padding: heroStyle.heroPadding(context),
                 child: _HomeHeroPlaceholder(style: heroStyle),
               ),
-            ...enabledModules.map((module) {
+            ...enabledModules.asMap().entries.map((entry) {
+              final index = entry.key;
+              final module = entry.value;
               final state = sectionStates[module.id] ??
                   const AsyncLoading<HomeSectionViewModel?>();
               return Padding(
-                padding: const EdgeInsets.only(bottom: 26),
+                padding: EdgeInsets.only(
+                  top: !heroEnabled && index == 0 ? 20 : 0,
+                  bottom: 26,
+                ),
                 child: _buildSectionSlot(
                   context: context,
                   module: module,
@@ -311,7 +353,9 @@ List<_FeaturedHeroItem> _buildFeaturedItems({
   }
   if (preferredModuleId.trim().isNotEmpty) {
     return _fallbackFeaturedItems(
-      resolvedSections.where((section) => section.id != preferredModuleId).toList(),
+      resolvedSections
+          .where((section) => section.id != preferredModuleId)
+          .toList(),
     );
   }
   return _fallbackFeaturedItems(resolvedSections);
@@ -323,38 +367,47 @@ extension _HomeHeroStyleLayoutX on HomeHeroStyle {
       this == HomeHeroStyle.normal ? 12 : 0,
       this == HomeHeroStyle.normal ? MediaQuery.paddingOf(context).top + 6 : 0,
       this == HomeHeroStyle.normal ? 12 : 0,
-      24,
+      5,
     );
   }
 
-  double get heroHeight => this == HomeHeroStyle.normal ? 430 : 500;
+  double get heroHeight => this == HomeHeroStyle.normal ? 440 : 500;
 
-  double get viewportFraction => this == HomeHeroStyle.normal ? 0.94 : 1;
+  double get viewportFraction => this == HomeHeroStyle.normal ? 0.78 : 1;
 
-  double get cardGap => this == HomeHeroStyle.normal ? 10 : 0;
+  double get cardGap => this == HomeHeroStyle.normal ? 12 : 0;
 
   double get cardBorderRadius => this == HomeHeroStyle.normal ? 30 : 0;
 
   bool get showShadow => this == HomeHeroStyle.normal;
 
-  double get textWidthFactor => this == HomeHeroStyle.normal ? 0.84 : 0.9;
+  bool get usesFrostedBackdrop => this == HomeHeroStyle.borderless;
+
+  double get textWidthFactor => this == HomeHeroStyle.normal ? 0.92 : 0.62;
+
+  BoxFit get imageFit =>
+      this == HomeHeroStyle.normal ? BoxFit.cover : BoxFit.contain;
+
+  Alignment get imageAlignment => Alignment.center;
 
   EdgeInsets get textPadding => this == HomeHeroStyle.normal
-      ? const EdgeInsets.fromLTRB(26, 28, 26, 26)
+      ? const EdgeInsets.fromLTRB(22, 24, 22, 24)
       : const EdgeInsets.fromLTRB(20, 28, 20, 22);
 
-  double get titleFontSize => this == HomeHeroStyle.normal ? 34 : 38;
+  double get titleFontSize => this == HomeHeroStyle.normal ? 30 : 36;
 }
 
 class _HomeShell extends StatelessWidget {
   const _HomeShell({
     required this.backgroundImageUrl,
     this.backgroundImageHeaders = const {},
+    this.translucentEffectsEnabled = true,
     required this.child,
   });
 
   final String backgroundImageUrl;
   final Map<String, String> backgroundImageHeaders;
+  final bool translucentEffectsEnabled;
   final Widget child;
 
   @override
@@ -373,6 +426,7 @@ class _HomeShell extends StatelessWidget {
         _DynamicHeroBackdrop(
           imageUrl: backgroundImageUrl,
           imageHeaders: backgroundImageHeaders,
+          translucentEffectsEnabled: translucentEffectsEnabled,
         ),
         DecoratedBox(
           decoration: BoxDecoration(
@@ -402,10 +456,12 @@ class _DynamicHeroBackdrop extends StatelessWidget {
   const _DynamicHeroBackdrop({
     required this.imageUrl,
     this.imageHeaders = const {},
+    this.translucentEffectsEnabled = true,
   });
 
   final String imageUrl;
   final Map<String, String> imageHeaders;
+  final bool translucentEffectsEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -421,6 +477,7 @@ class _DynamicHeroBackdrop extends StatelessWidget {
           key: ValueKey(imageUrl.trim().isEmpty ? 'empty' : imageUrl),
           imageUrl: imageUrl,
           imageHeaders: imageHeaders,
+          translucentEffectsEnabled: translucentEffectsEnabled,
         ),
       ),
     );
@@ -432,10 +489,12 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
     super.key,
     required this.imageUrl,
     this.imageHeaders = const {},
+    this.translucentEffectsEnabled = true,
   });
 
   final String imageUrl;
   final Map<String, String> imageHeaders;
+  final bool translucentEffectsEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -447,16 +506,40 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
           if (imageUrl.trim().isNotEmpty)
             Transform.scale(
               scale: 1.16,
-              child: ImageFiltered(
-                imageFilter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
-                child: Opacity(
-                  opacity: 0.72,
-                  child: AppNetworkImage(
-                    imageUrl,
-                    headers: imageHeaders,
-                    fit: BoxFit.cover,
-                    alignment: Alignment.topCenter,
-                  ),
+              child: translucentEffectsEnabled
+                  ? ImageFiltered(
+                      imageFilter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                      child: Opacity(
+                        opacity: 0.72,
+                        child: AppNetworkImage(
+                          imageUrl,
+                          headers: imageHeaders,
+                          fit: BoxFit.cover,
+                          alignment: Alignment.topCenter,
+                        ),
+                      ),
+                    )
+                  : Opacity(
+                      opacity: 0.22,
+                      child: AppNetworkImage(
+                        imageUrl,
+                        headers: imageHeaders,
+                        fit: BoxFit.cover,
+                        alignment: Alignment.topCenter,
+                      ),
+                    ),
+            ),
+          if (!translucentEffectsEnabled)
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    const Color(0xFF07111D).withValues(alpha: 0.32),
+                    const Color(0xFF07111D).withValues(alpha: 0.64),
+                    const Color(0xFF030914).withValues(alpha: 0.82),
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
                 ),
               ),
             ),
@@ -571,35 +654,74 @@ class _PosterPlaceholderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: 154,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            height: 206,
-            decoration: BoxDecoration(
-              color: const Color(0xFF112036).withValues(alpha: 0.72),
-              borderRadius: BorderRadius.circular(22),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Container(
-            height: 14,
-            width: 118,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(999),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Container(
-            height: 12,
-            width: 44,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(999),
-            ),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (!constraints.hasBoundedHeight) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  height: 206,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF112036).withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  height: 14,
+                  width: 118,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  height: 12,
+                  width: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ],
+            );
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF112036).withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                height: 14,
+                width: 118,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                height: 12,
+                width: 44,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -635,23 +757,20 @@ class _HomeSection extends StatelessWidget {
             child: titleWidget,
           )
         else
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: onTitleTap,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
-                child: Row(
-                  children: [
-                    Expanded(child: titleWidget),
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      size: 18,
-                      color: const Color(0xFF95A4C0),
-                    ),
-                  ],
-                ),
+          TvFocusableAction(
+            onPressed: onTitleTap,
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(child: titleWidget),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: const Color(0xFF95A4C0),
+                  ),
+                ],
               ),
             ),
           ),
@@ -729,11 +848,17 @@ class _FeaturedHero extends StatefulWidget {
   const _FeaturedHero({
     required this.items,
     required this.style,
+    required this.isTelevision,
+    required this.showPagerButtons,
+    required this.translucentEffectsEnabled,
     this.onFocusedItemChanged,
   });
 
   final List<_FeaturedHeroItem> items;
   final HomeHeroStyle style;
+  final bool isTelevision;
+  final bool showPagerButtons;
+  final bool translucentEffectsEnabled;
   final ValueChanged<_FeaturedHeroItem>? onFocusedItemChanged;
 
   @override
@@ -813,29 +938,89 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     widget.onFocusedItemChanged?.call(widget.items[index]);
   }
 
+  Future<void> _moveToIndex(int index) async {
+    if (index < 0 || index >= widget.items.length) {
+      return;
+    }
+    await _controller.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final currentIndex = widget.items.isEmpty
+        ? 0
+        : _page.round().clamp(0, widget.items.length - 1);
+
     return Column(
       children: [
         SizedBox(
           height: widget.style.heroHeight,
-          child: PageView.builder(
-            controller: _controller,
-            itemCount: widget.items.length,
-            itemBuilder: (context, index) {
-              final item = widget.items[index];
-              return Padding(
-                padding: EdgeInsets.only(
-                  right: index == widget.items.length - 1
-                      ? 0
-                      : widget.style.cardGap,
+          child: Stack(
+            children: [
+              PageView.builder(
+                controller: _controller,
+                physics: widget.isTelevision
+                    ? const NeverScrollableScrollPhysics()
+                    : const PageScrollPhysics(),
+                itemCount: widget.items.length,
+                itemBuilder: (context, index) {
+                  final item = widget.items[index];
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      right: index == widget.items.length - 1
+                          ? 0
+                          : widget.style.cardGap,
+                    ),
+                    child: _FeaturedHeroCard(
+                      item: item,
+                      style: widget.style,
+                      isTelevision: widget.isTelevision,
+                      translucentEffectsEnabled:
+                          widget.translucentEffectsEnabled,
+                      onMovePrevious:
+                          index > 0 ? () => _moveToIndex(index - 1) : null,
+                      onMoveNext: index < widget.items.length - 1
+                          ? () => _moveToIndex(index + 1)
+                          : null,
+                    ),
+                  );
+                },
+              ),
+              if (widget.showPagerButtons && widget.items.length > 1) ...[
+                Positioned(
+                  left: 16,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: _HeroPagerButton(
+                      icon: Icons.chevron_left_rounded,
+                      enabled: currentIndex > 0,
+                      onPressed: currentIndex > 0
+                          ? () => _moveToIndex(currentIndex - 1)
+                          : null,
+                    ),
+                  ),
                 ),
-                child: _FeaturedHeroCard(
-                  item: item,
-                  style: widget.style,
+                Positioned(
+                  right: 16,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: _HeroPagerButton(
+                      icon: Icons.chevron_right_rounded,
+                      enabled: currentIndex < widget.items.length - 1,
+                      onPressed: currentIndex < widget.items.length - 1
+                          ? () => _moveToIndex(currentIndex + 1)
+                          : null,
+                    ),
+                  ),
                 ),
-              );
-            },
+              ],
+            ],
           ),
         ),
         if (widget.items.length > 1) ...[
@@ -864,152 +1049,289 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
   }
 }
 
-class _FeaturedHeroCard extends StatelessWidget {
-  const _FeaturedHeroCard({
-    required this.item,
-    required this.style,
+class _HeroPagerButton extends StatelessWidget {
+  const _HeroPagerButton({
+    required this.icon,
+    required this.enabled,
+    this.onPressed,
   });
 
-  final _FeaturedHeroItem item;
-  final HomeHeroStyle style;
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
-    final borderRadius = BorderRadius.circular(style.cardBorderRadius);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: borderRadius,
-        onTap: () => context.pushNamed('detail', extra: item.detailTarget),
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: borderRadius,
-            color: const Color(0xFF0B1628),
-            boxShadow: style.showShadow
-                ? [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.22),
-                      blurRadius: 34,
-                      offset: const Offset(0, 18),
-                    ),
-                  ]
-                : null,
-          ),
-          child: ClipRRect(
-            borderRadius: borderRadius,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (item.imageUrl.trim().isNotEmpty)
-                  AppNetworkImage(
-                    item.imageUrl,
-                    fit: BoxFit.cover,
-                  ),
-                Align(
-                  alignment: Alignment.bottomLeft,
-                  child: IgnorePointer(
-                    child: FractionallySizedBox(
-                      widthFactor: style.textWidthFactor,
-                      heightFactor: 0.72,
-                      alignment: Alignment.bottomLeft,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: RadialGradient(
-                            center: const Alignment(-0.92, 0.96),
-                            radius: 1.1,
-                            colors: [
-                              Colors.black.withValues(alpha: 0.82),
-                              Colors.black.withValues(alpha: 0.52),
-                              Colors.black.withValues(alpha: 0.18),
-                              Colors.transparent,
-                            ],
-                            stops: const [0, 0.36, 0.72, 1],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: style.textPadding,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Spacer(),
-                      if (item.metadata.trim().isNotEmpty)
-                        Text(
-                          item.metadata,
-                          style: const TextStyle(
-                            color: Color(0xFFDCE7FF),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      if (item.metadata.trim().isNotEmpty)
-                        const SizedBox(height: 10),
-                      Text(
-                        item.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style:
-                            Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                          fontSize: style.titleFontSize,
-                          height: 1.05,
-                          shadows: [
-                            Shadow(
-                              color: Colors.black.withValues(alpha: 0.45),
-                              blurRadius: 20,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      if (item.overview.trim().isNotEmpty)
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 460),
-                          child: Text(
-                            item.overview,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xFFE4ECFF),
-                              fontSize: 15,
-                              height: 1.45,
-                              shadows: [
-                                Shadow(
-                                  color: Color(0x9A000000),
-                                  blurRadius: 16,
-                                  offset: Offset(0, 3),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 180),
+      opacity: enabled ? 0.92 : 0.35,
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.26),
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: IconButton(
+          onPressed: onPressed,
+          icon: Icon(icon, color: Colors.white),
+          iconSize: 30,
+          padding: const EdgeInsets.all(12),
+          splashRadius: 26,
         ),
       ),
     );
   }
 }
 
-class _HomeCarousel extends StatelessWidget {
+class _FeaturedHeroCard extends StatelessWidget {
+  const _FeaturedHeroCard({
+    required this.item,
+    required this.style,
+    required this.isTelevision,
+    required this.translucentEffectsEnabled,
+    this.onMovePrevious,
+    this.onMoveNext,
+  });
+
+  final _FeaturedHeroItem item;
+  final HomeHeroStyle style;
+  final bool isTelevision;
+  final bool translucentEffectsEnabled;
+  final VoidCallback? onMovePrevious;
+  final VoidCallback? onMoveNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final borderRadius = BorderRadius.circular(style.cardBorderRadius);
+    final screenSize = MediaQuery.sizeOf(context);
+    final isPortraitViewport = screenSize.height > screenSize.width;
+    final heroImageFit = style == HomeHeroStyle.borderless && isPortraitViewport
+        ? BoxFit.cover
+        : style.imageFit;
+
+    final card = Ink(
+      decoration: BoxDecoration(
+        borderRadius: borderRadius,
+        color: style.usesFrostedBackdrop
+            ? Colors.white.withValues(
+                alpha: translucentEffectsEnabled ? 0.04 : 0.02,
+              )
+            : const Color(0xFF0B1628),
+        boxShadow: style.showShadow
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.22),
+                  blurRadius: 34,
+                  offset: const Offset(0, 18),
+                ),
+              ]
+            : null,
+      ),
+      child: ClipRRect(
+        borderRadius: borderRadius,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (style.usesFrostedBackdrop)
+              ClipRect(
+                child: translucentEffectsEnabled
+                    ? BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.white.withValues(alpha: 0.08),
+                                const Color(0xFF0A1628).withValues(alpha: 0.22),
+                                const Color(0xFF07111E).withValues(alpha: 0.32),
+                              ],
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                            ),
+                          ),
+                        ),
+                      )
+                    : DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.white.withValues(alpha: 0.03),
+                              const Color(0xFF0A1628).withValues(alpha: 0.14),
+                              const Color(0xFF07111E).withValues(alpha: 0.24),
+                            ],
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                          ),
+                        ),
+                      ),
+              ),
+            if (item.imageUrl.trim().isNotEmpty)
+              AppNetworkImage(
+                item.imageUrl,
+                fit: heroImageFit,
+                alignment: style.imageAlignment,
+              ),
+            Align(
+              alignment: Alignment.bottomLeft,
+              child: IgnorePointer(
+                child: FractionallySizedBox(
+                  widthFactor: style.textWidthFactor,
+                  heightFactor: 0.72,
+                  alignment: Alignment.bottomLeft,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: RadialGradient(
+                        center: const Alignment(-0.92, 0.96),
+                        radius: 1.1,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.82),
+                          Colors.black.withValues(alpha: 0.52),
+                          Colors.black.withValues(alpha: 0.18),
+                          Colors.transparent,
+                        ],
+                        stops: const [0, 0.36, 0.72, 1],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: style.textPadding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Spacer(),
+                  if (item.metadata.trim().isNotEmpty)
+                    Text(
+                      item.metadata,
+                      style: const TextStyle(
+                        color: Color(0xFFDCE7FF),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  if (item.metadata.trim().isNotEmpty)
+                    const SizedBox(height: 10),
+                  Text(
+                    item.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: style.titleFontSize,
+                      height: 1.05,
+                      shadows: [
+                        Shadow(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          blurRadius: 20,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (item.overview.trim().isNotEmpty)
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 460),
+                      child: Text(
+                        item.overview,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFFE4ECFF),
+                          fontSize: 15,
+                          height: 1.45,
+                          shadows: [
+                            Shadow(
+                              color: Color(0x9A000000),
+                              blurRadius: 16,
+                              offset: Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (!isTelevision) {
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: borderRadius,
+          onTap: () => context.pushNamed('detail', extra: item.detailTarget),
+          child: card,
+        ),
+      );
+    }
+
+    return FocusableActionDetector(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.arrowLeft):
+            DirectionalFocusIntent(TraversalDirection.left),
+        SingleActivator(LogicalKeyboardKey.arrowRight):
+            DirectionalFocusIntent(TraversalDirection.right),
+      },
+      actions: <Type, Action<Intent>>{
+        DirectionalFocusIntent: CallbackAction<DirectionalFocusIntent>(
+          onInvoke: (intent) {
+            if (intent.direction == TraversalDirection.left) {
+              onMovePrevious?.call();
+            } else if (intent.direction == TraversalDirection.right) {
+              onMoveNext?.call();
+            }
+            return null;
+          },
+        ),
+      },
+      child: TvFocusableAction(
+        onPressed: () => context.pushNamed('detail', extra: item.detailTarget),
+        borderRadius: borderRadius,
+        child: card,
+      ),
+    );
+  }
+}
+
+class _HomeCarousel extends ConsumerWidget {
   const _HomeCarousel({required this.items});
 
   final List<HomeCarouselItemViewModel> items;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     if (items.isEmpty) {
       return const _SectionEmptyState(message: '无');
+    }
+
+    if (isTelevision) {
+      return SizedBox(
+        height: 184,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: items.length,
+          separatorBuilder: (context, index) => const SizedBox(width: 10),
+          itemBuilder: (context, index) {
+            final item = items[index];
+            return SizedBox(
+              width: 320,
+              child: TvFocusableAction(
+                onPressed: () {
+                  context.pushNamed('detail', extra: item.detailTarget);
+                },
+                borderRadius: BorderRadius.circular(18),
+                child: _HomeCarouselCard(item: item),
+              ),
+            );
+          },
+        ),
+      );
     }
 
     return SizedBox(
@@ -1026,68 +1348,7 @@ class _HomeCarousel extends StatelessWidget {
               onTap: () {
                 context.pushNamed('detail', extra: item.detailTarget);
               },
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(18),
-                  color: const Color(0xFF0B1631),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (item.imageUrl.trim().isNotEmpty)
-                      AppNetworkImage(
-                        item.imageUrl,
-                        fit: BoxFit.cover,
-                      ),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.black.withValues(alpha: 0.18),
-                            Colors.black.withValues(alpha: 0.72),
-                          ],
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                        ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Spacer(),
-                          Text(
-                            item.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleLarge
-                                ?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            item.subtitle.trim().isEmpty
-                                ? '点击查看详情'
-                                : item.subtitle,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xFFE5EDFF),
-                              height: 1.45,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              child: _HomeCarouselCard(item: item),
             ),
           );
         },
@@ -1096,30 +1357,107 @@ class _HomeCarousel extends StatelessWidget {
   }
 }
 
-class _HomeEditButton extends StatelessWidget {
-  const _HomeEditButton();
+class _HomeCarouselCard extends StatelessWidget {
+  const _HomeCarouselCard({required this.item});
+
+  final HomeCarouselItemViewModel item;
 
   @override
   Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: const Color(0xFF0B1631),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (item.imageUrl.trim().isNotEmpty)
+            AppNetworkImage(
+              item.imageUrl,
+              fit: BoxFit.cover,
+            ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.black.withValues(alpha: 0.18),
+                  Colors.black.withValues(alpha: 0.72),
+                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Spacer(),
+                Text(
+                  item.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  item.subtitle.trim().isEmpty ? '点击查看详情' : item.subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFE5EDFF),
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeEditButton extends ConsumerWidget {
+  const _HomeEditButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: kBottomReservedSpacing),
       child: Center(
         child: Opacity(
           opacity: 0.46,
-          child: TextButton.icon(
-            onPressed: () => context.pushNamed('home-editor'),
-            icon: const Icon(Icons.tune_rounded, size: 14),
-            label: const Text('编辑首页'),
-            style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFF8FA0BD),
-              textStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+          child: isTelevision
+              ? TvAdaptiveButton(
+                  label: '编辑首页',
+                  icon: Icons.tune_rounded,
+                  onPressed: () => context.pushNamed('home-editor'),
+                  variant: TvButtonVariant.text,
+                )
+              : TextButton.icon(
+                  onPressed: () => context.pushNamed('home-editor'),
+                  icon: const Icon(Icons.tune_rounded, size: 14),
+                  label: const Text('编辑首页'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF8FA0BD),
+                    textStyle:
+                        Theme.of(context).textTheme.labelMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                    minimumSize: const Size(0, 32),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
-              minimumSize: const Size(0, 32),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-          ),
+                ),
         ),
       ),
     );

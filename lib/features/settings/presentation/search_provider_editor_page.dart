@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -179,6 +181,61 @@ class _SearchProviderEditorPageState
     }
   }
 
+  bool _hasUnsavedChanges() {
+    if (_didDelete) {
+      return false;
+    }
+    final initial = widget.initial;
+    if (initial == null) {
+      return _hasMeaningfulDraft();
+    }
+    return jsonEncode(_buildDraftConfig().toJson()) !=
+        jsonEncode(initial.toJson());
+  }
+
+  Future<void> _discardAndClose() async {
+    _skipAutoSaveOnPop = true;
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _handleCloseRequest() async {
+    if (_skipAutoSaveOnPop || _didDelete) {
+      return;
+    }
+    if (!_hasUnsavedChanges()) {
+      await _discardAndClose();
+      return;
+    }
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('保存修改？'),
+        content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('cancel'),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('discard'),
+            child: const Text('不保存'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop('save'),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (action == 'discard') {
+      await _discardAndClose();
+    } else if (action == 'save') {
+      await _saveDraft();
+    }
+  }
+
   Future<void> _testConnection() async {
     FocusScope.of(context).unfocus();
     final draft = _buildDraftConfig();
@@ -306,12 +363,12 @@ class _SearchProviderEditorPageState
     final theme = Theme.of(context);
 
     return PopScope<void>(
-      canPop: true,
+      canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop || _skipAutoSaveOnPop || _didDelete) {
+        if (didPop || _skipAutoSaveOnPop || _didDelete) {
           return;
         }
-        _saveDraft(popAfterSave: false);
+        _handleCloseRequest();
       },
       child: Scaffold(
         body: Stack(
@@ -561,6 +618,7 @@ class _SearchProviderEditorPageState
                     ),
                   ),
                 ],
+                const SizedBox(height: kBottomReservedSpacing),
               ],
             ),
             Positioned(
@@ -568,6 +626,7 @@ class _SearchProviderEditorPageState
               left: 0,
               right: 0,
               child: OverlayToolbar(
+                onBack: _handleCloseRequest,
                 trailing: TextButton(
                   onPressed: _saveDraft,
                   child: const Text('保存'),
