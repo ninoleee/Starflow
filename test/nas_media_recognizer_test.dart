@@ -50,5 +50,18 @@ void main() {
       expect(result.seasonNumber, 1);
       expect(result.episodeNumber, 2);
     });
+
+    test('treats bare E01 naming as an episode cue', () {
+      final result = NasMediaRecognizer.recognize(
+        'Shows/陈鲁豫/陈鲁豫E01.strm',
+      );
+
+      expect(result.title, '陈鲁豫');
+      expect(result.parentTitle, '陈鲁豫');
+      expect(result.itemType, 'episode');
+      expect(result.preferSeries, isTrue);
+      expect(result.seasonNumber, isNull);
+      expect(result.episodeNumber, 1);
+    });
   });
 }

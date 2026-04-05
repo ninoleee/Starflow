@@ -309,6 +309,8 @@ class _FakeWebDavNasClient extends WebDavNasClient {
     String? sectionId,
     String sectionName = '',
     int limit = 200,
+    bool? loadSidecarMetadata,
+    bool resetCaches = true,
   }) async {
     final items = sectionId?.trim().isNotEmpty == true
         ? (itemsBySection[sectionId] ?? const <MediaItem>[])
@@ -354,7 +356,6 @@ class _FakeWebDavNasClient extends WebDavNasClient {
               seasonNumber: item.seasonNumber,
               episodeNumber: item.episodeNumber,
               imdbId: item.imdbId,
-              tmdbId: item.tmdbId,
               container: item.container,
               videoCodec: item.videoCodec,
               audioCodec: item.audioCodec,

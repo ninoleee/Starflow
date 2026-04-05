@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
+import 'package:starflow/features/library/application/nas_media_index_revision.dart';
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
@@ -44,12 +45,14 @@ extension LibraryFilterX on LibraryFilter {
 
 final libraryItemsProvider =
     FutureProvider.family<List<MediaItem>, LibraryFilter>((ref, filter) {
+  ref.watch(nasMediaIndexRevisionProvider);
   ref.watch(appSettingsProvider);
   return ref.read(mediaRepositoryProvider).fetchLibrary(kind: filter.kind);
 });
 
 final libraryCollectionsProvider =
     FutureProvider.family<List<MediaCollection>, LibraryFilter>((ref, filter) {
+  ref.watch(nasMediaIndexRevisionProvider);
   ref.watch(appSettingsProvider);
   return ref.read(mediaRepositoryProvider).fetchCollections(kind: filter.kind);
 });

@@ -1,3 +1,5 @@
+import 'package:starflow/core/utils/webdav_trace.dart';
+
 class NasMediaRecognition {
   const NasMediaRecognition({
     required this.title,
@@ -120,7 +122,7 @@ class NasMediaRecognizer {
       title = fileBaseName.trim();
     }
 
-    return NasMediaRecognition(
+    final result = NasMediaRecognition(
       title: title.trim(),
       searchQuery: title.trim(),
       originalFileName: fileName.trim(),
@@ -132,6 +134,20 @@ class NasMediaRecognizer {
       seasonNumber: seasonNumber,
       episodeNumber: episodeNumber,
     );
+    webDavTrace(
+      'recognize',
+      fields: {
+        'path': actualAddress,
+        'title': result.title,
+        'parentTitle': result.parentTitle,
+        'itemType': result.itemType,
+        'preferSeries': result.preferSeries,
+        'season': result.seasonNumber,
+        'episode': result.episodeNumber,
+        'imdbId': result.imdbId,
+      },
+    );
+    return result;
   }
 
   static String _resolveImdbId(List<String> inputs) {
@@ -173,6 +189,7 @@ class NasMediaRecognizer {
     for (final pattern in const [
       r'(?:^|[ ._\-])s(\d{1,2})[ ._\-]*e(\d{1,3})(?:$|[ ._\-])',
       r'(?:^|[ ._\-])season[ ._\-]?(\d{1,2})[ ._\-]*(?:episode|ep)[ ._\-]?(\d{1,3})(?:$|[ ._\-])',
+      r'(?<!\d)e(\d{1,3})(?!\d)',
       r'(?:^|[ ._\-])ep(?:isode)?[ ._\-]?(\d{1,3})(?:$|[ ._\-])',
       r'第(\d{1,3})[集话]',
     ]) {

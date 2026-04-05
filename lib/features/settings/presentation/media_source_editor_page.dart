@@ -24,6 +24,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   late final TextEditingController _usernameController;
   late final TextEditingController _passwordController;
   late final TextEditingController _tokenController;
+  late final TextEditingController _webDavExcludedKeywordsController;
 
   late MediaSourceKind _kind;
   late bool _enabled;
@@ -57,6 +58,9 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _usernameController = TextEditingController(text: e?.username ?? '');
     _passwordController = TextEditingController(text: e?.password ?? '');
     _tokenController = TextEditingController(text: e?.accessToken ?? '');
+    _webDavExcludedKeywordsController = TextEditingController(
+      text: (e?.webDavExcludedPathKeywords ?? const []).join('\n'),
+    );
     _kind = e?.kind ?? MediaSourceKind.emby;
     _enabled = e?.enabled ?? true;
     _resolvedUserId = e?.userId ?? '';
@@ -71,8 +75,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _selectedNasPath = e?.libraryPath ?? '';
     _webDavStructureInferenceEnabled =
         e?.webDavStructureInferenceEnabled ?? false;
-    _webDavSidecarScrapingEnabled =
-        e?.webDavSidecarScrapingEnabled ?? true;
+    _webDavSidecarScrapingEnabled = e?.webDavSidecarScrapingEnabled ?? true;
   }
 
   @override
@@ -82,6 +85,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _usernameController.dispose();
     _passwordController.dispose();
     _tokenController.dispose();
+    _webDavExcludedKeywordsController.dispose();
     super.dispose();
   }
 
@@ -106,7 +110,24 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
           _kind == MediaSourceKind.nas && _webDavStructureInferenceEnabled,
       webDavSidecarScrapingEnabled:
           _kind == MediaSourceKind.nas && _webDavSidecarScrapingEnabled,
+      webDavExcludedPathKeywords: _kind == MediaSourceKind.nas
+          ? _parsedWebDavExcludedPathKeywords()
+          : const [],
     );
+  }
+
+  List<String> _parsedWebDavExcludedPathKeywords() {
+    final seen = <String>{};
+    final values = <String>[];
+    for (final chunk
+        in _webDavExcludedKeywordsController.text.split(RegExp(r'[\n,，;；]+'))) {
+      final normalized = chunk.trim();
+      if (normalized.isEmpty || !seen.add(normalized.toLowerCase())) {
+        continue;
+      }
+      values.add(normalized);
+    }
+    return values;
   }
 
   List<String> _selectedSectionIdsForSave() {
@@ -126,6 +147,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         _passwordController.text.trim().isNotEmpty ||
         _tokenController.text.trim().isNotEmpty ||
         _selectedNasPath.trim().isNotEmpty ||
+        _webDavExcludedKeywordsController.text.trim().isNotEmpty ||
         widget.initial != null;
   }
 
@@ -158,6 +180,9 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
           _kind == MediaSourceKind.nas && _webDavStructureInferenceEnabled,
       webDavSidecarScrapingEnabled:
           _kind == MediaSourceKind.nas && _webDavSidecarScrapingEnabled,
+      webDavExcludedPathKeywords: _kind == MediaSourceKind.nas
+          ? _parsedWebDavExcludedPathKeywords()
+          : const [],
     );
     await ref.read(settingsControllerProvider.notifier).saveMediaSource(config);
     _savedFeaturedSectionIds = [...config.featuredSectionIds];
@@ -490,6 +515,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                         _selectedNasPath = '';
                         _webDavStructureInferenceEnabled = false;
                         _webDavSidecarScrapingEnabled = true;
+                        _webDavExcludedKeywordsController.clear();
                         _connectionMessage = _defaultConnectionMessage(value);
                       });
                     }
@@ -683,6 +709,18 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                         _webDavSidecarScrapingEnabled = value;
                       });
                     },
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _webDavExcludedKeywordsController,
+                    minLines: 2,
+                    maxLines: 5,
+                    decoration: const InputDecoration(
+                      labelText: '过滤关键字',
+                      hintText: '比如：sample、预告片',
+                      helperText: '支持填写多个。每行一个，或用逗号分隔；命中任意关键字的路径都会被过滤。',
+                      alignLabelWithHint: true,
+                    ),
                   ),
                 ],
                 if (isEmby) ...[

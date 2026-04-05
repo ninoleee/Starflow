@@ -40,6 +40,7 @@ class MediaSourceConfig {
     this.featuredSectionIds = const [],
     this.webDavStructureInferenceEnabled = false,
     this.webDavSidecarScrapingEnabled = true,
+    this.webDavExcludedPathKeywords = const [],
   });
 
   final String id;
@@ -57,6 +58,7 @@ class MediaSourceConfig {
   final List<String> featuredSectionIds;
   final bool webDavStructureInferenceEnabled;
   final bool webDavSidecarScrapingEnabled;
+  final List<String> webDavExcludedPathKeywords;
 
   bool get hasAccessToken => accessToken.trim().isNotEmpty;
 
@@ -91,6 +93,7 @@ class MediaSourceConfig {
     List<String>? featuredSectionIds,
     bool? webDavStructureInferenceEnabled,
     bool? webDavSidecarScrapingEnabled,
+    List<String>? webDavExcludedPathKeywords,
   }) {
     return MediaSourceConfig(
       id: id ?? this.id,
@@ -108,8 +111,10 @@ class MediaSourceConfig {
       featuredSectionIds: featuredSectionIds ?? this.featuredSectionIds,
       webDavStructureInferenceEnabled: webDavStructureInferenceEnabled ??
           this.webDavStructureInferenceEnabled,
-      webDavSidecarScrapingEnabled: webDavSidecarScrapingEnabled ??
-          this.webDavSidecarScrapingEnabled,
+      webDavSidecarScrapingEnabled:
+          webDavSidecarScrapingEnabled ?? this.webDavSidecarScrapingEnabled,
+      webDavExcludedPathKeywords:
+          webDavExcludedPathKeywords ?? this.webDavExcludedPathKeywords,
     );
   }
 
@@ -130,6 +135,7 @@ class MediaSourceConfig {
       'featuredSectionIds': featuredSectionIds,
       'webDavStructureInferenceEnabled': webDavStructureInferenceEnabled,
       'webDavSidecarScrapingEnabled': webDavSidecarScrapingEnabled,
+      'webDavExcludedPathKeywords': webDavExcludedPathKeywords,
     };
   }
 
@@ -156,6 +162,11 @@ class MediaSourceConfig {
           json['webDavStructureInferenceEnabled'] as bool? ?? false,
       webDavSidecarScrapingEnabled:
           json['webDavSidecarScrapingEnabled'] as bool? ?? true,
+      webDavExcludedPathKeywords:
+          (json['webDavExcludedPathKeywords'] as List<dynamic>? ?? const [])
+              .map((item) => '$item')
+              .where((item) => item.trim().isNotEmpty)
+              .toList(),
     );
   }
 }
@@ -188,6 +199,49 @@ extension MediaSourceConfigEditorX on MediaSourceConfig {
       return '已经保存 token，但还没有拿到 User ID，建议重新测试登录。';
     }
     return '填写账号密码后可以直接验证 Emby 登录。';
+  }
+}
+
+extension MediaSourceConfigWebDavFilterX on MediaSourceConfig {
+  List<String> get normalizedWebDavExcludedPathKeywords {
+    final seen = <String>{};
+    final values = <String>[];
+    for (final item in webDavExcludedPathKeywords) {
+      final normalized = item.trim().toLowerCase();
+      if (normalized.isEmpty || !seen.add(normalized)) {
+        continue;
+      }
+      values.add(normalized);
+    }
+    return values;
+  }
+
+  bool matchesWebDavExcludedPath(String rawPath) {
+    if (kind != MediaSourceKind.nas) {
+      return false;
+    }
+    final keywords = normalizedWebDavExcludedPathKeywords;
+    if (keywords.isEmpty) {
+      return false;
+    }
+    final haystacks = <String>{};
+    final trimmed = rawPath.trim();
+    if (trimmed.isNotEmpty) {
+      haystacks.add(trimmed.toLowerCase());
+      try {
+        haystacks.add(Uri.decodeFull(trimmed).toLowerCase());
+      } catch (_) {
+        // Keep the raw path when percent-decoding fails.
+      }
+    }
+    return keywords.any(
+      (keyword) => haystacks.any((path) => path.contains(keyword)),
+    );
+  }
+
+  bool matchesWebDavExcludedUri(Uri uri) {
+    return matchesWebDavExcludedPath(uri.toString()) ||
+        matchesWebDavExcludedPath(uri.path);
   }
 }
 
@@ -357,8 +411,7 @@ class MediaItem {
       bannerUrl: bannerUrl ?? this.bannerUrl,
       bannerHeaders: bannerHeaders ?? this.bannerHeaders,
       extraBackdropUrls: extraBackdropUrls ?? this.extraBackdropUrls,
-      extraBackdropHeaders:
-          extraBackdropHeaders ?? this.extraBackdropHeaders,
+      extraBackdropHeaders: extraBackdropHeaders ?? this.extraBackdropHeaders,
       year: year ?? this.year,
       durationLabel: durationLabel ?? this.durationLabel,
       genres: genres ?? this.genres,

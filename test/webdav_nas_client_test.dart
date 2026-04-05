@@ -94,7 +94,7 @@ void main() {
       expect(movie.height, 2160);
       expect(movie.bitrate, 18000000);
       expect(movie.fileSizeBytes, 0);
-      expect(movie.actualAddress, 'Movies/Interstellar.mkv');
+      expect(movie.actualAddress, '/dav/Movies/Interstellar.mkv');
       expect(movie.addedAt, DateTime.utc(2026, 4, 2, 8, 30, 0));
 
       final strm = items.firstWhere((item) => item.title == 'One Piece');
@@ -102,7 +102,7 @@ void main() {
         strm.streamUrl,
         'https://media.example.com/streams/one-piece/master.m3u8',
       );
-      expect(strm.actualAddress, 'Shows/One Piece.strm');
+      expect(strm.actualAddress, '/dav/Shows/One Piece.strm');
       expect(strm.overview, isEmpty);
       expect(strm.addedAt, DateTime.utc(2026, 4, 3, 9, 0, 0));
     });
@@ -155,7 +155,7 @@ void main() {
       );
 
       final movie = items.firstWhere(
-          (item) => item.actualAddress == 'Movies/Interstellar.mkv');
+          (item) => item.actualAddress == '/dav/Movies/Interstellar.mkv');
       expect(movie.title, 'Interstellar');
       expect(movie.posterUrl, isEmpty);
       expect(movie.backdropUrl, isEmpty);
@@ -193,7 +193,7 @@ void main() {
       expect(items.single.streamUrl, isNotEmpty);
     });
 
-    test('optionally infers episode grouping from directory structure',
+    test('does not force generic child folders into seasons without clues',
         () async {
       final client = WebDavNasClient(
         MockClient((request) async {
@@ -237,23 +237,152 @@ void main() {
         limit: 20,
       );
       expect(inferredItems, hasLength(3));
-
-      final directEpisode = inferredItems.firstWhere(
-        (item) => item.title == 'Part A',
+      expect(
+        inferredItems.every((item) => item.itemType.trim().isEmpty),
+        isTrue,
       );
-      expect(directEpisode.itemType, 'episode');
-      expect(directEpisode.seasonNumber, 0);
-      expect(directEpisode.episodeNumber, 1);
+      expect(
+        inferredItems.every(
+          (item) => item.seasonNumber == null && item.episodeNumber == null,
+        ),
+        isTrue,
+      );
+    });
 
-      final arcEpisodes = inferredItems
-          .where((item) => item.actualAddress.startsWith('Arc/'))
-          .toList(growable: false)
-        ..sort((left, right) => left.title.compareTo(right.title));
-      expect(arcEpisodes, hasLength(2));
-      expect(arcEpisodes.every((item) => item.itemType == 'episode'), isTrue);
-      expect(arcEpisodes.every((item) => item.seasonNumber == 1), isTrue);
-      expect(arcEpisodes[0].episodeNumber, 1);
-      expect(arcEpisodes[1].episodeNumber, 2);
+    test('treats direct episode-style files as a single implicit season',
+        () async {
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/ChenLuyu/') {
+            return http.Response.bytes(
+              utf8.encode(_chenLuyuRootPropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/ChenLuyu/%E9%99%88%E9%B2%81%E8%B1%ABE01.strm') {
+            return http.Response(
+              'https://media.example.com/chen/e01.m3u8\n',
+              200,
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/ChenLuyu/%E9%99%88%E9%B2%81%E8%B1%ABE02.strm') {
+            return http.Response(
+              'https://media.example.com/chen/e02.m3u8\n',
+              200,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'nas-chen',
+          name: 'Chen NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/Shows/ChenLuyu/',
+          enabled: true,
+          webDavStructureInferenceEnabled: true,
+        ),
+        limit: 20,
+      );
+
+      expect(items, hasLength(2));
+      expect(items.every((item) => item.itemType == 'episode'), isTrue);
+      expect(items.every((item) => item.seasonNumber == 1), isTrue);
+      expect(items.map((item) => item.episodeNumber), containsAll([1, 2]));
+    });
+
+    test('treats root files as specials when sibling folders are seasons',
+        () async {
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/FoodDao/') {
+            return http.Response.bytes(
+              utf8.encode(_foodDaoRootPropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/FoodDao/1.%E6%97%A5%E6%9C%AC/') {
+            return http.Response.bytes(
+              utf8.encode(_foodDaoJapanPropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/FoodDao/2.%E5%B7%B4%E4%BB%A5/') {
+            return http.Response.bytes(
+              utf8.encode(_foodDaoMideastPropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/FoodDao/%E5%90%B4%E5%93%A5%E7%AA%9F.strm') {
+            return http.Response(
+              'https://media.example.com/fooddao/special.m3u8\n',
+              200,
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/FoodDao/1.%E6%97%A5%E6%9C%AC/%E8%BF%B7%E5%A4%B1%E4%B8%9C%E4%BA%AC.strm') {
+            return http.Response(
+              'https://media.example.com/fooddao/japan.m3u8\n',
+              200,
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/FoodDao/2.%E5%B7%B4%E4%BB%A5/%E5%B7%B4%E4%BB%A5%E8%A7%82%E5%AF%9F.strm') {
+            return http.Response(
+              'https://media.example.com/fooddao/mideast.m3u8\n',
+              200,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'nas-fooddao',
+          name: 'FoodDao NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/Shows/FoodDao/',
+          enabled: true,
+          webDavStructureInferenceEnabled: true,
+        ),
+        limit: 20,
+      );
+
+      expect(items, hasLength(3));
+      final special = items.firstWhere((item) => item.title == '吴哥窟');
+      expect(special.itemType, 'episode');
+      expect(special.seasonNumber, 0);
+
+      final japan = items.firstWhere((item) => item.title == '迷失东京');
+      expect(japan.itemType, 'episode');
+      expect(japan.seasonNumber, 1);
+
+      final mideast = items.firstWhere((item) => item.title == '巴以观察');
+      expect(mideast.itemType, 'episode');
+      expect(mideast.seasonNumber, 2);
     });
 
     test(
@@ -310,6 +439,44 @@ void main() {
       expect(items.every((item) => item.itemType == 'episode'), isTrue);
       expect(items.map((item) => item.seasonNumber), containsAll([1, 2]));
       expect(items.map((item) => item.episodeNumber), containsAll([1, 2]));
+    });
+
+    test('filters excluded WebDAV path keywords from collections and scan',
+        () async {
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() == 'https://nas.example.com/dav/') {
+            return http.Response(_filteredRootPropfindResponse, 207);
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() == 'https://nas.example.com/dav/Movies/') {
+            return http.Response(_filteredMoviesPropfindResponse, 207);
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() == 'https://nas.example.com/dav/temp/') {
+            return http.Response(_filteredTempPropfindResponse, 207);
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      const source = MediaSourceConfig(
+        id: 'nas-filtered',
+        name: 'Filtered NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/dav/',
+        enabled: true,
+        webDavExcludedPathKeywords: ['temp', 'sample'],
+      );
+
+      final collections = await client.fetchCollections(source);
+      expect(collections.map((item) => item.title), ['Movies']);
+
+      final items = await client.fetchLibrary(source, limit: 20);
+      expect(items, hasLength(1));
+      expect(items.single.title, 'Main Feature');
+      expect(items.single.actualAddress, '/dav/Movies/Main Feature.mkv');
     });
   });
 }
@@ -600,6 +767,127 @@ const _lostArcPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
   </d:response>
 </d:multistatus>''';
 
+const _chenLuyuRootPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/ChenLuyu/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>ChenLuyu</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/ChenLuyu/%E9%99%88%E9%B2%81%E8%B1%ABE01.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>陈鲁豫E01.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/ChenLuyu/%E9%99%88%E9%B2%81%E8%B1%ABE02.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>陈鲁豫E02.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _foodDaoRootPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/FoodDao/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>FoodDao</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDao/%E5%90%B4%E5%93%A5%E7%AA%9F.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>吴哥窟.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDao/1.%E6%97%A5%E6%9C%AC/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>1.日本</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDao/2.%E5%B7%B4%E4%BB%A5/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>2.巴以</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _foodDaoJapanPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/FoodDao/1.%E6%97%A5%E6%9C%AC/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>1.日本</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDao/1.%E6%97%A5%E6%9C%AC/%E8%BF%B7%E5%A4%B1%E4%B8%9C%E4%BA%AC.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>迷失东京.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _foodDaoMideastPropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/FoodDao/2.%E5%B7%B4%E4%BB%A5/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>2.巴以</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDao/2.%E5%B7%B4%E4%BB%A5/%E5%B7%B4%E4%BB%A5%E8%A7%82%E5%AF%9F.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>巴以观察.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
 const _strangerThingsRootPropfindResponse =
     '''<?xml version="1.0" encoding="utf-8"?>
 <d:multistatus xmlns:d="DAV:">
@@ -642,6 +930,97 @@ const _strangerThingsRootPropfindResponse =
         <d:resourcetype />
         <d:getcontenttype>text/plain</d:getcontenttype>
         <d:getlastmodified>Sun, 05 Apr 2026 08:02:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _filteredRootPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>dav</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Movies/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Movies</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/temp/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>temp</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _filteredMoviesPropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Movies/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Movies</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Movies/Main%20Feature.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Main Feature.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
+        <d:getlastmodified>Sun, 05 Apr 2026 09:00:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Movies/sample-trailer.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>sample-trailer.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
+        <d:getlastmodified>Sun, 05 Apr 2026 09:01:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _filteredTempPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/temp/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>temp</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/temp/Hidden%20Movie.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Hidden Movie.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
+        <d:getlastmodified>Sun, 05 Apr 2026 09:02:00 GMT</d:getlastmodified>
       </d:prop>
     </d:propstat>
   </d:response>

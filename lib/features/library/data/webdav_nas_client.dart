@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:starflow/core/utils/webdav_trace.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/nas_media_recognition.dart';
 import 'package:xml/xml.dart';
@@ -16,8 +17,12 @@ class WebDavNasClient {
   WebDavNasClient(this._client);
 
   final http.Client _client;
+  final Map<String, _ParsedNfoMetadata?> _nfoCache =
+      <String, _ParsedNfoMetadata?>{};
   final Map<String, Future<_ParsedNfoMetadata?>> _nfoInflight =
       <String, Future<_ParsedNfoMetadata?>>{};
+  final Map<String, List<_WebDavEntry>> _directoryCache =
+      <String, List<_WebDavEntry>>{};
   final Map<String, Future<List<_WebDavEntry>>> _directoryInflight =
       <String, Future<List<_WebDavEntry>>>{};
 
@@ -35,8 +40,30 @@ class WebDavNasClient {
           ? directoryId!.trim()
           : _browseRoot(source),
     );
-    final entries = await _propfind(rootUri, source: source);
-    return entries
+    if (_isExcludedByKeyword(rootUri, source: source)) {
+      webDavTrace(
+        'fetchCollections.skipExcludedRoot',
+        fields: {
+          'sourceId': source.id,
+          'rootUri': rootUri,
+          'keywords': source.normalizedWebDavExcludedPathKeywords,
+        },
+      );
+      return const [];
+    }
+    webDavTrace(
+      'fetchCollections.start',
+      fields: {
+        'sourceId': source.id,
+        'sourceName': source.name,
+        'rootUri': rootUri,
+      },
+    );
+    final entries = _filterExcludedEntries(
+      await _propfind(rootUri, source: source),
+      source: source,
+    );
+    final collections = entries
         .where((entry) => !entry.isSelf && entry.isCollection)
         .map(
           (entry) => MediaCollection(
@@ -49,6 +76,15 @@ class WebDavNasClient {
           ),
         )
         .toList();
+    webDavTrace(
+      'fetchCollections.done',
+      fields: {
+        'sourceId': source.id,
+        'count': collections.length,
+        'titles': collections.map((item) => item.title).toList(),
+      },
+    );
+    return collections;
   }
 
   Future<List<MediaItem>> fetchLibrary(
@@ -73,21 +109,51 @@ class WebDavNasClient {
     String? sectionId,
     String sectionName = '',
     int limit = 200,
+    bool? loadSidecarMetadata,
+    bool resetCaches = true,
   }) async {
+    if (resetCaches) {
+      _resetScanCaches();
+    }
     final endpoint = source.endpoint.trim();
     if (endpoint.isEmpty) {
       return const [];
     }
+    final shouldLoadSidecarMetadata =
+        loadSidecarMetadata ?? source.webDavSidecarScrapingEnabled;
 
     final rootUri = Uri.parse(
       sectionId?.trim().isNotEmpty == true
           ? sectionId!.trim()
           : _browseRoot(source),
     );
+    if (_isExcludedByKeyword(rootUri, source: source)) {
+      webDavTrace(
+        'scanLibrary.skipExcludedRoot',
+        fields: {
+          'sourceId': source.id,
+          'rootUri': rootUri,
+          'keywords': source.normalizedWebDavExcludedPathKeywords,
+        },
+      );
+      return const [];
+    }
     final collectionId = rootUri.toString();
     final collectionName = sectionName.trim().isEmpty
         ? _displayNameFromUri(rootUri, fallback: source.name)
         : sectionName.trim();
+    webDavTrace(
+      'scanLibrary.start',
+      fields: {
+        'sourceId': source.id,
+        'sourceName': source.name,
+        'rootUri': rootUri,
+        'sectionName': collectionName,
+        'limit': limit,
+        'structureInference': source.webDavStructureInferenceEnabled,
+        'sidecar': shouldLoadSidecarMetadata,
+      },
+    );
     final pendingItems = <_PendingWebDavScannedItem>[];
     final visited = <String>{};
 
@@ -97,22 +163,81 @@ class WebDavNasClient {
           !visited.add(uri.toString())) {
         return;
       }
+      if (_isExcludedByKeyword(uri, source: source)) {
+        webDavTrace(
+          'scan.walk.skipExcludedDirectory',
+          fields: {
+            'uri': uri,
+            'depth': depth,
+          },
+        );
+        return;
+      }
 
-      final entries = await _propfind(uri, source: source);
+      webDavTrace(
+        'scan.walk.enter',
+        fields: {
+          'uri': uri,
+          'depth': depth,
+          'pending': pendingItems.length,
+        },
+      );
+      final entries = _filterExcludedEntries(
+        await _propfind(uri, source: source),
+        source: source,
+      );
       final directoryEntries =
           entries.where((entry) => !entry.isSelf).toList(growable: false);
+      webDavTrace(
+        'scan.walk.entries',
+        fields: {
+          'uri': uri,
+          'depth': depth,
+          'entryCount': directoryEntries.length,
+          'directories': directoryEntries
+              .where((entry) => entry.isCollection)
+              .map((entry) => entry.name)
+              .toList(),
+        },
+      );
       for (final entry in directoryEntries) {
         if (pendingItems.length >= limit) {
           return;
         }
         if (entry.isCollection) {
+          webDavTrace(
+            'scan.walk.descend',
+            fields: {
+              'parent': uri,
+              'child': entry.uri,
+              'name': entry.name,
+            },
+          );
           await walk(entry.uri, depth + 1);
           continue;
         }
-        if (!_isPlayableVideo(entry)) {
+        if (_isExcludedByKeyword(entry.uri, source: source)) {
+          webDavTrace(
+            'scan.walk.skipExcludedFile',
+            fields: {
+              'uri': entry.uri,
+              'name': entry.name,
+            },
+          );
           continue;
         }
-        final metadata = source.webDavSidecarScrapingEnabled
+        if (!_isPlayableVideo(entry)) {
+          webDavTrace(
+            'scan.walk.skipNonPlayable',
+            fields: {
+              'uri': entry.uri,
+              'name': entry.name,
+              'contentType': entry.contentType,
+            },
+          );
+          continue;
+        }
+        final metadata = shouldLoadSidecarMetadata
             ? await _resolveSidecarMetadata(
                 entry,
                 siblings: directoryEntries,
@@ -121,28 +246,44 @@ class WebDavNasClient {
             : _buildBasicMetadataSeed(entry);
         final streamUrl = await _resolvePlayableUrl(entry, source: source);
         if (streamUrl.trim().isEmpty) {
+          webDavTrace(
+            'scan.walk.skipEmptyStream',
+            fields: {
+              'uri': entry.uri,
+              'name': entry.name,
+            },
+          );
           continue;
         }
-        pendingItems.add(
-          _PendingWebDavScannedItem(
-            resourceId: entry.uri.toString(),
-            fileName: entry.name,
-            actualAddress:
-                _relativePathForNasDisplay(entry.uri, source: source),
-            sectionId: collectionId,
-            sectionName: collectionName,
-            streamUrl: streamUrl,
-            streamHeaders: _headersForResolvedStream(source, streamUrl),
-            addedAt: entry.modifiedAt ?? DateTime.now(),
-            modifiedAt: entry.modifiedAt,
-            fileSizeBytes: entry.sizeBytes,
-            metadataSeed: metadata,
-            relativeDirectories: _relativeDirectorySegmentsFromRoot(
-              fileUri: entry.uri,
-              rootUri: rootUri,
-            ),
+        final pendingItem = _PendingWebDavScannedItem(
+          resourceId: entry.uri.toString(),
+          fileName: entry.name,
+          actualAddress: _relativePathForNasDisplay(entry.uri, source: source),
+          sectionId: collectionId,
+          sectionName: collectionName,
+          streamUrl: streamUrl,
+          streamHeaders: _headersForResolvedStream(source, streamUrl),
+          addedAt: entry.modifiedAt ?? DateTime.now(),
+          modifiedAt: entry.modifiedAt,
+          fileSizeBytes: entry.sizeBytes,
+          metadataSeed: metadata,
+          relativeDirectories: _relativeDirectorySegmentsFromRoot(
+            fileUri: entry.uri,
+            rootUri: rootUri,
           ),
         );
+        webDavTrace(
+          'scan.walk.accept',
+          fields: {
+            'path': pendingItem.actualAddress,
+            'title': pendingItem.metadataSeed.title,
+            'itemType': pendingItem.metadataSeed.itemType,
+            'season': pendingItem.metadataSeed.seasonNumber,
+            'episode': pendingItem.metadataSeed.episodeNumber,
+            'directories': pendingItem.relativeDirectories,
+          },
+        );
+        pendingItems.add(pendingItem);
       }
     }
 
@@ -153,6 +294,15 @@ class WebDavNasClient {
         .map((item) => item.toScannedItem())
         .toList(growable: false);
     items.sort((left, right) => right.addedAt.compareTo(left.addedAt));
+    webDavTrace(
+      'scanLibrary.done',
+      fields: {
+        'sourceId': source.id,
+        'rootUri': rootUri,
+        'pendingCount': pendingItems.length,
+        'resultCount': items.length,
+      },
+    );
     return items;
   }
 
@@ -161,6 +311,13 @@ class WebDavNasClient {
     required List<_WebDavEntry> siblings,
     required MediaSourceConfig source,
   }) async {
+    webDavTrace(
+      'sidecar.start',
+      fields: {
+        'video': videoEntry.uri,
+        'fileName': videoEntry.name,
+      },
+    );
     final currentDirectoryUri = _parentDirectoryUri(videoEntry.uri);
     final parentDirectoryUri = currentDirectoryUri == null
         ? null
@@ -284,7 +441,7 @@ class WebDavNasClient {
         localLogoEntry != null ||
         localBannerEntry != null ||
         localExtraBackdropEntries.isNotEmpty;
-    return WebDavMetadataSeed(
+    final seed = WebDavMetadataSeed(
       title: nfoMetadata?.title.trim().isNotEmpty == true
           ? nfoMetadata!.title.trim()
           : _stripExtension(videoEntry.name),
@@ -325,6 +482,25 @@ class WebDavNasClient {
       bitrate: nfoMetadata?.bitrate ?? inferredMediaInfo.bitrate,
       hasSidecarMatch: hasSidecarMatch,
     );
+    webDavTrace(
+      'sidecar.done',
+      fields: {
+        'video': videoEntry.uri,
+        'primaryNfo': primaryNfoEntry?.name ?? '',
+        'seasonNfo': seasonNfoEntry?.name ?? '',
+        'seriesNfo': seriesNfoEntry?.name ?? '',
+        'title': seed.title,
+        'itemType': seed.itemType,
+        'season': seed.seasonNumber,
+        'episode': seed.episodeNumber,
+        'imdbId': seed.imdbId,
+        'hasPoster': seed.posterUrl.isNotEmpty,
+        'hasBackdrop': seed.backdropUrl.isNotEmpty,
+        'hasLogo': seed.logoUrl.isNotEmpty,
+        'hasSidecarMatch': seed.hasSidecarMatch,
+      },
+    );
+    return seed;
   }
 
   WebDavMetadataSeed _buildBasicMetadataSeed(_WebDavEntry videoEntry) {
@@ -365,6 +541,13 @@ class WebDavNasClient {
     Uri uri, {
     required MediaSourceConfig source,
   }) async {
+    webDavTrace(
+      'propfind.request',
+      fields: {
+        'uri': uri,
+        'sourceId': source.id,
+      },
+    );
     final request = http.Request('PROPFIND', uri)
       ..headers.addAll({
         ..._headers(source),
@@ -385,9 +568,23 @@ class WebDavNasClient {
     final streamed = await _client.send(request);
     final response = await http.Response.fromStream(streamed);
     if (response.statusCode != 207 && response.statusCode != 200) {
+      webDavTrace(
+        'propfind.error',
+        fields: {
+          'uri': uri,
+          'status': response.statusCode,
+        },
+      );
       throw WebDavNasException('WebDAV 请求失败：HTTP ${response.statusCode}');
     }
     if (response.body.trim().isEmpty) {
+      webDavTrace(
+        'propfind.empty',
+        fields: {
+          'uri': uri,
+          'status': response.statusCode,
+        },
+      );
       return const [];
     }
 
@@ -397,7 +594,7 @@ class WebDavNasClient {
         .where((element) => element.name.local == 'response');
     final normalizedSelf = _normalizeUri(uri);
 
-    return responses.map((node) {
+    final parsed = responses.map((node) {
       final href = _childText(node, 'href');
       final resolvedUri = _resolveHref(uri, href);
       final prop = node.descendants.whereType<XmlElement>().firstWhere(
@@ -425,6 +622,19 @@ class WebDavNasClient {
         isSelf: _normalizeUri(resolvedUri) == normalizedSelf,
       );
     }).toList();
+    webDavTrace(
+      'propfind.response',
+      fields: {
+        'uri': uri,
+        'status': response.statusCode,
+        'count': parsed.length,
+        'entries': parsed
+            .map((entry) =>
+                '${entry.isCollection ? 'dir' : 'file'}:${entry.name}')
+            .toList(),
+      },
+    );
+    return parsed;
   }
 
   Map<String, String> _headers(MediaSourceConfig source) {
@@ -449,6 +659,35 @@ class WebDavNasClient {
       return selectedPath;
     }
     return source.endpoint.trim();
+  }
+
+  bool _isExcludedByKeyword(
+    Uri uri, {
+    required MediaSourceConfig source,
+  }) {
+    return source.matchesWebDavExcludedUri(uri);
+  }
+
+  List<_WebDavEntry> _filterExcludedEntries(
+    List<_WebDavEntry> entries, {
+    required MediaSourceConfig source,
+  }) {
+    final filtered = <_WebDavEntry>[];
+    for (final entry in entries) {
+      if (!entry.isSelf && _isExcludedByKeyword(entry.uri, source: source)) {
+        webDavTrace(
+          'filter.exclude',
+          fields: {
+            'uri': entry.uri,
+            'name': entry.name,
+            'keywords': source.normalizedWebDavExcludedPathKeywords,
+          },
+        );
+        continue;
+      }
+      filtered.add(entry);
+    }
+    return filtered;
   }
 
   /// 详情页「地址」用：优先显示完整的 WebDAV 路径，而不是播放直链。
@@ -499,11 +738,31 @@ class WebDavNasClient {
     required MediaSourceConfig source,
   }) async {
     if (!_isStrmFile(entry)) {
+      webDavTrace(
+        'resolvePlayable.direct',
+        fields: {
+          'uri': entry.uri,
+          'streamUrl': entry.uri,
+        },
+      );
       return entry.uri.toString();
     }
 
+    webDavTrace(
+      'resolvePlayable.strm.start',
+      fields: {
+        'uri': entry.uri,
+      },
+    );
     final response = await _client.get(entry.uri, headers: _headers(source));
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      webDavTrace(
+        'resolvePlayable.strm.error',
+        fields: {
+          'uri': entry.uri,
+          'status': response.statusCode,
+        },
+      );
       throw WebDavNasException(
         'STRM 读取失败：HTTP ${response.statusCode} (${entry.uri})',
       );
@@ -517,10 +776,31 @@ class WebDavNasClient {
       }
       final parsed = Uri.tryParse(normalized);
       if (parsed != null && parsed.hasScheme) {
+        webDavTrace(
+          'resolvePlayable.strm.done',
+          fields: {
+            'uri': entry.uri,
+            'streamUrl': normalized,
+          },
+        );
         return normalized;
       }
-      return entry.uri.resolve(normalized).toString();
+      final resolved = entry.uri.resolve(normalized).toString();
+      webDavTrace(
+        'resolvePlayable.strm.relative',
+        fields: {
+          'uri': entry.uri,
+          'streamUrl': resolved,
+        },
+      );
+      return resolved;
     }
+    webDavTrace(
+      'resolvePlayable.strm.empty',
+      fields: {
+        'uri': entry.uri,
+      },
+    );
     return '';
   }
 
@@ -775,13 +1055,19 @@ class WebDavNasClient {
     _WebDavEntry entry, {
     required MediaSourceConfig source,
   }) {
-    final key = entry.uri.toString();
+    final key = _webDavCacheKey(source, entry.uri);
+    if (_nfoCache.containsKey(key)) {
+      return Future.value(_nfoCache[key]);
+    }
     final inflight = _nfoInflight[key];
     if (inflight != null) {
       return inflight;
     }
 
-    final future = _loadNfoMetadataUncached(entry, source: source);
+    final future = _loadNfoMetadataUncached(entry, source: source).then((value) {
+      _nfoCache[key] = value;
+      return value;
+    });
     _nfoInflight[key] = future;
     future.whenComplete(() {
       _nfoInflight.remove(key);
@@ -879,12 +1165,27 @@ class WebDavNasClient {
     Uri uri, {
     required MediaSourceConfig source,
   }) {
-    final key = uri.toString();
+    if (_isExcludedByKeyword(uri, source: source)) {
+      return Future.value(const <_WebDavEntry>[]);
+    }
+    final key = _webDavCacheKey(source, uri);
+    final cached = _directoryCache[key];
+    if (cached != null) {
+      return Future.value(cached);
+    }
     final inflight = _directoryInflight[key];
     if (inflight != null) {
       return inflight;
     }
-    final future = _propfind(uri, source: source).catchError((_) {
+    final future = _propfind(uri, source: source)
+        .then(
+      (entries) {
+        final filtered = _filterExcludedEntries(entries, source: source);
+        _directoryCache[key] = filtered;
+        return filtered;
+      },
+    )
+        .catchError((_) {
       return const <_WebDavEntry>[];
     });
     _directoryInflight[key] = future;
@@ -892,6 +1193,17 @@ class WebDavNasClient {
       _directoryInflight.remove(key);
     });
     return future;
+  }
+
+  void _resetScanCaches() {
+    _nfoCache.clear();
+    _nfoInflight.clear();
+    _directoryCache.clear();
+    _directoryInflight.clear();
+  }
+
+  String _webDavCacheKey(MediaSourceConfig source, Uri uri) {
+    return '${source.id}|${uri.toString()}';
   }
 
   Uri? _parentDirectoryUri(Uri uri) {
@@ -1445,9 +1757,17 @@ class WebDavNasClient {
     if (items.isEmpty) {
       return items;
     }
+    webDavTrace(
+      'structure.start',
+      fields: {
+        'itemCount': items.length,
+      },
+    );
 
     final filesByDirectory = <String, List<_PendingWebDavScannedItem>>{};
     final childVideoCountsByDirectory = <String, Map<String, int>>{};
+    final childItemsByDirectory =
+        <String, Map<String, List<_PendingWebDavScannedItem>>>{};
     final recognitionByResource = <String, NasMediaRecognition>{};
     final explicitEpisodeCountByDirectory = <String, int>{};
     for (final item in items) {
@@ -1467,36 +1787,42 @@ class WebDavNasClient {
           () => <String, int>{},
         );
         counts[childName] = (counts[childName] ?? 0) + 1;
+        childItemsByDirectory
+            .putIfAbsent(
+              parentKey,
+              () => <String, List<_PendingWebDavScannedItem>>{},
+            )
+            .putIfAbsent(childName, () => <_PendingWebDavScannedItem>[])
+            .add(item);
       }
     }
 
-    bool isSeriesRoot(String directoryKey) {
-      final directVideoCount = filesByDirectory[directoryKey]?.length ?? 0;
-      final directExplicitEpisodeCount =
-          explicitEpisodeCountByDirectory[directoryKey] ?? 0;
-      if (directVideoCount >= 2 && directExplicitEpisodeCount >= 2) {
-        return true;
-      }
-      final childVideoCounts =
-          childVideoCountsByDirectory[directoryKey] ?? const <String, int>{};
-      if (childVideoCounts.isEmpty) {
-        return false;
-      }
-      if (directVideoCount > 0) {
-        return true;
-      }
-      final multiEpisodeChildCount =
-          childVideoCounts.values.where((count) => count >= 2).length;
-      if (multiEpisodeChildCount >= 2) {
-        return true;
-      }
-      return childVideoCounts.length == 1 && multiEpisodeChildCount == 1;
-    }
-
-    final seriesRootKeys = <String>{
-      for (final key in childVideoCountsByDirectory.keys)
-        if (isSeriesRoot(key)) key,
+    final seriesRootPlans = <String, _SeriesRootInferencePlan>{};
+    final candidateDirectoryKeys = <String>{
+      ...filesByDirectory.keys,
+      ...childVideoCountsByDirectory.keys,
     };
+    for (final directoryKey in candidateDirectoryKeys) {
+      final plan = _buildSeriesRootPlan(
+        directoryKey: directoryKey,
+        filesByDirectory: filesByDirectory,
+        childItemsByDirectory: childItemsByDirectory,
+        recognitionByResource: recognitionByResource,
+        explicitEpisodeCountByDirectory: explicitEpisodeCountByDirectory,
+      );
+      if (plan != null) {
+        seriesRootPlans[directoryKey] = plan;
+        webDavTrace(
+          'structure.seriesRoot',
+          fields: {
+            'directory': directoryKey,
+            'rootItemsAsSpecials': plan.rootItemsAsSpecials,
+            'seasonDirs': plan.seasonNumberByChildDirectory,
+          },
+        );
+      }
+    }
+
     final seriesRootForResource = <String, String>{};
     for (final item in items) {
       for (var length = 0;
@@ -1504,7 +1830,7 @@ class WebDavNasClient {
           length++) {
         final candidateKey =
             _segmentsKey(item.relativeDirectories.take(length));
-        if (seriesRootKeys.contains(candidateKey)) {
+        if (seriesRootPlans.containsKey(candidateKey)) {
           seriesRootForResource[item.resourceId] = candidateKey;
           break;
         }
@@ -1524,12 +1850,23 @@ class WebDavNasClient {
       final explicitEpisodeNumber =
           seed.episodeNumber ?? recognition?.episodeNumber;
       if (seriesRootKey != null) {
+        final plan = seriesRootPlans[seriesRootKey]!;
         final rootDepth = _segmentsFromKey(seriesRootKey).length;
+        final isRootDirectFile = item.relativeDirectories.length == rootDepth;
+        final childDirectoryName =
+            isRootDirectFile ? '' : item.relativeDirectories[rootDepth];
+        final derivedSeasonNumber = isRootDirectFile
+            ? plan.rootItemsAsSpecials
+                ? 0
+                : 1
+            : plan.seasonNumberByChildDirectory[childDirectoryName];
         final seasonGroupKey = explicitSeasonNumber != null
             ? _buildExplicitSeasonGroupKey(explicitSeasonNumber)
-            : item.relativeDirectories.length == rootDepth
-                ? _directSeasonGroupKey
-                : item.relativeDirectories[rootDepth];
+            : isRootDirectFile
+                ? (plan.rootItemsAsSpecials
+                    ? _directSeasonGroupKey
+                    : _implicitSeasonGroupKey)
+                : childDirectoryName;
         final seasonOrder = seasonOrderByRoot.putIfAbsent(
           seriesRootKey,
           () => <String>[],
@@ -1539,8 +1876,20 @@ class WebDavNasClient {
         }
         final nextSeed = seed.copyWith(
           itemType: 'episode',
+          seasonNumber: explicitSeasonNumber ?? derivedSeasonNumber,
         );
         final nextItem = item.copyWith(metadataSeed: nextSeed);
+        webDavTrace(
+          'structure.assignSeriesEpisode',
+          fields: {
+            'path': item.actualAddress,
+            'seriesRoot': seriesRootKey,
+            'seasonGroup': seasonGroupKey,
+            'season': nextSeed.seasonNumber,
+            'episode': explicitEpisodeNumber,
+            'title': nextSeed.title,
+          },
+        );
         episodeItemsByGroup
             .putIfAbsent('$seriesRootKey::$seasonGroupKey', () => [])
             .add(nextItem);
@@ -1556,13 +1905,23 @@ class WebDavNasClient {
       if (seed.itemType.trim().isEmpty &&
           directVideoCount == 1 &&
           childDirectoryCount == 0) {
+        final resolvedItemType =
+            explicitEpisodeNumber != null || explicitSeasonNumber != null
+                ? 'episode'
+                : 'movie';
+        webDavTrace(
+          'structure.singleFileFallback',
+          fields: {
+            'path': item.actualAddress,
+            'resolvedItemType': resolvedItemType,
+            'season': explicitSeasonNumber,
+            'episode': explicitEpisodeNumber,
+          },
+        );
         nextItems.add(
           item.copyWith(
             metadataSeed: seed.copyWith(
-              itemType:
-                  explicitEpisodeNumber != null || explicitSeasonNumber != null
-                      ? 'episode'
-                      : 'movie',
+              itemType: resolvedItemType,
               seasonNumber: explicitSeasonNumber,
               episodeNumber: explicitEpisodeNumber,
             ),
@@ -1578,8 +1937,15 @@ class WebDavNasClient {
       if (entry.value.contains(_directSeasonGroupKey)) {
         seasonNumberByGroup['${entry.key}::$_directSeasonGroupKey'] = 0;
       }
+      if (entry.value.contains(_implicitSeasonGroupKey)) {
+        seasonNumberByGroup['${entry.key}::$_implicitSeasonGroupKey'] = 1;
+      }
       final orderedGroups = entry.value
-          .where((group) => group != _directSeasonGroupKey)
+          .where(
+            (group) =>
+                group != _directSeasonGroupKey &&
+                group != _implicitSeasonGroupKey,
+          )
           .toList(growable: false)
         ..sort((left, right) {
           final leftExplicit = _parseExplicitSeasonGroupKey(left);
@@ -1623,10 +1989,16 @@ class WebDavNasClient {
         final explicitEpisodeNumber =
             item.metadataSeed.episodeNumber ?? recognition?.episodeNumber;
         final specialGroupSuffix = '::$_directSeasonGroupKey';
+        final implicitGroupSuffix = '::$_implicitSeasonGroupKey';
         final isDirectSeasonGroup = entry.key.endsWith(specialGroupSuffix);
+        final isImplicitSeasonGroup = entry.key.endsWith(implicitGroupSuffix);
         final resolvedSeasonNumber = explicitSeasonNumber ??
             seasonNumber ??
-            (isDirectSeasonGroup ? 0 : 1);
+            (isDirectSeasonGroup
+                ? 0
+                : isImplicitSeasonGroup
+                    ? 1
+                    : 1);
         episodeOverrides[item.resourceId] = item.metadataSeed.copyWith(
           seasonNumber: resolvedSeasonNumber,
           episodeNumber: explicitEpisodeNumber ?? index + 1,
@@ -1634,7 +2006,7 @@ class WebDavNasClient {
       }
     }
 
-    return nextItems
+    final resolvedItems = nextItems
         .map(
           (item) => item.copyWith(
             metadataSeed:
@@ -1642,6 +2014,229 @@ class WebDavNasClient {
           ),
         )
         .toList(growable: false);
+    webDavTrace(
+      'structure.done',
+      fields: {
+        'resultCount': resolvedItems.length,
+        'episodes': resolvedItems
+            .where((item) => item.metadataSeed.itemType == 'episode')
+            .length,
+        'movies': resolvedItems
+            .where((item) => item.metadataSeed.itemType == 'movie')
+            .length,
+      },
+    );
+    return resolvedItems;
+  }
+
+  _SeriesRootInferencePlan? _buildSeriesRootPlan({
+    required String directoryKey,
+    required Map<String, List<_PendingWebDavScannedItem>> filesByDirectory,
+    required Map<String, Map<String, List<_PendingWebDavScannedItem>>>
+        childItemsByDirectory,
+    required Map<String, NasMediaRecognition> recognitionByResource,
+    required Map<String, int> explicitEpisodeCountByDirectory,
+  }) {
+    final directItems = filesByDirectory[directoryKey] ?? const [];
+    final childGroups = childItemsByDirectory[directoryKey] ??
+        const <String, List<_PendingWebDavScannedItem>>{};
+    if (directItems.isEmpty && childGroups.isEmpty) {
+      webDavTrace(
+        'structure.plan.skipEmpty',
+        fields: {
+          'directory': directoryKey,
+        },
+      );
+      return null;
+    }
+
+    final directExplicitEpisodeCount =
+        explicitEpisodeCountByDirectory[directoryKey] ?? 0;
+    final seasonHintsByChildDirectory = <String, _SeasonDirectoryHint>{};
+    for (final entry in childGroups.entries) {
+      final hint = _resolveSeasonDirectoryHint(
+        childDirectoryName: entry.key,
+        items: entry.value,
+        siblingDirectoryNames: childGroups.keys.toList(growable: false),
+        recognitionByResource: recognitionByResource,
+      );
+      if (hint != null) {
+        seasonHintsByChildDirectory[entry.key] = hint;
+      }
+    }
+
+    final hasImplicitRootEpisodes = childGroups.isEmpty &&
+        directItems.length >= 2 &&
+        directExplicitEpisodeCount >= 2;
+    if (hasImplicitRootEpisodes) {
+      webDavTrace(
+        'structure.plan.implicitSeason',
+        fields: {
+          'directory': directoryKey,
+          'directItems': directItems.length,
+          'explicitEpisodes': directExplicitEpisodeCount,
+        },
+      );
+      return const _SeriesRootInferencePlan(
+        rootItemsAsSpecials: false,
+        seasonNumberByChildDirectory: <String, int?>{},
+      );
+    }
+
+    final validSeasonHints =
+        seasonHintsByChildDirectory.values.toList(growable: false);
+    final hasSeasonDirectories = validSeasonHints.length >= 2 ||
+        (validSeasonHints.length == 1 &&
+            (directItems.isNotEmpty || childGroups.values.first.length >= 2));
+    if (!hasSeasonDirectories) {
+      webDavTrace(
+        'structure.plan.noSeriesRoot',
+        fields: {
+          'directory': directoryKey,
+          'directItems': directItems.length,
+          'childDirs': childGroups.keys.toList(),
+          'seasonHints': seasonHintsByChildDirectory,
+        },
+      );
+      return null;
+    }
+
+    webDavTrace(
+      'structure.plan.seriesRoot',
+      fields: {
+        'directory': directoryKey,
+        'directItems': directItems.length,
+        'rootItemsAsSpecials': directItems.isNotEmpty,
+        'seasonHints': seasonHintsByChildDirectory,
+      },
+    );
+    return _SeriesRootInferencePlan(
+      rootItemsAsSpecials: directItems.isNotEmpty,
+      seasonNumberByChildDirectory: {
+        for (final entry in seasonHintsByChildDirectory.entries)
+          entry.key: entry.value.seasonNumber,
+      },
+    );
+  }
+
+  _SeasonDirectoryHint? _resolveSeasonDirectoryHint({
+    required String childDirectoryName,
+    required List<_PendingWebDavScannedItem> items,
+    required List<String> siblingDirectoryNames,
+    required Map<String, NasMediaRecognition> recognitionByResource,
+  }) {
+    if (items.isEmpty) {
+      webDavTrace(
+        'structure.seasonHint.empty',
+        fields: {
+          'directory': childDirectoryName,
+        },
+      );
+      return null;
+    }
+
+    final explicitSeasonNumber = _parseSeasonNumberFromDirectoryName(
+      childDirectoryName,
+    );
+    if (explicitSeasonNumber != null) {
+      webDavTrace(
+        'structure.seasonHint.explicit',
+        fields: {
+          'directory': childDirectoryName,
+          'season': explicitSeasonNumber,
+        },
+      );
+      return _SeasonDirectoryHint(seasonNumber: explicitSeasonNumber);
+    }
+
+    if (_looksLikeNumericSeasonDirectory(
+      childDirectoryName,
+      siblingDirectoryNames: siblingDirectoryNames,
+    )) {
+      final seasonNumber = _parseLeadingNumericSeasonNumber(childDirectoryName);
+      webDavTrace(
+        'structure.seasonHint.numeric',
+        fields: {
+          'directory': childDirectoryName,
+          'season': seasonNumber,
+          'siblings': siblingDirectoryNames,
+        },
+      );
+      return _SeasonDirectoryHint(
+        seasonNumber: seasonNumber,
+      );
+    }
+
+    final explicitSeasonNumbers = items
+        .map(
+          (item) =>
+              item.metadataSeed.seasonNumber ??
+              recognitionByResource[item.resourceId]?.seasonNumber,
+        )
+        .whereType<int>()
+        .toSet();
+    if (explicitSeasonNumbers.length == 1) {
+      webDavTrace(
+        'structure.seasonHint.fromItems',
+        fields: {
+          'directory': childDirectoryName,
+          'season': explicitSeasonNumbers.first,
+        },
+      );
+      return _SeasonDirectoryHint(seasonNumber: explicitSeasonNumbers.first);
+    }
+
+    webDavTrace(
+      'structure.seasonHint.none',
+      fields: {
+        'directory': childDirectoryName,
+        'itemCount': items.length,
+      },
+    );
+    return null;
+  }
+
+  int? _parseSeasonNumberFromDirectoryName(String value) {
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      return null;
+    }
+    for (final pattern in const [
+      r'(?:^|[ ._\-])s(\d{1,2})(?:$|[ ._\-])',
+      r'season[ ._\-]?(\d{1,2})',
+      r'第(\d{1,2})季',
+    ]) {
+      final match =
+          RegExp(pattern, caseSensitive: false).firstMatch(normalized);
+      final seasonNumber = int.tryParse(match?.group(1) ?? '');
+      if (seasonNumber != null && seasonNumber > 0) {
+        return seasonNumber;
+      }
+    }
+    return null;
+  }
+
+  int? _parseLeadingNumericSeasonNumber(String value) {
+    final match = RegExp(r'^\s*(\d{1,2})(?:[ ._\-]|$)').firstMatch(value);
+    final seasonNumber = int.tryParse(match?.group(1) ?? '');
+    if (seasonNumber == null || seasonNumber <= 0) {
+      return null;
+    }
+    return seasonNumber;
+  }
+
+  bool _looksLikeNumericSeasonDirectory(
+    String value, {
+    required List<String> siblingDirectoryNames,
+  }) {
+    final seasonNumber = _parseLeadingNumericSeasonNumber(value);
+    if (seasonNumber == null) {
+      return false;
+    }
+    final numericSiblingCount = siblingDirectoryNames
+        .where((name) => _parseLeadingNumericSeasonNumber(name) != null)
+        .length;
+    return numericSiblingCount >= 2;
   }
 
   bool _hasExplicitEpisodeCue(
@@ -2036,6 +2631,24 @@ class _NfoStreamDetails {
   final int? bitrate;
 }
 
+class _SeriesRootInferencePlan {
+  const _SeriesRootInferencePlan({
+    required this.rootItemsAsSpecials,
+    required this.seasonNumberByChildDirectory,
+  });
+
+  final bool rootItemsAsSpecials;
+  final Map<String, int?> seasonNumberByChildDirectory;
+}
+
+class _SeasonDirectoryHint {
+  const _SeasonDirectoryHint({
+    required this.seasonNumber,
+  });
+
+  final int? seasonNumber;
+}
+
 class _InferredMediaInfo {
   const _InferredMediaInfo({
     this.container = '',
@@ -2055,6 +2668,7 @@ class _InferredMediaInfo {
 }
 
 const String _directSeasonGroupKey = '__root__';
+const String _implicitSeasonGroupKey = '__implicit__';
 
 class _PendingWebDavScannedItem {
   const _PendingWebDavScannedItem({

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/features/library/application/nas_media_index_revision.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -14,6 +15,7 @@ final libraryCollectionItemsProvider =
   ref,
   target,
 ) {
+  ref.watch(nasMediaIndexRevisionProvider);
   return ref.read(mediaRepositoryProvider).fetchLibrary(
         sourceId: target.sourceId,
         sectionId: target.sectionId,

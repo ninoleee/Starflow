@@ -14,26 +14,36 @@ class BootstrapPage extends ConsumerStatefulWidget {
 }
 
 class _BootstrapPageState extends ConsumerState<BootstrapPage> {
+  ProviderSubscription<BootstrapState>? _bootstrapSubscription;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    _bootstrapSubscription = ref.listenManual<BootstrapState>(
+      bootstrapControllerProvider,
+      (previous, next) {
+        if (next.isComplete && previous?.isComplete != true) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              context.goNamed('home');
+            }
+          });
+        }
+      },
+    );
+    Future<void>.microtask(() {
       ref.read(bootstrapControllerProvider.notifier).start();
     });
   }
 
   @override
-  Widget build(BuildContext context) {
-    ref.listen(bootstrapControllerProvider, (previous, next) {
-      if (next.isComplete && previous?.isComplete != true) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            context.goNamed('home');
-          }
-        });
-      }
-    });
+  void dispose() {
+    _bootstrapSubscription?.close();
+    super.dispose();
+  }
 
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(bootstrapControllerProvider);
     final progress = state.progress.clamp(0.0, 1.0).toDouble();
 

@@ -376,6 +376,211 @@ void main() {
     );
     expect(seasons.map((item) => item.seasonNumber), containsAll([0, 1, 2]));
     expect(seasons.firstWhere((item) => item.seasonNumber == 0).title, '特别篇');
+    expect(seasons.firstWhere((item) => item.seasonNumber == 1).title, '1.日本');
+    expect(seasons.firstWhere((item) => item.seasonNumber == 2).title, '2.巴以');
+  });
+
+  test(
+      'NasMediaIndexer resolves series root past wrapper folders for season directories',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-wrapper-series',
+      name: 'WebDAV Wrapper Series',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://webdav.example.com/movies/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'food-wrapper-1',
+          path: 'strm/quark/食贫道/11.日本（12月更新-日本战后八十年）/【4K】战 后 八 十 年.(mp4).strm',
+          title: '【4K】战 后 八 十 年',
+          itemType: 'episode',
+          seasonNumber: 11,
+          episodeNumber: 1,
+        ),
+        _PendingTestItem(
+          id: 'food-wrapper-2',
+          path: 'strm/quark/食贫道/7.黄粱一梦（你还好吗，美国）/黄 粱 一 梦.(mp4).strm',
+          title: '黄 粱 一 梦',
+          itemType: 'episode',
+          seasonNumber: 7,
+          episodeNumber: 1,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    final library = await indexer.loadLibrary(source, limit: 20);
+    expect(library, hasLength(1));
+    final series = library.single;
+    expect(series.itemType, 'series');
+    expect(series.title, '食贫道');
+
+    final seasons = await indexer.loadChildren(
+      source,
+      parentId: series.id,
+      limit: 20,
+    );
+    expect(seasons, hasLength(2));
+    expect(
+      seasons.map((item) => item.title),
+      containsAll([
+        '11.日本（12月更新-日本战后八十年）',
+        '7.黄粱一梦（你还好吗，美国）',
+      ]),
+    );
+  });
+
+  test(
+      'NasMediaIndexer keeps imdb-tagged WebDAV episodes under structure root series grouping',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-wrapper-imdb-series',
+      name: 'WebDAV Wrapper IMDb Series',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://webdav.example.com/movies/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'food-wrapper-imdb-1',
+          path: 'strm/quark/食贫道/11.日本（12月更新-日本战后八十年）/【4K】战 后 八 十 年.(mp4).strm',
+          title: '【4K】战 后 八 十 年',
+          itemType: 'episode',
+          seasonNumber: 11,
+          episodeNumber: 1,
+        ),
+        _PendingTestItem(
+          id: 'food-wrapper-imdb-2',
+          path: 'strm/quark/食贫道/7.黄粱一梦（你还好吗，美国）/黄 粱 一 梦.(mp4).strm',
+          title: '黄 粱 一 梦',
+          itemType: 'episode',
+          seasonNumber: 7,
+          episodeNumber: 2,
+          imdbId: 'tt0025880',
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    final library = await indexer.loadLibrary(source, limit: 20);
+    expect(library, hasLength(1));
+    final series = library.single;
+    expect(series.itemType, 'series');
+    expect(series.title, '食贫道');
+
+    final seasons = await indexer.loadChildren(
+      source,
+      parentId: series.id,
+      limit: 20,
+    );
+    expect(seasons, hasLength(2));
+    expect(seasons.map((item) => item.seasonNumber), containsAll([7, 11]));
+    expect(
+      seasons.map((item) => item.title),
+      containsAll([
+        '11.日本（12月更新-日本战后八十年）',
+        '7.黄粱一梦（你还好吗，美国）',
+      ]),
+    );
+  });
+
+  test('NasMediaIndexer keeps single-file movie folders as playable movies',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-starwars',
+      name: 'WebDAV StarWars',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://webdav.example.com/movies/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'starwars-1',
+          path:
+              'strm/quark/星球大战：最后的绝地武士 2160p remux (2017)/星球大战：最后的绝地武士 2160p remux (2017).(mkv).strm',
+          title: '星球大战：最后的绝地武士 2160p remux (2017)',
+          itemType: 'movie',
+          seasonNumber: 0,
+          episodeNumber: 0,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    final library = await indexer.loadLibrary(source, limit: 20);
+    expect(library, hasLength(1));
+    final movie = library.single;
+    expect(movie.itemType, 'movie');
+    expect(movie.streamUrl, isNotEmpty);
+    expect(movie.title, '星球大战：最后的绝地武士 2160p remux (2017)');
   });
 }
 
@@ -404,6 +609,7 @@ class _PendingTestItem {
     required this.itemType,
     required this.seasonNumber,
     required this.episodeNumber,
+    this.imdbId = '',
   });
 
   final String id;
@@ -412,6 +618,7 @@ class _PendingTestItem {
   final String itemType;
   final int seasonNumber;
   final int episodeNumber;
+  final String imdbId;
 }
 
 class _FakeWebDavNasClient extends WebDavNasClient {
@@ -426,6 +633,8 @@ class _FakeWebDavNasClient extends WebDavNasClient {
     String? sectionId,
     String sectionName = '',
     int limit = 200,
+    bool? loadSidecarMetadata,
+    bool resetCaches = true,
   }) async {
     return scannedItems
         .take(limit)
@@ -462,7 +671,7 @@ class _FakeWebDavNasClient extends WebDavNasClient {
               itemType: item.itemType,
               seasonNumber: item.seasonNumber,
               episodeNumber: item.episodeNumber,
-              imdbId: '',
+              imdbId: item.imdbId,
               container: 'mkv',
               videoCodec: '',
               audioCodec: '',
