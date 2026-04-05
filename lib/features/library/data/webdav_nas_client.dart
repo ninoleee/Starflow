@@ -25,6 +25,8 @@ class WebDavNasClient {
       <String, List<_WebDavEntry>>{};
   final Map<String, Future<List<_WebDavEntry>>> _directoryInflight =
       <String, Future<List<_WebDavEntry>>>{};
+  final Map<String, _DirectorySubtreeCacheEntry> _directorySubtreeCache =
+      <String, _DirectorySubtreeCacheEntry>{};
 
   Future<List<MediaCollection>> fetchCollections(
     MediaSourceConfig source, {
@@ -154,14 +156,19 @@ class WebDavNasClient {
         'sidecar': shouldLoadSidecarMetadata,
       },
     );
-    final pendingItems = <_PendingWebDavScannedItem>[];
     final visited = <String>{};
 
-    Future<void> walk(Uri uri, int depth) async {
-      if (pendingItems.length >= limit ||
-          depth > 8 ||
-          !visited.add(uri.toString())) {
-        return;
+    Future<_DirectoryWalkResult> walk(
+      Uri uri,
+      int depth,
+      int remaining, {
+      DateTime? directoryModifiedAt,
+    }) async {
+      if (remaining <= 0) {
+        return const _DirectoryWalkResult(truncated: true);
+      }
+      if (depth > 8 || !visited.add(uri.toString())) {
+        return const _DirectoryWalkResult();
       }
       if (_isExcludedByKeyword(uri, source: source)) {
         webDavTrace(
@@ -171,7 +178,40 @@ class WebDavNasClient {
             'depth': depth,
           },
         );
-        return;
+        return const _DirectoryWalkResult();
+      }
+
+      final cachedSubtree = _loadCachedDirectorySubtree(
+        source: source,
+        uri: uri,
+        includeSidecarMetadata: shouldLoadSidecarMetadata,
+        directoryModifiedAt: directoryModifiedAt,
+      );
+      if (cachedSubtree != null) {
+        final rebasedItems = _rebasePendingItemsForRoot(
+          cachedSubtree.items,
+          rootUri: rootUri,
+          sectionId: collectionId,
+          sectionName: collectionName,
+        );
+        final truncated = rebasedItems.length > remaining;
+        final items = truncated
+            ? rebasedItems.take(remaining).toList(growable: false)
+            : rebasedItems;
+        webDavTrace(
+          'scan.walk.cacheHit',
+          fields: {
+            'uri': uri,
+            'depth': depth,
+            'cachedCount': cachedSubtree.items.length,
+            'returnedCount': items.length,
+            'truncated': truncated,
+          },
+        );
+        return _DirectoryWalkResult(
+          items: items,
+          truncated: truncated,
+        );
       }
 
       webDavTrace(
@@ -179,15 +219,18 @@ class WebDavNasClient {
         fields: {
           'uri': uri,
           'depth': depth,
-          'pending': pendingItems.length,
+          'remaining': remaining,
         },
       );
       final entries = _filterExcludedEntries(
         await _propfind(uri, source: source),
         source: source,
       );
+      _directoryCache[_webDavCacheKey(source, uri)] = entries;
       final directoryEntries =
           entries.where((entry) => !entry.isSelf).toList(growable: false);
+      final collected = <_PendingWebDavScannedItem>[];
+      var truncated = false;
       webDavTrace(
         'scan.walk.entries',
         fields: {
@@ -201,8 +244,10 @@ class WebDavNasClient {
         },
       );
       for (final entry in directoryEntries) {
-        if (pendingItems.length >= limit) {
-          return;
+        final remainingForEntry = remaining - collected.length;
+        if (remainingForEntry <= 0) {
+          truncated = true;
+          break;
         }
         if (entry.isCollection) {
           webDavTrace(
@@ -213,7 +258,14 @@ class WebDavNasClient {
               'name': entry.name,
             },
           );
-          await walk(entry.uri, depth + 1);
+          final childResult = await walk(
+            entry.uri,
+            depth + 1,
+            remainingForEntry,
+            directoryModifiedAt: entry.modifiedAt,
+          );
+          collected.addAll(childResult.items);
+          truncated = truncated || childResult.truncated;
           continue;
         }
         if (_isExcludedByKeyword(entry.uri, source: source)) {
@@ -283,11 +335,31 @@ class WebDavNasClient {
             'directories': pendingItem.relativeDirectories,
           },
         );
-        pendingItems.add(pendingItem);
+        collected.add(pendingItem);
       }
+
+      if (!truncated && directoryModifiedAt != null) {
+        _storeCachedDirectorySubtree(
+          source: source,
+          uri: uri,
+          includeSidecarMetadata: shouldLoadSidecarMetadata,
+          directoryModifiedAt: directoryModifiedAt,
+          items: _rebasePendingItemsForRoot(
+            collected,
+            rootUri: uri,
+            sectionId: collectionId,
+            sectionName: collectionName,
+          ),
+        );
+      }
+      return _DirectoryWalkResult(
+        items: collected,
+        truncated: truncated,
+      );
     }
 
-    await walk(rootUri, 0);
+    final walkResult = await walk(rootUri, 0, limit);
+    final pendingItems = walkResult.items;
     final items = (source.webDavStructureInferenceEnabled
             ? _applyDirectoryStructureInference(pendingItems)
             : pendingItems)
@@ -304,6 +376,79 @@ class WebDavNasClient {
       },
     );
     return items;
+  }
+
+  Future<WebDavScannedItem?> scanResource(
+    MediaSourceConfig source, {
+    required String resourceId,
+    required String sectionId,
+    required String sectionName,
+    bool? loadSidecarMetadata,
+  }) async {
+    final endpoint = source.endpoint.trim();
+    final normalizedResourceId = resourceId.trim();
+    if (endpoint.isEmpty || normalizedResourceId.isEmpty) {
+      return null;
+    }
+    final resourceUri = Uri.tryParse(normalizedResourceId);
+    if (resourceUri == null) {
+      return null;
+    }
+    if (_isExcludedByKeyword(resourceUri, source: source)) {
+      return null;
+    }
+
+    final parentUri = _parentDirectoryUri(resourceUri);
+    if (parentUri == null) {
+      return null;
+    }
+    final shouldLoadSidecarMetadata =
+        loadSidecarMetadata ?? source.webDavSidecarScrapingEnabled;
+    final siblings = _filterExcludedEntries(
+      await _loadDirectoryEntries(parentUri, source: source),
+      source: source,
+    );
+    _WebDavEntry? entry;
+    for (final candidate in siblings) {
+      if (candidate.isCollection || candidate.isSelf) {
+        continue;
+      }
+      if (candidate.uri.toString() == normalizedResourceId) {
+        entry = candidate;
+        break;
+      }
+    }
+    if (entry == null || !_isPlayableVideo(entry)) {
+      return null;
+    }
+
+    final metadata = shouldLoadSidecarMetadata
+        ? await _resolveSidecarMetadata(
+            entry,
+            siblings: siblings,
+            source: source,
+          )
+        : _buildBasicMetadataSeed(entry);
+    final streamUrl = await _resolvePlayableUrl(entry, source: source);
+    if (streamUrl.trim().isEmpty) {
+      return null;
+    }
+    final collectionName = sectionName.trim().isEmpty
+        ? _displayNameFromUri(Uri.parse(sectionId), fallback: source.name)
+        : sectionName.trim();
+    return WebDavScannedItem(
+      resourceId: entry.uri.toString(),
+      fileName: entry.name,
+      actualAddress: _relativePathForNasDisplay(entry.uri, source: source),
+      sectionId: sectionId,
+      sectionName: collectionName,
+      streamUrl: streamUrl,
+      streamHeaders: _headersForResolvedStream(source, streamUrl),
+      addedAt: entry.modifiedAt ?? DateTime.now(),
+      modifiedAt: entry.modifiedAt,
+      fileSizeBytes: entry.sizeBytes,
+      metadataSeed: metadata,
+    );
   }
 
   Future<WebDavMetadataSeed> _resolveSidecarMetadata(
@@ -1064,7 +1209,8 @@ class WebDavNasClient {
       return inflight;
     }
 
-    final future = _loadNfoMetadataUncached(entry, source: source).then((value) {
+    final future =
+        _loadNfoMetadataUncached(entry, source: source).then((value) {
       _nfoCache[key] = value;
       return value;
     });
@@ -1177,15 +1323,13 @@ class WebDavNasClient {
     if (inflight != null) {
       return inflight;
     }
-    final future = _propfind(uri, source: source)
-        .then(
+    final future = _propfind(uri, source: source).then(
       (entries) {
         final filtered = _filterExcludedEntries(entries, source: source);
         _directoryCache[key] = filtered;
         return filtered;
       },
-    )
-        .catchError((_) {
+    ).catchError((_) {
       return const <_WebDavEntry>[];
     });
     _directoryInflight[key] = future;
@@ -1202,8 +1346,81 @@ class WebDavNasClient {
     _directoryInflight.clear();
   }
 
+  _DirectorySubtreeCacheEntry? _loadCachedDirectorySubtree({
+    required MediaSourceConfig source,
+    required Uri uri,
+    required bool includeSidecarMetadata,
+    required DateTime? directoryModifiedAt,
+  }) {
+    if (directoryModifiedAt == null) {
+      return null;
+    }
+    final key = _directorySubtreeCacheKey(
+      source,
+      uri,
+      includeSidecarMetadata: includeSidecarMetadata,
+    );
+    final cached = _directorySubtreeCache[key];
+    if (cached == null || cached.directoryModifiedAt != directoryModifiedAt) {
+      return null;
+    }
+    return cached;
+  }
+
+  void _storeCachedDirectorySubtree({
+    required MediaSourceConfig source,
+    required Uri uri,
+    required bool includeSidecarMetadata,
+    required DateTime directoryModifiedAt,
+    required List<_PendingWebDavScannedItem> items,
+  }) {
+    final key = _directorySubtreeCacheKey(
+      source,
+      uri,
+      includeSidecarMetadata: includeSidecarMetadata,
+    );
+    _directorySubtreeCache[key] = _DirectorySubtreeCacheEntry(
+      directoryModifiedAt: directoryModifiedAt,
+      items: items,
+    );
+  }
+
+  List<_PendingWebDavScannedItem> _rebasePendingItemsForRoot(
+    List<_PendingWebDavScannedItem> items, {
+    required Uri rootUri,
+    required String sectionId,
+    required String sectionName,
+  }) {
+    return items.map((item) {
+      final fileUri = Uri.tryParse(item.resourceId);
+      if (fileUri == null) {
+        return item.copyWith(
+          sectionId: sectionId,
+          sectionName: sectionName,
+        );
+      }
+      return item.copyWith(
+        sectionId: sectionId,
+        sectionName: sectionName,
+        relativeDirectories: _relativeDirectorySegmentsFromRoot(
+          fileUri: fileUri,
+          rootUri: rootUri,
+        ),
+      );
+    }).toList(growable: false);
+  }
+
   String _webDavCacheKey(MediaSourceConfig source, Uri uri) {
     return '${source.id}|${uri.toString()}';
+  }
+
+  String _directorySubtreeCacheKey(
+    MediaSourceConfig source,
+    Uri uri, {
+    required bool includeSidecarMetadata,
+  }) {
+    final keywords = source.normalizedWebDavExcludedPathKeywords.join(',');
+    return '${source.id}|${includeSidecarMetadata ? 'sidecar' : 'plain'}|$keywords|${uri.toString()}';
   }
 
   Uri? _parentDirectoryUri(Uri uri) {
@@ -2701,20 +2918,23 @@ class _PendingWebDavScannedItem {
 
   _PendingWebDavScannedItem copyWith({
     WebDavMetadataSeed? metadataSeed,
+    String? sectionId,
+    String? sectionName,
+    List<String>? relativeDirectories,
   }) {
     return _PendingWebDavScannedItem(
       resourceId: resourceId,
       fileName: fileName,
       actualAddress: actualAddress,
-      sectionId: sectionId,
-      sectionName: sectionName,
+      sectionId: sectionId ?? this.sectionId,
+      sectionName: sectionName ?? this.sectionName,
       streamUrl: streamUrl,
       streamHeaders: streamHeaders,
       addedAt: addedAt,
       modifiedAt: modifiedAt,
       fileSizeBytes: fileSizeBytes,
       metadataSeed: metadataSeed ?? this.metadataSeed,
-      relativeDirectories: relativeDirectories,
+      relativeDirectories: relativeDirectories ?? this.relativeDirectories,
     );
   }
 
@@ -2733,4 +2953,24 @@ class _PendingWebDavScannedItem {
       metadataSeed: metadataSeed,
     );
   }
+}
+
+class _DirectoryWalkResult {
+  const _DirectoryWalkResult({
+    this.items = const [],
+    this.truncated = false,
+  });
+
+  final List<_PendingWebDavScannedItem> items;
+  final bool truncated;
+}
+
+class _DirectorySubtreeCacheEntry {
+  const _DirectorySubtreeCacheEntry({
+    required this.directoryModifiedAt,
+    required this.items,
+  });
+
+  final DateTime directoryModifiedAt;
+  final List<_PendingWebDavScannedItem> items;
 }

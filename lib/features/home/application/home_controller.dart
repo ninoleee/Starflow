@@ -5,6 +5,7 @@ import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -124,6 +125,7 @@ final homeCarouselItemsProvider =
 
 final homeSectionProvider =
     FutureProvider.family<HomeSectionViewModel?, String>((ref, moduleId) async {
+  ref.watch(localStorageDetailCacheRevisionProvider);
   final module = ref.watch(homeModuleByIdProvider(moduleId));
   if (module == null) {
     return null;
@@ -177,6 +179,7 @@ final homeSectionProvider =
         entries: entries,
         emptyMessage:
             _resolveDoubanEmptyMessage(module, settings.doubanAccount),
+        localStorageCacheRepository: localStorageCacheRepository,
       );
     case HomeModuleType.doubanCarousel:
       final carouselItems = await ref.watch(homeCarouselItemsProvider.future);
@@ -185,6 +188,7 @@ final homeSectionProvider =
         items: carouselItems,
         emptyMessage:
             _resolveDoubanEmptyMessage(module, settings.doubanAccount),
+        localStorageCacheRepository: localStorageCacheRepository,
       );
   }
 });
@@ -247,12 +251,10 @@ Future<HomeSectionViewModel> _buildLibrarySection({
 }) async {
   final viewModels = <HomeCardViewModel>[];
   for (final item in items) {
-    final seedTarget = MediaDetailTarget.fromMediaItem(item);
-    final cachedTarget =
-        await localStorageCacheRepository.loadDetailTarget(seedTarget);
-    final detailTarget = cachedTarget == null
-        ? seedTarget
-        : _mergeCachedHomeDetailTarget(seedTarget, cachedTarget);
+    final detailTarget = await _resolveCachedHomeDetailTarget(
+      seedTarget: MediaDetailTarget.fromMediaItem(item),
+      localStorageCacheRepository: localStorageCacheRepository,
+    );
     viewModels.add(
       HomeCardViewModel(
         id: item.id,
@@ -277,6 +279,18 @@ Future<HomeSectionViewModel> _buildLibrarySection({
         ? null
         : HomeSectionViewAllTarget.collection(viewAllTarget),
   );
+}
+
+Future<MediaDetailTarget> _resolveCachedHomeDetailTarget({
+  required MediaDetailTarget seedTarget,
+  required LocalStorageCacheRepository localStorageCacheRepository,
+}) async {
+  final cachedTarget =
+      await localStorageCacheRepository.loadDetailTarget(seedTarget);
+  if (cachedTarget == null) {
+    return seedTarget;
+  }
+  return _mergeCachedHomeDetailTarget(seedTarget, cachedTarget);
 }
 
 MediaDetailTarget _mergeCachedHomeDetailTarget(
@@ -327,19 +341,17 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
   );
 }
 
-HomeSectionViewModel _buildDoubanSection({
+Future<HomeSectionViewModel> _buildDoubanSection({
   required HomeModuleConfig module,
   required List<DoubanEntry> entries,
   required String emptyMessage,
-}) {
-  final items = entries.map((entry) {
+  required LocalStorageCacheRepository localStorageCacheRepository,
+}) async {
+  final items = <HomeCardViewModel>[];
+  for (final entry in entries) {
     final posterUrl = entry.posterUrl.trim();
-    return HomeCardViewModel(
-      id: entry.id,
-      title: entry.title,
-      subtitle: entry.year > 0 ? '${entry.year}' : '',
-      posterUrl: posterUrl,
-      detailTarget: MediaDetailTarget(
+    final detailTarget = await _resolveCachedHomeDetailTarget(
+      seedTarget: MediaDetailTarget(
         title: entry.title,
         posterUrl: posterUrl,
         overview: entry.note,
@@ -360,8 +372,18 @@ HomeSectionViewModel _buildDoubanSection({
         doubanId: entry.id,
         sourceName: '豆瓣',
       ),
+      localStorageCacheRepository: localStorageCacheRepository,
     );
-  }).toList();
+    items.add(HomeCardViewModel(
+      id: entry.id,
+      title: entry.title,
+      subtitle: entry.year > 0 ? '${entry.year}' : '',
+      posterUrl: detailTarget.posterUrl.trim().isNotEmpty
+          ? detailTarget.posterUrl
+          : posterUrl,
+      detailTarget: detailTarget,
+    ));
+  }
 
   return HomeSectionViewModel(
     id: module.id,
@@ -374,24 +396,17 @@ HomeSectionViewModel _buildDoubanSection({
   );
 }
 
-HomeSectionViewModel _buildCarouselSection({
+Future<HomeSectionViewModel> _buildCarouselSection({
   required HomeModuleConfig module,
   required List<DoubanCarouselEntry> items,
   required String emptyMessage,
-}) {
-  final carouselItems = items.map((item) {
+  required LocalStorageCacheRepository localStorageCacheRepository,
+}) async {
+  final carouselItems = <HomeCarouselItemViewModel>[];
+  for (final item in items) {
     final posterUrl = item.posterUrl.trim();
-    final imageUrl =
-        item.imageUrl.trim().isNotEmpty ? item.imageUrl : posterUrl;
-    return HomeCarouselItemViewModel(
-      id: item.id,
-      title: item.title,
-      subtitle: [
-        if (item.ratingLabel.trim().isNotEmpty) item.ratingLabel,
-        if (item.year > 0) '${item.year}',
-      ].join(' · '),
-      imageUrl: imageUrl,
-      detailTarget: MediaDetailTarget(
+    final detailTarget = await _resolveCachedHomeDetailTarget(
+      seedTarget: MediaDetailTarget(
         title: item.title,
         posterUrl: posterUrl,
         overview: item.overview,
@@ -404,8 +419,24 @@ HomeSectionViewModel _buildCarouselSection({
         doubanId: item.id,
         sourceName: '豆瓣',
       ),
+      localStorageCacheRepository: localStorageCacheRepository,
     );
-  }).toList();
+    final imageUrl = item.imageUrl.trim().isNotEmpty
+        ? item.imageUrl
+        : (detailTarget.posterUrl.trim().isNotEmpty
+            ? detailTarget.posterUrl
+            : posterUrl);
+    carouselItems.add(HomeCarouselItemViewModel(
+      id: item.id,
+      title: item.title,
+      subtitle: [
+        if (item.ratingLabel.trim().isNotEmpty) item.ratingLabel,
+        if (item.year > 0) '${item.year}',
+      ].join(' · '),
+      imageUrl: imageUrl,
+      detailTarget: detailTarget,
+    ));
+  }
 
   return HomeSectionViewModel(
     id: module.id,

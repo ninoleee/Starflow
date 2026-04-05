@@ -478,6 +478,62 @@ void main() {
       expect(items.single.title, 'Main Feature');
       expect(items.single.actualAddress, '/dav/Movies/Main Feature.mkv');
     });
+
+    test('reuses unchanged directory subtrees across repeated scans', () async {
+      final propfindCounts = <String, int>{};
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND') {
+            final key = request.url.toString();
+            propfindCounts[key] = (propfindCounts[key] ?? 0) + 1;
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/Repeatable/') {
+            return http.Response(_repeatableRootPropfindResponse, 207);
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/Repeatable/Season%201/') {
+            return http.Response(_repeatableSeasonOnePropfindResponse, 207);
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/Repeatable/Season%202/') {
+            return http.Response(_repeatableSeasonTwoPropfindResponse, 207);
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      const source = MediaSourceConfig(
+        id: 'nas-repeatable',
+        name: 'Repeatable NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/dav/Shows/Repeatable/',
+        enabled: true,
+      );
+
+      final firstItems = await client.fetchLibrary(source, limit: 20);
+      final secondItems = await client.fetchLibrary(source, limit: 20);
+
+      expect(firstItems, hasLength(2));
+      expect(secondItems, hasLength(2));
+      expect(
+        propfindCounts['https://nas.example.com/dav/Shows/Repeatable/'],
+        2,
+      );
+      expect(
+        propfindCounts[
+            'https://nas.example.com/dav/Shows/Repeatable/Season%201/'],
+        1,
+      );
+      expect(
+        propfindCounts[
+            'https://nas.example.com/dav/Shows/Repeatable/Season%202/'],
+        1,
+      );
+    });
   });
 }
 
@@ -1021,6 +1077,90 @@ const _filteredTempPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
         <d:resourcetype />
         <d:getcontenttype>video/x-matroska</d:getcontenttype>
         <d:getlastmodified>Sun, 05 Apr 2026 09:02:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _repeatableRootPropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/Repeatable/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Repeatable</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/Repeatable/Season%201/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Season 1</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+        <d:getlastmodified>Sun, 05 Apr 2026 08:00:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/Repeatable/Season%202/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Season 2</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+        <d:getlastmodified>Sun, 05 Apr 2026 08:05:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _repeatableSeasonOnePropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/Repeatable/Season%201/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Season 1</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/Repeatable/Season%201/Episode%2001.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Episode 01.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
+        <d:getlastmodified>Sun, 05 Apr 2026 08:01:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _repeatableSeasonTwoPropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/Repeatable/Season%202/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Season 2</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/Repeatable/Season%202/Episode%2002.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Episode 02.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
+        <d:getlastmodified>Sun, 05 Apr 2026 08:06:00 GMT</d:getlastmodified>
       </d:prop>
     </d:propstat>
   </d:response>

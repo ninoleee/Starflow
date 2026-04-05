@@ -178,7 +178,7 @@ class _NetworkStorageSettingsPageState
     FocusScope.of(context).unfocus();
     setState(() => _isTestingSmartStrm = true);
     try {
-      await ref.read(smartStrmWebhookClientProvider).triggerTask(
+      final result = await ref.read(smartStrmWebhookClientProvider).triggerTask(
             webhookUrl: _smartStrmWebhookController.text.trim(),
             taskName: _smartStrmTaskNameController.text.trim(),
             storagePath: _quarkFolderPath == '/' ? '' : _quarkFolderPath,
@@ -186,8 +186,13 @@ class _NetworkStorageSettingsPageState
       if (!mounted) {
         return;
       }
+      final message = result.addedCount != null
+          ? 'SmartStrm 任务触发成功 · 新增 ${result.addedCount} 条'
+          : result.message.trim().isNotEmpty
+              ? 'SmartStrm ${result.message.trim()}'
+              : 'SmartStrm 任务触发成功';
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('SmartStrm 任务触发成功')),
+        SnackBar(content: Text(message)),
       );
     } on SmartStrmWebhookException catch (error) {
       if (!mounted) {
@@ -208,9 +213,8 @@ class _NetworkStorageSettingsPageState
     final theme = Theme.of(context);
     final settings = ref.watch(appSettingsProvider);
     final refreshableSources = _refreshableMediaSources(settings);
-    final refreshableSourceIds = refreshableSources
-        .map((source) => source.id)
-        .toSet();
+    final refreshableSourceIds =
+        refreshableSources.map((source) => source.id).toSet();
     final selectedRefreshSourceIds =
         _refreshSourceIds.intersection(refreshableSourceIds);
 
@@ -247,8 +251,9 @@ class _NetworkStorageSettingsPageState
                   runSpacing: 12,
                   children: [
                     OutlinedButton.icon(
-                      onPressed:
-                          _isTestingQuarkConnection ? null : _testQuarkConnection,
+                      onPressed: _isTestingQuarkConnection
+                          ? null
+                          : _testQuarkConnection,
                       icon: _isTestingQuarkConnection
                           ? const SizedBox(
                               width: 16,

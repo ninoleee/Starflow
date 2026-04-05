@@ -62,6 +62,8 @@ class NasMediaIndexer {
   final AppSettings Function() _readSettings;
   final WebDavScrapeProgressController _progressController;
   final void Function()? _notifyIndexChanged;
+  final Map<String, Future<void>> _activeRefreshTasks =
+      <String, Future<void>>{};
   final Map<String, Future<void>> _backgroundEnrichmentTasks =
       <String, Future<void>>{};
 
@@ -190,51 +192,76 @@ class NasMediaIndexer {
     if (normalizedSourceId.isEmpty) {
       return;
     }
+    final taskKey = _buildRefreshTaskKey(source, scopedCollections);
+    final existingTask =
+        _activeRefreshTasks[taskKey] ?? _backgroundEnrichmentTasks[taskKey];
+    if (existingTask != null) {
+      await existingTask;
+      return;
+    }
 
-    try {
-      webDavTrace(
-        'indexer.refresh.start',
-        fields: {
-          'sourceId': source.id,
-          'sourceName': source.name,
-          'endpoint': source.endpoint,
-          'scopedCollections':
-              scopedCollections?.map((item) => item.title).toList() ?? const [],
-          'limitPerCollection': limitPerCollection,
-          'forceFullRescan': forceFullRescan,
-        },
-      );
-      if (forceFullRescan) {
-        _wmdbMetadataClient.clearCache();
-        _tmdbMetadataClient.clearCache();
-        _imdbRatingClient.clearCache();
-      }
+    final task = Future<void>(() async {
+      try {
+        webDavTrace(
+          'indexer.refresh.start',
+          fields: {
+            'sourceId': source.id,
+            'sourceName': source.name,
+            'endpoint': source.endpoint,
+            'scopedCollections':
+                scopedCollections?.map((item) => item.title).toList() ??
+                    const [],
+            'limitPerCollection': limitPerCollection,
+            'forceFullRescan': forceFullRescan,
+          },
+        );
+        if (forceFullRescan) {
+          _wmdbMetadataClient.clearCache();
+          _tmdbMetadataClient.clearCache();
+          _imdbRatingClient.clearCache();
+        }
 
-      final settings = _readSettings();
-      final shouldStageMetadata =
-          source.webDavSidecarScrapingEnabled || _hasOnlineMetadataEnabled(settings);
-      await _refreshSourcePhase(
-        source,
-        scopedCollections: scopedCollections,
-        limitPerCollection: limitPerCollection,
-        includeSidecarMetadata: false,
-        includeOnlineMetadata: false,
-        forceFullRescan: forceFullRescan,
-        resetScanCaches: true,
-        clearProgressWhenDone: !shouldStageMetadata,
-        phaseLabel: shouldStageMetadata ? '快速扫描' : '扫描完成',
-      );
-      if (shouldStageMetadata) {
-        _scheduleBackgroundEnrichment(
+        final settings = _readSettings();
+        final shouldStageMetadata = source.webDavSidecarScrapingEnabled ||
+            _hasOnlineMetadataEnabled(settings);
+        final requiresSidecarMetadata = source.webDavSidecarScrapingEnabled;
+        final requiresOnlineMetadata = _hasOnlineMetadataEnabled(settings);
+        final phaseResult = await _refreshSourcePhase(
           source,
           scopedCollections: scopedCollections,
           limitPerCollection: limitPerCollection,
+          includeSidecarMetadata: false,
+          includeOnlineMetadata: false,
+          forceFullRescan: forceFullRescan,
+          resetScanCaches: true,
+          clearProgressWhenDone: !shouldStageMetadata,
+          phaseLabel: shouldStageMetadata ? '快速扫描' : '扫描完成',
+          collectEnrichmentCandidates: shouldStageMetadata,
+          requiredSidecarMetadata: requiresSidecarMetadata,
+          requiredOnlineMetadata: requiresOnlineMetadata,
         );
+        if (shouldStageMetadata) {
+          if (phaseResult.enrichmentCandidates.isEmpty) {
+            _clearProgressSafely(normalizedSourceId);
+          } else {
+            _scheduleBackgroundEnrichment(
+              source,
+              scopedCollections: scopedCollections,
+              enrichmentCandidates: phaseResult.enrichmentCandidates,
+              includeSidecarMetadata: requiresSidecarMetadata,
+              includeOnlineMetadata: requiresOnlineMetadata,
+            );
+          }
+        }
+      } catch (_) {
+        _clearProgressSafely(normalizedSourceId);
+        rethrow;
+      } finally {
+        _activeRefreshTasks.remove(taskKey);
       }
-    } catch (_) {
-      _clearProgressSafely(normalizedSourceId);
-      rethrow;
-    }
+    });
+    _activeRefreshTasks[taskKey] = task;
+    await task;
   }
 
   Future<MediaDetailTarget?> applyManualMetadata({
@@ -439,7 +466,7 @@ class NasMediaIndexer {
     return rootItems;
   }
 
-  Future<void> _refreshSourcePhase(
+  Future<_RefreshPhaseResult> _refreshSourcePhase(
     MediaSourceConfig source, {
     required List<MediaCollection>? scopedCollections,
     required int limitPerCollection,
@@ -449,6 +476,9 @@ class NasMediaIndexer {
     required bool resetScanCaches,
     required bool clearProgressWhenDone,
     required String phaseLabel,
+    bool collectEnrichmentCandidates = false,
+    bool requiredSidecarMetadata = false,
+    bool requiredOnlineMetadata = false,
   }) async {
     final now = DateTime.now();
     final normalizedSourceId = source.id.trim();
@@ -471,6 +501,7 @@ class NasMediaIndexer {
               record.resourceId: record,
           };
     final nextRecords = <NasMediaIndexRecord>[];
+    final enrichmentCandidates = <WebDavScannedItem>[];
 
     for (var index = 0; index < scannedItems.length; index++) {
       final scannedItem = scannedItems[index];
@@ -481,8 +512,8 @@ class NasMediaIndexer {
         fileSizeBytes: scannedItem.fileSizeBytes,
       );
       final existing = existingRecords[scannedItem.resourceId];
-      final hasRequiredSidecar = !includeSidecarMetadata ||
-          (existing?.sidecarMatched ?? false);
+      final hasRequiredSidecar =
+          !includeSidecarMetadata || (existing?.sidecarMatched ?? false);
       final hasRequiredOnlineMetadata = !includeOnlineMetadata ||
           (existing?.wmdbMatched ?? false) ||
           (existing?.tmdbMatched ?? false) ||
@@ -491,6 +522,17 @@ class NasMediaIndexer {
           existing.fingerprint == fingerprint &&
           hasRequiredSidecar &&
           hasRequiredOnlineMetadata;
+      final needsFurtherEnrichment = collectEnrichmentCandidates &&
+          ((existing == null) ||
+              existing.fingerprint != fingerprint ||
+              (requiredSidecarMetadata && !(existing.sidecarMatched)) ||
+              (requiredOnlineMetadata &&
+                  !(existing.wmdbMatched ||
+                      existing.tmdbMatched ||
+                      existing.imdbMatched)));
+      if (needsFurtherEnrichment) {
+        enrichmentCandidates.add(scannedItem);
+      }
       if (canReuse) {
         webDavTrace(
           'indexer.refresh.reuse',
@@ -562,29 +604,29 @@ class NasMediaIndexer {
     if (clearProgressWhenDone) {
       _clearProgressSafely(normalizedSourceId);
     }
+    return _RefreshPhaseResult(
+      enrichmentCandidates: enrichmentCandidates,
+    );
   }
 
   void _scheduleBackgroundEnrichment(
     MediaSourceConfig source, {
     required List<MediaCollection>? scopedCollections,
-    required int limitPerCollection,
+    required List<WebDavScannedItem> enrichmentCandidates,
+    required bool includeSidecarMetadata,
+    required bool includeOnlineMetadata,
   }) {
-    final taskKey =
-        '${source.id}|${_buildScopeKey(source, scopedCollections)}';
+    final taskKey = _buildRefreshTaskKey(source, scopedCollections);
     if (_backgroundEnrichmentTasks.containsKey(taskKey)) {
       return;
     }
     final future = Future<void>(() async {
       try {
-        await _refreshSourcePhase(
+        await _refreshSelectedItemsPhase(
           source,
-          scopedCollections: scopedCollections,
-          limitPerCollection: limitPerCollection,
-          includeSidecarMetadata: source.webDavSidecarScrapingEnabled,
-          includeOnlineMetadata: _hasOnlineMetadataEnabled(_readSettings()),
-          forceFullRescan: false,
-          resetScanCaches: false,
-          clearProgressWhenDone: true,
+          scannedItems: enrichmentCandidates,
+          includeSidecarMetadata: includeSidecarMetadata,
+          includeOnlineMetadata: includeOnlineMetadata,
           phaseLabel: '后台补元数据',
         );
       } catch (error) {
@@ -601,6 +643,88 @@ class NasMediaIndexer {
       }
     });
     _backgroundEnrichmentTasks[taskKey] = future;
+  }
+
+  Future<void> _refreshSelectedItemsPhase(
+    MediaSourceConfig source, {
+    required List<WebDavScannedItem> scannedItems,
+    required bool includeSidecarMetadata,
+    required bool includeOnlineMetadata,
+    required String phaseLabel,
+  }) async {
+    final normalizedSourceId = source.id.trim();
+    final now = DateTime.now();
+    final records = await _store.loadSourceRecords(source.id);
+    if (records.isEmpty || scannedItems.isEmpty) {
+      _clearProgressSafely(normalizedSourceId);
+      return;
+    }
+    final recordIndexByResourceId = <String, int>{};
+    final nextRecords = [...records];
+    for (var index = 0; index < nextRecords.length; index++) {
+      recordIndexByResourceId[nextRecords[index].resourceId] = index;
+    }
+    _progressController.startIndexing(
+      sourceId: normalizedSourceId,
+      totalItems: scannedItems.length,
+      detail: phaseLabel,
+    );
+    for (var index = 0; index < scannedItems.length; index++) {
+      final scannedItem = scannedItems[index];
+      final recordIndex = recordIndexByResourceId[scannedItem.resourceId];
+      if (recordIndex == null) {
+        continue;
+      }
+      final enrichedItem = includeSidecarMetadata
+          ? await _webDavNasClient.scanResource(
+                source,
+                resourceId: scannedItem.resourceId,
+                sectionId: scannedItem.sectionId,
+                sectionName: scannedItem.sectionName,
+                loadSidecarMetadata: true,
+              ) ??
+              scannedItem
+          : scannedItem;
+      final fingerprint = _buildFingerprint(
+        sourceId: source.id,
+        resourcePath: enrichedItem.actualAddress,
+        modifiedAt: enrichedItem.modifiedAt,
+        fileSizeBytes: enrichedItem.fileSizeBytes,
+      );
+      nextRecords[recordIndex] = await _indexScannedItem(
+        source,
+        enrichedItem,
+        indexedAt: now,
+        fingerprint: fingerprint,
+        applyOnlineMetadata: includeOnlineMetadata,
+      );
+      _progressController.updateIndexing(
+        sourceId: normalizedSourceId,
+        current: index + 1,
+        total: scannedItems.length,
+        detail: enrichedItem.fileName,
+      );
+    }
+    final existingState = await _store.loadSourceState(source.id);
+    await _store.replaceSourceRecords(
+      sourceId: source.id,
+      records: nextRecords,
+      state: NasMediaIndexSourceState(
+        sourceId: source.id,
+        lastIndexedAt: now,
+        recordCount: nextRecords.length,
+        scopeKey: existingState?.scopeKey ?? '',
+      ),
+    );
+    _notifyIndexChanged?.call();
+    _clearProgressSafely(normalizedSourceId);
+  }
+
+  String _buildRefreshTaskKey(
+    MediaSourceConfig source,
+    List<MediaCollection>? scopedCollections,
+  ) {
+    return '${source.id}|${_buildScopeKey(source, scopedCollections)}';
   }
 
   Future<List<NasMediaIndexRecord>> _loadScopedRecords(
@@ -2100,4 +2224,12 @@ class _ParsedSeasonGroupId {
 
   final String seriesKey;
   final int seasonNumber;
+}
+
+class _RefreshPhaseResult {
+  const _RefreshPhaseResult({
+    required this.enrichmentCandidates,
+  });
+
+  final List<WebDavScannedItem> enrichmentCandidates;
 }

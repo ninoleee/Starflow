@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -83,5 +84,24 @@ void main() {
     expect(settings.networkStorage.refreshMediaSourceIds, isEmpty);
     expect(settings.networkStorage.refreshDelaySeconds, 0);
     expect(settings.networkStorage.hasAnyConfigured, isFalse);
+  });
+
+  test('seed defaults enable douban and preload built-in douban modules', () {
+    final settings = SeedData.defaultSettings;
+
+    expect(settings.doubanAccount.enabled, isTrue);
+    expect(settings.homeModules.length, 3);
+    expect(
+      settings.homeModules.map((item) => item.title).toList(),
+      ['热播新剧', '豆瓣热门电影', '热播综艺'],
+    );
+    expect(
+      settings.homeModules.map((item) => item.doubanListUrl).toList(),
+      [
+        'https://m.douban.com/subject_collection/tv_hot',
+        'https://m.douban.com/subject_collection/movie_hot_gaia',
+        'https://m.douban.com/subject_collection/show_hot',
+      ],
+    );
   });
 }

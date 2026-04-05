@@ -1,10 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -195,6 +197,69 @@ void main() {
       expect(section.viewAllTarget!.routeName, 'home-module-list');
       expect(section.viewAllTarget!.extra, isA<HomeModuleConfig>());
     });
+
+    test('douban section prefers cached poster from detail cache', () async {
+      final cacheRepository = _FakeLocalStorageCacheRepository(
+        target: MediaDetailTarget(
+          title: '美丽人生',
+          posterUrl: 'https://cache.example.com/beautiful-life.jpg',
+          overview: '缓存海报',
+          year: 1997,
+          availabilityLabel: '无',
+          searchQuery: '美丽人生',
+          doubanId: '1292063',
+          sourceName: '豆瓣',
+        ),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings(
+              mediaSources: const [],
+              searchProviders: const [],
+              doubanAccount: const DoubanAccountConfig(
+                enabled: true,
+                userId: 'demo-user',
+              ),
+              homeModules: [
+                HomeModuleConfig.doubanInterest(DoubanInterestStatus.mark),
+              ],
+            ),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            _FakeMediaRepository(library: const []),
+          ),
+          discoveryRepositoryProvider.overrideWithValue(
+            const _FakeDiscoveryRepository(
+              entries: [
+                DoubanEntry(
+                  id: '1292063',
+                  title: '美丽人生',
+                  year: 1997,
+                  posterUrl: '',
+                  note: '圭多用幽默守护家人。',
+                  ratingLabel: '豆瓣 9.6',
+                ),
+              ],
+            ),
+          ),
+          localStorageCacheRepositoryProvider
+              .overrideWithValue(cacheRepository),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final sections = await container.read(homeSectionsProvider.future);
+      expect(sections, hasLength(1));
+      expect(
+        sections.first.items.first.posterUrl,
+        'https://cache.example.com/beautiful-life.jpg',
+      );
+      expect(
+        sections.first.items.first.detailTarget.posterUrl,
+        'https://cache.example.com/beautiful-life.jpg',
+      );
+    });
   });
 }
 
@@ -287,5 +352,18 @@ class _FakeDiscoveryRepository implements DiscoveryRepository {
     int? pageSize,
   }) async {
     return entries;
+  }
+}
+
+class _FakeLocalStorageCacheRepository extends LocalStorageCacheRepository {
+  _FakeLocalStorageCacheRepository({this.target});
+
+  final MediaDetailTarget? target;
+
+  @override
+  Future<MediaDetailTarget?> loadDetailTarget(
+    MediaDetailTarget seedTarget,
+  ) async {
+    return target;
   }
 }

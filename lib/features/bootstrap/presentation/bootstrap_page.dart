@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -52,9 +50,9 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              Color(0xFF050816),
-              Color(0xFF10265E),
-              Color(0xFF1A58D6),
+              Color(0xFF010206),
+              Color(0xFF071327),
+              Color(0xFF0D2856),
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
@@ -68,23 +66,15 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 320),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        AnimatedScale(
-                          duration: const Duration(milliseconds: 420),
-                          curve: Curves.easeOutCubic,
-                          scale: 0.94 + progress * 0.08,
-                          child: const StarflowLogo(
-                            iconSize: 108,
-                            showWordmark: true,
-                            wordmarkSize: 34,
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        _ProgressBar(progress: progress),
-                      ],
+                    constraints: const BoxConstraints(maxWidth: 220),
+                    child: AnimatedScale(
+                      duration: const Duration(milliseconds: 420),
+                      curve: Curves.easeOutCubic,
+                      scale: 0.94 + progress * 0.08,
+                      child: const StarflowLogo(
+                        iconSize: 124,
+                        showWordmark: false,
+                      ),
                     ),
                   ),
                 ),
@@ -93,47 +83,6 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
           },
         ),
       ),
-    );
-  }
-}
-
-class _ProgressBar extends StatelessWidget {
-  const _ProgressBar({required this.progress});
-
-  final double progress;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width =
-            math.max(24.0, constraints.maxWidth * progress).toDouble();
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: Container(
-            height: 12,
-            color: Colors.white.withValues(alpha: 0.16),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 340),
-                curve: Curves.easeOutCubic,
-                width: width,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      Color(0xFF93C5FD),
-                      Color(0xFFFFFFFF),
-                    ],
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }

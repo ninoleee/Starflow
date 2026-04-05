@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
+import 'package:starflow/core/widgets/starflow_logo.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -92,7 +93,8 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     return _HomeShell(
       backgroundImageUrl: activeHero?.imageUrl ?? '',
-      backgroundImageHeaders: activeHero?.detailTarget.posterHeaders ?? const {},
+      backgroundImageHeaders:
+          activeHero?.detailTarget.posterHeaders ?? const {},
       child: RefreshIndicator(
         color: Colors.white,
         backgroundColor: const Color(0xFF102033),
@@ -1063,23 +1065,30 @@ class _EmptyHomeState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: EdgeInsets.zero,
-      children: const [
-        Text(
-          '还没有首页模块',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-            color: Colors.white,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  StarflowLogo(
+                    iconSize: 112,
+                    showWordmark: true,
+                    wordmarkSize: 34,
+                  ),
+                  SizedBox(height: 18),
+                  _HomeEditButton(),
+                ],
+              ),
+            ),
           ),
-        ),
-        SizedBox(height: 10),
-        _SectionEmptyState(message: '无'),
-        SizedBox(height: 12),
-        _HomeEditButton(),
-      ],
+        );
+      },
     );
   }
 }

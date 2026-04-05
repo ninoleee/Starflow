@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
+import 'package:starflow/features/library/application/library_cached_items.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/application/nas_media_index_revision.dart';
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
@@ -12,6 +13,8 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/presentation/widgets/library_paged_grid.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
+import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 enum LibraryFilter {
   all,
@@ -44,10 +47,16 @@ extension LibraryFilterX on LibraryFilter {
 }
 
 final libraryItemsProvider =
-    FutureProvider.family<List<MediaItem>, LibraryFilter>((ref, filter) {
+    FutureProvider.family<List<MediaItem>, LibraryFilter>((ref, filter) async {
   ref.watch(nasMediaIndexRevisionProvider);
   ref.watch(appSettingsProvider);
-  return ref.read(mediaRepositoryProvider).fetchLibrary(kind: filter.kind);
+  ref.watch(localStorageDetailCacheRevisionProvider);
+  final items =
+      await ref.read(mediaRepositoryProvider).fetchLibrary(kind: filter.kind);
+  return resolveLibraryItemsWithCachedDetails(
+    items: items,
+    localStorageCacheRepository: ref.read(localStorageCacheRepositoryProvider),
+  );
 });
 
 final libraryCollectionsProvider =
@@ -67,6 +76,7 @@ class LibraryPage extends ConsumerStatefulWidget {
 class _LibraryPageState extends ConsumerState<LibraryPage> {
   LibraryFilter _filter = LibraryFilter.all;
   int _currentPage = 0;
+  bool _isIncrementalRefreshing = false;
   bool _isForceRescanning = false;
 
   @override
@@ -111,20 +121,41 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
             if (rebuildableSourceIds.isNotEmpty) ...[
               Align(
                 alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(
-                  onPressed: _isForceRescanning
-                      ? null
-                      : () => _confirmForceRescan(rebuildableSourceIds),
-                  icon: _isForceRescanning
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.restart_alt_rounded),
-                  label: Text(
-                    _isForceRescanning ? '重建中...' : '重建 WebDAV 索引',
-                  ),
+                child: Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _isIncrementalRefreshing || _isForceRescanning
+                          ? null
+                          : () => _runIncrementalRefresh(rebuildableSourceIds),
+                      icon: _isIncrementalRefreshing
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.refresh_rounded),
+                      label: Text(
+                        _isIncrementalRefreshing ? '更新中...' : '增量更新 WebDAV',
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _isIncrementalRefreshing || _isForceRescanning
+                          ? null
+                          : () => _confirmForceRescan(rebuildableSourceIds),
+                      icon: _isForceRescanning
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.restart_alt_rounded),
+                      label: Text(
+                        _isForceRescanning ? '重建中...' : '重建 WebDAV 索引',
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 16),
@@ -302,6 +333,40 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
       if (mounted) {
         setState(() {
           _isForceRescanning = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _runIncrementalRefresh(List<String> sourceIds) async {
+    setState(() {
+      _isIncrementalRefreshing = true;
+    });
+    try {
+      await ref.read(mediaRefreshCoordinatorProvider).refreshSelectedSources(
+            sourceIds: sourceIds,
+            forceFullRescan: false,
+          );
+      for (final filter in LibraryFilter.values) {
+        ref.invalidate(libraryItemsProvider(filter));
+        ref.invalidate(libraryCollectionsProvider(filter));
+      }
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            sourceIds.length == 1
+                ? '已完成 WebDAV 增量更新'
+                : '已完成 ${sourceIds.length} 个 WebDAV 媒体源的增量更新',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isIncrementalRefreshing = false;
         });
       }
     }

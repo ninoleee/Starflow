@@ -3,27 +3,36 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
+import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 
 final localStorageCacheRepositoryProvider =
     Provider<LocalStorageCacheRepository>(
-  (ref) => LocalStorageCacheRepository(),
+  (ref) => LocalStorageCacheRepository(
+    notifyDetailCacheChanged: () {
+      ref.read(localStorageDetailCacheRevisionProvider.notifier).state++;
+    },
+  ),
 );
 
 class LocalStorageCacheRepository {
   LocalStorageCacheRepository({
     SharedPreferences? sharedPreferences,
-  }) : _sharedPreferences = sharedPreferences;
+    void Function()? notifyDetailCacheChanged,
+  })  : _sharedPreferences = sharedPreferences,
+        _notifyDetailCacheChanged = notifyDetailCacheChanged;
 
   static const _detailCacheKey = 'starflow.local_storage.detail_cache.v1';
 
   SharedPreferences? _sharedPreferences;
+  final void Function()? _notifyDetailCacheChanged;
 
   Future<SharedPreferences> _prefs() async {
     return _sharedPreferences ??= await SharedPreferences.getInstance();
   }
 
-  Future<MediaDetailTarget?> loadDetailTarget(MediaDetailTarget seedTarget) async {
+  Future<MediaDetailTarget?> loadDetailTarget(
+      MediaDetailTarget seedTarget) async {
     final payload = await _loadDetailPayload();
     for (final lookupKey in buildLookupKeys(seedTarget)) {
       final recordId = payload.lookupKeys[lookupKey];
@@ -92,6 +101,7 @@ class LocalStorageCacheRepository {
         lookupKeys: nextLookupKeys,
       ),
     );
+    _notifyDetailCacheChanged?.call();
   }
 
   Future<LocalStorageCacheSummary> inspectDetailCache() async {
@@ -108,6 +118,7 @@ class LocalStorageCacheRepository {
   Future<void> clearDetailCache() async {
     final prefs = await _prefs();
     await prefs.remove(_detailCacheKey);
+    _notifyDetailCacheChanged?.call();
   }
 
   Future<void> clearCache(LocalStorageCacheType type) async {
@@ -217,19 +228,16 @@ class _DetailCachePayload {
 
   factory _DetailCachePayload.fromJson(Map<String, dynamic> json) {
     return _DetailCachePayload(
-      records:
-          (json['records'] as Map<dynamic, dynamic>? ?? const {})
-              .map(
-                (key, value) => MapEntry(
-                  '$key',
-                  _CachedDetailRecord.fromJson(
-                    Map<String, dynamic>.from(value as Map),
-                  ),
-                ),
-              ),
-      lookupKeys:
-          (json['lookupKeys'] as Map<dynamic, dynamic>? ?? const {})
-              .map((key, value) => MapEntry('$key', '$value')),
+      records: (json['records'] as Map<dynamic, dynamic>? ?? const {}).map(
+        (key, value) => MapEntry(
+          '$key',
+          _CachedDetailRecord.fromJson(
+            Map<String, dynamic>.from(value as Map),
+          ),
+        ),
+      ),
+      lookupKeys: (json['lookupKeys'] as Map<dynamic, dynamic>? ?? const {})
+          .map((key, value) => MapEntry('$key', '$value')),
     );
   }
 }
@@ -259,13 +267,11 @@ class _CachedDetailRecord {
   factory _CachedDetailRecord.fromJson(Map<String, dynamic> json) {
     return _CachedDetailRecord(
       id: json['id'] as String? ?? '',
-      lookupKeys:
-          (json['lookupKeys'] as List<dynamic>? ?? const [])
-              .whereType<String>()
-              .toList(growable: false),
-      updatedAt:
-          DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
-              DateTime.fromMillisecondsSinceEpoch(0),
+      lookupKeys: (json['lookupKeys'] as List<dynamic>? ?? const [])
+          .whereType<String>()
+          .toList(growable: false),
+      updatedAt: DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
       target: MediaDetailTarget.fromJson(
         Map<String, dynamic>.from(
           (json['target'] as Map?) ?? const {},
