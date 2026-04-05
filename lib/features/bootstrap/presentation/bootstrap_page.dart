@@ -66,14 +66,70 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 220),
-                    child: AnimatedScale(
-                      duration: const Duration(milliseconds: 420),
+                    constraints: const BoxConstraints(maxWidth: 260),
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0, end: 1),
+                      duration: const Duration(milliseconds: 820),
                       curve: Curves.easeOutCubic,
-                      scale: 0.94 + progress * 0.08,
-                      child: const StarflowLogo(
-                        iconSize: 124,
-                        showWordmark: false,
+                      builder: (context, entrance, child) {
+                        final scale =
+                            (0.92 + entrance * 0.08) * (0.97 + progress * 0.04);
+                        final translateY = 18 * (1 - entrance);
+                        return Transform.translate(
+                          offset: Offset(0, translateY),
+                          child: Transform.scale(
+                            scale: scale,
+                            child: Opacity(
+                              opacity: 0.58 + entrance * 0.42,
+                              child: child,
+                            ),
+                          ),
+                        );
+                      },
+                      child: Stack(
+                        alignment: Alignment.center,
+                        clipBehavior: Clip.none,
+                        children: [
+                          IgnorePointer(
+                            child: Container(
+                              width: 244,
+                              height: 244,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: RadialGradient(
+                                  colors: [
+                                    const Color(0xFF4F8FFF)
+                                        .withValues(alpha: 0.18),
+                                    const Color(0xFF4F8FFF)
+                                        .withValues(alpha: 0.06),
+                                    Colors.transparent,
+                                  ],
+                                  stops: const [0, 0.38, 1],
+                                ),
+                              ),
+                            ),
+                          ),
+                          IgnorePointer(
+                            child: Container(
+                              width: 176,
+                              height: 176,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: RadialGradient(
+                                  colors: [
+                                    Colors.white.withValues(alpha: 0.06),
+                                    Colors.transparent,
+                                  ],
+                                  stops: const [0, 1],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const StarflowLogo(
+                            iconSize: 132,
+                            showWordmark: false,
+                          ),
+                        ],
                       ),
                     ),
                   ),
