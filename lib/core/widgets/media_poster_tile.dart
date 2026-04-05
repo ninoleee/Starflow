@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 
-class MediaPosterTile extends StatelessWidget {
+class MediaPosterTile extends ConsumerWidget {
   const MediaPosterTile({
     super.key,
     required this.title,
@@ -24,8 +27,9 @@ class MediaPosterTile extends StatelessWidget {
   final Color? subtitleColor;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final trimmedPoster = posterUrl.trim();
     final pixelRatio = MediaQuery.devicePixelRatioOf(context);
     final cacheWidth = (136 * pixelRatio).round();
@@ -83,10 +87,7 @@ class MediaPosterTile extends StatelessWidget {
       );
     }
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: onTap,
-      child: SizedBox(
+    final content = SizedBox(
         width: width,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -124,7 +125,20 @@ class MediaPosterTile extends StatelessWidget {
             ],
           ],
         ),
-      ),
+      );
+
+    if (isTelevision) {
+      return TvFocusableAction(
+        onPressed: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: content,
+      );
+    }
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: content,
     );
   }
 }

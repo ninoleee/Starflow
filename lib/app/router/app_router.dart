@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/bootstrap/presentation/bootstrap_page.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
@@ -179,16 +180,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   );
 });
 
-class _AppNavigationShell extends StatefulWidget {
+class _AppNavigationShell extends ConsumerStatefulWidget {
   const _AppNavigationShell({required this.navigationShell});
 
   final StatefulNavigationShell navigationShell;
 
   @override
-  State<_AppNavigationShell> createState() => _AppNavigationShellState();
+  ConsumerState<_AppNavigationShell> createState() =>
+      _AppNavigationShellState();
 }
 
-class _AppNavigationShellState extends State<_AppNavigationShell> {
+class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
   bool _isBottomBarVisible = true;
 
   bool _handleScrollNotification(ScrollNotification notification) {
@@ -218,57 +220,149 @@ class _AppNavigationShellState extends State<_AppNavigationShell> {
 
   @override
   Widget build(BuildContext context) {
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+
     return Scaffold(
       extendBody: true,
       backgroundColor: Colors.transparent,
-      body: NotificationListener<ScrollNotification>(
-        onNotification: _handleScrollNotification,
-        child: widget.navigationShell,
-      ),
-      bottomNavigationBar: IgnorePointer(
-        ignoring: !_isBottomBarVisible,
-        child: AnimatedSlide(
-          offset: _isBottomBarVisible ? Offset.zero : const Offset(0, 1.2),
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-          child: AnimatedOpacity(
-            opacity: _isBottomBarVisible ? 1 : 0,
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOutCubic,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
-              child: Material(
-                color: Colors.transparent,
-                elevation: 0,
-                shadowColor: Colors.transparent,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(_kBottomNavShellRadius),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        borderRadius:
-                            BorderRadius.circular(_kBottomNavShellRadius),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.2),
+      body: isTelevision
+          ? _TelevisionNavigationShell(
+              currentIndex: widget.navigationShell.currentIndex,
+              onDestinationSelected: widget.navigationShell.goBranch,
+              child: widget.navigationShell,
+            )
+          : NotificationListener<ScrollNotification>(
+              onNotification: _handleScrollNotification,
+              child: widget.navigationShell,
+            ),
+      bottomNavigationBar: isTelevision
+          ? null
+          : IgnorePointer(
+              ignoring: !_isBottomBarVisible,
+              child: AnimatedSlide(
+                offset: _isBottomBarVisible ? Offset.zero : const Offset(0, 1.2),
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                child: AnimatedOpacity(
+                  opacity: _isBottomBarVisible ? 1 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+                    child: Material(
+                      color: Colors.transparent,
+                      elevation: 0,
+                      shadowColor: Colors.transparent,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(_kBottomNavShellRadius),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius:
+                                  BorderRadius.circular(_kBottomNavShellRadius),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.2),
+                              ),
+                              color: const Color(0x1A0F1622),
+                            ),
+                            child: _FloatingNavigationBar(
+                              currentIndex: widget.navigationShell.currentIndex,
+                              onDestinationSelected: (index) {
+                                _setBottomBarVisible(true);
+                                widget.navigationShell.goBranch(index);
+                              },
+                            ),
+                          ),
                         ),
-                        color: const Color(0x1A0F1622),
-                      ),
-                      child: _FloatingNavigationBar(
-                        currentIndex: widget.navigationShell.currentIndex,
-                        onDestinationSelected: (index) {
-                          _setBottomBarVisible(true);
-                          widget.navigationShell.goBranch(index);
-                        },
                       ),
                     ),
                   ),
                 ),
               ),
             ),
+    );
+  }
+}
+
+class _TelevisionNavigationShell extends StatelessWidget {
+  const _TelevisionNavigationShell({
+    required this.currentIndex,
+    required this.onDestinationSelected,
+    required this.child,
+  });
+
+  final int currentIndex;
+  final ValueChanged<int> onDestinationSelected;
+  final Widget child;
+
+  static const _items = [
+    _NavigationItemData(
+      label: '首页',
+      icon: Icons.space_dashboard_outlined,
+      selectedIcon: Icons.space_dashboard_rounded,
+    ),
+    _NavigationItemData(
+      label: '搜索',
+      icon: Icons.search_rounded,
+      selectedIcon: Icons.search_rounded,
+    ),
+    _NavigationItemData(
+      label: '媒体库',
+      icon: Icons.video_library_outlined,
+      selectedIcon: Icons.video_library_rounded,
+    ),
+    _NavigationItemData(
+      label: '设置',
+      icon: Icons.tune_outlined,
+      selectedIcon: Icons.tune_rounded,
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 12, 18),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: const Color(0x22111C2B),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.12),
+                ),
+              ),
+              child: NavigationRail(
+                backgroundColor: Colors.transparent,
+                extended: true,
+                minExtendedWidth: 168,
+                selectedIndex: currentIndex,
+                onDestinationSelected: onDestinationSelected,
+                labelType: NavigationRailLabelType.none,
+                leading: const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 12, 16, 20),
+                  child: Icon(
+                    Icons.live_tv_rounded,
+                    color: Colors.white,
+                    size: 26,
+                  ),
+                ),
+                destinations: [
+                  for (final item in _items)
+                    NavigationRailDestination(
+                      icon: Icon(item.icon),
+                      selectedIcon: Icon(item.selectedIcon),
+                      label: Text(item.label),
+                    ),
+                ],
+              ),
+            ),
           ),
         ),
-      ),
+        Expanded(child: child),
+      ],
     );
   }
 }

@@ -4,9 +4,11 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
@@ -1473,6 +1475,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     final targetAsync = ref.watch(enrichedDetailTargetProvider(seedTarget));
     final target = targetAsync.valueOrNull ?? seedTarget;
     final seriesAsync = ref.watch(seriesBrowserProvider(target));
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
 
     return Scaffold(
       backgroundColor: const Color(0xFF030914),
@@ -1656,100 +1659,132 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                 const SizedBox(height: 12),
                                 Align(
                                   alignment: Alignment.centerLeft,
-                                  child: TextButton.icon(
-                                    onPressed: _isMatchingLocalResource
-                                        ? null
-                                        : () => _matchLocalResource(target),
-                                    icon: _isMatchingLocalResource
-                                        ? const SizedBox(
-                                            width: 14,
-                                            height: 14,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                        : const Icon(
-                                            Icons.link_rounded,
-                                            size: 16,
+                                  child: isTelevision
+                                      ? TvAdaptiveButton(
+                                          label: _isMatchingLocalResource
+                                              ? '匹配中...'
+                                              : _libraryMatchChoices.length > 1
+                                                  ? '重新匹配本地资源'
+                                                  : '匹配本地资源',
+                                          icon: Icons.link_rounded,
+                                          onPressed: _isMatchingLocalResource
+                                              ? null
+                                              : () => _matchLocalResource(target),
+                                          variant: TvButtonVariant.text,
+                                        )
+                                      : TextButton.icon(
+                                          onPressed: _isMatchingLocalResource
+                                              ? null
+                                              : () => _matchLocalResource(target),
+                                          icon: _isMatchingLocalResource
+                                              ? const SizedBox(
+                                                  width: 14,
+                                                  height: 14,
+                                                  child: CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                  ),
+                                                )
+                                              : const Icon(
+                                                  Icons.link_rounded,
+                                                  size: 16,
+                                                ),
+                                          label: Text(
+                                            _isMatchingLocalResource
+                                                ? '匹配中...'
+                                                : _libraryMatchChoices.length > 1
+                                                    ? '重新匹配本地资源'
+                                                    : '匹配本地资源',
                                           ),
-                                    label: Text(
-                                      _isMatchingLocalResource
-                                          ? '匹配中...'
-                                          : _libraryMatchChoices.length > 1
-                                              ? '重新匹配本地资源'
-                                              : '匹配本地资源',
-                                    ),
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 0,
-                                        vertical: 0,
-                                      ),
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                  ),
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 0,
+                                              vertical: 0,
+                                            ),
+                                            tapTargetSize:
+                                                MaterialTapTargetSize.shrinkWrap,
+                                          ),
+                                        ),
                                 ),
                               ],
                               if (_canManageMetadataIndex(target)) ...[
                                 const SizedBox(height: 12),
                                 Align(
                                   alignment: Alignment.centerLeft,
-                                  child: TextButton.icon(
-                                    onPressed: () =>
-                                        _openMetadataIndexManager(target),
-                                    icon: const Icon(
-                                      Icons.manage_search_rounded,
-                                      size: 16,
-                                    ),
-                                    label: const Text('建立/管理索引'),
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 0,
-                                        vertical: 0,
-                                      ),
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                  ),
+                                  child: isTelevision
+                                      ? TvAdaptiveButton(
+                                          label: '建立/管理索引',
+                                          icon: Icons.manage_search_rounded,
+                                          onPressed: () =>
+                                              _openMetadataIndexManager(target),
+                                          variant: TvButtonVariant.text,
+                                        )
+                                      : TextButton.icon(
+                                          onPressed: () =>
+                                              _openMetadataIndexManager(target),
+                                          icon: const Icon(
+                                            Icons.manage_search_rounded,
+                                            size: 16,
+                                          ),
+                                          label: const Text('建立/管理索引'),
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 0,
+                                              vertical: 0,
+                                            ),
+                                            tapTargetSize:
+                                                MaterialTapTargetSize.shrinkWrap,
+                                          ),
+                                        ),
                                 ),
                               ],
                               if (_canManuallyRefreshMetadata(target)) ...[
                                 const SizedBox(height: 12),
                                 Align(
                                   alignment: Alignment.centerLeft,
-                                  child: TextButton.icon(
-                                    onPressed: _isRefreshingMetadata
-                                        ? null
-                                        : () => _refreshMetadata(target),
-                                    icon: _isRefreshingMetadata
-                                        ? const SizedBox(
-                                            width: 14,
-                                            height: 14,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                        : const Icon(
-                                            Icons.refresh_rounded,
-                                            size: 16,
+                                  child: isTelevision
+                                      ? TvAdaptiveButton(
+                                          label: _isRefreshingMetadata
+                                              ? '更新中...'
+                                              : '手动更新信息',
+                                          icon: Icons.refresh_rounded,
+                                          onPressed: _isRefreshingMetadata
+                                              ? null
+                                              : () => _refreshMetadata(target),
+                                          variant: TvButtonVariant.text,
+                                        )
+                                      : TextButton.icon(
+                                          onPressed: _isRefreshingMetadata
+                                              ? null
+                                              : () => _refreshMetadata(target),
+                                          icon: _isRefreshingMetadata
+                                              ? const SizedBox(
+                                                  width: 14,
+                                                  height: 14,
+                                                  child: CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                  ),
+                                                )
+                                              : const Icon(
+                                                  Icons.refresh_rounded,
+                                                  size: 16,
+                                                ),
+                                          label: Text(
+                                            _isRefreshingMetadata
+                                                ? '更新中...'
+                                                : '手动更新信息',
                                           ),
-                                    label: Text(
-                                      _isRefreshingMetadata
-                                          ? '更新中...'
-                                          : '手动更新信息',
-                                    ),
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 0,
-                                        vertical: 0,
-                                      ),
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                  ),
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 0,
+                                              vertical: 0,
+                                            ),
+                                            tapTargetSize:
+                                                MaterialTapTargetSize.shrinkWrap,
+                                          ),
+                                        ),
                                 ),
                               ],
                               if (target.sourceName.trim().isNotEmpty) ...[
@@ -2003,7 +2038,7 @@ class _HeroSection extends StatelessWidget {
   }
 }
 
-class _HeroContent extends StatelessWidget {
+class _HeroContent extends ConsumerWidget {
   const _HeroContent({
     required this.target,
     required this.metadata,
@@ -2015,7 +2050,8 @@ class _HeroContent extends StatelessWidget {
   final String peopleLine;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final hasLogo = target.logoUrl.trim().isNotEmpty;
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 560),
@@ -2111,62 +2147,93 @@ class _HeroContent extends StatelessWidget {
             runSpacing: 10,
             children: [
               if (target.isPlayable)
-                FilledButton.icon(
-                  onPressed: () {
-                    context.pushNamed('player', extra: target.playbackTarget);
-                  },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: const Color(0xFF081120),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 15,
-                    ),
-                  ),
-                  icon: const Icon(Icons.play_arrow_rounded),
-                  label: const Text('立即播放'),
-                ),
+                isTelevision
+                    ? TvAdaptiveButton(
+                        label: '立即播放',
+                        icon: Icons.play_arrow_rounded,
+                        onPressed: () {
+                          context.pushNamed('player', extra: target.playbackTarget);
+                        },
+                      )
+                    : FilledButton.icon(
+                        onPressed: () {
+                          context.pushNamed('player', extra: target.playbackTarget);
+                        },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: const Color(0xFF081120),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 15,
+                          ),
+                        ),
+                        icon: const Icon(Icons.play_arrow_rounded),
+                        label: const Text('立即播放'),
+                      ),
               if (!target.isPlayable && target.searchQuery.trim().isNotEmpty)
-                FilledButton.icon(
-                  onPressed: () {
-                    context.goNamed(
-                      'search',
-                      queryParameters: {'q': target.searchQuery},
-                    );
-                  },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: const Color(0xFF081120),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 15,
-                    ),
-                  ),
-                  icon: const Icon(Icons.search_rounded),
-                  label: const Text('搜索资源'),
-                ),
+                isTelevision
+                    ? TvAdaptiveButton(
+                        label: '搜索资源',
+                        icon: Icons.search_rounded,
+                        onPressed: () {
+                          context.goNamed(
+                            'search',
+                            queryParameters: {'q': target.searchQuery},
+                          );
+                        },
+                      )
+                    : FilledButton.icon(
+                        onPressed: () {
+                          context.goNamed(
+                            'search',
+                            queryParameters: {'q': target.searchQuery},
+                          );
+                        },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: const Color(0xFF081120),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 15,
+                          ),
+                        ),
+                        icon: const Icon(Icons.search_rounded),
+                        label: const Text('搜索资源'),
+                      ),
               if (target.isPlayable && target.searchQuery.trim().isNotEmpty)
-                OutlinedButton.icon(
-                  onPressed: () {
-                    context.goNamed(
-                      'search',
-                      queryParameters: {'q': target.searchQuery},
-                    );
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: BorderSide(
-                      color: Colors.white.withValues(alpha: 0.24),
-                    ),
-                    backgroundColor: Colors.white.withValues(alpha: 0.06),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 15,
-                    ),
-                  ),
-                  icon: const Icon(Icons.search_rounded),
-                  label: const Text('搜索资源'),
-                ),
+                isTelevision
+                    ? TvAdaptiveButton(
+                        label: '搜索资源',
+                        icon: Icons.search_rounded,
+                        onPressed: () {
+                          context.goNamed(
+                            'search',
+                            queryParameters: {'q': target.searchQuery},
+                          );
+                        },
+                        variant: TvButtonVariant.outlined,
+                      )
+                    : OutlinedButton.icon(
+                        onPressed: () {
+                          context.goNamed(
+                            'search',
+                            queryParameters: {'q': target.searchQuery},
+                          );
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.24),
+                          ),
+                          backgroundColor: Colors.white.withValues(alpha: 0.06),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 15,
+                          ),
+                        ),
+                        icon: const Icon(Icons.search_rounded),
+                        label: const Text('搜索资源'),
+                      ),
             ],
           ),
         ],

@@ -32,6 +32,12 @@ class _HomePageState extends ConsumerState<HomePage> {
     final heroStyle = ref.watch(
       appSettingsProvider.select((settings) => settings.homeHeroStyle),
     );
+    final heroEnabled = ref.watch(
+      appSettingsProvider.select((settings) => settings.homeHeroEnabled),
+    );
+    final heroSourceModuleId = ref.watch(
+      appSettingsProvider.select((settings) => settings.homeHeroSourceModuleId),
+    );
     final resolvedSections = <HomeSectionViewModel>[];
     var hasPendingSections = false;
 
@@ -60,6 +66,8 @@ class _HomePageState extends ConsumerState<HomePage> {
               sectionStates: sectionStates,
               resolvedSections: resolvedSections,
               hasPendingSections: hasPendingSections,
+              heroEnabled: heroEnabled,
+              heroSourceModuleId: heroSourceModuleId,
               heroStyle: heroStyle,
             ),
     );
@@ -71,23 +79,24 @@ class _HomePageState extends ConsumerState<HomePage> {
     required Map<String, AsyncValue<HomeSectionViewModel?>> sectionStates,
     required List<HomeSectionViewModel> resolvedSections,
     required bool hasPendingSections,
+    required bool heroEnabled,
+    required String heroSourceModuleId,
     required HomeHeroStyle heroStyle,
   }) {
-    HomeSectionViewModel? featuredSection;
-    for (final section in resolvedSections) {
-      if (section.layout == HomeSectionLayout.carousel &&
-          section.carouselItems.isNotEmpty) {
-        featuredSection = section;
-        break;
-      }
-    }
+    final featuredSection = heroEnabled
+        ? _resolveHeroSection(
+            resolvedSections: resolvedSections,
+            preferredModuleId: heroSourceModuleId,
+          )
+        : null;
 
-    final featuredItems = featuredSection != null
-        ? featuredSection.carouselItems
-            .take(5)
-            .map(_FeaturedHeroItem.fromCarousel)
-            .toList()
-        : _fallbackFeaturedItems(resolvedSections);
+    final featuredItems = !heroEnabled
+        ? const <_FeaturedHeroItem>[]
+        : _buildFeaturedItems(
+            featuredSection: featuredSection,
+            resolvedSections: resolvedSections,
+            preferredModuleId: heroSourceModuleId,
+          );
     final activeHero = _resolveActiveHeroItem(featuredItems);
     final featuredSectionId = featuredSection?.id;
 
@@ -105,7 +114,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
           padding: EdgeInsets.zero,
           children: [
-            if (featuredItems.isNotEmpty)
+            if (heroEnabled && featuredItems.isNotEmpty)
               Padding(
                 padding: heroStyle.heroPadding(context),
                 child: _FeaturedHero(
@@ -114,7 +123,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   onFocusedItemChanged: _handleFocusedHeroChanged,
                 ),
               )
-            else if (hasPendingSections)
+            else if (heroEnabled && hasPendingSections)
               Padding(
                 padding: heroStyle.heroPadding(context),
                 child: _HomeHeroPlaceholder(style: heroStyle),
@@ -249,6 +258,63 @@ List<_FeaturedHeroItem> _fallbackFeaturedItems(
     }
   }
   return const [];
+}
+
+HomeSectionViewModel? _resolveHeroSection({
+  required List<HomeSectionViewModel> resolvedSections,
+  required String preferredModuleId,
+}) {
+  final normalizedPreferredModuleId = preferredModuleId.trim();
+  if (normalizedPreferredModuleId.isNotEmpty) {
+    for (final section in resolvedSections) {
+      if (section.id == normalizedPreferredModuleId) {
+        return section;
+      }
+    }
+  }
+
+  for (final section in resolvedSections) {
+    if (section.layout == HomeSectionLayout.carousel &&
+        section.carouselItems.isNotEmpty) {
+      return section;
+    }
+  }
+
+  for (final section in resolvedSections) {
+    if (section.items.isNotEmpty || section.carouselItems.isNotEmpty) {
+      return section;
+    }
+  }
+  return null;
+}
+
+List<_FeaturedHeroItem> _buildFeaturedItems({
+  required HomeSectionViewModel? featuredSection,
+  required List<HomeSectionViewModel> resolvedSections,
+  required String preferredModuleId,
+}) {
+  if (featuredSection == null) {
+    return const [];
+  }
+  if (featuredSection.layout == HomeSectionLayout.carousel &&
+      featuredSection.carouselItems.isNotEmpty) {
+    return featuredSection.carouselItems
+        .take(5)
+        .map(_FeaturedHeroItem.fromCarousel)
+        .toList();
+  }
+  if (featuredSection.items.isNotEmpty) {
+    return featuredSection.items
+        .take(5)
+        .map(_FeaturedHeroItem.fromPoster)
+        .toList();
+  }
+  if (preferredModuleId.trim().isNotEmpty) {
+    return _fallbackFeaturedItems(
+      resolvedSections.where((section) => section.id != preferredModuleId).toList(),
+    );
+  }
+  return _fallbackFeaturedItems(resolvedSections);
 }
 
 extension _HomeHeroStyleLayoutX on HomeHeroStyle {

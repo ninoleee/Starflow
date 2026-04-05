@@ -381,6 +381,8 @@ class AppSettings {
     required this.doubanAccount,
     required this.homeModules,
     this.networkStorage = const NetworkStorageConfig(),
+    this.homeHeroEnabled = true,
+    this.homeHeroSourceModuleId = '',
     this.homeHeroStyle = HomeHeroStyle.normal,
     this.tmdbMetadataMatchEnabled = false,
     this.wmdbMetadataMatchEnabled = false,
@@ -395,6 +397,8 @@ class AppSettings {
   final DoubanAccountConfig doubanAccount;
   final List<HomeModuleConfig> homeModules;
   final NetworkStorageConfig networkStorage;
+  final bool homeHeroEnabled;
+  final String homeHeroSourceModuleId;
   final HomeHeroStyle homeHeroStyle;
   final bool tmdbMetadataMatchEnabled;
   final bool wmdbMetadataMatchEnabled;
@@ -409,6 +413,8 @@ class AppSettings {
     DoubanAccountConfig? doubanAccount,
     List<HomeModuleConfig>? homeModules,
     NetworkStorageConfig? networkStorage,
+    bool? homeHeroEnabled,
+    String? homeHeroSourceModuleId,
     HomeHeroStyle? homeHeroStyle,
     bool? tmdbMetadataMatchEnabled,
     bool? wmdbMetadataMatchEnabled,
@@ -423,6 +429,8 @@ class AppSettings {
       doubanAccount: doubanAccount ?? this.doubanAccount,
       homeModules: homeModules ?? this.homeModules,
       networkStorage: networkStorage ?? this.networkStorage,
+      homeHeroEnabled: homeHeroEnabled ?? this.homeHeroEnabled,
+      homeHeroSourceModuleId: homeHeroSourceModuleId ?? this.homeHeroSourceModuleId,
       homeHeroStyle: homeHeroStyle ?? this.homeHeroStyle,
       tmdbMetadataMatchEnabled:
           tmdbMetadataMatchEnabled ?? this.tmdbMetadataMatchEnabled,
@@ -445,6 +453,8 @@ class AppSettings {
       'doubanAccount': doubanAccount.toJson(),
       'homeModules': homeModules.map((item) => item.toJson()).toList(),
       'networkStorage': networkStorage.toJson(),
+      'homeHeroEnabled': homeHeroEnabled,
+      'homeHeroSourceModuleId': homeHeroSourceModuleId,
       'homeHeroStyle': homeHeroStyle.name,
       'tmdbMetadataMatchEnabled': tmdbMetadataMatchEnabled,
       'wmdbMetadataMatchEnabled': wmdbMetadataMatchEnabled,
@@ -490,6 +500,8 @@ class AppSettings {
           (json['networkStorage'] as Map?) ?? const {},
         ),
       ),
+      homeHeroEnabled: json['homeHeroEnabled'] as bool? ?? true,
+      homeHeroSourceModuleId: json['homeHeroSourceModuleId'] as String? ?? '',
       homeHeroStyle: HomeHeroStyleX.fromName(
         json['homeHeroStyle'] as String? ?? '',
       ),

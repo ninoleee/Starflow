@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -156,6 +158,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(appSettingsProvider);
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final enabledProviders =
         settings.searchProviders.where((item) => item.enabled).toList();
     final collectionsAsync = ref.watch(searchCollectionsProvider);
@@ -175,119 +178,195 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         contentPadding: EdgeInsets.only(
           top: MediaQuery.paddingOf(context).top,
         ),
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                kAppPageHorizontalPadding,
-                0,
-                kAppPageHorizontalPadding,
-                0,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    controller: _controller,
-                    textInputAction: TextInputAction.search,
-                    onSubmitted: (_) => _performSearch(),
-                    decoration: InputDecoration(
-                      hintText: '搜索电影、剧集或番剧资源',
-                      suffixIcon: IconButton(
-                        onPressed: _performSearch,
-                        icon: const Icon(Icons.search_rounded),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  if (targets.length == 1)
-                    const Text('还没有启用可搜索的来源，请先去设置页添加媒体源或搜索服务。')
-                  else
-                    SizedBox(
-                      height: 40,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: targets.length,
-                        separatorBuilder: (context, index) =>
-                            const SizedBox(width: 8),
-                        itemBuilder: (context, index) {
-                          final target = targets[index];
-                          return FilterChip(
-                            label: Text(target.label),
-                            selected: _selectedTargetIds.contains(target.id),
-                            onSelected: (_) {
-                              _toggleTargetSelection(target, targets);
-                              if (_controller.text.trim().isNotEmpty) {
-                                _performSearch();
-                              }
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                  const SizedBox(height: 12),
-                  if (_isSearching) ...[
-                    LinearProgressIndicator(
-                      value: _totalSearchTaskCount > 0
-                          ? _completedSearchTaskCount / _totalSearchTaskCount
-                          : null,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _results.isEmpty
-                          ? '正在搜索...'
-                          : '正在继续搜索 $_completedSearchTaskCount/$_totalSearchTaskCount',
+        child: FocusTraversalGroup(
+          policy: OrderedTraversalPolicy(),
+          child: ListView(
+            padding: EdgeInsets.zero,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  kAppPageHorizontalPadding,
+                  0,
+                  kAppPageHorizontalPadding,
+                  0,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    FocusTraversalOrder(
+                      order: const NumericFocusOrder(1),
+                      child: isTelevision
+                          ? _TelevisionSearchInput(
+                              query: _controller.text.trim(),
+                              onEditQuery: _openTelevisionQueryDialog,
+                              onSearch: _performSearch,
+                            )
+                          : TextField(
+                              controller: _controller,
+                              textInputAction: TextInputAction.search,
+                              onSubmitted: (_) => _performSearch(),
+                              decoration: InputDecoration(
+                                hintText: '搜索电影、剧集或番剧资源',
+                                suffixIcon: IconButton(
+                                  onPressed: _performSearch,
+                                  icon: const Icon(Icons.search_rounded),
+                                ),
+                              ),
+                            ),
                     ),
                     const SizedBox(height: 10),
+                    if (targets.length == 1)
+                      const Text('还没有启用可搜索的来源，请先去设置页添加媒体源或搜索服务。')
+                    else
+                      FocusTraversalOrder(
+                        order: const NumericFocusOrder(2),
+                        child: isTelevision
+                            ? Wrap(
+                                spacing: 10,
+                                runSpacing: 10,
+                                children: [
+                                  for (final target in targets)
+                                    _SearchTargetChip(
+                                      target: target,
+                                      selected: _selectedTargetIds.contains(target.id),
+                                      isTelevision: true,
+                                      onPressed: () {
+                                        _toggleTargetSelection(target, targets);
+                                        if (_controller.text.trim().isNotEmpty) {
+                                          _performSearch();
+                                        }
+                                      },
+                                    ),
+                                ],
+                              )
+                            : SizedBox(
+                                height: 40,
+                                child: ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: targets.length,
+                                  separatorBuilder: (context, index) =>
+                                      const SizedBox(width: 8),
+                                  itemBuilder: (context, index) {
+                                    final target = targets[index];
+                                    return _SearchTargetChip(
+                                      target: target,
+                                      selected:
+                                          _selectedTargetIds.contains(target.id),
+                                      isTelevision: false,
+                                      onPressed: () {
+                                        _toggleTargetSelection(target, targets);
+                                        if (_controller.text.trim().isNotEmpty) {
+                                          _performSearch();
+                                        }
+                                      },
+                                    );
+                                  },
+                                ),
+                              ),
+                      ),
+                    const SizedBox(height: 12),
+                    if (_isSearching) ...[
+                      LinearProgressIndicator(
+                        value: _totalSearchTaskCount > 0
+                            ? _completedSearchTaskCount / _totalSearchTaskCount
+                            : null,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _results.isEmpty
+                            ? '正在搜索...'
+                            : '正在继续搜索 $_completedSearchTaskCount/$_totalSearchTaskCount',
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    if (_controller.text.trim().isNotEmpty &&
+                        (_results.isNotEmpty || _filteredResultCount > 0))
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          '结果 ${_results.length} 条 · 过滤 $_filteredResultCount 条',
+                        ),
+                      ),
+                    if (_errorMessage != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text('搜索失败：$_errorMessage'),
+                      )
+                    else if (_results.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          _controller.text.trim().isEmpty
+                              ? '输入关键字后开始搜索。'
+                              : _filteredResultCount > 0
+                                  ? '没有可用结果，已过滤 $_filteredResultCount 条结果。'
+                                  : '没有找到结果。',
+                        ),
+                      ),
                   ],
-                  if (_controller.text.trim().isNotEmpty &&
-                      (_results.isNotEmpty || _filteredResultCount > 0))
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(
-                        '结果 ${_results.length} 条 · 过滤 $_filteredResultCount 条',
-                      ),
-                    ),
-                  if (_errorMessage != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text('搜索失败：$_errorMessage'),
-                    )
-                  else if (_results.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(
-                        _controller.text.trim().isEmpty
-                            ? '输入关键字后开始搜索。'
-                            : _filteredResultCount > 0
-                                ? '没有可用结果，已过滤 $_filteredResultCount 条结果。'
-                                : '没有找到结果。',
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            if (_results.isNotEmpty)
-              ..._results.map(
-                (item) => _SearchResultCard(
-                  result: item,
-                  isSaving: _savingResultIds.contains(item.id),
-                  showSaveAction: _canSaveResultToQuark(
-                    result: item,
-                    settings: settings,
-                  ),
-                  onSave: () => _saveResultToQuark(
-                    result: item,
-                    settings: settings,
-                  ),
                 ),
               ),
-            const SizedBox(height: 8),
-          ],
+              if (_results.isNotEmpty)
+                ..._results.map(
+                  (item) => _SearchResultCard(
+                    result: item,
+                    isSaving: _savingResultIds.contains(item.id),
+                    showSaveAction: _canSaveResultToQuark(
+                      result: item,
+                      settings: settings,
+                    ),
+                    onSave: () => _saveResultToQuark(
+                      result: item,
+                      settings: settings,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  Future<void> _openTelevisionQueryDialog() async {
+    final controller = TextEditingController(text: _controller.text);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('输入搜索关键字'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (value) => Navigator.of(context).pop(value),
+            decoration: const InputDecoration(
+              hintText: '电影、剧集、番剧...',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(controller.text),
+              child: const Text('搜索'),
+            ),
+          ],
+        );
+      },
+    );
+    if (!mounted || result == null) {
+      return;
+    }
+    setState(() {
+      _controller.text = result;
+    });
+    if (result.trim().isNotEmpty) {
+      await _performSearch();
+    }
   }
 
   List<_SearchOperation> _buildSearchOperations({
@@ -642,7 +721,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   }
 }
 
-class _SearchResultCard extends StatelessWidget {
+class _SearchResultCard extends ConsumerWidget {
   const _SearchResultCard({
     required this.result,
     required this.isSaving,
@@ -656,24 +735,24 @@ class _SearchResultCard extends StatelessWidget {
   final VoidCallback onSave;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final posterUrl = result.posterUrl.trim();
     final resourceUri = _parseLaunchUri(result.resourceUrl);
-    return InkWell(
-      onTap: () {
-        if (result.detailTarget != null) {
-          context.pushNamed('detail', extra: result.detailTarget);
-          return;
-        }
-        if (resourceUri != null) {
-          _openResourceUrl(context, resourceUri);
-          return;
-        }
-        _showDetailDialog(context, result);
-      },
-      onLongPress: () => _showDetailDialog(context, result),
-      child: Padding(
+    void onOpen() {
+      if (result.detailTarget != null) {
+        context.pushNamed('detail', extra: result.detailTarget);
+        return;
+      }
+      if (resourceUri != null) {
+        _openResourceUrl(context, resourceUri);
+        return;
+      }
+      _showDetailDialog(context, result);
+    }
+
+    final cardChild = Padding(
         padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
         child: Column(
           children: [
@@ -716,27 +795,34 @@ class _SearchResultCard extends StatelessWidget {
                           if (showSaveAction)
                             Padding(
                               padding: const EdgeInsets.only(left: 6),
-                              child: SizedBox(
-                                width: 32,
-                                height: 32,
-                                child: IconButton(
-                                  padding: EdgeInsets.zero,
-                                  tooltip: '保存到夸克',
-                                  onPressed: isSaving ? null : onSave,
-                                  icon: isSaving
-                                      ? const SizedBox(
-                                          width: 14,
-                                          height: 14,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : const Icon(
-                                          Icons.bookmark_add_rounded,
-                                          size: 18,
-                                        ),
-                                ),
-                              ),
+                              child: isTelevision
+                                  ? TvAdaptiveButton(
+                                      label: isSaving ? '保存中' : '保存',
+                                      icon: Icons.bookmark_add_rounded,
+                                      onPressed: isSaving ? null : onSave,
+                                      variant: TvButtonVariant.text,
+                                    )
+                                  : SizedBox(
+                                      width: 32,
+                                      height: 32,
+                                      child: IconButton(
+                                        padding: EdgeInsets.zero,
+                                        tooltip: '保存到夸克',
+                                        onPressed: isSaving ? null : onSave,
+                                        icon: isSaving
+                                            ? const SizedBox(
+                                                width: 14,
+                                                height: 14,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                ),
+                                              )
+                                            : const Icon(
+                                                Icons.bookmark_add_rounded,
+                                                size: 18,
+                                              ),
+                                      ),
+                                    ),
                             ),
                         ],
                       ),
@@ -774,7 +860,30 @@ class _SearchResultCard extends StatelessWidget {
             ),
           ],
         ),
-      ),
+      );
+
+    if (isTelevision) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: TvFocusableAction(
+          onPressed: onOpen,
+          borderRadius: BorderRadius.circular(18),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.74),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: theme.colorScheme.outlineVariant),
+            ),
+            child: cardChild,
+          ),
+        ),
+      );
+    }
+
+    return InkWell(
+      onTap: onOpen,
+      onLongPress: () => _showDetailDialog(context, result),
+      child: cardChild,
     );
   }
 
@@ -871,6 +980,125 @@ class _SearchResultCard extends StatelessWidget {
     }
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('无法打开链接')),
+    );
+  }
+}
+
+class _TelevisionSearchInput extends StatelessWidget {
+  const _TelevisionSearchInput({
+    required this.query,
+    required this.onEditQuery,
+    required this.onSearch,
+  });
+
+  final String query;
+  final VoidCallback onEditQuery;
+  final VoidCallback onSearch;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: TvFocusableAction(
+            onPressed: onEditQuery,
+            borderRadius: BorderRadius.circular(22),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '搜索关键字',
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      query.isEmpty ? '按确认键输入电影、剧集或番剧资源' : query,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        TvAdaptiveButton(
+          label: '编辑',
+          icon: Icons.edit_rounded,
+          onPressed: onEditQuery,
+          variant: TvButtonVariant.outlined,
+        ),
+        const SizedBox(width: 12),
+        TvAdaptiveButton(
+          label: '搜索',
+          icon: Icons.search_rounded,
+          onPressed: onSearch,
+        ),
+      ],
+    );
+  }
+}
+
+class _SearchTargetChip extends StatelessWidget {
+  const _SearchTargetChip({
+    required this.target,
+    required this.selected,
+    required this.isTelevision,
+    required this.onPressed,
+  });
+
+  final _SearchTarget target;
+  final bool selected;
+  final bool isTelevision;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isTelevision) {
+      return FilterChip(
+        label: Text(target.label),
+        selected: selected,
+        onSelected: (_) => onPressed(),
+      );
+    }
+
+    return TvFocusableAction(
+      onPressed: onPressed,
+      borderRadius: BorderRadius.circular(999),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: selected
+              ? Colors.white
+              : Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected
+                ? Colors.white
+                : Theme.of(context).colorScheme.outlineVariant,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Text(
+            target.label,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: selected ? const Color(0xFF081120) : null,
+                ),
+          ),
+        ),
+      ),
     );
   }
 }

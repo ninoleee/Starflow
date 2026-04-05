@@ -46,6 +46,8 @@ class SeedData {
       ),
     ],
     networkStorage: const NetworkStorageConfig(),
+    homeHeroEnabled: true,
+    homeHeroSourceModuleId: '',
     homeHeroStyle: HomeHeroStyle.normal,
     tmdbMetadataMatchEnabled: false,
     wmdbMetadataMatchEnabled: false,

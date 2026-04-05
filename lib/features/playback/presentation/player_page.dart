@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
@@ -24,6 +26,7 @@ class PlayerPage extends ConsumerStatefulWidget {
 
 class _PlayerPageState extends ConsumerState<PlayerPage> {
   static const int _maxPlaybackAttempts = 3;
+  static const _kSeekStep = Duration(seconds: 10);
 
   Player? _player;
   VideoController? _videoController;
@@ -320,113 +323,183 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final activeTarget = _resolvedTarget ?? widget.target;
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          ColoredBox(
-            color: Colors.black,
-            child: Center(
-              child: AspectRatio(
-                aspectRatio: _currentAspectRatio(),
-                child: _buildVideoSurface(theme),
-              ),
-            ),
+    return Shortcuts(
+      shortcuts: isTelevision
+          ? const <ShortcutActivator, Intent>{
+              SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
+              SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
+              SingleActivator(LogicalKeyboardKey.backspace): DismissIntent(),
+              SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+              SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+              SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
+              SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+              SingleActivator(LogicalKeyboardKey.mediaPlayPause):
+                  ActivateIntent(),
+              SingleActivator(LogicalKeyboardKey.mediaPlay): ActivateIntent(),
+              SingleActivator(LogicalKeyboardKey.mediaPause): ActivateIntent(),
+              SingleActivator(LogicalKeyboardKey.arrowLeft):
+                  DirectionalFocusIntent(TraversalDirection.left),
+              SingleActivator(LogicalKeyboardKey.arrowRight):
+                  DirectionalFocusIntent(TraversalDirection.right),
+            }
+          : const <ShortcutActivator, Intent>{},
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          DismissIntent: CallbackAction<DismissIntent>(
+            onInvoke: (_) {
+              context.pop();
+              return null;
+            },
           ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Colors.black.withValues(alpha: 0.62),
-                    Colors.black.withValues(alpha: 0.22),
-                    Colors.transparent,
-                  ],
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                ),
-              ),
-              child: OverlayToolbar(
-                onBack: () => context.pop(),
-              ),
-            ),
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              _togglePlayback();
+              return null;
+            },
           ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      Colors.transparent,
-                      Colors.black.withValues(alpha: 0.16),
-                      Colors.black.withValues(alpha: 0.62),
-                    ],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                  ),
-                ),
-                child: SafeArea(
-                  top: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 40, 18, 18),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          activeTarget.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.headlineSmall?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          '${activeTarget.sourceKind.label} · ${activeTarget.sourceName}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: const Color(0xCCFFFFFF),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
+          DirectionalFocusIntent: CallbackAction<DirectionalFocusIntent>(
+            onInvoke: (intent) {
+              if (intent.direction == TraversalDirection.left) {
+                _seekRelative(-_kSeekStep);
+              } else if (intent.direction == TraversalDirection.right) {
+                _seekRelative(_kSeekStep);
+              }
+              return null;
+            },
+          ),
+        },
+        child: Focus(
+          autofocus: true,
+          canRequestFocus: isTelevision,
+          child: Scaffold(
+            backgroundColor: Colors.black,
+            body: Stack(
+              fit: StackFit.expand,
+              children: [
+                ColoredBox(
+                  color: Colors.black,
+                  child: Center(
+                    child: AspectRatio(
+                      aspectRatio: _currentAspectRatio(),
+                      child: _buildVideoSurface(theme, isTelevision: isTelevision),
                     ),
                   ),
                 ),
-              ),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.black.withValues(alpha: 0.62),
+                          Colors.black.withValues(alpha: 0.22),
+                          Colors.transparent,
+                        ],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                      ),
+                    ),
+                    child: OverlayToolbar(
+                      onBack: () => context.pop(),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.16),
+                            Colors.black.withValues(alpha: 0.62),
+                          ],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
+                      ),
+                      child: SafeArea(
+                        top: false,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(18, 40, 18, 18),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                activeTarget.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.headlineSmall?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                '${activeTarget.sourceKind.label} · ${activeTarget.sourceName}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: const Color(0xCCFFFFFF),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (isTelevision) ...[
+                                const SizedBox(height: 10),
+                                const Text(
+                                  '遥控器：确认键播放/暂停，左右键快退/快进，返回键退出',
+                                  style: TextStyle(
+                                    color: Color(0xB3FFFFFF),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }
 
-  double _currentAspectRatio() {
+  Future<void> _togglePlayback() async {
     final player = _player;
     if (!_isReady || player == null) {
-      return 16 / 9;
+      return;
     }
-
-    final width = player.state.width ?? 0;
-    final height = player.state.height ?? 0;
-    if (width <= 0 || height <= 0) {
-      return 16 / 9;
-    }
-    return width / height;
+    await player.playOrPause();
   }
 
-  Widget _buildVideoSurface(ThemeData theme) {
+  Future<void> _seekRelative(Duration delta) async {
+    final player = _player;
+    if (!_isReady || player == null) {
+      return;
+    }
+    final current = player.state.position;
+    final target = current + delta;
+    await player.seek(target < Duration.zero ? Duration.zero : target);
+  }
+
+  Widget _buildVideoSurface(
+    ThemeData theme, {
+    required bool isTelevision,
+  }) {
     if (_error != null) {
       return Center(
         child: Padding(
@@ -471,7 +544,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                       aspectRatio: aspectRatio,
                       child: Video(
                         controller: videoController,
-                        controls: AdaptiveVideoControls,
+                        controls:
+                            isTelevision ? NoVideoControls : AdaptiveVideoControls,
                         fill: Colors.black,
                         fit: BoxFit.contain,
                       ),
@@ -508,6 +582,21 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       },
     );
   }
+
+  double _currentAspectRatio() {
+    final player = _player;
+    if (!_isReady || player == null) {
+      return 16 / 9;
+    }
+
+    final width = player.state.width ?? 0;
+    final height = player.state.height ?? 0;
+    if (width <= 0 || height <= 0) {
+      return 16 / 9;
+    }
+    return width / height;
+  }
+
 }
 
 class _PlayerStartupOverlay extends StatelessWidget {

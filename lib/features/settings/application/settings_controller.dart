@@ -164,6 +164,16 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(homeHeroStyle: style));
   }
 
+  Future<void> setHomeHeroEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(homeHeroEnabled: enabled));
+  }
+
+  Future<void> setHomeHeroSourceModuleId(String moduleId) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(homeHeroSourceModuleId: moduleId.trim()));
+  }
+
   Future<void> toggleHomeModule(String id, bool enabled) async {
     final current = state.valueOrNull ?? await _repository.load();
     final next = current.copyWith(

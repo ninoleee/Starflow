@@ -89,6 +89,10 @@ final homeEnabledModulesProvider = Provider<List<HomeModuleConfig>>((ref) {
       .toList();
 });
 
+final homeHeroModuleCandidatesProvider = Provider<List<HomeModuleConfig>>((ref) {
+  return ref.watch(homeEnabledModulesProvider);
+});
+
 final homeModuleByIdProvider =
     Provider.family<HomeModuleConfig?, String>((ref, moduleId) {
   final normalizedModuleId = moduleId.trim();
@@ -147,11 +151,12 @@ final homeSectionProvider =
         localStorageCacheRepository: localStorageCacheRepository,
       );
     case HomeModuleType.librarySection:
+      final sourceKind = _resolveSourceKind(settings, module.sourceId);
       final sectionItems = module.isLibrarySection
           ? await mediaRepository.fetchLibrary(
               sourceId: module.sourceId,
               sectionId: module.sectionId,
-              limit: 6,
+              limit: _homeModuleFetchLimit(module, sourceKind: sourceKind),
             )
           : const <MediaItem>[];
       return _buildLibrarySection(
@@ -208,6 +213,17 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
 
 void primeHomeModules(Ref ref) {
   _primeHomeModulesWithReader(ref.read);
+}
+
+int _homeModuleFetchLimit(
+  HomeModuleConfig module, {
+  required MediaSourceKind sourceKind,
+}) {
+  if (module.type == HomeModuleType.librarySection &&
+      sourceKind == MediaSourceKind.emby) {
+    return 20;
+  }
+  return 6;
 }
 
 void primeHomeModulesFromWidget(WidgetRef ref) {
