@@ -542,10 +542,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             await ref.read(smartStrmWebhookClientProvider).triggerTask(
                   webhookUrl: storage.smartStrmWebhookUrl,
                   taskName: storage.smartStrmTaskName,
-                  storagePath: _smartStrmStoragePathForSave(
-                    storage: storage,
-                    response: response,
-                  ),
+                  storagePath: storage.quarkSaveFolderPath == '/'
+                      ? ''
+                      : storage.quarkSaveFolderPath,
                   delay: smartStrmDelaySeconds,
                 );
         triggeredTask = true;
@@ -619,17 +618,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   int _networkStorageDelaySeconds(NetworkStorageConfig storage) {
     final configured = storage.refreshDelaySeconds;
     return configured <= 0 ? 1 : configured;
-  }
-
-  String _smartStrmStoragePathForSave({
-    required NetworkStorageConfig storage,
-    required QuarkSaveResult response,
-  }) {
-    final configuredPath = storage.quarkSaveFolderPath.trim();
-    if (configuredPath.isNotEmpty && configuredPath != '/') {
-      return configuredPath;
-    }
-    return response.targetFolderPath == '/' ? '' : response.targetFolderPath;
   }
 
   String _smartStrmSuccessMessage(
