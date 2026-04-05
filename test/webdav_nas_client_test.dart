@@ -300,6 +300,57 @@ void main() {
       expect(items.map((item) => item.episodeNumber), containsAll([1, 2]));
     });
 
+    test('treats plain numeric root files as a single implicit season',
+        () async {
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/FamilyCourt/') {
+            return http.Response.bytes(
+              utf8.encode(_familyCourtRootPropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/FamilyCourt/01%204K.(mp4).strm') {
+            return http.Response(
+              'https://media.example.com/family-court/e01.m3u8\n',
+              200,
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/FamilyCourt/02%204K.(mp4).strm') {
+            return http.Response(
+              'https://media.example.com/family-court/e02.m3u8\n',
+              200,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'nas-family-court',
+          name: 'Family Court NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/Shows/FamilyCourt/',
+          enabled: true,
+          webDavStructureInferenceEnabled: true,
+        ),
+        limit: 20,
+      );
+
+      expect(items, hasLength(2));
+      expect(items.every((item) => item.itemType == 'episode'), isTrue);
+      expect(items.every((item) => item.seasonNumber == 1), isTrue);
+      expect(items.map((item) => item.episodeNumber), containsAll([1, 2]));
+    });
+
     test('treats root files as specials when sibling folders are seasons',
         () async {
       final client = WebDavNasClient(
@@ -904,6 +955,43 @@ const _chenLuyuRootPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
         <d:displayname>陈鲁豫E02.strm</d:displayname>
         <d:resourcetype />
         <d:getcontenttype>text/plain</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _familyCourtRootPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/FamilyCourt/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>FamilyCourt</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FamilyCourt/01%204K.(mp4).strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>01 4K.(mp4).strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+        <d:getcontentlength>128</d:getcontentlength>
+        <d:getlastmodified>Sun, 05 Apr 2026 10:01:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FamilyCourt/02%204K.(mp4).strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>02 4K.(mp4).strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+        <d:getcontentlength>128</d:getcontentlength>
+        <d:getlastmodified>Sun, 05 Apr 2026 10:02:00 GMT</d:getlastmodified>
       </d:prop>
     </d:propstat>
   </d:response>

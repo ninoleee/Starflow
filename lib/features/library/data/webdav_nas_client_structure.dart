@@ -317,7 +317,8 @@ extension _WebDavNasClientStructure on WebDavNasClient {
 
     final hasImplicitRootEpisodes = childGroups.isEmpty &&
         directItems.length >= 2 &&
-        directExplicitEpisodeCount >= 2;
+        (directExplicitEpisodeCount >= 2 ||
+            _looksLikeImplicitRootEpisodeBatch(directItems));
     if (hasImplicitRootEpisodes) {
       webDavTrace(
         'structure.plan.implicitSeason',
@@ -500,6 +501,54 @@ extension _WebDavNasClientStructure on WebDavNasClient {
         recognition.seasonNumber != null ||
         recognition.episodeNumber != null ||
         recognition.itemType.trim().toLowerCase() == 'episode';
+  }
+
+  bool _looksLikeImplicitRootEpisodeBatch(
+    List<_PendingWebDavScannedItem> items,
+  ) {
+    if (items.length < 2) {
+      return false;
+    }
+    final numberedItems = items
+        .where(
+          (item) => _parseBareEpisodeNumberFromPath(item.actualAddress) != null,
+        )
+        .length;
+    return numberedItems == items.length;
+  }
+
+  int? _parseBareEpisodeNumberFromPath(String actualAddress) {
+    final rawName = actualAddress.split('/').last.trim();
+    if (rawName.isEmpty) {
+      return null;
+    }
+    final fileName = _decodePathSegment(rawName);
+    var baseName = fileName.replaceFirst(RegExp(r'\.[^.]+$'), '');
+    baseName = baseName.replaceFirst(
+      RegExp(r'\.\((mp4|mkv|avi|mov|ts|m2ts|strm)\)$', caseSensitive: false),
+      '',
+    );
+    final match = RegExp(
+      r'^\s*(?:ep(?:isode)?\s*)?0*(\d{1,3})(.*)$',
+      caseSensitive: false,
+    ).firstMatch(baseName);
+    if (match == null) {
+      return null;
+    }
+    final episodeNumber = int.tryParse(match.group(1) ?? '');
+    if (episodeNumber == null || episodeNumber <= 0) {
+      return null;
+    }
+    final remainder = (match.group(2) ?? '')
+        .replaceAll(
+          RegExp(
+            r'\b(?:4k|8k|2160p|1080p|720p|480p|hdr|dv|uhd|sd|hd|hevc|h265|h264|x265|x264|aac|ddp|dd|atmos|remux|webdl|web-dl|webrip|bluray|bdrip|proper|repack|mp4|mkv|avi|mov|ts|m2ts)\b',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .replaceAll(RegExp(r'[\s._\-\[\]\(\)]+'), '');
+    return remainder.isEmpty ? episodeNumber : null;
   }
 
   String _buildExplicitSeasonGroupKey(int seasonNumber) {
