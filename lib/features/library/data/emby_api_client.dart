@@ -4,12 +4,12 @@ import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 final embyApiClientProvider = Provider<EmbyApiClient>((ref) {
-  final client = http.Client();
-  ref.onDispose(client.close);
+  final client = ref.watch(starflowHttpClientProvider);
   return EmbyApiClient(client);
 });
 

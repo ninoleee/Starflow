@@ -1127,3 +1127,95 @@ Try `flutter pub outdated` for more information.
 [        ] MetadataProvider: Loaded debug metadata for module: packages/starflow/features/bootstrap/presentation/bootstrap_page.dart
 [        ] MetadataProvider: Loaded debug metadata for module: packages/starflow/features/bootstrap/application/bootstrap_controller.dart
 [  +34 ms] DwdsInjector: Injected debugging metadata for entrypoint at http://localhost:52679/main_module.bootstrap.js
+[+12986 ms] DevHandler: VmService proxy responded with an error:
+            {jsonrpc: 2.0, id: 3, error: {code: -32602, message: The stream `Timer` is not supported on web devices}}
+[  +48 ms] DwdsVmClient: Registering service extension: ext.dwds.emitEvent
+[        ] DwdsVmClient: Registering service extension: ext.dwds.reload
+[        ] DwdsVmClient: Registering service extension: ext.dwds.restart
+[        ] DwdsVmClient: Registering service extension: ext.dwds.screenshot
+[        ] DwdsVmClient: Registering service extension: ext.dwds.sendEvent
+[        ] DwdsVmClient: Registering service extension: _flutter.listViews
+[  +29 ms] DevHandler: Debug service listening on ws://127.0.0.1:55277/B4uOasXW-9M=/ws
+
+[+2695 ms] ChromeProxyService: Initializing expression compiler for main_module.bootstrap.js
+[ +100 ms] DevHandler: Chrome proxy service initialized successfully
+[   +3 ms] ChromeProxyService: Caching package:flutter/src/widgets/widget_inspector.dart in expression compiler worker
+[  +27 ms] DevHandler: VmService proxy responded with an error:
+           {jsonrpc: 2.0, id: 10, error: {code: -32601, message: Method not found, data: {jsonrpc: 2.0, method: _setStreamIncludePrivateMembers, id: 10, params: {streamId: Stdout, includePrivateMembers: false}}}}
+[   +3 ms] DevHandler: VmService proxy responded with an error:
+           {jsonrpc: 2.0, id: 11, error: {code: -32601, message: Method not found, data: {jsonrpc: 2.0, method: _setStreamIncludePrivateMembers, id: 11, params: {streamId: Stderr, includePrivateMembers: false}}}}
+[  +13 ms] DevHandler: VmService proxy responded with an error:
+           {jsonrpc: 2.0, id: 13, error: {code: -32601, message: Method not found, data: {jsonrpc: 2.0, method: _setStreamIncludePrivateMembers, id: 13, params: {streamId: Isolate, includePrivateMembers: false}}}}
+[   +6 ms] DevHandler: VmService proxy responded with an error:
+           {jsonrpc: 2.0, id: 14, error: {code: -32601, message: Method not found, data: {jsonrpc: 2.0, method: _setStreamIncludePrivateMembers, id: 14, params: {streamId: Extension, includePrivateMembers: false}}}}
+[   +4 ms] Debug service listening on ws://127.0.0.1:55277/B4uOasXW-9M=/ws
+[        ] A Dart VM Service on Edge is available at: http://127.0.0.1:55277/B4uOasXW-9M=
+[   +1 ms] The Flutter DevTools debugger and profiler on Edge is available at: http://127.0.0.1:55277/B4uOasXW-9M=/devtools/?uri=ws://127.0.0.1:55277/B4uOasXW-9M=/ws
+[  +14 ms] Starting application from main method in: org-dartlang-app:/web_entrypoint.dart.
+[ +157 ms] ExpressionEvaluator: Evaluating "() { return true; }" at packages/flutter/src/cupertino/text_form_field_row.dart
+[  +54 ms] ExpressionEvaluator: Evaluating JS: "function () {
+             try {
+               return ((() => {var sentinel = {}; var output = function() {
+                   let dart = dartDevEmbedder.importLibrary("dart:_runtime", function(lib) {
+                     dart = lib;
+                   });
+                   let dart_rti = dartDevEmbedder.importLibrary("dart:_rti", function(lib) {
+                     dart_rti = lib;
+                   });
+                   let dartx = dartDevEmbedder.importLibrary("dartx", function(lib) {
+                     dartx = lib;
+                   });
+                   var T = {
+                     VoidTobool: () => (T.VoidTobool = dart.constFn(dart_rti._Universe.eval(dart.typeUniverse, "core|bool()", true)))()
+                   };
+                   return dart.fn(() => true, T.VoidTobool());
+                 }(); if (output === sentinel) throw Error("Value not found in scope");return output?._boundMethod || output;})())();
+             } catch (error) {
+               return error.name + ": " + error.message;
+             }
+           }" with scope: {}
+[   +6 ms] ExpressionEvaluator: Evaluated "() { return true; }" to "{type: boolean, value: true}"
+[+1611 ms] A message on the flutter/lifecycle channel was discarded before it could be handled.
+           This happens when a plugin sends messages to the framework side before the framework has had an opportunity to register a listener. See the ChannelBuffers API documentation for details on how to configure the channel to expect more messages, or to expect messages to get discarded:
+             https://api.flutter.dev/flutter/dart-ui/ChannelBuffers-class.html
+[+1331 ms] A message on the flutter/lifecycle channel was discarded before it could be handled.
+           This happens when a plugin sends messages to the framework side before the framework has had an opportunity to register a listener. See the ChannelBuffers API documentation for details on how to configure the channel to expect more messages, or to expect messages to get discarded:
+             https://api.flutter.dev/flutter/dart-ui/ChannelBuffers-class.html
+[+4473 ms] ══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞═════════════════════════════════════════════════════════
+[   +3 ms] The following assertion was thrown during layout:
+[        ] A RenderFlex overflowed by 2.0 pixels on the bottom.
+[        ] The relevant error-causing widget was:
+[        ]   Column Column:file:///D:/codes/Starflow/lib/features/home/presentation/home_page.dart:508:14
+[   +1 ms] The overflowing RenderFlex has an orientation of Axis.vertical.
+[   +2 ms] The edge of the RenderFlex that is overflowing has been marked in the rendering with a yellow and
+[        ] black striped pattern. This is usually caused by the contents being too big for the RenderFlex.
+[   +2 ms] Consider applying a flex factor (e.g. using an Expanded widget) to force the children of the
+[   +4 ms] RenderFlex to fit within the available space instead of being sized to their natural size.
+[        ] This is considered an error condition because it indicates that there is content that cannot be
+[   +1 ms] seen. If the content is legitimately bigger than the available space, consider clipping it with a
+[   +1 ms] ClipRect widget before putting it in the flex, or using a scrollable container rather than a Flex,
+[        ] like a ListView.
+[        ] The specific RenderFlex in question is: RenderFlex#59646 OVERFLOWING:
+[   +2 ms]   creator: Column ← SizedBox ← _PosterPlaceholderCard ← RepaintBoundary ← IndexedSemantics ←
+[        ]     _SelectionKeepAlive ← NotificationListener<KeepAliveNotification> ← KeepAlive ← AutomaticKeepAlive
+[        ]     ← KeyedSubtree ← SliverList ← SliverPadding ← ⋯
+[        ]   parentData: <none> (can use size)
+[   +1 ms]   constraints: BoxConstraints(w=154.0, h=246.0)
+[        ]   size: Size(154.0, 246.0)
+[        ]   direction: vertical
+[        ]   mainAxisAlignment: start
+[        ]   mainAxisSize: max
+[        ]   crossAxisAlignment: start
+[        ]   textDirection: ltr
+[        ]   verticalDirection: down
+[        ]   spacing: 0.0
+[        ] ◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤
+[        ] ════════════════════════════════════════════════════════════════════════════════════════════════════
+[   +1 ms] Another exception was thrown: A RenderFlex overflowed by 2.0 pixels on the bottom.
+[        ] Another exception was thrown: A RenderFlex overflowed by 2.0 pixels on the bottom.
+[   +2 ms] Another exception was thrown: A RenderFlex overflowed by 2.0 pixels on the bottom.
+[        ] Another exception was thrown: A RenderFlex overflowed by 2.0 pixels on the bottom.
+[        ] Another exception was thrown: A RenderFlex overflowed by 2.0 pixels on the bottom.
+[   +2 ms] Another exception was thrown: A RenderFlex overflowed by 2.0 pixels on the bottom.
+[   +1 ms] Another exception was thrown: A RenderFlex overflowed by 2.0 pixels on the bottom.
+[        ] Another exception was thrown: A RenderFlex overflowed by 2.0 pixels on the bottom.

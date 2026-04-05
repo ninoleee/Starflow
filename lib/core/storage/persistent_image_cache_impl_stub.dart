@@ -1,13 +1,15 @@
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/core/storage/persistent_image_cache_api.dart';
 
-PersistentImageCache createPersistentImageCache() => _StubPersistentImageCache();
+PersistentImageCache createPersistentImageCache() =>
+    _StubPersistentImageCache(StarflowHttpClient(http.Client()));
 
 class _StubPersistentImageCache implements PersistentImageCache {
-  _StubPersistentImageCache() : _client = http.Client();
+  _StubPersistentImageCache(this._client);
 
   final http.Client _client;
 

@@ -2,10 +2,10 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:starflow/core/network/starflow_http_client.dart';
 
 final tmdbMetadataClientProvider = Provider<TmdbMetadataClient>((ref) {
-  final client = http.Client();
-  ref.onDispose(client.close);
+  final client = ref.watch(starflowHttpClientProvider);
   return TmdbMetadataClient(client);
 });
 

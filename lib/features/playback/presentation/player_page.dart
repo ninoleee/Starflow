@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -245,7 +246,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       return const _StartupProbeResult();
     }
 
-    final client = http.Client();
+    final client = StarflowHttpClient(http.Client());
     StreamSubscription<List<int>>? subscription;
     final completer = Completer<_StartupProbeResult>();
     final stopwatch = Stopwatch();

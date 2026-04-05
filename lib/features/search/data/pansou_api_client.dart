@@ -2,11 +2,11 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 
 final panSouApiClientProvider = Provider<PanSouApiClient>((ref) {
-  final client = http.Client();
-  ref.onDispose(client.close);
+  final client = ref.watch(starflowHttpClientProvider);
   return PanSouApiClient(client);
 });
 

@@ -2,14 +2,14 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/utils/webdav_trace.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/nas_media_recognition.dart';
 import 'package:xml/xml.dart';
 
 final webDavNasClientProvider = Provider<WebDavNasClient>((ref) {
-  final client = http.Client();
-  ref.onDispose(client.close);
+  final client = ref.watch(starflowHttpClientProvider);
   return WebDavNasClient(client);
 });
 
