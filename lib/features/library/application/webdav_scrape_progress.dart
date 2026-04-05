@@ -34,6 +34,9 @@ class WebDavScrapeProgress {
   final String detail;
 
   double? get fraction {
+    if (stage == WebDavScrapeStage.scanning) {
+      return null;
+    }
     if (total <= 0) {
       return null;
     }
@@ -42,6 +45,9 @@ class WebDavScrapeProgress {
   }
 
   String get summaryLabel {
+    if (stage == WebDavScrapeStage.scanning) {
+      return stage.label;
+    }
     if (total <= 0) {
       return stage.label;
     }

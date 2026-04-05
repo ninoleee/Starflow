@@ -5,6 +5,7 @@ import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -131,6 +132,8 @@ final homeSectionProvider =
   final settings = ref.watch(appSettingsProvider);
   final mediaRepository = ref.read(mediaRepositoryProvider);
   final discoveryRepository = ref.read(discoveryRepositoryProvider);
+  final localStorageCacheRepository =
+      ref.read(localStorageCacheRepositoryProvider);
 
   switch (module.type) {
     case HomeModuleType.recentlyAdded:
@@ -139,6 +142,7 @@ final homeSectionProvider =
         module: module,
         items: recentItems,
         subtitle: module.description,
+        localStorageCacheRepository: localStorageCacheRepository,
       );
     case HomeModuleType.librarySection:
       final sectionItems = module.isLibrarySection
@@ -152,6 +156,7 @@ final homeSectionProvider =
         module: module,
         items: sectionItems,
         subtitle: module.description,
+        localStorageCacheRepository: localStorageCacheRepository,
         viewAllTarget: module.isLibrarySection
             ? LibraryCollectionTarget(
                 title: module.title,
@@ -233,21 +238,33 @@ bool _needsCarousel(List<HomeModuleConfig> modules) {
   return modules.any((item) => item.type == HomeModuleType.doubanCarousel);
 }
 
-HomeSectionViewModel _buildLibrarySection({
+Future<HomeSectionViewModel> _buildLibrarySection({
   required HomeModuleConfig module,
   required List<MediaItem> items,
   required String subtitle,
+  required LocalStorageCacheRepository localStorageCacheRepository,
   LibraryCollectionTarget? viewAllTarget,
-}) {
-  final viewModels = items.map((item) {
-    return HomeCardViewModel(
-      id: item.id,
-      title: item.title,
-      subtitle: item.year > 0 ? '${item.year}' : '',
-      posterUrl: item.posterUrl,
-      detailTarget: MediaDetailTarget.fromMediaItem(item),
+}) async {
+  final viewModels = <HomeCardViewModel>[];
+  for (final item in items) {
+    final seedTarget = MediaDetailTarget.fromMediaItem(item);
+    final cachedTarget =
+        await localStorageCacheRepository.loadDetailTarget(seedTarget);
+    final detailTarget = cachedTarget == null
+        ? seedTarget
+        : _mergeCachedHomeDetailTarget(seedTarget, cachedTarget);
+    viewModels.add(
+      HomeCardViewModel(
+        id: item.id,
+        title: item.title,
+        subtitle: item.year > 0 ? '${item.year}' : '',
+        posterUrl: detailTarget.posterUrl.trim().isNotEmpty
+            ? detailTarget.posterUrl
+            : item.posterUrl,
+        detailTarget: detailTarget,
+      ),
     );
-  }).toList();
+  }
 
   return HomeSectionViewModel(
     id: module.id,
@@ -259,6 +276,54 @@ HomeSectionViewModel _buildLibrarySection({
     viewAllTarget: viewAllTarget == null
         ? null
         : HomeSectionViewAllTarget.collection(viewAllTarget),
+  );
+}
+
+MediaDetailTarget _mergeCachedHomeDetailTarget(
+  MediaDetailTarget seed,
+  MediaDetailTarget cached,
+) {
+  return seed.copyWith(
+    posterUrl:
+        seed.posterUrl.trim().isNotEmpty ? seed.posterUrl : cached.posterUrl,
+    posterHeaders: seed.posterHeaders.isNotEmpty
+        ? seed.posterHeaders
+        : cached.posterHeaders,
+    backdropUrl: seed.backdropUrl.trim().isNotEmpty
+        ? seed.backdropUrl
+        : cached.backdropUrl,
+    backdropHeaders: seed.backdropHeaders.isNotEmpty
+        ? seed.backdropHeaders
+        : cached.backdropHeaders,
+    logoUrl: seed.logoUrl.trim().isNotEmpty ? seed.logoUrl : cached.logoUrl,
+    logoHeaders:
+        seed.logoHeaders.isNotEmpty ? seed.logoHeaders : cached.logoHeaders,
+    bannerUrl:
+        seed.bannerUrl.trim().isNotEmpty ? seed.bannerUrl : cached.bannerUrl,
+    bannerHeaders: seed.bannerHeaders.isNotEmpty
+        ? seed.bannerHeaders
+        : cached.bannerHeaders,
+    extraBackdropUrls: seed.extraBackdropUrls.isNotEmpty
+        ? seed.extraBackdropUrls
+        : cached.extraBackdropUrls,
+    extraBackdropHeaders: seed.extraBackdropHeaders.isNotEmpty
+        ? seed.extraBackdropHeaders
+        : cached.extraBackdropHeaders,
+    overview: seed.hasUsefulOverview ? seed.overview : cached.overview,
+    durationLabel: seed.durationLabel.trim().isNotEmpty
+        ? seed.durationLabel
+        : cached.durationLabel,
+    ratingLabels:
+        seed.ratingLabels.isNotEmpty ? seed.ratingLabels : cached.ratingLabels,
+    genres: seed.genres.isNotEmpty ? seed.genres : cached.genres,
+    directors: seed.directors.isNotEmpty ? seed.directors : cached.directors,
+    actors: seed.actors.isNotEmpty ? seed.actors : cached.actors,
+    actorProfiles: seed.actorProfiles.isNotEmpty
+        ? seed.actorProfiles
+        : cached.actorProfiles,
+    doubanId: seed.doubanId.trim().isNotEmpty ? seed.doubanId : cached.doubanId,
+    imdbId: seed.imdbId.trim().isNotEmpty ? seed.imdbId : cached.imdbId,
+    playbackTarget: seed.playbackTarget ?? cached.playbackTarget,
   );
 }
 

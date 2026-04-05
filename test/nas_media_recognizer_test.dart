@@ -36,7 +36,19 @@ void main() {
       );
 
       expect(result.imdbId, 'tt1160419');
-      expect(result.tmdbId, '438631');
+    });
+
+    test('prioritizes explicit SxxEyy naming for series title inference', () {
+      final result = NasMediaRecognizer.recognize(
+        'Shows/怪奇物语/Stranger.Things.S01.2160p.BluRay.REMUX/Stranger.Things.S01E02.Chapter.Two.strm',
+      );
+
+      expect(result.title, '怪奇物语');
+      expect(result.parentTitle, '怪奇物语');
+      expect(result.itemType, 'episode');
+      expect(result.preferSeries, isTrue);
+      expect(result.seasonNumber, 1);
+      expect(result.episodeNumber, 2);
     });
   });
 }

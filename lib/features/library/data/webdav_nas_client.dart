@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/domain/nas_media_recognition.dart';
 import 'package:xml/xml.dart';
 
 final webDavNasClientProvider = Provider<WebDavNasClient>((ref) {
@@ -241,20 +242,20 @@ class WebDavNasClient {
       localEntry: localPosterEntry,
       remoteUrl: nfoMetadata?.thumbUrl ?? '',
     );
-    final backdropArtwork = localExtraBackdropEntries.isNotEmpty &&
-            localBackdropEntry == null
-        ? _ArtworkResolution(
-            url: localExtraBackdropEntries.first.uri.toString(),
-            headers: _headers(source),
-          )
-        : _resolveArtworkCandidate(
-            source: source,
-            localEntry: localBackdropEntry,
-            remoteUrl: nfoMetadata?.backdropUrl ??
-                (nfoMetadata?.extraBackdropUrls.isNotEmpty == true
-                    ? nfoMetadata!.extraBackdropUrls.first
-                    : ''),
-          );
+    final backdropArtwork =
+        localExtraBackdropEntries.isNotEmpty && localBackdropEntry == null
+            ? _ArtworkResolution(
+                url: localExtraBackdropEntries.first.uri.toString(),
+                headers: _headers(source),
+              )
+            : _resolveArtworkCandidate(
+                source: source,
+                localEntry: localBackdropEntry,
+                remoteUrl: nfoMetadata?.backdropUrl ??
+                    (nfoMetadata?.extraBackdropUrls.isNotEmpty == true
+                        ? nfoMetadata!.extraBackdropUrls.first
+                        : ''),
+              );
     final logoArtwork = _resolveArtworkCandidate(
       source: source,
       localEntry: localLogoEntry,
@@ -267,8 +268,8 @@ class WebDavNasClient {
     );
     final extraBackdropUrls = localExtraBackdropEntries.isNotEmpty
         ? localExtraBackdropEntries.map((entry) => entry.uri.toString()).toList(
-            growable: false,
-          )
+              growable: false,
+            )
         : nfoMetadata?.extraBackdropUrls ?? const <String>[];
     final extraBackdropHeaders = localExtraBackdropEntries.isNotEmpty
         ? _headers(source)
@@ -450,37 +451,20 @@ class WebDavNasClient {
     return source.endpoint.trim();
   }
 
-  /// 详情页「地址」用：去掉与 [source.endpoint] 相同的前缀（避免 `/dav` 误匹配 `/dav2`）。
+  /// 详情页「地址」用：优先显示完整的 WebDAV 路径，而不是播放直链。
   String _relativePathForNasDisplay(
     Uri resource, {
     required MediaSourceConfig source,
   }) {
-    final base = source.endpoint.trim();
-    final full = resource.toString();
-    final baseOk = base.isNotEmpty &&
-        full.startsWith(base) &&
-        (full.length == base.length ||
-            base.endsWith('/') ||
-            '/?#'.contains(full[base.length]));
-    if (baseOk) {
-      var tail = full.substring(base.length);
-      if (tail.startsWith('/')) {
-        tail = tail.substring(1);
-      }
-      if (tail.isEmpty) {
-        return full;
-      }
+    final path = resource.path.trim();
+    if (path.isNotEmpty) {
       try {
-        return Uri.decodeComponent(tail);
+        return Uri.decodeFull(path);
       } catch (_) {
-        return tail;
+        return path;
       }
     }
-    var path = resource.path;
-    if (path.startsWith('/')) {
-      path = path.substring(1);
-    }
-    return path.isNotEmpty ? path : full;
+    return resource.toString();
   }
 
   bool _isPlayableVideo(_WebDavEntry entry) {
@@ -1257,9 +1241,7 @@ class WebDavNasClient {
   }
 
   _NfoStreamDetails _parseNfoStreamDetails(XmlElement root) {
-    final streamDetails = root.descendants
-        .whereType<XmlElement>()
-        .firstWhere(
+    final streamDetails = root.descendants.whereType<XmlElement>().firstWhere(
           (element) => element.name.local == 'streamdetails',
           orElse: () => XmlElement(XmlName('streamdetails')),
         );
@@ -1295,7 +1277,8 @@ class WebDavNasClient {
       container: container,
       videoCodec: video == null ? '' : _xmlSingleText(video, 'codec'),
       audioCodec: audio == null ? '' : _xmlSingleText(audio, 'codec'),
-      width: video == null ? null : _tryParseInt(_xmlSingleText(video, 'width')),
+      width:
+          video == null ? null : _tryParseInt(_xmlSingleText(video, 'width')),
       height:
           video == null ? null : _tryParseInt(_xmlSingleText(video, 'height')),
       bitrate: _tryParseInt(
@@ -1307,9 +1290,8 @@ class WebDavNasClient {
   _InferredMediaInfo _inferMediaInfo(_WebDavEntry entry) {
     final path = entry.uri.path.toLowerCase();
     final fileName = entry.name.toLowerCase();
-    final extension = path.contains('.')
-        ? path.substring(path.lastIndexOf('.') + 1)
-        : '';
+    final extension =
+        path.contains('.') ? path.substring(path.lastIndexOf('.') + 1) : '';
 
     int? width;
     int? height;
@@ -1363,8 +1345,8 @@ class WebDavNasClient {
       audioCodec = 'aac';
     }
 
-    final bitrateMatch = RegExp(r'(?<!\d)(\d{1,3})\s?mbps(?!\d)')
-        .firstMatch(fileName);
+    final bitrateMatch =
+        RegExp(r'(?<!\d)(\d{1,3})\s?mbps(?!\d)').firstMatch(fileName);
     if (bitrateMatch != null) {
       bitrate = int.tryParse(bitrateMatch.group(1) ?? '') == null
           ? null
@@ -1466,9 +1448,17 @@ class WebDavNasClient {
 
     final filesByDirectory = <String, List<_PendingWebDavScannedItem>>{};
     final childVideoCountsByDirectory = <String, Map<String, int>>{};
+    final recognitionByResource = <String, NasMediaRecognition>{};
+    final explicitEpisodeCountByDirectory = <String, int>{};
     for (final item in items) {
       final directoryKey = _segmentsKey(item.relativeDirectories);
       filesByDirectory.putIfAbsent(directoryKey, () => []).add(item);
+      final recognition = NasMediaRecognizer.recognize(item.actualAddress);
+      recognitionByResource[item.resourceId] = recognition;
+      if (_hasExplicitEpisodeCue(item, recognition)) {
+        explicitEpisodeCountByDirectory[directoryKey] =
+            (explicitEpisodeCountByDirectory[directoryKey] ?? 0) + 1;
+      }
       for (var depth = 0; depth < item.relativeDirectories.length; depth++) {
         final parentKey = _segmentsKey(item.relativeDirectories.take(depth));
         final childName = item.relativeDirectories[depth];
@@ -1482,6 +1472,11 @@ class WebDavNasClient {
 
     bool isSeriesRoot(String directoryKey) {
       final directVideoCount = filesByDirectory[directoryKey]?.length ?? 0;
+      final directExplicitEpisodeCount =
+          explicitEpisodeCountByDirectory[directoryKey] ?? 0;
+      if (directVideoCount >= 2 && directExplicitEpisodeCount >= 2) {
+        return true;
+      }
       final childVideoCounts =
           childVideoCountsByDirectory[directoryKey] ?? const <String, int>{};
       if (childVideoCounts.isEmpty) {
@@ -1504,7 +1499,9 @@ class WebDavNasClient {
     };
     final seriesRootForResource = <String, String>{};
     for (final item in items) {
-      for (var length = 0; length <= item.relativeDirectories.length; length++) {
+      for (var length = 0;
+          length <= item.relativeDirectories.length;
+          length++) {
         final candidateKey =
             _segmentsKey(item.relativeDirectories.take(length));
         if (seriesRootKeys.contains(candidateKey)) {
@@ -1521,11 +1518,18 @@ class WebDavNasClient {
     for (final item in items) {
       final seriesRootKey = seriesRootForResource[item.resourceId];
       final seed = item.metadataSeed;
+      final recognition = recognitionByResource[item.resourceId];
+      final explicitSeasonNumber =
+          seed.seasonNumber ?? recognition?.seasonNumber;
+      final explicitEpisodeNumber =
+          seed.episodeNumber ?? recognition?.episodeNumber;
       if (seriesRootKey != null) {
         final rootDepth = _segmentsFromKey(seriesRootKey).length;
-        final seasonGroupKey = item.relativeDirectories.length == rootDepth
-            ? _directSeasonGroupKey
-            : item.relativeDirectories[rootDepth];
+        final seasonGroupKey = explicitSeasonNumber != null
+            ? _buildExplicitSeasonGroupKey(explicitSeasonNumber)
+            : item.relativeDirectories.length == rootDepth
+                ? _directSeasonGroupKey
+                : item.relativeDirectories[rootDepth];
         final seasonOrder = seasonOrderByRoot.putIfAbsent(
           seriesRootKey,
           () => <String>[],
@@ -1553,7 +1557,16 @@ class WebDavNasClient {
           directVideoCount == 1 &&
           childDirectoryCount == 0) {
         nextItems.add(
-          item.copyWith(metadataSeed: seed.copyWith(itemType: 'movie')),
+          item.copyWith(
+            metadataSeed: seed.copyWith(
+              itemType:
+                  explicitEpisodeNumber != null || explicitSeasonNumber != null
+                      ? 'episode'
+                      : 'movie',
+              seasonNumber: explicitSeasonNumber,
+              episodeNumber: explicitEpisodeNumber,
+            ),
+          ),
         );
       } else {
         nextItems.add(item);
@@ -1566,14 +1579,31 @@ class WebDavNasClient {
         seasonNumberByGroup['${entry.key}::$_directSeasonGroupKey'] = 0;
       }
       final orderedGroups = entry.value
-        .where((group) => group != _directSeasonGroupKey)
-        .toList(growable: false)
-        ..sort((left, right) => left.toLowerCase().compareTo(
-              right.toLowerCase(),
-            ));
-      for (var index = 0; index < orderedGroups.length; index++) {
-        seasonNumberByGroup['${entry.key}::${orderedGroups[index]}'] =
-            index + 1;
+          .where((group) => group != _directSeasonGroupKey)
+          .toList(growable: false)
+        ..sort((left, right) {
+          final leftExplicit = _parseExplicitSeasonGroupKey(left);
+          final rightExplicit = _parseExplicitSeasonGroupKey(right);
+          if (leftExplicit != null || rightExplicit != null) {
+            if (leftExplicit == null) {
+              return 1;
+            }
+            if (rightExplicit == null) {
+              return -1;
+            }
+            return leftExplicit.compareTo(rightExplicit);
+          }
+          return left.toLowerCase().compareTo(right.toLowerCase());
+        });
+      var nextFallbackSeasonNumber = 1;
+      for (final group in orderedGroups) {
+        final explicitSeasonNumber = _parseExplicitSeasonGroupKey(group);
+        final resolvedSeasonNumber =
+            explicitSeasonNumber ?? nextFallbackSeasonNumber;
+        seasonNumberByGroup['${entry.key}::$group'] = resolvedSeasonNumber;
+        if (explicitSeasonNumber == null) {
+          nextFallbackSeasonNumber += 1;
+        }
       }
     }
 
@@ -1587,14 +1617,19 @@ class WebDavNasClient {
         );
       for (var index = 0; index < orderedEpisodes.length; index++) {
         final item = orderedEpisodes[index];
+        final recognition = recognitionByResource[item.resourceId];
+        final explicitSeasonNumber =
+            item.metadataSeed.seasonNumber ?? recognition?.seasonNumber;
+        final explicitEpisodeNumber =
+            item.metadataSeed.episodeNumber ?? recognition?.episodeNumber;
         final specialGroupSuffix = '::$_directSeasonGroupKey';
-        final isDirectSeasonGroup =
-            entry.key.endsWith(specialGroupSuffix);
-        final resolvedSeasonNumber =
-            seasonNumber ?? (isDirectSeasonGroup ? 0 : 1);
+        final isDirectSeasonGroup = entry.key.endsWith(specialGroupSuffix);
+        final resolvedSeasonNumber = explicitSeasonNumber ??
+            seasonNumber ??
+            (isDirectSeasonGroup ? 0 : 1);
         episodeOverrides[item.resourceId] = item.metadataSeed.copyWith(
           seasonNumber: resolvedSeasonNumber,
-          episodeNumber: item.metadataSeed.episodeNumber ?? index + 1,
+          episodeNumber: explicitEpisodeNumber ?? index + 1,
         );
       }
     }
@@ -1607,6 +1642,28 @@ class WebDavNasClient {
           ),
         )
         .toList(growable: false);
+  }
+
+  bool _hasExplicitEpisodeCue(
+    _PendingWebDavScannedItem item,
+    NasMediaRecognition recognition,
+  ) {
+    return item.metadataSeed.seasonNumber != null ||
+        item.metadataSeed.episodeNumber != null ||
+        recognition.seasonNumber != null ||
+        recognition.episodeNumber != null ||
+        recognition.itemType.trim().toLowerCase() == 'episode';
+  }
+
+  String _buildExplicitSeasonGroupKey(int seasonNumber) {
+    return '__season__:$seasonNumber';
+  }
+
+  int? _parseExplicitSeasonGroupKey(String value) {
+    if (!value.startsWith('__season__:')) {
+      return null;
+    }
+    return int.tryParse(value.substring('__season__:'.length));
   }
 
   List<String> _relativeDirectorySegmentsFromRoot({
@@ -1799,8 +1856,7 @@ class WebDavMetadataSeed {
       bannerUrl: bannerUrl ?? this.bannerUrl,
       bannerHeaders: bannerHeaders ?? this.bannerHeaders,
       extraBackdropUrls: extraBackdropUrls ?? this.extraBackdropUrls,
-      extraBackdropHeaders:
-          extraBackdropHeaders ?? this.extraBackdropHeaders,
+      extraBackdropHeaders: extraBackdropHeaders ?? this.extraBackdropHeaders,
       year: year ?? this.year,
       durationLabel: durationLabel ?? this.durationLabel,
       genres: genres ?? this.genres,

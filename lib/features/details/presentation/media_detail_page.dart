@@ -106,7 +106,8 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
 
   final playback = nextTarget.playbackTarget;
   if (playback == null) {
-    DebugTraceOnce.logMetadata(traceKey, 'playback-resolve', 'skipped no playback target');
+    DebugTraceOnce.logMetadata(
+        traceKey, 'playback-resolve', 'skipped no playback target');
     await saveResolvedTarget();
     return nextTarget;
   }
@@ -461,6 +462,9 @@ MediaDetailTarget _mergeCachedDetailTarget({
     sectionName: current.sectionName.trim().isNotEmpty
         ? current.sectionName
         : cached.sectionName,
+    resourcePath: current.resourcePath.trim().isNotEmpty
+        ? current.resourcePath
+        : cached.resourcePath,
     doubanId:
         current.doubanId.trim().isNotEmpty ? current.doubanId : cached.doubanId,
     imdbId: current.imdbId.trim().isNotEmpty ? current.imdbId : cached.imdbId,
@@ -1828,7 +1832,12 @@ List<_ResourceFact> _buildResourceFacts(MediaDetailTarget target) {
   final facts = <_ResourceFact>[];
   final streamUrl = playback?.streamUrl.trim() ?? '';
   final actualAddress = playback?.actualAddress.trim() ?? '';
-  final displayAddress = actualAddress.isNotEmpty ? actualAddress : streamUrl;
+  final resourcePath = target.resourcePath.trim();
+  final displayAddress = actualAddress.isNotEmpty
+      ? actualAddress
+      : resourcePath.isNotEmpty
+          ? resourcePath
+          : streamUrl;
   final format = playback?.formatLabel.trim() ?? '';
   final fileSize = playback?.fileSizeLabel.trim() ?? '';
   final resolution = playback?.resolutionLabel.trim() ?? '';

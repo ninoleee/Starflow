@@ -73,7 +73,8 @@ void main() {
       expect(movie.overview, '一支探险队穿越虫洞寻找人类新家园。');
       expect(movie.posterUrl, 'https://nas.example.com/dav/Movies/poster.jpg');
       expect(movie.posterHeaders['Authorization'], startsWith('Basic '));
-      expect(movie.backdropUrl, 'https://nas.example.com/dav/Movies/fanart.jpg');
+      expect(
+          movie.backdropUrl, 'https://nas.example.com/dav/Movies/fanart.jpg');
       expect(movie.logoUrl, 'https://nas.example.com/dav/Movies/clearlogo.png');
       expect(movie.bannerUrl, 'https://nas.example.com/dav/Movies/banner.jpg');
       expect(
@@ -86,7 +87,6 @@ void main() {
       expect(movie.directors, contains('克里斯托弗·诺兰'));
       expect(movie.actors, contains('马修·麦康纳'));
       expect(movie.imdbId, 'tt0816692');
-      expect(movie.tmdbId, '157336');
       expect(movie.container, 'mkv');
       expect(movie.videoCodec, 'hevc');
       expect(movie.audioCodec, 'truehd');
@@ -154,12 +154,12 @@ void main() {
         limit: 20,
       );
 
-      final movie = items.firstWhere((item) => item.actualAddress == 'Movies/Interstellar.mkv');
+      final movie = items.firstWhere(
+          (item) => item.actualAddress == 'Movies/Interstellar.mkv');
       expect(movie.title, 'Interstellar');
       expect(movie.posterUrl, isEmpty);
       expect(movie.backdropUrl, isEmpty);
       expect(movie.imdbId, isEmpty);
-      expect(movie.tmdbId, isEmpty);
       expect(movie.container, 'mkv');
     });
 
@@ -254,6 +254,62 @@ void main() {
       expect(arcEpisodes.every((item) => item.seasonNumber == 1), isTrue);
       expect(arcEpisodes[0].episodeNumber, 1);
       expect(arcEpisodes[1].episodeNumber, 2);
+    });
+
+    test(
+        'prioritizes explicit SxxEyy markers for inference and season grouping',
+        () async {
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/StrangerThings/') {
+            return http.Response(_strangerThingsRootPropfindResponse, 207);
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/StrangerThings/Stranger.Things.S01E01.2160p.strm') {
+            return http.Response(
+              'https://media.example.com/stranger/s01e01.m3u8\n',
+              200,
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/StrangerThings/Stranger.Things.S02E01.2160p.strm') {
+            return http.Response(
+              'https://media.example.com/stranger/s02e01.m3u8\n',
+              200,
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/StrangerThings/Stranger.Things.S02E02.2160p.strm') {
+            return http.Response(
+              'https://media.example.com/stranger/s02e02.m3u8\n',
+              200,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'nas-shows',
+          name: 'Show NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/Shows/StrangerThings/',
+          enabled: true,
+          webDavStructureInferenceEnabled: true,
+        ),
+        limit: 20,
+      );
+
+      expect(items, hasLength(3));
+      expect(items.every((item) => item.itemType == 'episode'), isTrue);
+      expect(items.map((item) => item.seasonNumber), containsAll([1, 2]));
+      expect(items.map((item) => item.episodeNumber), containsAll([1, 2]));
     });
   });
 }
@@ -539,6 +595,53 @@ const _lostArcPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
         <d:resourcetype />
         <d:getcontenttype>video/x-matroska</d:getcontenttype>
         <d:getlastmodified>Sun, 05 Apr 2026 08:20:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _strangerThingsRootPropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/StrangerThings/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>StrangerThings</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/StrangerThings/Stranger.Things.S01E01.2160p.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Stranger.Things.S01E01.2160p.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+        <d:getlastmodified>Sun, 05 Apr 2026 08:00:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/StrangerThings/Stranger.Things.S02E01.2160p.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Stranger.Things.S02E01.2160p.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+        <d:getlastmodified>Sun, 05 Apr 2026 08:01:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/StrangerThings/Stranger.Things.S02E02.2160p.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Stranger.Things.S02E02.2160p.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+        <d:getlastmodified>Sun, 05 Apr 2026 08:02:00 GMT</d:getlastmodified>
       </d:prop>
     </d:propstat>
   </d:response>

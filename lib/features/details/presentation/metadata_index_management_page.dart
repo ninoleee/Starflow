@@ -9,7 +9,6 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
-import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/presentation/library_collection_page.dart';
 import 'package:starflow/features/library/presentation/library_page.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
@@ -97,7 +96,7 @@ class _MetadataIndexManagementPageState
 
     final settings = ref.read(appSettingsProvider);
 
-    final wmdbFuture = () async {
+    final Future<(MetadataMatchResult?, String)> wmdbFuture = () async {
       try {
         final result = await ref.read(wmdbMetadataClientProvider).matchTitle(
               query: query,
@@ -111,7 +110,7 @@ class _MetadataIndexManagementPageState
       }
     }();
 
-    final tmdbFuture = () async {
+    final Future<(MetadataMatchResult?, String)> tmdbFuture = () async {
       final token = settings.tmdbReadAccessToken.trim();
       if (token.isEmpty) {
         return (null, '未配置 TMDB Read Access Token。');
@@ -132,7 +131,7 @@ class _MetadataIndexManagementPageState
       }
     }();
 
-    final imdbFuture = () async {
+    final Future<(ImdbRatingPreview?, String)> imdbFuture = () async {
       try {
         final result = await ref.read(imdbRatingClientProvider).previewMatch(
               query: query,
@@ -145,19 +144,21 @@ class _MetadataIndexManagementPageState
       }
     }();
 
-    final resolved = await Future.wait([wmdbFuture, tmdbFuture, imdbFuture]);
+    final wmdbResolved = await wmdbFuture;
+    final tmdbResolved = await tmdbFuture;
+    final imdbResolved = await imdbFuture;
     if (!mounted) {
       return;
     }
 
     setState(() {
       _isSearching = false;
-      _wmdbResult = resolved[0].$1 as MetadataMatchResult?;
-      _wmdbMessage = resolved[0].$2 as String;
-      _tmdbResult = resolved[1].$1 as MetadataMatchResult?;
-      _tmdbMessage = resolved[1].$2 as String;
-      _imdbPreview = resolved[2].$1 as ImdbRatingPreview?;
-      _imdbMessage = resolved[2].$2 as String;
+      _wmdbResult = wmdbResolved.$1;
+      _wmdbMessage = wmdbResolved.$2;
+      _tmdbResult = tmdbResolved.$1;
+      _tmdbMessage = tmdbResolved.$2;
+      _imdbPreview = imdbResolved.$1;
+      _imdbMessage = imdbResolved.$2;
     });
   }
 

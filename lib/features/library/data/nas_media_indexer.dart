@@ -45,7 +45,7 @@ class NasMediaIndexer {
   static const int _defaultRefreshLimitPerCollection = 1200;
   static const String _seriesGroupPrefix = 'webdav-series';
   static const String _seasonGroupPrefix = 'webdav-season';
-  static const String _webDavMetadataSchemaVersion = 'webdav-v3';
+  static const String _webDavMetadataSchemaVersion = 'webdav-v4';
 
   final NasMediaIndexStore _store;
   final WebDavNasClient _webDavNasClient;
@@ -504,6 +504,19 @@ class NasMediaIndexer {
     final parentTitle = record.parentTitle.trim();
     final recognizedTitle = record.recognizedTitle.trim();
     final itemType = record.item.itemType.trim().toLowerCase();
+    final hasCanonicalIds = record.item.imdbId.trim().isNotEmpty ||
+        record.item.doubanId.trim().isNotEmpty;
+    if (itemType == 'episode' && hasCanonicalIds && parentTitle.isNotEmpty) {
+      return parentTitle;
+    }
+    final structureSeriesTitle = _seriesTitleFromStructurePath(record);
+    if (structureSeriesTitle.isNotEmpty &&
+        (itemType == 'episode' ||
+            record.preferSeries ||
+            record.item.seasonNumber != null ||
+            record.recognizedSeasonNumber != null)) {
+      return structureSeriesTitle;
+    }
     if (itemType == 'episode') {
       if (parentTitle.isNotEmpty) {
         return parentTitle;
@@ -519,6 +532,62 @@ class NasMediaIndexer {
       return recognizedTitle;
     }
     return itemTitle;
+  }
+
+  String _seriesTitleFromStructurePath(NasMediaIndexRecord record) {
+    final resourceSegments = _pathSegments(record.resourcePath);
+    if (resourceSegments.isEmpty) {
+      return '';
+    }
+
+    final hasSeasonHint = record.item.seasonNumber != null ||
+        record.recognizedSeasonNumber != null;
+    final sectionSegments = _pathSegments(_uriPath(record.sectionId));
+
+    var commonLength = 0;
+    while (commonLength < sectionSegments.length &&
+        commonLength < resourceSegments.length &&
+        sectionSegments[commonLength] == resourceSegments[commonLength]) {
+      commonLength += 1;
+    }
+
+    final relativeDirectories = resourceSegments.length <= commonLength + 1
+        ? <String>[]
+        : resourceSegments.sublist(commonLength, resourceSegments.length - 1);
+    if (relativeDirectories.isNotEmpty) {
+      return relativeDirectories.first.trim();
+    }
+
+    if (hasSeasonHint && sectionSegments.isNotEmpty) {
+      return sectionSegments.last.trim();
+    }
+    return '';
+  }
+
+  String _uriPath(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return '';
+    }
+    final uri = Uri.tryParse(trimmed);
+    if (uri != null && uri.path.isNotEmpty) {
+      return uri.path;
+    }
+    return trimmed;
+  }
+
+  List<String> _pathSegments(String value) {
+    return value
+        .split('/')
+        .map((segment) => segment.trim())
+        .where((segment) => segment.isNotEmpty)
+        .map((segment) {
+      try {
+        return Uri.decodeComponent(segment);
+      } catch (_) {
+        return segment;
+      }
+    }).toList(growable: false);
   }
 
   String _buildSeriesGroupKey(NasMediaIndexRecord record, String title) {
@@ -615,9 +684,9 @@ class NasMediaIndexer {
       sourceName: base.item.sourceName,
       sourceKind: base.item.sourceKind,
       streamUrl: '',
-      actualAddress: base.parentTitle.trim().isNotEmpty
-          ? base.parentTitle.trim()
-          : base.item.actualAddress,
+      actualAddress: _commonDirectoryPath(
+        records.map((record) => record.resourcePath),
+      ),
       streamHeaders: const {},
       imdbId: imdbId,
       doubanId: doubanId,
@@ -662,7 +731,9 @@ class NasMediaIndexer {
       sourceName: base.item.sourceName,
       sourceKind: base.item.sourceKind,
       streamUrl: '',
-      actualAddress: base.item.actualAddress,
+      actualAddress: _commonDirectoryPath(
+        records.map((record) => record.resourcePath),
+      ),
       streamHeaders: const {},
       seasonNumber: seasonNumber,
       imdbId: base.item.imdbId,
@@ -694,6 +765,62 @@ class NasMediaIndexer {
 
   String _buildSeriesItemId(String seriesKey) {
     return '$_seriesGroupPrefix|${Uri.encodeComponent(seriesKey)}';
+  }
+
+  String _commonDirectoryPath(Iterable<String> paths) {
+    final directories = paths
+        .map(_directoryPath)
+        .where((value) => value.trim().isNotEmpty)
+        .toList(growable: false);
+    if (directories.isEmpty) {
+      return '';
+    }
+    if (directories.length == 1) {
+      return directories.first;
+    }
+
+    final splitDirectories =
+        directories.map((value) => value.split('/')).toList(growable: false);
+    final first = splitDirectories.first;
+    var maxLength = first.length;
+    for (final segments in splitDirectories.skip(1)) {
+      if (segments.length < maxLength) {
+        maxLength = segments.length;
+      }
+    }
+
+    var commonLength = 0;
+    while (commonLength < maxLength) {
+      final candidate = first[commonLength];
+      final matchesAll = splitDirectories.every(
+        (segments) => segments[commonLength] == candidate,
+      );
+      if (!matchesAll) {
+        break;
+      }
+      commonLength += 1;
+    }
+
+    if (commonLength == 0) {
+      return directories.first;
+    }
+    final joined = first.take(commonLength).join('/');
+    return joined.isEmpty ? '/' : joined;
+  }
+
+  String _directoryPath(String path) {
+    final normalized = path.trim().replaceAll('\\', '/');
+    if (normalized.isEmpty) {
+      return '';
+    }
+    final trimmed = normalized.endsWith('/')
+        ? normalized.substring(0, normalized.length - 1)
+        : normalized;
+    final lastSlash = trimmed.lastIndexOf('/');
+    if (lastSlash <= 0) {
+      return trimmed;
+    }
+    return trimmed.substring(0, lastSlash);
   }
 
   String _buildSeasonItemId(String seriesKey, int seasonNumber) {

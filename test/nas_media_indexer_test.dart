@@ -288,6 +288,95 @@ void main() {
       containsAll(['Pilot (1)', 'Pilot (2)']),
     );
   });
+
+  test(
+      'NasMediaIndexer keeps structure-inferred documentary folders grouped under one series',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-doc-series',
+      name: 'WebDAV Docs',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/movies/strm/quark/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final collection = const MediaCollection(
+      id: 'https://nas.example.com/movies/strm/quark/',
+      title: 'Quark',
+      sourceId: 'webdav-doc-series',
+      sourceName: 'WebDAV Docs',
+      sourceKind: MediaSourceKind.nas,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'food-0',
+          path: '食贫道/《电诈 摇滚 吴哥窟》.(mp4).strm',
+          title: '《电诈 摇滚 吴哥窟》',
+          itemType: 'episode',
+          seasonNumber: 0,
+          episodeNumber: 1,
+        ),
+        _PendingTestItem(
+          id: 'food-1',
+          path: '食贫道/1.日本/食贫道 东瀛大宝荐 迷失东京.(mp4).strm',
+          title: '食贫道 东瀛大宝荐 迷失东京',
+          itemType: 'episode',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+        _PendingTestItem(
+          id: 'food-2',
+          path: '食贫道/2.巴以/食贫道 巴以观察.(mp4).strm',
+          title: '食贫道 巴以观察',
+          itemType: 'episode',
+          seasonNumber: 2,
+          episodeNumber: 1,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    final library = await indexer.loadLibrary(
+      source,
+      scopedCollections: [collection],
+      limit: 20,
+    );
+    expect(library, hasLength(1));
+    final series = library.single;
+    expect(series.itemType, 'series');
+    expect(series.title, '食贫道');
+
+    final seasons = await indexer.loadChildren(
+      source,
+      parentId: series.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 20,
+    );
+    expect(seasons.map((item) => item.seasonNumber), containsAll([0, 1, 2]));
+    expect(seasons.firstWhere((item) => item.seasonNumber == 0).title, '特别篇');
+  });
 }
 
 _PendingTestItem _episodeItem({

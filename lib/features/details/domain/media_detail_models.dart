@@ -54,6 +54,7 @@ class MediaDetailTarget {
     this.itemType = '',
     this.sectionId = '',
     this.sectionName = '',
+    this.resourcePath = '',
     this.doubanId = '',
     this.imdbId = '',
     this.sourceKind,
@@ -87,6 +88,7 @@ class MediaDetailTarget {
   final String itemType;
   final String sectionId;
   final String sectionName;
+  final String resourcePath;
   final String doubanId;
   final String imdbId;
   final MediaSourceKind? sourceKind;
@@ -167,6 +169,7 @@ class MediaDetailTarget {
     String? itemType,
     String? sectionId,
     String? sectionName,
+    String? resourcePath,
     String? doubanId,
     String? imdbId,
     MediaSourceKind? sourceKind,
@@ -183,8 +186,7 @@ class MediaDetailTarget {
       bannerUrl: bannerUrl ?? this.bannerUrl,
       bannerHeaders: bannerHeaders ?? this.bannerHeaders,
       extraBackdropUrls: extraBackdropUrls ?? this.extraBackdropUrls,
-      extraBackdropHeaders:
-          extraBackdropHeaders ?? this.extraBackdropHeaders,
+      extraBackdropHeaders: extraBackdropHeaders ?? this.extraBackdropHeaders,
       overview: overview ?? this.overview,
       year: year ?? this.year,
       durationLabel: durationLabel ?? this.durationLabel,
@@ -201,6 +203,7 @@ class MediaDetailTarget {
       itemType: itemType ?? this.itemType,
       sectionId: sectionId ?? this.sectionId,
       sectionName: sectionName ?? this.sectionName,
+      resourcePath: resourcePath ?? this.resourcePath,
       doubanId: doubanId ?? this.doubanId,
       imdbId: imdbId ?? this.imdbId,
       sourceKind: sourceKind ?? this.sourceKind,
@@ -249,6 +252,7 @@ class MediaDetailTarget {
       itemType: item.itemType,
       sectionId: item.sectionId,
       sectionName: item.sectionName,
+      resourcePath: item.actualAddress,
       doubanId: item.doubanId,
       imdbId: item.imdbId,
       sourceKind: item.sourceKind,
@@ -285,6 +289,7 @@ class MediaDetailTarget {
       'itemType': itemType,
       'sectionId': sectionId,
       'sectionName': sectionName,
+      'resourcePath': resourcePath,
       'doubanId': doubanId,
       'imdbId': imdbId,
       'sourceKind': sourceKind?.name,
@@ -351,6 +356,7 @@ class MediaDetailTarget {
       itemType: json['itemType'] as String? ?? '',
       sectionId: json['sectionId'] as String? ?? '',
       sectionName: json['sectionName'] as String? ?? '',
+      resourcePath: json['resourcePath'] as String? ?? '',
       doubanId: json['doubanId'] as String? ?? '',
       imdbId: json['imdbId'] as String? ?? '',
       sourceKind: (json['sourceKind'] as String?) == null
