@@ -534,15 +534,19 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           );
       var triggeredTask = false;
       SmartStrmTriggerResult? smartStrmResult;
+      final refreshDelaySeconds = _networkStorageDelaySeconds(storage);
+      final smartStrmDelaySeconds = refreshDelaySeconds;
       if (storage.smartStrmWebhookUrl.trim().isNotEmpty &&
           storage.smartStrmTaskName.trim().isNotEmpty) {
         smartStrmResult =
             await ref.read(smartStrmWebhookClientProvider).triggerTask(
                   webhookUrl: storage.smartStrmWebhookUrl,
                   taskName: storage.smartStrmTaskName,
-                  storagePath: response.targetFolderPath == '/'
-                      ? ''
-                      : response.targetFolderPath,
+                  storagePath: _smartStrmStoragePathForSave(
+                    storage: storage,
+                    response: response,
+                  ),
+                  delay: smartStrmDelaySeconds,
                 );
         triggeredTask = true;
       }
@@ -550,8 +554,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           .map((item) => item.trim())
           .where((item) => item.isNotEmpty)
           .toList(growable: false);
-      final refreshDelaySeconds =
-          storage.refreshDelaySeconds < 0 ? 0 : storage.refreshDelaySeconds;
       if (refreshSourceIds.isNotEmpty) {
         unawaited(
           ref.read(mediaRefreshCoordinatorProvider).refreshSelectedSources(
@@ -566,8 +568,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       final message = response.taskId.isEmpty
           ? '已提交到夸克，保存 ${response.savedCount} 个文件'
           : '已提交到夸克，任务 ${response.taskId}';
-      final strmMessage =
-          triggeredTask ? _smartStrmSuccessMessage(smartStrmResult) : '';
+      final strmMessage = triggeredTask
+          ? _smartStrmSuccessMessage(
+              smartStrmResult,
+              delaySeconds: smartStrmDelaySeconds,
+            )
+          : '';
       final refreshMessage = refreshSourceIds.isEmpty
           ? ''
           : refreshDelaySeconds > 0
@@ -610,7 +616,29 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     }
   }
 
-  String _smartStrmSuccessMessage(SmartStrmTriggerResult? result) {
+  int _networkStorageDelaySeconds(NetworkStorageConfig storage) {
+    final configured = storage.refreshDelaySeconds;
+    return configured <= 0 ? 1 : configured;
+  }
+
+  String _smartStrmStoragePathForSave({
+    required NetworkStorageConfig storage,
+    required QuarkSaveResult response,
+  }) {
+    final configuredPath = storage.quarkSaveFolderPath.trim();
+    if (configuredPath.isNotEmpty && configuredPath != '/') {
+      return configuredPath;
+    }
+    return response.targetFolderPath == '/' ? '' : response.targetFolderPath;
+  }
+
+  String _smartStrmSuccessMessage(
+    SmartStrmTriggerResult? result, {
+    int delaySeconds = 0,
+  }) {
+    if (delaySeconds > 0) {
+      return 'STRM 已延迟 $delaySeconds 秒触发';
+    }
     if (result == null) {
       return '已触发 STRM 任务';
     }

@@ -80,8 +80,12 @@ class _NetworkStorageSettingsPageState
   }
 
   int _refreshDelaySeconds() {
-    final parsed = int.tryParse(_refreshDelayController.text.trim()) ?? 0;
-    return parsed < 0 ? 0 : parsed;
+    final text = _refreshDelayController.text.trim();
+    if (text.isEmpty) {
+      return 1;
+    }
+    final parsed = int.tryParse(text) ?? 1;
+    return parsed <= 0 ? 1 : parsed;
   }
 
   NetworkStorageConfig _buildDraft() {
@@ -183,6 +187,7 @@ class _NetworkStorageSettingsPageState
             webhookUrl: _smartStrmWebhookController.text.trim(),
             taskName: _smartStrmTaskNameController.text.trim(),
             storagePath: _quarkFolderPath == '/' ? '' : _quarkFolderPath,
+            delay: _refreshDelaySeconds(),
           );
       if (!mounted) {
         return;
@@ -331,7 +336,7 @@ class _NetworkStorageSettingsPageState
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
                     labelText: '延迟刷新秒数',
-                    hintText: '0',
+                    hintText: '1',
                   ),
                 ),
                 const SizedBox(height: 12),

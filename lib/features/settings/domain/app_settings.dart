@@ -299,7 +299,7 @@ class NetworkStorageConfig {
     this.smartStrmWebhookUrl = '',
     this.smartStrmTaskName = '',
     this.refreshMediaSourceIds = const [],
-    this.refreshDelaySeconds = 0,
+    this.refreshDelaySeconds = 1,
   });
 
   final String quarkCookie;
@@ -317,7 +317,7 @@ class NetworkStorageConfig {
         quarkSaveFolderId.trim() != '0' ||
         quarkSaveFolderPath.trim() != '/' ||
         refreshMediaSourceIds.isNotEmpty ||
-        refreshDelaySeconds > 0;
+        refreshDelaySeconds != 1;
   }
 
   NetworkStorageConfig copyWith({
@@ -354,6 +354,8 @@ class NetworkStorageConfig {
   }
 
   factory NetworkStorageConfig.fromJson(Map<String, dynamic> json) {
+    final resolvedRefreshDelaySeconds =
+        (json['refreshDelaySeconds'] as num?)?.toInt() ?? 1;
     return NetworkStorageConfig(
       quarkCookie: json['quarkCookie'] as String? ?? '',
       quarkSaveFolderId: json['quarkSaveFolderId'] as String? ?? '0',
@@ -366,7 +368,8 @@ class NetworkStorageConfig {
               .map((item) => item.trim())
               .where((item) => item.isNotEmpty)
               .toList(growable: false),
-      refreshDelaySeconds: (json['refreshDelaySeconds'] as num?)?.toInt() ?? 0,
+      refreshDelaySeconds:
+          resolvedRefreshDelaySeconds <= 0 ? 1 : resolvedRefreshDelaySeconds,
     );
   }
 }

@@ -1,0 +1,172 @@
+[  +27 ms] Artifact Instance of 'MaterialFonts' is not required, skipping update.
+[   +1 ms] Artifact Instance of 'GradleWrapper' is not required, skipping update.
+[        ] Artifact Instance of 'AndroidGenSnapshotArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'AndroidInternalBuildArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'IOSEngineArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'FlutterWebSdk' is not required, skipping update.
+[   +3 ms] Artifact Instance of 'LegacyCanvasKitRemover' is not required, skipping update.
+[        ] Artifact Instance of 'FlutterSdk' is not required, skipping update.
+[        ] Artifact Instance of 'WindowsEngineArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'MacOSEngineArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'LinuxEngineArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'LinuxFuchsiaSDKArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'MacOSFuchsiaSDKArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'FlutterRunnerSDKArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'FlutterRunnerDebugSymbols' is not required, skipping update.
+[        ] Artifact Instance of 'IosUsbArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'IosUsbArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'IosUsbArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'IosUsbArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'IosUsbArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'IosUsbArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'FontSubsetArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'PubDependencies' is not required, skipping update.
+[  +13 ms] Artifact Instance of 'AndroidGenSnapshotArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'AndroidInternalBuildArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'IOSEngineArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'FlutterWebSdk' is not required, skipping update.
+[        ] Artifact Instance of 'FlutterEngineStamp' is not required, skipping update.
+[        ] Artifact Instance of 'LegacyCanvasKitRemover' is not required, skipping update.
+[   +3 ms] Artifact Instance of 'WindowsEngineArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'MacOSEngineArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'LinuxEngineArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'LinuxFuchsiaSDKArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'MacOSFuchsiaSDKArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'FlutterRunnerSDKArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'FlutterRunnerDebugSymbols' is not required, skipping update.
+[  +41 ms] Artifact Instance of 'MaterialFonts' is not required, skipping update.
+[        ] Artifact Instance of 'GradleWrapper' is not required, skipping update.
+[   +2 ms] Artifact Instance of 'AndroidInternalBuildArtifacts' is not required, skipping update.
+[   +1 ms] Artifact Instance of 'IOSEngineArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'FlutterWebSdk' is not required, skipping update.
+[        ] Artifact Instance of 'FlutterEngineStamp' is not required, skipping update.
+[        ] Artifact Instance of 'LegacyCanvasKitRemover' is not required, skipping update.
+[        ] Artifact Instance of 'FlutterSdk' is not required, skipping update.
+[        ] Artifact Instance of 'WindowsEngineArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'MacOSEngineArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'LinuxEngineArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'LinuxFuchsiaSDKArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'MacOSFuchsiaSDKArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'FlutterRunnerSDKArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'FlutterRunnerDebugSymbols' is not required, skipping update.
+[        ] Artifact Instance of 'IosUsbArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'IosUsbArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'IosUsbArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'IosUsbArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'IosUsbArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'IosUsbArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'FontSubsetArtifacts' is not required, skipping update.
+[        ] Artifact Instance of 'PubDependencies' is not required, skipping update.
+[  +68 ms] executing: [D:\codes\Starflow/] C:\dev\flutter\bin\cache\dart-sdk\bin\dart pub --suppress-analytics --directory . get --example
+Resolving dependencies...
+Downloading packages...
+  flutter_lints 5.0.0 (6.0.0 available)
+  flutter_riverpod 2.6.1 (3.3.1 available)
+  go_router 14.8.1 (17.2.0 available)
+  lints 5.1.1 (6.1.0 available)
+  meta 1.17.0 (1.18.2 available)
+  riverpod 2.6.1 (3.2.1 available)
+  test_api 0.7.10 (0.7.11 available)
+  vector_math 2.2.0 (2.3.0 available)
+  win32 5.15.0 (6.0.0 available)
+Got dependencies!
+9 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+[+14029 ms] Found plugin url_launcher at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher-6.3.2\
+[  +12 ms] Found plugin url_launcher_windows at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_windows-3.1.5\
+[  +12 ms] Found plugin url_launcher_web at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_web-2.4.2\
+[  +12 ms] Found plugin url_launcher_macos at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_macos-3.2.5\
+[   +6 ms] Found plugin url_launcher_linux at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_linux-3.2.2\
+[   +7 ms] Found plugin url_launcher_ios at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_ios-6.4.1\
+[   +6 ms] Found plugin url_launcher_android at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_android-6.3.29\
+[   +6 ms] Found plugin shared_preferences at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences-2.5.5\
+[   +6 ms] Found plugin shared_preferences_windows at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_windows-2.4.1\
+[  +10 ms] Found plugin path_provider_windows at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider_windows-2.3.0\
+[  +12 ms] Found plugin shared_preferences_web at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_web-2.4.3\
+[   +8 ms] Found plugin shared_preferences_linux at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_linux-2.4.1\
+[   +4 ms] Found plugin path_provider_linux at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider_linux-2.2.1\
+[   +7 ms] Found plugin shared_preferences_foundation at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_foundation-2.5.6\
+[   +4 ms] Found plugin shared_preferences_android at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_android-2.4.23\
+[  +19 ms] Found plugin path_provider at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider-2.1.5\
+[   +6 ms] Found plugin path_provider_foundation at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider_foundation-2.6.0\
+[  +32 ms] Found plugin path_provider_android at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider_android-2.2.23\
+[   +3 ms] Found plugin media_kit_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_video-2.0.1\
+[   +5 ms] Found plugin wakelock_plus at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\wakelock_plus-1.5.1\
+[  +13 ms] Found plugin package_info_plus at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\package_info_plus-9.0.1\
+[  +40 ms] Found plugin media_kit_libs_windows_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_windows_video-1.0.11\
+[   +3 ms] Found plugin media_kit_libs_macos_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_macos_video-1.1.4\
+[   +2 ms] Found plugin media_kit_libs_linux at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_linux-1.2.1\
+[   +5 ms] Found plugin media_kit_libs_ios_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_ios_video-1.1.4\
+[   +7 ms] Found plugin media_kit_libs_android_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_android_video-1.3.8\
+[ +133 ms] Found plugin url_launcher at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher-6.3.2\
+[   +5 ms] Found plugin url_launcher_windows at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_windows-3.1.5\
+[   +9 ms] Found plugin url_launcher_web at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_web-2.4.2\
+[   +7 ms] Found plugin url_launcher_macos at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_macos-3.2.5\
+[   +3 ms] Found plugin url_launcher_linux at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_linux-3.2.2\
+[   +2 ms] Found plugin url_launcher_ios at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_ios-6.4.1\
+[   +3 ms] Found plugin url_launcher_android at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_android-6.3.29\
+[   +3 ms] Found plugin shared_preferences at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences-2.5.5\
+[   +3 ms] Found plugin shared_preferences_windows at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_windows-2.4.1\
+[   +4 ms] Found plugin path_provider_windows at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider_windows-2.3.0\
+[  +16 ms] Found plugin shared_preferences_web at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_web-2.4.3\
+[   +3 ms] Found plugin shared_preferences_linux at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_linux-2.4.1\
+[   +4 ms] Found plugin path_provider_linux at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider_linux-2.2.1\
+[   +5 ms] Found plugin shared_preferences_foundation at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_foundation-2.5.6\
+[   +3 ms] Found plugin shared_preferences_android at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_android-2.4.23\
+[  +17 ms] Found plugin path_provider at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider-2.1.5\
+[   +3 ms] Found plugin path_provider_foundation at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider_foundation-2.6.0\
+[  +25 ms] Found plugin path_provider_android at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider_android-2.2.23\
+[   +4 ms] Found plugin media_kit_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_video-2.0.1\
+[   +2 ms] Found plugin wakelock_plus at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\wakelock_plus-1.5.1\
+[  +13 ms] Found plugin package_info_plus at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\package_info_plus-9.0.1\
+[  +41 ms] Found plugin media_kit_libs_windows_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_windows_video-1.0.11\
+[   +4 ms] Found plugin media_kit_libs_macos_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_macos_video-1.1.4\
+[   +3 ms] Found plugin media_kit_libs_linux at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_linux-1.2.1\
+[   +3 ms] Found plugin media_kit_libs_ios_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_ios_video-1.1.4\
+[   +3 ms] Found plugin media_kit_libs_android_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_android_video-1.3.8\
+[  +30 ms] Skipping generating web_plugin_registrant.dart because it is up-to-date.
+[  +60 ms] Found plugin url_launcher at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher-6.3.2\
+[   +2 ms] Found plugin url_launcher_windows at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_windows-3.1.5\
+[  +10 ms] Found plugin url_launcher_web at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_web-2.4.2\
+[   +8 ms] Found plugin url_launcher_macos at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_macos-3.2.5\
+[   +3 ms] Found plugin url_launcher_linux at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_linux-3.2.2\
+[   +3 ms] Found plugin url_launcher_ios at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_ios-6.4.1\
+[   +2 ms] Found plugin url_launcher_android at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_android-6.3.29\
+[   +2 ms] Found plugin shared_preferences at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences-2.5.5\
+[   +2 ms] Found plugin shared_preferences_windows at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_windows-2.4.1\
+[   +2 ms] Found plugin path_provider_windows at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider_windows-2.3.0\
+[   +6 ms] Found plugin shared_preferences_web at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_web-2.4.3\
+[   +2 ms] Found plugin shared_preferences_linux at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_linux-2.4.1\
+[   +4 ms] Found plugin path_provider_linux at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider_linux-2.2.1\
+[   +4 ms] Found plugin shared_preferences_foundation at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_foundation-2.5.6\
+[   +2 ms] Found plugin shared_preferences_android at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_android-2.4.23\
+[   +8 ms] Found plugin path_provider at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider-2.1.5\
+[   +2 ms] Found plugin path_provider_foundation at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider_foundation-2.6.0\
+[  +16 ms] Found plugin path_provider_android at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\path_provider_android-2.2.23\
+[   +4 ms] Found plugin media_kit_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_video-2.0.1\
+[   +4 ms] Found plugin wakelock_plus at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\wakelock_plus-1.5.1\
+[   +5 ms] Found plugin package_info_plus at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\package_info_plus-9.0.1\
+[  +31 ms] Found plugin media_kit_libs_windows_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_windows_video-1.0.11\
+[   +1 ms] Found plugin media_kit_libs_macos_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_macos_video-1.1.4\
+[   +1 ms] Found plugin media_kit_libs_linux at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_linux-1.2.1\
+[   +2 ms] Found plugin media_kit_libs_ios_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_ios_video-1.1.4\
+[   +3 ms] Found plugin media_kit_libs_android_video at C:\Users\ninol\AppData\Local\Pub\Cache\hosted\pub.dev\media_kit_libs_android_video-1.3.8\
+[  +15 ms] Generating D:\codes\Starflow\android\app\src\main\java\io\flutter\plugins\GeneratedPluginRegistrant.java
+[   +3 ms] Skipping generating GeneratedPluginRegistrant.java because it is up-to-date.
+[   +7 ms] Skipping generating generated_plugin_registrant.h because it is up-to-date.
+[   +3 ms] Skipping generating generated_plugin_registrant.cc because it is up-to-date.
+[   +3 ms] Skipping generating generated_plugins.cmake because it is up-to-date.
+[   +4 ms] Skipping generating generated_plugin_registrant.h because it is up-to-date.
+[   +1 ms] Skipping generating generated_plugin_registrant.cc because it is up-to-date.
+[   +3 ms] Skipping generating generated_plugins.cmake because it is up-to-date.
+[   +3 ms] Skipping generating GeneratedPluginRegistrant.h because it is up-to-date.
+[   +2 ms] Skipping generating GeneratedPluginRegistrant.m because it is up-to-date.
+[   +3 ms] Skipping generating GeneratedPluginRegistrant.swift because it is up-to-date.
+[  +74 ms] Top-level Gradle build file not found, skipping migration of task "clean".
+[   +2 ms] Android Studio version could not be detected, skipping Gradle-Java version compatibility check.
+[  +29 ms] CMake project not found, skipping support Android 15 16k page size migration.
+[  +12 ms] Using gradle from D:\codes\Starflow\android\gradlew.bat.
+[  +21 ms] LocalFile: 'D:\codes\Starflow\android\build.gradle.kts' doesn't provide an AGP version. Checking settings.
+[   +5 ms] LocalFile: 'D:\codes\Starflow\android\settings.gradle.kts' provides AGP version: 8.11.1
+[   +2 ms] Running Gradle task 'assembleRelease'...
+[   +2 ms] executing: [D:\codes\Starflow\android/] D:\codes\Starflow\android\gradlew.bat --full-stacktrace --info -Pverbose=true -Ptarget-platform=android-arm,android-arm64,android-x64 -Ptarget=lib\main.dart -Pbase-application-name=android.app.Application -Pdart-defines=RkxVVFRFUl9WRVJTSU9OPTMuNDEuNg==,RkxVVFRFUl9DSEFOTkVMPXN0YWJsZQ==,RkxVVFRFUl9HSVRfVVJMPWh0dHBzOi8vZ2l0aHViLmNvbS9mbHV0dGVyL2ZsdXR0ZXIuZ2l0,RkxVVFRFUl9GUkFNRVdPUktfUkVWSVNJT049ZGI1MGUyMDE2OA==,RkxVVFRFUl9FTkdJTkVfUkVWSVNJT049NDI1Y2ZiNTRkMA==,RkxVVFRFUl9EQVJUX1ZFUlNJT049My4xMS40 -Pdart-obfuscation=false -Ptrack-widget-creation=true -Ptree-shake-icons=true assembleRelease
