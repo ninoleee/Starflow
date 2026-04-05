@@ -113,6 +113,7 @@ class WebDavNasClient {
     int limit = 200,
     bool? loadSidecarMetadata,
     bool resetCaches = true,
+    bool Function()? shouldCancel,
   }) async {
     if (resetCaches) {
       _resetScanCaches();
@@ -164,6 +165,7 @@ class WebDavNasClient {
       int remaining, {
       DateTime? directoryModifiedAt,
     }) async {
+      _throwIfCancelled(shouldCancel);
       if (remaining <= 0) {
         return const _DirectoryWalkResult(truncated: true);
       }
@@ -226,6 +228,7 @@ class WebDavNasClient {
         await _propfind(uri, source: source),
         source: source,
       );
+      _throwIfCancelled(shouldCancel);
       _directoryCache[_webDavCacheKey(source, uri)] = entries;
       final directoryEntries =
           entries.where((entry) => !entry.isSelf).toList(growable: false);
@@ -244,6 +247,7 @@ class WebDavNasClient {
         },
       );
       for (final entry in directoryEntries) {
+        _throwIfCancelled(shouldCancel);
         final remainingForEntry = remaining - collected.length;
         if (remainingForEntry <= 0) {
           truncated = true;
@@ -264,6 +268,7 @@ class WebDavNasClient {
             remainingForEntry,
             directoryModifiedAt: entry.modifiedAt,
           );
+          _throwIfCancelled(shouldCancel);
           collected.addAll(childResult.items);
           truncated = truncated || childResult.truncated;
           continue;
@@ -296,7 +301,9 @@ class WebDavNasClient {
                 source: source,
               )
             : _buildBasicMetadataSeed(entry);
+        _throwIfCancelled(shouldCancel);
         final streamUrl = await _resolvePlayableUrl(entry, source: source);
+        _throwIfCancelled(shouldCancel);
         if (streamUrl.trim().isEmpty) {
           webDavTrace(
             'scan.walk.skipEmptyStream',
@@ -359,6 +366,7 @@ class WebDavNasClient {
     }
 
     final walkResult = await walk(rootUri, 0, limit);
+    _throwIfCancelled(shouldCancel);
     final pendingItems = walkResult.items;
     final items = (source.webDavStructureInferenceEnabled
             ? _applyDirectoryStructureInference(pendingItems)
@@ -384,6 +392,7 @@ class WebDavNasClient {
     required String sectionId,
     required String sectionName,
     bool? loadSidecarMetadata,
+    bool Function()? shouldCancel,
   }) async {
     final endpoint = source.endpoint.trim();
     final normalizedResourceId = resourceId.trim();
@@ -408,6 +417,7 @@ class WebDavNasClient {
       await _loadDirectoryEntries(parentUri, source: source),
       source: source,
     );
+    _throwIfCancelled(shouldCancel);
     _WebDavEntry? entry;
     for (final candidate in siblings) {
       if (candidate.isCollection || candidate.isSelf) {
@@ -429,7 +439,9 @@ class WebDavNasClient {
             source: source,
           )
         : _buildBasicMetadataSeed(entry);
+    _throwIfCancelled(shouldCancel);
     final streamUrl = await _resolvePlayableUrl(entry, source: source);
+    _throwIfCancelled(shouldCancel);
     if (streamUrl.trim().isEmpty) {
       return null;
     }
@@ -1344,6 +1356,12 @@ class WebDavNasClient {
     _nfoInflight.clear();
     _directoryCache.clear();
     _directoryInflight.clear();
+  }
+
+  void _throwIfCancelled(bool Function()? shouldCancel) {
+    if (shouldCancel?.call() ?? false) {
+      throw const _WebDavScanCancelledException();
+    }
   }
 
   _DirectorySubtreeCacheEntry? _loadCachedDirectorySubtree({
@@ -2543,6 +2561,10 @@ class WebDavNasException implements Exception {
 
   @override
   String toString() => message;
+}
+
+class _WebDavScanCancelledException implements Exception {
+  const _WebDavScanCancelledException();
 }
 
 class _WebDavEntry {
