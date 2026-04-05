@@ -697,6 +697,172 @@ void main() {
           'Second incremental refresh should not re-read sidecar for unchanged items.',
     );
   });
+
+  test(
+      'NasMediaIndexer keeps structure-inferred episode grouping after background sidecar enrichment',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-structure-merge',
+      name: 'WebDAV Structure Merge',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Shows/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+      webDavSidecarScrapingEnabled: true,
+    );
+    final collection = const MediaCollection(
+      id: 'https://nas.example.com/dav/Shows/',
+      title: '剧集',
+      sourceId: 'webdav-structure-merge',
+      sourceName: 'WebDAV Structure Merge',
+      sourceKind: MediaSourceKind.nas,
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'mystery-1',
+          path: 'Shows/9号秘事 (2014)/Season 01/Episode 01.strm',
+          title: 'Episode 01',
+          itemType: 'episode',
+          seasonNumber: 1,
+          episodeNumber: 1,
+          hasSidecarMatch: true,
+        ),
+        _PendingTestItem(
+          id: 'mystery-2',
+          path: 'Shows/9号秘事 (2014)/Season 01/Episode 02.strm',
+          title: 'Episode 02',
+          itemType: 'episode',
+          seasonNumber: 1,
+          episodeNumber: 2,
+          hasSidecarMatch: true,
+        ),
+      ],
+      scanResourceOverrides: const {
+        'mystery-1': _PendingTestItem(
+          id: 'mystery-1',
+          path: 'Shows/9号秘事 (2014)/Season 01/Episode 01.strm',
+          title: '9号秘事',
+          itemType: '',
+          seasonNumber: 0,
+          episodeNumber: 0,
+          hasSidecarMatch: true,
+        ),
+        'mystery-2': _PendingTestItem(
+          id: 'mystery-2',
+          path: 'Shows/9号秘事 (2014)/Season 01/Episode 02.strm',
+          title: '9号秘事',
+          itemType: '',
+          seasonNumber: 0,
+          episodeNumber: 0,
+          hasSidecarMatch: true,
+        ),
+      },
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(
+      source,
+      scopedCollections: [collection],
+    );
+    await _drainAsyncTasks();
+
+    final library = await indexer.loadLibrary(
+      source,
+      scopedCollections: [collection],
+      limit: 20,
+    );
+    expect(library, hasLength(1));
+    expect(library.single.itemType, 'series');
+    expect(library.single.title, contains('9号秘事'));
+
+    final episodes = await indexer.loadChildren(
+      source,
+      parentId: library.single.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 20,
+    );
+    expect(episodes, hasLength(2));
+    expect(episodes.every((item) => item.itemType == 'episode'), isTrue);
+  });
+
+  test(
+      'NasMediaIndexer skips per-file online matching for structure-inferred episodes',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-episode-online-skip',
+      name: 'WebDAV Episode Online Skip',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Shows/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+      webDavSidecarScrapingEnabled: true,
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: true,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    var wmdbRequestCount = 0;
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'skip-online-1',
+          path: 'Shows/Test Show/Season 01/Episode 01.strm',
+          title: 'Episode 01',
+          itemType: 'episode',
+          seasonNumber: 1,
+          episodeNumber: 1,
+          hasSidecarMatch: true,
+        ),
+      ],
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async {
+          wmdbRequestCount += 1;
+          return http.Response('', 500);
+        }),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    await _drainAsyncTasks();
+
+    expect(wmdbRequestCount, 0);
+  });
 }
 
 _PendingTestItem _episodeItem({
@@ -742,10 +908,12 @@ class _FakeWebDavNasClient extends WebDavNasClient {
   _FakeWebDavNasClient({
     required this.scannedItems,
     this.scanDelay = Duration.zero,
+    this.scanResourceOverrides = const {},
   }) : super(MockClient((request) async => http.Response('', 200)));
 
   final List<_PendingTestItem> scannedItems;
   final Duration scanDelay;
+  final Map<String, _PendingTestItem> scanResourceOverrides;
   int scanCallCount = 0;
   int scanResourceCallCount = 0;
 
@@ -821,7 +989,10 @@ class _FakeWebDavNasClient extends WebDavNasClient {
     bool? loadSidecarMetadata,
   }) async {
     scanResourceCallCount += 1;
-    final matched = scannedItems.where((item) => item.id == resourceId);
+    final override = scanResourceOverrides[resourceId];
+    final matched = override == null
+        ? scannedItems.where((item) => item.id == resourceId)
+        : [override];
     if (matched.isEmpty) {
       return null;
     }

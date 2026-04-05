@@ -25,6 +25,8 @@ class QuarkSaveClient {
     required String shareUrl,
     required String cookie,
     String toPdirFid = '0',
+    String toPdirPath = '/',
+    String saveFolderName = '',
   }) async {
     final trimmedCookie = cookie.trim();
     if (trimmedCookie.isEmpty) {
@@ -51,6 +53,18 @@ class QuarkSaveClient {
       throw const QuarkSaveException('分享链接里没有可保存的文件');
     }
 
+    var resolvedTargetDirectoryId =
+        toPdirFid.trim().isEmpty ? '0' : toPdirFid.trim();
+    final sanitizedFolderName = _sanitizeDirectoryName(saveFolderName);
+    if (sanitizedFolderName.isNotEmpty) {
+      resolvedTargetDirectoryId = await _ensureDirectory(
+        cookie: trimmedCookie,
+        parentFid: resolvedTargetDirectoryId,
+        parentPath: toPdirPath,
+        folderName: sanitizedFolderName,
+      );
+    }
+
     final response = await _client.post(
       Uri.parse('$_baseUrl/1/clouddrive/share/sharepage/save').replace(
         queryParameters: {
@@ -66,7 +80,7 @@ class QuarkSaveClient {
       body: jsonEncode({
         'fid_list': sharedEntries.map((item) => item.fid).toList(),
         'fid_token_list': sharedEntries.map((item) => item.shareFidToken).toList(),
-        'to_pdir_fid': toPdirFid.trim().isEmpty ? '0' : toPdirFid.trim(),
+        'to_pdir_fid': resolvedTargetDirectoryId,
         'pwd_id': parsed.pwdId,
         'stoken': stoken,
         'pdir_fid': '0',
@@ -99,6 +113,70 @@ class QuarkSaveClient {
       parentFid: '0',
     );
     return QuarkConnectionStatus(rootDirectoryCount: directories.length);
+  }
+
+  Future<String> _ensureDirectory({
+    required String cookie,
+    required String parentFid,
+    required String parentPath,
+    required String folderName,
+  }) async {
+    final existingDirectories = await listDirectories(
+      cookie: cookie,
+      parentFid: parentFid,
+    );
+    for (final directory in existingDirectories) {
+      if (directory.name.trim() == folderName) {
+        return directory.fid;
+      }
+    }
+
+    final normalizedParentPath = _normalizeDirectoryPath(parentPath);
+    final targetPath = normalizedParentPath == '/'
+        ? '/$folderName'
+        : '$normalizedParentPath/$folderName';
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/1/clouddrive/file').replace(
+        queryParameters: const {
+          'pr': 'ucpro',
+          'fr': 'pc',
+          'uc_param_str': '',
+        },
+      ),
+      headers: _headers(cookie),
+      body: jsonEncode({
+        'pdir_fid': parentFid.trim().isEmpty ? '0' : parentFid.trim(),
+        'file_name': folderName,
+        'dir_path': targetPath,
+        'dir_init_lock': false,
+      }),
+    );
+    final payload = _decode(response);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
+    }
+    final code = payload['code'] as int? ?? -1;
+    if (code != 0) {
+      throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
+    }
+
+    final createdFid =
+        '${(payload['data'] as Map<String, dynamic>? ?? const {})['fid'] ?? ''}'
+            .trim();
+    if (createdFid.isNotEmpty) {
+      return createdFid;
+    }
+
+    final refreshedDirectories = await listDirectories(
+      cookie: cookie,
+      parentFid: parentFid,
+    );
+    for (final directory in refreshedDirectories) {
+      if (directory.name.trim() == folderName) {
+        return directory.fid;
+      }
+    }
+    throw const QuarkSaveException('夸克文件夹创建成功，但未返回目录 ID');
   }
 
   Future<List<QuarkDirectoryEntry>> listDirectories({
@@ -277,6 +355,25 @@ class QuarkSaveClient {
     return '夸克保存失败：HTTP $statusCode';
   }
 
+  String _normalizeDirectoryPath(String rawPath) {
+    final trimmed = rawPath.trim();
+    if (trimmed.isEmpty || trimmed == '/') {
+      return '/';
+    }
+    final normalized = trimmed.replaceAll('\\', '/');
+    final withLeadingSlash =
+        normalized.startsWith('/') ? normalized : '/$normalized';
+    return withLeadingSlash.replaceFirst(RegExp(r'/+$'), '');
+  }
+
+  String _sanitizeDirectoryName(String rawName) {
+    final sanitized = rawName
+        .replaceAll(RegExp(r'[\\/:*?"<>|]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return sanitized == '.' || sanitized == '..' ? '' : sanitized;
+  }
+
   _ParsedQuarkShare? _parseShareUrl(String rawUrl) {
     final uri = Uri.tryParse(rawUrl.trim());
     if (uri == null) {
@@ -313,10 +410,12 @@ class QuarkSaveResult {
   const QuarkSaveResult({
     required this.taskId,
     required this.savedCount,
+    required this.targetFolderPath,
   });
 
   final String taskId;
   final int savedCount;
+  final String targetFolderPath;
 }
 
 class QuarkConnectionStatus {

@@ -23,6 +23,7 @@ class WebDavScrapeProgress {
     required this.stage,
     required this.current,
     required this.total,
+    this.activityLabel = '',
     this.detail = '',
   });
 
@@ -31,6 +32,7 @@ class WebDavScrapeProgress {
   final WebDavScrapeStage stage;
   final int current;
   final int total;
+  final String activityLabel;
   final String detail;
 
   double? get fraction {
@@ -45,13 +47,14 @@ class WebDavScrapeProgress {
   }
 
   String get summaryLabel {
+    final resolvedLabel = activityLabel.trim().isEmpty ? stage.label : activityLabel;
     if (stage == WebDavScrapeStage.scanning) {
-      return stage.label;
+      return resolvedLabel;
     }
     if (total <= 0) {
-      return stage.label;
+      return resolvedLabel;
     }
-    return '${stage.label} $current / $total';
+    return '$resolvedLabel $current / $total';
   }
 
   WebDavScrapeProgress copyWith({
@@ -60,6 +63,7 @@ class WebDavScrapeProgress {
     WebDavScrapeStage? stage,
     int? current,
     int? total,
+    String? activityLabel,
     String? detail,
   }) {
     return WebDavScrapeProgress(
@@ -68,6 +72,7 @@ class WebDavScrapeProgress {
       stage: stage ?? this.stage,
       current: current ?? this.current,
       total: total ?? this.total,
+      activityLabel: activityLabel ?? this.activityLabel,
       detail: detail ?? this.detail,
     );
   }
@@ -95,6 +100,7 @@ class WebDavScrapeProgressController
         stage: WebDavScrapeStage.scanning,
         current: totalCollections > 0 ? 0 : 1,
         total: totalCollections > 0 ? totalCollections : 1,
+        activityLabel: WebDavScrapeStage.scanning.label,
         detail: detail,
       ),
     );
@@ -123,6 +129,7 @@ class WebDavScrapeProgressController
   void startIndexing({
     required String sourceId,
     required int totalItems,
+    String activityLabel = '',
     String detail = '',
   }) {
     final existing = state[sourceId];
@@ -134,6 +141,8 @@ class WebDavScrapeProgressController
         stage: WebDavScrapeStage.indexing,
         current: totalItems > 0 ? 0 : 1,
         total: totalItems > 0 ? totalItems : 1,
+        activityLabel:
+            activityLabel.trim().isEmpty ? WebDavScrapeStage.indexing.label : activityLabel,
         detail: detail,
       ),
     );

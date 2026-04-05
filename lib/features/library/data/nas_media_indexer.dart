@@ -235,7 +235,7 @@ class NasMediaIndexer {
           forceFullRescan: forceFullRescan,
           resetScanCaches: true,
           clearProgressWhenDone: !shouldStageMetadata,
-          phaseLabel: shouldStageMetadata ? '快速扫描' : '扫描完成',
+          phaseLabel: '建立索引中',
           collectEnrichmentCandidates: shouldStageMetadata,
           requiredSidecarMetadata: requiresSidecarMetadata,
           requiredOnlineMetadata: requiresOnlineMetadata,
@@ -250,6 +250,7 @@ class NasMediaIndexer {
               enrichmentCandidates: phaseResult.enrichmentCandidates,
               includeSidecarMetadata: requiresSidecarMetadata,
               includeOnlineMetadata: requiresOnlineMetadata,
+              forceFullRescan: forceFullRescan,
             );
           }
         }
@@ -492,6 +493,7 @@ class NasMediaIndexer {
     _progressController.startIndexing(
       sourceId: normalizedSourceId,
       totalItems: scannedItems.length,
+      activityLabel: phaseLabel,
       detail: scannedItems.isEmpty ? '没有发现媒体文件' : phaseLabel,
     );
     final existingRecords = forceFullRescan
@@ -615,6 +617,7 @@ class NasMediaIndexer {
     required List<WebDavScannedItem> enrichmentCandidates,
     required bool includeSidecarMetadata,
     required bool includeOnlineMetadata,
+    required bool forceFullRescan,
   }) {
     final taskKey = _buildRefreshTaskKey(source, scopedCollections);
     if (_backgroundEnrichmentTasks.containsKey(taskKey)) {
@@ -627,7 +630,11 @@ class NasMediaIndexer {
           scannedItems: enrichmentCandidates,
           includeSidecarMetadata: includeSidecarMetadata,
           includeOnlineMetadata: includeOnlineMetadata,
-          phaseLabel: '后台补元数据',
+          phaseLabel: forceFullRescan
+              ? '全量补元数据'
+              : ((includeOnlineMetadata || includeSidecarMetadata)
+                    ? '增量补元数据'
+                    : '后台补全'),
         );
       } catch (error) {
         webDavTrace(
@@ -667,6 +674,7 @@ class NasMediaIndexer {
     _progressController.startIndexing(
       sourceId: normalizedSourceId,
       totalItems: scannedItems.length,
+      activityLabel: phaseLabel,
       detail: phaseLabel,
     );
     for (var index = 0; index < scannedItems.length; index++) {
@@ -675,6 +683,8 @@ class NasMediaIndexer {
       if (recordIndex == null) {
         continue;
       }
+      final skipPerFileOnlineMetadata =
+          _shouldSkipIndividualOnlineMetadata(source, scannedItem);
       final enrichedItem = includeSidecarMetadata
           ? await _webDavNasClient.scanResource(
                 source,
@@ -685,24 +695,30 @@ class NasMediaIndexer {
               ) ??
               scannedItem
           : scannedItem;
+      final effectiveItem = _mergeStructureInferredSeed(
+        source: source,
+        original: scannedItem,
+        enriched: enrichedItem,
+      );
       final fingerprint = _buildFingerprint(
         sourceId: source.id,
-        resourcePath: enrichedItem.actualAddress,
-        modifiedAt: enrichedItem.modifiedAt,
-        fileSizeBytes: enrichedItem.fileSizeBytes,
+        resourcePath: effectiveItem.actualAddress,
+        modifiedAt: effectiveItem.modifiedAt,
+        fileSizeBytes: effectiveItem.fileSizeBytes,
       );
       nextRecords[recordIndex] = await _indexScannedItem(
         source,
-        enrichedItem,
+        effectiveItem,
         indexedAt: now,
         fingerprint: fingerprint,
-        applyOnlineMetadata: includeOnlineMetadata,
+        applyOnlineMetadata:
+            includeOnlineMetadata && !skipPerFileOnlineMetadata,
       );
       _progressController.updateIndexing(
         sourceId: normalizedSourceId,
         current: index + 1,
         total: scannedItems.length,
-        detail: enrichedItem.fileName,
+        detail: effectiveItem.fileName,
       );
     }
     final existingState = await _store.loadSourceState(source.id);
@@ -718,6 +734,58 @@ class NasMediaIndexer {
     );
     _notifyIndexChanged?.call();
     _clearProgressSafely(normalizedSourceId);
+  }
+
+  WebDavScannedItem _mergeStructureInferredSeed({
+    required MediaSourceConfig source,
+    required WebDavScannedItem original,
+    required WebDavScannedItem enriched,
+  }) {
+    if (!source.webDavStructureInferenceEnabled) {
+      return enriched;
+    }
+    final originalSeed = original.metadataSeed;
+    final enrichedSeed = enriched.metadataSeed;
+    final mergedSeed = enrichedSeed.copyWith(
+      itemType: originalSeed.itemType.trim().isNotEmpty
+          ? originalSeed.itemType
+          : enrichedSeed.itemType,
+      seasonNumber: originalSeed.seasonNumber ?? enrichedSeed.seasonNumber,
+      episodeNumber: originalSeed.episodeNumber ?? enrichedSeed.episodeNumber,
+    );
+    if (identical(mergedSeed, enrichedSeed) ||
+        (mergedSeed.itemType == enrichedSeed.itemType &&
+            mergedSeed.seasonNumber == enrichedSeed.seasonNumber &&
+            mergedSeed.episodeNumber == enrichedSeed.episodeNumber)) {
+      return enriched;
+    }
+    return WebDavScannedItem(
+      resourceId: enriched.resourceId,
+      fileName: enriched.fileName,
+      actualAddress: enriched.actualAddress,
+      sectionId: enriched.sectionId,
+      sectionName: enriched.sectionName,
+      streamUrl: enriched.streamUrl,
+      streamHeaders: enriched.streamHeaders,
+      addedAt: enriched.addedAt,
+      modifiedAt: enriched.modifiedAt,
+      fileSizeBytes: enriched.fileSizeBytes,
+      metadataSeed: mergedSeed,
+    );
+  }
+
+  bool _shouldSkipIndividualOnlineMetadata(
+    MediaSourceConfig source,
+    WebDavScannedItem item,
+  ) {
+    if (!source.webDavStructureInferenceEnabled) {
+      return false;
+    }
+    final seed = item.metadataSeed;
+    final inferredEpisodeLike = seed.itemType.trim().toLowerCase() == 'episode' ||
+        seed.seasonNumber != null ||
+        seed.episodeNumber != null;
+    return inferredEpisodeLike;
   }
 
   String _buildRefreshTaskKey(
