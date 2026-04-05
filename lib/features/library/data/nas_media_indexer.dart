@@ -409,15 +409,23 @@ class NasMediaIndexer {
       final groups = await Future.wait(
         scopedCollections.map((collection) async {
           controller.throwIfCancelled();
-          final result = await _webDavNasClient.scanLibrary(
-            source,
-            sectionId: collection.id,
-            sectionName: collection.title,
-            limit: limitPerCollection,
-            loadSidecarMetadata: includeSidecarMetadata,
-            resetCaches: resetScanCaches && completedCollections == 0,
-            shouldCancel: controller.isCancelled,
-          );
+          late final List<WebDavScannedItem> result;
+          try {
+            result = await _webDavNasClient.scanLibrary(
+              source,
+              sectionId: collection.id,
+              sectionName: collection.title,
+              limit: limitPerCollection,
+              loadSidecarMetadata: includeSidecarMetadata,
+              resetCaches: resetScanCaches && completedCollections == 0,
+              shouldCancel: controller.isCancelled,
+            );
+          } catch (_) {
+            if (controller.cancelled) {
+              throw const _RefreshCancelledException();
+            }
+            rethrow;
+          }
           controller.throwIfCancelled();
           completedCollections += 1;
           _progressController.updateScanning(
@@ -464,13 +472,21 @@ class NasMediaIndexer {
       sourceName: source.name,
       totalCollections: 1,
     );
-    final rootItems = await _webDavNasClient.scanLibrary(
-      source,
-      limit: limitPerCollection,
-      loadSidecarMetadata: includeSidecarMetadata,
-      resetCaches: resetScanCaches,
-      shouldCancel: controller.isCancelled,
-    );
+    late final List<WebDavScannedItem> rootItems;
+    try {
+      rootItems = await _webDavNasClient.scanLibrary(
+        source,
+        limit: limitPerCollection,
+        loadSidecarMetadata: includeSidecarMetadata,
+        resetCaches: resetScanCaches,
+        shouldCancel: controller.isCancelled,
+      );
+    } catch (_) {
+      if (controller.cancelled) {
+        throw const _RefreshCancelledException();
+      }
+      rethrow;
+    }
     controller.throwIfCancelled();
     _progressController.updateScanning(
       sourceId: source.id,
@@ -638,6 +654,7 @@ class NasMediaIndexer {
     required bool includeSidecarMetadata,
     required bool includeOnlineMetadata,
     required bool forceFullRescan,
+    required _RefreshTaskController controller,
   }) {
     final taskKey = _buildRefreshTaskKey(source, scopedCollections);
     if (_backgroundEnrichmentTasks.containsKey(taskKey)) {
@@ -655,7 +672,10 @@ class NasMediaIndexer {
               : ((includeOnlineMetadata || includeSidecarMetadata)
                   ? '增量补元数据'
                   : '后台补全'),
+          controller: controller,
         );
+      } on _RefreshCancelledException {
+        _clearProgressSafely(source.id);
       } catch (error) {
         webDavTrace(
           'indexer.refresh.background.error',
@@ -669,7 +689,13 @@ class NasMediaIndexer {
         _backgroundEnrichmentTasks.remove(taskKey);
       }
     });
-    _backgroundEnrichmentTasks[taskKey] = future;
+    _backgroundEnrichmentTasks[taskKey] = _RefreshTaskHandle(
+      future: future,
+      mode: forceFullRescan
+          ? _RefreshTaskMode.forceFull
+          : _RefreshTaskMode.incremental,
+      controller: controller,
+    );
   }
 
   Future<void> _refreshSelectedItemsPhase(
@@ -678,9 +704,11 @@ class NasMediaIndexer {
     required bool includeSidecarMetadata,
     required bool includeOnlineMetadata,
     required String phaseLabel,
+    required _RefreshTaskController controller,
   }) async {
     final normalizedSourceId = source.id.trim();
     final now = DateTime.now();
+    controller.throwIfCancelled();
     final records = await _store.loadSourceRecords(source.id);
     if (records.isEmpty || scannedItems.isEmpty) {
       _clearProgressSafely(normalizedSourceId);
@@ -698,20 +726,32 @@ class NasMediaIndexer {
       detail: phaseLabel,
     );
     for (var index = 0; index < scannedItems.length; index++) {
+      controller.throwIfCancelled();
       final scannedItem = scannedItems[index];
       final recordIndex = recordIndexByResourceId[scannedItem.resourceId];
       if (recordIndex == null) {
         continue;
       }
       final enrichedItem = includeSidecarMetadata
-          ? await _webDavNasClient.scanResource(
-              source,
-              resourceId: scannedItem.resourceId,
-              sectionId: scannedItem.sectionId,
-              sectionName: scannedItem.sectionName,
-              loadSidecarMetadata: true,
-            )
+          ? await (() async {
+              try {
+                return await _webDavNasClient.scanResource(
+                  source,
+                  resourceId: scannedItem.resourceId,
+                  sectionId: scannedItem.sectionId,
+                  sectionName: scannedItem.sectionName,
+                  loadSidecarMetadata: true,
+                  shouldCancel: controller.isCancelled,
+                );
+              } catch (_) {
+                if (controller.cancelled) {
+                  throw const _RefreshCancelledException();
+                }
+                rethrow;
+              }
+            })()
           : scannedItem;
+      controller.throwIfCancelled();
       if (includeSidecarMetadata && enrichedItem == null) {
         nextRecords.removeAt(recordIndex);
         recordIndexByResourceId
@@ -754,6 +794,7 @@ class NasMediaIndexer {
         detail: effectiveItem.fileName,
       );
     }
+    controller.throwIfCancelled();
     final existingState = await _store.loadSourceState(source.id);
     await _store.replaceSourceRecords(
       sourceId: source.id,
@@ -2433,4 +2474,47 @@ class _RefreshPhaseResult {
   });
 
   final List<WebDavScannedItem> enrichmentCandidates;
+}
+
+enum _RefreshTaskMode {
+  incremental,
+  forceFull,
+}
+
+class _RefreshTaskHandle {
+  const _RefreshTaskHandle({
+    required this.future,
+    required this.mode,
+    required this.controller,
+  });
+
+  final Future<void> future;
+  final _RefreshTaskMode mode;
+  final _RefreshTaskController controller;
+
+  void cancel() {
+    controller.cancel();
+  }
+}
+
+class _RefreshTaskController {
+  bool _isCancelled = false;
+
+  bool get cancelled => _isCancelled;
+
+  bool Function() get isCancelled => () => _isCancelled;
+
+  void cancel() {
+    _isCancelled = true;
+  }
+
+  void throwIfCancelled() {
+    if (_isCancelled) {
+      throw const _RefreshCancelledException();
+    }
+  }
+}
+
+class _RefreshCancelledException implements Exception {
+  const _RefreshCancelledException();
 }

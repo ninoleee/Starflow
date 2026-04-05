@@ -311,6 +311,7 @@ class _FakeWebDavNasClient extends WebDavNasClient {
     int limit = 200,
     bool? loadSidecarMetadata,
     bool resetCaches = true,
+    bool Function()? shouldCancel,
   }) async {
     final items = sectionId?.trim().isNotEmpty == true
         ? (itemsBySection[sectionId] ?? const <MediaItem>[])

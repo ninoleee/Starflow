@@ -385,6 +385,59 @@ void main() {
       expect(mideast.seasonNumber, 2);
     });
 
+    test('treats a single explicit season folder as series structure',
+        () async {
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/New%20Show/') {
+            return http.Response.bytes(
+              utf8.encode(_newShowRootPropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/New%20Show/Season%2001/') {
+            return http.Response.bytes(
+              utf8.encode(_newShowSeasonOnePropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/New%20Show/Season%2001/Episode%2001.strm') {
+            return http.Response(
+              'https://media.example.com/new-show/e01.m3u8\n',
+              200,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'nas-new-show',
+          name: 'New Show NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/Shows/New%20Show/',
+          enabled: true,
+          webDavStructureInferenceEnabled: true,
+        ),
+        limit: 20,
+      );
+
+      expect(items, hasLength(1));
+      expect(items.single.itemType, 'episode');
+      expect(items.single.seasonNumber, 1);
+      expect(items.single.episodeNumber, 1);
+      expect(items.single.title, 'Episode 01');
+    });
+
     test(
         'prioritizes explicit SxxEyy markers for inference and season grouping',
         () async {
@@ -1161,6 +1214,56 @@ const _repeatableSeasonTwoPropfindResponse =
         <d:resourcetype />
         <d:getcontenttype>video/x-matroska</d:getcontenttype>
         <d:getlastmodified>Sun, 05 Apr 2026 08:06:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _newShowRootPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/New%20Show/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>New Show</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+        <d:getlastmodified>Sun, 05 Apr 2026 10:00:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/New%20Show/Season%2001/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Season 01</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+        <d:getlastmodified>Sun, 05 Apr 2026 10:00:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _newShowSeasonOnePropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/New%20Show/Season%2001/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Season 01</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/New%20Show/Season%2001/Episode%2001.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Episode 01.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+        <d:getcontentlength>128</d:getcontentlength>
+        <d:getlastmodified>Sun, 05 Apr 2026 10:01:00 GMT</d:getlastmodified>
       </d:prop>
     </d:propstat>
   </d:response>

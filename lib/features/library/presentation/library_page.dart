@@ -78,6 +78,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
   int _currentPage = 0;
   bool _isIncrementalRefreshing = false;
   bool _isForceRescanning = false;
+  int _refreshIntentSerial = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -141,7 +142,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                       ),
                     ),
                     OutlinedButton.icon(
-                      onPressed: _isIncrementalRefreshing || _isForceRescanning
+                      onPressed: _isForceRescanning
                           ? null
                           : () => _confirmForceRescan(rebuildableSourceIds),
                       icon: _isForceRescanning
@@ -282,8 +283,10 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('重建 WebDAV 索引'),
-            content: const Text(
-              '这会对当前启用的 WebDAV 媒体源执行全量重扫，忽略已有指纹并重新抓取 sidecar、WMDB、TMDB 和 IMDb 信息。',
+            content: Text(
+              _isIncrementalRefreshing
+                  ? '当前正在执行增量更新。继续后会先停止这次增量，再对当前启用的 WebDAV 媒体源执行全量重扫。'
+                  : '这会对当前启用的 WebDAV 媒体源执行全量重扫，忽略已有指纹并重新抓取 sidecar、WMDB、TMDB 和 IMDb 信息。',
             ),
             actions: [
               TextButton(
@@ -305,7 +308,9 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
   }
 
   Future<void> _runForceRescan(List<String> sourceIds) async {
+    _refreshIntentSerial += 1;
     setState(() {
+      _isIncrementalRefreshing = false;
       _isForceRescanning = true;
     });
     try {
@@ -339,6 +344,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
   }
 
   Future<void> _runIncrementalRefresh(List<String> sourceIds) async {
+    final refreshIntent = ++_refreshIntentSerial;
     setState(() {
       _isIncrementalRefreshing = true;
     });
@@ -347,6 +353,9 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
             sourceIds: sourceIds,
             forceFullRescan: false,
           );
+      if (refreshIntent != _refreshIntentSerial) {
+        return;
+      }
       for (final filter in LibraryFilter.values) {
         ref.invalidate(libraryItemsProvider(filter));
         ref.invalidate(libraryCollectionsProvider(filter));
