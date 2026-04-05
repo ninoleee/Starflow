@@ -156,10 +156,6 @@ class QuarkSaveClient {
       }
     }
 
-    final normalizedParentPath = _normalizeDirectoryPath(parentPath);
-    final targetPath = normalizedParentPath == '/'
-        ? '/$folderName'
-        : '$normalizedParentPath/$folderName';
     final response = await _client.post(
       Uri.parse('$_baseUrl/1/clouddrive/file').replace(
         queryParameters: const {
@@ -172,7 +168,10 @@ class QuarkSaveClient {
       body: jsonEncode({
         'pdir_fid': parentFid.trim().isEmpty ? '0' : parentFid.trim(),
         'file_name': folderName,
-        'dir_path': targetPath,
+        // Quark already knows the parent folder from `pdir_fid`.
+        // Passing the full absolute path here creates an extra wrapper level
+        // such as `/分享/分享/家庭医生`, so only send the child directory name.
+        'dir_path': '/$folderName',
         'dir_init_lock': false,
       }),
     );

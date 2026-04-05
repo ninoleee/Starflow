@@ -155,7 +155,7 @@ void main() {
             final body = jsonDecode(request.body) as Map<String, dynamic>;
             expect(body['pdir_fid'], 'dir-parent');
             expect(body['file_name'], '三体');
-            expect(body['dir_path'], '/电影/三体');
+            expect(body['dir_path'], '/三体');
             return http.Response(
               jsonEncode({
                 'code': 0,
