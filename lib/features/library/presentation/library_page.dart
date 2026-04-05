@@ -137,7 +137,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                             )
                           : const Icon(Icons.refresh_rounded),
                       label: Text(
-                        _isIncrementalRefreshing ? '更新中...' : '增量更新 WebDAV 索引',
+                        _isIncrementalRefreshing ? '更新中...' : '增量更新 WebDAV',
                       ),
                     ),
                     OutlinedButton.icon(
@@ -358,7 +358,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
         SnackBar(
           content: Text(
             sourceIds.length == 1
-                ? '已完成 WebDAV 索引增量更新'
+                ? '已完成 WebDAV 增量更新'
                 : '已完成 ${sourceIds.length} 个 WebDAV 媒体源的增量更新',
           ),
         ),

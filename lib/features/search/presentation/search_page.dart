@@ -529,15 +529,17 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             toPdirFid: storage.quarkSaveFolderId,
           );
       var triggeredTask = false;
+      SmartStrmTriggerResult? smartStrmResult;
       if (storage.smartStrmWebhookUrl.trim().isNotEmpty &&
           storage.smartStrmTaskName.trim().isNotEmpty) {
-        await ref.read(smartStrmWebhookClientProvider).triggerTask(
-              webhookUrl: storage.smartStrmWebhookUrl,
-              taskName: storage.smartStrmTaskName,
-              storagePath: storage.quarkSaveFolderPath == '/'
-                  ? ''
-                  : storage.quarkSaveFolderPath,
-            );
+        smartStrmResult =
+            await ref.read(smartStrmWebhookClientProvider).triggerTask(
+                  webhookUrl: storage.smartStrmWebhookUrl,
+                  taskName: storage.smartStrmTaskName,
+                  storagePath: storage.quarkSaveFolderPath == '/'
+                      ? ''
+                      : storage.quarkSaveFolderPath,
+                );
         triggeredTask = true;
       }
       final refreshSourceIds = storage.refreshMediaSourceIds
@@ -560,6 +562,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       final message = response.taskId.isEmpty
           ? '已提交到夸克，保存 ${response.savedCount} 个文件'
           : '已提交到夸克，任务 ${response.taskId}';
+      final strmMessage =
+          triggeredTask ? _smartStrmSuccessMessage(smartStrmResult) : '';
       final refreshMessage = refreshSourceIds.isEmpty
           ? ''
           : refreshDelaySeconds > 0
@@ -568,7 +572,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '${triggeredTask ? '$message，已触发 STRM 任务' : message}$refreshMessage',
+            '$message${strmMessage.isEmpty ? '' : '，$strmMessage'}$refreshMessage',
           ),
         ),
       );
@@ -600,6 +604,21 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         });
       }
     }
+  }
+
+  String _smartStrmSuccessMessage(SmartStrmTriggerResult? result) {
+    if (result == null) {
+      return '已触发 STRM 任务';
+    }
+    final addedCount = result.addedCount;
+    if (addedCount != null) {
+      return 'STRM 新增成功 $addedCount 条';
+    }
+    final message = result.message.trim();
+    if (message.isNotEmpty) {
+      return 'STRM $message';
+    }
+    return '已触发 STRM 任务';
   }
 }
 
