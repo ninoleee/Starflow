@@ -20,6 +20,12 @@ void main() {
             return http.Response(_moviesPropfindResponse, 207);
           }
 
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Movies/extrafanart/') {
+            return http.Response(_extraFanartPropfindResponse, 207);
+          }
+
           if (request.method == 'GET' &&
               request.url.toString() ==
                   'https://nas.example.com/dav/Movies/movie.nfo') {
@@ -67,6 +73,13 @@ void main() {
       expect(movie.overview, '一支探险队穿越虫洞寻找人类新家园。');
       expect(movie.posterUrl, 'https://nas.example.com/dav/Movies/poster.jpg');
       expect(movie.posterHeaders['Authorization'], startsWith('Basic '));
+      expect(movie.backdropUrl, 'https://nas.example.com/dav/Movies/fanart.jpg');
+      expect(movie.logoUrl, 'https://nas.example.com/dav/Movies/clearlogo.png');
+      expect(movie.bannerUrl, 'https://nas.example.com/dav/Movies/banner.jpg');
+      expect(
+        movie.extraBackdropUrls,
+        contains('https://nas.example.com/dav/Movies/extrafanart/shot1.jpg'),
+      );
       expect(movie.year, 2014);
       expect(movie.durationLabel, '169分钟');
       expect(movie.genres, contains('科幻'));
@@ -74,6 +87,13 @@ void main() {
       expect(movie.actors, contains('马修·麦康纳'));
       expect(movie.imdbId, 'tt0816692');
       expect(movie.tmdbId, '157336');
+      expect(movie.container, 'mkv');
+      expect(movie.videoCodec, 'hevc');
+      expect(movie.audioCodec, 'truehd');
+      expect(movie.width, 3840);
+      expect(movie.height, 2160);
+      expect(movie.bitrate, 18000000);
+      expect(movie.fileSizeBytes, 0);
       expect(movie.actualAddress, 'Movies/Interstellar.mkv');
       expect(movie.addedAt, DateTime.utc(2026, 4, 2, 8, 30, 0));
 
@@ -85,6 +105,62 @@ void main() {
       expect(strm.actualAddress, 'Shows/One Piece.strm');
       expect(strm.overview, isEmpty);
       expect(strm.addedAt, DateTime.utc(2026, 4, 3, 9, 0, 0));
+    });
+
+    test('can disable local sidecar scraping independently from structure',
+        () async {
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() == 'https://nas.example.com/dav/') {
+            return http.Response(_rootPropfindResponse, 207);
+          }
+
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() == 'https://nas.example.com/dav/Movies/') {
+            return http.Response(_moviesPropfindResponse, 207);
+          }
+
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Movies/extrafanart/') {
+            return http.Response(_extraFanartPropfindResponse, 207);
+          }
+
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/One%20Piece.strm') {
+            return http.Response(
+              'https://media.example.com/streams/one-piece/master.m3u8\n',
+              200,
+            );
+          }
+
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'nas-main',
+          name: 'Home NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/',
+          enabled: true,
+          username: 'alice',
+          password: 'secret',
+          webDavSidecarScrapingEnabled: false,
+        ),
+        limit: 20,
+      );
+
+      final movie = items.firstWhere((item) => item.actualAddress == 'Movies/Interstellar.mkv');
+      expect(movie.title, 'Interstellar');
+      expect(movie.posterUrl, isEmpty);
+      expect(movie.backdropUrl, isEmpty);
+      expect(movie.imdbId, isEmpty);
+      expect(movie.tmdbId, isEmpty);
+      expect(movie.container, 'mkv');
     });
 
     test('tolerates malformed percent-encoding in href and path segments',
@@ -166,7 +242,7 @@ void main() {
         (item) => item.title == 'Part A',
       );
       expect(directEpisode.itemType, 'episode');
-      expect(directEpisode.seasonNumber, 1);
+      expect(directEpisode.seasonNumber, 0);
       expect(directEpisode.episodeNumber, 1);
 
       final arcEpisodes = inferredItems
@@ -175,7 +251,7 @@ void main() {
         ..sort((left, right) => left.title.compareTo(right.title));
       expect(arcEpisodes, hasLength(2));
       expect(arcEpisodes.every((item) => item.itemType == 'episode'), isTrue);
-      expect(arcEpisodes.every((item) => item.seasonNumber == 2), isTrue);
+      expect(arcEpisodes.every((item) => item.seasonNumber == 1), isTrue);
       expect(arcEpisodes[0].episodeNumber, 1);
       expect(arcEpisodes[1].episodeNumber, 2);
     });
@@ -286,6 +362,78 @@ const _moviesPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
       </d:prop>
     </d:propstat>
   </d:response>
+  <d:response>
+    <d:href>/dav/Movies/fanart.jpg</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>fanart.jpg</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>image/jpeg</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Movies/clearlogo.png</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>clearlogo.png</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>image/png</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Movies/banner.jpg</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>banner.jpg</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>image/jpeg</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Movies/extrafanart/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>extrafanart</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _extraFanartPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Movies/extrafanart/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>extrafanart</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Movies/extrafanart/shot1.jpg</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>shot1.jpg</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>image/jpeg</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Movies/extrafanart/shot2.jpg</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>shot2.jpg</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>image/jpeg</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
 </d:multistatus>''';
 
 const _movieNfoResponse =
@@ -301,6 +449,29 @@ const _movieNfoResponse =
   <actor>
     <name>马修·麦康纳</name>
   </actor>
+  <art>
+    <fanart>fanart.jpg</fanart>
+    <clearlogo>clearlogo.png</clearlogo>
+    <banner>banner.jpg</banner>
+  </art>
+  <fanart>
+    <thumb>extrafanart/shot1.jpg</thumb>
+    <thumb>extrafanart/shot2.jpg</thumb>
+  </fanart>
+  <fileinfo>
+    <streamdetails>
+      <video>
+        <codec>hevc</codec>
+        <width>3840</width>
+        <height>2160</height>
+        <bitrate>18000000</bitrate>
+      </video>
+      <audio>
+        <codec>truehd</codec>
+      </audio>
+    </streamdetails>
+    <container>mkv</container>
+  </fileinfo>
   <uniqueid type="imdb">tt0816692</uniqueid>
   <uniqueid type="tmdb">157336</uniqueid>
 </movie>''';

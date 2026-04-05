@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 
 void main() {
   group('MediaDetailTarget.needsMetadataMatch', () {
@@ -55,6 +56,31 @@ void main() {
       );
 
       expect(target.needsImdbRatingMatch, isFalse);
+    });
+  });
+
+  group('MediaDetailTarget.fromMediaItem', () {
+    test('does not mark non-playable items as ready resources', () {
+      final target = MediaDetailTarget.fromMediaItem(
+        MediaItem(
+          id: 'series-1',
+          title: 'Lost',
+          overview: '',
+          posterUrl: '',
+          year: 0,
+          durationLabel: '剧集',
+          genres: const [],
+          itemType: 'series',
+          sourceId: 'webdav-1',
+          sourceName: 'WebDAV',
+          sourceKind: MediaSourceKind.nas,
+          streamUrl: '',
+          addedAt: DateTime(2026),
+        ),
+      );
+
+      expect(target.availabilityLabel, isEmpty);
+      expect(target.isPlayable, isFalse);
     });
   });
 }

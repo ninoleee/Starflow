@@ -560,7 +560,6 @@ class EmbyApiClient {
       episodeNumber: episodeNumber,
       playbackProgress: playbackProgress,
       imdbId: _resolveProviderId(providerIds, const ['Imdb', 'IMDb']),
-      tmdbId: _resolveProviderId(providerIds, const ['Tmdb', 'TMDb', 'TMDB']),
       addedAt: createdAt,
       lastWatchedAt: lastPlayedAt,
     );

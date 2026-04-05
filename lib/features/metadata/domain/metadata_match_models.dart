@@ -64,7 +64,6 @@ class MetadataMatchResult {
     this.ratingLabels = const [],
     this.imdbId = '',
     this.doubanId = '',
-    this.tmdbId = '',
   });
 
   final MetadataMatchProvider provider;
@@ -82,7 +81,6 @@ class MetadataMatchResult {
   final List<String> ratingLabels;
   final String imdbId;
   final String doubanId;
-  final String tmdbId;
 
   List<String> get titlesForMatching {
     final seen = <String>{};

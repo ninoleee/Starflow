@@ -30,6 +30,14 @@ class MediaDetailTarget {
     required this.title,
     required this.posterUrl,
     this.posterHeaders = const {},
+    this.backdropUrl = '',
+    this.backdropHeaders = const {},
+    this.logoUrl = '',
+    this.logoHeaders = const {},
+    this.bannerUrl = '',
+    this.bannerHeaders = const {},
+    this.extraBackdropUrls = const [],
+    this.extraBackdropHeaders = const {},
     required this.overview,
     this.year = 0,
     this.durationLabel = '',
@@ -48,7 +56,6 @@ class MediaDetailTarget {
     this.sectionName = '',
     this.doubanId = '',
     this.imdbId = '',
-    this.tmdbId = '',
     this.sourceKind,
     this.sourceName = '',
   });
@@ -56,6 +63,14 @@ class MediaDetailTarget {
   final String title;
   final String posterUrl;
   final Map<String, String> posterHeaders;
+  final String backdropUrl;
+  final Map<String, String> backdropHeaders;
+  final String logoUrl;
+  final Map<String, String> logoHeaders;
+  final String bannerUrl;
+  final Map<String, String> bannerHeaders;
+  final List<String> extraBackdropUrls;
+  final Map<String, String> extraBackdropHeaders;
   final String overview;
   final int year;
   final String durationLabel;
@@ -74,7 +89,6 @@ class MediaDetailTarget {
   final String sectionName;
   final String doubanId;
   final String imdbId;
-  final String tmdbId;
   final MediaSourceKind? sourceKind;
   final String sourceName;
 
@@ -129,6 +143,14 @@ class MediaDetailTarget {
     String? title,
     String? posterUrl,
     Map<String, String>? posterHeaders,
+    String? backdropUrl,
+    Map<String, String>? backdropHeaders,
+    String? logoUrl,
+    Map<String, String>? logoHeaders,
+    String? bannerUrl,
+    Map<String, String>? bannerHeaders,
+    List<String>? extraBackdropUrls,
+    Map<String, String>? extraBackdropHeaders,
     String? overview,
     int? year,
     String? durationLabel,
@@ -147,7 +169,6 @@ class MediaDetailTarget {
     String? sectionName,
     String? doubanId,
     String? imdbId,
-    String? tmdbId,
     MediaSourceKind? sourceKind,
     String? sourceName,
   }) {
@@ -155,6 +176,15 @@ class MediaDetailTarget {
       title: title ?? this.title,
       posterUrl: posterUrl ?? this.posterUrl,
       posterHeaders: posterHeaders ?? this.posterHeaders,
+      backdropUrl: backdropUrl ?? this.backdropUrl,
+      backdropHeaders: backdropHeaders ?? this.backdropHeaders,
+      logoUrl: logoUrl ?? this.logoUrl,
+      logoHeaders: logoHeaders ?? this.logoHeaders,
+      bannerUrl: bannerUrl ?? this.bannerUrl,
+      bannerHeaders: bannerHeaders ?? this.bannerHeaders,
+      extraBackdropUrls: extraBackdropUrls ?? this.extraBackdropUrls,
+      extraBackdropHeaders:
+          extraBackdropHeaders ?? this.extraBackdropHeaders,
       overview: overview ?? this.overview,
       year: year ?? this.year,
       durationLabel: durationLabel ?? this.durationLabel,
@@ -173,7 +203,6 @@ class MediaDetailTarget {
       sectionName: sectionName ?? this.sectionName,
       doubanId: doubanId ?? this.doubanId,
       imdbId: imdbId ?? this.imdbId,
-      tmdbId: tmdbId ?? this.tmdbId,
       sourceKind: sourceKind ?? this.sourceKind,
       sourceName: sourceName ?? this.sourceName,
     );
@@ -188,6 +217,14 @@ class MediaDetailTarget {
       title: item.title,
       posterUrl: item.posterUrl,
       posterHeaders: item.posterHeaders,
+      backdropUrl: item.backdropUrl,
+      backdropHeaders: item.backdropHeaders,
+      logoUrl: item.logoUrl,
+      logoHeaders: item.logoHeaders,
+      bannerUrl: item.bannerUrl,
+      bannerHeaders: item.bannerHeaders,
+      extraBackdropUrls: item.extraBackdropUrls,
+      extraBackdropHeaders: item.extraBackdropHeaders,
       overview: item.overview,
       year: item.year,
       durationLabel: item.durationLabel,
@@ -199,9 +236,11 @@ class MediaDetailTarget {
           .where((entry) => entry.trim().isNotEmpty)
           .map((entry) => MediaPersonProfile(name: entry.trim()))
           .toList(),
-      availabilityLabel: availabilityLabel.isEmpty
-          ? '资源已就绪：${item.sourceKind.label} · ${item.sourceName}'
-          : availabilityLabel,
+      availabilityLabel: availabilityLabel.isNotEmpty
+          ? availabilityLabel
+          : item.isPlayable
+              ? '资源已就绪：${item.sourceKind.label} · ${item.sourceName}'
+              : '',
       searchQuery: searchQuery.isEmpty ? item.title : searchQuery,
       playbackTarget:
           item.isPlayable ? PlaybackTarget.fromMediaItem(item) : null,
@@ -212,7 +251,6 @@ class MediaDetailTarget {
       sectionName: item.sectionName,
       doubanId: item.doubanId,
       imdbId: item.imdbId,
-      tmdbId: item.tmdbId,
       sourceKind: item.sourceKind,
       sourceName: item.sourceName,
     );
@@ -223,6 +261,14 @@ class MediaDetailTarget {
       'title': title,
       'posterUrl': posterUrl,
       'posterHeaders': posterHeaders,
+      'backdropUrl': backdropUrl,
+      'backdropHeaders': backdropHeaders,
+      'logoUrl': logoUrl,
+      'logoHeaders': logoHeaders,
+      'bannerUrl': bannerUrl,
+      'bannerHeaders': bannerHeaders,
+      'extraBackdropUrls': extraBackdropUrls,
+      'extraBackdropHeaders': extraBackdropHeaders,
       'overview': overview,
       'year': year,
       'durationLabel': durationLabel,
@@ -241,7 +287,6 @@ class MediaDetailTarget {
       'sectionName': sectionName,
       'doubanId': doubanId,
       'imdbId': imdbId,
-      'tmdbId': tmdbId,
       'sourceKind': sourceKind?.name,
       'sourceName': sourceName,
     };
@@ -253,6 +298,24 @@ class MediaDetailTarget {
       posterUrl: json['posterUrl'] as String? ?? '',
       posterHeaders:
           (json['posterHeaders'] as Map<dynamic, dynamic>? ?? const {})
+              .map((key, value) => MapEntry('$key', '$value')),
+      backdropUrl: json['backdropUrl'] as String? ?? '',
+      backdropHeaders:
+          (json['backdropHeaders'] as Map<dynamic, dynamic>? ?? const {})
+              .map((key, value) => MapEntry('$key', '$value')),
+      logoUrl: json['logoUrl'] as String? ?? '',
+      logoHeaders: (json['logoHeaders'] as Map<dynamic, dynamic>? ?? const {})
+          .map((key, value) => MapEntry('$key', '$value')),
+      bannerUrl: json['bannerUrl'] as String? ?? '',
+      bannerHeaders:
+          (json['bannerHeaders'] as Map<dynamic, dynamic>? ?? const {})
+              .map((key, value) => MapEntry('$key', '$value')),
+      extraBackdropUrls:
+          (json['extraBackdropUrls'] as List<dynamic>? ?? const [])
+              .whereType<String>()
+              .toList(growable: false),
+      extraBackdropHeaders:
+          (json['extraBackdropHeaders'] as Map<dynamic, dynamic>? ?? const {})
               .map((key, value) => MapEntry('$key', '$value')),
       overview: json['overview'] as String? ?? '',
       year: (json['year'] as num?)?.toInt() ?? 0,
@@ -290,7 +353,6 @@ class MediaDetailTarget {
       sectionName: json['sectionName'] as String? ?? '',
       doubanId: json['doubanId'] as String? ?? '',
       imdbId: json['imdbId'] as String? ?? '',
-      tmdbId: json['tmdbId'] as String? ?? '',
       sourceKind: (json['sourceKind'] as String?) == null
           ? null
           : MediaSourceKindX.fromName(json['sourceKind'] as String? ?? ''),

@@ -63,21 +63,15 @@ MediaItem? matchMediaItemByTitles(
 MediaItem? matchMediaItemByExternalIds(
   List<MediaItem> library, {
   String imdbId = '',
-  String tmdbId = '',
 }) {
   final normalizedImdbId = imdbId.trim().toLowerCase();
-  final normalizedTmdbId = tmdbId.trim().toLowerCase();
-  if (normalizedImdbId.isEmpty && normalizedTmdbId.isEmpty) {
+  if (normalizedImdbId.isEmpty) {
     return null;
   }
 
   for (final item in library) {
     if (normalizedImdbId.isNotEmpty &&
         item.imdbId.trim().toLowerCase() == normalizedImdbId) {
-      return item;
-    }
-    if (normalizedTmdbId.isNotEmpty &&
-        item.tmdbId.trim().toLowerCase() == normalizedTmdbId) {
       return item;
     }
   }

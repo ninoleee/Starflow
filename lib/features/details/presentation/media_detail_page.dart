@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -39,12 +40,31 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
   required AppSettings settings,
   required MediaDetailTarget target,
 }) async {
+  final traceKey = _detailTraceKey(target);
+  DebugTraceOnce.logMetadata(
+    traceKey,
+    'start',
+    'title=${target.title} source=${target.sourceKind?.name ?? 'unknown'} '
+        'itemId=${target.itemId} doubanId=${target.doubanId} imdbId=${target.imdbId} '
+        'poster=${target.posterUrl.trim().isNotEmpty} overview=${target.hasUsefulOverview} '
+        'ratings=${target.ratingLabels.join(' | ')}',
+  );
   final localStorageCacheRepository = ref.read(
     localStorageCacheRepositoryProvider,
   );
 
   final cachedTarget =
       await localStorageCacheRepository.loadDetailTarget(target);
+  DebugTraceOnce.logMetadata(
+    traceKey,
+    'cache-load',
+    cachedTarget == null
+        ? 'cache=miss'
+        : 'cache=hit poster=${cachedTarget.posterUrl.trim().isNotEmpty} '
+            'backdrop=${cachedTarget.backdropUrl.trim().isNotEmpty} '
+            'logo=${cachedTarget.logoUrl.trim().isNotEmpty} '
+            'ratings=${cachedTarget.ratingLabels.join(' | ')}',
+  );
   var nextTarget = cachedTarget == null
       ? target
       : _mergeCachedDetailTarget(
@@ -55,6 +75,13 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
     settings: settings,
     target: nextTarget,
   )) {
+    DebugTraceOnce.logMetadata(
+      traceKey,
+      'auto-enrich',
+      'enabled query=${_detailMetadataQuery(nextTarget)} '
+          'needsMetadata=${nextTarget.needsMetadataMatch} '
+          'needsImdb=${nextTarget.needsImdbRatingMatch}',
+    );
     nextTarget = await _resolveAutomaticMetadataIfNeeded(
       settings: settings,
       target: nextTarget,
@@ -62,6 +89,8 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
       tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
       imdbRatingClient: ref.read(imdbRatingClientProvider),
     );
+  } else {
+    DebugTraceOnce.logMetadata(traceKey, 'auto-enrich', 'skipped');
   }
 
   Future<void> saveResolvedTarget() async {
@@ -77,6 +106,7 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
 
   final playback = nextTarget.playbackTarget;
   if (playback == null) {
+    DebugTraceOnce.logMetadata(traceKey, 'playback-resolve', 'skipped no playback target');
     await saveResolvedTarget();
     return nextTarget;
   }
@@ -88,6 +118,14 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
           playback.resolutionLabel.trim().isEmpty ||
           playback.fileSizeLabel.trim().isEmpty);
   if (!shouldResolve) {
+    DebugTraceOnce.logMetadata(
+      traceKey,
+      'playback-resolve',
+      'skipped streamReady=${playback.streamUrl.trim().isNotEmpty} '
+          'format=${playback.formatLabel.trim().isNotEmpty} '
+          'resolution=${playback.resolutionLabel.trim().isNotEmpty} '
+          'fileSize=${playback.fileSizeLabel.trim().isNotEmpty}',
+    );
     await saveResolvedTarget();
     return nextTarget;
   }
@@ -100,23 +138,49 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
     }
   }
   if (source == null || !source.hasActiveSession) {
+    DebugTraceOnce.logMetadata(
+      traceKey,
+      'playback-resolve',
+      'skipped no active emby source',
+    );
     await saveResolvedTarget();
     return nextTarget;
   }
 
   try {
+    DebugTraceOnce.logMetadata(
+      traceKey,
+      'playback-resolve',
+      'request itemId=${playback.itemId} source=${source.name}',
+    );
     final resolvedPlayback =
         await ref.read(embyApiClientProvider).resolvePlaybackTarget(
               source: source,
               target: playback,
             );
     nextTarget = nextTarget.copyWith(playbackTarget: resolvedPlayback);
+    DebugTraceOnce.logMetadata(
+      traceKey,
+      'playback-resolve',
+      'success format=${resolvedPlayback.formatLabel} '
+          'resolution=${resolvedPlayback.resolutionLabel} '
+          'size=${resolvedPlayback.fileSizeLabel}',
+    );
   } catch (_) {
+    DebugTraceOnce.logMetadata(traceKey, 'playback-resolve', 'failed');
     await saveResolvedTarget();
     return nextTarget;
   }
 
   await saveResolvedTarget();
+  DebugTraceOnce.logMetadata(
+    traceKey,
+    'done',
+    'final poster=${nextTarget.posterUrl.trim().isNotEmpty} '
+        'backdrop=${nextTarget.backdropUrl.trim().isNotEmpty} '
+        'logo=${nextTarget.logoUrl.trim().isNotEmpty} '
+        'ratings=${nextTarget.ratingLabels.join(' | ')}',
+  );
   return nextTarget;
 }
 
@@ -137,13 +201,10 @@ bool _shouldAutoEnrichMetadataTarget({
           _needsRatingLabel(target, keyword: '豆瓣') ||
           target.needsImdbRatingMatch ||
           target.doubanId.trim().isEmpty ||
-          target.imdbId.trim().isEmpty ||
-          target.tmdbId.trim().isEmpty);
+          target.imdbId.trim().isEmpty);
   final needsTmdb = settings.tmdbMetadataMatchEnabled &&
       settings.tmdbReadAccessToken.trim().isNotEmpty &&
-      (target.needsMetadataMatch ||
-          target.imdbId.trim().isEmpty ||
-          target.tmdbId.trim().isEmpty);
+      (target.needsMetadataMatch || target.imdbId.trim().isEmpty);
   final needsImdb =
       settings.imdbRatingMatchEnabled && target.needsImdbRatingMatch;
   return needsWmdb || needsTmdb || needsImdb;
@@ -178,15 +239,20 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
 }) async {
   var nextTarget = target;
   final initialQuery = _detailMetadataQuery(target);
+  final traceKey = _detailTraceKey(target);
 
   if (settings.wmdbMetadataMatchEnabled &&
       (nextTarget.needsMetadataMatch ||
           _needsRatingLabel(nextTarget, keyword: '豆瓣') ||
           nextTarget.needsImdbRatingMatch ||
           nextTarget.doubanId.trim().isEmpty ||
-          nextTarget.imdbId.trim().isEmpty ||
-          nextTarget.tmdbId.trim().isEmpty)) {
+          nextTarget.imdbId.trim().isEmpty)) {
     try {
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'wmdb',
+        'request query=$initialQuery doubanId=${nextTarget.doubanId}',
+      );
       final wmdbMatch = nextTarget.doubanId.trim().isNotEmpty
           ? await wmdbMetadataClient.matchByDoubanId(
               doubanId: nextTarget.doubanId,
@@ -198,18 +264,32 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
               actors: nextTarget.actors,
             );
       if (wmdbMatch != null) {
+        DebugTraceOnce.logMetadata(
+          traceKey,
+          'wmdb',
+          'matched title=${wmdbMatch.title} imdbId=${wmdbMatch.imdbId} '
+              'ratings=${wmdbMatch.ratingLabels.join(' | ')}',
+        );
         nextTarget = _applyManualMetadataMatch(nextTarget, wmdbMatch);
+      } else {
+        DebugTraceOnce.logMetadata(traceKey, 'wmdb', 'no match');
       }
     } catch (_) {
+      DebugTraceOnce.logMetadata(traceKey, 'wmdb', 'failed');
       // Ignore WMDB failures and continue.
     }
   }
 
-  if (nextTarget.tmdbId.trim().isEmpty &&
-      settings.tmdbMetadataMatchEnabled &&
+  if (settings.tmdbMetadataMatchEnabled &&
       settings.tmdbReadAccessToken.trim().isNotEmpty) {
     try {
       final currentQuery = _detailMetadataQuery(nextTarget);
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'tmdb',
+        'request query=${currentQuery.isEmpty ? initialQuery : currentQuery} '
+            'year=${nextTarget.year} preferSeries=${nextTarget.isSeries}',
+      );
       final tmdbMatch = await tmdbMetadataClient.matchTitle(
         query: currentQuery.isEmpty ? initialQuery : currentQuery,
         readAccessToken: settings.tmdbReadAccessToken.trim(),
@@ -217,6 +297,11 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
         preferSeries: nextTarget.isSeries,
       );
       if (tmdbMatch != null) {
+        DebugTraceOnce.logMetadata(
+          traceKey,
+          'tmdb',
+          'matched title=${tmdbMatch.title} imdbId=${tmdbMatch.imdbId}',
+        );
         nextTarget = _applyManualMetadataMatch(
           nextTarget,
           MetadataMatchResult(
@@ -239,11 +324,13 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
                 )
                 .toList(),
             imdbId: tmdbMatch.imdbId,
-            tmdbId: tmdbMatch.tmdbId,
           ),
         );
+      } else {
+        DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'no match');
       }
     } catch (_) {
+      DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'failed');
       // Ignore TMDB failures and continue.
     }
   }
@@ -251,6 +338,12 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
   if (settings.imdbRatingMatchEnabled && nextTarget.needsImdbRatingMatch) {
     try {
       final currentQuery = _detailMetadataQuery(nextTarget);
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'imdb',
+        'request query=${currentQuery.isEmpty ? initialQuery : currentQuery} '
+            'year=${nextTarget.year} imdbId=${nextTarget.imdbId}',
+      );
       final ratingMatch = await imdbRatingClient.matchRating(
         query: currentQuery.isEmpty ? initialQuery : currentQuery,
         year: nextTarget.year,
@@ -258,6 +351,11 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
         imdbId: nextTarget.imdbId,
       );
       if (ratingMatch != null) {
+        DebugTraceOnce.logMetadata(
+          traceKey,
+          'imdb',
+          'matched rating=${ratingMatch.ratingLabel} imdbId=${ratingMatch.imdbId}',
+        );
         final nextRatings = [...nextTarget.ratingLabels];
         final nextRatingLabel = ratingMatch.ratingLabel.trim();
         final hasSameRating = nextRatings.any(
@@ -272,13 +370,27 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
               ? ratingMatch.imdbId
               : nextTarget.imdbId,
         );
+      } else {
+        DebugTraceOnce.logMetadata(traceKey, 'imdb', 'no match');
       }
     } catch (_) {
+      DebugTraceOnce.logMetadata(traceKey, 'imdb', 'failed');
       // Ignore IMDb failures and continue.
     }
   }
 
   return nextTarget;
+}
+
+String _detailTraceKey(MediaDetailTarget target) {
+  final id = [
+    target.title.trim(),
+    target.searchQuery.trim(),
+    target.sourceId.trim(),
+    target.itemId.trim(),
+    target.doubanId.trim(),
+  ].where((item) => item.isNotEmpty).join('|');
+  return id.isEmpty ? 'detail' : id;
 }
 
 MediaDetailTarget _mergeCachedDetailTarget({
@@ -292,6 +404,29 @@ MediaDetailTarget _mergeCachedDetailTarget({
     posterHeaders: current.posterHeaders.isNotEmpty
         ? current.posterHeaders
         : cached.posterHeaders,
+    backdropUrl: current.backdropUrl.trim().isNotEmpty
+        ? current.backdropUrl
+        : cached.backdropUrl,
+    backdropHeaders: current.backdropHeaders.isNotEmpty
+        ? current.backdropHeaders
+        : cached.backdropHeaders,
+    logoUrl:
+        current.logoUrl.trim().isNotEmpty ? current.logoUrl : cached.logoUrl,
+    logoHeaders: current.logoHeaders.isNotEmpty
+        ? current.logoHeaders
+        : cached.logoHeaders,
+    bannerUrl: current.bannerUrl.trim().isNotEmpty
+        ? current.bannerUrl
+        : cached.bannerUrl,
+    bannerHeaders: current.bannerHeaders.isNotEmpty
+        ? current.bannerHeaders
+        : cached.bannerHeaders,
+    extraBackdropUrls: current.extraBackdropUrls.isNotEmpty
+        ? current.extraBackdropUrls
+        : cached.extraBackdropUrls,
+    extraBackdropHeaders: current.extraBackdropHeaders.isNotEmpty
+        ? current.extraBackdropHeaders
+        : cached.extraBackdropHeaders,
     overview: current.hasUsefulOverview ? current.overview : cached.overview,
     year: current.year > 0 ? current.year : cached.year,
     durationLabel: current.durationLabel.trim().isNotEmpty
@@ -329,7 +464,6 @@ MediaDetailTarget _mergeCachedDetailTarget({
     doubanId:
         current.doubanId.trim().isNotEmpty ? current.doubanId : cached.doubanId,
     imdbId: current.imdbId.trim().isNotEmpty ? current.imdbId : cached.imdbId,
-    tmdbId: current.tmdbId.trim().isNotEmpty ? current.tmdbId : cached.tmdbId,
     sourceKind: current.sourceKind ?? cached.sourceKind,
     sourceName: current.sourceName.trim().isNotEmpty
         ? current.sourceName
@@ -389,6 +523,9 @@ bool _hasMetadataChanged(
   MediaDetailTarget next,
 ) {
   return current.posterUrl != next.posterUrl ||
+      current.backdropUrl != next.backdropUrl ||
+      current.logoUrl != next.logoUrl ||
+      current.bannerUrl != next.bannerUrl ||
       current.overview != next.overview ||
       current.year != next.year ||
       current.durationLabel != next.durationLabel ||
@@ -397,8 +534,7 @@ bool _hasMetadataChanged(
       !_sameStrings(current.directors, next.directors) ||
       !_sameStrings(current.actors, next.actors) ||
       current.doubanId != next.doubanId ||
-      current.imdbId != next.imdbId ||
-      current.tmdbId != next.tmdbId;
+      current.imdbId != next.imdbId;
 }
 
 bool _sameStrings(List<String> left, List<String> right) {
@@ -488,8 +624,6 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
       });
 
     final imdbId = _resolveManualMatchImdbId(target, metadataMatch);
-    final tmdbId = _resolveManualMatchTmdbId(target, metadataMatch);
-
     for (final collection in rankedCollections) {
       try {
         final items = await mediaRepository.fetchLibrary(
@@ -501,7 +635,6 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
         final exactMatched = matchMediaItemByExternalIds(
           items,
           imdbId: imdbId,
-          tmdbId: tmdbId,
         );
         if (exactMatched != null) {
           upsert(
@@ -510,7 +643,6 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
               matchReason: _externalIdMatchReason(
                 exactMatched,
                 imdbId: imdbId,
-                tmdbId: tmdbId,
               ),
               score: 1e9,
             ),
@@ -573,14 +705,27 @@ List<MediaDetailTarget> _candidatesToMergedTargets(
           current: current,
           matched: MediaDetailTarget.fromMediaItem(
             c.item,
-            availabilityLabel:
-                '资源已就绪：${c.item.sourceKind.label} · ${c.item.sourceName}'
-                '${c.matchReason.isEmpty ? '' : ' · ${c.matchReason}'}',
+            availabilityLabel: _matchedAvailabilityLabel(
+              item: c.item,
+              matchReason: c.matchReason,
+            ),
             searchQuery: query,
           ),
         ),
       )
       .toList();
+}
+
+String _matchedAvailabilityLabel({
+  required MediaItem item,
+  required String matchReason,
+}) {
+  final base = '${item.sourceKind.label} · ${item.sourceName}';
+  final suffix = matchReason.isEmpty ? '' : ' · $matchReason';
+  if (item.isPlayable) {
+    return '资源已就绪：$base$suffix';
+  }
+  return '已匹配：$base$suffix';
 }
 
 String _libraryMatchOptionLabel(MediaDetailTarget t) {
@@ -643,19 +788,13 @@ int _resolveManualMatchYear(
 String _externalIdMatchReason(
   MediaItem item, {
   required String imdbId,
-  required String tmdbId,
 }) {
   final reasons = <String>[];
   final normalizedImdbId = imdbId.trim().toLowerCase();
-  final normalizedTmdbId = tmdbId.trim().toLowerCase();
 
   if (normalizedImdbId.isNotEmpty &&
       item.imdbId.trim().toLowerCase() == normalizedImdbId) {
     reasons.add('IMDb ID');
-  }
-  if (normalizedTmdbId.isNotEmpty &&
-      item.tmdbId.trim().toLowerCase() == normalizedTmdbId) {
-    reasons.add('TMDB ID');
   }
 
   if (reasons.isEmpty) {
@@ -680,17 +819,6 @@ String _resolveManualMatchImdbId(
     return current;
   }
   return metadataMatch?.imdbId.trim() ?? '';
-}
-
-String _resolveManualMatchTmdbId(
-  MediaDetailTarget target,
-  MetadataMatchResult? metadataMatch,
-) {
-  final current = target.tmdbId.trim();
-  if (current.isNotEmpty) {
-    return current;
-  }
-  return metadataMatch?.tmdbId.trim() ?? '';
 }
 
 int _scoreManualMatchCollection(
@@ -881,6 +1009,24 @@ MediaDetailTarget _mergeMatchedLibraryTarget({
     posterHeaders: current.posterHeaders.isNotEmpty
         ? current.posterHeaders
         : matched.posterHeaders,
+    backdropUrl: _firstNonEmpty(current.backdropUrl, matched.backdropUrl),
+    backdropHeaders: current.backdropHeaders.isNotEmpty
+        ? current.backdropHeaders
+        : matched.backdropHeaders,
+    logoUrl: _firstNonEmpty(current.logoUrl, matched.logoUrl),
+    logoHeaders: current.logoHeaders.isNotEmpty
+        ? current.logoHeaders
+        : matched.logoHeaders,
+    bannerUrl: _firstNonEmpty(current.bannerUrl, matched.bannerUrl),
+    bannerHeaders: current.bannerHeaders.isNotEmpty
+        ? current.bannerHeaders
+        : matched.bannerHeaders,
+    extraBackdropUrls: current.extraBackdropUrls.isNotEmpty
+        ? current.extraBackdropUrls
+        : matched.extraBackdropUrls,
+    extraBackdropHeaders: current.extraBackdropHeaders.isNotEmpty
+        ? current.extraBackdropHeaders
+        : matched.extraBackdropHeaders,
     overview: current.hasUsefulOverview ? current.overview : matched.overview,
     year: current.year > 0 ? current.year : matched.year,
     durationLabel: current.durationLabel.trim().isNotEmpty
@@ -899,7 +1045,6 @@ MediaDetailTarget _mergeMatchedLibraryTarget({
     ),
     doubanId: current.doubanId,
     imdbId: current.imdbId,
-    tmdbId: current.tmdbId.trim().isNotEmpty ? current.tmdbId : matched.tmdbId,
   );
 }
 
@@ -943,7 +1088,6 @@ MediaDetailTarget _applyManualMetadataMatch(
     doubanId:
         target.doubanId.trim().isNotEmpty ? target.doubanId : match.doubanId,
     imdbId: target.imdbId.trim().isNotEmpty ? target.imdbId : match.imdbId,
-    tmdbId: target.tmdbId.trim().isNotEmpty ? target.tmdbId : match.tmdbId,
   );
 }
 
@@ -1226,7 +1370,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
         SnackBar(
           content: Text(
             matched.availabilityLabel.trim().isNotEmpty
-                ? '已匹配到 ${matched.availabilityLabel.replaceFirst('资源已就绪：', '')}'
+                ? '已匹配到 ${_availabilityFeedbackLabel(matched.availabilityLabel)}'
                 : '已匹配到 ${matched.sourceKind?.label ?? '资源'} · ${matched.sourceName}',
           ),
         ),
@@ -1728,6 +1872,17 @@ bool _isMeaningfulDurationLabel(String label) {
   return trimmed.isNotEmpty && trimmed != '时长未知' && trimmed != '文件';
 }
 
+String _availabilityFeedbackLabel(String label) {
+  final trimmed = label.trim();
+  if (trimmed.startsWith('资源已就绪：')) {
+    return trimmed.substring('资源已就绪：'.length).trim();
+  }
+  if (trimmed.startsWith('已匹配：')) {
+    return trimmed.substring('已匹配：'.length).trim();
+  }
+  return trimmed;
+}
+
 class _HeroSection extends StatelessWidget {
   const _HeroSection({required this.target});
 
@@ -1756,8 +1911,12 @@ class _HeroSection extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           _BackdropImage(
-            imageUrl: target.posterUrl,
-            imageHeaders: target.posterHeaders,
+            imageUrl: target.backdropUrl.trim().isNotEmpty
+                ? target.backdropUrl
+                : target.posterUrl,
+            imageHeaders: target.backdropUrl.trim().isNotEmpty
+                ? target.backdropHeaders
+                : target.posterHeaders,
           ),
           DecoratedBox(
             decoration: BoxDecoration(
@@ -1848,6 +2007,7 @@ class _HeroContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasLogo = target.logoUrl.trim().isNotEmpty;
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 560),
       child: Column(
@@ -1885,17 +2045,44 @@ class _HeroContent extends StatelessWidget {
                   .toList(),
             ),
           if (metadata.isNotEmpty) const SizedBox(height: 14),
-          Text(
-            target.title,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 38,
-                  height: 1.04,
-                ),
-          ),
+          if (hasLogo)
+            ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: 320,
+                maxHeight: 92,
+              ),
+              child: AppNetworkImage(
+                target.logoUrl,
+                headers: target.logoHeaders,
+                fit: BoxFit.contain,
+                alignment: Alignment.centerLeft,
+                errorBuilder: (context, error, stackTrace) {
+                  return Text(
+                    target.title,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 38,
+                          height: 1.04,
+                        ),
+                  );
+                },
+              ),
+            )
+          else
+            Text(
+              target.title,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 38,
+                    height: 1.04,
+                  ),
+            ),
           if (peopleLine.trim().isNotEmpty) ...[
             const SizedBox(height: 12),
             Text(

@@ -182,7 +182,6 @@ class _MetadataIndexManagementPageState
           )
           .toList(growable: false),
       imdbId: match.imdbId,
-      tmdbId: match.tmdbId,
     );
   }
 
@@ -594,8 +593,6 @@ class _ProviderResultCard extends StatelessWidget {
                     '年份：${result!.year > 0 ? result!.year : '未知'}',
                     if (result!.doubanId.trim().isNotEmpty)
                       '豆瓣 ID：${result!.doubanId}',
-                    if (result!.tmdbId.trim().isNotEmpty)
-                      'TMDB ID：${result!.tmdbId}',
                     if (result!.imdbId.trim().isNotEmpty)
                       'IMDb ID：${result!.imdbId}',
                     if (result!.ratingLabels.isNotEmpty)

@@ -8,7 +8,6 @@ class NasMediaRecognition {
     required this.itemType,
     required this.preferSeries,
     this.imdbId = '',
-    this.tmdbId = '',
     this.seasonNumber,
     this.episodeNumber,
   });
@@ -21,7 +20,6 @@ class NasMediaRecognition {
   final String itemType;
   final bool preferSeries;
   final String imdbId;
-  final String tmdbId;
   final int? seasonNumber;
   final int? episodeNumber;
 }
@@ -68,8 +66,7 @@ class NasMediaRecognizer {
     final grandParentRaw = normalizedPath.length >= 3
         ? normalizedPath[normalizedPath.length - 3]
         : '';
-    final externalIds =
-        _resolveExternalIds([fileBaseName, parentRaw, grandParentRaw]);
+    final imdbId = _resolveImdbId([fileBaseName, parentRaw, grandParentRaw]);
 
     final episodeMatch = _matchEpisode(fileBaseName);
     final parentSeason = _matchSeason(parentRaw);
@@ -131,31 +128,23 @@ class NasMediaRecognizer {
       year: year,
       itemType: itemType,
       preferSeries: preferSeries,
-      imdbId: externalIds.imdbId,
-      tmdbId: externalIds.tmdbId,
+      imdbId: imdbId,
       seasonNumber: seasonNumber,
       episodeNumber: episodeNumber,
     );
   }
 
-  static _ExternalIds _resolveExternalIds(List<String> inputs) {
+  static String _resolveImdbId(List<String> inputs) {
     var imdbId = '';
-    var tmdbId = '';
     for (final input in inputs) {
       if (imdbId.isEmpty) {
         imdbId = _matchImdbId(input);
       }
-      if (tmdbId.isEmpty) {
-        tmdbId = _matchTmdbId(input);
-      }
-      if (imdbId.isNotEmpty && tmdbId.isNotEmpty) {
+      if (imdbId.isNotEmpty) {
         break;
       }
     }
-    return _ExternalIds(
-      imdbId: imdbId,
-      tmdbId: tmdbId,
-    );
+    return imdbId;
   }
 
   static String _matchImdbId(String input) {
@@ -164,14 +153,6 @@ class NasMediaRecognizer {
       caseSensitive: false,
     ).firstMatch(input);
     return match == null ? '' : match.group(1)!.toLowerCase();
-  }
-
-  static String _matchTmdbId(String input) {
-    final match = RegExp(
-      r'(?:tmdb(?:id)?|themoviedb)[\s:=#_\-\.\[\(\{]*([0-9]{2,10})',
-      caseSensitive: false,
-    ).firstMatch(input);
-    return match == null ? '' : (match.group(1) ?? '').trim();
   }
 
   static int _findYear(List<String> inputs) {
@@ -335,14 +316,4 @@ class _EpisodeMatch {
 
   final int? seasonNumber;
   final int? episodeNumber;
-}
-
-class _ExternalIds {
-  const _ExternalIds({
-    required this.imdbId,
-    required this.tmdbId,
-  });
-
-  final String imdbId;
-  final String tmdbId;
 }

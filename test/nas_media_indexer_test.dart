@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
@@ -71,6 +72,7 @@ void main() {
         MockClient((request) async => http.Response('', 500)),
       ),
       readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
     );
 
     final library = await indexer.loadLibrary(
@@ -149,6 +151,7 @@ void main() {
         MockClient((request) async => http.Response('', 500)),
       ),
       readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
     );
 
     final library = await indexer.loadLibrary(source, limit: 20);
@@ -170,7 +173,6 @@ void main() {
         ratingLabels: ['豆瓣 9.1'],
         doubanId: '1291843',
         imdbId: 'tt0133093',
-        tmdbId: '603',
       ),
     );
 
@@ -181,10 +183,110 @@ void main() {
     expect(records.single.item.title, '黑客帝国');
     expect(records.single.item.overview, '这是手动写回到本地索引的简介。');
     expect(records.single.item.doubanId, '1291843');
-    expect(records.single.item.tmdbId, '603');
+    expect(records.single.item.imdbId, 'tt0133093');
     expect(records.single.item.ratingLabels, contains('豆瓣 9.1'));
     expect(records.single.searchQuery, '黑客帝国');
     expect(records.single.wmdbMatched, isTrue);
+  });
+
+  test('NasMediaIndexer applies manual metadata to synthetic series targets',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-series',
+      name: 'WebDAV Series',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Shows/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final collection = const MediaCollection(
+      id: 'https://nas.example.com/dav/Shows/',
+      title: '剧集',
+      sourceId: 'webdav-series',
+      sourceName: 'WebDAV Series',
+      sourceKind: MediaSourceKind.nas,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: [
+        _episodeItem(
+          id: 'series-ep-1',
+          path: 'Lost/Season 01/Episode 01.mkv',
+          title: 'Pilot (1)',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+        _episodeItem(
+          id: 'series-ep-2',
+          path: 'Lost/Season 01/Episode 02.mkv',
+          title: 'Pilot (2)',
+          seasonNumber: 1,
+          episodeNumber: 2,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    final library = await indexer.loadLibrary(
+      source,
+      scopedCollections: [collection],
+      limit: 20,
+    );
+    expect(library, hasLength(1));
+    final series = library.single;
+    expect(series.itemType, 'series');
+
+    final updatedTarget = await indexer.applyManualMetadata(
+      target: MediaDetailTarget.fromMediaItem(series),
+      searchQuery: '迷失',
+      metadataMatch: const MetadataMatchResult(
+        provider: MetadataMatchProvider.tmdb,
+        title: '迷失',
+        originalTitle: 'Lost',
+        overview: '一架客机坠毁后，幸存者在神秘岛屿上求生。',
+        year: 2004,
+        genres: ['剧情', '悬疑'],
+        directors: ['J·J·艾布拉姆斯'],
+        actors: ['马修·福克斯'],
+        ratingLabels: ['豆瓣 8.9'],
+        imdbId: 'tt0411008',
+      ),
+    );
+
+    expect(updatedTarget, isNotNull);
+    expect(updatedTarget!.itemType, 'series');
+    expect(updatedTarget.title, '迷失');
+    expect(updatedTarget.imdbId, 'tt0411008');
+    expect(updatedTarget.ratingLabels, contains('豆瓣 8.9'));
+
+    final records = await store.loadSourceRecords(source.id);
+    expect(records, hasLength(2));
+    expect(
+        records.every((record) => record.item.imdbId == 'tt0411008'), isTrue);
+    expect(records.every((record) => record.parentTitle == '迷失'), isTrue);
+    expect(
+      records.map((record) => record.item.title),
+      containsAll(['Pilot (1)', 'Pilot (2)']),
+    );
   });
 }
 
@@ -255,6 +357,14 @@ class _FakeWebDavNasClient extends WebDavNasClient {
               overview: '',
               posterUrl: '',
               posterHeaders: const {},
+              backdropUrl: '',
+              backdropHeaders: const {},
+              logoUrl: '',
+              logoHeaders: const {},
+              bannerUrl: '',
+              bannerHeaders: const {},
+              extraBackdropUrls: const [],
+              extraBackdropHeaders: const {},
               year: 0,
               durationLabel: '剧集',
               genres: const [],
@@ -264,7 +374,12 @@ class _FakeWebDavNasClient extends WebDavNasClient {
               seasonNumber: item.seasonNumber,
               episodeNumber: item.episodeNumber,
               imdbId: '',
-              tmdbId: '',
+              container: 'mkv',
+              videoCodec: '',
+              audioCodec: '',
+              width: null,
+              height: null,
+              bitrate: null,
               hasSidecarMatch: true,
             ),
           ),

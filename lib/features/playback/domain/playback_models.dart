@@ -92,7 +92,15 @@ class PlaybackTarget {
       preferredMediaSourceId: item.preferredMediaSourceId,
       subtitle: item.overview,
       headers: item.streamHeaders,
-      container: _inferContainerFromUrl(item.streamUrl),
+      container: item.container.trim().isNotEmpty
+          ? item.container
+          : _inferContainerFromUrl(item.streamUrl),
+      videoCodec: item.videoCodec,
+      audioCodec: item.audioCodec,
+      width: item.width,
+      height: item.height,
+      bitrate: item.bitrate,
+      fileSizeBytes: item.fileSizeBytes,
     );
   }
 

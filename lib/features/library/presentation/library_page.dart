@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
+import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -71,6 +72,11 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     final itemsAsync = ref.watch(libraryItemsProvider(_filter));
     final collectionsAsync = ref.watch(libraryCollectionsProvider(_filter));
     final rebuildableSourceIds = _rebuildableWebDavSourceIds(settings);
+    final scrapeProgress = ref.watch(webDavScrapeProgressProvider);
+    final visibleProgress = _visibleWebDavProgress(
+      scrapeProgress.values,
+      settings,
+    );
 
     return Scaffold(
       body: AppPageBackground(
@@ -119,6 +125,15 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                 ),
               ),
               const SizedBox(height: 16),
+            ],
+            if (visibleProgress.isNotEmpty) ...[
+              ...visibleProgress.map(
+                (progress) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _WebDavScrapeProgressCard(progress: progress),
+                ),
+              ),
+              const SizedBox(height: 6),
             ],
             collectionsAsync.when(
               data: (collections) {
@@ -209,6 +224,25 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
         .toList(growable: false);
   }
 
+  List<WebDavScrapeProgress> _visibleWebDavProgress(
+    Iterable<WebDavScrapeProgress> progressEntries,
+    AppSettings settings,
+  ) {
+    if (_filter == LibraryFilter.emby) {
+      return const [];
+    }
+    final enabledWebDavSourceIds = settings.mediaSources
+        .where((source) => source.enabled && source.kind == MediaSourceKind.nas)
+        .map((source) => source.id.trim())
+        .where((sourceId) => sourceId.isNotEmpty)
+        .toSet();
+    final visible = progressEntries
+        .where((entry) => enabledWebDavSourceIds.contains(entry.sourceId))
+        .toList(growable: false)
+      ..sort((left, right) => left.sourceName.compareTo(right.sourceName));
+    return visible;
+  }
+
   Future<void> _confirmForceRescan(List<String> sourceIds) async {
     final confirmed = await showDialog<bool>(
           context: context,
@@ -268,5 +302,72 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
         });
       }
     }
+  }
+}
+
+class _WebDavScrapeProgressCard extends StatelessWidget {
+  const _WebDavScrapeProgressCard({required this.progress});
+
+  final WebDavScrapeProgress progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.06),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  progress.sourceName,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Text(
+                progress.summaryLabel,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.8),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          if (progress.detail.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              progress.detail,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: Colors.white.withValues(alpha: 0.68),
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              minHeight: 6,
+              value: progress.fraction,
+              backgroundColor: Colors.white.withValues(alpha: 0.08),
+              valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

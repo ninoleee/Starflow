@@ -111,11 +111,13 @@ class WebDavNasClient {
         if (!_isPlayableVideo(entry)) {
           continue;
         }
-        final metadata = await _resolveSidecarMetadata(
-          entry,
-          siblings: directoryEntries,
-          source: source,
-        );
+        final metadata = source.webDavSidecarScrapingEnabled
+            ? await _resolveSidecarMetadata(
+                entry,
+                siblings: directoryEntries,
+                source: source,
+              )
+            : _buildBasicMetadataSeed(entry);
         final streamUrl = await _resolvePlayableUrl(entry, source: source);
         if (streamUrl.trim().isEmpty) {
           continue;
@@ -204,6 +206,7 @@ class WebDavNasClient {
         secondary: seriesNfoMetadata,
       ),
     );
+    final inferredMediaInfo = _inferMediaInfo(videoEntry);
 
     final localPosterEntry = _findBestPosterEntry(videoEntry, siblings) ??
         _findSeasonPosterEntry(
@@ -213,29 +216,88 @@ class WebDavNasClient {
         ) ??
         _findPosterByRole(parentEntries) ??
         _findPosterByRole(grandParentEntries);
+    final localBackdropEntry = _findBackdropByRole(siblings) ??
+        _findBackdropByRole(parentEntries) ??
+        _findBackdropByRole(grandParentEntries);
+    final localLogoEntry = _findLogoByRole(siblings) ??
+        _findLogoByRole(parentEntries) ??
+        _findLogoByRole(grandParentEntries);
+    final localBannerEntry = _findBannerByRole(siblings) ??
+        _findBannerByRole(parentEntries) ??
+        _findBannerByRole(grandParentEntries);
+    final localExtraBackdropEntries = await _loadExtraBackdropEntries(
+      source: source,
+      candidates: [
+        (entries: siblings, baseUri: currentDirectoryUri),
+        if (parentDirectoryUri != null)
+          (entries: parentEntries, baseUri: parentDirectoryUri),
+        if (grandParentDirectoryUri != null)
+          (entries: grandParentEntries, baseUri: grandParentDirectoryUri),
+      ],
+    );
 
-    String posterUrl = '';
-    Map<String, String> posterHeaders = const {};
-    if (localPosterEntry != null) {
-      posterUrl = localPosterEntry.uri.toString();
-      posterHeaders = _headers(source);
-    } else if (nfoMetadata?.thumbUrl.trim().isNotEmpty == true) {
-      posterUrl = nfoMetadata!.thumbUrl.trim();
-      final posterUri = Uri.tryParse(posterUrl);
-      if (posterUri != null &&
-          _shouldUseSourceHeadersForUri(posterUri, source)) {
-        posterHeaders = _headers(source);
-      }
-    }
+    final posterArtwork = _resolveArtworkCandidate(
+      source: source,
+      localEntry: localPosterEntry,
+      remoteUrl: nfoMetadata?.thumbUrl ?? '',
+    );
+    final backdropArtwork = localExtraBackdropEntries.isNotEmpty &&
+            localBackdropEntry == null
+        ? _ArtworkResolution(
+            url: localExtraBackdropEntries.first.uri.toString(),
+            headers: _headers(source),
+          )
+        : _resolveArtworkCandidate(
+            source: source,
+            localEntry: localBackdropEntry,
+            remoteUrl: nfoMetadata?.backdropUrl ??
+                (nfoMetadata?.extraBackdropUrls.isNotEmpty == true
+                    ? nfoMetadata!.extraBackdropUrls.first
+                    : ''),
+          );
+    final logoArtwork = _resolveArtworkCandidate(
+      source: source,
+      localEntry: localLogoEntry,
+      remoteUrl: nfoMetadata?.logoUrl ?? '',
+    );
+    final bannerArtwork = _resolveArtworkCandidate(
+      source: source,
+      localEntry: localBannerEntry,
+      remoteUrl: nfoMetadata?.bannerUrl ?? '',
+    );
+    final extraBackdropUrls = localExtraBackdropEntries.isNotEmpty
+        ? localExtraBackdropEntries.map((entry) => entry.uri.toString()).toList(
+            growable: false,
+          )
+        : nfoMetadata?.extraBackdropUrls ?? const <String>[];
+    final extraBackdropHeaders = localExtraBackdropEntries.isNotEmpty
+        ? _headers(source)
+        : _headersForArtworkUrl(
+            source,
+            extraBackdropUrls.isEmpty ? '' : extraBackdropUrls.first,
+          );
 
-    final hasSidecarMatch = nfoMetadata != null || localPosterEntry != null;
+    final hasSidecarMatch = nfoMetadata != null ||
+        localPosterEntry != null ||
+        localBackdropEntry != null ||
+        localLogoEntry != null ||
+        localBannerEntry != null ||
+        localExtraBackdropEntries.isNotEmpty;
     return WebDavMetadataSeed(
       title: nfoMetadata?.title.trim().isNotEmpty == true
           ? nfoMetadata!.title.trim()
           : _stripExtension(videoEntry.name),
       overview: nfoMetadata?.overview ?? '',
-      posterUrl: posterUrl,
-      posterHeaders: posterHeaders,
+      posterUrl: posterArtwork.url,
+      posterHeaders: posterArtwork.headers,
+      backdropUrl: backdropArtwork.url,
+      backdropHeaders: backdropArtwork.headers,
+      logoUrl: logoArtwork.url,
+      logoHeaders: logoArtwork.headers,
+      bannerUrl: bannerArtwork.url,
+      bannerHeaders: bannerArtwork.headers,
+      extraBackdropUrls: extraBackdropUrls,
+      extraBackdropHeaders: extraBackdropHeaders,
       year: nfoMetadata?.year ?? 0,
       durationLabel: nfoMetadata?.durationLabel ?? '文件',
       genres: nfoMetadata?.genres ?? const [],
@@ -245,8 +307,56 @@ class WebDavNasClient {
       seasonNumber: nfoMetadata?.seasonNumber,
       episodeNumber: nfoMetadata?.episodeNumber,
       imdbId: nfoMetadata?.imdbId ?? '',
-      tmdbId: nfoMetadata?.tmdbId ?? '',
+      container: _firstNonEmpty(
+        nfoMetadata?.container ?? '',
+        inferredMediaInfo.container,
+      ),
+      videoCodec: _firstNonEmpty(
+        nfoMetadata?.videoCodec ?? '',
+        inferredMediaInfo.videoCodec,
+      ),
+      audioCodec: _firstNonEmpty(
+        nfoMetadata?.audioCodec ?? '',
+        inferredMediaInfo.audioCodec,
+      ),
+      width: nfoMetadata?.width ?? inferredMediaInfo.width,
+      height: nfoMetadata?.height ?? inferredMediaInfo.height,
+      bitrate: nfoMetadata?.bitrate ?? inferredMediaInfo.bitrate,
       hasSidecarMatch: hasSidecarMatch,
+    );
+  }
+
+  WebDavMetadataSeed _buildBasicMetadataSeed(_WebDavEntry videoEntry) {
+    final inferredMediaInfo = _inferMediaInfo(videoEntry);
+    return WebDavMetadataSeed(
+      title: _stripExtension(videoEntry.name),
+      overview: '',
+      posterUrl: '',
+      posterHeaders: const {},
+      backdropUrl: '',
+      backdropHeaders: const {},
+      logoUrl: '',
+      logoHeaders: const {},
+      bannerUrl: '',
+      bannerHeaders: const {},
+      extraBackdropUrls: const [],
+      extraBackdropHeaders: const {},
+      year: 0,
+      durationLabel: '文件',
+      genres: const [],
+      directors: const [],
+      actors: const [],
+      itemType: '',
+      seasonNumber: null,
+      episodeNumber: null,
+      imdbId: '',
+      container: inferredMediaInfo.container,
+      videoCodec: inferredMediaInfo.videoCodec,
+      audioCodec: inferredMediaInfo.audioCodec,
+      width: inferredMediaInfo.width,
+      height: inferredMediaInfo.height,
+      bitrate: inferredMediaInfo.bitrate,
+      hasSidecarMatch: false,
     );
   }
 
@@ -568,6 +678,103 @@ class WebDavNasClient {
     return null;
   }
 
+  _WebDavEntry? _findBackdropByRole(List<_WebDavEntry> entries) {
+    return _findArtworkByNames(entries, const [
+      'fanart.jpg',
+      'fanart.jpeg',
+      'fanart.png',
+      'backdrop.jpg',
+      'backdrop.jpeg',
+      'backdrop.png',
+      'landscape.jpg',
+      'landscape.jpeg',
+      'landscape.png',
+    ]);
+  }
+
+  _WebDavEntry? _findLogoByRole(List<_WebDavEntry> entries) {
+    return _findArtworkByNames(entries, const [
+      'clearlogo.png',
+      'clearlogo.webp',
+      'clearlogo.jpg',
+      'logo.png',
+      'logo.webp',
+      'logo.jpg',
+    ]);
+  }
+
+  _WebDavEntry? _findBannerByRole(List<_WebDavEntry> entries) {
+    return _findArtworkByNames(entries, const [
+      'banner.jpg',
+      'banner.jpeg',
+      'banner.png',
+    ]);
+  }
+
+  _WebDavEntry? _findArtworkByNames(
+    List<_WebDavEntry> entries,
+    List<String> preferredNames,
+  ) {
+    final imageEntries = entries
+        .where((entry) => !entry.isCollection)
+        .where(_isLikelyPosterImage)
+        .toList(growable: false);
+    for (final preferredName in preferredNames) {
+      for (final entry in imageEntries) {
+        if (entry.name.toLowerCase() == preferredName.toLowerCase()) {
+          return entry;
+        }
+      }
+    }
+    return null;
+  }
+
+  _WebDavEntry? _findNamedDirectoryEntry(
+    List<_WebDavEntry> entries,
+    List<String> preferredNames,
+  ) {
+    for (final preferredName in preferredNames) {
+      for (final entry in entries) {
+        if (!entry.isCollection) {
+          continue;
+        }
+        if (entry.name.toLowerCase() == preferredName.toLowerCase()) {
+          return entry;
+        }
+      }
+    }
+    return null;
+  }
+
+  Future<List<_WebDavEntry>> _loadExtraBackdropEntries({
+    required MediaSourceConfig source,
+    required List<({List<_WebDavEntry> entries, Uri? baseUri})> candidates,
+  }) async {
+    for (final candidate in candidates) {
+      final baseUri = candidate.baseUri;
+      if (baseUri == null) {
+        continue;
+      }
+      final extraDir = _findNamedDirectoryEntry(
+        candidate.entries,
+        const ['extrafanart'],
+      );
+      if (extraDir == null) {
+        continue;
+      }
+      final loaded = await _loadDirectoryEntries(extraDir.uri, source: source);
+      final imageEntries = loaded
+          .where((entry) => !entry.isSelf && !entry.isCollection)
+          .where(_isLikelyPosterImage)
+          .toList(growable: false)
+        ..sort((left, right) => left.name.compareTo(right.name));
+      if (imageEntries.isNotEmpty) {
+        return imageEntries;
+      }
+    }
+    return const [];
+  }
+
   bool _isLikelyPosterImage(_WebDavEntry entry) {
     final type = entry.contentType.toLowerCase();
     if (type.startsWith('image/')) {
@@ -638,19 +845,31 @@ class WebDavNasClient {
         type: 'imdb',
         fallbackTag: 'imdbid',
       );
-      final tmdbId = _resolveNfoExternalId(
-        root,
-        type: 'tmdb',
-        fallbackTag: 'tmdbid',
-      );
       final thumbUrl = _resolveThumbUrl(
         entry.uri,
         _xmlSingleText(root, 'thumb'),
       );
+      final backdropUrl = _resolveNfoBackdropUrl(root, entry.uri);
+      final logoUrl = _resolveNfoArtUrl(
+        root,
+        entry.uri,
+        types: const ['clearlogo', 'logo'],
+      );
+      final bannerUrl = _resolveNfoArtUrl(
+        root,
+        entry.uri,
+        types: const ['banner'],
+      );
+      final extraBackdropUrls = _resolveNfoExtraBackdropUrls(root, entry.uri);
+      final streamDetails = _parseNfoStreamDetails(root);
       return _ParsedNfoMetadata(
         title: title,
         overview: plot.trim().isNotEmpty ? plot : outline,
         thumbUrl: thumbUrl,
+        backdropUrl: backdropUrl,
+        logoUrl: logoUrl,
+        bannerUrl: bannerUrl,
+        extraBackdropUrls: extraBackdropUrls,
         year: year,
         durationLabel: runtime,
         genres: genres,
@@ -660,7 +879,12 @@ class WebDavNasClient {
         seasonNumber: _tryParseInt(_xmlSingleText(root, 'season')),
         episodeNumber: _tryParseInt(_xmlSingleText(root, 'episode')),
         imdbId: imdbId,
-        tmdbId: tmdbId,
+        container: streamDetails.container,
+        videoCodec: streamDetails.videoCodec,
+        audioCodec: streamDetails.audioCodec,
+        width: streamDetails.width,
+        height: streamDetails.height,
+        bitrate: streamDetails.bitrate,
       );
     } catch (_) {
       return null;
@@ -722,6 +946,18 @@ class WebDavNasClient {
       thumbUrl: primary.thumbUrl.trim().isNotEmpty
           ? primary.thumbUrl
           : secondary.thumbUrl,
+      backdropUrl: primary.backdropUrl.trim().isNotEmpty
+          ? primary.backdropUrl
+          : secondary.backdropUrl,
+      logoUrl: primary.logoUrl.trim().isNotEmpty
+          ? primary.logoUrl
+          : secondary.logoUrl,
+      bannerUrl: primary.bannerUrl.trim().isNotEmpty
+          ? primary.bannerUrl
+          : secondary.bannerUrl,
+      extraBackdropUrls: primary.extraBackdropUrls.isNotEmpty
+          ? primary.extraBackdropUrls
+          : secondary.extraBackdropUrls,
       year: primary.year > 0 ? primary.year : secondary.year,
       durationLabel: primary.durationLabel.trim().isNotEmpty &&
               primary.durationLabel.trim() != '文件'
@@ -739,8 +975,18 @@ class WebDavNasClient {
       episodeNumber: primary.episodeNumber ?? secondary.episodeNumber,
       imdbId:
           primary.imdbId.trim().isNotEmpty ? primary.imdbId : secondary.imdbId,
-      tmdbId:
-          primary.tmdbId.trim().isNotEmpty ? primary.tmdbId : secondary.tmdbId,
+      container: primary.container.trim().isNotEmpty
+          ? primary.container
+          : secondary.container,
+      videoCodec: primary.videoCodec.trim().isNotEmpty
+          ? primary.videoCodec
+          : secondary.videoCodec,
+      audioCodec: primary.audioCodec.trim().isNotEmpty
+          ? primary.audioCodec
+          : secondary.audioCodec,
+      width: primary.width ?? secondary.width,
+      height: primary.height ?? secondary.height,
+      bitrate: primary.bitrate ?? secondary.bitrate,
     );
   }
 
@@ -939,6 +1185,241 @@ class WebDavNasClient {
     return nfoUri.resolve(trimmed).toString();
   }
 
+  String _resolveNfoBackdropUrl(XmlElement root, Uri nfoUri) {
+    final artFanart = _resolveNfoArtUrl(
+      root,
+      nfoUri,
+      types: const ['fanart', 'backdrop', 'landscape'],
+    );
+    if (artFanart.isNotEmpty) {
+      return artFanart;
+    }
+    final fanartElements = root.descendants
+        .whereType<XmlElement>()
+        .where((element) => element.name.local == 'fanart');
+    for (final element in fanartElements) {
+      final thumbs = element.children
+          .whereType<XmlElement>()
+          .where((child) => child.name.local == 'thumb')
+          .map((child) => _resolveThumbUrl(nfoUri, child.innerText))
+          .where((value) => value.trim().isNotEmpty)
+          .toList(growable: false);
+      if (thumbs.isNotEmpty) {
+        return thumbs.first;
+      }
+      final direct = _resolveThumbUrl(nfoUri, element.innerText);
+      if (direct.trim().isNotEmpty) {
+        return direct;
+      }
+    }
+    return '';
+  }
+
+  List<String> _resolveNfoExtraBackdropUrls(XmlElement root, Uri nfoUri) {
+    final fanartElements = root.descendants
+        .whereType<XmlElement>()
+        .where((element) => element.name.local == 'fanart');
+    for (final element in fanartElements) {
+      final urls = element.children
+          .whereType<XmlElement>()
+          .where((child) => child.name.local == 'thumb')
+          .map((child) => _resolveThumbUrl(nfoUri, child.innerText))
+          .where((value) => value.trim().isNotEmpty)
+          .toList(growable: false);
+      if (urls.length >= 2) {
+        return urls;
+      }
+    }
+    return const [];
+  }
+
+  String _resolveNfoArtUrl(
+    XmlElement root,
+    Uri nfoUri, {
+    required List<String> types,
+  }) {
+    final normalizedTypes = types.map((type) => type.toLowerCase()).toSet();
+    for (final art in root.descendants.whereType<XmlElement>()) {
+      if (art.name.local != 'art') {
+        continue;
+      }
+      for (final child in art.children.whereType<XmlElement>()) {
+        if (!normalizedTypes.contains(child.name.local.toLowerCase())) {
+          continue;
+        }
+        final resolved = _resolveThumbUrl(nfoUri, child.innerText);
+        if (resolved.trim().isNotEmpty) {
+          return resolved;
+        }
+      }
+    }
+    return '';
+  }
+
+  _NfoStreamDetails _parseNfoStreamDetails(XmlElement root) {
+    final streamDetails = root.descendants
+        .whereType<XmlElement>()
+        .firstWhere(
+          (element) => element.name.local == 'streamdetails',
+          orElse: () => XmlElement(XmlName('streamdetails')),
+        );
+    if (streamDetails.children.isEmpty) {
+      return const _NfoStreamDetails();
+    }
+
+    final videoElements = streamDetails.children
+        .whereType<XmlElement>()
+        .where((element) => element.name.local == 'video')
+        .toList(growable: false);
+    final audioElements = streamDetails.children
+        .whereType<XmlElement>()
+        .where((element) => element.name.local == 'audio')
+        .toList(growable: false);
+    final fileInfoElements = root.descendants
+        .whereType<XmlElement>()
+        .where((element) => element.name.local == 'fileinfo')
+        .toList(growable: false);
+
+    final video = videoElements.isEmpty ? null : videoElements.first;
+    final audio = audioElements.isEmpty ? null : audioElements.first;
+    String container = '';
+    for (final fileInfo in fileInfoElements) {
+      final value = _xmlSingleText(fileInfo, 'container');
+      if (value.trim().isNotEmpty) {
+        container = value.trim();
+        break;
+      }
+    }
+
+    return _NfoStreamDetails(
+      container: container,
+      videoCodec: video == null ? '' : _xmlSingleText(video, 'codec'),
+      audioCodec: audio == null ? '' : _xmlSingleText(audio, 'codec'),
+      width: video == null ? null : _tryParseInt(_xmlSingleText(video, 'width')),
+      height:
+          video == null ? null : _tryParseInt(_xmlSingleText(video, 'height')),
+      bitrate: _tryParseInt(
+        video == null ? '' : _xmlSingleText(video, 'bitrate'),
+      ),
+    );
+  }
+
+  _InferredMediaInfo _inferMediaInfo(_WebDavEntry entry) {
+    final path = entry.uri.path.toLowerCase();
+    final fileName = entry.name.toLowerCase();
+    final extension = path.contains('.')
+        ? path.substring(path.lastIndexOf('.') + 1)
+        : '';
+
+    int? width;
+    int? height;
+    int? bitrate;
+    String videoCodec = '';
+    String audioCodec = '';
+
+    if (fileName.contains('4320p') || fileName.contains('8k')) {
+      width = 7680;
+      height = 4320;
+    } else if (fileName.contains('2160p') || fileName.contains('4k')) {
+      width = 3840;
+      height = 2160;
+    } else if (fileName.contains('1440p')) {
+      width = 2560;
+      height = 1440;
+    } else if (fileName.contains('1080p')) {
+      width = 1920;
+      height = 1080;
+    } else if (fileName.contains('720p')) {
+      width = 1280;
+      height = 720;
+    } else if (fileName.contains('480p')) {
+      width = 854;
+      height = 480;
+    }
+
+    if (fileName.contains('hevc') ||
+        fileName.contains('x265') ||
+        fileName.contains('h265')) {
+      videoCodec = 'hevc';
+    } else if (fileName.contains('avc') ||
+        fileName.contains('x264') ||
+        fileName.contains('h264')) {
+      videoCodec = 'h264';
+    } else if (fileName.contains('av1')) {
+      videoCodec = 'av1';
+    }
+
+    if (fileName.contains('truehd')) {
+      audioCodec = fileName.contains('atmos') ? 'truehd atmos' : 'truehd';
+    } else if (fileName.contains('dtshd') || fileName.contains('dts-hd')) {
+      audioCodec = 'dtshd';
+    } else if (fileName.contains('dts')) {
+      audioCodec = 'dts';
+    } else if (fileName.contains('eac3') || fileName.contains('ddp')) {
+      audioCodec = 'eac3';
+    } else if (fileName.contains('ac3') || fileName.contains('dd5')) {
+      audioCodec = 'ac3';
+    } else if (fileName.contains('aac')) {
+      audioCodec = 'aac';
+    }
+
+    final bitrateMatch = RegExp(r'(?<!\d)(\d{1,3})\s?mbps(?!\d)')
+        .firstMatch(fileName);
+    if (bitrateMatch != null) {
+      bitrate = int.tryParse(bitrateMatch.group(1) ?? '') == null
+          ? null
+          : int.parse(bitrateMatch.group(1)!) * 1000000;
+    }
+
+    return _InferredMediaInfo(
+      container: extension,
+      videoCodec: videoCodec,
+      audioCodec: audioCodec,
+      width: width,
+      height: height,
+      bitrate: bitrate,
+    );
+  }
+
+  _ArtworkResolution _resolveArtworkCandidate({
+    required MediaSourceConfig source,
+    _WebDavEntry? localEntry,
+    String remoteUrl = '',
+  }) {
+    if (localEntry != null) {
+      return _ArtworkResolution(
+        url: localEntry.uri.toString(),
+        headers: _headers(source),
+      );
+    }
+    final url = remoteUrl.trim();
+    if (url.isEmpty) {
+      return const _ArtworkResolution();
+    }
+    return _ArtworkResolution(
+      url: url,
+      headers: _headersForArtworkUrl(source, url),
+    );
+  }
+
+  Map<String, String> _headersForArtworkUrl(
+    MediaSourceConfig source,
+    String url,
+  ) {
+    final resolvedUri = Uri.tryParse(url.trim());
+    if (resolvedUri == null) {
+      return const {};
+    }
+    if (_shouldUseSourceHeadersForUri(resolvedUri, source)) {
+      return _headers(source);
+    }
+    return const {};
+  }
+
+  String _firstNonEmpty(String primary, String fallback) {
+    return primary.trim().isNotEmpty ? primary.trim() : fallback.trim();
+  }
+
   String _resolveNfoItemType(String rawRootName) {
     switch (rawRootName.trim().toLowerCase()) {
       case 'movie':
@@ -1011,7 +1492,10 @@ class WebDavNasClient {
       }
       final multiEpisodeChildCount =
           childVideoCounts.values.where((count) => count >= 2).length;
-      return multiEpisodeChildCount >= 2;
+      if (multiEpisodeChildCount >= 2) {
+        return true;
+      }
+      return childVideoCounts.length == 1 && multiEpisodeChildCount == 1;
     }
 
     final seriesRootKeys = <String>{
@@ -1020,9 +1504,7 @@ class WebDavNasClient {
     };
     final seriesRootForResource = <String, String>{};
     for (final item in items) {
-      for (var length = item.relativeDirectories.length;
-          length >= 0;
-          length--) {
+      for (var length = 0; length <= item.relativeDirectories.length; length++) {
         final candidateKey =
             _segmentsKey(item.relativeDirectories.take(length));
         if (seriesRootKeys.contains(candidateKey)) {
@@ -1052,7 +1534,7 @@ class WebDavNasClient {
           seasonOrder.add(seasonGroupKey);
         }
         final nextSeed = seed.copyWith(
-          itemType: seed.itemType.trim().isEmpty ? 'episode' : null,
+          itemType: 'episode',
         );
         final nextItem = item.copyWith(metadataSeed: nextSeed);
         episodeItemsByGroup
@@ -1080,15 +1562,15 @@ class WebDavNasClient {
 
     final seasonNumberByGroup = <String, int>{};
     for (final entry in seasonOrderByRoot.entries) {
-      final orderedGroups = <String>[
-        if (entry.value.contains(_directSeasonGroupKey)) _directSeasonGroupKey,
-        ...entry.value
-            .where((group) => group != _directSeasonGroupKey)
-            .toList(growable: false)
-          ..sort((left, right) => left.toLowerCase().compareTo(
-                right.toLowerCase(),
-              )),
-      ];
+      if (entry.value.contains(_directSeasonGroupKey)) {
+        seasonNumberByGroup['${entry.key}::$_directSeasonGroupKey'] = 0;
+      }
+      final orderedGroups = entry.value
+        .where((group) => group != _directSeasonGroupKey)
+        .toList(growable: false)
+        ..sort((left, right) => left.toLowerCase().compareTo(
+              right.toLowerCase(),
+            ));
       for (var index = 0; index < orderedGroups.length; index++) {
         seasonNumberByGroup['${entry.key}::${orderedGroups[index]}'] =
             index + 1;
@@ -1105,9 +1587,13 @@ class WebDavNasClient {
         );
       for (var index = 0; index < orderedEpisodes.length; index++) {
         final item = orderedEpisodes[index];
+        final specialGroupSuffix = '::$_directSeasonGroupKey';
+        final isDirectSeasonGroup =
+            entry.key.endsWith(specialGroupSuffix);
+        final resolvedSeasonNumber =
+            seasonNumber ?? (isDirectSeasonGroup ? 0 : 1);
         episodeOverrides[item.resourceId] = item.metadataSeed.copyWith(
-          seasonNumber:
-              item.metadataSeed.seasonNumber ?? (seasonNumber ?? index + 1),
+          seasonNumber: resolvedSeasonNumber,
           episodeNumber: item.metadataSeed.episodeNumber ?? index + 1,
         );
       }
@@ -1216,6 +1702,14 @@ class WebDavMetadataSeed {
     required this.overview,
     required this.posterUrl,
     required this.posterHeaders,
+    required this.backdropUrl,
+    required this.backdropHeaders,
+    required this.logoUrl,
+    required this.logoHeaders,
+    required this.bannerUrl,
+    required this.bannerHeaders,
+    required this.extraBackdropUrls,
+    required this.extraBackdropHeaders,
     required this.year,
     required this.durationLabel,
     required this.genres,
@@ -1225,7 +1719,12 @@ class WebDavMetadataSeed {
     required this.seasonNumber,
     required this.episodeNumber,
     required this.imdbId,
-    required this.tmdbId,
+    required this.container,
+    required this.videoCodec,
+    required this.audioCodec,
+    required this.width,
+    required this.height,
+    required this.bitrate,
     required this.hasSidecarMatch,
   });
 
@@ -1233,6 +1732,14 @@ class WebDavMetadataSeed {
   final String overview;
   final String posterUrl;
   final Map<String, String> posterHeaders;
+  final String backdropUrl;
+  final Map<String, String> backdropHeaders;
+  final String logoUrl;
+  final Map<String, String> logoHeaders;
+  final String bannerUrl;
+  final Map<String, String> bannerHeaders;
+  final List<String> extraBackdropUrls;
+  final Map<String, String> extraBackdropHeaders;
   final int year;
   final String durationLabel;
   final List<String> genres;
@@ -1242,7 +1749,12 @@ class WebDavMetadataSeed {
   final int? seasonNumber;
   final int? episodeNumber;
   final String imdbId;
-  final String tmdbId;
+  final String container;
+  final String videoCodec;
+  final String audioCodec;
+  final int? width;
+  final int? height;
+  final int? bitrate;
   final bool hasSidecarMatch;
 
   WebDavMetadataSeed copyWith({
@@ -1250,6 +1762,14 @@ class WebDavMetadataSeed {
     String? overview,
     String? posterUrl,
     Map<String, String>? posterHeaders,
+    String? backdropUrl,
+    Map<String, String>? backdropHeaders,
+    String? logoUrl,
+    Map<String, String>? logoHeaders,
+    String? bannerUrl,
+    Map<String, String>? bannerHeaders,
+    List<String>? extraBackdropUrls,
+    Map<String, String>? extraBackdropHeaders,
     int? year,
     String? durationLabel,
     List<String>? genres,
@@ -1259,7 +1779,12 @@ class WebDavMetadataSeed {
     int? seasonNumber,
     int? episodeNumber,
     String? imdbId,
-    String? tmdbId,
+    String? container,
+    String? videoCodec,
+    String? audioCodec,
+    int? width,
+    int? height,
+    int? bitrate,
     bool? hasSidecarMatch,
   }) {
     return WebDavMetadataSeed(
@@ -1267,6 +1792,15 @@ class WebDavMetadataSeed {
       overview: overview ?? this.overview,
       posterUrl: posterUrl ?? this.posterUrl,
       posterHeaders: posterHeaders ?? this.posterHeaders,
+      backdropUrl: backdropUrl ?? this.backdropUrl,
+      backdropHeaders: backdropHeaders ?? this.backdropHeaders,
+      logoUrl: logoUrl ?? this.logoUrl,
+      logoHeaders: logoHeaders ?? this.logoHeaders,
+      bannerUrl: bannerUrl ?? this.bannerUrl,
+      bannerHeaders: bannerHeaders ?? this.bannerHeaders,
+      extraBackdropUrls: extraBackdropUrls ?? this.extraBackdropUrls,
+      extraBackdropHeaders:
+          extraBackdropHeaders ?? this.extraBackdropHeaders,
       year: year ?? this.year,
       durationLabel: durationLabel ?? this.durationLabel,
       genres: genres ?? this.genres,
@@ -1276,7 +1810,12 @@ class WebDavMetadataSeed {
       seasonNumber: seasonNumber ?? this.seasonNumber,
       episodeNumber: episodeNumber ?? this.episodeNumber,
       imdbId: imdbId ?? this.imdbId,
-      tmdbId: tmdbId ?? this.tmdbId,
+      container: container ?? this.container,
+      videoCodec: videoCodec ?? this.videoCodec,
+      audioCodec: audioCodec ?? this.audioCodec,
+      width: width ?? this.width,
+      height: height ?? this.height,
+      bitrate: bitrate ?? this.bitrate,
       hasSidecarMatch: hasSidecarMatch ?? this.hasSidecarMatch,
     );
   }
@@ -1318,6 +1857,14 @@ class WebDavScannedItem {
       overview: metadataSeed.overview,
       posterUrl: metadataSeed.posterUrl,
       posterHeaders: metadataSeed.posterHeaders,
+      backdropUrl: metadataSeed.backdropUrl,
+      backdropHeaders: metadataSeed.backdropHeaders,
+      logoUrl: metadataSeed.logoUrl,
+      logoHeaders: metadataSeed.logoHeaders,
+      bannerUrl: metadataSeed.bannerUrl,
+      bannerHeaders: metadataSeed.bannerHeaders,
+      extraBackdropUrls: metadataSeed.extraBackdropUrls,
+      extraBackdropHeaders: metadataSeed.extraBackdropHeaders,
       year: metadataSeed.year,
       durationLabel: metadataSeed.durationLabel,
       genres: metadataSeed.genres,
@@ -1335,7 +1882,13 @@ class WebDavScannedItem {
       seasonNumber: metadataSeed.seasonNumber,
       episodeNumber: metadataSeed.episodeNumber,
       imdbId: metadataSeed.imdbId,
-      tmdbId: metadataSeed.tmdbId,
+      container: metadataSeed.container,
+      videoCodec: metadataSeed.videoCodec,
+      audioCodec: metadataSeed.audioCodec,
+      width: metadataSeed.width,
+      height: metadataSeed.height,
+      bitrate: metadataSeed.bitrate,
+      fileSizeBytes: fileSizeBytes,
       addedAt: addedAt,
     );
   }
@@ -1354,6 +1907,10 @@ class _ParsedNfoMetadata {
     required this.title,
     required this.overview,
     required this.thumbUrl,
+    required this.backdropUrl,
+    required this.logoUrl,
+    required this.bannerUrl,
+    required this.extraBackdropUrls,
     required this.year,
     required this.durationLabel,
     required this.genres,
@@ -1363,12 +1920,21 @@ class _ParsedNfoMetadata {
     required this.seasonNumber,
     required this.episodeNumber,
     required this.imdbId,
-    required this.tmdbId,
+    required this.container,
+    required this.videoCodec,
+    required this.audioCodec,
+    required this.width,
+    required this.height,
+    required this.bitrate,
   });
 
   final String title;
   final String overview;
   final String thumbUrl;
+  final String backdropUrl;
+  final String logoUrl;
+  final String bannerUrl;
+  final List<String> extraBackdropUrls;
   final int year;
   final String durationLabel;
   final List<String> genres;
@@ -1378,7 +1944,58 @@ class _ParsedNfoMetadata {
   final int? seasonNumber;
   final int? episodeNumber;
   final String imdbId;
-  final String tmdbId;
+  final String container;
+  final String videoCodec;
+  final String audioCodec;
+  final int? width;
+  final int? height;
+  final int? bitrate;
+}
+
+class _ArtworkResolution {
+  const _ArtworkResolution({
+    this.url = '',
+    this.headers = const {},
+  });
+
+  final String url;
+  final Map<String, String> headers;
+}
+
+class _NfoStreamDetails {
+  const _NfoStreamDetails({
+    this.container = '',
+    this.videoCodec = '',
+    this.audioCodec = '',
+    this.width,
+    this.height,
+    this.bitrate,
+  });
+
+  final String container;
+  final String videoCodec;
+  final String audioCodec;
+  final int? width;
+  final int? height;
+  final int? bitrate;
+}
+
+class _InferredMediaInfo {
+  const _InferredMediaInfo({
+    this.container = '',
+    this.videoCodec = '',
+    this.audioCodec = '',
+    this.width,
+    this.height,
+    this.bitrate,
+  });
+
+  final String container;
+  final String videoCodec;
+  final String audioCodec;
+  final int? width;
+  final int? height;
+  final int? bitrate;
 }
 
 const String _directSeasonGroupKey = '__root__';

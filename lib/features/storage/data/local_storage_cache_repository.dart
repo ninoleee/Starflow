@@ -146,11 +146,6 @@ class LocalStorageCacheRepository {
       addKey('imdb|$imdbId');
     }
 
-    final tmdbId = target.tmdbId.trim().toLowerCase();
-    if (tmdbId.isNotEmpty) {
-      addKey('tmdb|$tmdbId');
-    }
-
     final normalizedTitle = _normalizeLookupText(target.title);
     if (normalizedTitle.isNotEmpty) {
       addKey(

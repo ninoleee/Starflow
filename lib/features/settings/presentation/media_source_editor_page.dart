@@ -42,6 +42,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   late final String _sourceId;
   late String _selectedNasPath;
   late bool _webDavStructureInferenceEnabled;
+  late bool _webDavSidecarScrapingEnabled;
   bool _didDelete = false;
   bool _skipAutoSaveOnPop = false;
 
@@ -70,6 +71,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _selectedNasPath = e?.libraryPath ?? '';
     _webDavStructureInferenceEnabled =
         e?.webDavStructureInferenceEnabled ?? false;
+    _webDavSidecarScrapingEnabled =
+        e?.webDavSidecarScrapingEnabled ?? true;
   }
 
   @override
@@ -101,6 +104,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       featuredSectionIds: _selectedSectionIdsForSave(),
       webDavStructureInferenceEnabled:
           _kind == MediaSourceKind.nas && _webDavStructureInferenceEnabled,
+      webDavSidecarScrapingEnabled:
+          _kind == MediaSourceKind.nas && _webDavSidecarScrapingEnabled,
     );
   }
 
@@ -151,6 +156,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       featuredSectionIds: _selectedSectionIdsForSave(),
       webDavStructureInferenceEnabled:
           _kind == MediaSourceKind.nas && _webDavStructureInferenceEnabled,
+      webDavSidecarScrapingEnabled:
+          _kind == MediaSourceKind.nas && _webDavSidecarScrapingEnabled,
     );
     await ref.read(settingsControllerProvider.notifier).saveMediaSource(config);
     _savedFeaturedSectionIds = [...config.featuredSectionIds];
@@ -482,6 +489,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                         _selectedSectionIds.clear();
                         _selectedNasPath = '';
                         _webDavStructureInferenceEnabled = false;
+                        _webDavSidecarScrapingEnabled = true;
                         _connectionMessage = _defaultConnectionMessage(value);
                       });
                     }
@@ -654,6 +662,29 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                   value: _enabled,
                   onChanged: (value) => setState(() => _enabled = value),
                 ),
+                if (!isEmby) ...[
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('目录结构推断'),
+                    value: _webDavStructureInferenceEnabled,
+                    onChanged: (value) {
+                      setState(() {
+                        _webDavStructureInferenceEnabled = value;
+                      });
+                    },
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('本地刮削/NFO'),
+                    value: _webDavSidecarScrapingEnabled,
+                    onChanged: (value) {
+                      setState(() {
+                        _webDavSidecarScrapingEnabled = value;
+                      });
+                    },
+                  ),
+                ],
                 if (isEmby) ...[
                   const SizedBox(height: 28),
                   Wrap(
@@ -741,16 +772,6 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                   child: const Text('保存'),
                 ),
               ),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('目录结构推断'),
-              value: _webDavStructureInferenceEnabled,
-              onChanged: (value) {
-                setState(() {
-                  _webDavStructureInferenceEnabled = value;
-                });
-              },
             ),
           ],
         ),

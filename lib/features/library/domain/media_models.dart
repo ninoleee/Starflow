@@ -39,6 +39,7 @@ class MediaSourceConfig {
     this.libraryPath = '',
     this.featuredSectionIds = const [],
     this.webDavStructureInferenceEnabled = false,
+    this.webDavSidecarScrapingEnabled = true,
   });
 
   final String id;
@@ -55,6 +56,7 @@ class MediaSourceConfig {
   final String libraryPath;
   final List<String> featuredSectionIds;
   final bool webDavStructureInferenceEnabled;
+  final bool webDavSidecarScrapingEnabled;
 
   bool get hasAccessToken => accessToken.trim().isNotEmpty;
 
@@ -88,6 +90,7 @@ class MediaSourceConfig {
     String? libraryPath,
     List<String>? featuredSectionIds,
     bool? webDavStructureInferenceEnabled,
+    bool? webDavSidecarScrapingEnabled,
   }) {
     return MediaSourceConfig(
       id: id ?? this.id,
@@ -105,6 +108,8 @@ class MediaSourceConfig {
       featuredSectionIds: featuredSectionIds ?? this.featuredSectionIds,
       webDavStructureInferenceEnabled: webDavStructureInferenceEnabled ??
           this.webDavStructureInferenceEnabled,
+      webDavSidecarScrapingEnabled: webDavSidecarScrapingEnabled ??
+          this.webDavSidecarScrapingEnabled,
     );
   }
 
@@ -124,6 +129,7 @@ class MediaSourceConfig {
       'libraryPath': libraryPath,
       'featuredSectionIds': featuredSectionIds,
       'webDavStructureInferenceEnabled': webDavStructureInferenceEnabled,
+      'webDavSidecarScrapingEnabled': webDavSidecarScrapingEnabled,
     };
   }
 
@@ -148,6 +154,8 @@ class MediaSourceConfig {
               .toList(),
       webDavStructureInferenceEnabled:
           json['webDavStructureInferenceEnabled'] as bool? ?? false,
+      webDavSidecarScrapingEnabled:
+          json['webDavSidecarScrapingEnabled'] as bool? ?? true,
     );
   }
 }
@@ -192,6 +200,14 @@ class MediaItem {
     required this.overview,
     required this.posterUrl,
     this.posterHeaders = const {},
+    this.backdropUrl = '',
+    this.backdropHeaders = const {},
+    this.logoUrl = '',
+    this.logoHeaders = const {},
+    this.bannerUrl = '',
+    this.bannerHeaders = const {},
+    this.extraBackdropUrls = const [],
+    this.extraBackdropHeaders = const {},
     required this.year,
     required this.durationLabel,
     required this.genres,
@@ -214,8 +230,14 @@ class MediaItem {
     this.playbackProgress,
     this.doubanId = '',
     this.imdbId = '',
-    this.tmdbId = '',
     this.ratingLabels = const [],
+    this.container = '',
+    this.videoCodec = '',
+    this.audioCodec = '',
+    this.width,
+    this.height,
+    this.bitrate,
+    this.fileSizeBytes,
     required this.addedAt,
     this.lastWatchedAt,
   });
@@ -227,6 +249,14 @@ class MediaItem {
   final String overview;
   final String posterUrl;
   final Map<String, String> posterHeaders;
+  final String backdropUrl;
+  final Map<String, String> backdropHeaders;
+  final String logoUrl;
+  final Map<String, String> logoHeaders;
+  final String bannerUrl;
+  final Map<String, String> bannerHeaders;
+  final List<String> extraBackdropUrls;
+  final Map<String, String> extraBackdropHeaders;
   final int year;
   final String durationLabel;
   final List<String> genres;
@@ -249,8 +279,14 @@ class MediaItem {
   final double? playbackProgress;
   final String doubanId;
   final String imdbId;
-  final String tmdbId;
   final List<String> ratingLabels;
+  final String container;
+  final String videoCodec;
+  final String audioCodec;
+  final int? width;
+  final int? height;
+  final int? bitrate;
+  final int? fileSizeBytes;
   final DateTime addedAt;
   final DateTime? lastWatchedAt;
 
@@ -265,6 +301,14 @@ class MediaItem {
     String? overview,
     String? posterUrl,
     Map<String, String>? posterHeaders,
+    String? backdropUrl,
+    Map<String, String>? backdropHeaders,
+    String? logoUrl,
+    Map<String, String>? logoHeaders,
+    String? bannerUrl,
+    Map<String, String>? bannerHeaders,
+    List<String>? extraBackdropUrls,
+    Map<String, String>? extraBackdropHeaders,
     int? year,
     String? durationLabel,
     List<String>? genres,
@@ -287,8 +331,14 @@ class MediaItem {
     double? playbackProgress,
     String? doubanId,
     String? imdbId,
-    String? tmdbId,
     List<String>? ratingLabels,
+    String? container,
+    String? videoCodec,
+    String? audioCodec,
+    int? width,
+    int? height,
+    int? bitrate,
+    int? fileSizeBytes,
     DateTime? addedAt,
     DateTime? lastWatchedAt,
   }) {
@@ -300,6 +350,15 @@ class MediaItem {
       overview: overview ?? this.overview,
       posterUrl: posterUrl ?? this.posterUrl,
       posterHeaders: posterHeaders ?? this.posterHeaders,
+      backdropUrl: backdropUrl ?? this.backdropUrl,
+      backdropHeaders: backdropHeaders ?? this.backdropHeaders,
+      logoUrl: logoUrl ?? this.logoUrl,
+      logoHeaders: logoHeaders ?? this.logoHeaders,
+      bannerUrl: bannerUrl ?? this.bannerUrl,
+      bannerHeaders: bannerHeaders ?? this.bannerHeaders,
+      extraBackdropUrls: extraBackdropUrls ?? this.extraBackdropUrls,
+      extraBackdropHeaders:
+          extraBackdropHeaders ?? this.extraBackdropHeaders,
       year: year ?? this.year,
       durationLabel: durationLabel ?? this.durationLabel,
       genres: genres ?? this.genres,
@@ -323,8 +382,14 @@ class MediaItem {
       playbackProgress: playbackProgress ?? this.playbackProgress,
       doubanId: doubanId ?? this.doubanId,
       imdbId: imdbId ?? this.imdbId,
-      tmdbId: tmdbId ?? this.tmdbId,
       ratingLabels: ratingLabels ?? this.ratingLabels,
+      container: container ?? this.container,
+      videoCodec: videoCodec ?? this.videoCodec,
+      audioCodec: audioCodec ?? this.audioCodec,
+      width: width ?? this.width,
+      height: height ?? this.height,
+      bitrate: bitrate ?? this.bitrate,
+      fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
       addedAt: addedAt ?? this.addedAt,
       lastWatchedAt: lastWatchedAt ?? this.lastWatchedAt,
     );
@@ -339,6 +404,14 @@ class MediaItem {
       'overview': overview,
       'posterUrl': posterUrl,
       'posterHeaders': posterHeaders,
+      'backdropUrl': backdropUrl,
+      'backdropHeaders': backdropHeaders,
+      'logoUrl': logoUrl,
+      'logoHeaders': logoHeaders,
+      'bannerUrl': bannerUrl,
+      'bannerHeaders': bannerHeaders,
+      'extraBackdropUrls': extraBackdropUrls,
+      'extraBackdropHeaders': extraBackdropHeaders,
       'year': year,
       'durationLabel': durationLabel,
       'genres': genres,
@@ -361,8 +434,14 @@ class MediaItem {
       'playbackProgress': playbackProgress,
       'doubanId': doubanId,
       'imdbId': imdbId,
-      'tmdbId': tmdbId,
       'ratingLabels': ratingLabels,
+      'container': container,
+      'videoCodec': videoCodec,
+      'audioCodec': audioCodec,
+      'width': width,
+      'height': height,
+      'bitrate': bitrate,
+      'fileSizeBytes': fileSizeBytes,
       'addedAt': addedAt.toIso8601String(),
       'lastWatchedAt': lastWatchedAt?.toIso8601String(),
     };
@@ -378,6 +457,24 @@ class MediaItem {
       posterUrl: json['posterUrl'] as String? ?? '',
       posterHeaders:
           (json['posterHeaders'] as Map<dynamic, dynamic>? ?? const {})
+              .map((key, value) => MapEntry('$key', '$value')),
+      backdropUrl: json['backdropUrl'] as String? ?? '',
+      backdropHeaders:
+          (json['backdropHeaders'] as Map<dynamic, dynamic>? ?? const {})
+              .map((key, value) => MapEntry('$key', '$value')),
+      logoUrl: json['logoUrl'] as String? ?? '',
+      logoHeaders: (json['logoHeaders'] as Map<dynamic, dynamic>? ?? const {})
+          .map((key, value) => MapEntry('$key', '$value')),
+      bannerUrl: json['bannerUrl'] as String? ?? '',
+      bannerHeaders:
+          (json['bannerHeaders'] as Map<dynamic, dynamic>? ?? const {})
+              .map((key, value) => MapEntry('$key', '$value')),
+      extraBackdropUrls:
+          (json['extraBackdropUrls'] as List<dynamic>? ?? const [])
+              .whereType<String>()
+              .toList(growable: false),
+      extraBackdropHeaders:
+          (json['extraBackdropHeaders'] as Map<dynamic, dynamic>? ?? const {})
               .map((key, value) => MapEntry('$key', '$value')),
       year: (json['year'] as num?)?.toInt() ?? 0,
       durationLabel: json['durationLabel'] as String? ?? '',
@@ -410,10 +507,16 @@ class MediaItem {
       playbackProgress: (json['playbackProgress'] as num?)?.toDouble(),
       doubanId: json['doubanId'] as String? ?? '',
       imdbId: json['imdbId'] as String? ?? '',
-      tmdbId: json['tmdbId'] as String? ?? '',
       ratingLabels: (json['ratingLabels'] as List<dynamic>? ?? const [])
           .whereType<String>()
           .toList(growable: false),
+      container: json['container'] as String? ?? '',
+      videoCodec: json['videoCodec'] as String? ?? '',
+      audioCodec: json['audioCodec'] as String? ?? '',
+      width: (json['width'] as num?)?.toInt(),
+      height: (json['height'] as num?)?.toInt(),
+      bitrate: (json['bitrate'] as num?)?.toInt(),
+      fileSizeBytes: (json['fileSizeBytes'] as num?)?.toInt(),
       addedAt:
           DateTime.tryParse(json['addedAt'] as String? ?? '') ?? DateTime.now(),
       lastWatchedAt: DateTime.tryParse(json['lastWatchedAt'] as String? ?? ''),

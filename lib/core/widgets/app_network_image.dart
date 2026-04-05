@@ -1,6 +1,6 @@
 import 'dart:async';
+import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:starflow/core/storage/persistent_image_cache.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
@@ -64,7 +64,9 @@ class _AppNetworkImageState extends State<AppNetworkImage> {
     if (url.isEmpty) {
       return null;
     }
-    final headers = widget.headers ?? networkImageHeadersForUrl(url);
+    final headers = (widget.headers?.isNotEmpty ?? false)
+        ? widget.headers
+        : networkImageHeadersForUrl(url);
     return persistentImageCache.load(url, headers: headers);
   }
 
@@ -100,6 +102,9 @@ class _AppNetworkImageState extends State<AppNetworkImage> {
           cacheHeight: widget.cacheHeight,
           filterQuality: widget.filterQuality,
           gaplessPlayback: true,
+          errorBuilder: (context, error, stackTrace) {
+            return _buildError(context, error, stackTrace);
+          },
         );
       },
     );
