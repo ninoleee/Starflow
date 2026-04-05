@@ -4,6 +4,11 @@
 
 当前仓库已经是可运行版本，不是纯骨架。
 
+## 开发网络
+
+- Android `Gradle` 已优先使用阿里云 Maven 镜像
+- 需要代理或 Flutter 镜像时，参考 [docs/development-network.md](/D:/codes/Starflow/docs/development-network.md)
+
 ## 当前能力
 
 ### 媒体源
