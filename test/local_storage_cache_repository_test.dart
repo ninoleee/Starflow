@@ -12,7 +12,8 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  test('persists matched and enriched detail targets for later reuse', () async {
+  test('persists matched and enriched detail targets for later reuse',
+      () async {
     final prefs = await SharedPreferences.getInstance();
     final repository = LocalStorageCacheRepository(sharedPreferences: prefs);
 
@@ -33,7 +34,6 @@ void main() {
       sourceName: '客厅 Emby',
       sourceKind: MediaSourceKind.emby,
       imdbId: 'tt0092263',
-      tmdbId: '12345',
       playbackTarget: const PlaybackTarget(
         title: '英雄本色',
         sourceId: 'emby-main',
@@ -63,7 +63,8 @@ void main() {
 
     expect(loadedFromDoubanKey, isNotNull);
     expect(loadedFromDoubanKey!.imdbId, 'tt0092263');
-    expect(loadedFromDoubanKey.playbackTarget?.actualAddress, '/movies/英雄本色.mkv');
+    expect(
+        loadedFromDoubanKey.playbackTarget?.actualAddress, '/movies/英雄本色.mkv');
     expect(loadedFromLibraryKey?.posterUrl, 'https://image.example/poster.jpg');
 
     final summary = await repository.inspectDetailCache();

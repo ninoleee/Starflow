@@ -307,7 +307,6 @@ void main() {
       );
 
       expect(resolved.imdbId, 'tt6035092');
-      expect(resolved.tmdbId, '135130');
       expect(resolved.ratingLabels, contains('IMDb 7.4'));
     });
 
@@ -382,7 +381,6 @@ void main() {
 
       expect(resolved.doubanId, '1292063');
       expect(resolved.imdbId, 'tt0118799');
-      expect(resolved.tmdbId, '637');
       expect(resolved.ratingLabels, contains('豆瓣 9.6'));
       expect(resolved.ratingLabels, contains('IMDb 8.6'));
       expect(resolved.posterUrl, 'https://emby.example.com/poster.jpg');
@@ -459,7 +457,6 @@ void main() {
       expect(resolved.ratingLabels, isNot(contains('豆瓣 9.6')));
       expect(resolved.ratingLabels, contains('IMDb 8.6'));
       expect(resolved.imdbId, 'tt0118799');
-      expect(resolved.tmdbId, '637');
     });
   });
 }
