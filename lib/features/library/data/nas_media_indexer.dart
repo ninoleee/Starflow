@@ -62,10 +62,10 @@ class NasMediaIndexer {
   final AppSettings Function() _readSettings;
   final WebDavScrapeProgressController _progressController;
   final void Function()? _notifyIndexChanged;
-  final Map<String, Future<void>> _activeRefreshTasks =
-      <String, Future<void>>{};
-  final Map<String, Future<void>> _backgroundEnrichmentTasks =
-      <String, Future<void>>{};
+  final Map<String, _RefreshTaskHandle> _activeRefreshTasks =
+      <String, _RefreshTaskHandle>{};
+  final Map<String, _RefreshTaskHandle> _backgroundEnrichmentTasks =
+      <String, _RefreshTaskHandle>{};
 
   Future<void> clearSource(String sourceId) {
     return _store.clearSource(sourceId);
@@ -196,10 +196,15 @@ class NasMediaIndexer {
     final existingTask =
         _activeRefreshTasks[taskKey] ?? _backgroundEnrichmentTasks[taskKey];
     if (existingTask != null) {
-      await existingTask;
-      return;
+      if (!forceFullRescan || existingTask.mode == _RefreshTaskMode.forceFull) {
+        await existingTask.future;
+        return;
+      }
+      existingTask.cancel();
+      await existingTask.future;
     }
 
+    final controller = _RefreshTaskController();
     final task = Future<void>(() async {
       try {
         webDavTrace(
@@ -237,7 +242,9 @@ class NasMediaIndexer {
           clearProgressWhenDone: !shouldStageMetadata,
           phaseLabel: '建立索引中',
           collectEnrichmentCandidates: shouldStageMetadata,
+          controller: controller,
         );
+        controller.throwIfCancelled();
         if (shouldStageMetadata) {
           if (phaseResult.enrichmentCandidates.isEmpty) {
             _clearProgressSafely(normalizedSourceId);
@@ -249,9 +256,12 @@ class NasMediaIndexer {
               includeSidecarMetadata: requiresSidecarMetadata,
               includeOnlineMetadata: requiresOnlineMetadata,
               forceFullRescan: forceFullRescan,
+              controller: controller,
             );
           }
         }
+      } on _RefreshCancelledException {
+        _clearProgressSafely(normalizedSourceId);
       } catch (_) {
         _clearProgressSafely(normalizedSourceId);
         rethrow;
@@ -259,7 +269,13 @@ class NasMediaIndexer {
         _activeRefreshTasks.remove(taskKey);
       }
     });
-    _activeRefreshTasks[taskKey] = task;
+    _activeRefreshTasks[taskKey] = _RefreshTaskHandle(
+      future: task,
+      mode: forceFullRescan
+          ? _RefreshTaskMode.forceFull
+          : _RefreshTaskMode.incremental,
+      controller: controller,
+    );
     await task;
   }
 
@@ -373,7 +389,9 @@ class NasMediaIndexer {
     required int limitPerCollection,
     required bool includeSidecarMetadata,
     required bool resetScanCaches,
+    required _RefreshTaskController controller,
   }) async {
+    controller.throwIfCancelled();
     if (scopedCollections != null && scopedCollections.isNotEmpty) {
       webDavTrace(
         'indexer.scanSource.scoped.start',
@@ -390,6 +408,7 @@ class NasMediaIndexer {
       var completedCollections = 0;
       final groups = await Future.wait(
         scopedCollections.map((collection) async {
+          controller.throwIfCancelled();
           final result = await _webDavNasClient.scanLibrary(
             source,
             sectionId: collection.id,
@@ -397,7 +416,9 @@ class NasMediaIndexer {
             limit: limitPerCollection,
             loadSidecarMetadata: includeSidecarMetadata,
             resetCaches: resetScanCaches && completedCollections == 0,
+            shouldCancel: controller.isCancelled,
           );
+          controller.throwIfCancelled();
           completedCollections += 1;
           _progressController.updateScanning(
             sourceId: source.id,
@@ -448,7 +469,9 @@ class NasMediaIndexer {
       limit: limitPerCollection,
       loadSidecarMetadata: includeSidecarMetadata,
       resetCaches: resetScanCaches,
+      shouldCancel: controller.isCancelled,
     );
+    controller.throwIfCancelled();
     _progressController.updateScanning(
       sourceId: source.id,
       current: 1,
@@ -475,6 +498,7 @@ class NasMediaIndexer {
     required bool resetScanCaches,
     required bool clearProgressWhenDone,
     required String phaseLabel,
+    required _RefreshTaskController controller,
     bool collectEnrichmentCandidates = false,
   }) async {
     final now = DateTime.now();
@@ -485,7 +509,9 @@ class NasMediaIndexer {
       limitPerCollection: limitPerCollection,
       includeSidecarMetadata: includeSidecarMetadata,
       resetScanCaches: resetScanCaches,
+      controller: controller,
     );
+    controller.throwIfCancelled();
     _progressController.startIndexing(
       sourceId: normalizedSourceId,
       totalItems: scannedItems.length,
@@ -502,6 +528,7 @@ class NasMediaIndexer {
     final enrichmentCandidates = <WebDavScannedItem>[];
 
     for (var index = 0; index < scannedItems.length; index++) {
+      controller.throwIfCancelled();
       final scannedItem = scannedItems[index];
       final fingerprint = _buildFingerprint(
         sourceId: source.id,
@@ -576,6 +603,7 @@ class NasMediaIndexer {
       );
     }
 
+    controller.throwIfCancelled();
     await _store.replaceSourceRecords(
       sourceId: source.id,
       records: nextRecords,
