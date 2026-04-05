@@ -2,17 +2,25 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:starflow/features/search/data/smart_strm_log_repository.dart';
 
 final smartStrmWebhookClientProvider = Provider<SmartStrmWebhookClient>((ref) {
   final client = http.Client();
   ref.onDispose(client.close);
-  return SmartStrmWebhookClient(client);
+  return SmartStrmWebhookClient(
+    client,
+    logRepository: ref.read(smartStrmWebhookLogRepositoryProvider),
+  );
 });
 
 class SmartStrmWebhookClient {
-  SmartStrmWebhookClient(this._client);
+  SmartStrmWebhookClient(
+    this._client, {
+    SmartStrmWebhookLogRepository? logRepository,
+  }) : _logRepository = logRepository;
 
   final http.Client _client;
+  final SmartStrmWebhookLogRepository? _logRepository;
 
   Future<SmartStrmTriggerResult> triggerTask({
     required String webhookUrl,
@@ -29,38 +37,88 @@ class SmartStrmWebhookClient {
       throw const SmartStrmWebhookException('请先填写 SmartStrm 任务名');
     }
 
-    final response = await _client.post(
-      Uri.parse(trimmedUrl),
-      headers: const {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
+    final trimmedStoragePath = storagePath.trim();
+    final requestBody = {
+      'event': 'a_task',
+      if (delay > 0) 'delay': delay,
+      'task': {
+        'name': trimmedTask,
+        if (trimmedStoragePath.isNotEmpty) 'storage_path': trimmedStoragePath,
       },
-      body: jsonEncode({
-        'event': 'a_task',
-        if (delay > 0) 'delay': delay,
-        'task': {
-          'name': trimmedTask,
-          if (storagePath.trim().isNotEmpty) 'storage_path': storagePath.trim(),
-        },
-      }),
-    );
+    };
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw SmartStrmWebhookException(
-        'SmartStrm Webhook 请求失败：HTTP ${response.statusCode}',
+    try {
+      final response = await _client.post(
+        Uri.parse(trimmedUrl),
+        headers: const {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode(requestBody),
       );
-    }
-    final payload = _decode(response);
-    if (_looksLikeFailure(payload)) {
-      throw SmartStrmWebhookException(
-        _resolveErrorMessage(payload) ?? 'SmartStrm 返回了失败结果',
+
+      final payload = _decode(response);
+      final payloadText = _stringifyPayload(response, payload);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final message = 'SmartStrm Webhook 请求失败：HTTP ${response.statusCode}';
+        await _appendLog(
+          success: false,
+          webhookUrl: trimmedUrl,
+          taskName: trimmedTask,
+          storagePath: trimmedStoragePath,
+          message: message,
+          httpStatusCode: response.statusCode,
+          addedCount: _extractAddedCount(payload),
+          payloadText: payloadText,
+        );
+        throw SmartStrmWebhookException(message);
+      }
+      if (_looksLikeFailure(payload)) {
+        final message = _resolveErrorMessage(payload) ?? 'SmartStrm 返回了失败结果';
+        await _appendLog(
+          success: false,
+          webhookUrl: trimmedUrl,
+          taskName: trimmedTask,
+          storagePath: trimmedStoragePath,
+          message: message,
+          httpStatusCode: response.statusCode,
+          addedCount: _extractAddedCount(payload),
+          payloadText: payloadText,
+        );
+        throw SmartStrmWebhookException(message);
+      }
+      final result = SmartStrmTriggerResult(
+        message: _extractMessage(payload),
+        addedCount: _extractAddedCount(payload),
+        rawPayload: payload,
       );
+      await _appendLog(
+        success: true,
+        webhookUrl: trimmedUrl,
+        taskName: trimmedTask,
+        storagePath: trimmedStoragePath,
+        message:
+            result.message.trim().isEmpty ? 'SmartStrm 任务触发成功' : result.message,
+        httpStatusCode: response.statusCode,
+        addedCount: result.addedCount,
+        payloadText: payloadText,
+      );
+      return result;
+    } catch (error) {
+      if (error is SmartStrmWebhookException) {
+        rethrow;
+      }
+      final message = 'SmartStrm Webhook 请求异常：$error';
+      await _appendLog(
+        success: false,
+        webhookUrl: trimmedUrl,
+        taskName: trimmedTask,
+        storagePath: trimmedStoragePath,
+        message: message,
+        payloadText: '',
+      );
+      throw SmartStrmWebhookException(message);
     }
-    return SmartStrmTriggerResult(
-      message: _extractMessage(payload),
-      addedCount: _extractAddedCount(payload),
-      rawPayload: payload,
-    );
   }
 
   Map<String, dynamic> _decode(http.Response response) {
@@ -189,6 +247,53 @@ class SmartStrmWebhookClient {
   String? _resolveErrorMessage(Map<String, dynamic> payload) {
     final message = _extractMessage(payload);
     return message.isEmpty ? null : message;
+  }
+
+  String _stringifyPayload(
+    http.Response response,
+    Map<String, dynamic> payload,
+  ) {
+    if (payload.isNotEmpty) {
+      try {
+        return const JsonEncoder.withIndent('  ').convert(payload);
+      } catch (_) {
+        return payload.toString();
+      }
+    }
+    final body = utf8.decode(response.bodyBytes, allowMalformed: true).trim();
+    if (body.isEmpty) {
+      return '';
+    }
+    return body.length > 4000 ? '${body.substring(0, 4000)}…' : body;
+  }
+
+  Future<void> _appendLog({
+    required bool success,
+    required String webhookUrl,
+    required String taskName,
+    required String storagePath,
+    required String message,
+    int? httpStatusCode,
+    int? addedCount,
+    String payloadText = '',
+  }) async {
+    final repository = _logRepository;
+    if (repository == null) {
+      return;
+    }
+    await repository.append(
+      SmartStrmWebhookLogEntry(
+        createdAt: DateTime.now(),
+        success: success,
+        webhookUrl: webhookUrl,
+        taskName: taskName,
+        storagePath: storagePath,
+        message: message,
+        httpStatusCode: httpStatusCode,
+        addedCount: addedCount,
+        payloadText: payloadText,
+      ),
+    );
   }
 }
 

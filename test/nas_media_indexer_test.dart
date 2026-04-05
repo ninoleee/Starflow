@@ -808,12 +808,12 @@ void main() {
   });
 
   test(
-      'NasMediaIndexer skips per-file online matching for structure-inferred episodes',
+      'NasMediaIndexer uses series title plus file title for structure-inferred episode matching',
       () async {
     final store = _MemoryNasMediaIndexStore();
     final source = const MediaSourceConfig(
-      id: 'webdav-episode-online-skip',
-      name: 'WebDAV Episode Online Skip',
+      id: 'webdav-episode-online-query',
+      name: 'WebDAV Episode Online Query',
       kind: MediaSourceKind.nas,
       endpoint: 'https://nas.example.com/dav/Shows/',
       enabled: true,
@@ -826,10 +826,11 @@ void main() {
       imdbRatingMatchEnabled: false,
     );
     var wmdbRequestCount = 0;
+    var lastWmdbQuery = '';
     final client = _FakeWebDavNasClient(
       scannedItems: const [
         _PendingTestItem(
-          id: 'skip-online-1',
+          id: 'episode-online-1',
           path: 'Shows/Test Show/Season 01/Episode 01.strm',
           title: 'Episode 01',
           itemType: 'episode',
@@ -845,7 +846,11 @@ void main() {
       wmdbMetadataClient: WmdbMetadataClient(
         MockClient((request) async {
           wmdbRequestCount += 1;
-          return http.Response('', 500);
+          lastWmdbQuery = request.url.queryParameters['q'] ?? '';
+          return http.Response(
+            '{"data":[{"name":"Test Show","type":"series","year":"2024","doubanVotes":1000}]}',
+            200,
+          );
         }),
       ),
       tmdbMetadataClient: TmdbMetadataClient(
@@ -861,7 +866,140 @@ void main() {
     await indexer.refreshSource(source);
     await _drainAsyncTasks();
 
-    expect(wmdbRequestCount, 0);
+    expect(wmdbRequestCount, 1);
+    expect(lastWmdbQuery, 'Test Show Episode 01');
+
+    final records = await store.loadSourceRecords(source.id);
+    expect(records, hasLength(1));
+    expect(records.single.searchQuery, 'Test Show Episode 01');
+    expect(
+      records.single.item.title,
+      'Episode 01',
+      reason:
+          'Episode display title should not be overwritten by series match.',
+    );
+  });
+
+  test(
+      'NasMediaIndexer removes records missing from an incremental WebDAV refresh',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-remove-missing',
+      name: 'WebDAV Remove Missing',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Movies/',
+      enabled: true,
+    );
+    final scannedItems = <_PendingTestItem>[
+      const _PendingTestItem(
+        id: 'keep-1',
+        path: 'Movies/Keep.mkv',
+        title: 'Keep',
+        itemType: 'movie',
+        seasonNumber: 0,
+        episodeNumber: 0,
+      ),
+      const _PendingTestItem(
+        id: 'delete-1',
+        path: 'Movies/Delete.mkv',
+        title: 'Delete',
+        itemType: 'movie',
+        seasonNumber: 0,
+        episodeNumber: 0,
+      ),
+    ];
+    final client = _FakeWebDavNasClient(scannedItems: scannedItems);
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    await _drainAsyncTasks();
+    expect(
+      (await store.loadSourceRecords(source.id)).map((item) => item.resourceId),
+      ['keep-1', 'delete-1'],
+    );
+
+    scannedItems.removeWhere((item) => item.id == 'delete-1');
+
+    await indexer.refreshSource(source);
+    await _drainAsyncTasks();
+    expect(
+      (await store.loadSourceRecords(source.id)).map((item) => item.resourceId),
+      ['keep-1'],
+    );
+  });
+
+  test(
+      'NasMediaIndexer removes records deleted between index and background enrichment',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-remove-during-enrichment',
+      name: 'WebDAV Remove During Enrichment',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Shows/',
+      enabled: true,
+      webDavSidecarScrapingEnabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'gone-later',
+          path: 'Shows/Test/Test Episode 01.strm',
+          title: 'Test Episode 01',
+          itemType: 'episode',
+          seasonNumber: 1,
+          episodeNumber: 1,
+          hasSidecarMatch: false,
+        ),
+      ],
+      missingScanResourceIds: const {'gone-later'},
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    await _drainAsyncTasks();
+
+    final records = await store.loadSourceRecords(source.id);
+    expect(records, isEmpty);
   });
 }
 
@@ -909,11 +1047,13 @@ class _FakeWebDavNasClient extends WebDavNasClient {
     required this.scannedItems,
     this.scanDelay = Duration.zero,
     this.scanResourceOverrides = const {},
+    this.missingScanResourceIds = const {},
   }) : super(MockClient((request) async => http.Response('', 200)));
 
   final List<_PendingTestItem> scannedItems;
   final Duration scanDelay;
   final Map<String, _PendingTestItem> scanResourceOverrides;
+  final Set<String> missingScanResourceIds;
   int scanCallCount = 0;
   int scanResourceCallCount = 0;
 
@@ -989,6 +1129,9 @@ class _FakeWebDavNasClient extends WebDavNasClient {
     bool? loadSidecarMetadata,
   }) async {
     scanResourceCallCount += 1;
+    if (missingScanResourceIds.contains(resourceId)) {
+      return null;
+    }
     final override = scanResourceOverrides[resourceId];
     final matched = override == null
         ? scannedItems.where((item) => item.id == resourceId)

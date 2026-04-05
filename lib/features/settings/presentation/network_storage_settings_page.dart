@@ -8,6 +8,7 @@ import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/quark_folder_picker_page.dart';
+import 'package:starflow/features/settings/presentation/smart_strm_logs_page.dart';
 
 class NetworkStorageSettingsPage extends ConsumerStatefulWidget {
   const NetworkStorageSettingsPage({super.key, required this.initial});
@@ -293,21 +294,36 @@ class _NetworkStorageSettingsPageState
                   ),
                 ),
                 const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: _isTestingSmartStrm ? null : _testSmartStrmTask,
-                    icon: _isTestingSmartStrm
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.bolt_rounded),
-                    label: Text(
-                      _isTestingSmartStrm ? '测试中...' : '测试 STRM 任务',
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed:
+                          _isTestingSmartStrm ? null : _testSmartStrmTask,
+                      icon: _isTestingSmartStrm
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.bolt_rounded),
+                      label: Text(
+                        _isTestingSmartStrm ? '测试中...' : '测试 STRM 任务',
+                      ),
                     ),
-                  ),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const SmartStrmLogsPage(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.receipt_long_rounded),
+                      label: const Text('查看日志'),
+                    ),
+                  ],
                 ),
                 _SectionTitle(theme: theme, label: '刷新媒体源'),
                 TextField(

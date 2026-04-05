@@ -633,8 +633,8 @@ class NasMediaIndexer {
           phaseLabel: forceFullRescan
               ? '全量补元数据'
               : ((includeOnlineMetadata || includeSidecarMetadata)
-                    ? '增量补元数据'
-                    : '后台补全'),
+                  ? '增量补元数据'
+                  : '后台补全'),
         );
       } catch (error) {
         webDavTrace(
@@ -683,22 +683,36 @@ class NasMediaIndexer {
       if (recordIndex == null) {
         continue;
       }
-      final skipPerFileOnlineMetadata =
-          _shouldSkipIndividualOnlineMetadata(source, scannedItem);
       final enrichedItem = includeSidecarMetadata
           ? await _webDavNasClient.scanResource(
-                source,
-                resourceId: scannedItem.resourceId,
-                sectionId: scannedItem.sectionId,
-                sectionName: scannedItem.sectionName,
-                loadSidecarMetadata: true,
-              ) ??
-              scannedItem
+              source,
+              resourceId: scannedItem.resourceId,
+              sectionId: scannedItem.sectionId,
+              sectionName: scannedItem.sectionName,
+              loadSidecarMetadata: true,
+            )
           : scannedItem;
+      if (includeSidecarMetadata && enrichedItem == null) {
+        nextRecords.removeAt(recordIndex);
+        recordIndexByResourceId
+          ..clear()
+          ..addEntries(
+            nextRecords.indexed.map(
+              (entry) => MapEntry(entry.$2.resourceId, entry.$1),
+            ),
+          );
+        _progressController.updateIndexing(
+          sourceId: normalizedSourceId,
+          current: index + 1,
+          total: scannedItems.length,
+          detail: '${scannedItem.fileName} 已删除',
+        );
+        continue;
+      }
       final effectiveItem = _mergeStructureInferredSeed(
         source: source,
         original: scannedItem,
-        enriched: enrichedItem,
+        enriched: enrichedItem ?? scannedItem,
       );
       final fingerprint = _buildFingerprint(
         sourceId: source.id,
@@ -711,8 +725,7 @@ class NasMediaIndexer {
         effectiveItem,
         indexedAt: now,
         fingerprint: fingerprint,
-        applyOnlineMetadata:
-            includeOnlineMetadata && !skipPerFileOnlineMetadata,
+        applyOnlineMetadata: includeOnlineMetadata,
       );
       _progressController.updateIndexing(
         sourceId: normalizedSourceId,
@@ -774,7 +787,7 @@ class NasMediaIndexer {
     );
   }
 
-  bool _shouldSkipIndividualOnlineMetadata(
+  bool _isStructureInferredEpisodeLike(
     MediaSourceConfig source,
     WebDavScannedItem item,
   ) {
@@ -782,9 +795,10 @@ class NasMediaIndexer {
       return false;
     }
     final seed = item.metadataSeed;
-    final inferredEpisodeLike = seed.itemType.trim().toLowerCase() == 'episode' ||
-        seed.seasonNumber != null ||
-        seed.episodeNumber != null;
+    final inferredEpisodeLike =
+        seed.itemType.trim().toLowerCase() == 'episode' ||
+            seed.seasonNumber != null ||
+            seed.episodeNumber != null;
     return inferredEpisodeLike;
   }
 
@@ -1705,6 +1719,8 @@ class NasMediaIndexer {
     final settings = _readSettings();
     final recognition = NasMediaRecognizer.recognize(scannedItem.actualAddress);
     final seed = scannedItem.metadataSeed;
+    final structureInferredEpisodeLike =
+        _isStructureInferredEpisodeLike(source, scannedItem);
 
     var title =
         seed.title.trim().isNotEmpty ? seed.title.trim() : recognition.title;
@@ -1747,7 +1763,9 @@ class NasMediaIndexer {
     final height = seed.height;
     final bitrate = seed.bitrate;
 
-    final titleLocked = seed.hasSidecarMatch && seed.title.trim().isNotEmpty;
+    final titleLocked =
+        (seed.hasSidecarMatch && seed.title.trim().isNotEmpty) ||
+            (structureInferredEpisodeLike && seed.title.trim().isNotEmpty);
     final overviewLocked = seed.overview.trim().isNotEmpty;
     final posterLocked = seed.posterUrl.trim().isNotEmpty;
     final backdropLocked = seed.backdropUrl.trim().isNotEmpty;
@@ -1764,8 +1782,13 @@ class NasMediaIndexer {
     var tmdbMatched = false;
     var imdbMatched = false;
 
-    final baseQuery =
-        title.trim().isNotEmpty ? title.trim() : recognition.searchQuery;
+    final baseQuery = _buildMetadataMatchQuery(
+      source: source,
+      scannedItem: scannedItem,
+      recognition: recognition,
+      fallbackTitle:
+          title.trim().isNotEmpty ? title.trim() : recognition.searchQuery,
+    );
     final preferSeries = recognition.preferSeries ||
         itemType.trim().toLowerCase() == 'episode' ||
         itemType.trim().toLowerCase() == 'series';
@@ -2028,6 +2051,96 @@ class NasMediaIndexer {
       imdbMatched: imdbMatched,
       item: item,
     );
+  }
+
+  String _buildMetadataMatchQuery({
+    required MediaSourceConfig source,
+    required WebDavScannedItem scannedItem,
+    required NasMediaRecognition recognition,
+    required String fallbackTitle,
+  }) {
+    final baseTitle = fallbackTitle.trim();
+    if (!_isStructureInferredEpisodeLike(source, scannedItem)) {
+      return baseTitle;
+    }
+
+    final seriesTitle = _seriesTitleFromScannedItem(scannedItem).trim();
+    final fileTitle = scannedItem.metadataSeed.title.trim().isNotEmpty
+        ? scannedItem.metadataSeed.title.trim()
+        : _stripExtension(scannedItem.fileName).trim();
+    final normalizedSeries = _normalizeMetadataQueryToken(seriesTitle);
+    final normalizedFile = _normalizeMetadataQueryToken(fileTitle);
+
+    if (seriesTitle.isEmpty) {
+      return baseTitle;
+    }
+    if (fileTitle.isEmpty) {
+      return seriesTitle;
+    }
+    if (normalizedSeries.isNotEmpty &&
+        normalizedFile.isNotEmpty &&
+        (normalizedFile.contains(normalizedSeries) ||
+            normalizedSeries.contains(normalizedFile))) {
+      return fileTitle;
+    }
+    return '$seriesTitle $fileTitle'.trim();
+  }
+
+  String _normalizeMetadataQueryToken(String value) {
+    return value.trim().toLowerCase().replaceAll(
+          RegExp(r'[\s\-_.,:;!?/\\|()\[\]{}<>《》【】"“”·]+'),
+          '',
+        );
+  }
+
+  String _seriesTitleFromScannedItem(WebDavScannedItem item) {
+    final resourceSegments = _pathSegments(item.actualAddress);
+    if (resourceSegments.isEmpty) {
+      return '';
+    }
+
+    final hasSeasonHint = item.metadataSeed.seasonNumber != null ||
+        item.metadataSeed.episodeNumber != null;
+    final itemType = item.metadataSeed.itemType.trim().toLowerCase();
+    final sectionSegments = _pathSegments(_uriPath(item.sectionId));
+
+    var commonLength = 0;
+    while (commonLength < sectionSegments.length &&
+        commonLength < resourceSegments.length &&
+        sectionSegments[commonLength] == resourceSegments[commonLength]) {
+      commonLength += 1;
+    }
+
+    final relativeDirectories = resourceSegments.length <= commonLength + 1
+        ? <String>[]
+        : resourceSegments.sublist(commonLength, resourceSegments.length - 1);
+    if (relativeDirectories.isEmpty) {
+      return '';
+    }
+
+    final seasonDirectoryIndex =
+        relativeDirectories.indexWhere(_looksLikeSeasonFolderLabel);
+    if (seasonDirectoryIndex > 0) {
+      return relativeDirectories[seasonDirectoryIndex - 1].trim();
+    }
+
+    final trailingStructureRoot =
+        _nearestNonSeasonDirectory(relativeDirectories);
+    if (trailingStructureRoot.isNotEmpty &&
+        (hasSeasonHint || itemType == 'episode')) {
+      return trailingStructureRoot;
+    }
+
+    return relativeDirectories.first.trim();
+  }
+
+  String _stripExtension(String value) {
+    final trimmed = value.trim();
+    final lastDot = trimmed.lastIndexOf('.');
+    if (lastDot <= 0) {
+      return trimmed;
+    }
+    return trimmed.substring(0, lastDot);
   }
 
   String _buildScopeKey(

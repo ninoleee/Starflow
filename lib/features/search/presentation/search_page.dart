@@ -527,6 +527,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             shareUrl: result.resourceUrl,
             cookie: cookie,
             toPdirFid: storage.quarkSaveFolderId,
+            toPdirPath: storage.quarkSaveFolderPath,
+            saveFolderName: _controller.text.trim().isNotEmpty
+                ? _controller.text.trim()
+                : result.title.trim(),
           );
       var triggeredTask = false;
       SmartStrmTriggerResult? smartStrmResult;
@@ -536,9 +540,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             await ref.read(smartStrmWebhookClientProvider).triggerTask(
                   webhookUrl: storage.smartStrmWebhookUrl,
                   taskName: storage.smartStrmTaskName,
-                  storagePath: storage.quarkSaveFolderPath == '/'
+                  storagePath: response.targetFolderPath == '/'
                       ? ''
-                      : storage.quarkSaveFolderPath,
+                      : response.targetFolderPath,
                 );
         triggeredTask = true;
       }

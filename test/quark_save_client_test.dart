@@ -57,7 +57,12 @@ void main() {
             final body = jsonDecode(request.body) as Map<String, dynamic>;
             expect(body['pwd_id'], 'abc123');
             expect(body['passcode'], 'pw88');
-            return http.Response(jsonEncode({'code': 0, 'data': {'stoken': 'st-1'}}), 200);
+            return http.Response(
+                jsonEncode({
+                  'code': 0,
+                  'data': {'stoken': 'st-1'}
+                }),
+                200);
           }
           if (request.url.path == '/1/clouddrive/share/sharepage/detail') {
             expect(request.url.queryParameters['pwd_id'], 'abc123');
@@ -84,7 +89,12 @@ void main() {
             expect(body['stoken'], 'st-1');
             expect(body['fid_list'], ['fid-1', 'fid-2']);
             expect(body['fid_token_list'], ['token-1', 'token-2']);
-            return http.Response(jsonEncode({'code': 0, 'data': {'task_id': 'task-9'}}), 200);
+            return http.Response(
+                jsonEncode({
+                  'code': 0,
+                  'data': {'task_id': 'task-9'}
+                }),
+                200);
           }
           return http.Response('Not found', 404);
         }),
@@ -97,11 +107,89 @@ void main() {
 
       expect(result.taskId, 'task-9');
       expect(result.savedCount, 2);
+      expect(result.targetFolderPath, '/');
       expect(requests.map((item) => item.path), [
         '/1/clouddrive/share/sharepage/token',
         '/1/clouddrive/share/sharepage/detail',
         '/1/clouddrive/share/sharepage/save',
       ]);
+    });
+
+    test('creates or reuses a child folder before saving', () async {
+      final client = QuarkSaveClient(
+        MockClient((request) async {
+          if (request.url.path == '/1/clouddrive/share/sharepage/token') {
+            return http.Response(
+              jsonEncode({
+                'code': 0,
+                'data': {'stoken': 'st-2'}
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/1/clouddrive/share/sharepage/detail') {
+            return http.Response(
+              jsonEncode({
+                'code': 0,
+                'data': {
+                  'list': [
+                    {'fid': 'fid-9', 'share_fid_token': 'token-9'},
+                  ],
+                },
+                'metadata': {'_total': 1},
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/1/clouddrive/file/sort') {
+            expect(request.url.queryParameters['pdir_fid'], 'dir-parent');
+            return http.Response(
+              jsonEncode({
+                'code': 0,
+                'data': {'list': []},
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/1/clouddrive/file') {
+            final body = jsonDecode(request.body) as Map<String, dynamic>;
+            expect(body['pdir_fid'], 'dir-parent');
+            expect(body['file_name'], '三体');
+            expect(body['dir_path'], '/电影/三体');
+            return http.Response(
+              jsonEncode({
+                'code': 0,
+                'data': {'fid': 'dir-child'},
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/1/clouddrive/share/sharepage/save') {
+            final body = jsonDecode(request.body) as Map<String, dynamic>;
+            expect(body['to_pdir_fid'], 'dir-child');
+            return http.Response(
+              jsonEncode({
+                'code': 0,
+                'data': {'task_id': 'task-10'}
+              }),
+              200,
+            );
+          }
+          return http.Response('Not found', 404);
+        }),
+      );
+
+      final result = await client.saveShareLink(
+        shareUrl: 'https://pan.quark.cn/s/abc123',
+        cookie: 'kps=test; sign=test; vcode=test;',
+        toPdirFid: 'dir-parent',
+        toPdirPath: '/电影',
+        saveFolderName: '三体',
+      );
+
+      expect(result.taskId, 'task-10');
+      expect(result.savedCount, 1);
+      expect(result.targetFolderPath, '/电影/三体');
     });
   });
 }

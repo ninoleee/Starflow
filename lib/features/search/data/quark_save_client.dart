@@ -53,6 +53,7 @@ class QuarkSaveClient {
       throw const QuarkSaveException('分享链接里没有可保存的文件');
     }
 
+    final normalizedTargetDirectoryPath = _normalizeDirectoryPath(toPdirPath);
     var resolvedTargetDirectoryId =
         toPdirFid.trim().isEmpty ? '0' : toPdirFid.trim();
     final sanitizedFolderName = _sanitizeDirectoryName(saveFolderName);
@@ -64,6 +65,11 @@ class QuarkSaveClient {
         folderName: sanitizedFolderName,
       );
     }
+    final resolvedTargetDirectoryPath = sanitizedFolderName.isEmpty
+        ? normalizedTargetDirectoryPath
+        : normalizedTargetDirectoryPath == '/'
+            ? '/$sanitizedFolderName'
+            : '$normalizedTargetDirectoryPath/$sanitizedFolderName';
 
     final response = await _client.post(
       Uri.parse('$_baseUrl/1/clouddrive/share/sharepage/save').replace(
@@ -79,7 +85,8 @@ class QuarkSaveClient {
       headers: _headers(trimmedCookie),
       body: jsonEncode({
         'fid_list': sharedEntries.map((item) => item.fid).toList(),
-        'fid_token_list': sharedEntries.map((item) => item.shareFidToken).toList(),
+        'fid_token_list':
+            sharedEntries.map((item) => item.shareFidToken).toList(),
         'to_pdir_fid': resolvedTargetDirectoryId,
         'pwd_id': parsed.pwdId,
         'stoken': stoken,
@@ -90,11 +97,13 @@ class QuarkSaveClient {
 
     final payload = _decode(response);
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
+      throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode));
     }
     final code = payload['code'] as int? ?? -1;
     if (code != 0) {
-      throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
+      throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode));
     }
 
     final data = payload['data'] as Map<String, dynamic>? ?? const {};
@@ -102,6 +111,7 @@ class QuarkSaveClient {
     return QuarkSaveResult(
       taskId: taskId,
       savedCount: sharedEntries.length,
+      targetFolderPath: resolvedTargetDirectoryPath,
     );
   }
 
@@ -153,11 +163,13 @@ class QuarkSaveClient {
     );
     final payload = _decode(response);
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
+      throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode));
     }
     final code = payload['code'] as int? ?? -1;
     if (code != 0) {
-      throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
+      throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode));
     }
 
     final createdFid =
@@ -209,15 +221,17 @@ class QuarkSaveClient {
     );
     final payload = _decode(response);
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
+      throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode));
     }
     final code = payload['code'] as int? ?? -1;
     if (code != 0) {
-      throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
+      throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode));
     }
 
-    final entries = (payload['data'] as Map<String, dynamic>? ?? const {})['list']
-            as List<dynamic>? ??
+    final entries = (payload['data'] as Map<String, dynamic>? ??
+            const {})['list'] as List<dynamic>? ??
         const [];
     return entries
         .whereType<Map>()
@@ -248,11 +262,13 @@ class QuarkSaveClient {
     );
     final payload = _decode(response);
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
+      throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode));
     }
     final code = payload['code'] as int? ?? -1;
     if (code != 0) {
-      throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
+      throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode));
     }
     final data = payload['data'] as Map<String, dynamic>? ?? const {};
     final stoken = '${data['stoken'] ?? ''}'.trim();
@@ -295,11 +311,13 @@ class QuarkSaveClient {
       );
       final payload = _decode(response);
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
+        throw QuarkSaveException(
+            _resolveErrorMessage(payload, response.statusCode));
       }
       final code = payload['code'] as int? ?? -1;
       if (code != 0) {
-        throw QuarkSaveException(_resolveErrorMessage(payload, response.statusCode));
+        throw QuarkSaveException(
+            _resolveErrorMessage(payload, response.statusCode));
       }
 
       final data = payload['data'] as Map<String, dynamic>? ?? const {};
@@ -337,7 +355,8 @@ class QuarkSaveClient {
     if (response.body.trim().isEmpty) {
       return const {};
     }
-    final decoded = jsonDecode(utf8.decode(response.bodyBytes, allowMalformed: true));
+    final decoded =
+        jsonDecode(utf8.decode(response.bodyBytes, allowMalformed: true));
     if (decoded is Map<String, dynamic>) {
       return decoded;
     }
