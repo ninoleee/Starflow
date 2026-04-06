@@ -5,6 +5,8 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val starflowMinSdk = 23
+
 android {
     namespace = "com.example.starflow"
     compileSdk = maxOf(flutter.compileSdkVersion, 31)
@@ -31,7 +33,7 @@ android {
         applicationId = "com.example.starflow"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = starflowMinSdk
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

@@ -69,18 +69,13 @@ class SettingsPage extends ConsumerWidget {
                     ),
                     Align(
                       alignment: Alignment.centerLeft,
-                      child: isTelevision
-                          ? TvAdaptiveButton(
-                              label: '新增媒体源',
-                              icon: Icons.add_rounded,
-                              onPressed: () => _openMediaSourceEditor(context),
-                              variant: TvButtonVariant.outlined,
-                            )
-                          : OutlinedButton.icon(
-                              onPressed: () => _openMediaSourceEditor(context),
-                              icon: const Icon(Icons.add_rounded),
-                              label: const Text('新增媒体源'),
-                            ),
+                      child: StarflowButton(
+                        label: '新增媒体源',
+                        icon: Icons.add_rounded,
+                        onPressed: () => _openMediaSourceEditor(context),
+                        variant: StarflowButtonVariant.secondary,
+                        compact: true,
+                      ),
                     ),
                   ],
                 ),
@@ -110,20 +105,20 @@ class SettingsPage extends ConsumerWidget {
                     ),
                     Align(
                       alignment: Alignment.centerLeft,
-                      child: isTelevision
-                          ? TvAdaptiveButton(
-                              label: '新增搜索服务',
-                              icon: Icons.add_rounded,
-                              onPressed: () =>
-                                  _openSearchProviderEditor(context),
-                              variant: TvButtonVariant.outlined,
-                            )
-                          : OutlinedButton.icon(
-                              onPressed: () =>
-                                  _openSearchProviderEditor(context),
-                              icon: const Icon(Icons.add_rounded),
-                              label: const Text('新增搜索服务'),
-                            ),
+                      child: StarflowButton(
+                        label: '新增搜索服务',
+                        icon: Icons.add_rounded,
+                        onPressed: () => _openSearchProviderEditor(context),
+                        variant: StarflowButtonVariant.secondary,
+                        compact: true,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _SettingsNavigationTile(
+                      title: '搜索来源',
+                      subtitle: _searchSourceSummary(settings),
+                      onTap: () =>
+                          _openSearchSourcePicker(context, ref, settings),
                     ),
                   ],
                 ),
@@ -456,6 +451,142 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
+  Future<void> _openSearchSourcePicker(
+    BuildContext context,
+    WidgetRef ref,
+    AppSettings settings,
+  ) async {
+    final availableLocalSources = settings.mediaSources
+        .where(
+          (source) =>
+              source.enabled &&
+              (source.kind == MediaSourceKind.emby ||
+                  source.kind == MediaSourceKind.nas),
+        )
+        .toList(growable: false);
+    final availableProviders = settings.searchProviders
+        .where((provider) => provider.enabled)
+        .toList(growable: false);
+    if (availableLocalSources.isEmpty && availableProviders.isEmpty) {
+      return;
+    }
+
+    final initialSelection = settings.searchSourceIds.toSet();
+    final selected = await showDialog<Set<String>>(
+      context: context,
+      builder: (dialogContext) {
+        var draft = <String>{...initialSelection};
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('选择搜索来源'),
+              content: SizedBox(
+                width: 420,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('全部已启用来源'),
+                        subtitle: const Text('清空单独选择，搜索时使用全部已启用本地源和搜索服务'),
+                        value: draft.isEmpty,
+                        onChanged: (_) {
+                          setState(() {
+                            draft = <String>{};
+                          });
+                        },
+                      ),
+                      if (availableLocalSources.isNotEmpty) ...[
+                        const Divider(height: 16),
+                        Text(
+                          '本地媒体源',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 6),
+                        for (final source in availableLocalSources)
+                          CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(source.name),
+                            subtitle: Text(source.kind.label),
+                            value: draft.contains(
+                              searchSourceSettingIdForMediaSource(source.id),
+                            ),
+                            onChanged: (checked) {
+                              setState(() {
+                                final id = searchSourceSettingIdForMediaSource(
+                                  source.id,
+                                );
+                                if (checked ?? false) {
+                                  draft.add(id);
+                                } else {
+                                  draft.remove(id);
+                                }
+                              });
+                            },
+                          ),
+                      ],
+                      if (availableProviders.isNotEmpty) ...[
+                        const Divider(height: 16),
+                        Text(
+                          '搜索服务',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 6),
+                        for (final provider in availableProviders)
+                          CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(provider.name),
+                            subtitle: Text(provider.kind.label),
+                            value: draft.contains(
+                              searchSourceSettingIdForProvider(provider.id),
+                            ),
+                            onChanged: (checked) {
+                              setState(() {
+                                final id = searchSourceSettingIdForProvider(
+                                  provider.id,
+                                );
+                                if (checked ?? false) {
+                                  draft.add(id);
+                                } else {
+                                  draft.remove(id);
+                                }
+                              });
+                            },
+                          ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('取消'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(<String>{}),
+                  child: const Text('全部来源'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(draft),
+                  child: const Text('保存'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (selected == null) {
+      return;
+    }
+    await ref
+        .read(settingsControllerProvider.notifier)
+        .setSearchSourceIds(selected.toList(growable: false));
+  }
+
   Future<void> _openNetworkStorageSettings(
     BuildContext context,
     NetworkStorageConfig initial,
@@ -619,6 +750,53 @@ String _playbackSettingsSummary(AppSettings settings) {
     settings.playbackSubtitleScale.label,
     settings.playbackBackgroundPlaybackEnabled ? '后台播放开' : '后台播放关',
   ].join(' · ');
+}
+
+String _searchSourceSummary(AppSettings settings) {
+  final availableLocalSources = settings.mediaSources
+      .where(
+        (source) =>
+            source.enabled &&
+            (source.kind == MediaSourceKind.emby ||
+                source.kind == MediaSourceKind.nas),
+      )
+      .toList(growable: false);
+  final availableProviders = settings.searchProviders
+      .where((provider) => provider.enabled)
+      .toList(growable: false);
+  final totalCount = availableLocalSources.length + availableProviders.length;
+  if (totalCount == 0) {
+    return '暂无可选来源';
+  }
+
+  final selectedIds = settings.searchSourceIds.toSet();
+  if (selectedIds.isEmpty) {
+    return '全部已启用来源';
+  }
+
+  final selectedLabels = <String>[
+    ...availableLocalSources
+        .where(
+          (source) => selectedIds.contains(
+            searchSourceSettingIdForMediaSource(source.id),
+          ),
+        )
+        .map((source) => source.name),
+    ...availableProviders
+        .where(
+          (provider) => selectedIds.contains(
+            searchSourceSettingIdForProvider(provider.id),
+          ),
+        )
+        .map((provider) => provider.name),
+  ];
+  if (selectedLabels.isEmpty || selectedLabels.length >= totalCount) {
+    return '全部已启用来源';
+  }
+  if (selectedLabels.length <= 2) {
+    return selectedLabels.join('、');
+  }
+  return '${selectedLabels.take(2).join('、')} 等 ${selectedLabels.length} 个来源';
 }
 
 String _formatPlaybackSpeedLabel(double speed) {

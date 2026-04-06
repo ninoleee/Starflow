@@ -15,6 +15,29 @@ final localStorageCacheRepositoryProvider =
   ),
 );
 
+enum DetailMetadataRefreshStatus {
+  never,
+  succeeded,
+  failed,
+}
+
+extension DetailMetadataRefreshStatusX on DetailMetadataRefreshStatus {
+  static DetailMetadataRefreshStatus fromJsonValue(Object? value) {
+    final normalized = '$value'.trim().toLowerCase();
+    switch (normalized) {
+      case 'succeeded':
+        return DetailMetadataRefreshStatus.succeeded;
+      case 'failed':
+        return DetailMetadataRefreshStatus.failed;
+      case 'never':
+      case '':
+        return DetailMetadataRefreshStatus.never;
+      default:
+        return DetailMetadataRefreshStatus.never;
+    }
+  }
+}
+
 class LocalStorageCacheRepository {
   LocalStorageCacheRepository({
     SharedPreferences? sharedPreferences,
@@ -47,9 +70,27 @@ class LocalStorageCacheRepository {
     return null;
   }
 
+  Future<DetailMetadataRefreshStatus> loadDetailMetadataRefreshStatus(
+    MediaDetailTarget seedTarget,
+  ) async {
+    final payload = await _loadDetailPayload();
+    for (final lookupKey in buildLookupKeys(seedTarget)) {
+      final recordId = payload.lookupKeys[lookupKey];
+      if (recordId == null) {
+        continue;
+      }
+      final record = payload.records[recordId];
+      if (record != null) {
+        return record.metadataRefreshStatus;
+      }
+    }
+    return DetailMetadataRefreshStatus.never;
+  }
+
   Future<void> saveDetailTarget({
     required MediaDetailTarget seedTarget,
     required MediaDetailTarget resolvedTarget,
+    DetailMetadataRefreshStatus? metadataRefreshStatus,
   }) async {
     final lookupKeys = {
       ...buildLookupKeys(seedTarget),
@@ -82,6 +123,10 @@ class LocalStorageCacheRepository {
       lookupKeys: mergedLookupKeys,
       updatedAt: DateTime.now(),
       target: resolvedTarget,
+      metadataRefreshStatus:
+          metadataRefreshStatus ??
+          existing?.metadataRefreshStatus ??
+          DetailMetadataRefreshStatus.never,
     );
 
     final nextRecords = <String, _CachedDetailRecord>{
@@ -308,12 +353,14 @@ class _CachedDetailRecord {
     required this.lookupKeys,
     required this.updatedAt,
     required this.target,
+    this.metadataRefreshStatus = DetailMetadataRefreshStatus.never,
   });
 
   final String id;
   final List<String> lookupKeys;
   final DateTime updatedAt;
   final MediaDetailTarget target;
+  final DetailMetadataRefreshStatus metadataRefreshStatus;
 
   Map<String, dynamic> toJson() {
     return {
@@ -321,6 +368,7 @@ class _CachedDetailRecord {
       'lookupKeys': lookupKeys,
       'updatedAt': updatedAt.toIso8601String(),
       'target': target.toJson(),
+      'metadataRefreshStatus': metadataRefreshStatus.name,
     };
   }
 
@@ -336,6 +384,9 @@ class _CachedDetailRecord {
         Map<String, dynamic>.from(
           (json['target'] as Map?) ?? const {},
         ),
+      ),
+      metadataRefreshStatus: DetailMetadataRefreshStatusX.fromJsonValue(
+        json['metadataRefreshStatus'],
       ),
     );
   }

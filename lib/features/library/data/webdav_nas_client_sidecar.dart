@@ -955,6 +955,7 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     _nfoInflight.clear();
     _directoryCache.clear();
     _directoryInflight.clear();
+    _directorySubtreeCache.clear();
   }
 
   void _throwIfCancelled(bool Function()? shouldCancel) {

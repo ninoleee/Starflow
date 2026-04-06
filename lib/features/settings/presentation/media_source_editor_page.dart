@@ -3,11 +3,14 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
 /// 全屏编辑媒体源（替代原先窄对话框，便于长表单与键盘避让）。
 class MediaSourceEditorPage extends ConsumerStatefulWidget {
@@ -454,6 +457,47 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     });
   }
 
+  void _applyKindSelection(MediaSourceKind value) {
+    setState(() {
+      _kind = value;
+      _savedFeaturedSectionIds = const [];
+      _didHydrateSectionSelection = false;
+      _availableSections = const [];
+      _selectedSectionIds.clear();
+      _selectedNasPath = '';
+      _boundWebDavEndpoint =
+          value == MediaSourceKind.nas ? _endpointController.text.trim() : '';
+      _webDavStructureInferenceEnabled = false;
+      _webDavSidecarScrapingEnabled = true;
+      _webDavExcludedKeywordsController.clear();
+      _connectionMessage = _defaultConnectionMessage(value);
+    });
+  }
+
+  Future<void> _openKindPicker() async {
+    final selected = await showDialog<MediaSourceKind>(
+      context: context,
+      builder: (dialogContext) {
+        return SimpleDialog(
+          title: const Text('选择类型'),
+          children: [
+            for (final item in MediaSourceKind.values)
+              SimpleDialogOption(
+                onPressed: () => Navigator.of(dialogContext).pop(item),
+                child: Text(
+                  item == _kind ? '${item.label}  当前' : item.label,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+    if (selected == null) {
+      return;
+    }
+    _applyKindSelection(selected);
+  }
+
   Future<void> _onSave() => _saveDraft();
 
   bool _hasUnsavedChanges() {
@@ -554,6 +598,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final isEmby = _kind == MediaSourceKind.emby;
 
     return PopScope<void>(
@@ -573,56 +618,47 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               children: [
                 _SectionTitle(theme: theme, label: '基本信息'),
-                TextField(
+                SettingsTextInputField(
                   controller: _nameController,
+                  labelText: '名称',
                   textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(labelText: '名称'),
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<MediaSourceKind>(
-                  key: ValueKey(_kind),
-                  initialValue: _kind,
-                  decoration: const InputDecoration(labelText: '类型'),
-                  items: MediaSourceKind.values
-                      .map(
-                        (item) => DropdownMenuItem(
-                          value: item,
-                          child: Text(item.label),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() {
-                        _kind = value;
-                        _savedFeaturedSectionIds = const [];
-                        _didHydrateSectionSelection = false;
-                        _availableSections = const [];
-                        _selectedSectionIds.clear();
-                        _selectedNasPath = '';
-                        _boundWebDavEndpoint = value == MediaSourceKind.nas
-                            ? _endpointController.text.trim()
-                            : '';
-                        _webDavStructureInferenceEnabled = false;
-                        _webDavSidecarScrapingEnabled = true;
-                        _webDavExcludedKeywordsController.clear();
-                        _connectionMessage = _defaultConnectionMessage(value);
-                      });
-                    }
-                  },
-                ),
+                if (isTelevision)
+                  TvSelectionTile(
+                    title: '类型',
+                    value: _kind.label,
+                    onPressed: _openKindPicker,
+                  )
+                else
+                  DropdownButtonFormField<MediaSourceKind>(
+                    key: ValueKey(_kind),
+                    initialValue: _kind,
+                    decoration: const InputDecoration(labelText: '类型'),
+                    items: MediaSourceKind.values
+                        .map(
+                          (item) => DropdownMenuItem(
+                            value: item,
+                            child: Text(item.label),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        _applyKindSelection(value);
+                      }
+                    },
+                  ),
                 _SectionTitle(theme: theme, label: '连接'),
-                TextField(
+                SettingsTextInputField(
                   controller: _endpointController,
+                  labelText: isEmby ? 'Endpoint' : 'WebDAV Endpoint',
                   keyboardType: TextInputType.url,
                   textInputAction: TextInputAction.next,
                   autocorrect: false,
-                  decoration: InputDecoration(
-                    labelText: isEmby ? 'Endpoint' : 'WebDAV Endpoint',
-                    hintText: isEmby
-                        ? 'https://emby.example.com'
-                        : 'https://nas.example.com/dav',
-                  ),
+                  hintText: isEmby
+                      ? 'https://emby.example.com'
+                      : 'https://nas.example.com/dav',
                 ),
                 if (!isEmby) ...[
                   const SizedBox(height: 12),
@@ -640,55 +676,75 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                 AutofillGroup(
                   child: Column(
                     children: [
-                      TextField(
+                      SettingsTextInputField(
                         controller: _usernameController,
+                        labelText: isEmby ? 'Emby 用户名' : '用户名',
                         textInputAction: TextInputAction.next,
                         autofillHints: const [AutofillHints.username],
-                        decoration: InputDecoration(
-                          labelText: isEmby ? 'Emby 用户名' : '用户名',
-                        ),
                       ),
                       const SizedBox(height: 12),
-                      TextField(
+                      SettingsTextInputField(
                         controller: _passwordController,
+                        labelText: isEmby ? 'Emby 密码' : 'WebDAV 密码',
                         obscureText: true,
                         textInputAction: TextInputAction.done,
                         autofillHints: const [AutofillHints.password],
-                        decoration: InputDecoration(
-                          labelText: isEmby ? 'Emby 密码' : 'WebDAV 密码',
-                        ),
+                        summaryBuilder: (value) =>
+                            value.isEmpty ? '未填写' : '已填写',
                       ),
                     ],
                   ),
                 ),
                 if (isEmby) ...[
                   const SizedBox(height: 8),
-                  ExpansionTile(
-                    initiallyExpanded: _advancedTokenExpanded,
-                    onExpansionChanged: (expanded) {
-                      setState(() => _advancedTokenExpanded = expanded);
-                    },
-                    title: Text(
-                      '高级（可选）',
-                      style: theme.textTheme.titleSmall,
-                    ),
-                    subtitle: Text(
-                      '手动粘贴 Access Token / API Key',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                    children: [
-                      TextField(
-                        controller: _tokenController,
-                        minLines: 1,
-                        maxLines: 4,
-                        decoration: const InputDecoration(
-                          labelText: 'Access Token / API Key',
-                          alignLabelWithHint: true,
-                        ),
+                  if (isTelevision)
+                    TvSelectionTile(
+                      title: '高级（可选）',
+                      value: _advancedTokenExpanded ? '已展开' : '已收起',
+                      onPressed: () {
+                        setState(() {
+                          _advancedTokenExpanded = !_advancedTokenExpanded;
+                        });
+                      },
+                    )
+                  else
+                    ExpansionTile(
+                      initiallyExpanded: _advancedTokenExpanded,
+                      onExpansionChanged: (expanded) {
+                        setState(() => _advancedTokenExpanded = expanded);
+                      },
+                      title: Text(
+                        '高级（可选）',
+                        style: theme.textTheme.titleSmall,
                       ),
-                      const SizedBox(height: 8),
-                    ],
-                  ),
+                      subtitle: Text(
+                        '手动粘贴 Access Token / API Key',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                      children: [
+                        SettingsTextInputField(
+                          controller: _tokenController,
+                          labelText: 'Access Token / API Key',
+                          minLines: 1,
+                          maxLines: 4,
+                          alignLabelWithHint: true,
+                          summaryBuilder: (value) =>
+                              value.isEmpty ? '未填写' : '已填写',
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                    ),
+                  if (isTelevision && _advancedTokenExpanded) ...[
+                    const SizedBox(height: 12),
+                    SettingsTextInputField(
+                      controller: _tokenController,
+                      labelText: 'Access Token / API Key',
+                      minLines: 1,
+                      maxLines: 4,
+                      alignLabelWithHint: true,
+                      summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
+                    ),
+                  ],
                 ] else ...[
                   const SizedBox(height: 12),
                   Text(
@@ -702,38 +758,80 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                 if (_availableSections.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
+                    child: Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
                       children: [
-                        TextButton(
-                          onPressed: _selectAllSections,
-                          child: const Text('全选'),
-                        ),
-                        TextButton(
-                          onPressed: _clearAllSections,
-                          child: const Text('清空'),
-                        ),
+                        if (isTelevision)
+                          TvAdaptiveButton(
+                            label: '全选',
+                            icon: Icons.select_all_rounded,
+                            onPressed: _selectAllSections,
+                            variant: TvButtonVariant.text,
+                          )
+                        else
+                          TextButton(
+                            onPressed: _selectAllSections,
+                            child: const Text('全选'),
+                          ),
+                        if (isTelevision)
+                          TvAdaptiveButton(
+                            label: '清空',
+                            icon: Icons.clear_all_rounded,
+                            onPressed: _clearAllSections,
+                            variant: TvButtonVariant.text,
+                          )
+                        else
+                          TextButton(
+                            onPressed: _clearAllSections,
+                            child: const Text('清空'),
+                          ),
                       ],
                     ),
                   ),
                 if (_availableSections.isNotEmpty)
                   ..._availableSections.map(
-                    (section) => CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: _selectedSectionIds.contains(section.id),
-                      title: Text(section.title),
-                      onChanged: (value) {
-                        setState(() {
-                          _didHydrateSectionSelection = true;
-                          final nextSelection = {..._selectedSectionIds};
-                          if (value ?? false) {
-                            nextSelection.add(section.id);
-                          } else {
-                            nextSelection.remove(section.id);
-                          }
-                          _selectedSectionIds = nextSelection;
-                        });
-                      },
-                    ),
+                    (section) => isTelevision
+                        ? Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: TvSelectionTile(
+                              title: section.title,
+                              value: _selectedSectionIds.contains(section.id)
+                                  ? '已选中'
+                                  : '未选中',
+                              onPressed: () {
+                                setState(() {
+                                  _didHydrateSectionSelection = true;
+                                  final nextSelection = {
+                                    ..._selectedSectionIds
+                                  };
+                                  if (nextSelection.contains(section.id)) {
+                                    nextSelection.remove(section.id);
+                                  } else {
+                                    nextSelection.add(section.id);
+                                  }
+                                  _selectedSectionIds = nextSelection;
+                                });
+                              },
+                            ),
+                          )
+                        : CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            value: _selectedSectionIds.contains(section.id),
+                            title: Text(section.title),
+                            onChanged: (value) {
+                              setState(() {
+                                _didHydrateSectionSelection = true;
+                                final nextSelection = {..._selectedSectionIds};
+                                if (value ?? false) {
+                                  nextSelection.add(section.id);
+                                } else {
+                                  nextSelection.remove(section.id);
+                                }
+                                _selectedSectionIds = nextSelection;
+                              });
+                            },
+                          ),
                   )
                 else
                   Padding(
@@ -772,44 +870,95 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('启用此媒体源'),
-                  value: _enabled,
-                  onChanged: (value) => setState(() => _enabled = value),
-                ),
+                if (isTelevision)
+                  TvSelectionTile(
+                    title: '启用此媒体源',
+                    value: _enabled ? '已开启' : '已关闭',
+                    onPressed: () => setState(() => _enabled = !_enabled),
+                  )
+                else
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('启用此媒体源'),
+                    value: _enabled,
+                    onChanged: (value) => setState(() => _enabled = value),
+                  ),
                 if (!isEmby) ...[
                   const SizedBox(height: 12),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('目录结构推断'),
-                    value: _webDavStructureInferenceEnabled,
-                    onChanged: (value) {
-                      setState(() {
-                        _webDavStructureInferenceEnabled = value;
-                      });
-                    },
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('本地刮削/NFO'),
-                    value: _webDavSidecarScrapingEnabled,
-                    onChanged: (value) {
-                      setState(() {
-                        _webDavSidecarScrapingEnabled = value;
-                      });
-                    },
-                  ),
+                  if (isTelevision)
+                    TvSelectionTile(
+                      title: '目录结构推断',
+                      value: _webDavStructureInferenceEnabled ? '已开启' : '已关闭',
+                      onPressed: () {
+                        setState(() {
+                          _webDavStructureInferenceEnabled =
+                              !_webDavStructureInferenceEnabled;
+                        });
+                      },
+                    )
+                  else
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('目录结构推断'),
+                      value: _webDavStructureInferenceEnabled,
+                      onChanged: (value) {
+                        setState(() {
+                          _webDavStructureInferenceEnabled = value;
+                        });
+                      },
+                    ),
+                  if (isTelevision)
+                    TvSelectionTile(
+                      title: '本地刮削/NFO',
+                      value: _webDavSidecarScrapingEnabled ? '已开启' : '已关闭',
+                      onPressed: () {
+                        setState(() {
+                          _webDavSidecarScrapingEnabled =
+                              !_webDavSidecarScrapingEnabled;
+                        });
+                      },
+                    )
+                  else
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('本地刮削/NFO'),
+                      value: _webDavSidecarScrapingEnabled,
+                      onChanged: (value) {
+                        setState(() {
+                          _webDavSidecarScrapingEnabled = value;
+                        });
+                      },
+                    ),
                   const SizedBox(height: 8),
-                  TextField(
+                  SettingsTextInputField(
                     controller: _webDavExcludedKeywordsController,
+                    labelText: '过滤关键字',
                     minLines: 2,
                     maxLines: 5,
-                    decoration: const InputDecoration(
-                      labelText: '过滤关键字',
-                      hintText: '比如：sample、预告片',
-                      helperText: '支持填写多个。每行一个，或用逗号分隔；命中任意关键字的路径都会被过滤。',
-                      alignLabelWithHint: true,
+                    hintText: '比如：sample、预告片',
+                    alignLabelWithHint: true,
+                    summaryBuilder: (value) {
+                      if (value.isEmpty) {
+                        return '未填写';
+                      }
+                      final keywords = value
+                          .split(RegExp(r'[\n,，;；]+'))
+                          .map((item) => item.trim())
+                          .where((item) => item.isNotEmpty)
+                          .toList(growable: false);
+                      if (keywords.isEmpty) {
+                        return '未填写';
+                      }
+                      return '已填写 ${keywords.length} 项';
+                    },
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      '支持填写多个。每行一个，或用逗号分隔；命中任意关键字的路径都会被过滤。',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ],
@@ -820,23 +969,46 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                     runSpacing: 10,
                     alignment: WrapAlignment.start,
                     children: [
-                      OutlinedButton(
-                        onPressed: _isAuthenticating ? null : _onTestEmbyLogin,
-                        child: Text(
-                          _isAuthenticating ? '登录中…' : '测试登录',
+                      if (isTelevision)
+                        TvAdaptiveButton(
+                          label: _isAuthenticating ? '登录中…' : '测试登录',
+                          icon: Icons.login_rounded,
+                          onPressed:
+                              _isAuthenticating ? null : _onTestEmbyLogin,
+                          variant: TvButtonVariant.outlined,
+                        )
+                      else
+                        OutlinedButton(
+                          onPressed:
+                              _isAuthenticating ? null : _onTestEmbyLogin,
+                          child: Text(
+                            _isAuthenticating ? '登录中…' : '测试登录',
+                          ),
                         ),
-                      ),
-                      OutlinedButton(
-                        onPressed: _isLoadingSections ||
-                                _endpointController.text.trim().isEmpty ||
-                                _tokenController.text.trim().isEmpty ||
-                                _resolvedUserId.trim().isEmpty
-                            ? null
-                            : _onFetchEmbySections,
-                        child: Text(
-                          _isLoadingSections ? '读取中…' : '选择分区',
+                      if (isTelevision)
+                        TvAdaptiveButton(
+                          label: _isLoadingSections ? '读取中…' : '选择分区',
+                          icon: Icons.folder_open_rounded,
+                          onPressed: _isLoadingSections ||
+                                  _endpointController.text.trim().isEmpty ||
+                                  _tokenController.text.trim().isEmpty ||
+                                  _resolvedUserId.trim().isEmpty
+                              ? null
+                              : _onFetchEmbySections,
+                          variant: TvButtonVariant.outlined,
+                        )
+                      else
+                        OutlinedButton(
+                          onPressed: _isLoadingSections ||
+                                  _endpointController.text.trim().isEmpty ||
+                                  _tokenController.text.trim().isEmpty ||
+                                  _resolvedUserId.trim().isEmpty
+                              ? null
+                              : _onFetchEmbySections,
+                          child: Text(
+                            _isLoadingSections ? '读取中…' : '选择分区',
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ] else ...[
@@ -847,26 +1019,60 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                       spacing: 10,
                       runSpacing: 10,
                       children: [
-                        OutlinedButton(
-                          onPressed: _isTestingWebDav ||
-                                  _endpointController.text.trim().isEmpty
-                              ? null
-                              : _onTestWebDavConnection,
-                          child: Text(_isTestingWebDav ? '测试中…' : '测试连接'),
-                        ),
-                        OutlinedButton(
-                          onPressed: _endpointController.text.trim().isEmpty
-                              ? null
-                              : _pickWebDavPath,
-                          child: const Text('选择路径'),
-                        ),
-                        OutlinedButton(
-                          onPressed: _isLoadingSections ||
-                                  _endpointController.text.trim().isEmpty
-                              ? null
-                              : _onFetchNasSections,
-                          child: Text(_isLoadingSections ? '读取中…' : '选择分区'),
-                        ),
+                        if (isTelevision)
+                          TvAdaptiveButton(
+                            label: _isTestingWebDav ? '测试中…' : '测试连接',
+                            icon: Icons.cloud_done_outlined,
+                            onPressed: _isTestingWebDav ||
+                                    _endpointController.text.trim().isEmpty
+                                ? null
+                                : _onTestWebDavConnection,
+                            variant: TvButtonVariant.outlined,
+                          )
+                        else
+                          OutlinedButton(
+                            onPressed: _isTestingWebDav ||
+                                    _endpointController.text.trim().isEmpty
+                                ? null
+                                : _onTestWebDavConnection,
+                            child: Text(_isTestingWebDav ? '测试中…' : '测试连接'),
+                          ),
+                        if (isTelevision)
+                          TvAdaptiveButton(
+                            label: '选择路径',
+                            icon: Icons.folder_open_rounded,
+                            onPressed: _endpointController.text.trim().isEmpty
+                                ? null
+                                : _pickWebDavPath,
+                            variant: TvButtonVariant.outlined,
+                          )
+                        else
+                          OutlinedButton(
+                            onPressed: _endpointController.text.trim().isEmpty
+                                ? null
+                                : _pickWebDavPath,
+                            child: const Text('选择路径'),
+                          ),
+                        if (isTelevision)
+                          TvAdaptiveButton(
+                            label: _isLoadingSections ? '读取中…' : '选择分区',
+                            icon: Icons.view_list_rounded,
+                            onPressed: _isLoadingSections ||
+                                    _endpointController.text.trim().isEmpty
+                                ? null
+                                : _onFetchNasSections,
+                            variant: TvButtonVariant.outlined,
+                          )
+                        else
+                          OutlinedButton(
+                            onPressed: _isLoadingSections ||
+                                    _endpointController.text.trim().isEmpty
+                                ? null
+                                : _onFetchNasSections,
+                            child: Text(
+                              _isLoadingSections ? '读取中…' : '选择分区',
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -875,17 +1081,24 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                   const SizedBox(height: 28),
                   Align(
                     alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      icon: Icon(
-                        Icons.delete_outline_rounded,
-                        color: theme.colorScheme.error,
-                      ),
-                      label: Text(
-                        '删除此媒体源',
-                        style: TextStyle(color: theme.colorScheme.error),
-                      ),
-                      onPressed: _confirmDeleteMediaSource,
-                    ),
+                    child: isTelevision
+                        ? TvAdaptiveButton(
+                            label: '删除此媒体源',
+                            icon: Icons.delete_outline_rounded,
+                            onPressed: _confirmDeleteMediaSource,
+                            variant: TvButtonVariant.outlined,
+                          )
+                        : TextButton.icon(
+                            icon: Icon(
+                              Icons.delete_outline_rounded,
+                              color: theme.colorScheme.error,
+                            ),
+                            label: Text(
+                              '删除此媒体源',
+                              style: TextStyle(color: theme.colorScheme.error),
+                            ),
+                            onPressed: _confirmDeleteMediaSource,
+                          ),
                   ),
                 ],
                 const SizedBox(height: kBottomReservedSpacing),
@@ -897,10 +1110,20 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
               right: 0,
               child: OverlayToolbar(
                 onBack: _handleCloseRequest,
-                trailing: TextButton(
-                  onPressed: _onSave,
-                  child: const Text('保存'),
-                ),
+                trailing: isTelevision
+                    ? Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: TvAdaptiveButton(
+                          label: '保存',
+                          icon: Icons.save_rounded,
+                          onPressed: _onSave,
+                          variant: TvButtonVariant.text,
+                        ),
+                      )
+                    : TextButton(
+                        onPressed: _onSave,
+                        child: const Text('保存'),
+                      ),
               ),
             ),
           ],
@@ -1010,6 +1233,7 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final parentPath = _parentPath(_currentPath);
     return PopScope<String>(
       canPop: false,
@@ -1045,16 +1269,29 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
                       const SizedBox(height: 12),
                       Align(
                         alignment: Alignment.centerLeft,
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            setState(() {
-                              _currentPath = parentPath;
-                            });
-                          },
-                          icon:
-                              const Icon(Icons.arrow_upward_rounded, size: 18),
-                          label: const Text('返回上一级目录'),
-                        ),
+                        child: isTelevision
+                            ? TvAdaptiveButton(
+                                label: '返回上一级目录',
+                                icon: Icons.arrow_upward_rounded,
+                                onPressed: () {
+                                  setState(() {
+                                    _currentPath = parentPath;
+                                  });
+                                },
+                                variant: TvButtonVariant.outlined,
+                              )
+                            : OutlinedButton.icon(
+                                onPressed: () {
+                                  setState(() {
+                                    _currentPath = parentPath;
+                                  });
+                                },
+                                icon: const Icon(
+                                  Icons.arrow_upward_rounded,
+                                  size: 18,
+                                ),
+                                label: const Text('返回上一级目录'),
+                              ),
                       ),
                     ],
                     const SizedBox(height: 20),
@@ -1084,17 +1321,30 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
                       ),
                       const SizedBox(height: 8),
                       for (final folder in snapshot.data!)
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.folder_open_rounded),
-                          title: Text(folder.title),
-                          subtitle: Text(folder.id),
-                          onTap: () {
-                            setState(() {
-                              _currentPath = folder.id;
-                            });
-                          },
-                        ),
+                        isTelevision
+                            ? Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: TvSelectionTile(
+                                  title: folder.title,
+                                  value: folder.id,
+                                  onPressed: () {
+                                    setState(() {
+                                      _currentPath = folder.id;
+                                    });
+                                  },
+                                ),
+                              )
+                            : ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(Icons.folder_open_rounded),
+                                title: Text(folder.title),
+                                subtitle: Text(folder.id),
+                                onTap: () {
+                                  setState(() {
+                                    _currentPath = folder.id;
+                                  });
+                                },
+                              ),
                       const SizedBox(height: kBottomReservedSpacing),
                     ],
                     if (snapshot.connectionState == ConnectionState.waiting ||
@@ -1118,13 +1368,29 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
                     height: kToolbarHeight,
                     child: Row(
                       children: [
-                        IconButton(
-                          onPressed: () {
-                            _skipAutoSaveOnPop = true;
-                            Navigator.of(context).pop(_currentPath);
-                          },
-                          icon: const Icon(Icons.arrow_back_ios_new_rounded),
-                        ),
+                        if (isTelevision)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: TvFocusableAction(
+                              onPressed: () {
+                                _skipAutoSaveOnPop = true;
+                                Navigator.of(context).pop(_currentPath);
+                              },
+                              borderRadius: BorderRadius.circular(18),
+                              child: const Padding(
+                                padding: EdgeInsets.all(10),
+                                child: Icon(Icons.arrow_back_ios_new_rounded),
+                              ),
+                            ),
+                          )
+                        else
+                          IconButton(
+                            onPressed: () {
+                              _skipAutoSaveOnPop = true;
+                              Navigator.of(context).pop(_currentPath);
+                            },
+                            icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                          ),
                         Expanded(
                           child: Text(
                             '选择 WebDAV 路径',
@@ -1136,13 +1402,27 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
                                 ),
                           ),
                         ),
-                        TextButton(
-                          onPressed: () {
-                            _skipAutoSaveOnPop = true;
-                            Navigator.of(context).pop(_currentPath);
-                          },
-                          child: const Text('选这里'),
-                        ),
+                        if (isTelevision)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 12),
+                            child: TvAdaptiveButton(
+                              label: '选这里',
+                              icon: Icons.check_rounded,
+                              onPressed: () {
+                                _skipAutoSaveOnPop = true;
+                                Navigator.of(context).pop(_currentPath);
+                              },
+                              variant: TvButtonVariant.text,
+                            ),
+                          )
+                        else
+                          TextButton(
+                            onPressed: () {
+                              _skipAutoSaveOnPop = true;
+                              Navigator.of(context).pop(_currentPath);
+                            },
+                            child: const Text('选这里'),
+                          ),
                       ],
                     ),
                   ),

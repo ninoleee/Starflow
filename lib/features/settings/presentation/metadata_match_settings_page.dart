@@ -7,11 +7,13 @@ import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 
 class MetadataMatchSettingsPage extends ConsumerWidget {
   const MetadataMatchSettingsPage({super.key});
@@ -47,6 +49,16 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                               .read(settingsControllerProvider.notifier)
                               .setDetailAutoLibraryMatchEnabled(value);
                         },
+                      ),
+                      const SizedBox(height: 10),
+                      _MetadataSourceTile(
+                        title: '匹配来源',
+                        subtitle: _libraryMatchSourceSummary(settings),
+                        onPressed: () => _openLibraryMatchSourcePicker(
+                          context,
+                          ref,
+                          settings,
+                        ),
                       ),
                       const SizedBox(height: 10),
                       Text(
@@ -282,6 +294,97 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
     await ref
         .read(settingsControllerProvider.notifier)
         .setMetadataMatchPriority(selected);
+  }
+
+  Future<void> _openLibraryMatchSourcePicker(
+    BuildContext context,
+    WidgetRef ref,
+    AppSettings settings,
+  ) async {
+    final availableSources = settings.mediaSources
+        .where(
+          (source) =>
+              source.enabled &&
+              (source.kind == MediaSourceKind.emby ||
+                  source.kind == MediaSourceKind.nas),
+        )
+        .toList(growable: false);
+    if (availableSources.isEmpty) {
+      return;
+    }
+
+    final initialSelection = settings.libraryMatchSourceIds.toSet();
+    final selected = await showDialog<Set<String>>(
+      context: context,
+      builder: (dialogContext) {
+        var draft = <String>{...initialSelection};
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('选择匹配来源'),
+              content: SizedBox(
+                width: 420,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('全部已启用来源'),
+                        subtitle: const Text('清空单独选择，匹配时扫描全部已启用媒体源'),
+                        value: draft.isEmpty,
+                        onChanged: (_) {
+                          setState(() {
+                            draft = <String>{};
+                          });
+                        },
+                      ),
+                      const Divider(height: 16),
+                      for (final source in availableSources)
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(source.name),
+                          subtitle: Text(source.kind.label),
+                          value: draft.contains(source.id),
+                          onChanged: (checked) {
+                            setState(() {
+                              if (checked ?? false) {
+                                draft.add(source.id);
+                              } else {
+                                draft.remove(source.id);
+                              }
+                            });
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('取消'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(<String>{}),
+                  child: const Text('全部来源'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(draft),
+                  child: const Text('保存'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (selected == null) {
+      return;
+    }
+    await ref
+        .read(settingsControllerProvider.notifier)
+        .setLibraryMatchSourceIds(selected.toList(growable: false));
   }
 
   Future<void> _openTmdbTokenEditor(
@@ -1061,6 +1164,38 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
   }
 }
 
+String _libraryMatchSourceSummary(AppSettings settings) {
+  final availableSources = settings.mediaSources
+      .where(
+        (source) =>
+            source.enabled &&
+            (source.kind == MediaSourceKind.emby ||
+                source.kind == MediaSourceKind.nas),
+      )
+      .toList(growable: false);
+  if (availableSources.isEmpty) {
+    return '暂无可选来源';
+  }
+
+  final selectedIds = settings.libraryMatchSourceIds.toSet();
+  if (selectedIds.isEmpty) {
+    return '全部已启用来源';
+  }
+
+  final selectedNames = availableSources
+      .where((source) => selectedIds.contains(source.id))
+      .map((source) => source.name)
+      .toList(growable: false);
+  if (selectedNames.isEmpty ||
+      selectedNames.length >= availableSources.length) {
+    return '全部已启用来源';
+  }
+  if (selectedNames.length <= 2) {
+    return selectedNames.join('、');
+  }
+  return '${selectedNames.take(2).join('、')} 等 ${selectedNames.length} 个来源';
+}
+
 class _MetadataToggleTile extends ConsumerWidget {
   const _MetadataToggleTile({
     required this.title,
@@ -1090,6 +1225,37 @@ class _MetadataToggleTile extends ConsumerWidget {
       subtitle: subtitle.trim().isEmpty ? null : Text(subtitle),
       value: value,
       onChanged: onChanged,
+    );
+  }
+}
+
+class _MetadataSourceTile extends ConsumerWidget {
+  const _MetadataSourceTile({
+    required this.title,
+    required this.subtitle,
+    required this.onPressed,
+  });
+
+  final String title;
+  final String subtitle;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    if (isTelevision) {
+      return TvSelectionTile(
+        title: title,
+        value: subtitle,
+        onPressed: onPressed,
+      );
+    }
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(title),
+      subtitle: Text(subtitle),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: onPressed,
     );
   }
 }

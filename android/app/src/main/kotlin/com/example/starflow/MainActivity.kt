@@ -81,6 +81,9 @@ class MainActivity : FlutterActivity() {
                     val title = call.argument<String>("title")?.trim().orEmpty()
                     val headersJson = call.argument<String>("headersJson")?.trim().orEmpty()
                     val decodeMode = call.argument<String>("decodeMode")?.trim().orEmpty()
+                    val playbackTargetJson = call.argument<String>("playbackTargetJson")?.trim().orEmpty()
+                    val playbackItemKey = call.argument<String>("playbackItemKey")?.trim().orEmpty()
+                    val seriesKey = call.argument<String>("seriesKey")?.trim().orEmpty()
                     if (rawUrl.isEmpty()) {
                         result.success(false)
                         return@setMethodCallHandler
@@ -92,6 +95,9 @@ class MainActivity : FlutterActivity() {
                             putExtra(NativePlaybackActivity.EXTRA_TITLE, title)
                             putExtra(NativePlaybackActivity.EXTRA_HEADERS_JSON, headersJson)
                             putExtra(NativePlaybackActivity.EXTRA_DECODE_MODE, decodeMode)
+                            putExtra(NativePlaybackActivity.EXTRA_PLAYBACK_TARGET_JSON, playbackTargetJson)
+                            putExtra(NativePlaybackActivity.EXTRA_PLAYBACK_ITEM_KEY, playbackItemKey)
+                            putExtra(NativePlaybackActivity.EXTRA_SERIES_KEY, seriesKey)
                             addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                         }
                         startActivity(intent)

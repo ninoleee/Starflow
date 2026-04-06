@@ -214,6 +214,83 @@ class NasMediaIndexer {
     return records[writableIndices.first];
   }
 
+  Future<MediaDetailTarget?> enrichDetailTargetMetadataIfNeeded(
+    MediaDetailTarget target,
+  ) async {
+    final sourceId = target.sourceId.trim();
+    final resourceId = target.itemId.trim();
+    if (sourceId.isEmpty || resourceId.isEmpty) {
+      return null;
+    }
+
+    final settings = _readSettings();
+    MediaSourceConfig? source;
+    for (final candidate in settings.mediaSources) {
+      if (candidate.id == sourceId) {
+        source = candidate;
+        break;
+      }
+    }
+    if (source == null ||
+        source.kind != MediaSourceKind.nas ||
+        source.endpoint.trim().isEmpty) {
+      return null;
+    }
+
+    final records = await _store.loadSourceRecords(sourceId);
+    if (records.isEmpty) {
+      return null;
+    }
+
+    final targetIndices = _resolveWritableRecordIndices(
+      records,
+      resourceId,
+      resourceScopePath: target.resourcePath,
+    );
+    if (targetIndices.isEmpty) {
+      return null;
+    }
+
+    final selectedRecords = targetIndices
+        .map((index) => records[index])
+        .toList(growable: false);
+    final shouldAttemptSidecar = source.webDavSidecarScrapingEnabled &&
+        selectedRecords.any(
+          (record) => !_hasAttemptStatus(record.sidecarStatus),
+        );
+    final shouldAttemptOnline = selectedRecords.any(
+      (record) => _hasPendingOnlineAttempts(record, settings),
+    );
+    if (shouldAttemptSidecar || shouldAttemptOnline) {
+      final controller = _RefreshTaskController();
+      await _refreshSelectedItemsPhase(
+        source,
+        scannedItems: selectedRecords
+            .map(_buildScannedItemFromRecord)
+            .toList(growable: false),
+        includeSidecarMetadata: shouldAttemptSidecar,
+        includeOnlineMetadata: shouldAttemptOnline,
+        phaseLabel: 'Hero 补元数据',
+        controller: controller,
+      );
+    }
+
+    final updatedRecords = await _store.loadSourceRecords(sourceId);
+    return _buildManualMetadataTarget(
+      target: target,
+      records: updatedRecords,
+      selectedResourceIds: selectedRecords
+          .map((record) => record.resourceId)
+          .where((id) => id.trim().isNotEmpty)
+          .toList(growable: false),
+      resourceId: resourceId,
+      resourcePath: target.resourcePath,
+      searchQuery: target.searchQuery.trim().isEmpty
+          ? target.title
+          : target.searchQuery.trim(),
+    );
+  }
+
   Future<List<MediaItem>> loadLibrary(
     MediaSourceConfig source, {
     String? sectionId,
@@ -1921,6 +1998,72 @@ class NasMediaIndexer {
     return resourcePath.trim().isEmpty
         ? nextTarget
         : nextTarget.copyWith(resourcePath: resourcePath);
+  }
+
+  WebDavScannedItem _buildScannedItemFromRecord(NasMediaIndexRecord record) {
+    final item = record.item;
+    return WebDavScannedItem(
+      resourceId: record.resourceId,
+      fileName: _resolveRecordFileName(record),
+      actualAddress: record.resourcePath.trim().isNotEmpty
+          ? record.resourcePath
+          : item.actualAddress,
+      sectionId: record.sectionId,
+      sectionName: record.sectionName,
+      streamUrl: item.streamUrl,
+      streamHeaders: item.streamHeaders,
+      addedAt: item.addedAt,
+      modifiedAt: record.modifiedAt,
+      fileSizeBytes: record.fileSizeBytes,
+      metadataSeed: WebDavMetadataSeed(
+        title: item.title,
+        overview: item.overview,
+        posterUrl: item.posterUrl,
+        posterHeaders: item.posterHeaders,
+        backdropUrl: item.backdropUrl,
+        backdropHeaders: item.backdropHeaders,
+        logoUrl: item.logoUrl,
+        logoHeaders: item.logoHeaders,
+        bannerUrl: item.bannerUrl,
+        bannerHeaders: item.bannerHeaders,
+        extraBackdropUrls: item.extraBackdropUrls,
+        extraBackdropHeaders: item.extraBackdropHeaders,
+        year: item.year,
+        durationLabel: item.durationLabel,
+        genres: item.genres,
+        directors: item.directors,
+        actors: item.actors,
+        itemType: item.itemType,
+        seasonNumber: item.seasonNumber,
+        episodeNumber: item.episodeNumber,
+        imdbId: item.imdbId,
+        tmdbId: item.tmdbId,
+        container: item.container,
+        videoCodec: item.videoCodec,
+        audioCodec: item.audioCodec,
+        width: item.width,
+        height: item.height,
+        bitrate: item.bitrate,
+        hasSidecarMatch: record.sidecarMatched,
+      ),
+    );
+  }
+
+  String _resolveRecordFileName(NasMediaIndexRecord record) {
+    final original = record.originalFileName.trim();
+    if (original.isNotEmpty) {
+      return original;
+    }
+    final path = record.resourcePath.trim();
+    if (path.isEmpty) {
+      return record.resourceId;
+    }
+    final normalized = path.replaceAll('\\', '/');
+    final lastSlash = normalized.lastIndexOf('/');
+    if (lastSlash < 0 || lastSlash == normalized.length - 1) {
+      return normalized;
+    }
+    return normalized.substring(lastSlash + 1);
   }
 
   List<int> _filterRecordIndicesByScope(

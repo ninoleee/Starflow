@@ -431,14 +431,18 @@ class _TelevisionNavigationShellState extends State<_TelevisionNavigationShell> 
               title: const Text('退出 Starflow？'),
               content: const Text('再次确认后将关闭当前应用。'),
               actions: [
-                TextButton(
+                TvAdaptiveButton(
+                  label: '取消',
+                  icon: Icons.close_rounded,
                   autofocus: true,
+                  variant: TvButtonVariant.text,
                   onPressed: () => Navigator.of(dialogContext).pop(false),
-                  child: const Text('取消'),
                 ),
-                FilledButton(
+                TvAdaptiveButton(
+                  label: '退出',
+                  icon: Icons.logout_rounded,
+                  variant: TvButtonVariant.outlined,
                   onPressed: () => Navigator.of(dialogContext).pop(true),
-                  child: const Text('退出'),
                 ),
               ],
             );

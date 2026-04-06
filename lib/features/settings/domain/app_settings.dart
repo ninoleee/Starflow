@@ -6,6 +6,7 @@ import 'package:starflow/features/search/domain/search_models.dart';
 enum HomeModuleType {
   hero,
   recentlyAdded,
+  recentPlayback,
   librarySection,
   doubanInterest,
   doubanSuggestion,
@@ -20,6 +21,8 @@ extension HomeModuleTypeX on HomeModuleType {
         return 'Hero';
       case HomeModuleType.recentlyAdded:
         return '最近新增';
+      case HomeModuleType.recentPlayback:
+        return '最近播放';
       case HomeModuleType.librarySection:
         return '来源分区';
       case HomeModuleType.doubanInterest:
@@ -37,6 +40,7 @@ extension HomeModuleTypeX on HomeModuleType {
     return switch (raw) {
       'hero' => HomeModuleType.hero,
       'recentlyAdded' => HomeModuleType.recentlyAdded,
+      'recentPlayback' => HomeModuleType.recentPlayback,
       'librarySection' => HomeModuleType.librarySection,
       'doubanInterest' => HomeModuleType.doubanInterest,
       'doubanSuggestion' => HomeModuleType.doubanSuggestion,
@@ -132,7 +136,7 @@ extension PlaybackEngineX on PlaybackEngine {
       case PlaybackEngine.embeddedMpv:
         return '使用应用内置播放器，支持字幕、音轨和倍速控制。';
       case PlaybackEngine.nativeContainer:
-        return 'Android 上使用 App 内原生播放器容器页，优先追求播放性能，部分高级播放设置不可用。';
+        return 'Android / iOS 上使用 App 内原生播放器容器页，优先追求播放性能，部分高级播放设置不可用。';
       case PlaybackEngine.systemPlayer:
         return '交给系统默认的视频播放器处理。';
     }
@@ -267,6 +271,8 @@ class HomeModuleConfig {
         return '首页 Hero';
       case HomeModuleType.recentlyAdded:
         return '展示最近同步进来的内容';
+      case HomeModuleType.recentPlayback:
+        return '展示最近播放过的内容';
       case HomeModuleType.librarySection:
         final sourcePart = sourceName.trim().isEmpty ? '资源来源' : sourceName;
         final sectionPart = sectionName.trim().isEmpty ? '分区' : sectionName;
@@ -362,6 +368,7 @@ class HomeModuleConfig {
     return switch (type) {
       HomeModuleType.hero => 'Hero',
       HomeModuleType.recentlyAdded => '最近新增',
+      HomeModuleType.recentPlayback => '最近播放',
       HomeModuleType.librarySection =>
         (json['sectionName'] as String? ?? '').trim().isEmpty
             ? '来源分区'
@@ -395,6 +402,15 @@ class HomeModuleConfig {
       id: 'home-module-${DateTime.now().millisecondsSinceEpoch}',
       type: HomeModuleType.recentlyAdded,
       title: '最近新增',
+      enabled: true,
+    );
+  }
+
+  static HomeModuleConfig recentPlayback() {
+    return HomeModuleConfig(
+      id: 'home-module-${DateTime.now().millisecondsSinceEpoch}',
+      type: HomeModuleType.recentPlayback,
+      title: '最近播放',
       enabled: true,
     );
   }
@@ -567,6 +583,8 @@ class AppSettings {
     this.metadataMatchPriority = MetadataMatchProvider.tmdb,
     this.imdbRatingMatchEnabled = false,
     this.detailAutoLibraryMatchEnabled = false,
+    this.libraryMatchSourceIds = const [],
+    this.searchSourceIds = const [],
     this.tmdbReadAccessToken = '',
     this.playbackOpenTimeoutSeconds = 20,
     this.playbackDefaultSpeed = 1.0,
@@ -593,6 +611,8 @@ class AppSettings {
   final MetadataMatchProvider metadataMatchPriority;
   final bool imdbRatingMatchEnabled;
   final bool detailAutoLibraryMatchEnabled;
+  final List<String> libraryMatchSourceIds;
+  final List<String> searchSourceIds;
   final String tmdbReadAccessToken;
   final int playbackOpenTimeoutSeconds;
   final double playbackDefaultSpeed;
@@ -619,6 +639,8 @@ class AppSettings {
     MetadataMatchProvider? metadataMatchPriority,
     bool? imdbRatingMatchEnabled,
     bool? detailAutoLibraryMatchEnabled,
+    List<String>? libraryMatchSourceIds,
+    List<String>? searchSourceIds,
     String? tmdbReadAccessToken,
     int? playbackOpenTimeoutSeconds,
     double? playbackDefaultSpeed,
@@ -655,6 +677,9 @@ class AppSettings {
           imdbRatingMatchEnabled ?? this.imdbRatingMatchEnabled,
       detailAutoLibraryMatchEnabled:
           detailAutoLibraryMatchEnabled ?? this.detailAutoLibraryMatchEnabled,
+      libraryMatchSourceIds:
+          libraryMatchSourceIds ?? this.libraryMatchSourceIds,
+      searchSourceIds: searchSourceIds ?? this.searchSourceIds,
       tmdbReadAccessToken: tmdbReadAccessToken ?? this.tmdbReadAccessToken,
       playbackOpenTimeoutSeconds:
           playbackOpenTimeoutSeconds ?? this.playbackOpenTimeoutSeconds,
@@ -690,6 +715,8 @@ class AppSettings {
       'metadataMatchPriority': metadataMatchPriority.name,
       'imdbRatingMatchEnabled': imdbRatingMatchEnabled,
       'detailAutoLibraryMatchEnabled': detailAutoLibraryMatchEnabled,
+      'libraryMatchSourceIds': libraryMatchSourceIds,
+      'searchSourceIds': searchSourceIds,
       'tmdbReadAccessToken': tmdbReadAccessToken,
       'playbackOpenTimeoutSeconds': playbackOpenTimeoutSeconds,
       'playbackDefaultSpeed': playbackDefaultSpeed,
@@ -763,6 +790,9 @@ class AppSettings {
       imdbRatingMatchEnabled: json['imdbRatingMatchEnabled'] as bool? ?? false,
       detailAutoLibraryMatchEnabled:
           json['detailAutoLibraryMatchEnabled'] as bool? ?? false,
+      libraryMatchSourceIds:
+          _parseNormalizedStringList(json['libraryMatchSourceIds']),
+      searchSourceIds: _parseNormalizedStringList(json['searchSourceIds']),
       tmdbReadAccessToken: json['tmdbReadAccessToken'] as String? ?? '',
       playbackOpenTimeoutSeconds:
           ((json['playbackOpenTimeoutSeconds'] as num?)?.toInt() ?? 20)
@@ -786,6 +816,23 @@ class AppSettings {
       ),
     );
   }
+}
+
+List<String> _parseNormalizedStringList(Object? raw) {
+  return (raw as List<dynamic>? ?? const <dynamic>[])
+      .whereType<String>()
+      .map((item) => item.trim())
+      .where((item) => item.isNotEmpty)
+      .toSet()
+      .toList(growable: false);
+}
+
+String searchSourceSettingIdForMediaSource(String sourceId) {
+  return 'source:${sourceId.trim()}';
+}
+
+String searchSourceSettingIdForProvider(String providerId) {
+  return 'provider:${providerId.trim()}';
 }
 
 List<HomeModuleConfig> _normalizeHomeModules(

@@ -3,9 +3,12 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
 /// 全屏编辑豆瓣账号（与媒体源 / 搜索服务编辑页一致）。
 class DoubanAccountEditorPage extends ConsumerStatefulWidget {
@@ -110,6 +113,7 @@ class _DoubanAccountEditorPageState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
 
     return PopScope<void>(
       canPop: false,
@@ -128,22 +132,18 @@ class _DoubanAccountEditorPageState
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               children: [
                 _SectionTitle(theme: theme, label: '账号'),
-                TextField(
+                SettingsTextInputField(
                   controller: _userIdController,
+                  labelText: 'Douban User ID',
                   textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Douban User ID',
-                  ),
                 ),
                 const SizedBox(height: 12),
-                TextField(
+                SettingsTextInputField(
                   controller: _sessionController,
+                  labelText: 'Cookie / Session',
                   minLines: 3,
                   maxLines: 8,
-                  decoration: const InputDecoration(
-                    labelText: 'Cookie / Session',
-                    alignLabelWithHint: true,
-                  ),
+                  alignLabelWithHint: true,
                 ),
                 const SizedBox(height: 12),
                 DecoratedBox(
@@ -160,12 +160,19 @@ class _DoubanAccountEditorPageState
                   ),
                 ),
                 const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('启用豆瓣模块'),
-                  value: _enabled,
-                  onChanged: (value) => setState(() => _enabled = value),
-                ),
+                if (isTelevision)
+                  TvSelectionTile(
+                    title: '启用豆瓣模块',
+                    value: _enabled ? '已开启' : '已关闭',
+                    onPressed: () => setState(() => _enabled = !_enabled),
+                  )
+                else
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('启用豆瓣模块'),
+                    value: _enabled,
+                    onChanged: (value) => setState(() => _enabled = value),
+                  ),
                 const SizedBox(height: kBottomReservedSpacing),
               ],
             ),
@@ -175,10 +182,20 @@ class _DoubanAccountEditorPageState
               right: 0,
               child: OverlayToolbar(
                 onBack: _handleCloseRequest,
-                trailing: TextButton(
-                  onPressed: _saveDraft,
-                  child: const Text('保存'),
-                ),
+                trailing: isTelevision
+                    ? Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: TvAdaptiveButton(
+                          label: '保存',
+                          icon: Icons.save_rounded,
+                          onPressed: _saveDraft,
+                          variant: TvButtonVariant.text,
+                        ),
+                      )
+                    : TextButton(
+                        onPressed: _saveDraft,
+                        child: const Text('保存'),
+                      ),
               ),
             ),
           ],

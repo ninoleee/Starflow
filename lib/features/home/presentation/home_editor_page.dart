@@ -373,6 +373,15 @@ class HomeEditorPage extends ConsumerWidget {
                 Navigator.of(context).pop();
               },
             ),
+            _AddModuleTile(
+              title: '最近播放',
+              onTap: () {
+                ref
+                    .read(settingsControllerProvider.notifier)
+                    .saveHomeModule(HomeModuleConfig.recentPlayback());
+                Navigator.of(context).pop();
+              },
+            ),
           ],
         );
       },

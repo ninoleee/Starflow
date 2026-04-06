@@ -4,11 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/search/data/cloud_saver_api_client.dart';
 import 'package:starflow/features/search/data/pansou_api_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
 /// 全屏编辑搜索服务（与 [MediaSourceEditorPage] 同一交互模式）。
 class SearchProviderEditorPage extends ConsumerStatefulWidget {
@@ -162,6 +165,30 @@ class _SearchProviderEditorPageState
       return ordered.join('、');
     }
     return '已选 ${_selectedCloudTypes.length} 个网盘';
+  }
+
+  Future<void> _openKindPicker() async {
+    final selected = await showDialog<SearchProviderKind>(
+      context: context,
+      builder: (dialogContext) {
+        return SimpleDialog(
+          title: const Text('选择类型'),
+          children: [
+            for (final item in SearchProviderKind.values)
+              SimpleDialogOption(
+                onPressed: () => Navigator.of(dialogContext).pop(item),
+                child: Text(
+                  item == _kind ? '${item.label}  当前' : item.label,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+    if (selected == null) {
+      return;
+    }
+    setState(() => _applyDefaultsForKind(selected));
   }
 
   Future<void> _saveDraft({bool popAfterSave = true}) async {
@@ -361,6 +388,7 @@ class _SearchProviderEditorPageState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
 
     return PopScope<void>(
       canPop: false,
@@ -379,57 +407,72 @@ class _SearchProviderEditorPageState
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               children: [
                 _SectionTitle(theme: theme, label: '基本信息'),
-                TextField(
+                SettingsTextInputField(
                   controller: _nameController,
+                  labelText: '名称',
                   textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(labelText: '名称'),
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<SearchProviderKind>(
-                  key: ValueKey(_kind),
-                  initialValue: _kind,
-                  decoration: const InputDecoration(labelText: '类型'),
-                  items: SearchProviderKind.values
-                      .map(
-                        (item) => DropdownMenuItem(
-                          value: item,
-                          child: Text(item.label),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() => _applyDefaultsForKind(value));
-                    }
-                  },
-                ),
+                if (isTelevision)
+                  TvSelectionTile(
+                    title: '类型',
+                    value: _kind.label,
+                    onPressed: _openKindPicker,
+                  )
+                else
+                  DropdownButtonFormField<SearchProviderKind>(
+                    key: ValueKey(_kind),
+                    initialValue: _kind,
+                    decoration: const InputDecoration(labelText: '类型'),
+                    items: SearchProviderKind.values
+                        .map(
+                          (item) => DropdownMenuItem(
+                            value: item,
+                            child: Text(item.label),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() => _applyDefaultsForKind(value));
+                      }
+                    },
+                  ),
                 _SectionTitle(theme: theme, label: '连接'),
-                TextField(
+                SettingsTextInputField(
                   controller: _endpointController,
+                  labelText: 'Endpoint',
                   keyboardType: TextInputType.url,
                   textInputAction: TextInputAction.next,
                   autocorrect: false,
-                  decoration: InputDecoration(
-                    labelText: 'Endpoint',
-                    hintText: _kind.defaultEndpoint,
-                  ),
+                  hintText: _kind.defaultEndpoint,
                 ),
                 const SizedBox(height: 12),
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: _isTestingConnection ? null : _testConnection,
-                    icon: _isTestingConnection
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.network_check_rounded),
-                    label: Text(
-                      _isTestingConnection ? '测试中...' : '测试连接',
-                    ),
-                  ),
+                  child: isTelevision
+                      ? TvAdaptiveButton(
+                          label: _isTestingConnection ? '测试中...' : '测试连接',
+                          icon: Icons.network_check_rounded,
+                          onPressed:
+                              _isTestingConnection ? null : _testConnection,
+                          variant: TvButtonVariant.outlined,
+                        )
+                      : OutlinedButton.icon(
+                          onPressed:
+                              _isTestingConnection ? null : _testConnection,
+                          icon: _isTestingConnection
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.network_check_rounded),
+                          label: Text(
+                            _isTestingConnection ? '测试中...' : '测试连接',
+                          ),
+                        ),
                 ),
                 if (_connectionTestMessage.isNotEmpty) ...[
                   const SizedBox(height: 8),
@@ -443,135 +486,239 @@ class _SearchProviderEditorPageState
                   ),
                 ],
                 _SectionTitle(theme: theme, label: '认证（可选）'),
-                ExpansionTile(
-                  initiallyExpanded: _advancedAuthExpanded,
-                  onExpansionChanged: (expanded) {
-                    setState(() => _advancedAuthExpanded = expanded);
-                  },
-                  title: Text(
-                    'Token / 账号',
-                    style: theme.textTheme.titleSmall,
-                  ),
-                  subtitle: Text(
-                    'JWT、API Key，或用户名密码自动登录',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  children: [
-                    TextField(
-                      controller: _apiKeyController,
-                      minLines: 1,
-                      maxLines: 4,
-                      decoration: const InputDecoration(
+                if (isTelevision)
+                  TvSelectionTile(
+                    title: 'Token / 账号',
+                    value: _advancedAuthExpanded ? '已展开' : '已收起',
+                    onPressed: () {
+                      setState(
+                          () => _advancedAuthExpanded = !_advancedAuthExpanded);
+                    },
+                  )
+                else
+                  ExpansionTile(
+                    initiallyExpanded: _advancedAuthExpanded,
+                    onExpansionChanged: (expanded) {
+                      setState(() => _advancedAuthExpanded = expanded);
+                    },
+                    title: Text(
+                      'Token / 账号',
+                      style: theme.textTheme.titleSmall,
+                    ),
+                    subtitle: Text(
+                      'JWT、API Key，或用户名密码自动登录',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    children: [
+                      SettingsTextInputField(
+                        controller: _apiKeyController,
                         labelText: 'JWT Token / API Key',
+                        minLines: 1,
+                        maxLines: 4,
                         alignLabelWithHint: true,
+                        summaryBuilder: (value) =>
+                            value.isEmpty ? '未填写' : '已填写',
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    AutofillGroup(
-                      child: Column(
-                        children: [
-                          TextField(
-                            controller: _usernameController,
-                            textInputAction: TextInputAction.next,
-                            autofillHints: const [AutofillHints.username],
-                            decoration: const InputDecoration(
+                      const SizedBox(height: 12),
+                      AutofillGroup(
+                        child: Column(
+                          children: [
+                            SettingsTextInputField(
+                              controller: _usernameController,
                               labelText: '登录用户名',
+                              textInputAction: TextInputAction.next,
+                              autofillHints: const [AutofillHints.username],
                             ),
-                          ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: _passwordController,
-                            obscureText: true,
-                            textInputAction: TextInputAction.done,
-                            autofillHints: const [AutofillHints.password],
-                            decoration: const InputDecoration(
+                            const SizedBox(height: 12),
+                            SettingsTextInputField(
+                              controller: _passwordController,
                               labelText: '登录密码',
+                              obscureText: true,
+                              textInputAction: TextInputAction.done,
+                              autofillHints: const [AutofillHints.password],
+                              summaryBuilder: (value) =>
+                                  value.isEmpty ? '未填写' : '已填写',
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                ),
+                      const SizedBox(height: 8),
+                    ],
+                  ),
+                if (isTelevision && _advancedAuthExpanded) ...[
+                  const SizedBox(height: 12),
+                  SettingsTextInputField(
+                    controller: _apiKeyController,
+                    labelText: 'JWT Token / API Key',
+                    minLines: 1,
+                    maxLines: 4,
+                    alignLabelWithHint: true,
+                    summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
+                  ),
+                  const SizedBox(height: 12),
+                  SettingsTextInputField(
+                    controller: _usernameController,
+                    labelText: '登录用户名',
+                    textInputAction: TextInputAction.next,
+                    autofillHints: const [AutofillHints.username],
+                  ),
+                  const SizedBox(height: 12),
+                  SettingsTextInputField(
+                    controller: _passwordController,
+                    labelText: '登录密码',
+                    obscureText: true,
+                    textInputAction: TextInputAction.done,
+                    autofillHints: const [AutofillHints.password],
+                    summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
+                  ),
+                ],
                 _SectionTitle(theme: theme, label: '结果筛选'),
-                ExpansionTile(
-                  initiallyExpanded: _cloudTypesExpanded,
-                  onExpansionChanged: (expanded) {
-                    setState(() => _cloudTypesExpanded = expanded);
-                  },
-                  tilePadding: EdgeInsets.zero,
-                  childrenPadding: EdgeInsets.zero,
-                  title: Text(
-                    '网盘类型',
-                    style: theme.textTheme.titleSmall,
-                  ),
-                  subtitle: Text(
-                    _selectedCloudTypesLabel(),
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Row(
-                        children: [
-                          TextButton(
-                            onPressed: () {
-                              setState(() {
-                                _selectedCloudTypes =
-                                    SearchCloudType.values.toSet();
-                              });
-                            },
-                            child: const Text('全选'),
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              setState(() {
-                                _selectedCloudTypes = <SearchCloudType>{};
-                              });
-                            },
-                            child: const Text('清空'),
-                          ),
-                        ],
-                      ),
+                if (isTelevision)
+                  TvSelectionTile(
+                    title: '网盘类型',
+                    value:
+                        '${_selectedCloudTypesLabel()} · ${_cloudTypesExpanded ? '已展开' : '已收起'}',
+                    onPressed: () {
+                      setState(
+                          () => _cloudTypesExpanded = !_cloudTypesExpanded);
+                    },
+                  )
+                else
+                  ExpansionTile(
+                    initiallyExpanded: _cloudTypesExpanded,
+                    onExpansionChanged: (expanded) {
+                      setState(() => _cloudTypesExpanded = expanded);
+                    },
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: EdgeInsets.zero,
+                    title: Text(
+                      '网盘类型',
+                      style: theme.textTheme.titleSmall,
                     ),
-                    ...SearchCloudType.values.map(
-                      (item) => CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        controlAffinity: ListTileControlAffinity.trailing,
-                        value: _selectedCloudTypes.contains(item),
-                        title: Text(item.label),
-                        onChanged: (selected) {
+                    subtitle: Text(
+                      _selectedCloudTypesLabel(),
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          children: [
+                            TextButton(
+                              onPressed: () {
+                                setState(() {
+                                  _selectedCloudTypes =
+                                      SearchCloudType.values.toSet();
+                                });
+                              },
+                              child: const Text('全选'),
+                            ),
+                            TextButton(
+                              onPressed: () {
+                                setState(() {
+                                  _selectedCloudTypes = <SearchCloudType>{};
+                                });
+                              },
+                              child: const Text('清空'),
+                            ),
+                          ],
+                        ),
+                      ),
+                      ...SearchCloudType.values.map(
+                        (item) => CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          controlAffinity: ListTileControlAffinity.trailing,
+                          value: _selectedCloudTypes.contains(item),
+                          title: Text(item.label),
+                          onChanged: (selected) {
+                            setState(() {
+                              if (selected ?? false) {
+                                _selectedCloudTypes.add(item);
+                              } else {
+                                _selectedCloudTypes.remove(item);
+                              }
+                            });
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                if (isTelevision && _cloudTypesExpanded) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      TvAdaptiveButton(
+                        label: '全选',
+                        icon: Icons.select_all_rounded,
+                        onPressed: () {
                           setState(() {
-                            if (selected ?? false) {
-                              _selectedCloudTypes.add(item);
-                            } else {
+                            _selectedCloudTypes =
+                                SearchCloudType.values.toSet();
+                          });
+                        },
+                        variant: TvButtonVariant.text,
+                      ),
+                      TvAdaptiveButton(
+                        label: '清空',
+                        icon: Icons.clear_all_rounded,
+                        onPressed: () {
+                          setState(() {
+                            _selectedCloudTypes = <SearchCloudType>{};
+                          });
+                        },
+                        variant: TvButtonVariant.text,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ...SearchCloudType.values.map(
+                    (item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: TvSelectionTile(
+                        title: item.label,
+                        value:
+                            _selectedCloudTypes.contains(item) ? '已选中' : '未选中',
+                        onPressed: () {
+                          setState(() {
+                            if (_selectedCloudTypes.contains(item)) {
                               _selectedCloudTypes.remove(item);
+                            } else {
+                              _selectedCloudTypes.add(item);
                             }
                           });
                         },
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
                 const SizedBox(height: 12),
-                TextField(
+                SettingsTextInputField(
                   controller: _blockedKeywordsController,
+                  labelText: '过滤词',
                   minLines: 1,
                   maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: '过滤词',
-                  ),
                 ),
                 const SizedBox(height: 12),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('强匹配'),
-                  value: _strongMatchEnabled,
-                  onChanged: (value) {
-                    setState(() => _strongMatchEnabled = value);
-                  },
-                ),
+                if (isTelevision)
+                  TvSelectionTile(
+                    title: '强匹配',
+                    value: _strongMatchEnabled ? '已开启' : '已关闭',
+                    onPressed: () {
+                      setState(
+                          () => _strongMatchEnabled = !_strongMatchEnabled);
+                    },
+                  )
+                else
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('强匹配'),
+                    value: _strongMatchEnabled,
+                    onChanged: (value) {
+                      setState(() => _strongMatchEnabled = value);
+                    },
+                  ),
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
                   child: Align(
@@ -586,36 +733,48 @@ class _SearchProviderEditorPageState
                   ),
                 ),
                 const SizedBox(height: 12),
-                TextField(
+                SettingsTextInputField(
                   controller: _maxTitleLengthController,
+                  labelText: '标题长度上限',
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    labelText: '标题长度上限',
-                    hintText: '50',
+                  hintText: '50',
+                ),
+                if (isTelevision)
+                  TvSelectionTile(
+                    title: '启用此搜索服务',
+                    value: _enabled ? '已开启' : '已关闭',
+                    onPressed: () => setState(() => _enabled = !_enabled),
+                  )
+                else
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('启用此搜索服务'),
+                    value: _enabled,
+                    onChanged: (value) => setState(() => _enabled = value),
                   ),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('启用此搜索服务'),
-                  value: _enabled,
-                  onChanged: (value) => setState(() => _enabled = value),
-                ),
                 if (widget.initial != null) ...[
                   const SizedBox(height: 28),
                   Align(
                     alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      icon: Icon(
-                        Icons.delete_outline_rounded,
-                        color: theme.colorScheme.error,
-                      ),
-                      label: Text(
-                        '删除此搜索服务',
-                        style: TextStyle(color: theme.colorScheme.error),
-                      ),
-                      onPressed: _confirmDeleteSearchProvider,
-                    ),
+                    child: isTelevision
+                        ? TvAdaptiveButton(
+                            label: '删除此搜索服务',
+                            icon: Icons.delete_outline_rounded,
+                            onPressed: _confirmDeleteSearchProvider,
+                            variant: TvButtonVariant.outlined,
+                          )
+                        : TextButton.icon(
+                            icon: Icon(
+                              Icons.delete_outline_rounded,
+                              color: theme.colorScheme.error,
+                            ),
+                            label: Text(
+                              '删除此搜索服务',
+                              style: TextStyle(color: theme.colorScheme.error),
+                            ),
+                            onPressed: _confirmDeleteSearchProvider,
+                          ),
                   ),
                 ],
                 const SizedBox(height: kBottomReservedSpacing),
@@ -627,10 +786,20 @@ class _SearchProviderEditorPageState
               right: 0,
               child: OverlayToolbar(
                 onBack: _handleCloseRequest,
-                trailing: TextButton(
-                  onPressed: _saveDraft,
-                  child: const Text('保存'),
-                ),
+                trailing: isTelevision
+                    ? Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: TvAdaptiveButton(
+                          label: '保存',
+                          icon: Icons.save_rounded,
+                          onPressed: _saveDraft,
+                          variant: TvButtonVariant.text,
+                        ),
+                      )
+                    : TextButton(
+                        onPressed: _saveDraft,
+                        child: const Text('保存'),
+                      ),
               ),
             ),
           ],

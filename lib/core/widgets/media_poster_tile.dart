@@ -276,6 +276,7 @@ class MediaPosterTile extends ConsumerWidget {
         focusId: focusId,
         autofocus: autofocus,
         borderRadius: BorderRadius.circular(16),
+        visualStyle: TvFocusVisualStyle.subtle,
         child: content,
       );
     }

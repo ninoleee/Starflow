@@ -152,6 +152,32 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(detailAutoLibraryMatchEnabled: enabled));
   }
 
+  Future<void> setLibraryMatchSourceIds(List<String> sourceIds) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(
+      current.copyWith(
+        libraryMatchSourceIds: sourceIds
+            .map((item) => item.trim())
+            .where((item) => item.isNotEmpty)
+            .toSet()
+            .toList(growable: false),
+      ),
+    );
+  }
+
+  Future<void> setSearchSourceIds(List<String> sourceIds) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(
+      current.copyWith(
+        searchSourceIds: sourceIds
+            .map((item) => item.trim())
+            .where((item) => item.isNotEmpty)
+            .toSet()
+            .toList(growable: false),
+      ),
+    );
+  }
+
   Future<void> setTmdbReadAccessToken(String token) async {
     final current = state.valueOrNull ?? await _repository.load();
     await _persist(current.copyWith(tmdbReadAccessToken: token.trim()));

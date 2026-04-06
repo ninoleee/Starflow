@@ -12,7 +12,7 @@
     <application
         android:label="starflow"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@drawable/icon_preview_sharp"
         android:banner="@drawable/tv_banner_hd"
         android:usesCleartextTraffic="true">
         <activity

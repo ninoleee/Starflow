@@ -106,14 +106,41 @@ void main() {
       'wmdbMetadataMatchEnabled': true,
       'metadataMatchPriority': 'wmdb',
       'detailAutoLibraryMatchEnabled': true,
+      'libraryMatchSourceIds': ['emby-main', 'nas-main', 'emby-main'],
+      'searchSourceIds': [
+        'source:emby-main',
+        'provider:pansou',
+        'source:emby-main'
+      ],
     });
 
     expect(settings.tmdbMetadataMatchEnabled, isTrue);
     expect(settings.wmdbMetadataMatchEnabled, isTrue);
     expect(settings.metadataMatchPriority, MetadataMatchProvider.wmdb);
     expect(settings.detailAutoLibraryMatchEnabled, isTrue);
+    expect(settings.libraryMatchSourceIds, ['emby-main', 'nas-main']);
+    expect(settings.searchSourceIds, ['source:emby-main', 'provider:pansou']);
     expect(settings.toJson()['metadataMatchPriority'], 'wmdb');
     expect(settings.toJson()['detailAutoLibraryMatchEnabled'], isTrue);
+    expect(
+      settings.toJson()['libraryMatchSourceIds'],
+      ['emby-main', 'nas-main'],
+    );
+    expect(
+      settings.toJson()['searchSourceIds'],
+      ['source:emby-main', 'provider:pansou'],
+    );
+  });
+
+  test('search source setting ids are normalized by helper builders', () {
+    expect(
+      searchSourceSettingIdForMediaSource(' emby-main '),
+      'source:emby-main',
+    );
+    expect(
+      searchSourceSettingIdForProvider(' pansou-api '),
+      'provider:pansou-api',
+    );
   });
 
   test('app settings persist network storage config', () {

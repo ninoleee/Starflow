@@ -7,6 +7,8 @@ import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart';
+import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -137,6 +139,17 @@ final homeRecentItemsProvider = FutureProvider<List<MediaItem>>((ref) async {
   return ref.read(mediaRepositoryProvider).fetchRecentlyAdded(limit: 6);
 });
 
+final homeRecentPlaybackEntriesProvider =
+    FutureProvider<List<PlaybackProgressEntry>>((ref) async {
+  ref.watch(playbackHistoryRevisionProvider);
+  final enabledModules = ref.watch(homeEnabledModulesProvider);
+  if (!_needsRecentPlayback(enabledModules)) {
+    return const [];
+  }
+
+  return ref.read(playbackMemoryRepositoryProvider).loadRecentEntries(limit: 6);
+});
+
 final homeCarouselItemsProvider =
     FutureProvider<List<DoubanCarouselEntry>>((ref) async {
   final enabledModules = ref.watch(homeEnabledModulesProvider);
@@ -171,6 +184,14 @@ final homeSectionProvider =
         module: module,
         items: recentItems,
         subtitle: module.description,
+        localStorageCacheRepository: localStorageCacheRepository,
+      );
+    case HomeModuleType.recentPlayback:
+      final recentEntries =
+          await ref.watch(homeRecentPlaybackEntriesProvider.future);
+      return _buildRecentPlaybackSection(
+        module: module,
+        entries: recentEntries,
         localStorageCacheRepository: localStorageCacheRepository,
       );
     case HomeModuleType.librarySection:
@@ -261,6 +282,7 @@ void _primeHomeModulesWithReader(
   }
   final modules = read(homeEnabledModulesProvider);
   read(homeRecentItemsProvider.future);
+  read(homeRecentPlaybackEntriesProvider.future);
   read(homeCarouselItemsProvider.future);
   for (final module in modules) {
     read(homeSectionProvider(module.id).future);
@@ -272,6 +294,7 @@ Future<void> refreshHomeModules(WidgetRef ref) async {
     return;
   }
   ref.invalidate(homeRecentItemsProvider);
+  ref.invalidate(homeRecentPlaybackEntriesProvider);
   ref.invalidate(homeCarouselItemsProvider);
   ref.invalidate(homeSectionProvider);
   ref.invalidate(homeSectionsProvider);
@@ -281,6 +304,10 @@ Future<void> refreshHomeModules(WidgetRef ref) async {
 
 bool _needsRecentlyAdded(List<HomeModuleConfig> modules) {
   return modules.any((item) => item.type == HomeModuleType.recentlyAdded);
+}
+
+bool _needsRecentPlayback(List<HomeModuleConfig> modules) {
+  return modules.any((item) => item.type == HomeModuleType.recentPlayback);
 }
 
 bool _needsCarousel(List<HomeModuleConfig> modules) {
@@ -342,6 +369,15 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
   MediaDetailTarget seed,
   MediaDetailTarget cached,
 ) {
+  final preferCachedResourceState =
+      _homeHasResolvedLocalResourceState(cached) &&
+          !_homeHasResolvedLocalResourceState(seed);
+  final preferCachedAvailability =
+      _homeShouldPreferCachedAvailability(seed, cached) ||
+          preferCachedResourceState;
+  final preferCachedSourceContext =
+      _homeShouldPreferCachedSourceContext(seed, cached) ||
+          preferCachedResourceState;
   final resolvedPosterUrl =
       cached.posterUrl.trim().isNotEmpty ? cached.posterUrl : seed.posterUrl;
   final resolvedPosterHeaders = cached.posterUrl.trim().isNotEmpty
@@ -408,8 +444,197 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
     doubanId: seed.doubanId.trim().isNotEmpty ? seed.doubanId : cached.doubanId,
     imdbId: seed.imdbId.trim().isNotEmpty ? seed.imdbId : cached.imdbId,
     tmdbId: seed.tmdbId.trim().isNotEmpty ? seed.tmdbId : cached.tmdbId,
+    availabilityLabel: preferCachedAvailability
+        ? (cached.availabilityLabel.trim().isNotEmpty
+            ? cached.availabilityLabel
+            : seed.availabilityLabel)
+        : (seed.availabilityLabel.trim().isNotEmpty
+            ? seed.availabilityLabel
+            : cached.availabilityLabel),
     playbackTarget: seed.playbackTarget ?? cached.playbackTarget,
+    itemId: preferCachedSourceContext
+        ? (cached.itemId.trim().isNotEmpty ? cached.itemId : seed.itemId)
+        : (seed.itemId.trim().isNotEmpty ? seed.itemId : cached.itemId),
+    sourceId: preferCachedSourceContext
+        ? (cached.sourceId.trim().isNotEmpty ? cached.sourceId : seed.sourceId)
+        : (seed.sourceId.trim().isNotEmpty ? seed.sourceId : cached.sourceId),
+    itemType: preferCachedSourceContext
+        ? (cached.itemType.trim().isNotEmpty ? cached.itemType : seed.itemType)
+        : (seed.itemType.trim().isNotEmpty ? seed.itemType : cached.itemType),
+    seasonNumber: preferCachedSourceContext
+        ? (cached.seasonNumber ?? seed.seasonNumber)
+        : (seed.seasonNumber ?? cached.seasonNumber),
+    episodeNumber: preferCachedSourceContext
+        ? (cached.episodeNumber ?? seed.episodeNumber)
+        : (seed.episodeNumber ?? cached.episodeNumber),
+    sectionId: preferCachedSourceContext
+        ? (cached.sectionId.trim().isNotEmpty
+            ? cached.sectionId
+            : seed.sectionId)
+        : (seed.sectionId.trim().isNotEmpty
+            ? seed.sectionId
+            : cached.sectionId),
+    sectionName: preferCachedSourceContext
+        ? (cached.sectionName.trim().isNotEmpty
+            ? cached.sectionName
+            : seed.sectionName)
+        : (seed.sectionName.trim().isNotEmpty
+            ? seed.sectionName
+            : cached.sectionName),
+    resourcePath: preferCachedSourceContext
+        ? (cached.resourcePath.trim().isNotEmpty
+            ? cached.resourcePath
+            : seed.resourcePath)
+        : (seed.resourcePath.trim().isNotEmpty
+            ? seed.resourcePath
+            : cached.resourcePath),
+    sourceKind: preferCachedSourceContext
+        ? (cached.sourceKind ?? seed.sourceKind)
+        : (seed.sourceKind ?? cached.sourceKind),
+    sourceName: preferCachedSourceContext
+        ? (cached.sourceName.trim().isNotEmpty
+            ? cached.sourceName
+            : seed.sourceName)
+        : (seed.sourceName.trim().isNotEmpty
+            ? seed.sourceName
+            : cached.sourceName),
   );
+}
+
+Future<HomeSectionViewModel> _buildRecentPlaybackSection({
+  required HomeModuleConfig module,
+  required List<PlaybackProgressEntry> entries,
+  required LocalStorageCacheRepository localStorageCacheRepository,
+}) async {
+  final items = <HomeCardViewModel>[];
+  for (final entry in entries) {
+    final detailTarget = await _resolveCachedHomeDetailTarget(
+      seedTarget: _buildRecentPlaybackDetailTarget(entry),
+      localStorageCacheRepository: localStorageCacheRepository,
+    );
+    items.add(
+      HomeCardViewModel(
+        id: entry.key,
+        title: detailTarget.title,
+        subtitle: _buildRecentPlaybackSubtitle(entry),
+        posterUrl: detailTarget.posterUrl,
+        detailTarget: detailTarget,
+      ),
+    );
+  }
+
+  return HomeSectionViewModel(
+    id: module.id,
+    title: module.title,
+    subtitle: module.description,
+    emptyMessage: '暂无最近播放',
+    layout: HomeSectionLayout.posterRail,
+    items: items,
+  );
+}
+
+MediaDetailTarget _buildRecentPlaybackDetailTarget(
+    PlaybackProgressEntry entry) {
+  final target = entry.target;
+  return MediaDetailTarget(
+    title: target.title,
+    posterUrl: '',
+    overview: target.subtitle,
+    year: target.year,
+    availabilityLabel: target.canPlay
+        ? '资源已就绪：${target.sourceKind.label} · ${target.sourceName}'
+        : '',
+    searchQuery: target.seriesTitle.trim().isNotEmpty
+        ? target.seriesTitle
+        : target.title,
+    playbackTarget: target,
+    itemId: target.itemId,
+    sourceId: target.sourceId,
+    itemType: target.itemType,
+    seasonNumber: target.seasonNumber,
+    episodeNumber: target.episodeNumber,
+    resourcePath: target.actualAddress,
+    sourceKind: target.sourceKind,
+    sourceName: target.sourceName,
+  );
+}
+
+String _buildRecentPlaybackSubtitle(PlaybackProgressEntry entry) {
+  final parts = <String>[];
+  final target = entry.target;
+  if (target.seasonNumber != null && target.episodeNumber != null) {
+    parts.add(
+      'S${target.seasonNumber!.toString().padLeft(2, '0')}'
+      'E${target.episodeNumber!.toString().padLeft(2, '0')}',
+    );
+  } else if (target.year > 0) {
+    parts.add('${target.year}');
+  }
+
+  if (entry.canResume) {
+    final duration = entry.duration;
+    if (duration > Duration.zero) {
+      parts.add(
+        '${_formatClockDuration(entry.position)} / ${_formatClockDuration(duration)}',
+      );
+    } else {
+      parts.add('继续看到 ${_formatClockDuration(entry.position)}');
+    }
+  } else if (entry.completed) {
+    parts.add('已看完');
+  }
+
+  return parts.join(' · ');
+}
+
+bool _homeHasResolvedLocalResourceState(MediaDetailTarget target) {
+  if (target.playbackTarget?.canPlay == true) {
+    return true;
+  }
+  if (target.sourceId.trim().isNotEmpty && target.itemId.trim().isNotEmpty) {
+    return true;
+  }
+  final availability = target.availabilityLabel.trim();
+  if (availability.isNotEmpty &&
+      availability != '无' &&
+      (target.sourceName.trim().isNotEmpty ||
+          target.resourcePath.trim().isNotEmpty)) {
+    return true;
+  }
+  return false;
+}
+
+bool _homeShouldPreferCachedAvailability(
+  MediaDetailTarget seed,
+  MediaDetailTarget cached,
+) {
+  final cachedAvailability = cached.availabilityLabel.trim();
+  if (cachedAvailability.isEmpty || cachedAvailability == '无') {
+    return false;
+  }
+  final seedAvailability = seed.availabilityLabel.trim();
+  return seedAvailability.isEmpty || seedAvailability == '无';
+}
+
+bool _homeShouldPreferCachedSourceContext(
+  MediaDetailTarget seed,
+  MediaDetailTarget cached,
+) {
+  if (!_homeHasResolvedLocalResourceState(cached)) {
+    return false;
+  }
+  final seedHasResolvedIdentity =
+      seed.sourceId.trim().isNotEmpty && seed.itemId.trim().isNotEmpty;
+  if (!seedHasResolvedIdentity) {
+    return true;
+  }
+  if (seed.sourceKind == null && cached.sourceKind != null) {
+    return true;
+  }
+  if (seed.sourceName.trim().isEmpty && cached.sourceName.trim().isNotEmpty) {
+    return true;
+  }
+  return false;
 }
 
 Future<HomeSectionViewModel> _buildDoubanSection({
@@ -539,6 +764,17 @@ String _resolveDoubanEmptyMessage(
     return '请先填写豆瓣片单地址';
   }
   return '无';
+}
+
+String _formatClockDuration(Duration value) {
+  final totalSeconds = value.inSeconds;
+  final hours = totalSeconds ~/ 3600;
+  final minutes = (totalSeconds % 3600) ~/ 60;
+  final seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+  return '$minutes:${seconds.toString().padLeft(2, '0')}';
 }
 
 MediaSourceKind _resolveSourceKind(AppSettings settings, String sourceId) {

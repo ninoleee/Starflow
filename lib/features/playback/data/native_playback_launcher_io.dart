@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -20,10 +21,10 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
     PlaybackTarget target, {
     required PlaybackDecodeMode decodeMode,
   }) async {
-    if (!Platform.isAndroid) {
+    if (!Platform.isAndroid && !Platform.isIOS) {
       return const NativePlaybackLaunchResult(
         launched: false,
-        message: 'App 内原生播放器容器页当前仅支持 Android。',
+        message: 'App 内原生播放器容器页当前仅支持 Android 和 iOS。',
       );
     }
 
@@ -43,6 +44,9 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
           'title': target.title,
           'headersJson': jsonEncode(target.headers),
           'decodeMode': decodeMode.name,
+          'playbackTargetJson': jsonEncode(target.toJson()),
+          'playbackItemKey': buildPlaybackItemKey(target),
+          'seriesKey': buildSeriesKeyForTarget(target),
         },
       );
       return NativePlaybackLaunchResult(

@@ -62,6 +62,7 @@ class AppDiscoveryRepository implements DiscoveryRepository {
           pageSize: pageSize,
         );
       case HomeModuleType.recentlyAdded:
+      case HomeModuleType.recentPlayback:
       case HomeModuleType.hero:
       case HomeModuleType.librarySection:
       case HomeModuleType.doubanCarousel:

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -505,7 +506,11 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     if (_draftPlaybackEngine == PlaybackEngine.systemPlayer) {
       buffer.write(' 当前选择的是系统播放器，此设置不会生效。');
     } else if (_draftPlaybackEngine == PlaybackEngine.nativeContainer) {
-      buffer.write(' 作用于 App 内原生播放器容器页。');
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        buffer.write(' iOS 原生容器页走系统 AVPlayer 解码链路，此设置当前不会生效。');
+      } else {
+        buffer.write(' 作用于 App 内原生播放器容器页。');
+      }
     } else {
       buffer.write(' 作用于内置 MPV。');
     }

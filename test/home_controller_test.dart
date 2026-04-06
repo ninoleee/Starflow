@@ -7,6 +7,9 @@ import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart';
+import 'package:starflow/features/playback/domain/playback_memory_models.dart';
+import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -202,6 +205,61 @@ void main() {
       expect(section.viewAllTarget!.extra, isA<HomeModuleConfig>());
     });
 
+    test('recent playback module reads recent playback memory directly',
+        () async {
+      SharedPreferences.setMockInitialValues(const {});
+      final prefs = await SharedPreferences.getInstance();
+      final playbackMemoryRepository =
+          PlaybackMemoryRepository(sharedPreferences: prefs);
+      final target = const PlaybackTarget(
+        title: '最近播放影片',
+        sourceId: 'webdav-main',
+        streamUrl: 'https://media.example.com/recent-play.mkv',
+        sourceName: '家庭影音库',
+        sourceKind: MediaSourceKind.nas,
+        itemId: 'recent-1',
+        itemType: 'movie',
+        year: 2025,
+      );
+      await playbackMemoryRepository.saveProgress(
+        target: target,
+        position: const Duration(minutes: 27, seconds: 15),
+        duration: const Duration(hours: 1, minutes: 42),
+      );
+
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings(
+              mediaSources: const [],
+              searchProviders: const [],
+              doubanAccount: const DoubanAccountConfig(
+                enabled: true,
+                userId: 'demo-user',
+              ),
+              homeModules: [
+                HomeModuleConfig.recentPlayback(),
+              ],
+            ),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            _FakeMediaRepository(library: const []),
+          ),
+          playbackMemoryRepositoryProvider.overrideWithValue(
+            playbackMemoryRepository,
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final sections = await container.read(homeSectionsProvider.future);
+      expect(sections, hasLength(1));
+      expect(sections.first.title, '最近播放');
+      expect(sections.first.items, hasLength(1));
+      expect(sections.first.items.first.title, '最近播放影片');
+      expect(sections.first.items.first.subtitle, contains('27:15 / 1:42:00'));
+    });
+
     test('douban section prefers cached poster from detail cache', () async {
       final cacheRepository = _FakeLocalStorageCacheRepository(
         target: MediaDetailTarget(
@@ -209,10 +267,24 @@ void main() {
           posterUrl: 'https://cache.example.com/beautiful-life.jpg',
           overview: '缓存海报',
           year: 1997,
-          availabilityLabel: '无',
+          availabilityLabel: '资源已就绪：WebDAV · nas',
           searchQuery: '美丽人生',
+          sourceKind: MediaSourceKind.nas,
+          sourceName: 'nas',
+          sourceId: 'media-source-1',
+          itemId: 'nas-item-1',
+          itemType: 'movie',
+          resourcePath: '/movies/美丽人生 (1997).mkv',
           doubanId: '1292063',
-          sourceName: '豆瓣',
+          playbackTarget: const PlaybackTarget(
+            title: '美丽人生',
+            sourceId: 'media-source-1',
+            streamUrl: 'https://webdav.example.com/life-is-beautiful.mkv',
+            sourceName: 'nas',
+            sourceKind: MediaSourceKind.nas,
+            itemId: 'nas-item-1',
+            itemType: 'movie',
+          ),
         ),
       );
       final container = ProviderContainer(
@@ -263,6 +335,15 @@ void main() {
         sections.first.items.first.detailTarget.posterUrl,
         'https://cache.example.com/beautiful-life.jpg',
       );
+      expect(
+        sections.first.items.first.detailTarget.availabilityLabel,
+        '资源已就绪：WebDAV · nas',
+      );
+      expect(sections.first.items.first.detailTarget.sourceName, 'nas');
+      expect(
+          sections.first.items.first.detailTarget.sourceId, 'media-source-1');
+      expect(sections.first.items.first.detailTarget.itemId, 'nas-item-1');
+      expect(sections.first.items.first.detailTarget.playbackTarget, isNotNull);
     });
   });
 }

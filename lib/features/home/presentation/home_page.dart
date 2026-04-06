@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -13,9 +14,13 @@ import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/starflow_logo.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
+import 'package:starflow/features/library/data/nas_media_indexer.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -28,6 +33,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   String _focusedHeroId = '';
   final TvFocusMemoryController _tvFocusMemoryController =
       TvFocusMemoryController();
+  final Set<String> _heroMetadataRefreshScheduledKeys = <String>{};
 
   bool get _showHeroPagerButtons {
     if (kIsWeb) {
@@ -158,6 +164,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             resolvedSections: resolvedSections,
             preferredModuleId: heroSourceModuleId,
           );
+    _scheduleHeroMetadataRefresh(featuredItems);
     final activeHero = _resolveActiveHeroItem(featuredItems);
     final featuredSectionId = featuredSection?.id;
 
@@ -184,7 +191,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 child: _FeaturedHero(
                   items: featuredItems,
                   isTelevision: isTelevision,
-                  showPagerButtons: _showHeroPagerButtons && !isTelevision,
+                  showPagerButtons: _showHeroPagerButtons || isTelevision,
                   logoTitleEnabled: heroLogoTitleEnabled,
                   translucentEffectsEnabled: translucentEffectsEnabled,
                   style: heroStyle,
@@ -329,6 +336,200 @@ class _HomePageState extends ConsumerState<HomePage> {
     setState(() {
       _focusedHeroId = item.id;
     });
+  }
+
+  void _scheduleHeroMetadataRefresh(List<_FeaturedHeroItem> items) {
+    if (items.isEmpty) {
+      return;
+    }
+
+    final candidates = <MediaDetailTarget>[];
+    for (final item in items) {
+      final target = item.detailTarget;
+      if (!_needsHeroMetadataRefresh(target)) {
+        continue;
+      }
+      final refreshKey = _heroMetadataRefreshKey(target);
+      if (refreshKey.isEmpty ||
+          !_heroMetadataRefreshScheduledKeys.add(refreshKey)) {
+        continue;
+      }
+      candidates.add(target);
+    }
+    if (candidates.isEmpty) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(_refreshHeroMetadataInBackground(candidates));
+    });
+  }
+
+  Future<void> _refreshHeroMetadataInBackground(
+    List<MediaDetailTarget> targets,
+  ) async {
+    try {
+      await Future.wait(
+        targets.map(_refreshSingleHeroMetadataIfNeeded),
+        eagerError: false,
+      );
+    } catch (_) {
+      // Hero metadata refresh is best-effort and should never block home UI.
+    }
+  }
+
+  Future<void> _refreshSingleHeroMetadataIfNeeded(
+    MediaDetailTarget target,
+  ) async {
+    try {
+      if (!_needsHeroMetadataRefresh(target)) {
+        return;
+      }
+
+      if (target.sourceKind == MediaSourceKind.nas &&
+          target.sourceId.trim().isNotEmpty &&
+          target.itemId.trim().isNotEmpty) {
+        final updatedTarget = await ref
+            .read(nasMediaIndexerProvider)
+            .enrichDetailTargetMetadataIfNeeded(target);
+        if (updatedTarget == null ||
+            !_heroMetadataRefreshProducedUpdate(target, updatedTarget)) {
+          return;
+        }
+        await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+              seedTarget: target,
+              resolvedTarget: updatedTarget,
+            );
+        return;
+      }
+
+      final settings = ref.read(appSettingsProvider);
+      if (!_canAttemptHeroMetadataRefresh(settings, target)) {
+        return;
+      }
+
+      final cacheRepository = ref.read(localStorageCacheRepositoryProvider);
+      final refreshStatus =
+          await cacheRepository.loadDetailMetadataRefreshStatus(target);
+      if (refreshStatus != DetailMetadataRefreshStatus.never) {
+        return;
+      }
+
+      try {
+        final updatedTarget =
+            await ref.read(enrichedDetailTargetProvider(target).future);
+        await cacheRepository.saveDetailTarget(
+          seedTarget: target,
+          resolvedTarget: updatedTarget,
+          metadataRefreshStatus:
+              _heroMetadataRefreshProducedUpdate(target, updatedTarget)
+                  ? DetailMetadataRefreshStatus.succeeded
+                  : DetailMetadataRefreshStatus.failed,
+        );
+      } catch (_) {
+        await cacheRepository.saveDetailTarget(
+          seedTarget: target,
+          resolvedTarget: target,
+          metadataRefreshStatus: DetailMetadataRefreshStatus.failed,
+        );
+      }
+    } catch (_) {
+      // Background hero refresh is best-effort.
+    }
+  }
+
+  String _heroMetadataRefreshKey(MediaDetailTarget target) {
+    final parts = [
+      target.sourceKind?.name ?? '',
+      target.sourceId.trim(),
+      target.itemId.trim(),
+      target.doubanId.trim(),
+      target.imdbId.trim().toLowerCase(),
+      target.tmdbId.trim(),
+      target.title.trim().toLowerCase(),
+    ].where((item) => item.isNotEmpty).toList(growable: false);
+    return parts.join('|');
+  }
+
+  bool _needsHeroMetadataRefresh(MediaDetailTarget target) {
+    final hasHeroWideVisual = target.backdropUrl.trim().isNotEmpty ||
+        target.bannerUrl.trim().isNotEmpty ||
+        target.extraBackdropUrls.any((item) => item.trim().isNotEmpty);
+    final hasHeroTitleVisual = target.logoUrl.trim().isNotEmpty;
+    return target.needsMetadataMatch ||
+        target.needsImdbRatingMatch ||
+        !hasHeroWideVisual ||
+        !hasHeroTitleVisual;
+  }
+
+  bool _canAttemptHeroMetadataRefresh(
+    AppSettings settings,
+    MediaDetailTarget target,
+  ) {
+    final query = (target.searchQuery.trim().isEmpty
+            ? target.title
+            : target.searchQuery)
+        .trim();
+    if (query.isEmpty && target.doubanId.trim().isEmpty) {
+      return false;
+    }
+
+    final needsWmdb = settings.wmdbMetadataMatchEnabled &&
+        (target.needsMetadataMatch ||
+            _missingRatingKeyword(target.ratingLabels, '豆瓣') ||
+            target.needsImdbRatingMatch ||
+            target.doubanId.trim().isEmpty ||
+            target.imdbId.trim().isEmpty);
+    final needsTmdb = settings.tmdbMetadataMatchEnabled &&
+        settings.tmdbReadAccessToken.trim().isNotEmpty &&
+        (target.needsMetadataMatch ||
+            target.imdbId.trim().isEmpty ||
+            target.backdropUrl.trim().isEmpty ||
+            target.logoUrl.trim().isEmpty);
+    final needsImdb = settings.imdbRatingMatchEnabled &&
+        (!settings.tmdbMetadataMatchEnabled ||
+            settings.tmdbReadAccessToken.trim().isEmpty) &&
+        target.needsImdbRatingMatch;
+    return needsWmdb || needsTmdb || needsImdb;
+  }
+
+  bool _heroMetadataRefreshProducedUpdate(
+    MediaDetailTarget current,
+    MediaDetailTarget next,
+  ) {
+    if (!_needsHeroMetadataRefresh(next)) {
+      return true;
+    }
+    return current.posterUrl.trim() != next.posterUrl.trim() ||
+        current.backdropUrl.trim() != next.backdropUrl.trim() ||
+        current.logoUrl.trim() != next.logoUrl.trim() ||
+        current.bannerUrl.trim() != next.bannerUrl.trim() ||
+        !listEquals(current.extraBackdropUrls, next.extraBackdropUrls) ||
+        current.overview.trim() != next.overview.trim() ||
+        current.durationLabel.trim() != next.durationLabel.trim() ||
+        current.year != next.year ||
+        !listEquals(current.ratingLabels, next.ratingLabels) ||
+        !listEquals(current.genres, next.genres) ||
+        !listEquals(current.directors, next.directors) ||
+        !listEquals(current.actors, next.actors) ||
+        current.doubanId.trim() != next.doubanId.trim() ||
+        current.imdbId.trim().toLowerCase() !=
+            next.imdbId.trim().toLowerCase() ||
+        current.tmdbId.trim() != next.tmdbId.trim() ||
+        current.tvdbId.trim() != next.tvdbId.trim();
+  }
+
+  bool _missingRatingKeyword(Iterable<String> labels, String keyword) {
+    final normalizedKeyword = keyword.trim().toLowerCase();
+    if (normalizedKeyword.isEmpty) {
+      return false;
+    }
+    return !labels.any(
+      (label) => label.trim().toLowerCase().contains(normalizedKeyword),
+    );
   }
 }
 
@@ -831,7 +1032,7 @@ class _HomeSection extends StatelessWidget {
       children: [
         if (onTitleTap == null)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: titleWidget,
           )
         else
@@ -839,7 +1040,7 @@ class _HomeSection extends StatelessWidget {
             onPressed: onTitleTap,
             borderRadius: BorderRadius.circular(12),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               child: Row(
                 children: [
                   Expanded(child: titleWidget),
@@ -1118,6 +1319,10 @@ class _FeaturedHero extends StatefulWidget {
 
 class _FeaturedHeroState extends State<_FeaturedHero> {
   late PageController _controller;
+  final FocusNode _previousPagerButtonFocusNode =
+      FocusNode(debugLabel: 'home-hero-prev');
+  final FocusNode _nextPagerButtonFocusNode =
+      FocusNode(debugLabel: 'home-hero-next');
   double _page = 0;
   int _lastReportedIndex = -1;
   double? _pendingPage;
@@ -1156,6 +1361,8 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
 
   @override
   void dispose() {
+    _previousPagerButtonFocusNode.dispose();
+    _nextPagerButtonFocusNode.dispose();
     _controller
       ..removeListener(_handlePageChange)
       ..dispose();
@@ -1239,6 +1446,13 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     );
   }
 
+  void _focusPagerButton(FocusNode focusNode) {
+    if (!focusNode.canRequestFocus) {
+      return;
+    }
+    focusNode.requestFocus();
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentIndex = widget.items.isEmpty
@@ -1274,11 +1488,10 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                           widget.translucentEffectsEnabled,
                       focusId: '${widget.focusScopePrefix}:${item.id}',
                       autofocus: index == currentIndex,
-                      onMovePrevious:
-                          index > 0 ? () => _moveToIndex(index - 1) : null,
-                      onMoveNext: index < widget.items.length - 1
-                          ? () => _moveToIndex(index + 1)
-                          : null,
+                      onFocusPreviousControl: () =>
+                          _focusPagerButton(_previousPagerButtonFocusNode),
+                      onFocusNextControl: () =>
+                          _focusPagerButton(_nextPagerButtonFocusNode),
                     ),
                   );
                 },
@@ -1290,7 +1503,10 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                   bottom: 0,
                   child: Center(
                     child: _HeroPagerButton(
+                      isTelevision: widget.isTelevision,
                       icon: Icons.chevron_left_rounded,
+                      focusNode: _previousPagerButtonFocusNode,
+                      focusId: '${widget.focusScopePrefix}:pager-prev',
                       enabled: currentIndex > 0,
                       onPressed: currentIndex > 0
                           ? () => _moveToIndex(currentIndex - 1)
@@ -1304,7 +1520,10 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                   bottom: 0,
                   child: Center(
                     child: _HeroPagerButton(
+                      isTelevision: widget.isTelevision,
                       icon: Icons.chevron_right_rounded,
+                      focusNode: _nextPagerButtonFocusNode,
+                      focusId: '${widget.focusScopePrefix}:pager-next',
                       enabled: currentIndex < widget.items.length - 1,
                       onPressed: currentIndex < widget.items.length - 1
                           ? () => _moveToIndex(currentIndex + 1)
@@ -1344,32 +1563,57 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
 
 class _HeroPagerButton extends StatelessWidget {
   const _HeroPagerButton({
+    required this.isTelevision,
     required this.icon,
+    this.focusNode,
+    this.focusId,
     required this.enabled,
     this.onPressed,
   });
 
+  final bool isTelevision;
   final IconData icon;
+  final FocusNode? focusNode;
+  final String? focusId;
   final bool enabled;
   final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedOpacity(
+    final child = AnimatedOpacity(
       duration: const Duration(milliseconds: 180),
       opacity: enabled ? 0.92 : 0.35,
       child: Material(
         color: Colors.black.withValues(alpha: 0.26),
         shape: const CircleBorder(),
         clipBehavior: Clip.antiAlias,
-        child: IconButton(
-          onPressed: onPressed,
-          icon: Icon(icon, color: Colors.white),
-          iconSize: 30,
-          padding: const EdgeInsets.all(12),
-          splashRadius: 26,
+        child: SizedBox(
+          width: 54,
+          height: 54,
+          child: Icon(icon, color: Colors.white, size: 30),
         ),
       ),
+    );
+
+    if (!isTelevision) {
+      return Material(
+        color: Colors.transparent,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          customBorder: const CircleBorder(),
+          child: child,
+        ),
+      );
+    }
+
+    return TvFocusableAction(
+      onPressed: onPressed ?? () {},
+      focusNode: focusNode,
+      focusId: focusId,
+      borderRadius: BorderRadius.circular(999),
+      child: child,
     );
   }
 }
@@ -1383,8 +1627,8 @@ class _FeaturedHeroCard extends StatelessWidget {
     required this.translucentEffectsEnabled,
     required this.focusId,
     required this.autofocus,
-    this.onMovePrevious,
-    this.onMoveNext,
+    this.onFocusPreviousControl,
+    this.onFocusNextControl,
   });
 
   final _FeaturedHeroItem item;
@@ -1394,8 +1638,8 @@ class _FeaturedHeroCard extends StatelessWidget {
   final bool translucentEffectsEnabled;
   final String focusId;
   final bool autofocus;
-  final VoidCallback? onMovePrevious;
-  final VoidCallback? onMoveNext;
+  final VoidCallback? onFocusPreviousControl;
+  final VoidCallback? onFocusNextControl;
 
   @override
   Widget build(BuildContext context) {
@@ -1557,14 +1801,14 @@ class _FeaturedHeroCard extends StatelessWidget {
         DirectionalFocusIntent: CallbackAction<DirectionalFocusIntent>(
           onInvoke: (intent) {
             if (intent.direction == TraversalDirection.left) {
-              final movePrevious = onMovePrevious;
-              if (movePrevious != null) {
-                movePrevious();
+              final focusPreviousControl = onFocusPreviousControl;
+              if (focusPreviousControl != null) {
+                focusPreviousControl();
               } else {
                 TvMenuButtonScope.maybeOf(context)?.onMenuButtonPressed();
               }
             } else if (intent.direction == TraversalDirection.right) {
-              onMoveNext?.call();
+              onFocusNextControl?.call();
             }
             return null;
           },

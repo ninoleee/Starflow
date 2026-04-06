@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_subtitle_delay">字幕偏移</string>
+    <string name="native_external_subtitle">加载外部字幕</string>
+    <string name="native_online_subtitle_search">在线查找字幕</string>
+</resources>

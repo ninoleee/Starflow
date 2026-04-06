@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/features/bootstrap/application/bootstrap_controller.dart';
 
@@ -74,7 +73,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                       builder: (context, entrance, child) {
                         final scale =
                             (0.92 + entrance * 0.08) * (0.97 + progress * 0.04);
-                        final translateY = 18 * (1 - entrance);
+                        final translateY = 18 * (1 - entrance) - 18;
                         return Transform.translate(
                           offset: Offset(0, translateY),
                           child: Transform.scale(
@@ -90,41 +89,6 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                         alignment: Alignment.center,
                         clipBehavior: Clip.none,
                         children: [
-                          IgnorePointer(
-                            child: Container(
-                              width: 280,
-                              height: 280,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: RadialGradient(
-                                  colors: [
-                                    const Color(0xFF4F8FFF)
-                                        .withValues(alpha: 0.12),
-                                    const Color(0xFF4F8FFF)
-                                        .withValues(alpha: 0.03),
-                                    Colors.transparent,
-                                  ],
-                                  stops: const [0, 0.42, 1],
-                                ),
-                              ),
-                            ),
-                          ),
-                          IgnorePointer(
-                            child: Container(
-                              width: 168,
-                              height: 168,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: RadialGradient(
-                                  colors: [
-                                    Colors.white.withValues(alpha: 0.04),
-                                    Colors.transparent,
-                                  ],
-                                  stops: const [0, 1],
-                                ),
-                              ),
-                            ),
-                          ),
                           const _BootstrapLogoMark(
                             iconSize: 108,
                             wordmarkSize: 34,
@@ -180,48 +144,24 @@ class _BootstrapLogoMarkState extends State<_BootstrapLogoMark>
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
-        final glowScale = 1.0 + (_controller.value * 0.06);
-        final glowOpacity = 0.6 + (_controller.value * 0.4);
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             SizedBox(
               width: widget.iconSize,
               height: widget.iconSize,
-              child: Stack(
-                clipBehavior: Clip.none,
-                alignment: Alignment.center,
-                children: [
-                  Transform.scale(
-                    scale: glowScale,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: RadialGradient(
-                          center: const Alignment(0, 0.2),
-                          radius: 0.76,
-                          colors: [
-                            const Color(0xFF64A0FF)
-                                .withValues(alpha: 0.14 * glowOpacity),
-                            Colors.transparent,
-                          ],
-                        ),
-                      ),
-                      child: SizedBox(
-                        width: widget.iconSize,
-                        height: widget.iconSize,
-                      ),
-                    ),
-                  ),
-                  SvgPicture.asset(
-                    'assets/branding/starflow_logo_primary.svg',
-                    width: widget.iconSize,
-                    height: widget.iconSize,
-                  ),
-                ],
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(widget.iconSize * 0.22),
+                child: Image.asset(
+                  'assets/branding/starflow_launch_logo.png',
+                  width: widget.iconSize,
+                  height: widget.iconSize,
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.high,
+                ),
               ),
             ),
-            SizedBox(height: widget.iconSize * 0.21),
+            SizedBox(height: widget.iconSize * 0.16),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -231,7 +171,7 @@ class _BootstrapLogoMarkState extends State<_BootstrapLogoMark>
                     fontSize: widget.wordmarkSize,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -widget.wordmarkSize * 0.03,
-                    color: Colors.white,
+                    color: Color(0xFF101A2C),
                   ),
                 ),
                 Text(
@@ -240,7 +180,7 @@ class _BootstrapLogoMarkState extends State<_BootstrapLogoMark>
                     fontSize: widget.wordmarkSize,
                     fontWeight: FontWeight.w400,
                     letterSpacing: -widget.wordmarkSize * 0.04,
-                    color: Colors.white.withValues(alpha: 0.48),
+                    color: Color(0xFF101A2C).withValues(alpha: 0.54),
                   ),
                 ),
               ],

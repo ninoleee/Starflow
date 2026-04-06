@@ -264,6 +264,124 @@ void main() {
       );
     });
 
+    test('prefers cached series context for matched douban detail target',
+        () async {
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'wmdbMetadataMatchEnabled': false,
+              'tmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+            }),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const seedTarget = MediaDetailTarget(
+        title: '9号秘事',
+        posterUrl: '',
+        overview: '',
+        year: 2014,
+        availabilityLabel: '无',
+        searchQuery: '9号秘事',
+        itemType: 'movie',
+        doubanId: '25897385',
+        sourceName: '豆瓣',
+      );
+      final cachedTarget = seedTarget.copyWith(
+        availabilityLabel: '已匹配：WebDAV · nas',
+        sourceKind: MediaSourceKind.nas,
+        sourceName: 'nas',
+        sourceId: 'media-source-1775415208787',
+        itemId: 'webdav-series|inside-no-9',
+        itemType: 'series',
+        sectionName: '剧集',
+      );
+
+      await container.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+            seedTarget: seedTarget,
+            resolvedTarget: cachedTarget,
+          );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(seedTarget).future,
+      );
+
+      expect(resolved.itemType, 'series');
+      expect(resolved.isSeries, isTrue);
+      expect(resolved.sourceId, 'media-source-1775415208787');
+      expect(resolved.itemId, 'webdav-series|inside-no-9');
+      expect(resolved.sectionName, '剧集');
+    });
+
+    test('prefers cached availability when current target only has playback',
+        () async {
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'wmdbMetadataMatchEnabled': false,
+              'tmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+            }),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const seedTarget = MediaDetailTarget(
+        title: '天书奇谭',
+        posterUrl: '',
+        overview: '',
+        year: 1983,
+        availabilityLabel: '无',
+        searchQuery: '天书奇谭',
+        doubanId: '1428581',
+        sourceName: '豆瓣',
+        playbackTarget: PlaybackTarget(
+          title: '天书奇谭',
+          sourceId: 'media-source-1775415208787',
+          streamUrl: 'https://webdav.example.com/movies/天书奇谭.mkv',
+          sourceName: 'nas',
+          sourceKind: MediaSourceKind.nas,
+          actualAddress: '/movies/天书奇谭 (1983).strm',
+          itemId: 'nas-item-1',
+          itemType: 'movie',
+        ),
+      );
+      final cachedTarget = seedTarget.copyWith(
+        availabilityLabel: '资源已就绪：WebDAV · nas',
+        sourceKind: MediaSourceKind.nas,
+        sourceName: 'nas',
+        sourceId: 'media-source-1775415208787',
+        itemId: 'nas-item-1',
+        resourcePath: '/movies/天书奇谭 (1983).strm',
+      );
+
+      await container.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+            seedTarget: seedTarget,
+            resolvedTarget: cachedTarget,
+          );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(seedTarget).future,
+      );
+
+      expect(resolved.availabilityLabel, '资源已就绪：WebDAV · nas');
+      expect(resolved.sourceName, 'nas');
+      expect(resolved.sourceKind, MediaSourceKind.nas);
+    });
+
     test('auto enriches douban detail with imdb rating and ids', () async {
       final container = ProviderContainer(
         overrides: [

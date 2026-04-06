@@ -146,8 +146,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final keyword = _controller.text.trim();
     await _rememberQuery(keyword);
     final settings = ref.read(appSettingsProvider);
-    final enabledProviders =
-        settings.searchProviders.where((item) => item.enabled).toList();
+    final enabledProviders = _visibleSearchProviders(settings);
     final scopedCollections = await ref.read(searchCollectionsProvider.future);
     final localSources = _visibleLocalSources(
       settings: settings,
@@ -230,8 +229,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   Widget build(BuildContext context) {
     final settings = ref.watch(appSettingsProvider);
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
-    final enabledProviders =
-        settings.searchProviders.where((item) => item.enabled).toList();
+    final enabledProviders = _visibleSearchProviders(settings);
     final collectionsAsync = ref.watch(searchCollectionsProvider);
     final scopedCollections =
         collectionsAsync.valueOrNull ?? const <MediaCollection>[];
@@ -645,11 +643,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     required AppSettings settings,
     required List<MediaCollection> collections,
   }) {
+    final allowedIds = settings.searchSourceIds.toSet();
     final visibleSourceIds = collections
         .map((collection) => collection.sourceId.trim())
         .where((id) => id.isNotEmpty)
         .toSet();
-    return settings.mediaSources
+    final availableSources = settings.mediaSources
         .where(
           (source) =>
               source.enabled &&
@@ -658,6 +657,35 @@ class _SearchPageState extends ConsumerState<SearchPage> {
               visibleSourceIds.contains(source.id),
         )
         .toList(growable: false);
+    if (allowedIds.isEmpty) {
+      return availableSources;
+    }
+    final filteredSources = availableSources
+        .where(
+          (source) => allowedIds.contains(
+            searchSourceSettingIdForMediaSource(source.id),
+          ),
+        )
+        .toList(growable: false);
+    return filteredSources.isEmpty ? availableSources : filteredSources;
+  }
+
+  List<SearchProviderConfig> _visibleSearchProviders(AppSettings settings) {
+    final allowedIds = settings.searchSourceIds.toSet();
+    final availableProviders = settings.searchProviders
+        .where((provider) => provider.enabled)
+        .toList(growable: false);
+    if (allowedIds.isEmpty) {
+      return availableProviders;
+    }
+    final filteredProviders = availableProviders
+        .where(
+          (provider) => allowedIds.contains(
+            searchSourceSettingIdForProvider(provider.id),
+          ),
+        )
+        .toList(growable: false);
+    return filteredProviders.isEmpty ? availableProviders : filteredProviders;
   }
 
   List<_SearchTarget> _resolveSelectedTargets(List<_SearchTarget> targets) {
@@ -902,7 +930,11 @@ class _SearchResultCard extends ConsumerWidget {
         _openResourceUrl(context, resourceUri);
         return;
       }
-      _showDetailDialog(context, result);
+      _showDetailDialog(
+        context,
+        result,
+        isTelevision: isTelevision,
+      );
     }
 
     final cardChild = Padding(
@@ -1020,7 +1052,11 @@ class _SearchResultCard extends ConsumerWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: TvFocusableAction(
           onPressed: onOpen,
-          onContextAction: () => _showDetailDialog(context, result),
+          onContextAction: () => _showDetailDialog(
+            context,
+            result,
+            isTelevision: isTelevision,
+          ),
           focusId: focusId,
           autofocus: autofocus,
           borderRadius: BorderRadius.circular(18),
@@ -1039,13 +1075,21 @@ class _SearchResultCard extends ConsumerWidget {
 
     return TvFocusableAction(
       onPressed: onOpen,
-      onContextAction: () => _showDetailDialog(context, result),
+      onContextAction: () => _showDetailDialog(
+        context,
+        result,
+        isTelevision: isTelevision,
+      ),
       borderRadius: BorderRadius.circular(18),
       child: cardChild,
     );
   }
 
-  Future<void> _showDetailDialog(BuildContext context, SearchResult result) {
+  Future<void> _showDetailDialog(
+    BuildContext context,
+    SearchResult result, {
+    required bool isTelevision,
+  }) async {
     final resourceUri = _parseLaunchUri(result.resourceUrl);
     final detailLines = <String>[
       'Provider: ${result.providerName}',
@@ -1058,65 +1102,147 @@ class _SearchResultCard extends ConsumerWidget {
       if (result.summary.trim().isNotEmpty) result.summary,
     ];
 
-    return showDialog<void>(
-      context: context,
-      builder: (context) {
-        final theme = Theme.of(context);
-        return AlertDialog(
-          title: Text(
-            result.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SelectableText(detailLines.join('\n')),
-                if (result.resourceUrl.trim().isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    'Resource URL:',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  InkWell(
-                    onTap: resourceUri == null
-                        ? null
-                        : () => _openResourceUrl(context, resourceUri),
-                    child: Text(
-                      result.resourceUrl,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: resourceUri == null
-                            ? theme.colorScheme.onSurfaceVariant
-                            : theme.colorScheme.primary,
-                        decoration: resourceUri == null
-                            ? TextDecoration.none
-                            : TextDecoration.underline,
+    if (!isTelevision) {
+      return showDialog<void>(
+        context: context,
+        builder: (context) {
+          final theme = Theme.of(context);
+          return AlertDialog(
+            title: Text(
+              result.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SelectableText(detailLines.join('\n')),
+                  if (result.resourceUrl.trim().isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      'Resource URL:',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
-                  ),
+                    const SizedBox(height: 6),
+                    InkWell(
+                      onTap: resourceUri == null
+                          ? null
+                          : () => _openResourceUrl(context, resourceUri),
+                      child: Text(
+                        result.resourceUrl,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: resourceUri == null
+                              ? theme.colorScheme.onSurfaceVariant
+                              : theme.colorScheme.primary,
+                          decoration: resourceUri == null
+                              ? TextDecoration.none
+                              : TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
-              ],
-            ),
-          ),
-          actions: [
-            if (resourceUri != null)
-              TextButton(
-                onPressed: () => _openResourceUrl(context, resourceUri),
-                child: const Text('打开链接'),
               ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('关闭'),
             ),
-          ],
-        );
-      },
-    );
+            actions: [
+              if (resourceUri != null)
+                TextButton(
+                  onPressed: () => _openResourceUrl(context, resourceUri),
+                  child: const Text('打开链接'),
+                ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('关闭'),
+              ),
+            ],
+          );
+        },
+      );
+    }
+
+    final openFocusNode = FocusNode(debugLabel: 'search-result-dialog-open');
+    final closeFocusNode = FocusNode(debugLabel: 'search-result-dialog-close');
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) {
+          final theme = Theme.of(dialogContext);
+          final dialog = AlertDialog(
+            title: Text(
+              result.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            content: FocusTraversalGroup(
+              policy: OrderedTraversalPolicy(),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SelectableText(detailLines.join('\n')),
+                    if (result.resourceUrl.trim().isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        'Resource URL:',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      SelectableText(
+                        result.resourceUrl,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              if (resourceUri != null)
+                TvAdaptiveButton(
+                  label: '打开链接',
+                  icon: Icons.open_in_new_rounded,
+                  onPressed: () => _openResourceUrl(dialogContext, resourceUri),
+                  focusNode: openFocusNode,
+                  autofocus: true,
+                  focusId: 'search:result-dialog:open:${result.id}',
+                ),
+              TvAdaptiveButton(
+                label: '关闭',
+                icon: Icons.close_rounded,
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                focusNode: closeFocusNode,
+                autofocus: resourceUri == null,
+                variant: TvButtonVariant.outlined,
+                focusId: 'search:result-dialog:close:${result.id}',
+              ),
+            ],
+          );
+          return wrapTelevisionDialogBackHandling(
+            enabled: isTelevision,
+            dialogContext: dialogContext,
+            inputFocusNodes: const <FocusNode>[],
+            contentFocusNodes: const <FocusNode>[],
+            actionFocusNodes: [
+              if (resourceUri != null) openFocusNode,
+              closeFocusNode,
+            ],
+            child: dialog,
+          );
+        },
+      );
+    } finally {
+      openFocusNode.dispose();
+      closeFocusNode.dispose();
+    }
   }
 
   Uri? _parseLaunchUri(String rawUrl) {

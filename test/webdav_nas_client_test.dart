@@ -590,7 +590,8 @@ void main() {
       expect(items.single.actualAddress, '/dav/Movies/Main Feature.mkv');
     });
 
-    test('reuses unchanged directory subtrees across repeated scans', () async {
+    test('reuses unchanged directory subtrees only when scan caches stay warm',
+        () async {
       final propfindCounts = <String, int>{};
       final client = WebDavNasClient(
         MockClient((request) async {
@@ -625,8 +626,18 @@ void main() {
         enabled: true,
       );
 
-      final firstItems = await client.fetchLibrary(source, limit: 20);
-      final secondItems = await client.fetchLibrary(source, limit: 20);
+      final firstItems = await client.scanLibrary(
+        source,
+        limit: 20,
+        resolvePlayableStreams: false,
+        resetCaches: true,
+      );
+      final secondItems = await client.scanLibrary(
+        source,
+        limit: 20,
+        resolvePlayableStreams: false,
+        resetCaches: false,
+      );
 
       expect(firstItems, hasLength(2));
       expect(secondItems, hasLength(2));
@@ -643,6 +654,65 @@ void main() {
         propfindCounts[
             'https://nas.example.com/dav/Shows/Repeatable/Season%202/'],
         1,
+      );
+    });
+
+    test(
+        'resetting scan caches invalidates subtree cache and sees newly added files',
+        () async {
+      var scanVersion = 0;
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/Mutable/') {
+            return http.Response(_mutableRootPropfindResponse, 207);
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/Mutable/Season%201/') {
+            return http.Response(
+              scanVersion == 0
+                  ? _mutableSeasonOneInitialPropfindResponse
+                  : _mutableSeasonOneUpdatedPropfindResponse,
+              207,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      const source = MediaSourceConfig(
+        id: 'nas-mutable',
+        name: 'Mutable NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/dav/Shows/Mutable/',
+        enabled: true,
+      );
+
+      final firstItems = await client.scanLibrary(
+        source,
+        limit: 20,
+        resolvePlayableStreams: false,
+        resetCaches: true,
+      );
+      scanVersion = 1;
+      final secondItems = await client.scanLibrary(
+        source,
+        limit: 20,
+        resolvePlayableStreams: false,
+        resetCaches: true,
+      );
+
+      expect(firstItems, hasLength(1));
+      expect(firstItems.single.metadataSeed.title, 'Episode 01');
+      expect(secondItems, hasLength(2));
+      expect(
+        secondItems.map((item) => item.metadataSeed.title),
+        containsAll(<String>[
+          'Episode 01',
+          'Episode 02',
+        ]),
       );
     });
 
@@ -1454,6 +1524,90 @@ const _repeatableSeasonTwoPropfindResponse =
         <d:resourcetype />
         <d:getcontenttype>video/x-matroska</d:getcontenttype>
         <d:getlastmodified>Sun, 05 Apr 2026 08:06:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _mutableRootPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/Mutable/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Mutable</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/Mutable/Season%201/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Season 1</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+        <d:getlastmodified>Sun, 05 Apr 2026 08:00:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _mutableSeasonOneInitialPropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/Mutable/Season%201/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Season 1</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/Mutable/Season%201/Episode%2001.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Episode 01.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
+        <d:getlastmodified>Sun, 05 Apr 2026 08:01:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _mutableSeasonOneUpdatedPropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/Mutable/Season%201/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Season 1</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/Mutable/Season%201/Episode%2001.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Episode 01.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
+        <d:getlastmodified>Sun, 05 Apr 2026 08:01:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/Mutable/Season%201/Episode%2002.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Episode 02.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
+        <d:getlastmodified>Sun, 05 Apr 2026 08:02:00 GMT</d:getlastmodified>
       </d:prop>
     </d:propstat>
   </d:response>

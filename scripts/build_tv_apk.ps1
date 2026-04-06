@@ -25,11 +25,17 @@ function Update-PubspecVersion([string]$pubspecPath) {
   }
 
   $major = [int]$match.Groups[1].Value
+  $currentMonthInVersion = [int]$match.Groups[2].Value
+  $currentSequence = [int]$match.Groups[3].Value
   $build = [int]$match.Groups[4].Value
   $month = (Get-Date).Month
-  $day = (Get-Date).Day
+  $nextSequence = if ($currentMonthInVersion -eq $month) {
+    $currentSequence + 1
+  } else {
+    0
+  }
 
-  $nextVersion = "{0}.{1}.{2}+{3}" -f $major, $month, $day, ($build + 1)
+  $nextVersion = "{0}.{1}.{2}+{3}" -f $major, $month, $nextSequence, ($build + 1)
   $updated = [regex]::Replace(
     $raw,
     '(?m)^version:\s*\d+\.\d+\.\d+\+\d+\s*$',
@@ -84,6 +90,9 @@ try {
 
   if (-not $SkipBuild) {
     flutter build apk --release
+    if ($LASTEXITCODE -ne 0) {
+      throw "flutter build apk failed with exit code $LASTEXITCODE"
+    }
   }
 
   $displayVersion = $version.Split("+")[0]

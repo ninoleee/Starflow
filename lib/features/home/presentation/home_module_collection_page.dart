@@ -136,6 +136,8 @@ String _moduleSubtitle(HomeModuleConfig module) {
       return '豆瓣片单';
     case HomeModuleType.recentlyAdded:
       return '最近新增';
+    case HomeModuleType.recentPlayback:
+      return '最近播放';
     case HomeModuleType.librarySection:
       return module.description;
     case HomeModuleType.doubanCarousel:
