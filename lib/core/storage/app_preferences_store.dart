@@ -7,12 +7,7 @@ const _kAndroidFlutterKeyPrefix = 'flutter.';
 
 SharedPreferencesOptions _buildSharedPreferencesOptions() {
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    return const SharedPreferencesAsyncAndroidOptions(
-      backend: SharedPreferencesAndroidBackendLibrary.SharedPreferences,
-      originalSharedPreferencesOptions: AndroidSharedPreferencesStoreOptions(
-        fileName: _kAndroidSharedPreferencesFileName,
-      ),
-    );
+    return const SharedPreferencesAsyncAndroidOptions();
   }
   return const SharedPreferencesOptions();
 }
