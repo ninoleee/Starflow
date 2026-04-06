@@ -532,17 +532,22 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         title: const Text('保存修改？'),
         content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
         actions: [
-          TextButton(
+          StarflowButton(
+            label: '取消',
             onPressed: () => Navigator.of(dialogContext).pop('cancel'),
-            child: const Text('取消'),
+            variant: StarflowButtonVariant.ghost,
+            compact: true,
           ),
-          TextButton(
+          StarflowButton(
+            label: '不保存',
             onPressed: () => Navigator.of(dialogContext).pop('discard'),
-            child: const Text('不保存'),
+            variant: StarflowButtonVariant.secondary,
+            compact: true,
           ),
-          FilledButton(
+          StarflowButton(
+            label: '保存',
             onPressed: () => Navigator.of(dialogContext).pop('save'),
-            child: const Text('保存'),
+            compact: true,
           ),
         ],
       ),
@@ -564,16 +569,17 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         title: const Text('删除媒体源'),
         content: Text('确定删除「$name」？该操作无法撤销。'),
         actions: [
-          TextButton(
+          StarflowButton(
+            label: '取消',
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消'),
+            variant: StarflowButtonVariant.ghost,
+            compact: true,
           ),
-          TextButton(
+          StarflowButton(
+            label: '删除',
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(ctx).colorScheme.error,
-            ),
-            child: const Text('删除'),
+            variant: StarflowButtonVariant.danger,
+            compact: true,
           ),
         ],
       ),
@@ -662,14 +668,14 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                 ),
                 if (!isEmby) ...[
                   const SizedBox(height: 12),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('当前路径'),
-                    subtitle: Text(
-                      _selectedNasPath.trim().isEmpty
-                          ? '根目录'
-                          : _selectedNasPath,
-                    ),
+                  StarflowSelectionTile(
+                    title: '当前路径',
+                    subtitle: _selectedNasPath.trim().isEmpty
+                        ? '根目录'
+                        : _selectedNasPath,
+                    onPressed: _endpointController.text.trim().isEmpty
+                        ? null
+                        : _pickWebDavPath,
                   ),
                 ],
                 const SizedBox(height: 12),
@@ -770,9 +776,12 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                             variant: TvButtonVariant.text,
                           )
                         else
-                          TextButton(
+                          StarflowButton(
+                            label: '全选',
+                            icon: Icons.select_all_rounded,
                             onPressed: _selectAllSections,
-                            child: const Text('全选'),
+                            variant: StarflowButtonVariant.ghost,
+                            compact: true,
                           ),
                         if (isTelevision)
                           TvAdaptiveButton(
@@ -782,9 +791,12 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                             variant: TvButtonVariant.text,
                           )
                         else
-                          TextButton(
+                          StarflowButton(
+                            label: '清空',
+                            icon: Icons.clear_all_rounded,
                             onPressed: _clearAllSections,
-                            child: const Text('清空'),
+                            variant: StarflowButtonVariant.ghost,
+                            compact: true,
                           ),
                       ],
                     ),
@@ -815,22 +827,24 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                               },
                             ),
                           )
-                        : CheckboxListTile(
-                            contentPadding: EdgeInsets.zero,
-                            value: _selectedSectionIds.contains(section.id),
-                            title: Text(section.title),
-                            onChanged: (value) {
-                              setState(() {
-                                _didHydrateSectionSelection = true;
-                                final nextSelection = {..._selectedSectionIds};
-                                if (value ?? false) {
-                                  nextSelection.add(section.id);
-                                } else {
-                                  nextSelection.remove(section.id);
-                                }
-                                _selectedSectionIds = nextSelection;
-                              });
-                            },
+                        : Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: StarflowCheckboxTile(
+                              title: section.title,
+                              value: _selectedSectionIds.contains(section.id),
+                              onChanged: (checked) {
+                                setState(() {
+                                  _didHydrateSectionSelection = true;
+                                  final nextSelection = {..._selectedSectionIds};
+                                  if (checked) {
+                                    nextSelection.add(section.id);
+                                  } else {
+                                    nextSelection.remove(section.id);
+                                  }
+                                  _selectedSectionIds = nextSelection;
+                                });
+                              },
+                            ),
                           ),
                   )
                 else
@@ -877,9 +891,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                     onPressed: () => setState(() => _enabled = !_enabled),
                   )
                 else
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('启用此媒体源'),
+                  StarflowToggleTile(
+                    title: '启用此媒体源',
                     value: _enabled,
                     onChanged: (value) => setState(() => _enabled = value),
                   ),
@@ -897,9 +910,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                       },
                     )
                   else
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('目录结构推断'),
+                    StarflowToggleTile(
+                      title: '目录结构推断',
                       value: _webDavStructureInferenceEnabled,
                       onChanged: (value) {
                         setState(() {
@@ -919,9 +931,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                       },
                     )
                   else
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('本地刮削/NFO'),
+                    StarflowToggleTile(
+                      title: '本地刮削/NFO',
                       value: _webDavSidecarScrapingEnabled,
                       onChanged: (value) {
                         setState(() {
@@ -978,12 +989,13 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                           variant: TvButtonVariant.outlined,
                         )
                       else
-                        OutlinedButton(
+                        StarflowButton(
+                          label: _isAuthenticating ? '登录中…' : '测试登录',
+                          icon: Icons.login_rounded,
                           onPressed:
                               _isAuthenticating ? null : _onTestEmbyLogin,
-                          child: Text(
-                            _isAuthenticating ? '登录中…' : '测试登录',
-                          ),
+                          variant: StarflowButtonVariant.secondary,
+                          compact: true,
                         ),
                       if (isTelevision)
                         TvAdaptiveButton(
@@ -998,16 +1010,17 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                           variant: TvButtonVariant.outlined,
                         )
                       else
-                        OutlinedButton(
+                        StarflowButton(
+                          label: _isLoadingSections ? '读取中…' : '选择分区',
+                          icon: Icons.folder_open_rounded,
                           onPressed: _isLoadingSections ||
                                   _endpointController.text.trim().isEmpty ||
                                   _tokenController.text.trim().isEmpty ||
                                   _resolvedUserId.trim().isEmpty
                               ? null
                               : _onFetchEmbySections,
-                          child: Text(
-                            _isLoadingSections ? '读取中…' : '选择分区',
-                          ),
+                          variant: StarflowButtonVariant.secondary,
+                          compact: true,
                         ),
                     ],
                   ),
@@ -1030,12 +1043,15 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                             variant: TvButtonVariant.outlined,
                           )
                         else
-                          OutlinedButton(
+                          StarflowButton(
+                            label: _isTestingWebDav ? '测试中…' : '测试连接',
+                            icon: Icons.cloud_done_outlined,
                             onPressed: _isTestingWebDav ||
                                     _endpointController.text.trim().isEmpty
                                 ? null
                                 : _onTestWebDavConnection,
-                            child: Text(_isTestingWebDav ? '测试中…' : '测试连接'),
+                            variant: StarflowButtonVariant.secondary,
+                            compact: true,
                           ),
                         if (isTelevision)
                           TvAdaptiveButton(
@@ -1047,11 +1063,14 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                             variant: TvButtonVariant.outlined,
                           )
                         else
-                          OutlinedButton(
+                          StarflowButton(
+                            label: '选择路径',
+                            icon: Icons.folder_open_rounded,
                             onPressed: _endpointController.text.trim().isEmpty
                                 ? null
                                 : _pickWebDavPath,
-                            child: const Text('选择路径'),
+                            variant: StarflowButtonVariant.secondary,
+                            compact: true,
                           ),
                         if (isTelevision)
                           TvAdaptiveButton(
@@ -1064,14 +1083,15 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                             variant: TvButtonVariant.outlined,
                           )
                         else
-                          OutlinedButton(
+                          StarflowButton(
+                            label: _isLoadingSections ? '读取中…' : '选择分区',
+                            icon: Icons.view_list_rounded,
                             onPressed: _isLoadingSections ||
                                     _endpointController.text.trim().isEmpty
                                 ? null
                                 : _onFetchNasSections,
-                            child: Text(
-                              _isLoadingSections ? '读取中…' : '选择分区',
-                            ),
+                            variant: StarflowButtonVariant.secondary,
+                            compact: true,
                           ),
                       ],
                     ),
@@ -1120,9 +1140,11 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                           variant: TvButtonVariant.text,
                         ),
                       )
-                    : TextButton(
+                    : StarflowButton(
+                        label: '保存',
                         onPressed: _onSave,
-                        child: const Text('保存'),
+                        variant: StarflowButtonVariant.ghost,
+                        compact: true,
                       ),
               ),
             ),

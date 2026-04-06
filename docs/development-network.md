@@ -93,6 +93,8 @@ PowerShell 下推荐使用包装脚本运行 Flutter：
 - 如果 `flutter test` 或 `flutter pub get` 很慢，优先先试镜像脚本
 - Web 调试需要代理时，优先用 `scripts/run_web_with_proxy.ps1`
 - 需要切回官方源时，用 `-UseOfficialSource`
+- TV 安装包默认用 `.\scripts\build_tv_apk.ps1` 生成，并直接输出到桌面
+- `build_tv_apk.ps1` 只会在显式传入 `-SettingsJsonPath` 时临时嵌入配置 JSON
 - Android TV 的 `设置 -> 配置管理` 已切换为局域网传输模式，不再依赖系统目录 / 文件选择器
 - 打开后电视会显示访问码、端口和本机地址，手机连同一网络即可直接上传或下载配置
 - 关闭传输弹窗后，临时传输服务会立刻停止
@@ -155,7 +157,7 @@ PowerShell 下推荐使用包装脚本运行 Flutter：
 
 ## 7. 品牌资源导出
 
-当前外部展示用 Logo 与 TV Banner 使用本机无头浏览器渲染，不走 Flutter 构建流程：
+当前品牌资源导出不走 Flutter 构建流程：
 
 ```powershell
 C:\anaconda3\python.exe tool\generate_brand_assets.py
@@ -169,15 +171,16 @@ C:\anaconda3\python.exe tool\generate_brand_assets.py
 
 当前脚本会优先使用：
 
-- `assets/branding/starflow_icon_master.svg` 生成外部 App Icon
+- `assets/branding/starflow_icon_master.svg` 程序化生成外部 App Icon 统一母版
+- `assets/branding/starflow_launch_logo.png` 作为启动页首帧图标输出目标
 - `docs/starflow_tv_banner.html` 生成 TV Banner
-- `build/brand_assets/app_icon_raw_capture.png` 作为外部 Logo 高倍基准抓图
 - `build/brand_assets/starflow_app_icon_master.png` 作为各平台分发缩放前的统一母版
 
 补充说明：
 
 - 这条链路主要依赖本地文件与本机浏览器，不依赖在线元数据服务
-- `docs/starflow_app_icon.html` 现在只是预览页，外部 App Icon 导出以 `svg` 母版为准
+- 外部 App Icon 已不再依赖 HTML 截图，当前以 `svg` 母版程序化导出
+- TV Banner 仍然依赖本机 Microsoft Edge 无头渲染 `docs/starflow_tv_banner.html`
 - 如果后续换了外部 Logo 设计，只需要重新执行一次脚本，不要手工逐个平台替换
 - 当“详情页自动匹配本地资源”关闭时，进入详情页不会自动触发本地资源匹配，只能手动点击“重新匹配资源”
 - 本地资源手动匹配采用并发搜索；某个源先返回时会先展示该结果，但其余搜索源仍会继续完成

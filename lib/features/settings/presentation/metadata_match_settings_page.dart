@@ -79,24 +79,22 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                           ),
                         )
                       else
-                        SegmentedButton<MetadataMatchProvider>(
-                          showSelectedIcon: false,
-                          segments: [
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
                             for (final provider in MetadataMatchProvider.values)
-                              ButtonSegment<MetadataMatchProvider>(
-                                value: provider,
-                                label: Text('${provider.label} 优先'),
+                              StarflowChipButton(
+                                label: '${provider.label} 优先',
+                                selected:
+                                    provider == settings.metadataMatchPriority,
+                                onPressed: () {
+                                  ref
+                                      .read(settingsControllerProvider.notifier)
+                                      .setMetadataMatchPriority(provider);
+                                },
                               ),
                           ],
-                          selected: {settings.metadataMatchPriority},
-                          onSelectionChanged: (selection) {
-                            if (selection.isEmpty) {
-                              return;
-                            }
-                            ref
-                                .read(settingsControllerProvider.notifier)
-                                .setMetadataMatchPriority(selection.first);
-                          },
                         ),
                     ],
                   ),
@@ -129,13 +127,15 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                           ),
                         )
                       else
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('TMDB Read Access Token'),
-                          trailing: Text(
-                            settings.tmdbReadAccessToken.trim().isEmpty
-                                ? '未配置'
-                                : '已配置',
+                        StarflowSelectionTile(
+                          title: 'TMDB Read Access Token',
+                          value: settings.tmdbReadAccessToken.trim().isEmpty
+                              ? '未配置'
+                              : '已配置',
+                          onPressed: () => _openTmdbTokenEditor(
+                            context,
+                            ref,
+                            settings.tmdbReadAccessToken,
                           ),
                         ),
                       const SizedBox(height: 8),
@@ -157,17 +157,18 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                               variant: TvButtonVariant.outlined,
                             )
                           else
-                            OutlinedButton(
+                            StarflowButton(
+                              label: settings.tmdbReadAccessToken.trim().isEmpty
+                                  ? '填写 Token'
+                                  : '编辑 Token',
+                              icon: Icons.key_rounded,
                               onPressed: () => _openTmdbTokenEditor(
                                 context,
                                 ref,
                                 settings.tmdbReadAccessToken,
                               ),
-                              child: Text(
-                                settings.tmdbReadAccessToken.trim().isEmpty
-                                    ? '填写 Token'
-                                    : '编辑 Token',
-                              ),
+                              variant: StarflowButtonVariant.secondary,
+                              compact: true,
                             ),
                           if (isTelevision)
                             TvAdaptiveButton(
@@ -178,10 +179,13 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                               variant: TvButtonVariant.outlined,
                             )
                           else
-                            OutlinedButton(
+                            StarflowButton(
+                              label: '测试 TMDB',
+                              icon: Icons.science_rounded,
                               onPressed: () =>
                                   _openTmdbTestDialog(context, ref),
-                              child: const Text('测试 TMDB'),
+                              variant: StarflowButtonVariant.secondary,
+                              compact: true,
                             ),
                         ],
                       ),
@@ -212,10 +216,13 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                                     _openWmdbTestDialog(context, ref),
                                 variant: TvButtonVariant.outlined,
                               )
-                            : OutlinedButton(
+                            : StarflowButton(
+                                label: '测试 WMDB',
+                                icon: Icons.science_rounded,
                                 onPressed: () =>
                                     _openWmdbTestDialog(context, ref),
-                                child: const Text('测试 WMDB'),
+                                variant: StarflowButtonVariant.secondary,
+                                compact: true,
                               ),
                       ),
                     ],
@@ -245,10 +252,13 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                                     _openImdbTestDialog(context, ref),
                                 variant: TvButtonVariant.outlined,
                               )
-                            : OutlinedButton(
+                            : StarflowButton(
+                                label: '测试 IMDb',
+                                icon: Icons.science_rounded,
                                 onPressed: () =>
                                     _openImdbTestDialog(context, ref),
-                                child: const Text('测试 IMDb'),
+                                variant: StarflowButtonVariant.secondary,
+                                compact: true,
                               ),
                       ),
                     ],
@@ -328,10 +338,9 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('全部已启用来源'),
-                        subtitle: const Text('清空单独选择，匹配时扫描全部已启用媒体源'),
+                      StarflowCheckboxTile(
+                        title: '全部已启用来源',
+                        subtitle: '清空单独选择，匹配时扫描全部已启用媒体源',
                         value: draft.isEmpty,
                         onChanged: (_) {
                           setState(() {
@@ -341,37 +350,44 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                       ),
                       const Divider(height: 16),
                       for (final source in availableSources)
-                        CheckboxListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(source.name),
-                          subtitle: Text(source.kind.label),
-                          value: draft.contains(source.id),
-                          onChanged: (checked) {
-                            setState(() {
-                              if (checked ?? false) {
-                                draft.add(source.id);
-                              } else {
-                                draft.remove(source.id);
-                              }
-                            });
-                          },
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: StarflowCheckboxTile(
+                            title: source.name,
+                            subtitle: source.kind.label,
+                            value: draft.contains(source.id),
+                            onChanged: (checked) {
+                              setState(() {
+                                if (checked) {
+                                  draft.add(source.id);
+                                } else {
+                                  draft.remove(source.id);
+                                }
+                              });
+                            },
+                          ),
                         ),
                     ],
                   ),
                 ),
               ),
               actions: [
-                TextButton(
+                StarflowButton(
+                  label: '取消',
                   onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('取消'),
+                  variant: StarflowButtonVariant.ghost,
+                  compact: true,
                 ),
-                TextButton(
+                StarflowButton(
+                  label: '全部来源',
                   onPressed: () => Navigator.of(dialogContext).pop(<String>{}),
-                  child: const Text('全部来源'),
+                  variant: StarflowButtonVariant.secondary,
+                  compact: true,
                 ),
-                FilledButton(
+                StarflowButton(
+                  label: '保存',
                   onPressed: () => Navigator.of(dialogContext).pop(draft),
-                  child: const Text('保存'),
+                  compact: true,
                 ),
               ],
             );
@@ -418,23 +434,28 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
             ),
           ),
           actions: [
-            TextButton(
+            StarflowButton(
+              label: '取消',
               focusNode: cancelFocusNode,
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('取消'),
+              variant: StarflowButtonVariant.ghost,
+              compact: true,
             ),
-            TextButton(
+            StarflowButton(
+              label: '清空',
               focusNode: clearFocusNode,
               onPressed: () {
                 controller.clear();
                 Navigator.of(dialogContext).pop(true);
               },
-              child: const Text('清空'),
+              variant: StarflowButtonVariant.secondary,
+              compact: true,
             ),
-            FilledButton(
+            StarflowButton(
+              label: '保存',
               focusNode: saveFocusNode,
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('保存'),
+              compact: true,
             ),
           ],
         );
@@ -572,16 +593,14 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                               ),
                             )
                           else
-                            CheckboxListTile(
+                            StarflowCheckboxTile(
+                              title: '优先按剧集匹配',
                               value: preferSeries,
                               onChanged: (value) {
                                 setState(() {
-                                  preferSeries = value ?? false;
+                                  preferSeries = value;
                                 });
                               },
-                              contentPadding: EdgeInsets.zero,
-                              controlAffinity: ListTileControlAffinity.leading,
-                              title: const Text('优先按剧集匹配'),
                             ),
                           if (loading) ...[
                             const SizedBox(height: 6),
@@ -642,13 +661,16 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                           ),
                         ]
                       : [
-                          TextButton(
+                          StarflowButton(
+                            label: '关闭',
                             onPressed: () => Navigator.of(dialogContext).pop(),
-                            child: const Text('关闭'),
+                            variant: StarflowButtonVariant.ghost,
+                            compact: true,
                           ),
-                          FilledButton(
+                          StarflowButton(
+                            label: '开始测试',
                             onPressed: loading ? null : runTest,
-                            child: const Text('开始测试'),
+                            compact: true,
                           ),
                         ],
                 ),
@@ -883,13 +905,16 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                           ),
                         ]
                       : [
-                          TextButton(
+                          StarflowButton(
+                            label: '关闭',
                             onPressed: () => Navigator.of(dialogContext).pop(),
-                            child: const Text('关闭'),
+                            variant: StarflowButtonVariant.ghost,
+                            compact: true,
                           ),
-                          FilledButton(
+                          StarflowButton(
+                            label: '开始测试',
                             onPressed: loading ? null : runTest,
-                            child: const Text('开始测试'),
+                            compact: true,
                           ),
                         ],
                 ),
@@ -1054,16 +1079,14 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                               ),
                             )
                           else
-                            CheckboxListTile(
+                            StarflowCheckboxTile(
+                              title: '优先按剧集匹配',
                               value: preferSeries,
                               onChanged: (value) {
                                 setState(() {
-                                  preferSeries = value ?? false;
+                                  preferSeries = value;
                                 });
                               },
-                              contentPadding: EdgeInsets.zero,
-                              controlAffinity: ListTileControlAffinity.leading,
-                              title: const Text('优先按剧集匹配'),
                             ),
                           if (loading) ...[
                             const SizedBox(height: 6),
@@ -1125,13 +1148,16 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                           ),
                         ]
                       : [
-                          TextButton(
+                          StarflowButton(
+                            label: '关闭',
                             onPressed: () => Navigator.of(dialogContext).pop(),
-                            child: const Text('关闭'),
+                            variant: StarflowButtonVariant.ghost,
+                            compact: true,
                           ),
-                          FilledButton(
+                          StarflowButton(
+                            label: '开始测试',
                             onPressed: loading ? null : runTest,
-                            child: const Text('开始测试'),
+                            compact: true,
                           ),
                         ],
                 ),
@@ -1196,7 +1222,7 @@ String _libraryMatchSourceSummary(AppSettings settings) {
   return '${selectedNames.take(2).join('、')} 等 ${selectedNames.length} 个来源';
 }
 
-class _MetadataToggleTile extends ConsumerWidget {
+class _MetadataToggleTile extends StatelessWidget {
   const _MetadataToggleTile({
     required this.title,
     required this.value,
@@ -1210,26 +1236,17 @@ class _MetadataToggleTile extends ConsumerWidget {
   final String subtitle;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
-    if (isTelevision) {
-      return TvSelectionTile(
-        title: title,
-        value: value ? '已开启' : '已关闭',
-        onPressed: () => onChanged(!value),
-      );
-    }
-    return SwitchListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(title),
-      subtitle: subtitle.trim().isEmpty ? null : Text(subtitle),
+  Widget build(BuildContext context) {
+    return StarflowToggleTile(
+      title: title,
+      subtitle: subtitle,
       value: value,
       onChanged: onChanged,
     );
   }
 }
 
-class _MetadataSourceTile extends ConsumerWidget {
+class _MetadataSourceTile extends StatelessWidget {
   const _MetadataSourceTile({
     required this.title,
     required this.subtitle,
@@ -1241,21 +1258,11 @@ class _MetadataSourceTile extends ConsumerWidget {
   final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
-    if (isTelevision) {
-      return TvSelectionTile(
-        title: title,
-        value: subtitle,
-        onPressed: onPressed,
-      );
-    }
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(title),
-      subtitle: Text(subtitle),
-      trailing: const Icon(Icons.chevron_right_rounded),
-      onTap: onPressed,
+  Widget build(BuildContext context) {
+    return StarflowSelectionTile(
+      title: title,
+      subtitle: subtitle,
+      onPressed: onPressed,
     );
   }
 }

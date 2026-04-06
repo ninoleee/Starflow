@@ -175,63 +175,29 @@ class SettingsPage extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    if (isTelevision)
-                      TvSelectionTile(
-                        title: '高性能模式',
-                        value:
-                            settings.highPerformanceModeEnabled ? '已开启' : '已关闭',
-                        onPressed: () {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .setHighPerformanceModeEnabled(
-                                !settings.highPerformanceModeEnabled,
-                              );
-                        },
-                      )
-                    else
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('高性能模式'),
-                        subtitle: const Text(
-                          '降低 TV 端动画、模糊背景和播放页叠层，优先保证流畅度',
-                        ),
-                        value: settings.highPerformanceModeEnabled,
-                        onChanged: (value) {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .setHighPerformanceModeEnabled(value);
-                        },
-                      ),
+                    StarflowToggleTile(
+                      title: '高性能模式',
+                      subtitle: '降低 TV 端动画、模糊背景和播放页叠层，优先保证流畅度',
+                      value: settings.highPerformanceModeEnabled,
+                      onChanged: (value) {
+                        ref
+                            .read(settingsControllerProvider.notifier)
+                            .setHighPerformanceModeEnabled(value);
+                      },
+                    ),
                     const SizedBox(height: 10),
-                    if (isTelevision)
-                      TvSelectionTile(
-                        title: '透明磨砂效果',
-                        value:
-                            settings.translucentEffectsEnabled ? '已开启' : '已关闭',
-                        onPressed: () {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .setTranslucentEffectsEnabled(
-                                !settings.translucentEffectsEnabled,
-                              );
-                        },
-                      )
-                    else
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('透明磨砂效果'),
-                        subtitle: Text(
-                          settings.highPerformanceModeEnabled
-                              ? '高性能模式开启时，会自动进一步压低 TV 端视觉效果'
-                              : '关闭后减少模糊和毛玻璃效果，提高性能',
-                        ),
-                        value: settings.translucentEffectsEnabled,
-                        onChanged: (value) {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .setTranslucentEffectsEnabled(value);
-                        },
-                      ),
+                    StarflowToggleTile(
+                      title: '透明磨砂效果',
+                      subtitle: settings.highPerformanceModeEnabled
+                          ? '高性能模式开启时，会自动进一步压低 TV 端视觉效果'
+                          : '关闭后减少模糊和毛玻璃效果，提高性能',
+                      value: settings.translucentEffectsEnabled,
+                      onChanged: (value) {
+                        ref
+                            .read(settingsControllerProvider.notifier)
+                            .setTranslucentEffectsEnabled(value);
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -248,163 +214,79 @@ class SettingsPage extends ConsumerWidget {
                           ),
                     ),
                     const SizedBox(height: 10),
-                    if (isTelevision)
-                      TvSelectionTile(
-                        title: '启用 Hero',
-                        value: heroEnabled ? '已开启' : '已关闭',
-                        onPressed: () {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .setHomeHeroEnabled(!heroEnabled);
-                        },
-                      )
-                    else
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('启用 Hero'),
-                        value: heroEnabled,
-                        onChanged: (value) {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .setHomeHeroEnabled(value);
-                        },
-                      ),
+                    StarflowToggleTile(
+                      title: '启用 Hero',
+                      value: heroEnabled,
+                      onChanged: (value) {
+                        ref
+                            .read(settingsControllerProvider.notifier)
+                            .setHomeHeroEnabled(value);
+                      },
+                    ),
                     const SizedBox(height: 10),
-                    if (isTelevision)
-                      TvSelectionTile(
-                        title: 'Hero 样式',
-                        value: settings.homeHeroStyle.label,
-                        onPressed: heroEnabled
-                            ? () => _openHeroStylePicker(
-                                  context,
-                                  ref,
-                                  settings.homeHeroStyle,
-                                )
-                            : null,
-                      )
-                    else
-                      SegmentedButton<HomeHeroStyle>(
-                        showSelectedIcon: false,
-                        segments: [
-                          for (final style in HomeHeroStyle.values)
-                            ButtonSegment<HomeHeroStyle>(
-                              value: style,
-                              label: Text(style.label),
-                            ),
-                        ],
-                        selected: {settings.homeHeroStyle},
-                        onSelectionChanged: heroEnabled
-                            ? (selection) {
-                                if (selection.isEmpty) {
-                                  return;
-                                }
-                                final style = selection.first;
-                                ref
-                                    .read(settingsControllerProvider.notifier)
-                                    .setHomeHeroStyle(style);
-                              }
-                            : null,
-                      ),
-                    const SizedBox(height: 14),
-                    if (isTelevision)
-                      TvSelectionTile(
-                        title: '标题使用 Logo',
-                        value:
-                            settings.homeHeroLogoTitleEnabled ? '已开启' : '已关闭',
-                        onPressed: heroEnabled
-                            ? () {
-                                ref
-                                    .read(settingsControllerProvider.notifier)
-                                    .setHomeHeroLogoTitleEnabled(
-                                      !settings.homeHeroLogoTitleEnabled,
-                                    );
-                              }
-                            : null,
-                      )
-                    else
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('标题优先展示 Logo'),
-                        value: settings.homeHeroLogoTitleEnabled,
-                        onChanged: heroEnabled
-                            ? (value) {
-                                ref
-                                    .read(settingsControllerProvider.notifier)
-                                    .setHomeHeroLogoTitleEnabled(value);
-                              }
-                            : null,
-                      ),
-                    const SizedBox(height: 14),
-                    if (isTelevision)
-                      TvSelectionTile(
-                        title: '全屏背景图',
-                        value:
-                            settings.homeHeroBackgroundEnabled ? '已开启' : '已关闭',
-                        onPressed: () {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .setHomeHeroBackgroundEnabled(
-                                !settings.homeHeroBackgroundEnabled,
-                              );
-                        },
-                      )
-                    else
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('启用 Hero 全屏背景图'),
-                        value: settings.homeHeroBackgroundEnabled,
-                        onChanged: (value) {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .setHomeHeroBackgroundEnabled(value);
-                        },
-                      ),
+                    Text(
+                      'Hero 样式',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
                     const SizedBox(height: 10),
-                    if (isTelevision)
-                      TvSelectionTile(
-                        title: 'Hero 数据来源',
-                        value: _heroSourceLabel(
-                          settings: settings,
-                          heroCandidates: heroCandidates,
-                        ),
-                        onPressed: heroEnabled
-                            ? () => _openHeroSourcePicker(
-                                  context,
-                                  ref,
-                                  settings,
-                                  heroCandidates,
-                                )
-                            : null,
-                      )
-                    else
-                      DropdownButtonFormField<String>(
-                        initialValue: _resolveHeroModuleSelectionValue(
-                          settings: settings,
-                          heroCandidates: heroCandidates,
-                        ),
-                        decoration: const InputDecoration(
-                          labelText: 'Hero 数据来源',
-                        ),
-                        items: [
-                          const DropdownMenuItem<String>(
-                            value: '',
-                            child: Text('自动选择'),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        for (final style in HomeHeroStyle.values)
+                          StarflowChipButton(
+                            label: style.label,
+                            selected: style == settings.homeHeroStyle,
+                            onPressed: heroEnabled
+                                ? () {
+                                    ref
+                                        .read(settingsControllerProvider.notifier)
+                                        .setHomeHeroStyle(style);
+                                  }
+                                : null,
                           ),
-                          ...heroCandidates.map(
-                            (module) => DropdownMenuItem<String>(
-                              value: module.id,
-                              child: Text(module.title),
-                            ),
-                          ),
-                        ],
-                        onChanged: heroEnabled
-                            ? (value) {
-                                ref
-                                    .read(settingsControllerProvider.notifier)
-                                    .setHomeHeroSourceModuleId(value ?? '');
-                              }
-                            : null,
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    StarflowToggleTile(
+                      title: '标题优先展示 Logo',
+                      value: settings.homeHeroLogoTitleEnabled,
+                      onChanged: heroEnabled
+                          ? (value) {
+                              ref
+                                  .read(settingsControllerProvider.notifier)
+                                  .setHomeHeroLogoTitleEnabled(value);
+                            }
+                          : null,
+                    ),
+                    const SizedBox(height: 14),
+                    StarflowToggleTile(
+                      title: '启用 Hero 全屏背景图',
+                      value: settings.homeHeroBackgroundEnabled,
+                      onChanged: (value) {
+                        ref
+                            .read(settingsControllerProvider.notifier)
+                            .setHomeHeroBackgroundEnabled(value);
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    StarflowSelectionTile(
+                      title: 'Hero 数据来源',
+                      value: _heroSourceLabel(
+                        settings: settings,
+                        heroCandidates: heroCandidates,
                       ),
+                      onPressed: heroEnabled
+                          ? () => _openHeroSourcePicker(
+                                context,
+                                ref,
+                                settings,
+                                heroCandidates,
+                              )
+                          : null,
+                    ),
                     const SizedBox(height: 14),
                     _SettingsNavigationTile(
                       title: '打开首页编辑器',
@@ -487,10 +369,9 @@ class SettingsPage extends ConsumerWidget {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('全部已启用来源'),
-                        subtitle: const Text('清空单独选择，搜索时使用全部已启用本地源和搜索服务'),
+                      StarflowCheckboxTile(
+                        title: '全部已启用来源',
+                        subtitle: '清空单独选择，搜索时使用全部已启用本地源和搜索服务',
                         value: draft.isEmpty,
                         onChanged: (_) {
                           setState(() {
@@ -504,27 +385,29 @@ class SettingsPage extends ConsumerWidget {
                           '本地媒体源',
                           style: Theme.of(context).textTheme.titleSmall,
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 8),
                         for (final source in availableLocalSources)
-                          CheckboxListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: Text(source.name),
-                            subtitle: Text(source.kind.label),
-                            value: draft.contains(
-                              searchSourceSettingIdForMediaSource(source.id),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: StarflowCheckboxTile(
+                              title: source.name,
+                              subtitle: source.kind.label,
+                              value: draft.contains(
+                                searchSourceSettingIdForMediaSource(source.id),
+                              ),
+                              onChanged: (checked) {
+                                setState(() {
+                                  final id = searchSourceSettingIdForMediaSource(
+                                    source.id,
+                                  );
+                                  if (checked) {
+                                    draft.add(id);
+                                  } else {
+                                    draft.remove(id);
+                                  }
+                                });
+                              },
                             ),
-                            onChanged: (checked) {
-                              setState(() {
-                                final id = searchSourceSettingIdForMediaSource(
-                                  source.id,
-                                );
-                                if (checked ?? false) {
-                                  draft.add(id);
-                                } else {
-                                  draft.remove(id);
-                                }
-                              });
-                            },
                           ),
                       ],
                       if (availableProviders.isNotEmpty) ...[
@@ -533,27 +416,29 @@ class SettingsPage extends ConsumerWidget {
                           '搜索服务',
                           style: Theme.of(context).textTheme.titleSmall,
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 8),
                         for (final provider in availableProviders)
-                          CheckboxListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: Text(provider.name),
-                            subtitle: Text(provider.kind.label),
-                            value: draft.contains(
-                              searchSourceSettingIdForProvider(provider.id),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: StarflowCheckboxTile(
+                              title: provider.name,
+                              subtitle: provider.kind.label,
+                              value: draft.contains(
+                                searchSourceSettingIdForProvider(provider.id),
+                              ),
+                              onChanged: (checked) {
+                                setState(() {
+                                  final id = searchSourceSettingIdForProvider(
+                                    provider.id,
+                                  );
+                                  if (checked) {
+                                    draft.add(id);
+                                  } else {
+                                    draft.remove(id);
+                                  }
+                                });
+                              },
                             ),
-                            onChanged: (checked) {
-                              setState(() {
-                                final id = searchSourceSettingIdForProvider(
-                                  provider.id,
-                                );
-                                if (checked ?? false) {
-                                  draft.add(id);
-                                } else {
-                                  draft.remove(id);
-                                }
-                              });
-                            },
                           ),
                       ],
                     ],
@@ -561,17 +446,22 @@ class SettingsPage extends ConsumerWidget {
                 ),
               ),
               actions: [
-                TextButton(
+                StarflowButton(
+                  label: '取消',
                   onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('取消'),
+                  variant: StarflowButtonVariant.ghost,
+                  compact: true,
                 ),
-                TextButton(
+                StarflowButton(
+                  label: '全部来源',
                   onPressed: () => Navigator.of(dialogContext).pop(<String>{}),
-                  child: const Text('全部来源'),
+                  variant: StarflowButtonVariant.secondary,
+                  compact: true,
                 ),
-                FilledButton(
+                StarflowButton(
+                  label: '保存',
                   onPressed: () => Navigator.of(dialogContext).pop(draft),
-                  child: const Text('保存'),
+                  compact: true,
                 ),
               ],
             );
@@ -806,7 +696,7 @@ String _formatPlaybackSpeedLabel(double speed) {
   return '${speed.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '')}x';
 }
 
-class _SettingsTile extends ConsumerWidget {
+class _SettingsTile extends StatelessWidget {
   const _SettingsTile({
     required this.title,
     required this.value,
@@ -820,149 +710,89 @@ class _SettingsTile extends ConsumerWidget {
   final VoidCallback onEdit;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
-    if (isTelevision) {
-      return LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < 720;
-          return Container(
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                color: scheme.outlineVariant,
-              ),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style:
-                            Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        value ? '已启用' : '已关闭',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                _SettingsTileActionButton(
-                  icon: Icons.edit_outlined,
-                  label: compact ? '' : '编辑',
-                  onPressed: onEdit,
-                  filled: false,
-                ),
-                const SizedBox(width: 8),
-                _SettingsTileActionButton(
-                  icon: value
-                      ? Icons.toggle_off_rounded
-                      : Icons.toggle_on_rounded,
-                  label: value ? '关闭' : '开启',
-                  onPressed: () => onChanged(!value),
-                ),
-              ],
-            ),
-          );
-        },
-      );
-    }
-    return Container(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: scheme.outlineVariant,
-        ),
-      ),
-      child: ListTile(
-        title: Text(title),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              onPressed: onEdit,
-              icon: const Icon(Icons.edit_outlined),
-            ),
-            Switch(value: value, onChanged: onChanged),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SettingsTileActionButton extends StatelessWidget {
-  const _SettingsTileActionButton({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-    this.filled = true,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-  final bool filled;
-
-  @override
   Widget build(BuildContext context) {
-    final foregroundColor = filled ? const Color(0xFF081120) : Colors.white;
-    final backgroundColor =
-        filled ? Colors.white : Colors.white.withValues(alpha: 0.08);
-    final borderColor =
-        filled ? Colors.white : Colors.white.withValues(alpha: 0.22);
-    return TvFocusableAction(
-      onPressed: onPressed,
-      borderRadius: BorderRadius.circular(16),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: backgroundColor,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: borderColor),
-        ),
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: label.isEmpty ? 12 : 14,
-            vertical: 11,
+    final scheme = Theme.of(context).colorScheme;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 720;
+        final toggleLabel = value ? '关闭' : '开启';
+        final toggleIcon =
+            value ? Icons.toggle_off_rounded : Icons.toggle_on_rounded;
+        return Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: scheme.outlineVariant,
+            ),
           ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 18, color: foregroundColor),
-              if (label.isNotEmpty) ...[
-                const SizedBox(width: 8),
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: foregroundColor,
-                        fontWeight: FontWeight.w800,
-                      ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      value ? '已启用' : '已关闭',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
+              const SizedBox(width: 12),
+              compact
+                  ? StarflowIconButton(
+                      icon: Icons.edit_outlined,
+                      onPressed: onEdit,
+                      variant: StarflowButtonVariant.secondary,
+                      tooltip: '编辑',
+                    )
+                  : StarflowButton(
+                      label: '编辑',
+                      icon: Icons.edit_outlined,
+                      onPressed: onEdit,
+                      variant: StarflowButtonVariant.secondary,
+                      compact: true,
+                    ),
+              const SizedBox(width: 8),
+              compact
+                  ? StarflowIconButton(
+                      icon: toggleIcon,
+                      onPressed: () => onChanged(!value),
+                      variant: value
+                          ? StarflowButtonVariant.secondary
+                          : StarflowButtonVariant.primary,
+                      tooltip: toggleLabel,
+                    )
+                  : StarflowButton(
+                      label: toggleLabel,
+                      icon: toggleIcon,
+                      onPressed: () => onChanged(!value),
+                      variant: value
+                          ? StarflowButtonVariant.secondary
+                          : StarflowButtonVariant.primary,
+                      compact: true,
+                    ),
             ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -1013,7 +843,7 @@ class _SettingsPageHeader extends StatelessWidget {
   }
 }
 
-class _SettingsNavigationTile extends ConsumerWidget {
+class _SettingsNavigationTile extends StatelessWidget {
   const _SettingsNavigationTile({
     required this.title,
     required this.onTap,
@@ -1025,21 +855,11 @@ class _SettingsNavigationTile extends ConsumerWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
-    if (isTelevision) {
-      return TvSelectionTile(
-        title: title,
-        value: subtitle,
-        onPressed: onTap,
-      );
-    }
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(title),
-      subtitle: subtitle.trim().isEmpty ? null : Text(subtitle),
-      trailing: const Icon(Icons.chevron_right_rounded),
-      onTap: onTap,
+  Widget build(BuildContext context) {
+    return StarflowSelectionTile(
+      title: title,
+      subtitle: subtitle,
+      onPressed: onTap,
     );
   }
 }

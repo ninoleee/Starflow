@@ -104,11 +104,20 @@ lib/
 仓库里的 `tool/` 目录除了开发辅助工具外，还承担外部品牌资源导出：
 
 - `tool/generate_brand_assets.py` 会生成 Android、iOS、macOS、Web、Windows 的外部 App Icon
+- 同一脚本也会同步生成启动页所用的 `assets/branding/starflow_launch_logo.png` 与 iOS `LaunchImage.imageset`
 - 同一脚本也负责生成 Android TV Banner
 - 外部 App Icon 当前以 `assets/branding/starflow_icon_master.svg` 为设计源
-- 脚本会先输出 `build/brand_assets/app_icon_raw_capture.png`
-- 再保存一份统一分发母版 `build/brand_assets/starflow_app_icon_master.png`
+- 脚本会直接程序化生成统一分发母版 `build/brand_assets/starflow_app_icon_master.png`
 - 最后再缩放分发到各平台资源目录
+
+### `scripts`
+
+仓库里的 `scripts/` 目录当前除了开发辅助脚本，也包含 TV 构建链路：
+
+- `scripts/build_tv_apk.ps1` 默认把 TV 安装包输出到桌面
+- 支持按需临时嵌入配置 JSON，打包结束后自动清理
+- TV 文件名使用 `starflow-tv[-config]-主版本.月份.序号.apk`
+- 内部版本号按 `主版本.月份.序号+build` 自动递增
 
 ## 4. 核心设计取向
 
@@ -431,6 +440,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 字幕大小
 - 播放器内核
 - 透明磨砂效果
+- TV 高性能模式
 
 播放设置在页面结构上额外做了分组：
 
@@ -466,6 +476,7 @@ Android TV 下的设置页还额外做了遥控器适配：
 - 多个二级设置页的主要按钮与保存操作支持焦点可达
 - 长列表中的焦点会尽量停在屏幕中部，滚动容器随焦点一起平滑移动
 - 媒体源、搜索服务、豆瓣账号等编辑页里的文本项会先显示成可聚焦条目，再进入独立编辑弹窗
+- 已加入“高性能模式”总开关，用于进一步压低 TV 端动画、模糊背景和播放页叠层
 - 仍有少量弹窗和编辑流需要继续补齐焦点细节
 
 ## 12. 本地持久化
@@ -497,6 +508,8 @@ Android TV 下的设置页还额外做了遥控器适配：
 - TV 模式切换为左侧窄栏磨砂菜单和焦点式交互
 - 设置首页及部分设置子页会优先使用更适合遥控器操作的可聚焦按钮与入口
 - Android 主清单显式声明了 `INTERNET`、`ACCESS_NETWORK_STATE` 和明文流量支持，保证 TV 端能访问局域网与在线元数据资源
+- Android 当前实际最低兼容版本固定为 `API 23 / Android 6.0`
+- Release APK 当前启用了 `v1 + v2` 签名，兼容老一些的电视安装器
 - `TvMenuButtonScope` 用来把菜单键语义统一上抛到页面壳
 - `TvFocusMemoryScope` 用来记录首页、搜索、媒体库、详情等页面上次停留的焦点元素
 - `TvFocusableAction` 在垂直滚动容器里会尝试把焦点项保持在视口中线附近，降低 TV 遥控器纵向浏览时的视线跳动
@@ -507,7 +520,8 @@ Android TV 下的设置页还额外做了遥控器适配：
 
 - Android、iOS、macOS、Web、Windows 的外部 App Icon 都由 `tool/generate_brand_assets.py` 生成
 - Android TV Banner 也由同一脚本生成
-- 当前约定以 `build/brand_assets/app_icon_raw_capture.png` 作为外部 Logo 高倍基准图，再由 `build/brand_assets/starflow_app_icon_master.png` 统一缩放到各平台资源，避免手工替换时出现偏移或不对称
+- 启动页首帧图标与 iOS 原生 LaunchImage 也由同一脚本同步生成
+- 当前约定以 `build/brand_assets/starflow_app_icon_master.png` 作为统一母版，再缩放到各平台资源，避免手工替换时出现偏移或不对称
 
 ## 14. 测试覆盖
 

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 from PIL import Image, ImageDraw, ImageFilter
 
@@ -336,6 +338,452 @@ def create_app_icon_master(output_path: Path) -> None:
     print(f"Generated {output_path.relative_to(ROOT)}")
 
 
+SVG_NAMESPACE = "{http://www.w3.org/2000/svg}"
+SVG_PATH_TOKEN = re.compile(r"[A-Za-z]|[-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?")
+
+
+def strip_svg_namespace(tag: str) -> str:
+    return tag.split("}", 1)[-1]
+
+
+def parse_viewbox(value: str) -> tuple[float, float, float, float]:
+    parts = [float(part) for part in value.replace(",", " ").split()]
+    if len(parts) != 4:
+        raise ValueError(f"Unexpected viewBox: {value}")
+    return (parts[0], parts[1], parts[2], parts[3])
+
+
+def parse_svg_number(value: str | None, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    return float(value)
+
+
+def parse_svg_opacity(value: str | None, default: float = 1.0) -> float:
+    if value is None:
+        return default
+    return float(value)
+
+
+def apply_opacity(
+    color: tuple[int, int, int, int],
+    opacity: float,
+) -> tuple[int, int, int, int]:
+    clamped = max(0.0, min(1.0, opacity))
+    return (color[0], color[1], color[2], int(color[3] * clamped))
+
+
+def parse_svg_color(
+    value: str,
+    *,
+    opacity: float = 1.0,
+) -> tuple[int, int, int, int]:
+    text = value.strip()
+    if text.startswith("#"):
+        hex_value = text[1:]
+        if len(hex_value) == 6:
+            alpha = 255
+        elif len(hex_value) == 8:
+            alpha = int(hex_value[6:8], 16)
+            hex_value = hex_value[:6]
+        else:
+            raise ValueError(f"Unsupported hex color: {value}")
+        color = (
+            int(hex_value[0:2], 16),
+            int(hex_value[2:4], 16),
+            int(hex_value[4:6], 16),
+            alpha,
+        )
+        return apply_opacity(color, opacity)
+    if text.startswith("rgba(") and text.endswith(")"):
+        parts = [part.strip() for part in text[5:-1].split(",")]
+        if len(parts) != 4:
+            raise ValueError(f"Unsupported rgba color: {value}")
+        color = (
+            int(float(parts[0])),
+            int(float(parts[1])),
+            int(float(parts[2])),
+            int(float(parts[3]) * 255),
+        )
+        return apply_opacity(color, opacity)
+    if text.startswith("rgb(") and text.endswith(")"):
+        parts = [part.strip() for part in text[4:-1].split(",")]
+        if len(parts) != 3:
+            raise ValueError(f"Unsupported rgb color: {value}")
+        color = (
+            int(float(parts[0])),
+            int(float(parts[1])),
+            int(float(parts[2])),
+            255,
+        )
+        return apply_opacity(color, opacity)
+    raise ValueError(f"Unsupported SVG color: {value}")
+
+
+def parse_svg_offset(value: str | None) -> float:
+    if not value:
+        return 0.0
+    text = value.strip()
+    if text.endswith("%"):
+        return float(text[:-1]) / 100.0
+    return float(text)
+
+
+def build_transform(
+    offset: tuple[float, float],
+    size: tuple[float, float],
+    viewbox: tuple[float, float, float, float],
+):
+    offset_x, offset_y = offset
+    width, height = size
+    viewbox_x, viewbox_y, viewbox_width, viewbox_height = viewbox
+    scale_x = width / viewbox_width
+    scale_y = height / viewbox_height
+
+    def transform_point(point: tuple[float, float]) -> tuple[float, float]:
+        return (
+            offset_x + (point[0] - viewbox_x) * scale_x,
+            offset_y + (point[1] - viewbox_y) * scale_y,
+        )
+
+    def transform_length(value: float) -> float:
+        return value * ((scale_x + scale_y) / 2.0)
+
+    return transform_point, transform_length, scale_x, scale_y
+
+
+def parse_gradient_definitions(
+    defs_element: ET.Element | None,
+    transform_point,
+) -> dict[str, dict[str, object]]:
+    gradients: dict[str, dict[str, object]] = {}
+    if defs_element is None:
+        return gradients
+
+    for gradient in defs_element:
+        if strip_svg_namespace(gradient.tag) != "linearGradient":
+            continue
+        gradient_id = gradient.get("id")
+        if not gradient_id:
+            continue
+        start = transform_point(
+            (
+                parse_svg_number(gradient.get("x1")),
+                parse_svg_number(gradient.get("y1")),
+            )
+        )
+        end = transform_point(
+            (
+                parse_svg_number(gradient.get("x2")),
+                parse_svg_number(gradient.get("y2")),
+            )
+        )
+        stops: list[tuple[float, tuple[int, int, int, int]]] = []
+        for stop in gradient:
+            if strip_svg_namespace(stop.tag) != "stop":
+                continue
+            stop_opacity = parse_svg_opacity(stop.get("stop-opacity"))
+            stops.append(
+                (
+                    parse_svg_offset(stop.get("offset")),
+                    parse_svg_color(stop.get("stop-color", "#000000"), opacity=stop_opacity),
+                )
+            )
+        gradients[gradient_id] = {"start": start, "end": end, "stops": stops}
+    return gradients
+
+
+def draw_linear_gradient(
+    size: tuple[int, int],
+    start: tuple[float, float],
+    end: tuple[float, float],
+    stops: list[tuple[float, tuple[int, int, int, int]]],
+) -> Image.Image:
+    width, height = size
+    gradient = Image.new("RGBA", size)
+    gradient_pixels = gradient.load()
+    delta_x = end[0] - start[0]
+    delta_y = end[1] - start[1]
+    denominator = max(delta_x * delta_x + delta_y * delta_y, 1e-6)
+
+    for y in range(height):
+        for x in range(width):
+            t = ((x - start[0]) * delta_x + (y - start[1]) * delta_y) / denominator
+            gradient_pixels[x, y] = sample_gradient(stops, t)
+    return gradient
+
+
+def parse_url_reference(value: str | None) -> str | None:
+    if not value:
+        return None
+    text = value.strip()
+    if text.startswith("url(#") and text.endswith(")"):
+        return text[5:-1]
+    return None
+
+
+def parse_svg_path_commands(path_data: str) -> list[tuple]:
+    tokens = SVG_PATH_TOKEN.findall(path_data)
+    commands: list[tuple] = []
+    index = 0
+    current = (0.0, 0.0)
+    subpath_start = current
+    active_command: str | None = None
+
+    while index < len(tokens):
+        token = tokens[index]
+        if token.isalpha():
+            active_command = token
+            index += 1
+            if active_command in {"Z", "z"}:
+                commands.append(("Z", current, subpath_start))
+                current = subpath_start
+                active_command = None
+            continue
+
+        if active_command is None:
+            raise ValueError(f"Unexpected SVG path data: {path_data}")
+
+        if active_command in {"M", "m"}:
+            x = float(tokens[index])
+            y = float(tokens[index + 1])
+            index += 2
+            if active_command == "m":
+                current = (current[0] + x, current[1] + y)
+            else:
+                current = (x, y)
+            subpath_start = current
+            commands.append(("M", current))
+            active_command = "L" if active_command == "M" else "l"
+            continue
+
+        if active_command in {"L", "l"}:
+            x = float(tokens[index])
+            y = float(tokens[index + 1])
+            index += 2
+            if active_command == "l":
+                next_point = (current[0] + x, current[1] + y)
+            else:
+                next_point = (x, y)
+            commands.append(("L", current, next_point))
+            current = next_point
+            continue
+
+        if active_command in {"C", "c"}:
+            values = [float(token_value) for token_value in tokens[index:index + 6]]
+            index += 6
+            if active_command == "c":
+                control_1 = (current[0] + values[0], current[1] + values[1])
+                control_2 = (current[0] + values[2], current[1] + values[3])
+                next_point = (current[0] + values[4], current[1] + values[5])
+            else:
+                control_1 = (values[0], values[1])
+                control_2 = (values[2], values[3])
+                next_point = (values[4], values[5])
+            commands.append(("C", current, control_1, control_2, next_point))
+            current = next_point
+            continue
+
+        raise ValueError(f"Unsupported SVG path command: {active_command}")
+
+    return commands
+
+
+def transform_path_commands(commands: list[tuple], transform_point) -> list[tuple]:
+    transformed: list[tuple] = []
+    for command in commands:
+        opcode = command[0]
+        if opcode == "M":
+            transformed.append(("M", transform_point(command[1])))
+        elif opcode == "L":
+            transformed.append(("L", transform_point(command[1]), transform_point(command[2])))
+        elif opcode == "C":
+            transformed.append(
+                (
+                    "C",
+                    transform_point(command[1]),
+                    transform_point(command[2]),
+                    transform_point(command[3]),
+                    transform_point(command[4]),
+                )
+            )
+        elif opcode == "Z":
+            transformed.append(("Z", transform_point(command[1]), transform_point(command[2])))
+    return transformed
+
+
+def path_commands_to_points(
+    commands: list[tuple],
+    *,
+    curve_steps: int = 120,
+) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
+    for command in commands:
+        opcode = command[0]
+        if opcode == "M":
+            points.append(command[1])
+        elif opcode == "L":
+            if not points:
+                points.append(command[1])
+            points.append(command[2])
+        elif opcode == "C":
+            if not points:
+                points.append(command[1])
+            bezier_points = cubic_bezier_points(
+                command[1],
+                command[2],
+                command[3],
+                command[4],
+                steps=curve_steps,
+            )
+            points.extend(bezier_points[1:])
+        elif opcode == "Z":
+            if points and points[-1] != command[2]:
+                points.append(command[2])
+    return points
+
+
+def sample_linear_gradient_color(
+    gradient: dict[str, object],
+    point: tuple[float, float],
+) -> tuple[int, int, int, int]:
+    start = gradient["start"]
+    end = gradient["end"]
+    stops = gradient["stops"]
+    delta_x = end[0] - start[0]
+    delta_y = end[1] - start[1]
+    denominator = max(delta_x * delta_x + delta_y * delta_y, 1e-6)
+    t = ((point[0] - start[0]) * delta_x + (point[1] - start[1]) * delta_y) / denominator
+    return sample_gradient(stops, t)
+
+
+def render_app_icon_from_svg(
+    svg_path: Path,
+    output_path: Path,
+    size: tuple[int, int],
+) -> None:
+    tree = ET.parse(svg_path)
+    root = tree.getroot()
+    viewbox = parse_viewbox(root.get("viewBox", "0 0 1024 1024"))
+    transform_root_point, _, _, _ = build_transform((0.0, 0.0), size, viewbox)
+    image = Image.new("RGBA", size, (0, 0, 0, 0))
+
+    root_gradients = parse_gradient_definitions(root.find(f"{SVG_NAMESPACE}defs"), transform_root_point)
+    root_rect = next(
+        child for child in root
+        if strip_svg_namespace(child.tag) == "rect"
+    )
+    rect_x = parse_svg_number(root_rect.get("x"))
+    rect_y = parse_svg_number(root_rect.get("y"))
+    rect_width = parse_svg_number(root_rect.get("width"), viewbox[2])
+    rect_height = parse_svg_number(root_rect.get("height"), viewbox[3])
+    rect_rx = parse_svg_number(root_rect.get("rx"))
+    top_left = transform_root_point((rect_x, rect_y))
+    bottom_right = transform_root_point((rect_x + rect_width, rect_y + rect_height))
+    radius = int((bottom_right[0] - top_left[0]) * (rect_rx / max(rect_width, 1.0)))
+    rect_mask = Image.new("L", size, 0)
+    ImageDraw.Draw(rect_mask).rounded_rectangle(
+        (top_left[0], top_left[1], bottom_right[0], bottom_right[1]),
+        radius=radius,
+        fill=255,
+    )
+    rect_gradient_id = parse_url_reference(root_rect.get("fill"))
+    if rect_gradient_id is None:
+        raise ValueError("App icon rect is missing gradient fill")
+    rect_gradient = root_gradients[rect_gradient_id]
+    background = draw_linear_gradient(size, rect_gradient["start"], rect_gradient["end"], rect_gradient["stops"])
+    apply_masked_image(image, background, rect_mask)
+
+    nested_svg = next(
+        child for child in root
+        if strip_svg_namespace(child.tag) == "svg"
+    )
+    nested_viewbox = parse_viewbox(nested_svg.get("viewBox", "0 0 96 96"))
+    nested_origin = transform_root_point(
+        (
+            parse_svg_number(nested_svg.get("x")),
+            parse_svg_number(nested_svg.get("y")),
+        )
+    )
+    nested_size = (
+        parse_svg_number(nested_svg.get("width")) * (size[0] / viewbox[2]),
+        parse_svg_number(nested_svg.get("height")) * (size[1] / viewbox[3]),
+    )
+    transform_nested_point, transform_nested_length, _, _ = build_transform(
+        nested_origin,
+        nested_size,
+        nested_viewbox,
+    )
+    nested_gradients = parse_gradient_definitions(
+        nested_svg.find(f"{SVG_NAMESPACE}defs"),
+        transform_nested_point,
+    )
+
+    draw = ImageDraw.Draw(image, "RGBA")
+    for child in nested_svg:
+        tag = strip_svg_namespace(child.tag)
+        if tag == "defs":
+            continue
+
+        opacity = parse_svg_opacity(child.get("opacity"))
+        if tag == "line":
+            color = parse_svg_color(child.get("stroke", "#000000"), opacity=opacity)
+            start = transform_nested_point(
+                (
+                    parse_svg_number(child.get("x1")),
+                    parse_svg_number(child.get("y1")),
+                )
+            )
+            end = transform_nested_point(
+                (
+                    parse_svg_number(child.get("x2")),
+                    parse_svg_number(child.get("y2")),
+                )
+            )
+            width = max(int(round(transform_nested_length(parse_svg_number(child.get("stroke-width"), 1.0)))), 1)
+            draw.line([start, end], fill=color, width=width)
+            continue
+
+        if tag != "path":
+            continue
+
+        commands = transform_path_commands(
+            parse_svg_path_commands(child.get("d", "")),
+            transform_nested_point,
+        )
+
+        fill_gradient_id = parse_url_reference(child.get("fill"))
+        if fill_gradient_id:
+            points = path_commands_to_points(commands, curve_steps=40)
+            mask = Image.new("L", size, 0)
+            ImageDraw.Draw(mask).polygon(points, fill=255)
+            gradient = nested_gradients[fill_gradient_id]
+            fill_image = draw_linear_gradient(size, gradient["start"], gradient["end"], gradient["stops"])
+            apply_masked_image(image, fill_image, mask)
+
+        stroke_gradient_id = parse_url_reference(child.get("stroke"))
+        if stroke_gradient_id:
+            points = path_commands_to_points(commands, curve_steps=120)
+            gradient = nested_gradients[stroke_gradient_id]
+            width = max(int(round(transform_nested_length(parse_svg_number(child.get("stroke-width"), 1.0)))), 1)
+            for index in range(len(points) - 1):
+                midpoint = (
+                    (points[index][0] + points[index + 1][0]) / 2.0,
+                    (points[index][1] + points[index + 1][1]) / 2.0,
+                )
+                color = apply_opacity(sample_linear_gradient_color(gradient, midpoint), opacity)
+                draw.line(
+                    [points[index], points[index + 1]],
+                    fill=color,
+                    width=width,
+                    joint="curve",
+                )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(output_path)
+    print(f"Generated {output_path.relative_to(ROOT)}")
+
+
 def find_edge() -> Path:
     env_override = os.environ.get("EDGE_PATH")
     if env_override:
@@ -443,13 +891,10 @@ def main() -> int:
     app_icon_master = BUILD_DIR / "starflow_app_icon_master.png"
     tv_banner_master = BUILD_DIR / "starflow_tv_banner_master.png"
 
-    render_file(
-        edge_path=edge_path,
-        source_path=APP_ICON_SVG,
-        output_path=app_icon_capture,
-        viewport=APP_ICON_VIEWPORT,
-        scale=APP_ICON_SCALE,
-        wait_ms=2000,
+    render_app_icon_from_svg(
+        APP_ICON_SVG,
+        app_icon_capture,
+        APP_ICON_MASTER_SIZE,
     )
     copy_png(app_icon_capture, app_icon_master)
 

@@ -119,17 +119,22 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
         title: const Text('保存修改？'),
         content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
         actions: [
-          TextButton(
+          StarflowButton(
+            label: '取消',
             onPressed: () => Navigator.of(dialogContext).pop('cancel'),
-            child: const Text('取消'),
+            variant: StarflowButtonVariant.ghost,
+            compact: true,
           ),
-          TextButton(
+          StarflowButton(
+            label: '不保存',
             onPressed: () => Navigator.of(dialogContext).pop('discard'),
-            child: const Text('不保存'),
+            variant: StarflowButtonVariant.secondary,
+            compact: true,
           ),
-          FilledButton(
+          StarflowButton(
+            label: '保存',
             onPressed: () => Navigator.of(dialogContext).pop('save'),
-            child: const Text('保存'),
+            compact: true,
           ),
         ],
       ),
@@ -274,10 +279,9 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
                     },
                   )
                 else
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('后台播放'),
-                    subtitle: const Text('Android 切后台会进入小窗继续播放；iOS 会继续后台播放音频。'),
+                  StarflowToggleTile(
+                    title: '后台播放',
+                    subtitle: 'Android 切后台会进入小窗继续播放；iOS 会继续后台播放音频。',
                     value: _draftBackgroundPlaybackEnabled,
                     onChanged: (value) {
                       setState(() {
@@ -322,12 +326,10 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
                     onPressed: _openSubtitleSettingsPage,
                   )
                 else
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('字幕'),
-                    subtitle: Text(_subtitleSettingsSummary()),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: _openSubtitleSettingsPage,
+                  StarflowSelectionTile(
+                    title: '字幕',
+                    subtitle: _subtitleSettingsSummary(),
+                    onPressed: _openSubtitleSettingsPage,
                   ),
                 const SizedBox(height: kBottomReservedSpacing),
               ],
@@ -348,9 +350,11 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
                           variant: TvButtonVariant.text,
                         ),
                       )
-                    : TextButton(
+                    : StarflowButton(
+                        label: '保存',
                         onPressed: _saveDraft,
-                        child: const Text('保存'),
+                        variant: StarflowButtonVariant.ghost,
+                        compact: true,
                       ),
               ),
             ),
@@ -605,25 +609,22 @@ class _PlaybackSubtitleSettingsPageState
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      SegmentedButton<PlaybackSubtitlePreference>(
-                        showSelectedIcon: false,
-                        segments: [
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
                           for (final preference
                               in PlaybackSubtitlePreference.values)
-                            ButtonSegment<PlaybackSubtitlePreference>(
-                              value: preference,
-                              label: Text(preference.label),
+                            StarflowChipButton(
+                              label: preference.label,
+                              selected: preference == _draftSubtitlePreference,
+                              onPressed: () {
+                                setState(() {
+                                  _draftSubtitlePreference = preference;
+                                });
+                              },
                             ),
                         ],
-                        selected: {_draftSubtitlePreference},
-                        onSelectionChanged: (selection) {
-                          if (selection.isEmpty) {
-                            return;
-                          }
-                          setState(() {
-                            _draftSubtitlePreference = selection.first;
-                          });
-                        },
                       ),
                       const SizedBox(height: 8),
                       Text(
@@ -684,9 +685,11 @@ class _PlaybackSubtitleSettingsPageState
                           variant: TvButtonVariant.text,
                         ),
                       )
-                    : TextButton(
+                    : StarflowButton(
+                        label: '完成',
                         onPressed: _closeWithResult,
-                        child: const Text('完成'),
+                        variant: StarflowButtonVariant.ghost,
+                        compact: true,
                       ),
               ),
             ),

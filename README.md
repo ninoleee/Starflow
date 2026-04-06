@@ -20,6 +20,7 @@
 - `TV` 模式当前已经补齐左侧菜单、默认焦点、焦点记忆、搜索历史、媒体库分页和播放器遥控器提示等基础体验
 - `TV` 页面里的可聚焦控件会尽量保持在屏幕上下的中间区域，长列表会随焦点自动滚动，减少遥控器连续翻页时的跳跃感
 - `TV` 端配置管理已经改成局域网传输模式，打开后会显示本机地址，手机连同一网络即可直接上传或下载配置 JSON
+- `TV` 设置页已加入“高性能模式”开关，会主动降低动画、模糊背景和播放页叠层，优先保证老盒子流畅度
 
 ## 主导航
 
@@ -353,6 +354,30 @@ flutter build apk
 flutter build apk --release
 ```
 
+构建 TV 安装包：
+
+```powershell
+.\scripts\build_tv_apk.ps1
+.\scripts\build_tv_apk.ps1 -SettingsJsonPath "D:\OneDrive\Desktop\starflow-settings.json"
+```
+
+当前 TV 打包规则：
+
+- 默认输出到桌面
+- 默认只生成单个 APK
+- 不传 `SettingsJsonPath` 时不会嵌入配置
+- 传入 `SettingsJsonPath` 时会临时写入 `assets/bootstrap/embedded_settings.json`，打包结束后自动清理
+- 文件名为：
+  - `starflow-tv-主版本.月份.序号.apk`
+  - `starflow-tv-config-主版本.月份.序号.apk`
+- 内部版本号会自动递增：
+  - 第一段主版本号保留手动控制
+  - 第二段是月份
+  - 第三段是当月递增序号
+  - 每个月第一次打包时第三段自动归 `0`
+- 当前 Android TV 构建最低兼容版本为 `Android 6.0 / API 23`
+- Release APK 当前启用了 `v1 + v2` 签名，兼容老一些的电视安装器
+
 ## 开发脚本
 
 镜像运行 Flutter：
@@ -383,9 +408,9 @@ Web 开发代理：
 当前“展示在 App 外部”的品牌图标已经收敛到一套固定流程：
 
 - 设计源：`assets/branding/starflow_icon_master.svg`
-- 预览页：`docs/starflow_app_icon.html`
+- 应用内主 Logo：`assets/branding/starflow_logo_primary.svg`
+- 启动页首帧图标：`assets/branding/starflow_launch_logo.png`
 - 导出脚本：`tool/generate_brand_assets.py`
-- 当前外部 Logo 高倍基准抓图：`build/brand_assets/app_icon_raw_capture.png`
 - 当前外部 Logo 统一母版：`build/brand_assets/starflow_app_icon_master.png`
 
 重新生成外部图标资源：
@@ -398,6 +423,7 @@ C:\anaconda3\python.exe tool\generate_brand_assets.py
 
 - Android `mipmap-* / drawable-nodpi/icon_preview_sharp.png`
 - iOS `Runner/Assets.xcassets/AppIcon.appiconset/*`
+- iOS `Runner/Assets.xcassets/LaunchImage.imageset/*`
 - macOS `Runner/Assets.xcassets/AppIcon.appiconset/*`
 - Web `web/favicon.png` 与 `web/icons/*`
 - Windows `windows/runner/resources/app_icon.ico`
@@ -405,9 +431,10 @@ C:\anaconda3\python.exe tool\generate_brand_assets.py
 
 补充说明：
 
-- `build/brand_assets/app_icon_raw_capture.png` 当前是从 `assets/branding/starflow_icon_master.svg` 渲染出的高倍基准图
+- 外部 App Icon 已不再走 HTML 截图链路，当前是由脚本直接根据 `assets/branding/starflow_icon_master.svg` 程序化生成统一母版
 - `build/brand_assets/starflow_app_icon_master.png` 是用于各平台缩放分发的统一母版
-- 应用内 Logo 组件与外部启动器图标不是同一层资源，外部图标调完后如果还要同步 App 内视觉，需要再单独处理
+- Android TV Banner 仍然通过 `docs/starflow_tv_banner.html` + 本机 Edge 无头渲染导出
+- 启动页第一帧与外部启动器图标不是同一层资源；启动页当前使用 `assets/branding/starflow_launch_logo.png`
 
 ## 测试
 
