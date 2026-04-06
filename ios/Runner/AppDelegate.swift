@@ -226,11 +226,15 @@ private struct NativePlaybackRequest {
 
 private final class NativePlaybackViewController: AVPlayerViewController {
   private static let persistThresholdMs: Int64 = 4_000
+  private static let subtitleSearchChannelName = "starflow/subtitle_search"
 
   private let playbackStore: NativePlaybackMemoryStore
   private let isoFormatter = ISO8601DateFormatter()
   private let request: NativePlaybackRequest
   private let onlineSubtitleButton = UIButton(type: .system)
+  private var subtitleSearchEngine: FlutterEngine?
+  private var subtitleSearchChannel: FlutterMethodChannel?
+  private var subtitleSearchController: FlutterViewController?
   private var timeObserverToken: Any?
   private var endObserver: NSObjectProtocol?
   private var appObservers: [NSObjectProtocol] = []
@@ -248,6 +252,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   }
 
   deinit {
+    cleanupSubtitleSearchSession()
     teardownPlayback()
   }
 
@@ -336,32 +341,37 @@ private final class NativePlaybackViewController: AVPlayerViewController {
       return
     }
 
-    let searchKeywords = "\(query) 字幕"
+    if subtitleSearchController != nil {
+      return
+    }
 
-    let options: [(String, URL?)] = [
-      ("SubHD", URL(string: "https://subhd.tv/search/\(query.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "")")),
-      ("Bing", buildSearchURL(host: "www.bing.com", path: "/search", queryItemName: "q", queryItemValue: searchKeywords)),
-      ("百度", buildSearchURL(host: "www.baidu.com", path: "/s", queryItemName: "wd", queryItemValue: searchKeywords)),
-    ]
-
-    let alert = UIAlertController(title: "在线查找字幕", message: nil, preferredStyle: .actionSheet)
-    for option in options {
-      alert.addAction(
-        UIAlertAction(title: option.0, style: .default) { _ in
-          guard let url = option.1 else {
-            return
-          }
-          UIApplication.shared.open(url)
-        }
+    let initialRoute = buildSubtitleSearchRoute(query: query)
+    let engine = FlutterEngine(name: "subtitle-search-\(UUID().uuidString)")
+    guard engine.run(withEntrypoint: nil, initialRoute: initialRoute) else {
+      presentSubtitleSearchNotice(
+        title: "打开字幕搜索失败",
+        message: "暂时无法启动应用内字幕搜索。"
       )
+      return
     }
-    alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+    GeneratedPluginRegistrant.register(with: engine)
 
-    if let popover = alert.popoverPresentationController {
-      popover.sourceView = onlineSubtitleButton
-      popover.sourceRect = onlineSubtitleButton.bounds
+    let channel = FlutterMethodChannel(
+      name: Self.subtitleSearchChannelName,
+      binaryMessenger: engine.binaryMessenger
+    )
+    channel.setMethodCallHandler { [weak self] call, result in
+      self?.handleSubtitleSearchMethodCall(call, result: result)
     }
-    present(alert, animated: true)
+
+    let controller = FlutterViewController(engine: engine, nibName: nil, bundle: nil)
+    controller.modalPresentationStyle = .fullScreen
+
+    subtitleSearchEngine = engine
+    subtitleSearchChannel = channel
+    subtitleSearchController = controller
+
+    present(controller, animated: true)
   }
 
   private func buildSubtitleSearchQuery() -> String {
@@ -392,20 +402,83 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     return parts.joined(separator: " ")
   }
 
-  private func buildSearchURL(
-    host: String,
-    path: String,
-    queryItemName: String,
-    queryItemValue: String
-  ) -> URL? {
+  private func buildSubtitleSearchRoute(query: String) -> String {
     var components = URLComponents()
-    components.scheme = "https"
-    components.host = host
-    components.path = path
+    components.path = "/subtitle-search"
     components.queryItems = [
-      URLQueryItem(name: queryItemName, value: queryItemValue),
+      URLQueryItem(name: "q", value: query),
+      URLQueryItem(name: "title", value: buildSubtitleSearchTitle()),
+      URLQueryItem(name: "mode", value: "downloadOnly"),
+      URLQueryItem(name: "standalone", value: "1"),
     ]
-    return components.url
+    return components.string ?? "/subtitle-search"
+  }
+
+  private func buildSubtitleSearchTitle() -> String {
+    let targetObject = playbackStore.decodeTargetJson(request.playbackTargetJson)
+    let seriesTitle = (targetObject["seriesTitle"] as? String)?.nonEmptyTrimmed ?? ""
+    let title = (targetObject["title"] as? String)?.nonEmptyTrimmed ?? ""
+    return !seriesTitle.isEmpty ? seriesTitle : title
+  }
+
+  private func handleSubtitleSearchMethodCall(
+    _ call: FlutterMethodCall,
+    result: @escaping FlutterResult
+  ) {
+    switch call.method {
+    case "finishSubtitleSearch":
+      let arguments = call.arguments as? [String: Any] ?? [:]
+      let cachedPath =
+        (arguments["cachedPath"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      let subtitleFilePath =
+        (arguments["subtitleFilePath"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        ?? ""
+      let displayName =
+        (arguments["displayName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      dismissSubtitleSearch {
+        let resolvedName = displayName.isEmpty
+          ? URL(fileURLWithPath: subtitleFilePath.isEmpty ? cachedPath : subtitleFilePath)
+            .lastPathComponent
+          : displayName
+        self.presentSubtitleSearchNotice(
+          title: "字幕已下载",
+          message: resolvedName.isEmpty
+            ? "字幕已下载到本地缓存。当前 iOS 原生播放器暂未自动加载外挂字幕。"
+            : "已缓存字幕：\(resolvedName)\n当前 iOS 原生播放器暂未自动加载外挂字幕。"
+        )
+      }
+      result(true)
+    case "cancelSubtitleSearch":
+      dismissSubtitleSearch()
+      result(true)
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func dismissSubtitleSearch(completion: (() -> Void)? = nil) {
+    let controller = subtitleSearchController
+    cleanupSubtitleSearchSession()
+    if let controller {
+      controller.dismiss(animated: true) {
+        completion?()
+      }
+    } else {
+      completion?()
+    }
+  }
+
+  private func cleanupSubtitleSearchSession() {
+    subtitleSearchChannel?.setMethodCallHandler(nil)
+    subtitleSearchChannel = nil
+    subtitleSearchController = nil
+    subtitleSearchEngine = nil
+  }
+
+  private func presentSubtitleSearchNotice(title: String, message: String) {
+    let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+    alert.addAction(UIAlertAction(title: "知道了", style: .default))
+    present(alert, animated: true)
   }
 
   private func registerAppLifecycleObservers() {

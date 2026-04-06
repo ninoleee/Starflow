@@ -130,6 +130,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 heroLogoTitleEnabled: heroLogoTitleEnabled,
                 heroBackgroundEnabled: effectiveHeroBackgroundEnabled,
                 translucentEffectsEnabled: effectiveTranslucentEffectsEnabled,
+                highPerformanceModeEnabled: highPerformanceModeEnabled,
                 isTelevision: isTelevision,
                 heroStyle: heroStyle,
               ),
@@ -148,6 +149,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     required bool heroLogoTitleEnabled,
     required bool heroBackgroundEnabled,
     required bool translucentEffectsEnabled,
+    required bool highPerformanceModeEnabled,
     required bool isTelevision,
     required HomeHeroStyle heroStyle,
   }) {
@@ -192,6 +194,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 child: _FeaturedHero(
                   items: featuredItems,
                   isTelevision: isTelevision,
+                  highPerformanceModeEnabled: highPerformanceModeEnabled,
                   showPagerButtons: _showHeroPagerButtons || isTelevision,
                   logoTitleEnabled: heroLogoTitleEnabled,
                   translucentEffectsEnabled: translucentEffectsEnabled,
@@ -1307,6 +1310,7 @@ class _FeaturedHero extends StatefulWidget {
     required this.items,
     required this.style,
     required this.isTelevision,
+    required this.highPerformanceModeEnabled,
     required this.showPagerButtons,
     required this.logoTitleEnabled,
     required this.translucentEffectsEnabled,
@@ -1317,6 +1321,7 @@ class _FeaturedHero extends StatefulWidget {
   final List<_FeaturedHeroItem> items;
   final HomeHeroStyle style;
   final bool isTelevision;
+  final bool highPerformanceModeEnabled;
   final bool showPagerButtons;
   final bool logoTitleEnabled;
   final bool translucentEffectsEnabled;
@@ -1449,6 +1454,10 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     if (index < 0 || index >= widget.items.length) {
       return;
     }
+    if (widget.highPerformanceModeEnabled) {
+      _controller.jumpToPage(index);
+      return;
+    }
     await _controller.animateToPage(
       index,
       duration: const Duration(milliseconds: 220),
@@ -1514,6 +1523,8 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                   child: Center(
                     child: _HeroPagerButton(
                       isTelevision: widget.isTelevision,
+                      highPerformanceModeEnabled:
+                          widget.highPerformanceModeEnabled,
                       icon: Icons.chevron_left_rounded,
                       focusNode: _previousPagerButtonFocusNode,
                       focusId: '${widget.focusScopePrefix}:pager-prev',
@@ -1531,6 +1542,8 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                   child: Center(
                     child: _HeroPagerButton(
                       isTelevision: widget.isTelevision,
+                      highPerformanceModeEnabled:
+                          widget.highPerformanceModeEnabled,
                       icon: Icons.chevron_right_rounded,
                       focusNode: _nextPagerButtonFocusNode,
                       focusId: '${widget.focusScopePrefix}:pager-next',
@@ -1551,6 +1564,19 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(widget.items.length, (index) {
               final isActive = (_page.round() == index);
+              if (widget.highPerformanceModeEnabled) {
+                return Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: isActive ? 18 : 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: isActive
+                        ? Colors.white
+                        : Colors.white.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                );
+              }
               return AnimatedContainer(
                 duration: const Duration(milliseconds: 220),
                 margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -1574,6 +1600,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
 class _HeroPagerButton extends StatelessWidget {
   const _HeroPagerButton({
     required this.isTelevision,
+    required this.highPerformanceModeEnabled,
     required this.icon,
     this.focusNode,
     this.focusId,
@@ -1582,6 +1609,7 @@ class _HeroPagerButton extends StatelessWidget {
   });
 
   final bool isTelevision;
+  final bool highPerformanceModeEnabled;
   final IconData icon;
   final FocusNode? focusNode;
   final String? focusId;
@@ -1591,7 +1619,9 @@ class _HeroPagerButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final child = AnimatedOpacity(
-      duration: const Duration(milliseconds: 180),
+      duration: highPerformanceModeEnabled
+          ? Duration.zero
+          : const Duration(milliseconds: 180),
       opacity: enabled ? 0.92 : 0.35,
       child: Material(
         color: Colors.black.withValues(alpha: 0.26),

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 
-class SectionPanel extends StatelessWidget {
+class SectionPanel extends ConsumerWidget {
   const SectionPanel({
     super.key,
     required this.title,
@@ -20,9 +22,13 @@ class SectionPanel extends StatelessWidget {
   final VoidCallback? onActionPressed;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final hasSubtitle = subtitle.trim().isNotEmpty;
+    final highPerformanceModeEnabled = ref.watch(
+      appSettingsProvider
+          .select((settings) => settings.highPerformanceModeEnabled),
+    );
     return Container(
       width: double.infinity,
       padding: padding,
@@ -39,13 +45,15 @@ class SectionPanel extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: theme.colorScheme.shadow.withValues(alpha: 0.08),
-            blurRadius: 28,
-            offset: const Offset(0, 16),
-          ),
-        ],
+        boxShadow: highPerformanceModeEnabled
+            ? null
+            : [
+                BoxShadow(
+                  color: theme.colorScheme.shadow.withValues(alpha: 0.08),
+                  blurRadius: 28,
+                  offset: const Offset(0, 16),
+                ),
+              ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -89,7 +89,7 @@ try {
   $embeddedPath = Set-EmbeddedSettings $repoRoot $SettingsJsonPath
 
   if (-not $SkipBuild) {
-    flutter build apk --release
+    flutter build apk --release --android-skip-build-dependency-validation
     if ($LASTEXITCODE -ne 0) {
       throw "flutter build apk failed with exit code $LASTEXITCODE"
     }

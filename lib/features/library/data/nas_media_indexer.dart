@@ -214,6 +214,36 @@ class NasMediaIndexer {
     return records[writableIndices.first];
   }
 
+  Future<List<NasMediaIndexRecord>> loadRecordsInScope({
+    required String sourceId,
+    required String resourcePath,
+  }) async {
+    final normalizedSourceId = sourceId.trim();
+    final normalizedResourcePath = resourcePath.trim();
+    if (normalizedSourceId.isEmpty || normalizedResourcePath.isEmpty) {
+      return const [];
+    }
+
+    final records = await _store.loadSourceRecords(normalizedSourceId);
+    if (records.isEmpty) {
+      return const [];
+    }
+
+    final scopeSegments = _pathSegments(_uriPath(normalizedResourcePath));
+    if (scopeSegments.isEmpty) {
+      return const [];
+    }
+
+    return records
+        .where(
+          (record) => _isRecordWithinScope(
+            record,
+            scopeSegments: scopeSegments,
+          ),
+        )
+        .toList(growable: false);
+  }
+
   Future<MediaDetailTarget?> enrichDetailTargetMetadataIfNeeded(
     MediaDetailTarget target,
   ) async {

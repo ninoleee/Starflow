@@ -15,7 +15,6 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
@@ -27,6 +26,7 @@ import 'package:starflow/features/playback/data/subtitle_file_picker.dart';
 import 'package:starflow/features/playback/data/system_playback_launcher.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
+import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -779,97 +779,64 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (path == null || path.trim().isEmpty) {
       return;
     }
-    final resolvedPath = path;
+    await _applyExternalSubtitlePath(player, path);
+  }
 
+  Future<void> _applyExternalSubtitlePath(
+    Player player,
+    String path, {
+    String? displayName,
+  }) async {
+    final resolvedPath = path.trim();
+    if (resolvedPath.isEmpty) {
+      return;
+    }
     final uri = Uri.file(resolvedPath).toString();
     await _runPlayerCommand(
       () => player.setSubtitleTrack(
         SubtitleTrack.uri(
           uri,
-          title: p.basenameWithoutExtension(resolvedPath),
+          title: (displayName?.trim().isNotEmpty ?? false)
+              ? displayName!.trim()
+              : p.basenameWithoutExtension(resolvedPath),
         ),
       ),
       failureMessage: '加载字幕失败',
     );
+    _showMessage('外挂字幕已加载');
   }
 
-  Future<void> _showOnlineSubtitleSearch(PlaybackTarget target) async {
+  Future<void> _showOnlineSubtitleSearch(
+    Player player,
+    PlaybackTarget target,
+  ) async {
     final query = _buildSubtitleSearchQuery(target);
-    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
-    if (isTelevision) {
-      if (!mounted) {
-        return;
-      }
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) {
-          return AlertDialog(
-            title: const Text('在线查找字幕'),
-            content: Text(
-              '电视模式暂不直接拉起外部浏览器，避免系统兼容性问题。\n\n'
-              '请在其他设备上搜索：\n$query 字幕',
-            ),
-            actions: [
-              StarflowButton(
-                label: '知道了',
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                variant: StarflowButtonVariant.ghost,
-                compact: true,
-              ),
-            ],
-          );
-        },
-      );
+    if (query.trim().isEmpty) {
+      _showMessage('缺少片名信息，暂时无法搜索字幕');
       return;
     }
-    final options = <_SubtitleSearchOption>[
-      _SubtitleSearchOption(
-        label: 'SubHD',
-        uri: Uri.parse(
-          'https://subhd.tv/search/${Uri.encodeComponent(query)}',
-        ),
-      ),
-      _SubtitleSearchOption(
-        label: 'Bing',
-        uri: Uri.https('www.bing.com', '/search', {'q': '$query 字幕'}),
-      ),
-      _SubtitleSearchOption(
-        label: '百度',
-        uri: Uri.https('www.baidu.com', '/s', {'wd': '$query 字幕'}),
-      ),
-    ];
 
-    final selection = await showDialog<_SubtitleSearchOption>(
-      context: context,
-      builder: (dialogContext) {
-        return SimpleDialog(
-          title: const Text('在线查找字幕'),
-          children: [
-            for (final option in options)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(dialogContext).pop(option),
-                child: Text(option.label),
-              ),
-          ],
-        );
-      },
+    final selection = await context.push<SubtitleSearchSelection>(
+      SubtitleSearchRequest(
+        query: query,
+        title: target.resolvedSeriesTitle.isNotEmpty
+            ? target.resolvedSeriesTitle
+            : target.title.trim(),
+        applyMode: SubtitleSearchApplyMode.downloadAndApply,
+      ).toLocation(),
     );
     if (selection == null) {
       return;
     }
-
-    bool launched = false;
-    try {
-      launched = await launchUrl(
-        selection.uri,
-        mode: LaunchMode.externalApplication,
-      );
-    } catch (_) {
-      launched = false;
+    if (!selection.canApply) {
+      _showMessage('字幕已缓存，但当前结果暂不能直接挂载播放');
+      return;
     }
-    if (!launched) {
-      _showMessage('打开字幕搜索失败');
-    }
+    await _applyExternalSubtitlePath(
+      player,
+      selection.subtitleFilePath!,
+      displayName: selection.displayName,
+    );
   }
 
   Future<void> _configureSeriesSkipPreference(Player player) async {
@@ -1587,7 +1554,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           onAdjustSubtitleDelay: () => _openSubtitleDelayDialog(player),
           onLoadExternalSubtitle: () => _loadExternalSubtitle(player),
           onSearchSubtitlesOnline: () =>
-              _showOnlineSubtitleSearch(_resolvedTarget ?? widget.target),
+              _showOnlineSubtitleSearch(
+                player,
+                _resolvedTarget ?? widget.target,
+              ),
           onConfigureSeriesSkip: () => _configureSeriesSkipPreference(player),
         );
       },
@@ -2169,16 +2139,6 @@ class _PlaybackOptionTile extends StatelessWidget {
       },
     );
   }
-}
-
-class _SubtitleSearchOption {
-  const _SubtitleSearchOption({
-    required this.label,
-    required this.uri,
-  });
-
-  final String label;
-  final Uri uri;
 }
 
 class _PlayerOpenException implements Exception {

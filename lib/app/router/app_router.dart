@@ -21,7 +21,9 @@ import 'package:starflow/features/library/presentation/library_collection_page.d
 import 'package:starflow/features/library/presentation/library_page.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
+import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/playback/presentation/player_page.dart';
+import 'package:starflow/features/playback/presentation/subtitle_search_page.dart';
 import 'package:starflow/features/search/presentation/search_page.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
@@ -44,6 +46,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       StatefulShellRoute.indexedStack(
         pageBuilder: (context, state, navigationShell) {
+          final highPerformanceModeEnabled =
+              ProviderScope.containerOf(context, listen: false)
+                  .read(appSettingsProvider)
+                  .highPerformanceModeEnabled;
+          if (highPerformanceModeEnabled) {
+            return NoTransitionPage<void>(
+              key: state.pageKey,
+              child: _AppNavigationShell(navigationShell: navigationShell),
+            );
+          }
           return CustomTransitionPage<void>(
             key: state.pageKey,
             child: _AppNavigationShell(navigationShell: navigationShell),
@@ -176,6 +188,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
+        path: '/subtitle-search',
+        name: 'subtitle-search',
+        pageBuilder: (context, state) {
+          final request = SubtitleSearchRequest.fromQueryParameters(
+            state.uri.queryParameters,
+          );
+          return MaterialPage<void>(
+            key: state.pageKey,
+            fullscreenDialog: true,
+            child: SubtitleSearchPage(request: request),
+          );
+        },
+      ),
+      GoRoute(
         path: '/player',
         name: 'player',
         pageBuilder: (context, state) {
@@ -251,6 +277,12 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
     );
     final effectiveTranslucentEffectsEnabled =
         translucentEffectsEnabled && !highPerformanceModeEnabled;
+    final navigationAnimationDuration = highPerformanceModeEnabled
+        ? Duration.zero
+        : const Duration(milliseconds: 220);
+    final navigationOpacityDuration = highPerformanceModeEnabled
+        ? Duration.zero
+        : const Duration(milliseconds: 180);
     final shellChild = HeroMode(
       enabled: !backgroundWorkSuspended,
       child: TickerMode(
@@ -283,11 +315,11 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
               child: AnimatedSlide(
                 offset:
                     _isBottomBarVisible ? Offset.zero : const Offset(0, 1.2),
-                duration: const Duration(milliseconds: 220),
+                duration: navigationAnimationDuration,
                 curve: Curves.easeOutCubic,
                 child: AnimatedOpacity(
                   opacity: _isBottomBarVisible ? 1 : 0,
-                  duration: const Duration(milliseconds: 180),
+                  duration: navigationOpacityDuration,
                   curve: Curves.easeOutCubic,
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
@@ -316,6 +348,8 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
                                   child: _FloatingNavigationBar(
                                     currentIndex:
                                         widget.navigationShell.currentIndex,
+                                    highPerformanceModeEnabled:
+                                        highPerformanceModeEnabled,
                                     onDestinationSelected: (index) {
                                       _setBottomBarVisible(true);
                                       widget.navigationShell.goBranch(index);
@@ -336,6 +370,8 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
                                 child: _FloatingNavigationBar(
                                   currentIndex:
                                       widget.navigationShell.currentIndex,
+                                  highPerformanceModeEnabled:
+                                      highPerformanceModeEnabled,
                                   onDestinationSelected: (index) {
                                     _setBottomBarVisible(true);
                                     widget.navigationShell.goBranch(index);
@@ -657,10 +693,12 @@ class _TelevisionNavigationDestination extends StatelessWidget {
 class _FloatingNavigationBar extends StatelessWidget {
   const _FloatingNavigationBar({
     required this.currentIndex,
+    required this.highPerformanceModeEnabled,
     required this.onDestinationSelected,
   });
 
   final int currentIndex;
+  final bool highPerformanceModeEnabled;
   final ValueChanged<int> onDestinationSelected;
 
   static const _items = [
@@ -698,6 +736,7 @@ class _FloatingNavigationBar extends StatelessWidget {
             child: _FloatingNavigationButton(
               item: item,
               selected: selected,
+              highPerformanceModeEnabled: highPerformanceModeEnabled,
               onTap: () => onDestinationSelected(index),
             ),
           );
@@ -711,11 +750,13 @@ class _FloatingNavigationButton extends StatelessWidget {
   const _FloatingNavigationButton({
     required this.item,
     required this.selected,
+    required this.highPerformanceModeEnabled,
     required this.onTap,
   });
 
   final _NavigationItemData item;
   final bool selected;
+  final bool highPerformanceModeEnabled;
   final VoidCallback onTap;
 
   @override
@@ -727,12 +768,18 @@ class _FloatingNavigationButton extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(_kBottomNavItemRadius),
-        splashColor: Colors.white.withValues(alpha: 0.06),
-        highlightColor: Colors.white.withValues(alpha: 0.02),
+        splashColor: highPerformanceModeEnabled
+            ? Colors.transparent
+            : Colors.white.withValues(alpha: 0.06),
+        highlightColor: highPerformanceModeEnabled
+            ? Colors.transparent
+            : Colors.white.withValues(alpha: 0.02),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
+            duration: highPerformanceModeEnabled
+                ? Duration.zero
+                : const Duration(milliseconds: 220),
             curve: Curves.easeOutCubic,
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(

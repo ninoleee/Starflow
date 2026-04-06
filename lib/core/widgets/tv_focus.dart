@@ -364,42 +364,25 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
             },
           ),
         },
-        child: AnimatedScale(
-          scale: _isFocused ? (useSubtleVisualStyle ? 1.004 : 1.012) : 1,
-          duration: const Duration(milliseconds: 110),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 110),
-            curve: Curves.easeOutCubic,
-            padding: EdgeInsets.all(useSubtleVisualStyle ? 1 : 2),
-            decoration: BoxDecoration(
-              borderRadius: widget.borderRadius,
-              border: Border.all(
-                color: _isFocused
-                    ? Colors.white
-                    : hasContextAction
-                        ? Colors.white.withValues(alpha: 0.08)
-                        : Colors.white.withValues(alpha: 0),
-                width: _isFocused ? (useSubtleVisualStyle ? 1.8 : 2.4) : 1,
-              ),
+        child: Container(
+          padding: EdgeInsets.all(useSubtleVisualStyle ? 1 : 2),
+          decoration: BoxDecoration(
+            borderRadius: widget.borderRadius,
+            border: Border.all(
               color: _isFocused
-                  ? Colors.white.withValues(
-                      alpha: useSubtleVisualStyle ? 0.028 : 0.045,
-                    )
-                  : Colors.transparent,
-              boxShadow: _isFocused
-                  ? [
-                      BoxShadow(
-                        color: Colors.black.withValues(
-                          alpha: useSubtleVisualStyle ? 0.18 : 0.34,
-                        ),
-                        blurRadius: useSubtleVisualStyle ? 8 : 14,
-                        spreadRadius: useSubtleVisualStyle ? 0 : 1,
-                      ),
-                    ]
-                  : null,
+                  ? Colors.white
+                  : hasContextAction
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : Colors.white.withValues(alpha: 0),
+              width: _isFocused ? (useSubtleVisualStyle ? 1.8 : 2.2) : 1,
             ),
-            child: widget.child,
+            color: _isFocused
+                ? Colors.white.withValues(
+                    alpha: useSubtleVisualStyle ? 0.02 : 0.035,
+                  )
+                : Colors.transparent,
           ),
+          child: widget.child,
         ),
       );
     }

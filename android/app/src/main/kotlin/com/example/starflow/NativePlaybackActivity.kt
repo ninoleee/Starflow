@@ -2,7 +2,6 @@ package com.example.starflow
 
 import android.app.Activity
 import android.app.AlertDialog
-import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Configuration
@@ -137,11 +136,17 @@ class NativePlaybackActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQUEST_CODE_EXTERNAL_SUBTITLE || resultCode != RESULT_OK) {
+        if (requestCode == REQUEST_CODE_EXTERNAL_SUBTITLE) {
+            if (resultCode != RESULT_OK) {
+                return
+            }
+            val subtitleUri = data?.data ?: return
+            loadExternalSubtitle(subtitleUri, data.flags)
             return
         }
-        val subtitleUri = data?.data ?: return
-        loadExternalSubtitle(subtitleUri, data.flags)
+        if (requestCode == REQUEST_CODE_SUBTITLE_SEARCH) {
+            handleSubtitleSearchResult(resultCode, data)
+        }
     }
 
     private fun initializePlayer() {
@@ -296,46 +301,16 @@ class NativePlaybackActivity : Activity() {
             return
         }
 
-        if (isTelevision()) {
-            AlertDialog.Builder(this)
-                .setTitle("在线查找字幕")
-                .setMessage(
-                    "电视模式暂不直接拉起外部浏览器，避免系统兼容性问题。\n\n" +
-                        "请在其他设备上搜索：\n$query 字幕",
-                )
-                .setPositiveButton("知道了", null)
-                .show()
-            return
-        }
-
-        val labels = arrayOf("SubHD", "Bing", "百度")
-        val uris = listOf(
-            Uri.parse("https://subhd.tv/search/${Uri.encode(query)}"),
-            Uri.parse("https://www.bing.com/search?q=${Uri.encode("$query 字幕")}"),
-            Uri.parse("https://www.baidu.com/s?wd=${Uri.encode("$query 字幕")}"),
-        )
-        AlertDialog.Builder(this)
-            .setTitle("在线查找字幕")
-            .setItems(labels) { _, which ->
-                launchExternalSubtitleSearch(uris.getOrNull(which))
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun launchExternalSubtitleSearch(uri: Uri?) {
-        if (uri == null) {
-            showToast("打开字幕搜索失败")
-            return
-        }
-        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-            addCategory(Intent.CATEGORY_BROWSABLE)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
         try {
-            startActivity(Intent.createChooser(intent, "在线查找字幕"))
-        } catch (_: ActivityNotFoundException) {
-            showToast("打开字幕搜索失败")
+            startActivityForResult(
+                Intent(this, SubtitleSearchActivity::class.java).apply {
+                    putExtra(
+                        SubtitleSearchActivity.EXTRA_INITIAL_ROUTE,
+                        buildSubtitleSearchRoute(query),
+                    )
+                },
+                REQUEST_CODE_SUBTITLE_SEARCH,
+            )
         } catch (_: Throwable) {
             showToast("打开字幕搜索失败")
         }
@@ -373,6 +348,52 @@ class NativePlaybackActivity : Activity() {
         return currentMode == Configuration.UI_MODE_TYPE_TELEVISION
     }
 
+    private fun buildSubtitleSearchRoute(query: String): String {
+        return Uri.Builder()
+            .path("/subtitle-search")
+            .appendQueryParameter("q", query)
+            .appendQueryParameter("title", buildSubtitleSearchTitle())
+            .appendQueryParameter("mode", "downloadAndApply")
+            .appendQueryParameter("standalone", "1")
+            .build()
+            .toString()
+    }
+
+    private fun buildSubtitleSearchTitle(): String {
+        val targetObject = try {
+            JSONObject(playbackTargetJson)
+        } catch (_: Throwable) {
+            JSONObject()
+        }
+        val seriesTitle = targetObject.optString("seriesTitle").trim()
+        val title = targetObject.optString("title").trim()
+        return if (seriesTitle.isNotEmpty()) seriesTitle else title
+    }
+
+    private fun handleSubtitleSearchResult(resultCode: Int, data: Intent?) {
+        if (resultCode != RESULT_OK || data == null) {
+            return
+        }
+
+        val subtitleFilePath = data.getStringExtra(SubtitleSearchActivity.RESULT_SUBTITLE_FILE_PATH)
+            ?.trim()
+            .orEmpty()
+        val displayName = data.getStringExtra(SubtitleSearchActivity.RESULT_DISPLAY_NAME)
+            ?.trim()
+            .orEmpty()
+        if (subtitleFilePath.isNotEmpty()) {
+            loadCachedSubtitleFile(subtitleFilePath, displayName)
+            return
+        }
+
+        val cachedPath = data.getStringExtra(SubtitleSearchActivity.RESULT_CACHED_PATH)
+            ?.trim()
+            .orEmpty()
+        if (cachedPath.isNotEmpty()) {
+            showToast("字幕已下载到缓存，但当前结果暂不能直接挂载")
+        }
+    }
+
     private fun loadExternalSubtitle(uri: Uri, intentFlags: Int) {
         val mimeType = resolveSubtitleMimeType(uri)
         if (mimeType == null) {
@@ -394,6 +415,28 @@ class NativePlaybackActivity : Activity() {
             originalUri = uri,
             mimeType = mimeType,
             displayName = resolveDisplayName(uri),
+        )
+        applyExternalSubtitleConfiguration()
+    }
+
+    private fun loadCachedSubtitleFile(filePath: String, displayName: String) {
+        val file = File(filePath)
+        if (!file.exists() || !file.isFile) {
+            showToast("缓存字幕文件不存在")
+            return
+        }
+
+        val uri = Uri.fromFile(file)
+        val mimeType = resolveSubtitleMimeType(uri)
+        if (mimeType == null) {
+            showToast("暂不支持该字幕格式")
+            return
+        }
+
+        externalSubtitleSource = ExternalSubtitleSource(
+            originalUri = uri,
+            mimeType = mimeType,
+            displayName = displayName.ifBlank { file.name },
         )
         applyExternalSubtitleConfiguration()
     }
@@ -455,7 +498,7 @@ class NativePlaybackActivity : Activity() {
             subtitleDirectory,
             "shifted_${source.displayName.hashCode()}_${delayMs}.$extension",
         )
-        val originalContent = contentResolver.openInputStream(source.originalUri)
+        val originalContent = openSubtitleInputStream(source.originalUri)
             ?.bufferedReader(StandardCharsets.UTF_8)
             ?.use { it.readText() }
             ?: throw IllegalStateException("字幕文件读取失败")
@@ -466,6 +509,19 @@ class NativePlaybackActivity : Activity() {
         )
         outputFile.writeText(shiftedContent, StandardCharsets.UTF_8)
         return Uri.fromFile(outputFile)
+    }
+
+    private fun openSubtitleInputStream(uri: Uri) = when (uri.scheme?.lowercase()) {
+        "file" -> {
+            val path = uri.path?.trim().orEmpty()
+            if (path.isEmpty()) {
+                null
+            } else {
+                File(path).inputStream()
+            }
+        }
+
+        else -> contentResolver.openInputStream(uri)
     }
 
     private fun shiftSubtitleContent(content: String, mimeType: String, delayMs: Long): String {
@@ -553,6 +609,12 @@ class NativePlaybackActivity : Activity() {
     }
 
     private fun resolveDisplayName(uri: Uri): String {
+        if (uri.scheme?.lowercase() == "file") {
+            val fileName = uri.path?.let { path -> File(path).name }.orEmpty()
+            if (fileName.isNotBlank()) {
+                return fileName
+            }
+        }
         var result = uri.lastPathSegment ?: "外挂字幕"
         try {
             contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
@@ -856,6 +918,7 @@ class NativePlaybackActivity : Activity() {
 
     companion object {
         private const val REQUEST_CODE_EXTERNAL_SUBTITLE = 1001
+        private const val REQUEST_CODE_SUBTITLE_SEARCH = 1002
         private const val SHARED_PREFERENCES_NAME = "FlutterSharedPreferences"
         private const val PLAYBACK_MEMORY_STORAGE_KEY = "flutter.starflow.playback.memory.v1"
         private const val RECENT_ENTRY_LIMIT = 20

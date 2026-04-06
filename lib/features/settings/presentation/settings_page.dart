@@ -189,12 +189,14 @@ class SettingsPage extends ConsumerWidget {
                     StarflowToggleTile(
                       title: '透明磨砂效果',
                       subtitle: _translucentEffectsSummary(settings),
-                      value: settings.translucentEffectsEnabled,
-                      onChanged: (value) {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .setTranslucentEffectsEnabled(value);
-                      },
+                      value: _effectiveTranslucentEffectsEnabled(settings),
+                      onChanged: settings.highPerformanceModeEnabled
+                          ? null
+                          : (value) {
+                              ref
+                                  .read(settingsControllerProvider.notifier)
+                                  .setTranslucentEffectsEnabled(value);
+                            },
                     ),
                   ],
                 ),
@@ -614,12 +616,17 @@ String _playbackSettingsSummary(AppSettings settings) {
 }
 
 String _highPerformanceModeSummary() {
-  return '所有客户端都会关闭磨砂/模糊背景，并简化部分动画与播放器叠层；进入播放器时，还会暂停首页 Hero 补数、详情自动补元数据/本地资源匹配、后台图片加载，并取消或跳过索引刷新。';
+  return '所有客户端都会关闭磨砂/模糊背景和通用面板阴影，并压低启动页、导航切换、首页 Hero 与 TV 焦点动画；进入播放器时，还会简化叠层，暂停首页 Hero 补数、详情自动补元数据/本地资源匹配、后台图片加载，并取消或跳过索引刷新。';
+}
+
+bool _effectiveTranslucentEffectsEnabled(AppSettings settings) {
+  return !settings.highPerformanceModeEnabled &&
+      settings.translucentEffectsEnabled;
 }
 
 String _translucentEffectsSummary(AppSettings settings) {
   if (settings.highPerformanceModeEnabled) {
-    return '高性能模式开启后，所有客户端都会强制关闭磨砂/模糊背景；这里的开关会保留当前设置，但要关闭高性能模式后才会恢复生效。';
+    return '高性能模式开启时，此项会被强制关闭；如需单独设置，请先关闭高性能模式。';
   }
   return '关闭后可减少模糊和毛玻璃效果，提高性能。';
 }
