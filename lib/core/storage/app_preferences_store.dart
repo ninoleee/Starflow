@@ -1,16 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:shared_preferences_android/shared_preferences_android.dart';
 
-const _kAndroidSharedPreferencesFileName = 'FlutterSharedPreferences';
 const _kAndroidFlutterKeyPrefix = 'flutter.';
-
-SharedPreferencesOptions _buildSharedPreferencesOptions() {
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    return const SharedPreferencesAsyncAndroidOptions();
-  }
-  return const SharedPreferencesOptions();
-}
 
 abstract class PreferencesStore {
   Future<String?> getString(String key);
@@ -39,8 +30,7 @@ class AppPreferencesStore implements PreferencesStore {
   })  : _preferences = preferences,
         _sharedPreferences = sharedPreferences;
 
-  static final SharedPreferencesOptions _options =
-      _buildSharedPreferencesOptions();
+  static const SharedPreferencesOptions _options = SharedPreferencesOptions();
 
   SharedPreferencesAsync? _preferences;
   SharedPreferences? _sharedPreferences;

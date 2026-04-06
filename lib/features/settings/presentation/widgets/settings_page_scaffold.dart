@@ -20,8 +20,7 @@ class SettingsPageScaffold extends StatelessWidget {
     this.trailing,
     this.listPadding,
     this.bottomSpacing = kBottomReservedSpacing,
-    this.keyboardDismissBehavior =
-        ScrollViewKeyboardDismissBehavior.onDrag,
+    this.keyboardDismissBehavior = ScrollViewKeyboardDismissBehavior.onDrag,
   });
 
   final List<Widget> children;
@@ -101,6 +100,9 @@ class SettingsActionButton extends ConsumerWidget {
     this.variant = StarflowButtonVariant.secondary,
     this.loading = false,
     this.expand = false,
+    this.autofocus = false,
+    this.focusNode,
+    this.focusId,
   });
 
   final String label;
@@ -109,6 +111,9 @@ class SettingsActionButton extends ConsumerWidget {
   final StarflowButtonVariant variant;
   final bool loading;
   final bool expand;
+  final bool autofocus;
+  final FocusNode? focusNode;
+  final String? focusId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -121,6 +126,126 @@ class SettingsActionButton extends ConsumerWidget {
       compact: !isTelevision,
       expand: expand,
       loading: loading,
+      autofocus: autofocus,
+      focusNode: focusNode,
+      focusId: focusId,
+    );
+  }
+}
+
+class SettingsSelectionTile extends StatelessWidget {
+  const SettingsSelectionTile({
+    super.key,
+    required this.title,
+    required this.value,
+    required this.onPressed,
+    this.subtitle = '',
+    this.leading,
+    this.trailing,
+    this.autofocus = false,
+    this.focusNode,
+    this.focusId,
+  });
+
+  final String title;
+  final String value;
+  final VoidCallback? onPressed;
+  final String subtitle;
+  final Widget? leading;
+  final Widget? trailing;
+  final bool autofocus;
+  final FocusNode? focusNode;
+  final String? focusId;
+
+  @override
+  Widget build(BuildContext context) {
+    return StarflowSelectionTile(
+      title: title,
+      value: value,
+      subtitle: subtitle,
+      leading: leading,
+      trailing: trailing,
+      onPressed: onPressed,
+      autofocus: autofocus,
+      focusNode: focusNode,
+      focusId: focusId,
+    );
+  }
+}
+
+class SettingsToggleTile extends StatelessWidget {
+  const SettingsToggleTile({
+    super.key,
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.subtitle = '',
+    this.autofocus = false,
+    this.focusNode,
+    this.focusId,
+  });
+
+  final String title;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final String subtitle;
+  final bool autofocus;
+  final FocusNode? focusNode;
+  final String? focusId;
+
+  @override
+  Widget build(BuildContext context) {
+    return StarflowToggleTile(
+      title: title,
+      value: value,
+      subtitle: subtitle,
+      onChanged: onChanged,
+      autofocus: autofocus,
+      focusNode: focusNode,
+      focusId: focusId,
+    );
+  }
+}
+
+class SettingsExpandableSection extends StatelessWidget {
+  const SettingsExpandableSection({
+    super.key,
+    required this.title,
+    required this.expanded,
+    required this.onChanged,
+    required this.children,
+    this.subtitle = '',
+  });
+
+  final String title;
+  final bool expanded;
+  final ValueChanged<bool>? onChanged;
+  final List<Widget> children;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SettingsSelectionTile(
+          title: title,
+          subtitle: subtitle,
+          value: expanded ? '已展开' : '已收起',
+          onPressed: onChanged == null ? null : () => onChanged!(!expanded),
+          trailing: Icon(
+            expanded
+                ? Icons.keyboard_arrow_up_rounded
+                : Icons.keyboard_arrow_down_rounded,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        if (expanded) ...[
+          const SizedBox(height: 12),
+          ...children,
+        ],
+      ],
     );
   }
 }
@@ -185,4 +310,32 @@ Future<SettingsCloseAction> showSettingsCloseConfirmDialog(
     },
   );
   return action ?? SettingsCloseAction.cancel;
+}
+
+Future<T?> showSettingsOptionDialog<T>({
+  required BuildContext context,
+  required String title,
+  required List<T> options,
+  required String Function(T option) labelBuilder,
+  T? currentValue,
+}) {
+  return showDialog<T>(
+    context: context,
+    builder: (dialogContext) {
+      return SimpleDialog(
+        title: Text(title),
+        children: [
+          for (final option in options)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(dialogContext).pop(option),
+              child: Text(
+                option == currentValue
+                    ? '${labelBuilder(option)}  当前'
+                    : labelBuilder(option),
+              ),
+            ),
+        ],
+      );
+    },
+  );
 }

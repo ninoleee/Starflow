@@ -3,14 +3,12 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/app/shell_layout.dart';
-import 'package:starflow/core/platform/tv_platform.dart';
-import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/search/data/cloud_saver_api_client.dart';
 import 'package:starflow/features/search/data/pansou_api_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
 /// 全屏编辑搜索服务（与 [MediaSourceEditorPage] 同一交互模式）。
@@ -168,22 +166,12 @@ class _SearchProviderEditorPageState
   }
 
   Future<void> _openKindPicker() async {
-    final selected = await showDialog<SearchProviderKind>(
+    final selected = await showSettingsOptionDialog<SearchProviderKind>(
       context: context,
-      builder: (dialogContext) {
-        return SimpleDialog(
-          title: const Text('选择类型'),
-          children: [
-            for (final item in SearchProviderKind.values)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(dialogContext).pop(item),
-                child: Text(
-                  item == _kind ? '${item.label}  当前' : item.label,
-                ),
-              ),
-          ],
-        );
-      },
+      title: '选择类型',
+      options: SearchProviderKind.values,
+      currentValue: _kind,
+      labelBuilder: (item) => item.label,
     );
     if (selected == null) {
       return;
@@ -235,35 +223,10 @@ class _SearchProviderEditorPageState
       await _discardAndClose();
       return;
     }
-    final action = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('保存修改？'),
-        content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
-        actions: [
-          StarflowButton(
-            label: '取消',
-            onPressed: () => Navigator.of(dialogContext).pop('cancel'),
-            variant: StarflowButtonVariant.ghost,
-            compact: true,
-          ),
-          StarflowButton(
-            label: '不保存',
-            onPressed: () => Navigator.of(dialogContext).pop('discard'),
-            variant: StarflowButtonVariant.secondary,
-            compact: true,
-          ),
-          StarflowButton(
-            label: '保存',
-            onPressed: () => Navigator.of(dialogContext).pop('save'),
-            compact: true,
-          ),
-        ],
-      ),
-    );
-    if (action == 'discard') {
+    final action = await showSettingsCloseConfirmDialog(context);
+    if (action == SettingsCloseAction.discard) {
       await _discardAndClose();
-    } else if (action == 'save') {
+    } else if (action == SettingsCloseAction.save) {
       await _saveDraft();
     }
   }
@@ -393,9 +356,6 @@ class _SearchProviderEditorPageState
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
-
     return PopScope<void>(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -404,431 +364,207 @@ class _SearchProviderEditorPageState
         }
         _handleCloseRequest();
       },
-      child: Scaffold(
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            ListView(
-              padding: overlayToolbarPagePadding(context),
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              children: [
-                _SectionTitle(theme: theme, label: '基本信息'),
-                SettingsTextInputField(
-                  controller: _nameController,
-                  labelText: '名称',
-                  textInputAction: TextInputAction.next,
-                ),
-                const SizedBox(height: 12),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '类型',
-                    value: _kind.label,
-                    onPressed: _openKindPicker,
-                  )
-                else
-                  DropdownButtonFormField<SearchProviderKind>(
-                    key: ValueKey(_kind),
-                    initialValue: _kind,
-                    decoration: const InputDecoration(labelText: '类型'),
-                    items: SearchProviderKind.values
-                        .map(
-                          (item) => DropdownMenuItem(
-                            value: item,
-                            child: Text(item.label),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _applyDefaultsForKind(value));
-                      }
-                    },
-                  ),
-                _SectionTitle(theme: theme, label: '连接'),
-                SettingsTextInputField(
-                  controller: _endpointController,
-                  labelText: 'Endpoint',
-                  keyboardType: TextInputType.url,
-                  textInputAction: TextInputAction.next,
-                  autocorrect: false,
-                  hintText: _kind.defaultEndpoint,
-                ),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: isTelevision
-                      ? TvAdaptiveButton(
-                          label: _isTestingConnection ? '测试中...' : '测试连接',
-                          icon: Icons.network_check_rounded,
-                          onPressed:
-                              _isTestingConnection ? null : _testConnection,
-                          variant: TvButtonVariant.outlined,
-                        )
-                      : StarflowButton(
-                          label: _isTestingConnection ? '测试中...' : '测试连接',
-                          icon: Icons.network_check_rounded,
-                          onPressed:
-                              _isTestingConnection ? null : _testConnection,
-                          variant: StarflowButtonVariant.secondary,
-                          compact: true,
-                        ),
-                ),
-                if (_connectionTestMessage.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    _connectionTestMessage,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: _connectionTestSucceeded == false
-                          ? theme.colorScheme.error
-                          : const Color(0xFF7F8FAE),
-                    ),
-                  ),
-                ],
-                _SectionTitle(theme: theme, label: '认证（可选）'),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: 'Token / 账号',
-                    value: _advancedAuthExpanded ? '已展开' : '已收起',
-                    onPressed: () {
-                      setState(
-                          () => _advancedAuthExpanded = !_advancedAuthExpanded);
-                    },
-                  )
-                else
-                  ExpansionTile(
-                    initiallyExpanded: _advancedAuthExpanded,
-                    onExpansionChanged: (expanded) {
-                      setState(() => _advancedAuthExpanded = expanded);
-                    },
-                    title: Text(
-                      'Token / 账号',
-                      style: theme.textTheme.titleSmall,
-                    ),
-                    subtitle: Text(
-                      'JWT、API Key，或用户名密码自动登录',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                    children: [
-                      SettingsTextInputField(
-                        controller: _apiKeyController,
-                        labelText: 'JWT Token / API Key',
-                        minLines: 1,
-                        maxLines: 4,
-                        alignLabelWithHint: true,
-                        summaryBuilder: (value) =>
-                            value.isEmpty ? '未填写' : '已填写',
-                      ),
-                      const SizedBox(height: 12),
-                      AutofillGroup(
-                        child: Column(
-                          children: [
-                            SettingsTextInputField(
-                              controller: _usernameController,
-                              labelText: '登录用户名',
-                              textInputAction: TextInputAction.next,
-                              autofillHints: const [AutofillHints.username],
-                            ),
-                            const SizedBox(height: 12),
-                            SettingsTextInputField(
-                              controller: _passwordController,
-                              labelText: '登录密码',
-                              obscureText: true,
-                              textInputAction: TextInputAction.done,
-                              autofillHints: const [AutofillHints.password],
-                              summaryBuilder: (value) =>
-                                  value.isEmpty ? '未填写' : '已填写',
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                  ),
-                if (isTelevision && _advancedAuthExpanded) ...[
-                  const SizedBox(height: 12),
-                  SettingsTextInputField(
-                    controller: _apiKeyController,
-                    labelText: 'JWT Token / API Key',
-                    minLines: 1,
-                    maxLines: 4,
-                    alignLabelWithHint: true,
-                    summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
-                  ),
-                  const SizedBox(height: 12),
-                  SettingsTextInputField(
-                    controller: _usernameController,
-                    labelText: '登录用户名',
-                    textInputAction: TextInputAction.next,
-                    autofillHints: const [AutofillHints.username],
-                  ),
-                  const SizedBox(height: 12),
-                  SettingsTextInputField(
-                    controller: _passwordController,
-                    labelText: '登录密码',
-                    obscureText: true,
-                    textInputAction: TextInputAction.done,
-                    autofillHints: const [AutofillHints.password],
-                    summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
-                  ),
-                ],
-                _SectionTitle(theme: theme, label: '结果筛选'),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '网盘类型',
-                    value:
-                        '${_selectedCloudTypesLabel()} · ${_cloudTypesExpanded ? '已展开' : '已收起'}',
-                    onPressed: () {
-                      setState(
-                          () => _cloudTypesExpanded = !_cloudTypesExpanded);
-                    },
-                  )
-                else
-                  ExpansionTile(
-                    initiallyExpanded: _cloudTypesExpanded,
-                    onExpansionChanged: (expanded) {
-                      setState(() => _cloudTypesExpanded = expanded);
-                    },
-                    tilePadding: EdgeInsets.zero,
-                    childrenPadding: EdgeInsets.zero,
-                    title: Text(
-                      '网盘类型',
-                      style: theme.textTheme.titleSmall,
-                    ),
-                    subtitle: Text(
-                      _selectedCloudTypesLabel(),
-                      style: theme.textTheme.bodySmall,
-                    ),
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Row(
-                          children: [
-                            StarflowButton(
-                              label: '全选',
-                              icon: Icons.select_all_rounded,
-                              onPressed: () {
-                                setState(() {
-                                  _selectedCloudTypes =
-                                      SearchCloudType.values.toSet();
-                                });
-                              },
-                              variant: StarflowButtonVariant.ghost,
-                              compact: true,
-                            ),
-                            const SizedBox(width: 8),
-                            StarflowButton(
-                              label: '清空',
-                              icon: Icons.clear_all_rounded,
-                              onPressed: () {
-                                setState(() {
-                                  _selectedCloudTypes = <SearchCloudType>{};
-                                });
-                              },
-                              variant: StarflowButtonVariant.ghost,
-                              compact: true,
-                            ),
-                          ],
-                        ),
-                      ),
-                      ...SearchCloudType.values.map(
-                        (item) => Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: StarflowCheckboxTile(
-                            title: item.label,
-                            value: _selectedCloudTypes.contains(item),
-                            onChanged: (selected) {
-                              setState(() {
-                                if (selected) {
-                                  _selectedCloudTypes.add(item);
-                                } else {
-                                  _selectedCloudTypes.remove(item);
-                                }
-                              });
-                            },
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                if (isTelevision && _cloudTypesExpanded) ...[
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      TvAdaptiveButton(
-                        label: '全选',
-                        icon: Icons.select_all_rounded,
-                        onPressed: () {
-                          setState(() {
-                            _selectedCloudTypes =
-                                SearchCloudType.values.toSet();
-                          });
-                        },
-                        variant: TvButtonVariant.text,
-                      ),
-                      TvAdaptiveButton(
-                        label: '清空',
-                        icon: Icons.clear_all_rounded,
-                        onPressed: () {
-                          setState(() {
-                            _selectedCloudTypes = <SearchCloudType>{};
-                          });
-                        },
-                        variant: TvButtonVariant.text,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  ...SearchCloudType.values.map(
-                    (item) => Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: TvSelectionTile(
-                        title: item.label,
-                        value:
-                            _selectedCloudTypes.contains(item) ? '已选中' : '未选中',
-                        onPressed: () {
-                          setState(() {
-                            if (_selectedCloudTypes.contains(item)) {
-                              _selectedCloudTypes.remove(item);
-                            } else {
-                              _selectedCloudTypes.add(item);
-                            }
-                          });
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                SettingsTextInputField(
-                  controller: _blockedKeywordsController,
-                  labelText: '过滤词',
-                  minLines: 1,
-                  maxLines: 3,
-                ),
-                const SizedBox(height: 12),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '强匹配',
-                    value: _strongMatchEnabled ? '已开启' : '已关闭',
-                    onPressed: () {
-                      setState(
-                          () => _strongMatchEnabled = !_strongMatchEnabled);
-                    },
-                  )
-                else
-                  StarflowToggleTile(
-                    title: '强匹配',
-                    value: _strongMatchEnabled,
-                    onChanged: (value) {
-                      setState(() => _strongMatchEnabled = value);
-                    },
-                  ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '开启后，标题只要包含搜索词拆分后的词组，或中文搜索词中这些字的任意组合，就会保留。',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        height: 1.35,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SettingsTextInputField(
-                  controller: _maxTitleLengthController,
-                  labelText: '标题长度上限',
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  hintText: '50',
-                ),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '启用此搜索服务',
-                    value: _enabled ? '已开启' : '已关闭',
-                    onPressed: () => setState(() => _enabled = !_enabled),
-                  )
-                else
-                  StarflowToggleTile(
-                    title: '启用此搜索服务',
-                    value: _enabled,
-                    onChanged: (value) => setState(() => _enabled = value),
-                  ),
-                if (widget.initial != null) ...[
-                  const SizedBox(height: 28),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: isTelevision
-                        ? TvAdaptiveButton(
-                            label: '删除此搜索服务',
-                            icon: Icons.delete_outline_rounded,
-                            onPressed: _confirmDeleteSearchProvider,
-                            variant: TvButtonVariant.outlined,
-                          )
-                        : StarflowButton(
-                            label: '删除此搜索服务',
-                            icon: Icons.delete_outline_rounded,
-                            onPressed: _confirmDeleteSearchProvider,
-                            variant: StarflowButtonVariant.danger,
-                            compact: true,
-                          ),
-                  ),
-                ],
-                const SizedBox(height: kBottomReservedSpacing),
-              ],
+      child: SettingsPageScaffold(
+        onBack: _handleCloseRequest,
+        trailing: SettingsToolbarButton(
+          label: '保存',
+          icon: Icons.save_rounded,
+          onPressed: _saveDraft,
+        ),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        children: [
+          const SettingsSectionTitle(label: '基本信息'),
+          SettingsTextInputField(
+            controller: _nameController,
+            labelText: '名称',
+            textInputAction: TextInputAction.next,
+          ),
+          const SizedBox(height: 12),
+          SettingsSelectionTile(
+            title: '类型',
+            value: _kind.label,
+            onPressed: _openKindPicker,
+          ),
+          const SettingsSectionTitle(label: '连接'),
+          SettingsTextInputField(
+            controller: _endpointController,
+            labelText: 'Endpoint',
+            keyboardType: TextInputType.url,
+            textInputAction: TextInputAction.next,
+            autocorrect: false,
+            hintText: _kind.defaultEndpoint,
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SettingsActionButton(
+              label: _isTestingConnection ? '测试中...' : '测试连接',
+              icon: Icons.network_check_rounded,
+              onPressed: _isTestingConnection ? null : _testConnection,
             ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: OverlayToolbar(
-                onBack: _handleCloseRequest,
-                trailing: isTelevision
-                    ? Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: TvAdaptiveButton(
-                          label: '保存',
-                          icon: Icons.save_rounded,
-                          onPressed: _saveDraft,
-                          variant: TvButtonVariant.text,
-                        ),
-                      )
-                    : StarflowButton(
-                        label: '保存',
-                        onPressed: _saveDraft,
-                        variant: StarflowButtonVariant.ghost,
-                        compact: true,
-                      ),
+          ),
+          if (_connectionTestMessage.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              _connectionTestMessage,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: _connectionTestSucceeded == false
+                        ? Theme.of(context).colorScheme.error
+                        : const Color(0xFF7F8FAE),
+                  ),
+            ),
+          ],
+          const SettingsSectionTitle(label: '认证（可选）'),
+          SettingsExpandableSection(
+            title: 'Token / 账号',
+            subtitle: 'JWT、API Key，或用户名密码自动登录',
+            expanded: _advancedAuthExpanded,
+            onChanged: (expanded) {
+              setState(() => _advancedAuthExpanded = expanded);
+            },
+            children: [
+              SettingsTextInputField(
+                controller: _apiKeyController,
+                labelText: 'JWT Token / API Key',
+                minLines: 1,
+                maxLines: 4,
+                alignLabelWithHint: true,
+                summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
+              ),
+              const SizedBox(height: 12),
+              AutofillGroup(
+                child: Column(
+                  children: [
+                    SettingsTextInputField(
+                      controller: _usernameController,
+                      labelText: '登录用户名',
+                      textInputAction: TextInputAction.next,
+                      autofillHints: const [AutofillHints.username],
+                    ),
+                    const SizedBox(height: 12),
+                    SettingsTextInputField(
+                      controller: _passwordController,
+                      labelText: '登录密码',
+                      obscureText: true,
+                      textInputAction: TextInputAction.done,
+                      autofillHints: const [AutofillHints.password],
+                      summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SettingsSectionTitle(label: '结果筛选'),
+          SettingsExpandableSection(
+            title: '网盘类型',
+            subtitle: _selectedCloudTypesLabel(),
+            expanded: _cloudTypesExpanded,
+            onChanged: (expanded) {
+              setState(() => _cloudTypesExpanded = expanded);
+            },
+            children: [
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  SettingsActionButton(
+                    label: '全选',
+                    icon: Icons.select_all_rounded,
+                    onPressed: () {
+                      setState(() {
+                        _selectedCloudTypes = SearchCloudType.values.toSet();
+                      });
+                    },
+                    variant: StarflowButtonVariant.ghost,
+                  ),
+                  SettingsActionButton(
+                    label: '清空',
+                    icon: Icons.clear_all_rounded,
+                    onPressed: () {
+                      setState(() {
+                        _selectedCloudTypes = <SearchCloudType>{};
+                      });
+                    },
+                    variant: StarflowButtonVariant.ghost,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ...SearchCloudType.values.map(
+                (item) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: StarflowCheckboxTile(
+                    title: item.label,
+                    value: _selectedCloudTypes.contains(item),
+                    onChanged: (selected) {
+                      setState(() {
+                        if (selected) {
+                          _selectedCloudTypes.add(item);
+                        } else {
+                          _selectedCloudTypes.remove(item);
+                        }
+                      });
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SettingsTextInputField(
+            controller: _blockedKeywordsController,
+            labelText: '过滤词',
+            minLines: 1,
+            maxLines: 3,
+          ),
+          const SizedBox(height: 12),
+          SettingsToggleTile(
+            title: '强匹配',
+            value: _strongMatchEnabled,
+            onChanged: (value) {
+              setState(() => _strongMatchEnabled = value);
+            },
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '开启后，标题只要包含搜索词拆分后的词组，或中文搜索词中这些字的任意组合，就会保留。',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      height: 1.35,
+                    ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SettingsTextInputField(
+            controller: _maxTitleLengthController,
+            labelText: '标题长度上限',
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            hintText: '50',
+          ),
+          SettingsToggleTile(
+            title: '启用此搜索服务',
+            value: _enabled,
+            onChanged: (value) => setState(() => _enabled = value),
+          ),
+          if (widget.initial != null) ...[
+            const SizedBox(height: 28),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SettingsActionButton(
+                label: '删除此搜索服务',
+                icon: Icons.delete_outline_rounded,
+                onPressed: _confirmDeleteSearchProvider,
+                variant: StarflowButtonVariant.danger,
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({required this.theme, required this.label});
-
-  final ThemeData theme;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 22, bottom: 10),
-      child: Text(
-        label,
-        style: theme.textTheme.titleSmall?.copyWith(
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.2,
-          color: theme.colorScheme.primary,
-        ),
+        ],
       ),
     );
   }

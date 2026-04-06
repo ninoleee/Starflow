@@ -117,4 +117,148 @@ void main() {
     expect(loaded, isNull);
     expect(summary.entryCount, 0);
   });
+
+  test('removes only the deleted resource from cached match choices', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final repository = LocalStorageCacheRepository(sharedPreferences: prefs);
+
+    const seedTarget = MediaDetailTarget(
+      title: '星际穿越',
+      posterUrl: '',
+      overview: '',
+      year: 2014,
+      searchQuery: '星际穿越',
+      doubanId: '1889243',
+    );
+    const deletedChoice = MediaDetailTarget(
+      title: '星际穿越',
+      posterUrl: '',
+      overview: '',
+      year: 2014,
+      availabilityLabel: '资源已就绪：WebDAV · nas',
+      sourceId: 'nas-main',
+      itemId: 'https://nas.example.com/dav/Movies/Interstellar.mkv',
+      itemType: 'movie',
+      sectionId: 'https://nas.example.com/dav/Movies/',
+      sectionName: 'Movies',
+      resourcePath: '/dav/Movies/Interstellar.mkv',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'nas',
+    );
+    const remainingChoice = MediaDetailTarget(
+      title: '星际穿越',
+      posterUrl: '',
+      overview: '',
+      year: 2014,
+      availabilityLabel: '资源已就绪：WebDAV · nas',
+      sourceId: 'nas-main',
+      itemId: 'https://nas.example.com/dav/Movies/Interstellar-Alt.mkv',
+      itemType: 'movie',
+      sectionId: 'https://nas.example.com/dav/Movies/',
+      sectionName: 'Movies',
+      resourcePath: '/dav/Movies/Interstellar-Alt.mkv',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'nas',
+    );
+
+    await repository.saveDetailTarget(
+      seedTarget: seedTarget,
+      resolvedTarget: deletedChoice,
+      libraryMatchChoices: const [deletedChoice, remainingChoice],
+      selectedLibraryMatchIndex: 0,
+    );
+
+    await repository.clearDetailCacheForResource(
+      sourceId: 'nas-main',
+      resourceId: 'https://nas.example.com/dav/Movies/Interstellar.mkv',
+      resourcePath: '/dav/Movies/Interstellar.mkv',
+    );
+
+    final cachedState = await repository.loadDetailState(seedTarget);
+    expect(cachedState, isNotNull);
+    expect(cachedState!.target.itemId, remainingChoice.itemId);
+    expect(cachedState.libraryMatchChoices.map((item) => item.itemId), [
+      remainingChoice.itemId,
+    ]);
+    expect(cachedState.selectedLibraryMatchIndex, 0);
+    expect(
+      await repository.loadDetailTarget(
+        const MediaDetailTarget(
+          title: '',
+          posterUrl: '',
+          overview: '',
+          sourceId: 'nas-main',
+          itemId: 'https://nas.example.com/dav/Movies/Interstellar.mkv',
+        ),
+      ),
+      isNull,
+    );
+  });
+
+  test('strips resolved local state when deleted resource was the only match',
+      () async {
+    final prefs = await SharedPreferences.getInstance();
+    final repository = LocalStorageCacheRepository(sharedPreferences: prefs);
+
+    const seedTarget = MediaDetailTarget(
+      title: '黑客帝国',
+      posterUrl: '',
+      overview: '',
+      year: 1999,
+      searchQuery: '黑客帝国',
+      tmdbId: '603',
+    );
+    final resolvedTarget = seedTarget.copyWith(
+      availabilityLabel: '资源已就绪：WebDAV · nas',
+      sourceId: 'nas-main',
+      itemId: 'https://nas.example.com/dav/Movies/The%20Matrix.mkv',
+      itemType: 'movie',
+      sectionId: 'https://nas.example.com/dav/Movies/',
+      sectionName: 'Movies',
+      resourcePath: '/dav/Movies/The Matrix.mkv',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'nas',
+      playbackTarget: const PlaybackTarget(
+        title: '黑客帝国',
+        sourceId: 'nas-main',
+        streamUrl: 'https://nas.example.com/dav/Movies/The%20Matrix.mkv',
+        sourceName: 'nas',
+        sourceKind: MediaSourceKind.nas,
+        actualAddress: '/dav/Movies/The Matrix.mkv',
+      ),
+    );
+
+    await repository.saveDetailTarget(
+      seedTarget: seedTarget,
+      resolvedTarget: resolvedTarget,
+    );
+
+    await repository.clearDetailCacheForResource(
+      sourceId: 'nas-main',
+      resourceId: 'https://nas.example.com/dav/Movies/The%20Matrix.mkv',
+      resourcePath: '/dav/Movies/The Matrix.mkv',
+    );
+
+    final cached = await repository.loadDetailTarget(seedTarget);
+    expect(cached, isNotNull);
+    expect(cached!.sourceId, isEmpty);
+    expect(cached.itemId, isEmpty);
+    expect(cached.resourcePath, isEmpty);
+    expect(cached.sourceName, isEmpty);
+    expect(cached.playbackTarget, isNull);
+    expect(cached.availabilityLabel, '无');
+    expect(cached.tmdbId, '603');
+    expect(
+      await repository.loadDetailTarget(
+        const MediaDetailTarget(
+          title: '',
+          posterUrl: '',
+          overview: '',
+          sourceId: 'nas-main',
+          itemId: 'https://nas.example.com/dav/Movies/The%20Matrix.mkv',
+        ),
+      ),
+      isNull,
+    );
+  });
 }

@@ -108,6 +108,34 @@ void main() {
       expect(strm.addedAt, DateTime.utc(2026, 4, 3, 9, 0, 0));
     });
 
+    test('resolves strm target url from a resource path directly', () async {
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/One%20Piece.strm') {
+            return http.Response('https://pan.quark.cn/s/abc123\n', 200);
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final resolvedUrl = await client.resolveStrmTargetUrl(
+        source: const MediaSourceConfig(
+          id: 'nas-main',
+          name: 'Home NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/',
+          enabled: true,
+          username: 'alice',
+          password: 'secret',
+        ),
+        resourcePath: 'https://nas.example.com/dav/Shows/One%20Piece.strm',
+      );
+
+      expect(resolvedUrl, 'https://pan.quark.cn/s/abc123');
+    });
+
     test('can disable local sidecar scraping independently from structure',
         () async {
       final client = WebDavNasClient(
@@ -858,6 +886,122 @@ void main() {
         'https://media.example.com/lazy/e01.m3u8',
       );
       expect(resolved.headers, isEmpty);
+    });
+
+    test('deletes files using their direct WebDAV resource uri', () async {
+      final requests = <String>[];
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          requests.add('${request.method} ${request.url}');
+          if (request.method == 'DELETE' &&
+              request.url.toString() ==
+                  'https://nas.example.com/library/Movies/Delete%20Me.mkv') {
+            return http.Response('', 204);
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/library/Movies/') {
+            return http.Response(
+              '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/library/Movies/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Movies</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''',
+              207,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      await client.deleteResource(
+        const MediaSourceConfig(
+          id: 'nas-delete',
+          name: 'Delete NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/',
+          enabled: true,
+        ),
+        resourcePath: 'https://nas.example.com/library/Movies/Delete%20Me.mkv',
+        sectionId: 'https://nas.example.com/dav/Movies/',
+      );
+
+      expect(
+        requests,
+        contains(
+          'DELETE https://nas.example.com/library/Movies/Delete%20Me.mkv',
+        ),
+      );
+    });
+
+    test('throws when WebDAV delete returns success but file still exists',
+        () async {
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'DELETE' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Movies/Delete%20Me.mkv') {
+            return http.Response('', 204);
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() == 'https://nas.example.com/dav/Movies/') {
+            return http.Response(
+              '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Movies/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Movies</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Movies/Delete%20Me.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Delete Me.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''',
+              207,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      await expectLater(
+        () => client.deleteResource(
+          const MediaSourceConfig(
+            id: 'nas-delete',
+            name: 'Delete NAS',
+            kind: MediaSourceKind.nas,
+            endpoint: 'https://nas.example.com/dav/',
+            enabled: true,
+          ),
+          resourcePath: '/dav/Movies/Delete Me.mkv',
+          sectionId: 'https://nas.example.com/dav/Movies/',
+        ),
+        throwsA(
+          isA<Exception>().having(
+            (error) => error.toString(),
+            'message',
+            contains('删除未生效'),
+          ),
+        ),
+      );
     });
   });
 }

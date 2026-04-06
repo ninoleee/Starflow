@@ -495,22 +495,10 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                             ),
                           ),
                           const SizedBox(height: 10),
-                          if (isTelevision)
-                            FocusTraversalOrder(
-                              order: const NumericFocusOrder(2),
-                              child: TvSelectionTile(
-                                focusNode: preferSeriesFocusNode,
-                                title: '优先按剧集匹配',
-                                value: preferSeries ? '已开启' : '已关闭',
-                                onPressed: () {
-                                  setState(() {
-                                    preferSeries = !preferSeries;
-                                  });
-                                },
-                              ),
-                            )
-                          else
-                            StarflowCheckboxTile(
+                          FocusTraversalOrder(
+                            order: const NumericFocusOrder(2),
+                            child: StarflowCheckboxTile(
+                              focusNode: preferSeriesFocusNode,
                               title: '优先按剧集匹配',
                               value: preferSeries,
                               onChanged: (value) {
@@ -519,6 +507,7 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                                 });
                               },
                             ),
+                          ),
                           if (loading) ...[
                             const SizedBox(height: 6),
                             const LinearProgressIndicator(),
@@ -554,42 +543,27 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  actions: isTelevision
-                      ? [
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(3),
-                            child: TvAdaptiveButton(
-                              label: '关闭',
-                              icon: Icons.close_rounded,
-                              focusNode: closeFocusNode,
-                              onPressed: () =>
-                                  Navigator.of(dialogContext).pop(),
-                              variant: TvButtonVariant.text,
-                            ),
-                          ),
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(4),
-                            child: TvAdaptiveButton(
-                              label: '开始测试',
-                              icon: Icons.play_arrow_rounded,
-                              focusNode: startFocusNode,
-                              onPressed: loading ? null : runTest,
-                            ),
-                          ),
-                        ]
-                      : [
-                          StarflowButton(
-                            label: '关闭',
-                            onPressed: () => Navigator.of(dialogContext).pop(),
-                            variant: StarflowButtonVariant.ghost,
-                            compact: true,
-                          ),
-                          StarflowButton(
-                            label: '开始测试',
-                            onPressed: loading ? null : runTest,
-                            compact: true,
-                          ),
-                        ],
+                  actions: [
+                    FocusTraversalOrder(
+                      order: const NumericFocusOrder(3),
+                      child: SettingsActionButton(
+                        label: '关闭',
+                        icon: Icons.close_rounded,
+                        focusNode: closeFocusNode,
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        variant: StarflowButtonVariant.ghost,
+                      ),
+                    ),
+                    FocusTraversalOrder(
+                      order: const NumericFocusOrder(4),
+                      child: SettingsActionButton(
+                        label: '开始测试',
+                        icon: Icons.play_arrow_rounded,
+                        focusNode: startFocusNode,
+                        onPressed: loading ? null : runTest,
+                      ),
+                    ),
+                  ],
                 ),
               );
               return wrapTelevisionDialogBackHandling(
@@ -798,42 +772,27 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  actions: isTelevision
-                      ? [
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(5),
-                            child: TvAdaptiveButton(
-                              label: '关闭',
-                              icon: Icons.close_rounded,
-                              focusNode: closeFocusNode,
-                              onPressed: () =>
-                                  Navigator.of(dialogContext).pop(),
-                              variant: TvButtonVariant.text,
-                            ),
-                          ),
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(6),
-                            child: TvAdaptiveButton(
-                              label: '开始测试',
-                              icon: Icons.play_arrow_rounded,
-                              focusNode: startFocusNode,
-                              onPressed: loading ? null : runTest,
-                            ),
-                          ),
-                        ]
-                      : [
-                          StarflowButton(
-                            label: '关闭',
-                            onPressed: () => Navigator.of(dialogContext).pop(),
-                            variant: StarflowButtonVariant.ghost,
-                            compact: true,
-                          ),
-                          StarflowButton(
-                            label: '开始测试',
-                            onPressed: loading ? null : runTest,
-                            compact: true,
-                          ),
-                        ],
+                  actions: [
+                    FocusTraversalOrder(
+                      order: const NumericFocusOrder(5),
+                      child: SettingsActionButton(
+                        label: '关闭',
+                        icon: Icons.close_rounded,
+                        focusNode: closeFocusNode,
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        variant: StarflowButtonVariant.ghost,
+                      ),
+                    ),
+                    FocusTraversalOrder(
+                      order: const NumericFocusOrder(6),
+                      child: SettingsActionButton(
+                        label: '开始测试',
+                        icon: Icons.play_arrow_rounded,
+                        focusNode: startFocusNode,
+                        onPressed: loading ? null : runTest,
+                      ),
+                    ),
+                  ],
                 ),
               );
               return wrapTelevisionDialogBackHandling(
@@ -981,22 +940,10 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                             ),
                           ),
                           const SizedBox(height: 10),
-                          if (isTelevision)
-                            FocusTraversalOrder(
-                              order: const NumericFocusOrder(3),
-                              child: TvSelectionTile(
-                                focusNode: preferSeriesFocusNode,
-                                title: '优先按剧集匹配',
-                                value: preferSeries ? '已开启' : '已关闭',
-                                onPressed: () {
-                                  setState(() {
-                                    preferSeries = !preferSeries;
-                                  });
-                                },
-                              ),
-                            )
-                          else
-                            StarflowCheckboxTile(
+                          FocusTraversalOrder(
+                            order: const NumericFocusOrder(3),
+                            child: StarflowCheckboxTile(
+                              focusNode: preferSeriesFocusNode,
                               title: '优先按剧集匹配',
                               value: preferSeries,
                               onChanged: (value) {
@@ -1005,6 +952,7 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                                 });
                               },
                             ),
+                          ),
                           if (loading) ...[
                             const SizedBox(height: 6),
                             const LinearProgressIndicator(),
@@ -1041,42 +989,27 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  actions: isTelevision
-                      ? [
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(4),
-                            child: TvAdaptiveButton(
-                              label: '关闭',
-                              icon: Icons.close_rounded,
-                              focusNode: closeFocusNode,
-                              onPressed: () =>
-                                  Navigator.of(dialogContext).pop(),
-                              variant: TvButtonVariant.text,
-                            ),
-                          ),
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(5),
-                            child: TvAdaptiveButton(
-                              label: '开始测试',
-                              icon: Icons.play_arrow_rounded,
-                              focusNode: startFocusNode,
-                              onPressed: loading ? null : runTest,
-                            ),
-                          ),
-                        ]
-                      : [
-                          StarflowButton(
-                            label: '关闭',
-                            onPressed: () => Navigator.of(dialogContext).pop(),
-                            variant: StarflowButtonVariant.ghost,
-                            compact: true,
-                          ),
-                          StarflowButton(
-                            label: '开始测试',
-                            onPressed: loading ? null : runTest,
-                            compact: true,
-                          ),
-                        ],
+                  actions: [
+                    FocusTraversalOrder(
+                      order: const NumericFocusOrder(4),
+                      child: SettingsActionButton(
+                        label: '关闭',
+                        icon: Icons.close_rounded,
+                        focusNode: closeFocusNode,
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        variant: StarflowButtonVariant.ghost,
+                      ),
+                    ),
+                    FocusTraversalOrder(
+                      order: const NumericFocusOrder(5),
+                      child: SettingsActionButton(
+                        label: '开始测试',
+                        icon: Icons.play_arrow_rounded,
+                        focusNode: startFocusNode,
+                        onPressed: loading ? null : runTest,
+                      ),
+                    ),
+                  ],
                 ),
               );
               return wrapTelevisionDialogBackHandling(

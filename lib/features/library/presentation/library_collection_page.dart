@@ -194,7 +194,11 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage> {
   }
 
   Future<void> _confirmDeleteResource(MediaItem item) async {
-    final resourcePath = item.actualAddress.trim();
+    final directResourceUri = Uri.tryParse(item.id.trim());
+    final resourcePath =
+        directResourceUri != null && directResourceUri.hasScheme
+            ? item.id.trim()
+            : item.actualAddress.trim();
     if (resourcePath.isEmpty) {
       return;
     }

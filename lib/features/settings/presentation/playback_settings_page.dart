@@ -1,9 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/core/platform/tv_platform.dart';
-import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
@@ -122,7 +119,6 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     return PopScope<void>(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -146,51 +142,17 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
                 ),
           ),
           const SizedBox(height: 18),
-          if (isTelevision)
-            StarflowSelectionTile(
-              title: '最大超时时间（秒）',
-              value: '${_draftSeconds()} 秒',
-              onPressed: _openTimeoutPicker,
-            )
-          else
-            TextField(
-              controller: _timeoutController,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: '最大超时时间（秒）',
-                hintText: '20',
-              ),
-            ),
+          SettingsSelectionTile(
+            title: '最大超时时间（秒）',
+            value: '${_draftSeconds()} 秒',
+            onPressed: _openTimeoutPicker,
+          ),
           const SizedBox(height: 18),
-          if (isTelevision)
-            StarflowSelectionTile(
-              title: '播放器内核',
-              value: _draftPlaybackEngine.label,
-              onPressed: _openPlaybackEnginePicker,
-            )
-          else
-            DropdownButtonFormField<PlaybackEngine>(
-              initialValue: _draftPlaybackEngine,
-              decoration: const InputDecoration(
-                labelText: '播放器内核',
-              ),
-              items: [
-                for (final engine in PlaybackEngine.values)
-                  DropdownMenuItem<PlaybackEngine>(
-                    value: engine,
-                    child: Text(engine.label),
-                  ),
-              ],
-              onChanged: (value) {
-                if (value == null) {
-                  return;
-                }
-                setState(() {
-                  _draftPlaybackEngine = value;
-                });
-              },
-            ),
+          SettingsSelectionTile(
+            title: '播放器内核',
+            value: _draftPlaybackEngine.label,
+            onPressed: _openPlaybackEnginePicker,
+          ),
           const SizedBox(height: 8),
           Text(
             _draftPlaybackEngine.description,
@@ -199,34 +161,11 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
                 ),
           ),
           const SizedBox(height: 18),
-          if (isTelevision)
-            StarflowSelectionTile(
-              title: '解码模式',
-              value: _draftPlaybackDecodeMode.label,
-              onPressed: _openPlaybackDecodeModePicker,
-            )
-          else
-            DropdownButtonFormField<PlaybackDecodeMode>(
-              initialValue: _draftPlaybackDecodeMode,
-              decoration: const InputDecoration(
-                labelText: '解码模式',
-              ),
-              items: [
-                for (final mode in PlaybackDecodeMode.values)
-                  DropdownMenuItem<PlaybackDecodeMode>(
-                    value: mode,
-                    child: Text(mode.label),
-                  ),
-              ],
-              onChanged: (value) {
-                if (value == null) {
-                  return;
-                }
-                setState(() {
-                  _draftPlaybackDecodeMode = value;
-                });
-              },
-            ),
+          SettingsSelectionTile(
+            title: '解码模式',
+            value: _draftPlaybackDecodeMode.label,
+            onPressed: _openPlaybackDecodeModePicker,
+          ),
           const SizedBox(height: 8),
           Text(
             _buildPlaybackDecodeModeDescription(),
@@ -235,7 +174,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
                 ),
           ),
           const SizedBox(height: 18),
-          StarflowToggleTile(
+          SettingsToggleTile(
             title: '后台播放',
             subtitle: 'Android 切后台会进入小窗继续播放；iOS 会继续后台播放音频。',
             value: _draftBackgroundPlaybackEnabled,
@@ -246,38 +185,16 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
             },
           ),
           const SizedBox(height: 18),
-          if (isTelevision)
-            StarflowSelectionTile(
-              title: '默认倍速',
-              value: _formatSpeedLabel(_draftPlaybackSpeed),
-              onPressed: _openSpeedPicker,
-            )
-          else
-            DropdownButtonFormField<double>(
-              initialValue: _draftPlaybackSpeed,
-              decoration: const InputDecoration(
-                labelText: '默认倍速',
-              ),
-              items: [
-                for (final speed in _speedOptions)
-                  DropdownMenuItem<double>(
-                    value: speed,
-                    child: Text(_formatSpeedLabel(speed)),
-                  ),
-              ],
-              onChanged: (value) {
-                if (value == null) {
-                  return;
-                }
-                setState(() {
-                  _draftPlaybackSpeed = value;
-                });
-              },
-            ),
+          SettingsSelectionTile(
+            title: '默认倍速',
+            value: _formatSpeedLabel(_draftPlaybackSpeed),
+            onPressed: _openSpeedPicker,
+          ),
           const SizedBox(height: 18),
-          StarflowSelectionTile(
+          SettingsSelectionTile(
             title: '字幕',
             subtitle: _subtitleSettingsSummary(),
+            value: '编辑',
             onPressed: _openSubtitleSettingsPage,
           ),
         ],
@@ -287,23 +204,12 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
 
   Future<void> _openTimeoutPicker() async {
     final options = <int>[5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 300, 600];
-    final selection = await showDialog<int>(
+    final selection = await showSettingsOptionDialog<int>(
       context: context,
-      builder: (context) {
-        final current = _draftSeconds();
-        return SimpleDialog(
-          title: const Text('选择最大超时时间'),
-          children: [
-            for (final seconds in options)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(context).pop(seconds),
-                child: Text(
-                  seconds == current ? '$seconds 秒  当前' : '$seconds 秒',
-                ),
-              ),
-          ],
-        );
-      },
+      title: '选择最大超时时间',
+      options: options,
+      currentValue: _draftSeconds(),
+      labelBuilder: (seconds) => '$seconds 秒',
     );
     if (selection == null) {
       return;
@@ -314,24 +220,12 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   }
 
   Future<void> _openSpeedPicker() async {
-    final selection = await showDialog<double>(
+    final selection = await showSettingsOptionDialog<double>(
       context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: const Text('选择默认倍速'),
-          children: [
-            for (final speed in _speedOptions)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(context).pop(speed),
-                child: Text(
-                  speed == _draftPlaybackSpeed
-                      ? '${_formatSpeedLabel(speed)}  当前'
-                      : _formatSpeedLabel(speed),
-                ),
-              ),
-          ],
-        );
-      },
+      title: '选择默认倍速',
+      options: _speedOptions,
+      currentValue: _draftPlaybackSpeed,
+      labelBuilder: _formatSpeedLabel,
     );
     if (selection == null) {
       return;
@@ -360,24 +254,12 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   }
 
   Future<void> _openPlaybackEnginePicker() async {
-    final selection = await showDialog<PlaybackEngine>(
+    final selection = await showSettingsOptionDialog<PlaybackEngine>(
       context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: const Text('选择播放器内核'),
-          children: [
-            for (final engine in PlaybackEngine.values)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(context).pop(engine),
-                child: Text(
-                  engine == _draftPlaybackEngine
-                      ? '${engine.label}  当前'
-                      : engine.label,
-                ),
-              ),
-          ],
-        );
-      },
+      title: '选择播放器内核',
+      options: PlaybackEngine.values,
+      currentValue: _draftPlaybackEngine,
+      labelBuilder: (engine) => engine.label,
     );
     if (selection == null) {
       return;
@@ -388,24 +270,12 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   }
 
   Future<void> _openPlaybackDecodeModePicker() async {
-    final selection = await showDialog<PlaybackDecodeMode>(
+    final selection = await showSettingsOptionDialog<PlaybackDecodeMode>(
       context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: const Text('选择解码模式'),
-          children: [
-            for (final mode in PlaybackDecodeMode.values)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(context).pop(mode),
-                child: Text(
-                  mode == _draftPlaybackDecodeMode
-                      ? '${mode.label}  当前'
-                      : mode.label,
-                ),
-              ),
-          ],
-        );
-      },
+      title: '选择解码模式',
+      options: PlaybackDecodeMode.values,
+      currentValue: _draftPlaybackDecodeMode,
+      labelBuilder: (mode) => mode.label,
     );
     if (selection == null) {
       return;
@@ -488,7 +358,6 @@ class _PlaybackSubtitleSettingsPageState
 
   @override
   Widget build(BuildContext context) {
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     return PopScope<void>(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -519,94 +388,36 @@ class _PlaybackSubtitleSettingsPageState
                 ),
           ),
           const SizedBox(height: 18),
-          if (isTelevision)
-            StarflowSelectionTile(
-              title: '默认字幕策略',
-              value: _draftSubtitlePreference.label,
-              onPressed: _openSubtitlePreferencePicker,
-            )
-          else
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    for (final preference in PlaybackSubtitlePreference.values)
-                      StarflowChipButton(
-                        label: preference.label,
-                        selected: preference == _draftSubtitlePreference,
-                        onPressed: () {
-                          setState(() {
-                            _draftSubtitlePreference = preference;
-                          });
-                        },
-                      ),
-                  ],
+          SettingsSelectionTile(
+            title: '默认字幕策略',
+            value: _draftSubtitlePreference.label,
+            onPressed: _openSubtitlePreferencePicker,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _draftSubtitlePreference.description,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  _draftSubtitlePreference.description,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-              ],
-            ),
+          ),
           const SizedBox(height: 18),
-          if (isTelevision)
-            StarflowSelectionTile(
-              title: '字幕大小',
-              value: _draftSubtitleScale.label,
-              onPressed: _openSubtitleScalePicker,
-            )
-          else
-            DropdownButtonFormField<PlaybackSubtitleScale>(
-              initialValue: _draftSubtitleScale,
-              decoration: const InputDecoration(
-                labelText: '字幕大小',
-              ),
-              items: [
-                for (final scale in PlaybackSubtitleScale.values)
-                  DropdownMenuItem<PlaybackSubtitleScale>(
-                    value: scale,
-                    child: Text(scale.label),
-                  ),
-              ],
-              onChanged: (value) {
-                if (value == null) {
-                  return;
-                }
-                setState(() {
-                  _draftSubtitleScale = value;
-                });
-              },
-            ),
+          SettingsSelectionTile(
+            title: '字幕大小',
+            value: _draftSubtitleScale.label,
+            onPressed: _openSubtitleScalePicker,
+          ),
         ],
       ),
     );
   }
 
   Future<void> _openSubtitlePreferencePicker() async {
-    final selection = await showDialog<PlaybackSubtitlePreference>(
+    final selection = await showSettingsOptionDialog<PlaybackSubtitlePreference>(
       context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: const Text('选择默认字幕策略'),
-          children: [
-            for (final preference in PlaybackSubtitlePreference.values)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(context).pop(preference),
-                child: Text(
-                  preference == _draftSubtitlePreference
-                      ? '${preference.label}  当前'
-                      : preference.label,
-                ),
-              ),
-          ],
-        );
-      },
+      title: '选择默认字幕策略',
+      options: PlaybackSubtitlePreference.values,
+      currentValue: _draftSubtitlePreference,
+      labelBuilder: (preference) => preference.label,
     );
     if (selection == null) {
       return;
@@ -617,24 +428,12 @@ class _PlaybackSubtitleSettingsPageState
   }
 
   Future<void> _openSubtitleScalePicker() async {
-    final selection = await showDialog<PlaybackSubtitleScale>(
+    final selection = await showSettingsOptionDialog<PlaybackSubtitleScale>(
       context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: const Text('选择字幕大小'),
-          children: [
-            for (final scale in PlaybackSubtitleScale.values)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(context).pop(scale),
-                child: Text(
-                  scale == _draftSubtitleScale
-                      ? '${scale.label}  当前'
-                      : scale.label,
-                ),
-              ),
-          ],
-        );
-      },
+      title: '选择字幕大小',
+      options: PlaybackSubtitleScale.values,
+      currentValue: _draftSubtitleScale,
+      labelBuilder: (scale) => scale.label,
     );
     if (selection == null) {
       return;

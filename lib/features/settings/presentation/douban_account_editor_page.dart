@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';

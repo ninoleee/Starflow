@@ -249,8 +249,8 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
       appSettingsProvider
           .select((settings) => settings.highPerformanceModeEnabled),
     );
-    final effectiveTelevisionEffectsEnabled = translucentEffectsEnabled &&
-        !(isTelevision && highPerformanceModeEnabled);
+    final effectiveTranslucentEffectsEnabled =
+        translucentEffectsEnabled && !highPerformanceModeEnabled;
     final shellChild = HeroMode(
       enabled: !backgroundWorkSuspended,
       child: TickerMode(
@@ -269,7 +269,7 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
           ? _TelevisionNavigationShell(
               currentIndex: widget.navigationShell.currentIndex,
               onDestinationSelected: widget.navigationShell.goBranch,
-              translucentEffectsEnabled: effectiveTelevisionEffectsEnabled,
+              translucentEffectsEnabled: effectiveTranslucentEffectsEnabled,
               child: shellChild,
             )
           : NotificationListener<ScrollNotification>(
@@ -298,7 +298,7 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
                       child: ClipRRect(
                         borderRadius:
                             BorderRadius.circular(_kBottomNavShellRadius),
-                        child: translucentEffectsEnabled
+                        child: effectiveTranslucentEffectsEnabled
                             ? BackdropFilter(
                                 filter:
                                     ImageFilter.blur(sigmaX: 24, sigmaY: 24),

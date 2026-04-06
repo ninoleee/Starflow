@@ -173,7 +173,7 @@ extension PlaybackDecodeModeX on PlaybackDecodeMode {
   String get description {
     switch (this) {
       case PlaybackDecodeMode.auto:
-        return '按设备能力自动选择；TV 高性能模式下会更积极地优先硬解。';
+        return '按设备能力自动选择；高性能模式下会更积极地优先硬解。';
       case PlaybackDecodeMode.hardwarePreferred:
         return '尽量优先使用硬件解码，适合高码率和 4K 片源。';
       case PlaybackDecodeMode.softwarePreferred:
@@ -487,6 +487,7 @@ class NetworkStorageConfig {
     this.quarkCookie = '',
     this.quarkSaveFolderId = '0',
     this.quarkSaveFolderPath = '/',
+    this.syncDeleteQuarkEnabled = false,
     this.smartStrmWebhookUrl = '',
     this.smartStrmTaskName = '',
     this.smartStrmDelaySeconds = 1,
@@ -497,6 +498,7 @@ class NetworkStorageConfig {
   final String quarkCookie;
   final String quarkSaveFolderId;
   final String quarkSaveFolderPath;
+  final bool syncDeleteQuarkEnabled;
   final String smartStrmWebhookUrl;
   final String smartStrmTaskName;
   final int smartStrmDelaySeconds;
@@ -510,6 +512,7 @@ class NetworkStorageConfig {
         smartStrmDelaySeconds != 1 ||
         quarkSaveFolderId.trim() != '0' ||
         quarkSaveFolderPath.trim() != '/' ||
+        syncDeleteQuarkEnabled ||
         refreshMediaSourceIds.isNotEmpty ||
         refreshDelaySeconds != 1;
   }
@@ -518,6 +521,7 @@ class NetworkStorageConfig {
     String? quarkCookie,
     String? quarkSaveFolderId,
     String? quarkSaveFolderPath,
+    bool? syncDeleteQuarkEnabled,
     String? smartStrmWebhookUrl,
     String? smartStrmTaskName,
     int? smartStrmDelaySeconds,
@@ -528,6 +532,8 @@ class NetworkStorageConfig {
       quarkCookie: quarkCookie ?? this.quarkCookie,
       quarkSaveFolderId: quarkSaveFolderId ?? this.quarkSaveFolderId,
       quarkSaveFolderPath: quarkSaveFolderPath ?? this.quarkSaveFolderPath,
+      syncDeleteQuarkEnabled:
+          syncDeleteQuarkEnabled ?? this.syncDeleteQuarkEnabled,
       smartStrmWebhookUrl: smartStrmWebhookUrl ?? this.smartStrmWebhookUrl,
       smartStrmTaskName: smartStrmTaskName ?? this.smartStrmTaskName,
       smartStrmDelaySeconds:
@@ -543,6 +549,7 @@ class NetworkStorageConfig {
       'quarkCookie': quarkCookie,
       'quarkSaveFolderId': quarkSaveFolderId,
       'quarkSaveFolderPath': quarkSaveFolderPath,
+      'syncDeleteQuarkEnabled': syncDeleteQuarkEnabled,
       'smartStrmWebhookUrl': smartStrmWebhookUrl,
       'smartStrmTaskName': smartStrmTaskName,
       'smartStrmDelaySeconds': smartStrmDelaySeconds,
@@ -561,6 +568,7 @@ class NetworkStorageConfig {
       quarkCookie: json['quarkCookie'] as String? ?? '',
       quarkSaveFolderId: json['quarkSaveFolderId'] as String? ?? '0',
       quarkSaveFolderPath: json['quarkSaveFolderPath'] as String? ?? '/',
+      syncDeleteQuarkEnabled: json['syncDeleteQuarkEnabled'] as bool? ?? false,
       smartStrmWebhookUrl: json['smartStrmWebhookUrl'] as String? ?? '',
       smartStrmTaskName: json['smartStrmTaskName'] as String? ?? '',
       smartStrmDelaySeconds: resolvedSmartStrmDelaySeconds <= 0

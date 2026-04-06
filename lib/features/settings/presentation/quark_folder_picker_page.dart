@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/app/shell_layout.dart';
-import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class QuarkFolderPickerPage extends ConsumerStatefulWidget {
   const QuarkFolderPickerPage({
@@ -103,72 +102,55 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          ListView(
-            padding: overlayToolbarPagePadding(context),
-            children: [
-              const Text(
-                '选择保存文件夹',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (var index = 0; index < _breadcrumbs.length; index++)
-                    StarflowChipButton(
-                      label: _breadcrumbs[index].path,
-                      selected: index == _breadcrumbs.length - 1,
-                      onPressed: index == _breadcrumbs.length - 1
-                          ? null
-                          : () => _goBackTo(index),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              if (_isLoading)
-                const Center(child: CircularProgressIndicator())
-              else if (_errorMessage != null)
-                Text(_errorMessage!)
-              else if (_entries.isEmpty)
-                const Text('当前目录下没有子文件夹')
-              else
-                ..._entries.map(
-                  (entry) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: StarflowSelectionTile(
-                      leading: const Icon(Icons.folder_outlined),
-                      title: entry.name,
-                      subtitle: entry.path,
-                      onPressed: () => _goToEntry(entry),
-                    ),
-                  ),
-                ),
-              const SizedBox(height: kBottomReservedSpacing),
-            ],
+    return SettingsPageScaffold(
+      trailing: SettingsToolbarButton(
+        label: '选择',
+        icon: Icons.check_rounded,
+        onPressed: _selectCurrent,
+      ),
+      children: [
+        const Text(
+          '选择保存文件夹',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
           ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: OverlayToolbar(
-              trailing: StarflowButton(
-                label: '选择',
-                onPressed: _selectCurrent,
-                variant: StarflowButtonVariant.ghost,
-                compact: true,
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (var index = 0; index < _breadcrumbs.length; index++)
+              StarflowChipButton(
+                label: _breadcrumbs[index].path,
+                selected: index == _breadcrumbs.length - 1,
+                onPressed: index == _breadcrumbs.length - 1
+                    ? null
+                    : () => _goBackTo(index),
+              ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        if (_isLoading)
+          const Center(child: CircularProgressIndicator())
+        else if (_errorMessage != null)
+          Text(_errorMessage!)
+        else if (_entries.isEmpty)
+          const Text('当前目录下没有子文件夹')
+        else
+          ..._entries.map(
+            (entry) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: StarflowSelectionTile(
+                leading: const Icon(Icons.folder_outlined),
+                title: entry.name,
+                subtitle: entry.path,
+                onPressed: () => _goToEntry(entry),
               ),
             ),
           ),
-        ],
-      ),
+      ],
     );
   }
 }

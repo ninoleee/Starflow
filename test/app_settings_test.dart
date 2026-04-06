@@ -149,6 +149,7 @@ void main() {
         'quarkCookie': 'foo=bar',
         'quarkSaveFolderId': '123',
         'quarkSaveFolderPath': '/影视',
+        'syncDeleteQuarkEnabled': true,
         'smartStrmWebhookUrl': 'http://localhost:8024/webhook/abc',
         'smartStrmTaskName': 'movie_task',
         'refreshMediaSourceIds': ['emby-a', 'webdav-b'],
@@ -159,6 +160,7 @@ void main() {
     expect(settings.networkStorage.quarkCookie, 'foo=bar');
     expect(settings.networkStorage.quarkSaveFolderId, '123');
     expect(settings.networkStorage.quarkSaveFolderPath, '/影视');
+    expect(settings.networkStorage.syncDeleteQuarkEnabled, isTrue);
     expect(
       settings.networkStorage.smartStrmWebhookUrl,
       'http://localhost:8024/webhook/abc',
@@ -174,6 +176,7 @@ void main() {
     expect(json['quarkCookie'], 'foo=bar');
     expect(json['quarkSaveFolderId'], '123');
     expect(json['quarkSaveFolderPath'], '/影视');
+    expect(json['syncDeleteQuarkEnabled'], isTrue);
     expect(json['smartStrmWebhookUrl'], 'http://localhost:8024/webhook/abc');
     expect(json['smartStrmTaskName'], 'movie_task');
     expect(json['refreshMediaSourceIds'], ['emby-a', 'webdav-b']);
@@ -186,6 +189,7 @@ void main() {
     expect(settings.networkStorage.quarkCookie, isEmpty);
     expect(settings.networkStorage.quarkSaveFolderId, '0');
     expect(settings.networkStorage.quarkSaveFolderPath, '/');
+    expect(settings.networkStorage.syncDeleteQuarkEnabled, isFalse);
     expect(settings.networkStorage.smartStrmWebhookUrl, isEmpty);
     expect(settings.networkStorage.smartStrmTaskName, isEmpty);
     expect(settings.networkStorage.refreshMediaSourceIds, isEmpty);

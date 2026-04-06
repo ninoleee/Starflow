@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
@@ -474,22 +473,12 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   }
 
   Future<void> _openKindPicker() async {
-    final selected = await showDialog<MediaSourceKind>(
+    final selected = await showSettingsOptionDialog<MediaSourceKind>(
       context: context,
-      builder: (dialogContext) {
-        return SimpleDialog(
-          title: const Text('选择类型'),
-          children: [
-            for (final item in MediaSourceKind.values)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(dialogContext).pop(item),
-                child: Text(
-                  item == _kind ? '${item.label}  当前' : item.label,
-                ),
-              ),
-          ],
-        );
-      },
+      title: '选择类型',
+      options: MediaSourceKind.values,
+      currentValue: _kind,
+      labelBuilder: (item) => item.label,
     );
     if (selected == null) {
       return;
@@ -577,8 +566,6 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final isEmby = _kind == MediaSourceKind.emby;
 
     return PopScope<void>(
@@ -589,561 +576,312 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         }
         _handleCloseRequest();
       },
-      child: Scaffold(
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            ListView(
-              padding: overlayToolbarPagePadding(context),
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      child: SettingsPageScaffold(
+        onBack: _handleCloseRequest,
+        trailing: SettingsToolbarButton(
+          label: '保存',
+          icon: Icons.save_rounded,
+          onPressed: _onSave,
+        ),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        children: [
+          const SettingsSectionTitle(label: '基本信息'),
+          SettingsTextInputField(
+            controller: _nameController,
+            labelText: '名称',
+            textInputAction: TextInputAction.next,
+          ),
+          const SizedBox(height: 12),
+          SettingsSelectionTile(
+            title: '类型',
+            value: _kind.label,
+            onPressed: _openKindPicker,
+          ),
+          const SettingsSectionTitle(label: '连接'),
+          SettingsTextInputField(
+            controller: _endpointController,
+            labelText: isEmby ? 'Endpoint' : 'WebDAV Endpoint',
+            keyboardType: TextInputType.url,
+            textInputAction: TextInputAction.next,
+            autocorrect: false,
+            hintText: isEmby
+                ? 'https://emby.example.com'
+                : 'https://nas.example.com/dav',
+          ),
+          if (!isEmby) ...[
+            const SizedBox(height: 12),
+            StarflowSelectionTile(
+              title: '当前路径',
+              subtitle:
+                  _selectedNasPath.trim().isEmpty ? '根目录' : _selectedNasPath,
+              onPressed: _endpointController.text.trim().isEmpty
+                  ? null
+                  : _pickWebDavPath,
+            ),
+          ],
+          const SizedBox(height: 12),
+          AutofillGroup(
+            child: Column(
               children: [
-                _SectionTitle(theme: theme, label: '基本信息'),
                 SettingsTextInputField(
-                  controller: _nameController,
-                  labelText: '名称',
+                  controller: _usernameController,
+                  labelText: isEmby ? 'Emby 用户名' : '用户名',
                   textInputAction: TextInputAction.next,
+                  autofillHints: const [AutofillHints.username],
                 ),
                 const SizedBox(height: 12),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '类型',
-                    value: _kind.label,
-                    onPressed: _openKindPicker,
-                  )
-                else
-                  DropdownButtonFormField<MediaSourceKind>(
-                    key: ValueKey(_kind),
-                    initialValue: _kind,
-                    decoration: const InputDecoration(labelText: '类型'),
-                    items: MediaSourceKind.values
-                        .map(
-                          (item) => DropdownMenuItem(
-                            value: item,
-                            child: Text(item.label),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        _applyKindSelection(value);
-                      }
-                    },
-                  ),
-                _SectionTitle(theme: theme, label: '连接'),
                 SettingsTextInputField(
-                  controller: _endpointController,
-                  labelText: isEmby ? 'Endpoint' : 'WebDAV Endpoint',
-                  keyboardType: TextInputType.url,
-                  textInputAction: TextInputAction.next,
-                  autocorrect: false,
-                  hintText: isEmby
-                      ? 'https://emby.example.com'
-                      : 'https://nas.example.com/dav',
+                  controller: _passwordController,
+                  labelText: isEmby ? 'Emby 密码' : 'WebDAV 密码',
+                  obscureText: true,
+                  textInputAction: TextInputAction.done,
+                  autofillHints: const [AutofillHints.password],
+                  summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
                 ),
-                if (!isEmby) ...[
-                  const SizedBox(height: 12),
-                  StarflowSelectionTile(
-                    title: '当前路径',
-                    subtitle: _selectedNasPath.trim().isEmpty
-                        ? '根目录'
-                        : _selectedNasPath,
+              ],
+            ),
+          ),
+          if (isEmby) ...[
+            const SizedBox(height: 8),
+            SettingsExpandableSection(
+              title: '高级（可选）',
+              subtitle: '手动粘贴 Access Token / API Key',
+              expanded: _advancedTokenExpanded,
+              onChanged: (expanded) {
+                setState(() => _advancedTokenExpanded = expanded);
+              },
+              children: [
+                SettingsTextInputField(
+                  controller: _tokenController,
+                  labelText: 'Access Token / API Key',
+                  minLines: 1,
+                  maxLines: 4,
+                  alignLabelWithHint: true,
+                  summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
+                ),
+              ],
+            ),
+          ] else ...[
+            const SizedBox(height: 12),
+            Text(
+              '可直接填写 WebDAV 地址、用户名和密码。',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+          const SettingsSectionTitle(label: '选择分区'),
+          if (_availableSections.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  SettingsActionButton(
+                    label: '全选',
+                    icon: Icons.select_all_rounded,
+                    onPressed: _selectAllSections,
+                    variant: StarflowButtonVariant.ghost,
+                  ),
+                  SettingsActionButton(
+                    label: '清空',
+                    icon: Icons.clear_all_rounded,
+                    onPressed: _clearAllSections,
+                    variant: StarflowButtonVariant.ghost,
+                  ),
+                ],
+              ),
+            ),
+          if (_availableSections.isNotEmpty)
+            ..._availableSections.map(
+              (section) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: StarflowCheckboxTile(
+                  title: section.title,
+                  value: _selectedSectionIds.contains(section.id),
+                  onChanged: (checked) {
+                    setState(() {
+                      _didHydrateSectionSelection = true;
+                      final nextSelection = {..._selectedSectionIds};
+                      if (checked) {
+                        nextSelection.add(section.id);
+                      } else {
+                        nextSelection.remove(section.id);
+                      }
+                      _selectedSectionIds = nextSelection;
+                    });
+                  },
+                ),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                '未选择分区',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ),
+          const SizedBox(height: 12),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _connectionMessage,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  if (isEmby && _resolvedUserId.trim().isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    SelectableText(
+                      'User ID: $_resolvedUserId',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SettingsToggleTile(
+            title: '启用此媒体源',
+            value: _enabled,
+            onChanged: (value) => setState(() => _enabled = value),
+          ),
+          if (!isEmby) ...[
+            const SizedBox(height: 12),
+            SettingsToggleTile(
+              title: '目录结构推断',
+              value: _webDavStructureInferenceEnabled,
+              onChanged: (value) {
+                setState(() {
+                  _webDavStructureInferenceEnabled = value;
+                });
+              },
+            ),
+            SettingsToggleTile(
+              title: '本地刮削/NFO',
+              value: _webDavSidecarScrapingEnabled,
+              onChanged: (value) {
+                setState(() {
+                  _webDavSidecarScrapingEnabled = value;
+                });
+              },
+            ),
+            const SizedBox(height: 8),
+            SettingsTextInputField(
+              controller: _webDavExcludedKeywordsController,
+              labelText: '过滤关键字',
+              minLines: 2,
+              maxLines: 5,
+              hintText: '比如：sample、预告片',
+              alignLabelWithHint: true,
+              summaryBuilder: (value) {
+                if (value.isEmpty) {
+                  return '未填写';
+                }
+                final keywords = value
+                    .split(RegExp(r'[\n,，;；]+'))
+                    .map((item) => item.trim())
+                    .where((item) => item.isNotEmpty)
+                    .toList(growable: false);
+                if (keywords.isEmpty) {
+                  return '未填写';
+                }
+                return '已填写 ${keywords.length} 项';
+              },
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                '支持填写多个。每行一个，或用逗号分隔；命中任意关键字的路径都会被过滤。',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ),
+          ],
+          if (isEmby) ...[
+            const SizedBox(height: 28),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              alignment: WrapAlignment.start,
+              children: [
+                SettingsActionButton(
+                  label: _isAuthenticating ? '登录中…' : '测试登录',
+                  icon: Icons.login_rounded,
+                  onPressed: _isAuthenticating ? null : _onTestEmbyLogin,
+                ),
+                SettingsActionButton(
+                  label: _isLoadingSections ? '读取中…' : '选择分区',
+                  icon: Icons.folder_open_rounded,
+                  onPressed: _isLoadingSections ||
+                          _endpointController.text.trim().isEmpty ||
+                          _tokenController.text.trim().isEmpty ||
+                          _resolvedUserId.trim().isEmpty
+                      ? null
+                      : _onFetchEmbySections,
+                ),
+              ],
+            ),
+          ] else ...[
+            const SizedBox(height: 28),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  SettingsActionButton(
+                    label: _isTestingWebDav ? '测试中…' : '测试连接',
+                    icon: Icons.cloud_done_outlined,
+                    onPressed: _isTestingWebDav ||
+                            _endpointController.text.trim().isEmpty
+                        ? null
+                        : _onTestWebDavConnection,
+                  ),
+                  SettingsActionButton(
+                    label: '选择路径',
+                    icon: Icons.folder_open_rounded,
                     onPressed: _endpointController.text.trim().isEmpty
                         ? null
                         : _pickWebDavPath,
                   ),
-                ],
-                const SizedBox(height: 12),
-                AutofillGroup(
-                  child: Column(
-                    children: [
-                      SettingsTextInputField(
-                        controller: _usernameController,
-                        labelText: isEmby ? 'Emby 用户名' : '用户名',
-                        textInputAction: TextInputAction.next,
-                        autofillHints: const [AutofillHints.username],
-                      ),
-                      const SizedBox(height: 12),
-                      SettingsTextInputField(
-                        controller: _passwordController,
-                        labelText: isEmby ? 'Emby 密码' : 'WebDAV 密码',
-                        obscureText: true,
-                        textInputAction: TextInputAction.done,
-                        autofillHints: const [AutofillHints.password],
-                        summaryBuilder: (value) =>
-                            value.isEmpty ? '未填写' : '已填写',
-                      ),
-                    ],
-                  ),
-                ),
-                if (isEmby) ...[
-                  const SizedBox(height: 8),
-                  if (isTelevision)
-                    TvSelectionTile(
-                      title: '高级（可选）',
-                      value: _advancedTokenExpanded ? '已展开' : '已收起',
-                      onPressed: () {
-                        setState(() {
-                          _advancedTokenExpanded = !_advancedTokenExpanded;
-                        });
-                      },
-                    )
-                  else
-                    ExpansionTile(
-                      initiallyExpanded: _advancedTokenExpanded,
-                      onExpansionChanged: (expanded) {
-                        setState(() => _advancedTokenExpanded = expanded);
-                      },
-                      title: Text(
-                        '高级（可选）',
-                        style: theme.textTheme.titleSmall,
-                      ),
-                      subtitle: Text(
-                        '手动粘贴 Access Token / API Key',
-                        style: theme.textTheme.bodySmall,
-                      ),
-                      children: [
-                        SettingsTextInputField(
-                          controller: _tokenController,
-                          labelText: 'Access Token / API Key',
-                          minLines: 1,
-                          maxLines: 4,
-                          alignLabelWithHint: true,
-                          summaryBuilder: (value) =>
-                              value.isEmpty ? '未填写' : '已填写',
-                        ),
-                        const SizedBox(height: 8),
-                      ],
-                    ),
-                  if (isTelevision && _advancedTokenExpanded) ...[
-                    const SizedBox(height: 12),
-                    SettingsTextInputField(
-                      controller: _tokenController,
-                      labelText: 'Access Token / API Key',
-                      minLines: 1,
-                      maxLines: 4,
-                      alignLabelWithHint: true,
-                      summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
-                    ),
-                  ],
-                ] else ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    '可直接填写 WebDAV 地址、用户名和密码。',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                  SettingsActionButton(
+                    label: _isLoadingSections ? '读取中…' : '选择分区',
+                    icon: Icons.view_list_rounded,
+                    onPressed: _isLoadingSections ||
+                            _endpointController.text.trim().isEmpty
+                        ? null
+                        : _onFetchNasSections,
                   ),
                 ],
-                _SectionTitle(theme: theme, label: '选择分区'),
-                if (_availableSections.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: [
-                        if (isTelevision)
-                          TvAdaptiveButton(
-                            label: '全选',
-                            icon: Icons.select_all_rounded,
-                            onPressed: _selectAllSections,
-                            variant: TvButtonVariant.text,
-                          )
-                        else
-                          StarflowButton(
-                            label: '全选',
-                            icon: Icons.select_all_rounded,
-                            onPressed: _selectAllSections,
-                            variant: StarflowButtonVariant.ghost,
-                            compact: true,
-                          ),
-                        if (isTelevision)
-                          TvAdaptiveButton(
-                            label: '清空',
-                            icon: Icons.clear_all_rounded,
-                            onPressed: _clearAllSections,
-                            variant: TvButtonVariant.text,
-                          )
-                        else
-                          StarflowButton(
-                            label: '清空',
-                            icon: Icons.clear_all_rounded,
-                            onPressed: _clearAllSections,
-                            variant: StarflowButtonVariant.ghost,
-                            compact: true,
-                          ),
-                      ],
-                    ),
-                  ),
-                if (_availableSections.isNotEmpty)
-                  ..._availableSections.map(
-                    (section) => isTelevision
-                        ? Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: TvSelectionTile(
-                              title: section.title,
-                              value: _selectedSectionIds.contains(section.id)
-                                  ? '已选中'
-                                  : '未选中',
-                              onPressed: () {
-                                setState(() {
-                                  _didHydrateSectionSelection = true;
-                                  final nextSelection = {
-                                    ..._selectedSectionIds
-                                  };
-                                  if (nextSelection.contains(section.id)) {
-                                    nextSelection.remove(section.id);
-                                  } else {
-                                    nextSelection.add(section.id);
-                                  }
-                                  _selectedSectionIds = nextSelection;
-                                });
-                              },
-                            ),
-                          )
-                        : Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: StarflowCheckboxTile(
-                              title: section.title,
-                              value: _selectedSectionIds.contains(section.id),
-                              onChanged: (checked) {
-                                setState(() {
-                                  _didHydrateSectionSelection = true;
-                                  final nextSelection = {
-                                    ..._selectedSectionIds
-                                  };
-                                  if (checked) {
-                                    nextSelection.add(section.id);
-                                  } else {
-                                    nextSelection.remove(section.id);
-                                  }
-                                  _selectedSectionIds = nextSelection;
-                                });
-                              },
-                            ),
-                          ),
-                  )
-                else
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      '未选择分区',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _connectionMessage,
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                        if (isEmby && _resolvedUserId.trim().isNotEmpty) ...[
-                          const SizedBox(height: 6),
-                          SelectableText(
-                            'User ID: $_resolvedUserId',
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '启用此媒体源',
-                    value: _enabled ? '已开启' : '已关闭',
-                    onPressed: () => setState(() => _enabled = !_enabled),
-                  )
-                else
-                  StarflowToggleTile(
-                    title: '启用此媒体源',
-                    value: _enabled,
-                    onChanged: (value) => setState(() => _enabled = value),
-                  ),
-                if (!isEmby) ...[
-                  const SizedBox(height: 12),
-                  if (isTelevision)
-                    TvSelectionTile(
-                      title: '目录结构推断',
-                      value: _webDavStructureInferenceEnabled ? '已开启' : '已关闭',
-                      onPressed: () {
-                        setState(() {
-                          _webDavStructureInferenceEnabled =
-                              !_webDavStructureInferenceEnabled;
-                        });
-                      },
-                    )
-                  else
-                    StarflowToggleTile(
-                      title: '目录结构推断',
-                      value: _webDavStructureInferenceEnabled,
-                      onChanged: (value) {
-                        setState(() {
-                          _webDavStructureInferenceEnabled = value;
-                        });
-                      },
-                    ),
-                  if (isTelevision)
-                    TvSelectionTile(
-                      title: '本地刮削/NFO',
-                      value: _webDavSidecarScrapingEnabled ? '已开启' : '已关闭',
-                      onPressed: () {
-                        setState(() {
-                          _webDavSidecarScrapingEnabled =
-                              !_webDavSidecarScrapingEnabled;
-                        });
-                      },
-                    )
-                  else
-                    StarflowToggleTile(
-                      title: '本地刮削/NFO',
-                      value: _webDavSidecarScrapingEnabled,
-                      onChanged: (value) {
-                        setState(() {
-                          _webDavSidecarScrapingEnabled = value;
-                        });
-                      },
-                    ),
-                  const SizedBox(height: 8),
-                  SettingsTextInputField(
-                    controller: _webDavExcludedKeywordsController,
-                    labelText: '过滤关键字',
-                    minLines: 2,
-                    maxLines: 5,
-                    hintText: '比如：sample、预告片',
-                    alignLabelWithHint: true,
-                    summaryBuilder: (value) {
-                      if (value.isEmpty) {
-                        return '未填写';
-                      }
-                      final keywords = value
-                          .split(RegExp(r'[\n,，;；]+'))
-                          .map((item) => item.trim())
-                          .where((item) => item.isNotEmpty)
-                          .toList(growable: false);
-                      if (keywords.isEmpty) {
-                        return '未填写';
-                      }
-                      return '已填写 ${keywords.length} 项';
-                    },
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      '支持填写多个。每行一个，或用逗号分隔；命中任意关键字的路径都会被过滤。',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
-                if (isEmby) ...[
-                  const SizedBox(height: 28),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    alignment: WrapAlignment.start,
-                    children: [
-                      if (isTelevision)
-                        TvAdaptiveButton(
-                          label: _isAuthenticating ? '登录中…' : '测试登录',
-                          icon: Icons.login_rounded,
-                          onPressed:
-                              _isAuthenticating ? null : _onTestEmbyLogin,
-                          variant: TvButtonVariant.outlined,
-                        )
-                      else
-                        StarflowButton(
-                          label: _isAuthenticating ? '登录中…' : '测试登录',
-                          icon: Icons.login_rounded,
-                          onPressed:
-                              _isAuthenticating ? null : _onTestEmbyLogin,
-                          variant: StarflowButtonVariant.secondary,
-                          compact: true,
-                        ),
-                      if (isTelevision)
-                        TvAdaptiveButton(
-                          label: _isLoadingSections ? '读取中…' : '选择分区',
-                          icon: Icons.folder_open_rounded,
-                          onPressed: _isLoadingSections ||
-                                  _endpointController.text.trim().isEmpty ||
-                                  _tokenController.text.trim().isEmpty ||
-                                  _resolvedUserId.trim().isEmpty
-                              ? null
-                              : _onFetchEmbySections,
-                          variant: TvButtonVariant.outlined,
-                        )
-                      else
-                        StarflowButton(
-                          label: _isLoadingSections ? '读取中…' : '选择分区',
-                          icon: Icons.folder_open_rounded,
-                          onPressed: _isLoadingSections ||
-                                  _endpointController.text.trim().isEmpty ||
-                                  _tokenController.text.trim().isEmpty ||
-                                  _resolvedUserId.trim().isEmpty
-                              ? null
-                              : _onFetchEmbySections,
-                          variant: StarflowButtonVariant.secondary,
-                          compact: true,
-                        ),
-                    ],
-                  ),
-                ] else ...[
-                  const SizedBox(height: 28),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        if (isTelevision)
-                          TvAdaptiveButton(
-                            label: _isTestingWebDav ? '测试中…' : '测试连接',
-                            icon: Icons.cloud_done_outlined,
-                            onPressed: _isTestingWebDav ||
-                                    _endpointController.text.trim().isEmpty
-                                ? null
-                                : _onTestWebDavConnection,
-                            variant: TvButtonVariant.outlined,
-                          )
-                        else
-                          StarflowButton(
-                            label: _isTestingWebDav ? '测试中…' : '测试连接',
-                            icon: Icons.cloud_done_outlined,
-                            onPressed: _isTestingWebDav ||
-                                    _endpointController.text.trim().isEmpty
-                                ? null
-                                : _onTestWebDavConnection,
-                            variant: StarflowButtonVariant.secondary,
-                            compact: true,
-                          ),
-                        if (isTelevision)
-                          TvAdaptiveButton(
-                            label: '选择路径',
-                            icon: Icons.folder_open_rounded,
-                            onPressed: _endpointController.text.trim().isEmpty
-                                ? null
-                                : _pickWebDavPath,
-                            variant: TvButtonVariant.outlined,
-                          )
-                        else
-                          StarflowButton(
-                            label: '选择路径',
-                            icon: Icons.folder_open_rounded,
-                            onPressed: _endpointController.text.trim().isEmpty
-                                ? null
-                                : _pickWebDavPath,
-                            variant: StarflowButtonVariant.secondary,
-                            compact: true,
-                          ),
-                        if (isTelevision)
-                          TvAdaptiveButton(
-                            label: _isLoadingSections ? '读取中…' : '选择分区',
-                            icon: Icons.view_list_rounded,
-                            onPressed: _isLoadingSections ||
-                                    _endpointController.text.trim().isEmpty
-                                ? null
-                                : _onFetchNasSections,
-                            variant: TvButtonVariant.outlined,
-                          )
-                        else
-                          StarflowButton(
-                            label: _isLoadingSections ? '读取中…' : '选择分区',
-                            icon: Icons.view_list_rounded,
-                            onPressed: _isLoadingSections ||
-                                    _endpointController.text.trim().isEmpty
-                                ? null
-                                : _onFetchNasSections,
-                            variant: StarflowButtonVariant.secondary,
-                            compact: true,
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-                if (widget.initial != null) ...[
-                  const SizedBox(height: 28),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: isTelevision
-                        ? TvAdaptiveButton(
-                            label: '删除此媒体源',
-                            icon: Icons.delete_outline_rounded,
-                            onPressed: _confirmDeleteMediaSource,
-                            variant: TvButtonVariant.outlined,
-                          )
-                        : StarflowButton(
-                            label: '删除此媒体源',
-                            icon: Icons.delete_outline_rounded,
-                            onPressed: _confirmDeleteMediaSource,
-                            variant: StarflowButtonVariant.danger,
-                            compact: true,
-                          ),
-                  ),
-                ],
-                const SizedBox(height: kBottomReservedSpacing),
-              ],
-            ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: OverlayToolbar(
-                onBack: _handleCloseRequest,
-                trailing: isTelevision
-                    ? Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: TvAdaptiveButton(
-                          label: '保存',
-                          icon: Icons.save_rounded,
-                          onPressed: _onSave,
-                          variant: TvButtonVariant.text,
-                        ),
-                      )
-                    : StarflowButton(
-                        label: '保存',
-                        onPressed: _onSave,
-                        variant: StarflowButtonVariant.ghost,
-                        compact: true,
-                      ),
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({required this.theme, required this.label});
-
-  final ThemeData theme;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 22, bottom: 10),
-      child: Text(
-        label,
-        style: theme.textTheme.titleSmall?.copyWith(
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.2,
-          color: theme.colorScheme.primary,
-        ),
+          if (widget.initial != null) ...[
+            const SizedBox(height: 28),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SettingsActionButton(
+                label: '删除此媒体源',
+                icon: Icons.delete_outline_rounded,
+                onPressed: _confirmDeleteMediaSource,
+                variant: StarflowButtonVariant.danger,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -1227,7 +965,6 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final parentPath = _parentPath(_currentPath);
     return PopScope<String>(
       canPop: false,
@@ -1238,199 +975,82 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
         _skipAutoSaveOnPop = true;
         Navigator.of(context).pop(_currentPath);
       },
-      child: Scaffold(
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            FutureBuilder<List<MediaCollection>>(
-              future: _loadFolders(),
-              builder: (context, snapshot) {
-                return ListView(
-                  padding: overlayToolbarPagePadding(context),
-                  children: [
-                    Text(
-                      '当前路径',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    const SizedBox(height: 8),
-                    SelectableText(
-                      _pathLabel(_currentPath),
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    if (parentPath != null) ...[
-                      const SizedBox(height: 12),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: isTelevision
-                            ? TvAdaptiveButton(
-                                label: '返回上一级目录',
-                                icon: Icons.arrow_upward_rounded,
-                                onPressed: () {
-                                  setState(() {
-                                    _currentPath = parentPath;
-                                  });
-                                },
-                                variant: TvButtonVariant.outlined,
-                              )
-                            : OutlinedButton.icon(
-                                onPressed: () {
-                                  setState(() {
-                                    _currentPath = parentPath;
-                                  });
-                                },
-                                icon: const Icon(
-                                  Icons.arrow_upward_rounded,
-                                  size: 18,
-                                ),
-                                label: const Text('返回上一级目录'),
-                              ),
-                      ),
-                    ],
-                    const SizedBox(height: 20),
-                    if (snapshot.connectionState == ConnectionState.waiting)
-                      const Center(
-                        child: Padding(
-                          padding: EdgeInsets.only(top: 48),
-                          child: CircularProgressIndicator(),
-                        ),
-                      )
-                    else if (snapshot.hasError)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: Text('读取路径失败：${snapshot.error}'),
-                      )
-                    else if ((snapshot.data ?? const []).isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 12),
-                        child: Text('当前路径下没有子文件夹，可以直接选择这里作为根路径。'),
-                      )
-                    else ...[
-                      Text(
-                        '子文件夹',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 8),
-                      for (final folder in snapshot.data!)
-                        isTelevision
-                            ? Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: TvSelectionTile(
-                                  title: folder.title,
-                                  value: folder.id,
-                                  onPressed: () {
-                                    setState(() {
-                                      _currentPath = folder.id;
-                                    });
-                                  },
-                                ),
-                              )
-                            : Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: StarflowSelectionTile(
-                                  leading:
-                                      const Icon(Icons.folder_open_rounded),
-                                  title: folder.title,
-                                  subtitle: folder.id,
-                                  onPressed: () {
-                                    setState(() {
-                                      _currentPath = folder.id;
-                                    });
-                                  },
-                                ),
-                              ),
-                      const SizedBox(height: kBottomReservedSpacing),
-                    ],
-                    if (snapshot.connectionState == ConnectionState.waiting ||
-                        snapshot.hasError ||
-                        (snapshot.data ?? const []).isEmpty)
-                      const SizedBox(height: kBottomReservedSpacing),
-                  ],
-                );
+      child: SettingsPageScaffold(
+        onBack: () {
+          _skipAutoSaveOnPop = true;
+          Navigator.of(context).pop(_currentPath);
+        },
+        trailing: SettingsToolbarButton(
+          label: '选这里',
+          icon: Icons.check_rounded,
+          onPressed: () {
+            _skipAutoSaveOnPop = true;
+            Navigator.of(context).pop(_currentPath);
+          },
+        ),
+        children: [
+          const SettingsSectionTitle(label: '当前路径'),
+          SelectableText(
+            _pathLabel(_currentPath),
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          if (parentPath != null) ...[
+            const SizedBox(height: 16),
+            SettingsActionButton(
+              label: '返回上一级目录',
+              icon: Icons.arrow_upward_rounded,
+              onPressed: () {
+                setState(() {
+                  _currentPath = parentPath;
+                });
               },
             ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: Material(
-                type: MaterialType.transparency,
-                child: Padding(
-                  padding:
-                      EdgeInsets.only(top: MediaQuery.paddingOf(context).top),
-                  child: SizedBox(
-                    height: kToolbarHeight,
-                    child: Row(
-                      children: [
-                        if (isTelevision)
-                          Padding(
-                            padding: const EdgeInsets.only(left: 8),
-                            child: TvFocusableAction(
-                              onPressed: () {
-                                _skipAutoSaveOnPop = true;
-                                Navigator.of(context).pop(_currentPath);
-                              },
-                              borderRadius: BorderRadius.circular(18),
-                              child: const Padding(
-                                padding: EdgeInsets.all(10),
-                                child: Icon(Icons.arrow_back_ios_new_rounded),
-                              ),
-                            ),
-                          )
-                        else
-                          StarflowIconButton(
-                            variant: StarflowButtonVariant.ghost,
-                            onPressed: () {
-                              _skipAutoSaveOnPop = true;
-                              Navigator.of(context).pop(_currentPath);
-                            },
-                            icon: Icons.arrow_back_ios_new_rounded,
-                          ),
-                        Expanded(
-                          child: Text(
-                            '选择 WebDAV 路径',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                          ),
-                        ),
-                        if (isTelevision)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 12),
-                            child: TvAdaptiveButton(
-                              label: '选这里',
-                              icon: Icons.check_rounded,
-                              onPressed: () {
-                                _skipAutoSaveOnPop = true;
-                                Navigator.of(context).pop(_currentPath);
-                              },
-                              variant: TvButtonVariant.text,
-                            ),
-                          )
-                        else
-                          StarflowButton(
-                            label: '选这里',
-                            onPressed: () {
-                              _skipAutoSaveOnPop = true;
-                              Navigator.of(context).pop(_currentPath);
-                            },
-                            variant: StarflowButtonVariant.ghost,
-                            compact: true,
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
           ],
-        ),
+          const SettingsSectionTitle(label: '子文件夹'),
+          FutureBuilder<List<MediaCollection>>(
+            future: _loadFolders(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Padding(
+                  padding: EdgeInsets.only(top: 40),
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (snapshot.hasError) {
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text('读取路径失败：${snapshot.error}'),
+                );
+              }
+              final folders = snapshot.data ?? const <MediaCollection>[];
+              if (folders.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text('当前路径下没有子文件夹，可以直接选择这里作为根路径。'),
+                );
+              }
+              return Column(
+                children: [
+                  for (final folder in folders)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: SettingsSelectionTile(
+                        title: folder.title,
+                        subtitle: folder.id,
+                        value: '进入',
+                        leading: const Icon(Icons.folder_open_rounded),
+                        onPressed: () {
+                          setState(() {
+                            _currentPath = folder.id;
+                          });
+                        },
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ],
       ),
     );
   }

@@ -137,14 +137,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool get _highPerformanceModeEnabled =>
       ref.read(appSettingsProvider).highPerformanceModeEnabled;
 
-  bool get _isTelevisionPerformanceMode =>
-      (ref.read(isTelevisionProvider).valueOrNull ?? false) &&
-      _highPerformanceModeEnabled &&
-      !_isInPictureInPictureMode;
+  bool get _isHighPerformancePlaybackMode =>
+      _highPerformanceModeEnabled && !_isInPictureInPictureMode;
 
-  bool get _prefersAggressiveHardwareDecoding =>
-      (ref.read(isTelevisionProvider).valueOrNull ?? false) &&
-      _highPerformanceModeEnabled;
+  bool get _prefersAggressiveHardwareDecoding => _highPerformanceModeEnabled;
 
   PlaybackDecodeMode get _playbackDecodeMode =>
       ref.read(appSettingsProvider).playbackDecodeMode;
@@ -1188,7 +1184,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final playbackSettings = ref.watch(appSettingsProvider);
     final showMinimalPlayerChrome = _isInPictureInPictureMode ||
-        (isTelevision && playbackSettings.highPerformanceModeEnabled);
+        playbackSettings.highPerformanceModeEnabled;
 
     return Shortcuts(
       shortcuts: isTelevision
@@ -1458,7 +1454,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                       ),
                     ),
                   ),
-                  if (!_isTelevisionPerformanceMode)
+                  if (!_isHighPerformancePlaybackMode)
                     StreamBuilder<bool>(
                       stream: player.stream.buffering,
                       initialData: player.state.buffering,
@@ -1509,16 +1505,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     AppSettings settings, {
     required bool isTelevision,
   }) {
-    final simplifyForTelevision =
-        isTelevision && settings.highPerformanceModeEnabled;
+    final simplifyForPerformance = settings.highPerformanceModeEnabled;
     return SubtitleViewConfiguration(
       style: TextStyle(
         height: 1.35,
-        fontSize: (simplifyForTelevision ? 28 : 32) *
+        fontSize: (simplifyForPerformance ? 28 : 32) *
             settings.playbackSubtitleScale.textScale,
         color: Colors.white,
         fontWeight: FontWeight.w600,
-        backgroundColor: simplifyForTelevision
+        backgroundColor: simplifyForPerformance
             ? Colors.transparent
             : const Color(0xAA000000),
       ),
@@ -1526,7 +1521,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         20,
         0,
         20,
-        simplifyForTelevision ? 18 : 28,
+        simplifyForPerformance ? 18 : 28,
       ),
     );
   }

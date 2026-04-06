@@ -88,12 +88,11 @@ class _HomePageState extends ConsumerState<HomePage> {
       appSettingsProvider
           .select((settings) => settings.highPerformanceModeEnabled),
     );
-    final simplifyTelevisionEffects =
-        isTelevision && highPerformanceModeEnabled;
+    final simplifyVisualEffects = highPerformanceModeEnabled;
     final effectiveTranslucentEffectsEnabled =
-        translucentEffectsEnabled && !simplifyTelevisionEffects;
+        translucentEffectsEnabled && !simplifyVisualEffects;
     final effectiveHeroBackgroundEnabled =
-        heroBackgroundEnabled && !simplifyTelevisionEffects;
+        heroBackgroundEnabled && !simplifyVisualEffects;
     final resolvedSections = <HomeSectionViewModel>[];
     var hasPendingSections = false;
 

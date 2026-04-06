@@ -2,15 +2,16 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/presentation/quark_directory_manager_page.dart';
 import 'package:starflow/features/settings/presentation/quark_folder_picker_page.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
 class NetworkStorageSettingsPage extends ConsumerStatefulWidget {
   const NetworkStorageSettingsPage({super.key, required this.initial});
@@ -31,6 +32,7 @@ class _NetworkStorageSettingsPageState
   late final TextEditingController _refreshDelayController;
   late String _quarkFolderId;
   late String _quarkFolderPath;
+  late bool _syncDeleteQuarkEnabled;
   late Set<String> _refreshSourceIds;
   bool _skipAutoSaveOnPop = false;
   bool _isTestingQuarkConnection = false;
@@ -64,6 +66,7 @@ class _NetworkStorageSettingsPageState
     _quarkFolderPath = widget.initial.quarkSaveFolderPath.trim().isEmpty
         ? '/'
         : widget.initial.quarkSaveFolderPath.trim();
+    _syncDeleteQuarkEnabled = widget.initial.syncDeleteQuarkEnabled;
     _refreshSourceIds = widget.initial.refreshMediaSourceIds.toSet();
   }
 
@@ -113,6 +116,7 @@ class _NetworkStorageSettingsPageState
       quarkCookie: _quarkCookieController.text.trim(),
       quarkSaveFolderId: _quarkFolderId,
       quarkSaveFolderPath: _quarkFolderPath,
+      syncDeleteQuarkEnabled: _syncDeleteQuarkEnabled,
       smartStrmWebhookUrl: _smartStrmWebhookController.text.trim(),
       smartStrmTaskName: _smartStrmTaskNameController.text.trim(),
       smartStrmDelaySeconds: _smartStrmDelaySeconds(),
@@ -225,6 +229,27 @@ class _NetworkStorageSettingsPageState
     });
   }
 
+  Future<void> _openQuarkDirectoryManager() async {
+    FocusScope.of(context).unfocus();
+    final cookie = _quarkCookieController.text.trim();
+    if (cookie.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先填写夸克 Cookie')),
+      );
+      return;
+    }
+
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => QuarkDirectoryManagerPage(
+          cookie: cookie,
+          initialFid: _quarkFolderId,
+          initialPath: _quarkFolderPath,
+        ),
+      ),
+    );
+  }
+
   Future<void> _testSmartStrmTask() async {
     FocusScope.of(context).unfocus();
     setState(() => _isTestingSmartStrm = true);
@@ -263,7 +288,6 @@ class _NetworkStorageSettingsPageState
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(appSettingsProvider);
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final refreshableSources = _refreshableMediaSources(settings);
     final refreshableSourceIds =
         refreshableSources.map((source) => source.id).toSet();
@@ -287,23 +311,15 @@ class _NetworkStorageSettingsPageState
         ),
         children: [
           const SettingsSectionTitle(label: '夸克保存'),
-          if (isTelevision)
-            StarflowSelectionTile(
-              title: '夸克 Cookie',
-              value: _quarkCookieController.text.trim().isEmpty ? '未填写' : '已填写',
-              onPressed: _openQuarkCookieEditor,
-            )
-          else
-            TextField(
-              controller: _quarkCookieController,
-              minLines: 2,
-              maxLines: 4,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: '夸克 Cookie',
-                hintText: '用于搜索结果一键保存到夸克网盘',
-              ),
-            ),
+          SettingsTextInputField(
+            controller: _quarkCookieController,
+            labelText: '夸克 Cookie',
+            minLines: 2,
+            maxLines: 4,
+            autocorrect: false,
+            hintText: '用于搜索结果一键保存到夸克网盘',
+            summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
+          ),
           Wrap(
             spacing: 12,
             runSpacing: 12,
@@ -319,63 +335,49 @@ class _NetworkStorageSettingsPageState
                 icon: Icons.folder_open_rounded,
                 onPressed: _pickQuarkFolder,
               ),
+              SettingsActionButton(
+                label: '管理当前保存目录',
+                icon: Icons.delete_outline_rounded,
+                onPressed: _openQuarkDirectoryManager,
+                variant: StarflowButtonVariant.ghost,
+              ),
             ],
           ),
           const SizedBox(height: 8),
           Text('默认保存到：$_quarkFolderPath'),
+          const SizedBox(height: 12),
+          StarflowToggleTile(
+            title: '同步删除夸克目录',
+            subtitle:
+                '开启后，删除已匹配到夸克直链的 WebDAV .strm 文件时，也会到当前夸克保存目录里删除对应影片或剧集目录。',
+            value: _syncDeleteQuarkEnabled,
+            onChanged: (value) {
+              setState(() {
+                _syncDeleteQuarkEnabled = value;
+              });
+            },
+          ),
           const SettingsSectionTitle(label: 'SmartStrm'),
-          if (isTelevision)
-            StarflowSelectionTile(
-              title: 'Webhook 地址',
-              value: _smartStrmWebhookController.text.trim().isEmpty
-                  ? '未填写'
-                  : _smartStrmWebhookController.text.trim(),
-              onPressed: _openSmartStrmWebhookEditor,
-            )
-          else
-            TextField(
-              controller: _smartStrmWebhookController,
-              keyboardType: TextInputType.url,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: 'Webhook 地址',
-                hintText: 'http://yourip:8024/webhook/abcdef123456',
-              ),
-            ),
+          SettingsTextInputField(
+            controller: _smartStrmWebhookController,
+            labelText: 'Webhook 地址',
+            keyboardType: TextInputType.url,
+            autocorrect: false,
+            hintText: 'http://yourip:8024/webhook/abcdef123456',
+          ),
           const SizedBox(height: 12),
-          if (isTelevision)
-            StarflowSelectionTile(
-              title: '任务名',
-              value: _smartStrmTaskNameController.text.trim().isEmpty
-                  ? '未填写'
-                  : _smartStrmTaskNameController.text.trim(),
-              onPressed: _openSmartStrmTaskNameEditor,
-            )
-          else
-            TextField(
-              controller: _smartStrmTaskNameController,
-              decoration: const InputDecoration(
-                labelText: '任务名',
-                hintText: 'movie_task',
-              ),
-            ),
+          SettingsTextInputField(
+            controller: _smartStrmTaskNameController,
+            labelText: '任务名',
+            hintText: 'movie_task',
+          ),
           const SizedBox(height: 12),
-          if (isTelevision)
-            StarflowSelectionTile(
-              title: 'STRM 触发等待时间',
-              value: '${_smartStrmDelaySeconds()} 秒',
-              onPressed: _openSmartStrmDelayPicker,
-            )
-          else
-            TextField(
-              controller: _smartStrmDelayController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'STRM 触发等待时间（秒）',
-                hintText: '1',
-                helperText: '保存到夸克后，等待多久再触发 Smart STRM 任务。',
-              ),
-            ),
+          SettingsSelectionTile(
+            title: 'STRM 触发等待时间',
+            subtitle: '保存到夸克后，等待多久再触发 Smart STRM 任务。',
+            value: '${_smartStrmDelaySeconds()} 秒',
+            onPressed: _openSmartStrmDelayPicker,
+          ),
           const SizedBox(height: 12),
           Wrap(
             spacing: 12,
@@ -389,22 +391,12 @@ class _NetworkStorageSettingsPageState
             ],
           ),
           const SettingsSectionTitle(label: '自动增量刷新索引'),
-          if (isTelevision)
-            StarflowSelectionTile(
-              title: '索引刷新等待时间',
-              value: '${_refreshDelaySeconds()} 秒',
-              onPressed: _openRefreshDelayPicker,
-            )
-          else
-            TextField(
-              controller: _refreshDelayController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: '索引刷新等待时间（秒）',
-                hintText: '1',
-                helperText: '任务结束后，等待多久再自动执行媒体库增量刷新。',
-              ),
-            ),
+          SettingsSelectionTile(
+            title: '索引刷新等待时间',
+            subtitle: '任务结束后，等待多久再自动执行媒体库增量刷新。',
+            value: '${_refreshDelaySeconds()} 秒',
+            onPressed: _openRefreshDelayPicker,
+          ),
           const SizedBox(height: 12),
           if (refreshableSources.isNotEmpty) ...[
             Wrap(
@@ -460,62 +452,14 @@ class _NetworkStorageSettingsPageState
     );
   }
 
-  Future<void> _openQuarkCookieEditor() async {
-    final result = await _openTextEditorDialog(
-      title: '夸克 Cookie',
-      initialValue: _quarkCookieController.text,
-      hintText: '用于搜索结果一键保存到夸克网盘',
-      minLines: 2,
-      maxLines: 4,
-    );
-    if (result == null) return;
-    setState(() {
-      _quarkCookieController.text = result;
-    });
-  }
-
-  Future<void> _openSmartStrmWebhookEditor() async {
-    final result = await _openTextEditorDialog(
-      title: 'Webhook 地址',
-      initialValue: _smartStrmWebhookController.text,
-      hintText: 'http://yourip:8024/webhook/abcdef123456',
-    );
-    if (result == null) return;
-    setState(() {
-      _smartStrmWebhookController.text = result;
-    });
-  }
-
-  Future<void> _openSmartStrmTaskNameEditor() async {
-    final result = await _openTextEditorDialog(
-      title: '任务名',
-      initialValue: _smartStrmTaskNameController.text,
-      hintText: 'movie_task',
-    );
-    if (result == null) return;
-    setState(() {
-      _smartStrmTaskNameController.text = result;
-    });
-  }
-
   Future<void> _openRefreshDelayPicker() async {
     const options = [1, 3, 5, 10, 15, 30, 60];
-    final current = _refreshDelaySeconds();
-    final selected = await showDialog<int>(
+    final selected = await showSettingsOptionDialog<int>(
       context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: const Text('选择索引刷新等待时间'),
-          children: [
-            for (final seconds in options)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(context).pop(seconds),
-                child:
-                    Text(seconds == current ? '$seconds 秒  当前' : '$seconds 秒'),
-              ),
-          ],
-        );
-      },
+      title: '选择索引刷新等待时间',
+      options: options,
+      currentValue: _refreshDelaySeconds(),
+      labelBuilder: (seconds) => '$seconds 秒',
     );
     if (selected == null) return;
     setState(() {
@@ -525,110 +469,16 @@ class _NetworkStorageSettingsPageState
 
   Future<void> _openSmartStrmDelayPicker() async {
     const options = [1, 3, 5, 10, 15, 30, 60];
-    final current = _smartStrmDelaySeconds();
-    final selected = await showDialog<int>(
+    final selected = await showSettingsOptionDialog<int>(
       context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: const Text('选择 STRM 触发等待时间'),
-          children: [
-            for (final seconds in options)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(context).pop(seconds),
-                child:
-                    Text(seconds == current ? '$seconds 秒  当前' : '$seconds 秒'),
-              ),
-          ],
-        );
-      },
+      title: '选择 STRM 触发等待时间',
+      options: options,
+      currentValue: _smartStrmDelaySeconds(),
+      labelBuilder: (seconds) => '$seconds 秒',
     );
     if (selected == null) return;
     setState(() {
       _smartStrmDelayController.text = '$selected';
     });
-  }
-
-  Future<String?> _openTextEditorDialog({
-    required String title,
-    required String initialValue,
-    required String hintText,
-    int minLines = 1,
-    int maxLines = 1,
-  }) async {
-    final controller = TextEditingController(text: initialValue);
-    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
-    final inputFocusNode = FocusNode(debugLabel: 'network-text-dialog-field');
-    final cancelFocusNode = FocusNode(debugLabel: 'network-text-dialog-cancel');
-    final saveFocusNode = FocusNode(debugLabel: 'network-text-dialog-save');
-    final result = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        final dialog = AlertDialog(
-          title: Text(title),
-          content: wrapTelevisionDialogFieldTraversal(
-            enabled: isTelevision,
-            child: TextField(
-              controller: controller,
-              focusNode: inputFocusNode,
-              autofocus: true,
-              minLines: minLines,
-              maxLines: maxLines,
-              decoration: InputDecoration(hintText: hintText),
-              onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
-            ),
-          ),
-          actions: [
-            StarflowButton(
-              label: '取消',
-              focusNode: cancelFocusNode,
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              variant: StarflowButtonVariant.ghost,
-              compact: true,
-            ),
-            StarflowButton(
-              label: '保存',
-              focusNode: saveFocusNode,
-              onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-              compact: true,
-            ),
-          ],
-        );
-        return wrapTelevisionDialogBackHandling(
-          enabled: isTelevision,
-          dialogContext: dialogContext,
-          inputFocusNodes: [inputFocusNode],
-          contentFocusNodes: [inputFocusNode],
-          actionFocusNodes: [saveFocusNode, cancelFocusNode],
-          child: dialog,
-        );
-      },
-    );
-    controller.dispose();
-    inputFocusNode.dispose();
-    cancelFocusNode.dispose();
-    saveFocusNode.dispose();
-    return result;
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({required this.theme, required this.label});
-
-  final ThemeData theme;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 22, bottom: 10),
-      child: Text(
-        label,
-        style: theme.textTheme.titleSmall?.copyWith(
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.2,
-          color: theme.colorScheme.primary,
-        ),
-      ),
-    );
   }
 }

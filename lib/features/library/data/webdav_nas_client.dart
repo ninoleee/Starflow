@@ -612,6 +612,28 @@ class WebDavNasClient {
     );
   }
 
+  Future<String> resolveStrmTargetUrl({
+    required MediaSourceConfig source,
+    required String resourcePath,
+    String sectionId = '',
+  }) async {
+    final endpoint = source.endpoint.trim();
+    final normalizedResourcePath = resourcePath.trim();
+    if (endpoint.isEmpty || normalizedResourcePath.isEmpty) {
+      return '';
+    }
+
+    final targetUri = _resolveResourceUri(
+      source,
+      resourcePath: normalizedResourcePath,
+      sectionId: sectionId,
+    );
+    if (!targetUri.path.toLowerCase().endsWith('.strm')) {
+      return '';
+    }
+    return _resolvePlayableUrlFromUri(targetUri, source: source);
+  }
+
   Future<void> deleteResource(
     MediaSourceConfig source, {
     required String resourcePath,
@@ -636,6 +658,18 @@ class WebDavNasClient {
       throw Exception('WebDAV 删除失败：HTTP ${response.statusCode}');
     }
     _resetScanCaches();
+    if (_looksLikePlayableResourceUri(targetUri)) {
+      final parentUri = _parentDirectoryUri(targetUri);
+      if (parentUri != null) {
+        final siblings = await _loadDirectoryEntries(parentUri, source: source);
+        final stillExists = siblings.any(
+          (entry) => !entry.isCollection && entry.uri == targetUri,
+        );
+        if (stillExists) {
+          throw Exception('WebDAV 删除未生效：远端文件仍然存在');
+        }
+      }
+    }
   }
 
   Uri _resolveResourceUri(
@@ -660,5 +694,23 @@ class WebDavNasClient {
     return baseUri.replace(
       path: resolvedPath.replaceAll(RegExp(r'/+'), '/'),
     );
+  }
+
+  bool _looksLikePlayableResourceUri(Uri uri) {
+    final normalizedPath = uri.path.toLowerCase();
+    return const [
+      '.mp4',
+      '.m4v',
+      '.mov',
+      '.mkv',
+      '.avi',
+      '.ts',
+      '.webm',
+      '.flv',
+      '.wmv',
+      '.mpg',
+      '.mpeg',
+      '.strm',
+    ].any(normalizedPath.endsWith);
   }
 }

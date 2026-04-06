@@ -177,7 +177,7 @@ class SettingsPage extends ConsumerWidget {
                     const SizedBox(height: 10),
                     StarflowToggleTile(
                       title: '高性能模式',
-                      subtitle: '降低 TV 端动画、模糊背景和播放页叠层，优先保证流畅度',
+                      subtitle: _highPerformanceModeSummary(),
                       value: settings.highPerformanceModeEnabled,
                       onChanged: (value) {
                         ref
@@ -188,9 +188,7 @@ class SettingsPage extends ConsumerWidget {
                     const SizedBox(height: 10),
                     StarflowToggleTile(
                       title: '透明磨砂效果',
-                      subtitle: settings.highPerformanceModeEnabled
-                          ? '高性能模式开启时，会自动进一步压低 TV 端视觉效果'
-                          : '关闭后减少模糊和毛玻璃效果，提高性能',
+                      subtitle: _translucentEffectsSummary(settings),
                       value: settings.translucentEffectsEnabled,
                       onChanged: (value) {
                         ref
@@ -615,6 +613,17 @@ String _playbackSettingsSummary(AppSettings settings) {
   ].join(' · ');
 }
 
+String _highPerformanceModeSummary() {
+  return '所有客户端都会关闭磨砂/模糊背景，并简化部分动画与播放器叠层；进入播放器时，还会暂停首页 Hero 补数、详情自动补元数据/本地资源匹配、后台图片加载，并取消或跳过索引刷新。';
+}
+
+String _translucentEffectsSummary(AppSettings settings) {
+  if (settings.highPerformanceModeEnabled) {
+    return '高性能模式开启后，所有客户端都会强制关闭磨砂/模糊背景；这里的开关会保留当前设置，但要关闭高性能模式后才会恢复生效。';
+  }
+  return '关闭后可减少模糊和毛玻璃效果，提高性能。';
+}
+
 String _searchSourceSummary(AppSettings settings) {
   final availableLocalSources = settings.mediaSources
       .where(
@@ -688,9 +697,9 @@ class _SettingsTile extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 720;
-        final toggleLabel = value ? '关闭' : '开启';
+        final toggleLabel = value ? '已开启' : '已关闭';
         final toggleIcon =
-            value ? Icons.toggle_off_rounded : Icons.toggle_on_rounded;
+            value ? Icons.toggle_on_rounded : Icons.toggle_off_rounded;
         return Container(
           width: double.infinity,
           decoration: BoxDecoration(
@@ -718,7 +727,7 @@ class _SettingsTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      value ? '已启用' : '已关闭',
+                      value ? '已开启' : '已关闭',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -749,8 +758,8 @@ class _SettingsTile extends StatelessWidget {
                       icon: toggleIcon,
                       onPressed: () => onChanged(!value),
                       variant: value
-                          ? StarflowButtonVariant.secondary
-                          : StarflowButtonVariant.primary,
+                          ? StarflowButtonVariant.primary
+                          : StarflowButtonVariant.secondary,
                       tooltip: toggleLabel,
                     )
                   : StarflowButton(
@@ -758,8 +767,8 @@ class _SettingsTile extends StatelessWidget {
                       icon: toggleIcon,
                       onPressed: () => onChanged(!value),
                       variant: value
-                          ? StarflowButtonVariant.secondary
-                          : StarflowButtonVariant.primary,
+                          ? StarflowButtonVariant.primary
+                          : StarflowButtonVariant.secondary,
                       compact: true,
                     ),
             ],

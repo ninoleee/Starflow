@@ -109,8 +109,9 @@ class _SettingsManagementPageState
                         _ActionButton(
                           icon: Icons.restore_page_rounded,
                           label: _isImporting ? '正在导入…' : '导入并覆盖配置',
-                          onPressed:
-                              _isExporting || _isImporting ? null : _confirmImport,
+                          onPressed: _isExporting || _isImporting
+                              ? null
+                              : _confirmImport,
                         ),
                       ],
                     )
@@ -158,7 +159,6 @@ class _SettingsManagementPageState
         ),
         const SizedBox(height: 16),
         _ActionButton(
-          isTelevision: true,
           icon: Icons.devices_rounded,
           label: _isStartingLanTransfer ? '正在启动手机传输…' : '手机传输配置',
           onPressed: _isStartingLanTransfer ? null : _openTelevisionLanTransfer,
@@ -496,7 +496,7 @@ class _PathEditor extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     if (isTelevision) {
-      return TvSelectionTile(
+      return SettingsSelectionTile(
         title: label,
         value: controller.text.trim().isEmpty ? '未填写' : controller.text.trim(),
         onPressed: () => _openActionDialog(context, isTelevision),

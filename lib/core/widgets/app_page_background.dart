@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
 class AppPageBackground extends ConsumerWidget {
@@ -16,12 +15,10 @@ class AppPageBackground extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final highPerformanceModeEnabled = ref.watch(
-      appSettingsProvider.select((settings) => settings.highPerformanceModeEnabled),
+      appSettingsProvider
+          .select((settings) => settings.highPerformanceModeEnabled),
     );
-    final simplifyTelevisionEffects =
-        isTelevision && highPerformanceModeEnabled;
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -37,7 +34,7 @@ class AppPageBackground extends ConsumerWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (!simplifyTelevisionEffects)
+          if (!highPerformanceModeEnabled)
             const IgnorePointer(
               child: Stack(
                 children: [

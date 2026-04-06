@@ -214,6 +214,68 @@ class LocalStorageCacheRepository {
     _notifyDetailCacheChanged?.call();
   }
 
+  Future<void> clearDetailCacheForResource({
+    required String sourceId,
+    String resourceId = '',
+    required String resourcePath,
+    bool treatAsScope = false,
+  }) async {
+    final normalizedSourceId = sourceId.trim();
+    final normalizedResourceId = resourceId.trim();
+    final normalizedResourcePath = resourcePath.trim();
+    if (normalizedSourceId.isEmpty ||
+        (normalizedResourceId.isEmpty && normalizedResourcePath.isEmpty)) {
+      return;
+    }
+
+    final payload = await _loadDetailPayload();
+    if (payload.records.isEmpty || payload.lookupKeys.isEmpty) {
+      return;
+    }
+
+    var changed = false;
+    final nextRecords = <String, _CachedDetailRecord>{};
+    for (final record in payload.records.values) {
+      final nextRecord = _removeResourceRelationsFromRecord(
+        record,
+        sourceId: normalizedSourceId,
+        resourceId: normalizedResourceId,
+        resourcePath: normalizedResourcePath,
+        treatAsScope: treatAsScope,
+      );
+      if (!identical(nextRecord, record)) {
+        changed = true;
+      }
+      if (nextRecord.lookupKeys.isNotEmpty) {
+        nextRecords[nextRecord.id] = nextRecord;
+      } else {
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      return;
+    }
+
+    final nextLookupKeys = <String, String>{};
+    for (final record in nextRecords.values) {
+      for (final lookupKey in record.lookupKeys) {
+        final trimmed = lookupKey.trim();
+        if (trimmed.isNotEmpty) {
+          nextLookupKeys[trimmed] = record.id;
+        }
+      }
+    }
+
+    await _saveDetailPayload(
+      _DetailCachePayload(
+        records: nextRecords,
+        lookupKeys: nextLookupKeys,
+      ),
+    );
+    _notifyDetailCacheChanged?.call();
+  }
+
   Future<void> clearCache(LocalStorageCacheType type) async {
     switch (type) {
       case LocalStorageCacheType.nasMetadataIndex:
@@ -315,6 +377,82 @@ class LocalStorageCacheRepository {
   Future<void> _saveDetailPayload(_DetailCachePayload payload) async {
     await _preferences.setString(_detailCacheKey, jsonEncode(payload.toJson()));
   }
+
+  _CachedDetailRecord _removeResourceRelationsFromRecord(
+    _CachedDetailRecord record, {
+    required String sourceId,
+    required String resourceId,
+    required String resourcePath,
+    required bool treatAsScope,
+  }) {
+    final normalizedChoices = <MediaDetailTarget>[];
+    final removedChoiceIndices = <int>[];
+    for (var index = 0; index < record.libraryMatchChoices.length; index++) {
+      final choice = record.libraryMatchChoices[index];
+      if (_detailTargetMatchesDeletedResource(
+        choice,
+        sourceId: sourceId,
+        resourceId: resourceId,
+        resourcePath: resourcePath,
+        treatAsScope: treatAsScope,
+      )) {
+        removedChoiceIndices.add(index);
+      } else {
+        normalizedChoices.add(choice);
+      }
+    }
+
+    final targetMatches = _detailTargetMatchesDeletedResource(
+      record.target,
+      sourceId: sourceId,
+      resourceId: resourceId,
+      resourcePath: resourcePath,
+      treatAsScope: treatAsScope,
+    );
+    if (!targetMatches && removedChoiceIndices.isEmpty) {
+      return record;
+    }
+
+    final oldChoiceCount = record.libraryMatchChoices.length;
+    final oldSelectedIndex = oldChoiceCount == 0
+        ? 0
+        : record.selectedLibraryMatchIndex.clamp(0, oldChoiceCount - 1);
+    final removedBeforeSelected =
+        removedChoiceIndices.where((index) => index < oldSelectedIndex).length;
+    final selectedChoiceRemoved =
+        removedChoiceIndices.contains(oldSelectedIndex);
+
+    MediaDetailTarget nextTarget = record.target;
+    var nextSelectedIndex = 0;
+    if (normalizedChoices.isNotEmpty) {
+      nextSelectedIndex = (oldSelectedIndex - removedBeforeSelected)
+          .clamp(0, normalizedChoices.length - 1);
+      if (targetMatches || selectedChoiceRemoved) {
+        nextTarget = normalizedChoices[nextSelectedIndex];
+      }
+    } else if (targetMatches) {
+      nextTarget = _stripResolvedLibraryResource(record.target);
+    }
+
+    final nextLookupKeys = {
+      for (final lookupKey in record.lookupKeys)
+        if (!_isSourceLibraryLookupKey(lookupKey, sourceId)) lookupKey.trim(),
+      ...buildLookupKeys(nextTarget),
+    }.where((item) => item.isNotEmpty).toList(growable: false)
+      ..sort();
+
+    return _CachedDetailRecord(
+      id: record.id,
+      lookupKeys: nextLookupKeys,
+      updatedAt: DateTime.now(),
+      target: nextTarget,
+      libraryMatchChoices:
+          List<MediaDetailTarget>.unmodifiable(normalizedChoices),
+      selectedLibraryMatchIndex:
+          normalizedChoices.isEmpty ? 0 : nextSelectedIndex,
+      metadataRefreshStatus: record.metadataRefreshStatus,
+    );
+  }
 }
 
 class CachedDetailState {
@@ -339,6 +477,157 @@ String _normalizeLookupText(String value) {
   return lower.replaceAll(
     RegExp(r'[\s\-_.,:;!?/\\|()\[\]{}<>《》【】"“”·]+'),
     '',
+  );
+}
+
+bool _isSourceLibraryLookupKey(String lookupKey, String sourceId) {
+  final normalizedLookupKey = lookupKey.trim();
+  final normalizedSourceId = sourceId.trim();
+  if (normalizedLookupKey.isEmpty || normalizedSourceId.isEmpty) {
+    return false;
+  }
+  return normalizedLookupKey.startsWith('library|$normalizedSourceId|');
+}
+
+bool _detailTargetMatchesDeletedResource(
+  MediaDetailTarget target, {
+  required String sourceId,
+  required String resourceId,
+  required String resourcePath,
+  required bool treatAsScope,
+}) {
+  final normalizedSourceId = sourceId.trim();
+  if (normalizedSourceId.isEmpty) {
+    return false;
+  }
+
+  final targetSourceId = target.sourceId.trim();
+  final playbackSourceId = target.playbackTarget?.sourceId.trim() ?? '';
+  if (targetSourceId != normalizedSourceId &&
+      playbackSourceId != normalizedSourceId) {
+    return false;
+  }
+
+  final normalizedResourceId = resourceId.trim();
+  if (normalizedResourceId.isNotEmpty) {
+    if (target.itemId.trim() == normalizedResourceId) {
+      return true;
+    }
+    if ((target.playbackTarget?.itemId.trim() ?? '') == normalizedResourceId) {
+      return true;
+    }
+  }
+
+  final normalizedResourcePath = resourcePath.trim();
+  if (normalizedResourcePath.isEmpty) {
+    return false;
+  }
+
+  if (treatAsScope) {
+    return _pathMatchesDeletedScope(
+            target.resourcePath, normalizedResourcePath) ||
+        _pathMatchesDeletedScope(
+          target.playbackTarget?.actualAddress ?? '',
+          normalizedResourcePath,
+        );
+  }
+
+  return _pathEqualsDeletedResource(
+          target.resourcePath, normalizedResourcePath) ||
+      _pathEqualsDeletedResource(
+        target.playbackTarget?.actualAddress ?? '',
+        normalizedResourcePath,
+      );
+}
+
+bool _pathEqualsDeletedResource(String candidate, String expectedPath) {
+  final left = _normalizedCachePath(candidate);
+  final right = _normalizedCachePath(expectedPath);
+  return left.isNotEmpty && left == right;
+}
+
+bool _pathMatchesDeletedScope(String candidate, String scopePath) {
+  final candidateSegments = _cachePathSegments(candidate);
+  final scopeSegments = _cachePathSegments(scopePath);
+  if (candidateSegments.isEmpty ||
+      scopeSegments.isEmpty ||
+      candidateSegments.length < scopeSegments.length) {
+    return false;
+  }
+  for (var index = 0; index < scopeSegments.length; index++) {
+    if (candidateSegments[index] != scopeSegments[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+String _normalizedCachePath(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  final uri = Uri.tryParse(trimmed);
+  final rawPath = (uri != null && uri.hasScheme) ? uri.path : trimmed;
+  final normalized = rawPath.replaceAll('\\', '/').trim();
+  if (normalized.isEmpty) {
+    return '';
+  }
+  return normalized.replaceAll(RegExp(r'/+'), '/');
+}
+
+List<String> _cachePathSegments(String value) {
+  return _normalizedCachePath(value)
+      .split('/')
+      .map((segment) => segment.trim())
+      .where((segment) => segment.isNotEmpty)
+      .toList(growable: false);
+}
+
+MediaDetailTarget _stripResolvedLibraryResource(MediaDetailTarget target) {
+  return MediaDetailTarget(
+    title: target.title,
+    posterUrl: target.posterUrl,
+    posterHeaders: target.posterHeaders,
+    backdropUrl: target.backdropUrl,
+    backdropHeaders: target.backdropHeaders,
+    logoUrl: target.logoUrl,
+    logoHeaders: target.logoHeaders,
+    bannerUrl: target.bannerUrl,
+    bannerHeaders: target.bannerHeaders,
+    extraBackdropUrls: target.extraBackdropUrls,
+    extraBackdropHeaders: target.extraBackdropHeaders,
+    overview: target.overview,
+    year: target.year,
+    durationLabel: target.durationLabel,
+    ratingLabels: target.ratingLabels,
+    genres: target.genres,
+    directors: target.directors,
+    directorProfiles: target.directorProfiles,
+    actors: target.actors,
+    actorProfiles: target.actorProfiles,
+    platforms: target.platforms,
+    platformProfiles: target.platformProfiles,
+    availabilityLabel: '无',
+    searchQuery: target.searchQuery,
+    playbackTarget: null,
+    itemId: '',
+    sourceId: '',
+    itemType: target.itemType,
+    seasonNumber: target.seasonNumber,
+    episodeNumber: target.episodeNumber,
+    sectionId: '',
+    sectionName: '',
+    resourcePath: '',
+    doubanId: target.doubanId,
+    imdbId: target.imdbId,
+    tmdbId: target.tmdbId,
+    tvdbId: target.tvdbId,
+    wikidataId: target.wikidataId,
+    tmdbSetId: target.tmdbSetId,
+    providerIds: target.providerIds,
+    sourceKind: null,
+    sourceName: '',
   );
 }
 

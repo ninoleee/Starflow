@@ -7,6 +7,7 @@ import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
+import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
@@ -62,6 +63,7 @@ final mediaRepositoryProvider = Provider<MediaRepository>(
     ref.read(embyApiClientProvider),
     ref.read(webDavNasClientProvider),
     ref.read(nasMediaIndexerProvider),
+    ref.read(quarkSaveClientProvider),
   ),
 );
 
@@ -71,12 +73,14 @@ class AppMediaRepository implements MediaRepository {
     this._embyApiClient,
     this._webDavNasClient,
     this._nasMediaIndexer,
+    this._quarkSaveClient,
   );
 
   final Ref ref;
   final EmbyApiClient _embyApiClient;
   final WebDavNasClient _webDavNasClient;
   final NasMediaIndexer _nasMediaIndexer;
+  final QuarkSaveClient _quarkSaveClient;
 
   List<MediaSourceConfig> get _enabledSources {
     return ref
@@ -267,18 +271,45 @@ class AppMediaRepository implements MediaRepository {
       return;
     }
 
+    final directResourceUri = Uri.tryParse(normalizedResourcePath);
+    final isDirectResourceId =
+        directResourceUri != null && directResourceUri.hasScheme;
+    final record = isDirectResourceId
+        ? await _nasMediaIndexer.loadRecord(
+            sourceId: normalizedSourceId,
+            resourceId: normalizedResourcePath,
+          )
+        : null;
+    final effectiveResourcePath = record?.resourcePath.trim().isNotEmpty == true
+        ? record!.resourcePath.trim()
+        : normalizedResourcePath;
+    final quarkDeletePlan = await _prepareQuarkSyncDeletePlan(
+      source: source,
+      resourcePath: normalizedResourcePath,
+      effectiveResourcePath: effectiveResourcePath,
+      sectionId: sectionId,
+    );
+
     await _webDavNasClient.deleteResource(
       source,
       resourcePath: normalizedResourcePath,
       sectionId: sectionId,
     );
+    if (quarkDeletePlan != null) {
+      await _deleteMatchedQuarkDirectory(quarkDeletePlan);
+    }
     await _nasMediaIndexer.removeResourceScope(
       sourceId: normalizedSourceId,
-      resourcePath: normalizedResourcePath,
+      resourcePath: effectiveResourcePath,
     );
     await ref
         .read(localStorageCacheRepositoryProvider)
-        .clearDetailCacheForSource(normalizedSourceId);
+        .clearDetailCacheForResource(
+          sourceId: normalizedSourceId,
+          resourceId: isDirectResourceId ? normalizedResourcePath : '',
+          resourcePath: effectiveResourcePath,
+          treatAsScope: !_looksLikePlayableResourcePath(effectiveResourcePath),
+        );
   }
 
   @override
@@ -587,6 +618,322 @@ class AppMediaRepository implements MediaRepository {
         .where((collection) => selectedIds.contains(collection.id))
         .toList();
   }
+
+  bool _looksLikePlayableResourcePath(String value) {
+    final normalized = value.trim().toLowerCase();
+    return const [
+      '.mp4',
+      '.m4v',
+      '.mov',
+      '.mkv',
+      '.avi',
+      '.ts',
+      '.webm',
+      '.flv',
+      '.wmv',
+      '.mpg',
+      '.mpeg',
+      '.strm',
+    ].any(normalized.endsWith);
+  }
+
+  Future<_MatchedQuarkDirectory?> _prepareQuarkSyncDeletePlan({
+    required MediaSourceConfig source,
+    required String resourcePath,
+    required String effectiveResourcePath,
+    required String sectionId,
+  }) async {
+    final networkStorage = ref.read(appSettingsProvider).networkStorage;
+    if (!networkStorage.syncDeleteQuarkEnabled ||
+        !_looksLikeStrmResourcePath(effectiveResourcePath)) {
+      return null;
+    }
+
+    final cookie = networkStorage.quarkCookie.trim();
+    final parentFid = networkStorage.quarkSaveFolderId.trim();
+    if (cookie.isEmpty || parentFid.isEmpty) {
+      return null;
+    }
+
+    final resolvedTargetUrl = await _resolveStrmTargetUrlSafely(
+      source: source,
+      resourcePath: resourcePath,
+      sectionId: sectionId,
+    );
+    if (!_looksLikeQuarkNetdiskUrl(resolvedTargetUrl)) {
+      return null;
+    }
+
+    final candidateNames =
+        _buildQuarkDirectoryNameCandidates(effectiveResourcePath);
+    if (candidateNames.isEmpty) {
+      return null;
+    }
+
+    final matchedDirectory = await _findMatchingQuarkDirectory(
+      cookie: cookie,
+      parentFid: parentFid,
+      candidateNames: candidateNames,
+    );
+    if (matchedDirectory == null) {
+      return null;
+    }
+
+    return _MatchedQuarkDirectory(
+      cookie: cookie,
+      fid: matchedDirectory.fid,
+    );
+  }
+
+  Future<String> _resolveStrmTargetUrlSafely({
+    required MediaSourceConfig source,
+    required String resourcePath,
+    required String sectionId,
+  }) async {
+    try {
+      return await _webDavNasClient.resolveStrmTargetUrl(
+        source: source,
+        resourcePath: resourcePath,
+        sectionId: sectionId,
+      );
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<QuarkDirectoryEntry?> _findMatchingQuarkDirectory({
+    required String cookie,
+    required String parentFid,
+    required List<String> candidateNames,
+  }) async {
+    try {
+      final directories = await _quarkSaveClient.listDirectories(
+        cookie: cookie,
+        parentFid: parentFid,
+      );
+      if (directories.isEmpty) {
+        return null;
+      }
+
+      for (final candidateName in candidateNames) {
+        final normalizedCandidate =
+            _normalizeQuarkDirectoryComparisonText(candidateName);
+        if (normalizedCandidate.isEmpty) {
+          continue;
+        }
+        for (final directory in directories) {
+          final normalizedDirectory =
+              _normalizeQuarkDirectoryComparisonText(directory.name);
+          if (normalizedDirectory == normalizedCandidate) {
+            return directory;
+          }
+        }
+      }
+
+      for (final candidateName in candidateNames) {
+        final normalizedCandidate =
+            _normalizeQuarkDirectoryComparisonText(candidateName);
+        if (normalizedCandidate.isEmpty) {
+          continue;
+        }
+        for (final directory in directories) {
+          final normalizedDirectory =
+              _normalizeQuarkDirectoryComparisonText(directory.name);
+          if (normalizedDirectory.isEmpty) {
+            continue;
+          }
+          if (normalizedDirectory.contains(normalizedCandidate) ||
+              normalizedCandidate.contains(normalizedDirectory)) {
+            return directory;
+          }
+        }
+      }
+    } catch (_) {
+      return null;
+    }
+
+    return null;
+  }
+
+  Future<void> _deleteMatchedQuarkDirectory(
+    _MatchedQuarkDirectory directory,
+  ) async {
+    try {
+      await _quarkSaveClient.deleteEntries(
+        cookie: directory.cookie,
+        fids: [directory.fid],
+      );
+    } catch (_) {
+      // WebDAV delete has already succeeded; Quark sync delete is best-effort.
+    }
+  }
+
+  List<String> _buildQuarkDirectoryNameCandidates(String resourcePath) {
+    final segments = _pathSegments(_uriPath(resourcePath));
+    if (segments.length < 2) {
+      return const [];
+    }
+
+    final directories = segments.sublist(0, segments.length - 1);
+    if (directories.isEmpty) {
+      return const [];
+    }
+
+    final rawRootName = _resolveMediaRootDirectoryName(directories);
+    if (rawRootName.isEmpty) {
+      return const [];
+    }
+
+    final candidates = <String>{};
+
+    void addCandidate(String value) {
+      final trimmed = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+      if (trimmed.isNotEmpty) {
+        candidates.add(trimmed);
+      }
+    }
+
+    addCandidate(rawRootName);
+    addCandidate(rawRootName.replaceAll(RegExp(r'\{[^}]+\}'), ' '));
+    addCandidate(rawRootName.replaceAll(RegExp(r'\[[^\]]+\]'), ' '));
+    addCandidate(
+      rawRootName
+          .replaceAll(RegExp(r'\{[^}]+\}'), ' ')
+          .replaceAll(RegExp(r'\[[^\]]+\]'), ' ')
+          .replaceAll(RegExp(r'\(\d{4}\)'), ' '),
+    );
+    addCandidate(
+      rawRootName
+          .replaceAll(RegExp(r'\{[^}]+\}'), ' ')
+          .replaceAll(RegExp(r'\[[^\]]+\]'), ' ')
+          .replaceAll(RegExp(r'\(\d{4}\)'), ' ')
+          .replaceAll(
+            RegExp(r'\b(?:2160p|1080p|720p|4k|remux|web-dl|bluray)\b',
+                caseSensitive: false),
+            ' ',
+          ),
+    );
+
+    return candidates.toList(growable: false);
+  }
+
+  String _resolveMediaRootDirectoryName(List<String> directories) {
+    final normalized = directories
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+    if (normalized.isEmpty) {
+      return '';
+    }
+
+    final lastDirectory = normalized.last;
+    if (_looksLikeSeasonFolderLabel(lastDirectory) && normalized.length > 1) {
+      return normalized[normalized.length - 2];
+    }
+
+    final nearestNonSeason = _nearestNonSeasonDirectory(normalized);
+    if (nearestNonSeason.isNotEmpty) {
+      return nearestNonSeason;
+    }
+    return lastDirectory;
+  }
+
+  bool _looksLikeStrmResourcePath(String value) {
+    return _uriPath(value).toLowerCase().endsWith('.strm');
+  }
+
+  bool _looksLikeQuarkNetdiskUrl(String value) {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null || !uri.hasScheme) {
+      return false;
+    }
+    final host = uri.host.toLowerCase();
+    return host == 'pan.quark.cn' ||
+        host == 'drive-pc.quark.cn' ||
+        host == 'drive.quark.cn' ||
+        host.endsWith('.quark.cn');
+  }
+
+  String _normalizeQuarkDirectoryComparisonText(String value) {
+    final normalized = value
+        .trim()
+        .replaceAll(RegExp(r'\{[^}]+\}'), ' ')
+        .replaceAll(RegExp(r'\[[^\]]+\]'), ' ')
+        .replaceAll(RegExp(r'\(\d{4}\)'), ' ')
+        .replaceAll(
+          RegExp(r'[\s\-_.,:;!?/\\|()\[\]{}<>《》【】"“”·]+'),
+          '',
+        )
+        .toLowerCase();
+    return normalized;
+  }
+
+  String _nearestNonSeasonDirectory(Iterable<String> directories) {
+    final normalized = directories
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+    for (var index = normalized.length - 1; index >= 0; index--) {
+      final candidate = normalized[index];
+      if (_looksLikeSeasonFolderLabel(candidate)) {
+        continue;
+      }
+      return candidate;
+    }
+    return '';
+  }
+
+  bool _looksLikeSeasonFolderLabel(String value) {
+    return _parseSeasonNumberFromLabel(value) != null ||
+        _looksLikeNumericTopicSeason(value);
+  }
+
+  int? _parseSeasonNumberFromLabel(String value) {
+    final normalized = value.trim();
+    for (final pattern in const [
+      r'(?:^|[ ._\-])s(\d{1,2})(?:$|[ ._\-])',
+      r'season[ ._\-]?(\d{1,2})',
+      r'第(\d{1,2})季',
+    ]) {
+      final match =
+          RegExp(pattern, caseSensitive: false).firstMatch(normalized);
+      final parsed = int.tryParse(match?.group(1) ?? '');
+      if (parsed != null && parsed > 0) {
+        return parsed;
+      }
+    }
+    return null;
+  }
+
+  bool _looksLikeNumericTopicSeason(String value) {
+    return RegExp(r'^\s*\d{1,2}(?:[ ._\-]|$)').hasMatch(value);
+  }
+
+  String _uriPath(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return '';
+    }
+    final uri = Uri.tryParse(trimmed);
+    if (uri != null && uri.path.isNotEmpty) {
+      return uri.path;
+    }
+    return trimmed;
+  }
+
+  List<String> _pathSegments(String value) {
+    return value
+        .split('/')
+        .map((segment) => segment.trim())
+        .where((segment) => segment.isNotEmpty)
+        .map((segment) {
+      try {
+        return Uri.decodeComponent(segment);
+      } catch (_) {
+        return segment;
+      }
+    }).toList(growable: false);
+  }
 }
 
 class _SourceFetchResult {
@@ -599,4 +946,14 @@ class _SourceFetchResult {
   final List<MediaItem> items;
   final Object? error;
   final StackTrace? stackTrace;
+}
+
+class _MatchedQuarkDirectory {
+  const _MatchedQuarkDirectory({
+    required this.cookie,
+    required this.fid,
+  });
+
+  final String cookie;
+  final String fid;
 }

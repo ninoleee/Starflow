@@ -140,6 +140,116 @@ class QuarkSaveClient {
     return QuarkConnectionStatus(rootDirectoryCount: directories.length);
   }
 
+  Future<List<QuarkFileEntry>> listEntries({
+    required String cookie,
+    String parentFid = '0',
+  }) async {
+    final trimmedCookie = cookie.trim();
+    if (trimmedCookie.isEmpty) {
+      throw const QuarkSaveException('请先填写夸克 Cookie');
+    }
+
+    final response = await _client.get(
+      Uri.parse('$_baseUrl/1/clouddrive/file/sort').replace(
+        queryParameters: {
+          'pr': 'ucpro',
+          'fr': 'pc',
+          'uc_param_str': '',
+          'pdir_fid': parentFid,
+          '_page': '1',
+          '_size': '200',
+          '_fetch_total': '1',
+          '_fetch_sub_dirs': '0',
+          '_sort': 'file_type:asc,updated_at:desc',
+          '_fetch_full_path': '1',
+          'fetch_all_file': '1',
+          'fetch_risk_file_name': '1',
+        },
+      ),
+      headers: _headers(trimmedCookie),
+    );
+    final payload = _decode(response);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode));
+    }
+    final code = payload['code'] as int? ?? -1;
+    if (code != 0) {
+      throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode));
+    }
+
+    final entries = (payload['data'] as Map<String, dynamic>? ??
+            const {})['list'] as List<dynamic>? ??
+        const [];
+    return entries
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .map(QuarkFileEntry.fromJson)
+        .whereType<QuarkFileEntry>()
+        .toList(growable: false);
+  }
+
+  Future<QuarkDeleteResult> deleteEntries({
+    required String cookie,
+    required List<String> fids,
+  }) async {
+    final trimmedCookie = cookie.trim();
+    if (trimmedCookie.isEmpty) {
+      throw const QuarkSaveException('请先填写夸克 Cookie');
+    }
+
+    final normalizedFids = fids
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (normalizedFids.isEmpty) {
+      throw const QuarkSaveException('没有可删除的夸克文件');
+    }
+
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/1/clouddrive/file/delete').replace(
+        queryParameters: const {
+          'pr': 'ucpro',
+          'fr': 'pc',
+          'uc_param_str': '',
+        },
+      ),
+      headers: _headers(trimmedCookie),
+      body: jsonEncode({
+        'action_type': 2,
+        'filelist': normalizedFids,
+        'exclude_fids': const <String>[],
+      }),
+    );
+    final payload = _decode(response);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode));
+    }
+    final code = payload['code'] as int? ?? -1;
+    if (code != 0) {
+      throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode));
+    }
+
+    final data = payload['data'] as Map<String, dynamic>? ?? const {};
+    final taskId = '${data['task_id'] ?? ''}'.trim();
+    var finished = data['finish'] == true;
+    if (taskId.isNotEmpty && !finished) {
+      finished = await _waitForTask(
+        cookie: trimmedCookie,
+        taskId: taskId,
+      );
+    }
+    return QuarkDeleteResult(
+      taskId: taskId,
+      deletedCount: normalizedFids.length,
+      finished: finished,
+    );
+  }
+
   Future<String> _ensureDirectory({
     required String cookie,
     required String parentFid,
@@ -209,51 +319,64 @@ class QuarkSaveClient {
     required String cookie,
     String parentFid = '0',
   }) async {
-    final trimmedCookie = cookie.trim();
-    if (trimmedCookie.isEmpty) {
-      throw const QuarkSaveException('请先填写夸克 Cookie');
-    }
-
-    final response = await _client.get(
-      Uri.parse('$_baseUrl/1/clouddrive/file/sort').replace(
-        queryParameters: {
-          'pr': 'ucpro',
-          'fr': 'pc',
-          'uc_param_str': '',
-          'pdir_fid': parentFid,
-          '_page': '1',
-          '_size': '200',
-          '_fetch_total': '1',
-          '_fetch_sub_dirs': '0',
-          '_sort': 'file_type:asc,updated_at:desc',
-          '_fetch_full_path': '1',
-          'fetch_all_file': '1',
-          'fetch_risk_file_name': '1',
-        },
-      ),
-      headers: _headers(trimmedCookie),
+    final entries = await listEntries(
+      cookie: cookie,
+      parentFid: parentFid,
     );
-    final payload = _decode(response);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw QuarkSaveException(
-          _resolveErrorMessage(payload, response.statusCode));
-    }
-    final code = payload['code'] as int? ?? -1;
-    if (code != 0) {
-      throw QuarkSaveException(
-          _resolveErrorMessage(payload, response.statusCode));
-    }
-
-    final entries = (payload['data'] as Map<String, dynamic>? ??
-            const {})['list'] as List<dynamic>? ??
-        const [];
     return entries
-        .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item))
-        .where((item) => item['dir'] == true)
-        .map(QuarkDirectoryEntry.fromJson)
+        .where((item) => item.isDirectory)
+        .map(QuarkDirectoryEntry.fromFileEntry)
         .whereType<QuarkDirectoryEntry>()
         .toList(growable: false);
+  }
+
+  Future<bool> _waitForTask({
+    required String cookie,
+    required String taskId,
+  }) async {
+    for (var attempt = 0; attempt < 80; attempt++) {
+      final response = await _client.get(
+        Uri.parse('$_baseUrl/1/clouddrive/task').replace(
+          queryParameters: {
+            'pr': 'ucpro',
+            'fr': 'pc',
+            'uc_param_str': '',
+            'task_id': taskId,
+            'retry_index': '$attempt',
+            '__dt':
+                '${(math.Random().nextDouble() * 4 + 1).round() * 60 * 1000}',
+            '__t': '${DateTime.now().millisecondsSinceEpoch ~/ 1000}',
+          },
+        ),
+        headers: _headers(cookie),
+      );
+      final payload = _decode(response);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode),
+        );
+      }
+      final code = payload['code'] as int? ?? -1;
+      if (code != 0) {
+        throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode),
+        );
+      }
+
+      final data = payload['data'] as Map<String, dynamic>? ?? const {};
+      final status = (data['status'] as num?)?.toInt() ?? 0;
+      if (status == 2) {
+        return true;
+      }
+      if (status < 0) {
+        final message = '${data['message'] ?? data['msg'] ?? ''}'.trim();
+        throw QuarkSaveException(
+          message.isNotEmpty ? message : '夸克删除任务执行失败',
+        );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    throw const QuarkSaveException('夸克删除任务执行超时，请稍后确认结果');
   }
 
   Future<String> _fetchShareToken({
@@ -495,6 +618,18 @@ class QuarkConnectionStatus {
   String get summary => '根目录文件夹 $rootDirectoryCount 个';
 }
 
+class QuarkDeleteResult {
+  const QuarkDeleteResult({
+    required this.taskId,
+    required this.deletedCount,
+    required this.finished,
+  });
+
+  final String taskId;
+  final int deletedCount;
+  final bool finished;
+}
+
 class QuarkSaveException implements Exception {
   const QuarkSaveException(this.message);
 
@@ -527,18 +662,48 @@ class QuarkDirectoryEntry {
   final String name;
   final String path;
 
-  static QuarkDirectoryEntry? fromJson(Map<String, dynamic> json) {
-    final fid = '${json['fid'] ?? ''}'.trim();
-    final name = '${json['file_name'] ?? json['name'] ?? ''}'.trim();
-    final rawPath = '${json['file_path'] ?? ''}'.trim();
-    final normalizedPath = rawPath.isEmpty ? '/$name' : rawPath;
-    if (fid.isEmpty || name.isEmpty) {
+  static QuarkDirectoryEntry? fromFileEntry(QuarkFileEntry entry) {
+    if (!entry.isDirectory) {
       return null;
     }
     return QuarkDirectoryEntry(
+      fid: entry.fid,
+      name: entry.name,
+      path: entry.path,
+    );
+  }
+}
+
+class QuarkFileEntry {
+  const QuarkFileEntry({
+    required this.fid,
+    required this.name,
+    required this.path,
+    required this.isDirectory,
+  });
+
+  final String fid;
+  final String name;
+  final String path;
+  final bool isDirectory;
+
+  static QuarkFileEntry? fromJson(Map<String, dynamic> json) {
+    final fid = '${json['fid'] ?? ''}'.trim();
+    final name = '${json['file_name'] ?? json['name'] ?? ''}'.trim();
+    final rawPath = '${json['file_path'] ?? ''}'.trim();
+    final normalizedPath = rawPath.isEmpty
+        ? '/$name'
+        : rawPath.startsWith('/')
+            ? rawPath
+            : '/$rawPath';
+    if (fid.isEmpty || name.isEmpty) {
+      return null;
+    }
+    return QuarkFileEntry(
       fid: fid,
       name: name,
       path: normalizedPath,
+      isDirectory: json['dir'] == true,
     );
   }
 }

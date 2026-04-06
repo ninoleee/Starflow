@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class SettingsTextInputField extends ConsumerWidget {
   const SettingsTextInputField({
@@ -61,7 +62,7 @@ class SettingsTextInputField extends ConsumerWidget {
     return ValueListenableBuilder<TextEditingValue>(
       valueListenable: controller,
       builder: (context, value, child) {
-        return TvSelectionTile(
+        return SettingsSelectionTile(
           title: labelText,
           value: _resolveTelevisionSummary(value.text),
           onPressed: () => _openTelevisionEditor(context),
