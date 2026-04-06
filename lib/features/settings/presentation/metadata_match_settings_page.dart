@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
-import 'package:starflow/core/widgets/app_page_background.dart';
-import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -14,6 +11,7 @@ import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class MetadataMatchSettingsPage extends ConsumerWidget {
   const MetadataMatchSettingsPage({super.key});
@@ -23,254 +21,173 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
     final settings = ref.watch(appSettingsProvider);
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
 
-    return Scaffold(
-      body: AppPageBackground(
-        contentPadding: appPageContentPadding(context),
-        child: Stack(
-          children: [
-            ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                SizedBox(
-                  height:
-                      MediaQuery.paddingOf(context).top + kToolbarHeight + 12,
+    return SettingsPageScaffold(
+      children: [
+        SectionPanel(
+          title: '匹配策略',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _MetadataToggleTile(
+                title: '详情页自动匹配本地资源',
+                subtitle: '开启后，进入详情页会自动尝试匹配本地资源；关闭后仅手动匹配',
+                value: settings.detailAutoLibraryMatchEnabled,
+                onChanged: (value) {
+                  ref
+                      .read(settingsControllerProvider.notifier)
+                      .setDetailAutoLibraryMatchEnabled(value);
+                },
+              ),
+              const SizedBox(height: 10),
+              _MetadataSourceTile(
+                title: '匹配来源',
+                subtitle: _libraryMatchSourceSummary(settings),
+                onPressed: () => _openLibraryMatchSourcePicker(
+                  context,
+                  ref,
+                  settings,
                 ),
-                SectionPanel(
-                  title: '匹配策略',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _MetadataToggleTile(
-                        title: '详情页自动匹配本地资源',
-                        subtitle: '开启后，进入详情页会自动尝试匹配本地资源；关闭后仅手动匹配',
-                        value: settings.detailAutoLibraryMatchEnabled,
-                        onChanged: (value) {
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '优先顺序',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              const SizedBox(height: 10),
+              if (isTelevision)
+                StarflowSelectionTile(
+                  title: '优先顺序',
+                  value: '${settings.metadataMatchPriority.label} 优先',
+                  onPressed: () => _openPriorityPicker(
+                    context,
+                    ref,
+                    settings.metadataMatchPriority,
+                  ),
+                )
+              else
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    for (final provider in MetadataMatchProvider.values)
+                      StarflowChipButton(
+                        label: '${provider.label} 优先',
+                        selected: provider == settings.metadataMatchPriority,
+                        onPressed: () {
                           ref
                               .read(settingsControllerProvider.notifier)
-                              .setDetailAutoLibraryMatchEnabled(value);
+                              .setMetadataMatchPriority(provider);
                         },
                       ),
-                      const SizedBox(height: 10),
-                      _MetadataSourceTile(
-                        title: '匹配来源',
-                        subtitle: _libraryMatchSourceSummary(settings),
-                        onPressed: () => _openLibraryMatchSourcePicker(
-                          context,
-                          ref,
-                          settings,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        '优先顺序',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 10),
-                      if (isTelevision)
-                        TvSelectionTile(
-                          title: '优先顺序',
-                          value: '${settings.metadataMatchPriority.label} 优先',
-                          onPressed: () => _openPriorityPicker(
-                            context,
-                            ref,
-                            settings.metadataMatchPriority,
-                          ),
-                        )
-                      else
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: [
-                            for (final provider in MetadataMatchProvider.values)
-                              StarflowChipButton(
-                                label: '${provider.label} 优先',
-                                selected:
-                                    provider == settings.metadataMatchPriority,
-                                onPressed: () {
-                                  ref
-                                      .read(settingsControllerProvider.notifier)
-                                      .setMetadataMatchPriority(provider);
-                                },
-                              ),
-                          ],
-                        ),
-                    ],
-                  ),
+                  ],
                 ),
-                const SizedBox(height: 18),
-                SectionPanel(
-                  title: 'TMDB',
-                  child: Column(
-                    children: [
-                      _MetadataToggleTile(
-                        title: '启用 TMDB 自动补全影片信息',
-                        value: settings.tmdbMetadataMatchEnabled,
-                        onChanged: (value) {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .setTmdbMetadataMatchEnabled(value);
-                        },
-                      ),
-                      const SizedBox(height: 6),
-                      if (isTelevision)
-                        TvSelectionTile(
-                          title: 'TMDB Read Access Token',
-                          value: settings.tmdbReadAccessToken.trim().isEmpty
-                              ? '未配置'
-                              : '已配置',
-                          onPressed: () => _openTmdbTokenEditor(
-                            context,
-                            ref,
-                            settings.tmdbReadAccessToken,
-                          ),
-                        )
-                      else
-                        StarflowSelectionTile(
-                          title: 'TMDB Read Access Token',
-                          value: settings.tmdbReadAccessToken.trim().isEmpty
-                              ? '未配置'
-                              : '已配置',
-                          onPressed: () => _openTmdbTokenEditor(
-                            context,
-                            ref,
-                            settings.tmdbReadAccessToken,
-                          ),
-                        ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          if (isTelevision)
-                            TvAdaptiveButton(
-                              label: settings.tmdbReadAccessToken.trim().isEmpty
-                                  ? '填写 Token'
-                                  : '编辑 Token',
-                              icon: Icons.key_rounded,
-                              onPressed: () => _openTmdbTokenEditor(
-                                context,
-                                ref,
-                                settings.tmdbReadAccessToken,
-                              ),
-                              variant: TvButtonVariant.outlined,
-                            )
-                          else
-                            StarflowButton(
-                              label: settings.tmdbReadAccessToken.trim().isEmpty
-                                  ? '填写 Token'
-                                  : '编辑 Token',
-                              icon: Icons.key_rounded,
-                              onPressed: () => _openTmdbTokenEditor(
-                                context,
-                                ref,
-                                settings.tmdbReadAccessToken,
-                              ),
-                              variant: StarflowButtonVariant.secondary,
-                              compact: true,
-                            ),
-                          if (isTelevision)
-                            TvAdaptiveButton(
-                              label: '测试 TMDB',
-                              icon: Icons.science_rounded,
-                              onPressed: () =>
-                                  _openTmdbTestDialog(context, ref),
-                              variant: TvButtonVariant.outlined,
-                            )
-                          else
-                            StarflowButton(
-                              label: '测试 TMDB',
-                              icon: Icons.science_rounded,
-                              onPressed: () =>
-                                  _openTmdbTestDialog(context, ref),
-                              variant: StarflowButtonVariant.secondary,
-                              compact: true,
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 18),
-                SectionPanel(
-                  title: 'WMDB',
-                  child: Column(
-                    children: [
-                      _MetadataToggleTile(
-                        title: '启用 WMDB 自动补全影片信息',
-                        value: settings.wmdbMetadataMatchEnabled,
-                        onChanged: (value) {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .setWmdbMetadataMatchEnabled(value);
-                        },
-                      ),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: isTelevision
-                            ? TvAdaptiveButton(
-                                label: '测试 WMDB',
-                                icon: Icons.science_rounded,
-                                onPressed: () =>
-                                    _openWmdbTestDialog(context, ref),
-                                variant: TvButtonVariant.outlined,
-                              )
-                            : StarflowButton(
-                                label: '测试 WMDB',
-                                icon: Icons.science_rounded,
-                                onPressed: () =>
-                                    _openWmdbTestDialog(context, ref),
-                                variant: StarflowButtonVariant.secondary,
-                                compact: true,
-                              ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 18),
-                SectionPanel(
-                  title: '评分',
-                  child: Column(
-                    children: [
-                      _MetadataToggleTile(
-                        title: '启用 IMDb 自动补评分',
-                        value: settings.imdbRatingMatchEnabled,
-                        onChanged: (value) {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .setImdbRatingMatchEnabled(value);
-                        },
-                      ),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: isTelevision
-                            ? TvAdaptiveButton(
-                                label: '测试 IMDb',
-                                icon: Icons.science_rounded,
-                                onPressed: () =>
-                                    _openImdbTestDialog(context, ref),
-                                variant: TvButtonVariant.outlined,
-                              )
-                            : StarflowButton(
-                                label: '测试 IMDb',
-                                icon: Icons.science_rounded,
-                                onPressed: () =>
-                                    _openImdbTestDialog(context, ref),
-                                variant: StarflowButtonVariant.secondary,
-                                compact: true,
-                              ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: kBottomReservedSpacing),
-              ],
-            ),
-            const OverlayToolbar(),
-          ],
+            ],
+          ),
         ),
-      ),
+        const SizedBox(height: 18),
+        SectionPanel(
+          title: 'TMDB',
+          child: Column(
+            children: [
+              _MetadataToggleTile(
+                title: '启用 TMDB 自动补全影片信息',
+                value: settings.tmdbMetadataMatchEnabled,
+                onChanged: (value) {
+                  ref
+                      .read(settingsControllerProvider.notifier)
+                      .setTmdbMetadataMatchEnabled(value);
+                },
+              ),
+              const SizedBox(height: 6),
+              StarflowSelectionTile(
+                title: 'TMDB Read Access Token',
+                value:
+                    settings.tmdbReadAccessToken.trim().isEmpty ? '未配置' : '已配置',
+                onPressed: () => _openTmdbTokenEditor(
+                  context,
+                  ref,
+                  settings.tmdbReadAccessToken,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  SettingsActionButton(
+                    label: settings.tmdbReadAccessToken.trim().isEmpty
+                        ? '填写 Token'
+                        : '编辑 Token',
+                    icon: Icons.key_rounded,
+                    onPressed: () => _openTmdbTokenEditor(
+                      context,
+                      ref,
+                      settings.tmdbReadAccessToken,
+                    ),
+                  ),
+                  SettingsActionButton(
+                    label: '测试 TMDB',
+                    icon: Icons.science_rounded,
+                    onPressed: () => _openTmdbTestDialog(context, ref),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        SectionPanel(
+          title: 'WMDB',
+          child: Column(
+            children: [
+              _MetadataToggleTile(
+                title: '启用 WMDB 自动补全影片信息',
+                value: settings.wmdbMetadataMatchEnabled,
+                onChanged: (value) {
+                  ref
+                      .read(settingsControllerProvider.notifier)
+                      .setWmdbMetadataMatchEnabled(value);
+                },
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: SettingsActionButton(
+                  label: '测试 WMDB',
+                  icon: Icons.science_rounded,
+                  onPressed: () => _openWmdbTestDialog(context, ref),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        SectionPanel(
+          title: '评分',
+          child: Column(
+            children: [
+              _MetadataToggleTile(
+                title: '启用 IMDb 自动补评分',
+                value: settings.imdbRatingMatchEnabled,
+                onChanged: (value) {
+                  ref
+                      .read(settingsControllerProvider.notifier)
+                      .setImdbRatingMatchEnabled(value);
+                },
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: SettingsActionButton(
+                  label: '测试 IMDb',
+                  icon: Icons.science_rounded,
+                  onPressed: () => _openImdbTestDialog(context, ref),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

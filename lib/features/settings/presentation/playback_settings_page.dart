@@ -2,12 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
-import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class PlaybackSettingsPage extends ConsumerStatefulWidget {
   const PlaybackSettingsPage({
@@ -113,35 +112,10 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
       await _discardAndClose();
       return;
     }
-    final action = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('保存修改？'),
-        content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
-        actions: [
-          StarflowButton(
-            label: '取消',
-            onPressed: () => Navigator.of(dialogContext).pop('cancel'),
-            variant: StarflowButtonVariant.ghost,
-            compact: true,
-          ),
-          StarflowButton(
-            label: '不保存',
-            onPressed: () => Navigator.of(dialogContext).pop('discard'),
-            variant: StarflowButtonVariant.secondary,
-            compact: true,
-          ),
-          StarflowButton(
-            label: '保存',
-            onPressed: () => Navigator.of(dialogContext).pop('save'),
-            compact: true,
-          ),
-        ],
-      ),
-    );
-    if (action == 'discard') {
+    final action = await showSettingsCloseConfirmDialog(context);
+    if (action == SettingsCloseAction.discard) {
       await _discardAndClose();
-    } else if (action == 'save') {
+    } else if (action == SettingsCloseAction.save) {
       await _saveDraft();
     }
   }
@@ -157,209 +131,156 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
         }
         _handleCloseRequest();
       },
-      child: Scaffold(
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            ListView(
-              padding: overlayToolbarPagePadding(context),
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              children: [
-                Text(
-                  '默认偏好会在每次打开播放器时自动生效。',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.onSurfaceVariant,
-                      ),
+      child: SettingsPageScaffold(
+        onBack: _handleCloseRequest,
+        trailing: SettingsToolbarButton(
+          label: '保存',
+          icon: Icons.save_rounded,
+          onPressed: _saveDraft,
+        ),
+        children: [
+          Text(
+            '默认偏好会在每次打开播放器时自动生效。',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-                const SizedBox(height: 18),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '最大超时时间（秒）',
-                    value: '${_draftSeconds()} 秒',
-                    onPressed: _openTimeoutPicker,
-                  )
-                else
-                  TextField(
-                    controller: _timeoutController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(
-                      labelText: '最大超时时间（秒）',
-                      hintText: '20',
-                    ),
-                  ),
-                const SizedBox(height: 18),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '播放器内核',
-                    value: _draftPlaybackEngine.label,
-                    onPressed: _openPlaybackEnginePicker,
-                  )
-                else
-                  DropdownButtonFormField<PlaybackEngine>(
-                    initialValue: _draftPlaybackEngine,
-                    decoration: const InputDecoration(
-                      labelText: '播放器内核',
-                    ),
-                    items: [
-                      for (final engine in PlaybackEngine.values)
-                        DropdownMenuItem<PlaybackEngine>(
-                          value: engine,
-                          child: Text(engine.label),
-                        ),
-                    ],
-                    onChanged: (value) {
-                      if (value == null) {
-                        return;
-                      }
-                      setState(() {
-                        _draftPlaybackEngine = value;
-                      });
-                    },
-                  ),
-                const SizedBox(height: 8),
-                Text(
-                  _draftPlaybackEngine.description,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-                const SizedBox(height: 18),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '解码模式',
-                    value: _draftPlaybackDecodeMode.label,
-                    onPressed: _openPlaybackDecodeModePicker,
-                  )
-                else
-                  DropdownButtonFormField<PlaybackDecodeMode>(
-                    initialValue: _draftPlaybackDecodeMode,
-                    decoration: const InputDecoration(
-                      labelText: '解码模式',
-                    ),
-                    items: [
-                      for (final mode in PlaybackDecodeMode.values)
-                        DropdownMenuItem<PlaybackDecodeMode>(
-                          value: mode,
-                          child: Text(mode.label),
-                        ),
-                    ],
-                    onChanged: (value) {
-                      if (value == null) {
-                        return;
-                      }
-                      setState(() {
-                        _draftPlaybackDecodeMode = value;
-                      });
-                    },
-                  ),
-                const SizedBox(height: 8),
-                Text(
-                  _buildPlaybackDecodeModeDescription(),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-                const SizedBox(height: 18),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '后台播放',
-                    value: _draftBackgroundPlaybackEnabled ? '已开启' : '已关闭',
-                    onPressed: () {
-                      setState(() {
-                        _draftBackgroundPlaybackEnabled =
-                            !_draftBackgroundPlaybackEnabled;
-                      });
-                    },
-                  )
-                else
-                  StarflowToggleTile(
-                    title: '后台播放',
-                    subtitle: 'Android 切后台会进入小窗继续播放；iOS 会继续后台播放音频。',
-                    value: _draftBackgroundPlaybackEnabled,
-                    onChanged: (value) {
-                      setState(() {
-                        _draftBackgroundPlaybackEnabled = value;
-                      });
-                    },
-                  ),
-                const SizedBox(height: 18),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '默认倍速',
-                    value: _formatSpeedLabel(_draftPlaybackSpeed),
-                    onPressed: _openSpeedPicker,
-                  )
-                else
-                  DropdownButtonFormField<double>(
-                    initialValue: _draftPlaybackSpeed,
-                    decoration: const InputDecoration(
-                      labelText: '默认倍速',
-                    ),
-                    items: [
-                      for (final speed in _speedOptions)
-                        DropdownMenuItem<double>(
-                          value: speed,
-                          child: Text(_formatSpeedLabel(speed)),
-                        ),
-                    ],
-                    onChanged: (value) {
-                      if (value == null) {
-                        return;
-                      }
-                      setState(() {
-                        _draftPlaybackSpeed = value;
-                      });
-                    },
-                  ),
-                const SizedBox(height: 18),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '字幕',
-                    value: _subtitleSettingsSummary(),
-                    onPressed: _openSubtitleSettingsPage,
-                  )
-                else
-                  StarflowSelectionTile(
-                    title: '字幕',
-                    subtitle: _subtitleSettingsSummary(),
-                    onPressed: _openSubtitleSettingsPage,
-                  ),
-                const SizedBox(height: kBottomReservedSpacing),
-              ],
-            ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: OverlayToolbar(
-                onBack: _handleCloseRequest,
-                trailing: isTelevision
-                    ? Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: TvAdaptiveButton(
-                          label: '保存',
-                          icon: Icons.save_rounded,
-                          onPressed: _saveDraft,
-                          variant: TvButtonVariant.text,
-                        ),
-                      )
-                    : StarflowButton(
-                        label: '保存',
-                        onPressed: _saveDraft,
-                        variant: StarflowButtonVariant.ghost,
-                        compact: true,
-                      ),
+          ),
+          const SizedBox(height: 18),
+          if (isTelevision)
+            StarflowSelectionTile(
+              title: '最大超时时间（秒）',
+              value: '${_draftSeconds()} 秒',
+              onPressed: _openTimeoutPicker,
+            )
+          else
+            TextField(
+              controller: _timeoutController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(
+                labelText: '最大超时时间（秒）',
+                hintText: '20',
               ),
             ),
-          ],
-        ),
+          const SizedBox(height: 18),
+          if (isTelevision)
+            StarflowSelectionTile(
+              title: '播放器内核',
+              value: _draftPlaybackEngine.label,
+              onPressed: _openPlaybackEnginePicker,
+            )
+          else
+            DropdownButtonFormField<PlaybackEngine>(
+              initialValue: _draftPlaybackEngine,
+              decoration: const InputDecoration(
+                labelText: '播放器内核',
+              ),
+              items: [
+                for (final engine in PlaybackEngine.values)
+                  DropdownMenuItem<PlaybackEngine>(
+                    value: engine,
+                    child: Text(engine.label),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value == null) {
+                  return;
+                }
+                setState(() {
+                  _draftPlaybackEngine = value;
+                });
+              },
+            ),
+          const SizedBox(height: 8),
+          Text(
+            _draftPlaybackEngine.description,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 18),
+          if (isTelevision)
+            StarflowSelectionTile(
+              title: '解码模式',
+              value: _draftPlaybackDecodeMode.label,
+              onPressed: _openPlaybackDecodeModePicker,
+            )
+          else
+            DropdownButtonFormField<PlaybackDecodeMode>(
+              initialValue: _draftPlaybackDecodeMode,
+              decoration: const InputDecoration(
+                labelText: '解码模式',
+              ),
+              items: [
+                for (final mode in PlaybackDecodeMode.values)
+                  DropdownMenuItem<PlaybackDecodeMode>(
+                    value: mode,
+                    child: Text(mode.label),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value == null) {
+                  return;
+                }
+                setState(() {
+                  _draftPlaybackDecodeMode = value;
+                });
+              },
+            ),
+          const SizedBox(height: 8),
+          Text(
+            _buildPlaybackDecodeModeDescription(),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 18),
+          StarflowToggleTile(
+            title: '后台播放',
+            subtitle: 'Android 切后台会进入小窗继续播放；iOS 会继续后台播放音频。',
+            value: _draftBackgroundPlaybackEnabled,
+            onChanged: (value) {
+              setState(() {
+                _draftBackgroundPlaybackEnabled = value;
+              });
+            },
+          ),
+          const SizedBox(height: 18),
+          if (isTelevision)
+            StarflowSelectionTile(
+              title: '默认倍速',
+              value: _formatSpeedLabel(_draftPlaybackSpeed),
+              onPressed: _openSpeedPicker,
+            )
+          else
+            DropdownButtonFormField<double>(
+              initialValue: _draftPlaybackSpeed,
+              decoration: const InputDecoration(
+                labelText: '默认倍速',
+              ),
+              items: [
+                for (final speed in _speedOptions)
+                  DropdownMenuItem<double>(
+                    value: speed,
+                    child: Text(_formatSpeedLabel(speed)),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value == null) {
+                  return;
+                }
+                setState(() {
+                  _draftPlaybackSpeed = value;
+                });
+              },
+            ),
+          const SizedBox(height: 18),
+          StarflowSelectionTile(
+            title: '字幕',
+            subtitle: _subtitleSettingsSummary(),
+            onPressed: _openSubtitleSettingsPage,
+          ),
+        ],
       ),
     );
   }
@@ -576,125 +497,93 @@ class _PlaybackSubtitleSettingsPageState
         }
         _closeWithResult();
       },
-      child: Scaffold(
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            ListView(
-              padding: overlayToolbarPagePadding(context),
+      child: SettingsPageScaffold(
+        onBack: _closeWithResult,
+        trailing: SettingsToolbarButton(
+          label: '完成',
+          icon: Icons.check_rounded,
+          onPressed: _closeWithResult,
+        ),
+        children: [
+          Text(
+            '字幕',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '把默认字幕策略和默认字幕大小统一放在这里，播放器打开时会按这里的偏好先应用。',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 18),
+          if (isTelevision)
+            StarflowSelectionTile(
+              title: '默认字幕策略',
+              value: _draftSubtitlePreference.label,
+              onPressed: _openSubtitlePreferencePicker,
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    for (final preference in PlaybackSubtitlePreference.values)
+                      StarflowChipButton(
+                        label: preference.label,
+                        selected: preference == _draftSubtitlePreference,
+                        onPressed: () {
+                          setState(() {
+                            _draftSubtitlePreference = preference;
+                          });
+                        },
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
                 Text(
-                  '字幕',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
+                  _draftSubtitlePreference.description,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  '把默认字幕策略和默认字幕大小统一放在这里，播放器打开时会按这里的偏好先应用。',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-                const SizedBox(height: 18),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '默认字幕策略',
-                    value: _draftSubtitlePreference.label,
-                    onPressed: _openSubtitlePreferencePicker,
-                  )
-                else
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          for (final preference
-                              in PlaybackSubtitlePreference.values)
-                            StarflowChipButton(
-                              label: preference.label,
-                              selected: preference == _draftSubtitlePreference,
-                              onPressed: () {
-                                setState(() {
-                                  _draftSubtitlePreference = preference;
-                                });
-                              },
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _draftSubtitlePreference.description,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                            ),
-                      ),
-                    ],
-                  ),
-                const SizedBox(height: 18),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '字幕大小',
-                    value: _draftSubtitleScale.label,
-                    onPressed: _openSubtitleScalePicker,
-                  )
-                else
-                  DropdownButtonFormField<PlaybackSubtitleScale>(
-                    initialValue: _draftSubtitleScale,
-                    decoration: const InputDecoration(
-                      labelText: '字幕大小',
-                    ),
-                    items: [
-                      for (final scale in PlaybackSubtitleScale.values)
-                        DropdownMenuItem<PlaybackSubtitleScale>(
-                          value: scale,
-                          child: Text(scale.label),
-                        ),
-                    ],
-                    onChanged: (value) {
-                      if (value == null) {
-                        return;
-                      }
-                      setState(() {
-                        _draftSubtitleScale = value;
-                      });
-                    },
-                  ),
-                const SizedBox(height: kBottomReservedSpacing),
               ],
             ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: OverlayToolbar(
-                onBack: _closeWithResult,
-                trailing: isTelevision
-                    ? Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: TvAdaptiveButton(
-                          label: '完成',
-                          icon: Icons.check_rounded,
-                          onPressed: _closeWithResult,
-                          variant: TvButtonVariant.text,
-                        ),
-                      )
-                    : StarflowButton(
-                        label: '完成',
-                        onPressed: _closeWithResult,
-                        variant: StarflowButtonVariant.ghost,
-                        compact: true,
-                      ),
+          const SizedBox(height: 18),
+          if (isTelevision)
+            StarflowSelectionTile(
+              title: '字幕大小',
+              value: _draftSubtitleScale.label,
+              onPressed: _openSubtitleScalePicker,
+            )
+          else
+            DropdownButtonFormField<PlaybackSubtitleScale>(
+              initialValue: _draftSubtitleScale,
+              decoration: const InputDecoration(
+                labelText: '字幕大小',
               ),
+              items: [
+                for (final scale in PlaybackSubtitleScale.values)
+                  DropdownMenuItem<PlaybackSubtitleScale>(
+                    value: scale,
+                    child: Text(scale.label),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value == null) {
+                  return;
+                }
+                setState(() {
+                  _draftSubtitleScale = value;
+                });
+              },
             ),
-          ],
-        ),
+        ],
       ),
     );
   }

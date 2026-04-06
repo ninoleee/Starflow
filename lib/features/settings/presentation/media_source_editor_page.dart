@@ -2,14 +2,13 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
-import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
 /// 全屏编辑媒体源（替代原先窄对话框，便于长表单与键盘避让）。
@@ -526,35 +525,10 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       await _discardAndClose();
       return;
     }
-    final action = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('保存修改？'),
-        content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
-        actions: [
-          StarflowButton(
-            label: '取消',
-            onPressed: () => Navigator.of(dialogContext).pop('cancel'),
-            variant: StarflowButtonVariant.ghost,
-            compact: true,
-          ),
-          StarflowButton(
-            label: '不保存',
-            onPressed: () => Navigator.of(dialogContext).pop('discard'),
-            variant: StarflowButtonVariant.secondary,
-            compact: true,
-          ),
-          StarflowButton(
-            label: '保存',
-            onPressed: () => Navigator.of(dialogContext).pop('save'),
-            compact: true,
-          ),
-        ],
-      ),
-    );
-    if (action == 'discard') {
+    final action = await showSettingsCloseConfirmDialog(context);
+    if (action == SettingsCloseAction.discard) {
       await _discardAndClose();
-    } else if (action == 'save') {
+    } else if (action == SettingsCloseAction.save) {
       await _saveDraft();
     }
   }

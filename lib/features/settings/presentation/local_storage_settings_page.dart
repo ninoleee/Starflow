@@ -1,16 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/core/storage/persistent_image_cache.dart';
-import 'package:starflow/core/platform/tv_platform.dart';
-import 'package:starflow/core/widgets/app_page_background.dart';
-import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 final localStorageSummariesProvider =
@@ -48,76 +45,48 @@ class _LocalStorageSettingsPageState
   @override
   Widget build(BuildContext context) {
     final summariesAsync = ref.watch(localStorageSummariesProvider);
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: AppPageBackground(
-        contentPadding: appPageContentPadding(context),
-        child: Stack(
-          children: [
-            ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                SizedBox(
-                  height:
-                      MediaQuery.paddingOf(context).top + kToolbarHeight + 12,
-                ),
-                SectionPanel(
-                  title: '本地存储',
-                  subtitle: '这里只展示可安全清理的本地缓存、索引和历史记录，不包含应用设置本身。',
-                  child: summariesAsync.when(
-                    data: (summaries) {
-                      return Column(
-                        children: [
-                          for (var index = 0; index < summaries.length; index++)
-                            Padding(
-                              padding: EdgeInsets.only(
-                                bottom: index == summaries.length - 1 ? 0 : 12,
-                              ),
-                              child: _LocalStorageTile(
-                                summary: summaries[index],
-                                onClear: () => _clearCache(
-                                    context, ref, summaries[index].type),
-                              ),
-                            ),
-                          const SizedBox(height: 12),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: isTelevision
-                                ? TvAdaptiveButton(
-                                    label: '清空全部缓存',
-                                    icon: Icons.delete_sweep_rounded,
-                                    onPressed: () => _clearAll(context, ref),
-                                    variant: TvButtonVariant.text,
-                                  )
-                                : StarflowButton(
-                                    label: '清空全部缓存',
-                                    icon: Icons.delete_sweep_rounded,
-                                    onPressed: () => _clearAll(context, ref),
-                                    variant: StarflowButtonVariant.danger,
-                                    compact: true,
-                                  ),
-                          ),
-                        ],
-                      );
-                    },
-                    loading: () => const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 18),
-                      child: LinearProgressIndicator(),
+    return SettingsPageScaffold(
+      children: [
+        SectionPanel(
+          title: '本地存储',
+          subtitle: '这里只展示可安全清理的本地缓存、索引和历史记录，不包含应用设置本身。',
+          child: summariesAsync.when(
+            data: (summaries) {
+              return Column(
+                children: [
+                  for (var index = 0; index < summaries.length; index++)
+                    Padding(
+                      padding: EdgeInsets.only(
+                        bottom: index == summaries.length - 1 ? 0 : 12,
+                      ),
+                      child: _LocalStorageTile(
+                        summary: summaries[index],
+                        onClear: () =>
+                            _clearCache(context, ref, summaries[index].type),
+                      ),
                     ),
-                    error: (error, _) => Text('读取本地缓存失败：$error'),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SettingsActionButton(
+                      label: '清空全部缓存',
+                      icon: Icons.delete_sweep_rounded,
+                      onPressed: () => _clearAll(context, ref),
+                      variant: StarflowButtonVariant.danger,
+                    ),
                   ),
-                ),
-                const SizedBox(height: kBottomReservedSpacing),
-              ],
+                ],
+              );
+            },
+            loading: () => const Padding(
+              padding: EdgeInsets.symmetric(vertical: 18),
+              child: LinearProgressIndicator(),
             ),
-            OverlayToolbar(
-              onBack: () => Navigator.of(context).maybePop(),
-            ),
-          ],
+            error: (error, _) => Text('读取本地缓存失败：$error'),
+          ),
         ),
-      ),
+      ],
     );
   }
 

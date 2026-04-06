@@ -3,16 +3,14 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
-import 'package:starflow/core/widgets/app_page_background.dart';
-import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/data/settings_lan_transfer_service.dart';
 import 'package:starflow/features/settings/data/settings_transfer_service.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class SettingsManagementPage extends ConsumerStatefulWidget {
   const SettingsManagementPage({super.key});
@@ -64,84 +62,61 @@ class _SettingsManagementPageState
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final isIos = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: AppPageBackground(
-        contentPadding: appPageContentPadding(context),
-        child: Stack(
-          children: [
-            ListView(
-              padding: EdgeInsets.zero,
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              children: [
-                SizedBox(
-                  height:
-                      MediaQuery.paddingOf(context).top + kToolbarHeight + 12,
-                ),
-                SectionPanel(
-                  title: '配置管理',
-                  child: service.isSupported
-                      ? isTelevision
-                          ? _buildTelevisionTransferContent()
-                          : Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  isIos
-                                      ? '可以把当前设置导出到本地 JSON 文件，也可以从本地 JSON 文件导入并覆盖当前配置。iOS 上导出会自动使用应用文档目录。'
-                                      : '可以把当前设置导出到本地 JSON 文件，也可以从本地 JSON 文件导入并覆盖当前配置。导出时会先选择目录，再自动生成文件名。',
-                                  style: Theme.of(context).textTheme.bodyMedium,
-                                ),
-                                const SizedBox(height: 16),
-                                _PathEditor(
-                                  label: '导出路径',
-                                  controller: _exportPathController,
-                                  hintText:
-                                      '例如：D:\\Backups\\starflow-settings.json',
-                                  icon: Icons.upload_file_rounded,
-                                  actionLabel: '选择位置',
-                                  onActionPressed: _pickExportPath,
-                                ),
-                                const SizedBox(height: 12),
-                                _ActionButton(
-                                  isTelevision: isTelevision,
-                                  icon: Icons.save_alt_rounded,
-                                  label: _isExporting ? '正在导出…' : '导出当前配置',
-                                  onPressed: _isExporting || _isImporting
-                                      ? null
-                                      : () => _exportSettings(settings),
-                                ),
-                                const SizedBox(height: 24),
-                                _PathEditor(
-                                  label: '导入路径',
-                                  controller: _importPathController,
-                                  hintText: '填写要导入的 JSON 文件路径',
-                                  icon: Icons.download_rounded,
-                                  actionLabel: '选择文件',
-                                  onActionPressed: _pickImportPath,
-                                ),
-                                const SizedBox(height: 12),
-                                _ActionButton(
-                                  isTelevision: isTelevision,
-                                  icon: Icons.restore_page_rounded,
-                                  label: _isImporting ? '正在导入…' : '导入并覆盖配置',
-                                  onPressed: _isExporting || _isImporting
-                                      ? null
-                                      : _confirmImport,
-                                ),
-                              ],
-                            )
-                      : Text(service.unsupportedReason),
-                ),
-                const SizedBox(height: kBottomReservedSpacing),
-              ],
-            ),
-            OverlayToolbar(
-              onBack: () => Navigator.of(context).maybePop(),
-            ),
-          ],
+    return SettingsPageScaffold(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      children: [
+        SectionPanel(
+          title: '配置管理',
+          child: service.isSupported
+              ? isTelevision
+                  ? _buildTelevisionTransferContent()
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isIos
+                              ? '可以把当前设置导出到本地 JSON 文件，也可以从本地 JSON 文件导入并覆盖当前配置。iOS 上导出会自动使用应用文档目录。'
+                              : '可以把当前设置导出到本地 JSON 文件，也可以从本地 JSON 文件导入并覆盖当前配置。导出时会先选择目录，再自动生成文件名。',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 16),
+                        _PathEditor(
+                          label: '导出路径',
+                          controller: _exportPathController,
+                          hintText: '例如：D:\\Backups\\starflow-settings.json',
+                          icon: Icons.upload_file_rounded,
+                          actionLabel: '选择位置',
+                          onActionPressed: _pickExportPath,
+                        ),
+                        const SizedBox(height: 12),
+                        _ActionButton(
+                          icon: Icons.save_alt_rounded,
+                          label: _isExporting ? '正在导出…' : '导出当前配置',
+                          onPressed: _isExporting || _isImporting
+                              ? null
+                              : () => _exportSettings(settings),
+                        ),
+                        const SizedBox(height: 24),
+                        _PathEditor(
+                          label: '导入路径',
+                          controller: _importPathController,
+                          hintText: '填写要导入的 JSON 文件路径',
+                          icon: Icons.download_rounded,
+                          actionLabel: '选择文件',
+                          onActionPressed: _pickImportPath,
+                        ),
+                        const SizedBox(height: 12),
+                        _ActionButton(
+                          icon: Icons.restore_page_rounded,
+                          label: _isImporting ? '正在导入…' : '导入并覆盖配置',
+                          onPressed:
+                              _isExporting || _isImporting ? null : _confirmImport,
+                        ),
+                      ],
+                    )
+              : Text(service.unsupportedReason),
         ),
-      ),
+      ],
     );
   }
 
@@ -663,32 +638,21 @@ enum _PathEditorAction {
 
 class _ActionButton extends StatelessWidget {
   const _ActionButton({
-    required this.isTelevision,
     required this.icon,
     required this.label,
     required this.onPressed,
   });
 
-  final bool isTelevision;
   final IconData icon;
   final String label;
   final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
-    if (isTelevision) {
-      return TvAdaptiveButton(
-        label: label,
-        icon: icon,
-        onPressed: onPressed,
-      );
-    }
-
-    return StarflowButton(
+    return SettingsActionButton(
       label: label,
       icon: icon,
       onPressed: onPressed,
-      compact: true,
     );
   }
 }

@@ -2,9 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
-import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
@@ -12,6 +10,7 @@ import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/quark_folder_picker_page.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class NetworkStorageSettingsPage extends ConsumerStatefulWidget {
   const NetworkStorageSettingsPage({super.key, required this.initial});
@@ -154,35 +153,10 @@ class _NetworkStorageSettingsPageState
       await _discardAndClose();
       return;
     }
-    final action = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('保存修改？'),
-        content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
-        actions: [
-          StarflowButton(
-            label: '取消',
-            onPressed: () => Navigator.of(dialogContext).pop('cancel'),
-            variant: StarflowButtonVariant.ghost,
-            compact: true,
-          ),
-          StarflowButton(
-            label: '不保存',
-            onPressed: () => Navigator.of(dialogContext).pop('discard'),
-            variant: StarflowButtonVariant.secondary,
-            compact: true,
-          ),
-          StarflowButton(
-            label: '保存',
-            onPressed: () => Navigator.of(dialogContext).pop('save'),
-            compact: true,
-          ),
-        ],
-      ),
-    );
-    if (action == 'discard') {
+    final action = await showSettingsCloseConfirmDialog(context);
+    if (action == SettingsCloseAction.discard) {
       await _discardAndClose();
-    } else if (action == 'save') {
+    } else if (action == SettingsCloseAction.save) {
       await _saveDraft();
     }
   }
@@ -288,7 +262,6 @@ class _NetworkStorageSettingsPageState
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final settings = ref.watch(appSettingsProvider);
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final refreshableSources = _refreshableMediaSources(settings);
@@ -305,298 +278,184 @@ class _NetworkStorageSettingsPageState
         }
         _handleCloseRequest();
       },
-      child: Scaffold(
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            ListView(
-              padding: overlayToolbarPagePadding(context),
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              children: [
-                _SectionTitle(theme: theme, label: '夸克保存'),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '夸克 Cookie',
-                    value: _quarkCookieController.text.trim().isEmpty
-                        ? '未填写'
-                        : '已填写',
-                    onPressed: _openQuarkCookieEditor,
-                  )
-                else
-                  TextField(
-                    controller: _quarkCookieController,
-                    minLines: 2,
-                    maxLines: 4,
-                    autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: '夸克 Cookie',
-                      hintText: '用于搜索结果一键保存到夸克网盘',
-                    ),
-                  ),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    if (isTelevision)
-                      TvAdaptiveButton(
-                        label: _isTestingQuarkConnection ? '测试中...' : '测试夸克连接',
-                        icon: Icons.cloud_done_outlined,
-                        onPressed: _isTestingQuarkConnection
-                            ? null
-                            : _testQuarkConnection,
-                        variant: TvButtonVariant.outlined,
-                      )
-                    else
-                      StarflowButton(
-                        label: _isTestingQuarkConnection ? '测试中...' : '测试夸克连接',
-                        icon: Icons.cloud_done_outlined,
-                        onPressed: _isTestingQuarkConnection
-                            ? null
-                            : _testQuarkConnection,
-                        variant: StarflowButtonVariant.secondary,
-                        compact: true,
-                      ),
-                    if (isTelevision)
-                      TvAdaptiveButton(
-                        label: '选择默认保存文件夹',
-                        icon: Icons.folder_open_rounded,
-                        onPressed: _pickQuarkFolder,
-                        variant: TvButtonVariant.outlined,
-                      )
-                    else
-                      StarflowButton(
-                        label: '选择默认保存文件夹',
-                        icon: Icons.folder_open_rounded,
-                        onPressed: _pickQuarkFolder,
-                        variant: StarflowButtonVariant.secondary,
-                        compact: true,
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text('默认保存到：$_quarkFolderPath'),
-                _SectionTitle(theme: theme, label: 'SmartStrm'),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: 'Webhook 地址',
-                    value: _smartStrmWebhookController.text.trim().isEmpty
-                        ? '未填写'
-                        : _smartStrmWebhookController.text.trim(),
-                    onPressed: _openSmartStrmWebhookEditor,
-                  )
-                else
-                  TextField(
-                    controller: _smartStrmWebhookController,
-                    keyboardType: TextInputType.url,
-                    autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: 'Webhook 地址',
-                      hintText: 'http://yourip:8024/webhook/abcdef123456',
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '任务名',
-                    value: _smartStrmTaskNameController.text.trim().isEmpty
-                        ? '未填写'
-                        : _smartStrmTaskNameController.text.trim(),
-                    onPressed: _openSmartStrmTaskNameEditor,
-                  )
-                else
-                  TextField(
-                    controller: _smartStrmTaskNameController,
-                    decoration: const InputDecoration(
-                      labelText: '任务名',
-                      hintText: 'movie_task',
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: 'STRM 触发等待时间',
-                    value: '${_smartStrmDelaySeconds()} 秒',
-                    onPressed: _openSmartStrmDelayPicker,
-                  )
-                else
-                  TextField(
-                    controller: _smartStrmDelayController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'STRM 触发等待时间（秒）',
-                      hintText: '1',
-                      helperText: '保存到夸克后，等待多久再触发 Smart STRM 任务。',
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    if (isTelevision)
-                      TvAdaptiveButton(
-                        label: _isTestingSmartStrm ? '测试中...' : '测试 STRM 任务',
-                        icon: Icons.bolt_rounded,
-                        onPressed:
-                            _isTestingSmartStrm ? null : _testSmartStrmTask,
-                        variant: TvButtonVariant.outlined,
-                      )
-                    else
-                      StarflowButton(
-                        label: _isTestingSmartStrm ? '测试中...' : '测试 STRM 任务',
-                        icon: Icons.bolt_rounded,
-                        onPressed:
-                            _isTestingSmartStrm ? null : _testSmartStrmTask,
-                        variant: StarflowButtonVariant.secondary,
-                        compact: true,
-                      ),
-                  ],
-                ),
-                _SectionTitle(theme: theme, label: '自动增量刷新索引'),
-                if (isTelevision)
-                  TvSelectionTile(
-                    title: '索引刷新等待时间',
-                    value: '${_refreshDelaySeconds()} 秒',
-                    onPressed: _openRefreshDelayPicker,
-                  )
-                else
-                  TextField(
-                    controller: _refreshDelayController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: '索引刷新等待时间（秒）',
-                      hintText: '1',
-                      helperText: '任务结束后，等待多久再自动执行媒体库增量刷新。',
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                if (refreshableSources.isNotEmpty) ...[
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      if (isTelevision)
-                        TvAdaptiveButton(
-                          label: '全选',
-                          icon: Icons.select_all_rounded,
-                          onPressed: () {
-                            setState(() {
-                              _refreshSourceIds = refreshableSourceIds;
-                            });
-                          },
-                          variant: TvButtonVariant.text,
-                        )
-                      else
-                        StarflowButton(
-                          label: '全选',
-                          icon: Icons.select_all_rounded,
-                          onPressed: () {
-                            setState(() {
-                              _refreshSourceIds = refreshableSourceIds;
-                            });
-                          },
-                          variant: StarflowButtonVariant.ghost,
-                          compact: true,
-                        ),
-                      if (isTelevision)
-                        TvAdaptiveButton(
-                          label: '清空',
-                          icon: Icons.clear_all_rounded,
-                          onPressed: () {
-                            setState(() {
-                              _refreshSourceIds.clear();
-                            });
-                          },
-                          variant: TvButtonVariant.text,
-                        )
-                      else
-                        StarflowButton(
-                          label: '清空',
-                          icon: Icons.clear_all_rounded,
-                          onPressed: () {
-                            setState(() {
-                              _refreshSourceIds.clear();
-                            });
-                          },
-                          variant: StarflowButtonVariant.ghost,
-                          compact: true,
-                        ),
-                    ],
-                  ),
-                  ...refreshableSources.map(
-                    (source) => isTelevision
-                        ? Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: TvSelectionTile(
-                              title: source.name,
-                              value:
-                                  selectedRefreshSourceIds.contains(source.id)
-                                      ? '已选中'
-                                      : '未选中',
-                              onPressed: () {
-                                setState(() {
-                                  final next = {..._refreshSourceIds};
-                                  if (next.contains(source.id)) {
-                                    next.remove(source.id);
-                                  } else {
-                                    next.add(source.id);
-                                  }
-                                  _refreshSourceIds = next;
-                                });
-                              },
-                            ),
-                          )
-                        : Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: StarflowCheckboxTile(
-                              title: source.name,
-                              value:
-                                  selectedRefreshSourceIds.contains(source.id),
-                              onChanged: (value) {
-                                setState(() {
-                                  final next = {..._refreshSourceIds};
-                                  if (value) {
-                                    next.add(source.id);
-                                  } else {
-                                    next.remove(source.id);
-                                  }
-                                  _refreshSourceIds = next;
-                                });
-                              },
-                            ),
-                          ),
-                  ),
-                ] else
-                  const Text('无'),
-                const SizedBox(height: kBottomReservedSpacing),
-              ],
-            ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: OverlayToolbar(
-                onBack: _handleCloseRequest,
-                trailing: isTelevision
-                    ? Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: TvAdaptiveButton(
-                          label: '保存',
-                          icon: Icons.save_rounded,
-                          onPressed: _saveDraft,
-                          variant: TvButtonVariant.text,
-                        ),
-                      )
-                    : StarflowButton(
-                        label: '保存',
-                        onPressed: _saveDraft,
-                        variant: StarflowButtonVariant.ghost,
-                        compact: true,
-                      ),
+      child: SettingsPageScaffold(
+        onBack: _handleCloseRequest,
+        trailing: SettingsToolbarButton(
+          label: '保存',
+          icon: Icons.save_rounded,
+          onPressed: _saveDraft,
+        ),
+        children: [
+          const SettingsSectionTitle(label: '夸克保存'),
+          if (isTelevision)
+            StarflowSelectionTile(
+              title: '夸克 Cookie',
+              value: _quarkCookieController.text.trim().isEmpty ? '未填写' : '已填写',
+              onPressed: _openQuarkCookieEditor,
+            )
+          else
+            TextField(
+              controller: _quarkCookieController,
+              minLines: 2,
+              maxLines: 4,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: '夸克 Cookie',
+                hintText: '用于搜索结果一键保存到夸克网盘',
               ),
             ),
-          ],
-        ),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              SettingsActionButton(
+                label: _isTestingQuarkConnection ? '测试中...' : '测试夸克连接',
+                icon: Icons.cloud_done_outlined,
+                onPressed:
+                    _isTestingQuarkConnection ? null : _testQuarkConnection,
+              ),
+              SettingsActionButton(
+                label: '选择默认保存文件夹',
+                icon: Icons.folder_open_rounded,
+                onPressed: _pickQuarkFolder,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text('默认保存到：$_quarkFolderPath'),
+          const SettingsSectionTitle(label: 'SmartStrm'),
+          if (isTelevision)
+            StarflowSelectionTile(
+              title: 'Webhook 地址',
+              value: _smartStrmWebhookController.text.trim().isEmpty
+                  ? '未填写'
+                  : _smartStrmWebhookController.text.trim(),
+              onPressed: _openSmartStrmWebhookEditor,
+            )
+          else
+            TextField(
+              controller: _smartStrmWebhookController,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'Webhook 地址',
+                hintText: 'http://yourip:8024/webhook/abcdef123456',
+              ),
+            ),
+          const SizedBox(height: 12),
+          if (isTelevision)
+            StarflowSelectionTile(
+              title: '任务名',
+              value: _smartStrmTaskNameController.text.trim().isEmpty
+                  ? '未填写'
+                  : _smartStrmTaskNameController.text.trim(),
+              onPressed: _openSmartStrmTaskNameEditor,
+            )
+          else
+            TextField(
+              controller: _smartStrmTaskNameController,
+              decoration: const InputDecoration(
+                labelText: '任务名',
+                hintText: 'movie_task',
+              ),
+            ),
+          const SizedBox(height: 12),
+          if (isTelevision)
+            StarflowSelectionTile(
+              title: 'STRM 触发等待时间',
+              value: '${_smartStrmDelaySeconds()} 秒',
+              onPressed: _openSmartStrmDelayPicker,
+            )
+          else
+            TextField(
+              controller: _smartStrmDelayController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'STRM 触发等待时间（秒）',
+                hintText: '1',
+                helperText: '保存到夸克后，等待多久再触发 Smart STRM 任务。',
+              ),
+            ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              SettingsActionButton(
+                label: _isTestingSmartStrm ? '测试中...' : '测试 STRM 任务',
+                icon: Icons.bolt_rounded,
+                onPressed: _isTestingSmartStrm ? null : _testSmartStrmTask,
+              ),
+            ],
+          ),
+          const SettingsSectionTitle(label: '自动增量刷新索引'),
+          if (isTelevision)
+            StarflowSelectionTile(
+              title: '索引刷新等待时间',
+              value: '${_refreshDelaySeconds()} 秒',
+              onPressed: _openRefreshDelayPicker,
+            )
+          else
+            TextField(
+              controller: _refreshDelayController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: '索引刷新等待时间（秒）',
+                hintText: '1',
+                helperText: '任务结束后，等待多久再自动执行媒体库增量刷新。',
+              ),
+            ),
+          const SizedBox(height: 12),
+          if (refreshableSources.isNotEmpty) ...[
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                SettingsActionButton(
+                  label: '全选',
+                  icon: Icons.select_all_rounded,
+                  onPressed: () {
+                    setState(() {
+                      _refreshSourceIds = refreshableSourceIds;
+                    });
+                  },
+                  variant: StarflowButtonVariant.ghost,
+                ),
+                SettingsActionButton(
+                  label: '清空',
+                  icon: Icons.clear_all_rounded,
+                  onPressed: () {
+                    setState(() {
+                      _refreshSourceIds.clear();
+                    });
+                  },
+                  variant: StarflowButtonVariant.ghost,
+                ),
+              ],
+            ),
+            ...refreshableSources.map(
+              (source) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: StarflowCheckboxTile(
+                  title: source.name,
+                  value: selectedRefreshSourceIds.contains(source.id),
+                  onChanged: (value) {
+                    setState(() {
+                      final next = {..._refreshSourceIds};
+                      if (value) {
+                        next.add(source.id);
+                      } else {
+                        next.remove(source.id);
+                      }
+                      _refreshSourceIds = next;
+                    });
+                  },
+                ),
+              ),
+            ),
+          ] else
+            const Text('无'),
+        ],
       ),
     );
   }
