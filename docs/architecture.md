@@ -2,70 +2,43 @@
 
 这份文档描述的是仓库当前已经落地的实现，而不是早期规划稿。
 
-Starflow 现在的核心定位不是“单一播放器”，而是一个面向个人影音库的跨平台入口，把下面几类能力收在同一套应用体验里：
+## 1. 总体定位
+
+Starflow 不是单一播放器，而是一个面向个人影音库的统一入口，把这些能力放进同一个 App：
 
 - 本地媒体源：`Emby`、`WebDAV`
-- 发现内容：豆瓣
-- 在线搜索：`PanSou`、`CloudSaver` 等可配置来源
-- 播放：应用内播放器
-- 网络存储联动：夸克保存、`SmartStrm` Webhook、媒体源刷新
-- 本地缓存：详情缓存、图片缓存、`WebDAV` 元数据索引
+- 内容发现：豆瓣
+- 聚合搜索：本地资源、`PanSou`、`CloudSaver`
+- 播放：内置 `MPV` + App 内原生播放器容器页 + 系统播放器
+- 入库联动：夸克保存、`SmartStrm` Webhook、媒体源刷新
+- 本地持久化：设置、详情缓存、图片缓存、`WebDAV` 元数据索引
 
-## 1. 设计原则
+## 2. 技术基线
 
-### 1.1 单代码库跨平台
+- 框架：`Flutter`
+- 状态管理：`flutter_riverpod`
+- 路由：`go_router`
+- 播放：`media_kit`
+- 设置与轻量缓存：`SharedPreferences`
+- `WebDAV` 索引库：`Sembast`
 
-项目基于 Flutter，统一覆盖 `iOS / Android / macOS / Windows / Linux / Web`。应用入口在 `lib/main.dart`，启动时完成：
+应用入口在 `lib/main.dart`，启动时完成：
 
 - Flutter 绑定初始化
 - `media_kit` 初始化
 - `ProviderScope` 注入
 
-### 1.2 本地优先
-
-Starflow 当前最重要的架构选择是“本地优先”：
-
-- 设置先落到本地
-- `WebDAV` 媒体先扫描并建立本地索引
-- 首页、媒体库、详情页优先读取本地缓存或索引
-- 在线元数据补全作为增量 enrichment，而不是每次页面打开都从头请求
-
-这让应用的核心链路更稳定，也避免把详情页变成一个又慢又脆的“实时刮削器”。
-
-### 1.3 统一领域模型
-
-不同来源的数据最终都会尽量落到统一模型上，避免页面直接依赖某个第三方协议：
-
-- `MediaItem`
-- `MediaSourceConfig`
-- `MediaCollection`
-- `MediaDetailTarget`
-- `PlaybackTarget`
-- `HomeModuleConfig`
-- `SearchProviderConfig`
-- `DoubanEntry`
-
-### 1.4 页面只依赖 provider
-
-页面层主要通过 Riverpod provider 读取状态和触发动作，不直接持有底层 HTTP 细节。这样做的好处是：
-
-- UI 和数据源解耦
-- 同一份数据可在首页、媒体库、详情页复用
-- 设置变化后可以通过 invalidation 统一刷新
-
-## 2. 代码组织
-
-当前 `lib` 目录主要分成三层：
+## 3. 代码组织
 
 ```text
 lib/
   main.dart
   app/
     app.dart
-    shell_layout.dart
     router/
     theme/
   core/
+    network/
     platform/
     storage/
     utils/
@@ -83,624 +56,401 @@ lib/
     storage/
 ```
 
-### 2.1 `app`
+分层上仍然遵循 `presentation / application / domain / data` 的思路，但以 feature 为第一组织单位。
 
-应用壳层，负责全局外观和导航：
+### `app`
+
+负责应用壳、主题和主路由：
 
 - `app.dart`：`MaterialApp.router`
-- `router/app_router.dart`：`GoRouter` + `StatefulShellRoute.indexedStack`
-- `theme/app_theme.dart`：全局主题
-- `shell_layout.dart`：页面统一壳布局
+- `router/app_router.dart`：主导航和独立页面路由
+- `theme/app_theme.dart`：当前全局主题
 
-一级导航目前是：
+一级导航固定为：
 
 - 首页
 - 搜索
 - 媒体库
 - 设置
 
-详情页、播放器、首页编辑、分区列表、索引管理页则通过独立路由进入。
+### `core`
 
-另外，壳层已经包含一层平台分支能力：
+放业务无关或弱相关的公共基础能力：
 
-- `core/platform/tv_platform.dart`：识别 Android TV
-- TV 模式下切换为更适合焦点导航的壳布局与设置交互
+- 平台识别
+- HTTP 客户端包装
+- 本地图片缓存抽象
+- 通用组件
+- 网络图片请求头和调试工具
+- `TV` 焦点组件、菜单键动作和焦点记忆
 
-### 2.2 `core`
+### `features`
 
-与具体业务弱相关的底层公共能力：
+按业务拆分：
 
-- `storage/`：图片缓存抽象、本地缓存模型
-- `platform/`：平台能力探测，例如 TV 设备判断
-- `utils/`：网络图片头、调试 trace、种子数据等
-- `widgets/`：通用 UI 组件
-
-### 2.3 `features`
-
-按业务能力拆分，每个 feature 内部再按 `application / data / domain / presentation` 组织。
-
-当前最关键的模块有：
-
-- `bootstrap`：启动页与预热流程
-- `home`：首页模块装配
-- `library`：媒体源接入、`WebDAV` 索引、刷新协调
-- `details`：详情页、详情缓存、索引管理入口
-- `metadata`：`WMDB / TMDB / IMDb` 元数据匹配
+- `bootstrap`：启动预热
+- `home`：首页模块装配与 Hero
+- `library`：媒体源接入、`WebDAV` 索引、刷新、删除
+- `details`：详情页、详情缓存、手动索引入口、人物关联影片页
+- `metadata`：`WMDB / TMDB / IMDb`
 - `search`：本地搜索、在线搜索、夸克保存、`SmartStrm`
 - `playback`：播放器
-- `settings`：设置读写与配置模型
+- `settings`：设置、配置导入导出
 - `storage`：详情缓存 revision 等辅助状态
 
-## 3. 分层方式
+## 4. 核心设计取向
 
-Starflow 当前的实现可以理解成“按功能拆分的四层结构”。
+### 本地优先
 
-### 3.1 Presentation
+项目当前最重要的架构选择是“本地优先”：
 
-负责页面、组件和交互：
+- 设置先落本地
+- `WebDAV` 先建立本地索引
+- 首页、媒体库、详情页优先读取本地缓存或索引
+- 在线元数据是补全链路，不是页面实时依赖
 
-- 启动页
-- 首页与首页编辑
-- 媒体库列表
+这让核心浏览体验更稳定，也避免让详情页承担过重的实时抓取职责。
+
+### 统一模型
+
+UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
+
+- `MediaSourceConfig`
+- `MediaCollection`
+- `MediaItem`
+- `MediaDetailTarget`
+- `PlaybackTarget`
+- `HomeModuleConfig`
+- `SearchProviderConfig`
+
+### 已选分区作用域一致
+
+无论是首页、媒体库、搜索还是手动匹配，都尽量以“已选分区”为同一作用域：
+
+- UI 展示范围一致
+- 刷新范围一致
+- 搜索范围一致
+
+## 5. 启动与路由
+
+启动流程由 `BootstrapController` 驱动：
+
+1. 读取本地设置
+2. 预热首页模块
+3. 完成启动页过渡
+4. 跳转主壳首页
+
+启动阶段是轻量预热，不做重型阻塞初始化。
+
+主路由之外，还有这些关键独立页面：
+
+- 首页编辑器
+- 首页模块完整列表
+- 分区列表页
 - 详情页
-- 搜索页
-- 设置页
+- 人物关联影片页
+- 元数据索引管理页
 - 播放器页
 
-这一层尽量不直接写第三方协议。
+## 6. 首页链路
 
-### 3.2 Application
+首页不是固定模板，而是由设置驱动的模块容器。
 
-负责拼装页面可直接消费的状态，以及跨 feature 的协调：
+当前模块类型：
 
-- `bootstrap_controller.dart`
-- `home_controller.dart`
-- `settings_controller.dart`
-- `media_refresh_coordinator.dart`
-- `webdav_scrape_progress.dart`
+- `Hero`
+- 最近新增
+- 指定来源分区
+- 豆瓣兴趣条目
+- 豆瓣个性化推荐
+- 豆瓣片单
+- 豆瓣首页轮播
 
-这一层是 Riverpod provider 最集中的地方。
+首页装配特点：
 
-### 3.3 Domain
+- 模块配置持久化在设置里
+- 首页卡片最终统一映射到 `MediaDetailTarget`
+- 进入详情前会优先合并本地详情缓存
+- Hero 支持 Logo 形态标题和横竖屏素材优先选择，尽量避免横图被错误塞进竖版位
 
-负责稳定的业务模型和匹配规则：
+## 7. 媒体库链路
 
-- 媒体模型
-- 详情模型
-- 搜索模型
-- 豆瓣模型
-- 元数据匹配模型
-- 标题匹配与识别规则
+媒体库通过 `MediaRepository` 统一对外，底层分两条主链路。
 
-### 3.4 Data
+### Emby
 
-负责：
-
-- 本地持久化
-- 第三方 HTTP 调用
-- 扫描、索引、缓存写回
-
-这里有两个历史命名需要注意：
-
-- `features/library/data/mock_media_repository.dart`
-- `features/search/data/mock_search_repository.dart`
-
-这两个文件名虽然带 `mock`，但现在已经是应用实际在用的 facade，不是纯假实现。
-
-## 4. 运行时总览
-
-```mermaid
-flowchart TD
-    A["App Start"] --> B["BootstrapController"]
-    B --> C["SettingsController.load()"]
-    C --> D["Home providers preheat"]
-    D --> E["Shell Router"]
-
-    E --> F["Home"]
-    E --> G["Search"]
-    E --> H["Library"]
-    E --> I["Settings"]
-
-    I --> C
-
-    H --> J["MediaRepository"]
-    F --> J
-    G --> J
-
-    J --> K["EmbyApiClient"]
-    J --> L["NasMediaIndexer"]
-    L --> M["WebDavNasClient"]
-    L --> N["NasMediaIndexStore (Sembast)"]
-    L --> O["WMDB / TMDB / IMDb clients"]
-
-    F --> P["LocalStorageCacheRepository"]
-    H --> P
-    Q["Detail Page"] --> P
-    Q --> O
-    Q --> K
-
-    G --> R["SearchRepository"]
-    R --> S["PanSou / CloudSaver"]
-    G --> T["QuarkSaveClient"]
-    G --> U["SmartStrmWebhookClient"]
-    U --> V["MediaRefreshCoordinator"]
-    V --> J
-
-    W["PlayerPage"] --> X["PlaybackTarget"]
-    X --> K
-    W --> Y["media_kit"]
-```
-
-## 5. 启动链路
-
-启动流程由 `BootstrapController` 驱动，逻辑比较轻，但职责很明确：
-
-1. 启动应用壳、主题和路由
-2. 读取本地设置
-3. 预热首页模块
-4. 进入主壳页面
-
-这里的关键点是：
-
-- 设置是启动阶段的第一优先级，因为后续所有能力都依赖媒体源、搜索源和首页模块配置
-- 首页预热是 best-effort，不阻塞用户进入应用
-- 启动页更像“温和预热”，不是重型初始化框架
-
-## 6. 配置与状态管理
-
-### 6.1 设置存储
-
-设置由 `SettingsController` 管理，通过 `AppSettingsRepository` 持久化。
-
-当前存储实现：
-
-- `features/settings/data/app_settings_repository.dart`
-- 后端：`SharedPreferences`
-
-保存内容包括：
-
-- 媒体源配置
-- 搜索服务配置
-- 豆瓣账号配置
-- 网络存储配置
-- 元数据匹配开关
-- 首页模块配置
-- 播放设置
-
-### 6.2 配置迁移与清洗
-
-设置加载时还做两件事：
-
-- 迁移旧版网络存储配置到新的 `NetworkStorageConfig`
-- 去掉历史 demo 数据和失效默认模块
-
-所以 `load()` 不只是简单反序列化，也承担一部分本地数据迁移职责。
-
-## 7. 首页架构
-
-首页不是固定页面，而是“模块容器”。
-
-核心组成：
-
-- `HomeModuleConfig`：模块定义
-- `homeEnabledModulesProvider`：启用模块列表
-- `homeSectionProvider`：单模块装配
-- `homeSectionsProvider`：首页模块聚合
-
-当前首页模块主要分两类：
-
-- 本地媒体模块：最近新增、指定媒体源分区
-- 豆瓣模块：想看、在看、看过、推荐、片单、轮播
-
-首页额外还有一层 Hero 配置：
-
-- 是否启用 Hero
-- Hero 样式（正常 / 无边）
-- Hero 数据来源可指向自动选择或指定模块
-
-首页的实现特点：
-
-- 模块配置来自设置，而不是写死
-- 首页卡片统一映射到 `MediaDetailTarget`
-- 首页在跳详情前会先尝试合并详情缓存
-
-这意味着首页并不只是“展示列表”，它也是详情页缓存命中的入口之一。
-
-## 8. 媒体库架构
-
-媒体库通过 `MediaRepository` 统一对外，底下分成两条主要接入链路。
-
-### 8.1 Emby 链路
-
-`Emby` 相关能力主要通过 `EmbyApiClient` 提供：
+`EmbyApiClient` 负责：
 
 - 登录鉴权
-- 分区获取
-- 媒体列表读取
+- 分区获取与选择
+- 媒体列表
 - 子项读取
 - 播放信息解析
 
-`MediaRepository` 会根据媒体源配置决定：
+### WebDAV
 
-- 是读取全部分区
-- 还是只读取用户选中的分区
-
-### 8.2 WebDAV 链路
-
-`WebDAV` 是当前 NAS 侧的核心接入方式，但页面不会直接把 `WebDavNasClient` 当作长期数据源使用。
-
-实际链路是：
+`WebDAV` 页面消费模型不是“页面实时扫目录”，而是“索引驱动”：
 
 1. `WebDavNasClient` 扫描目录
-2. `NasMediaIndexer` 识别、聚合、补元数据
-3. `NasMediaIndexStore` 落本地索引
-4. 首页 / 媒体库 / 详情页优先读取索引
+2. `NasMediaIndexer` 做识别、聚合和补元数据
+3. `NasMediaIndexStore` 把结果落到本地
+4. 首页、媒体库、详情页优先读取索引
 
-也就是说，`WebDAV` 的页面消费模型是“索引驱动”，不是“页面直扫目录驱动”。
+补充约束：
 
-### 8.3 为什么要有 `NasMediaIndexer`
+- 增量刷新会限制在当前“已选分区”或显式指定的作用域内扫描
+- 这一步会遍历作用域内目录来识别变更，但不会越过到其他分区
+- sidecar 和在线元数据补全只针对增量项继续执行
+- 只有当当前作用域索引为空时，才允许自动升级成一次全量重建
+- `WebDAV` 调试日志默认关闭，需要排障时再在 `lib/core/utils/webdav_trace.dart` 手动打开
 
-`NasMediaIndexer` 是当前项目最关键的业务组件之一，负责把原始 `WebDAV` 文件树提升成可直接展示的媒体条目。
+`NasMediaIndexer` 负责的事情包括：
 
-它处理的事情包括：
+- 文件指纹
+- 标题、年份、类型、季集识别
+- sidecar 读取
+- `streamdetails`
+- 外部 ID 提取
+- `WMDB / TMDB / IMDb` 补全
+- `MediaItem` 生成
+- 剧集父子关系聚合
 
-- 构建文件指纹
-- 识别标题、年份、类型、季集
-- 读取 `NFO / poster / fanart / logo / banner / extrafanart`
-- 读取 `streamdetails`
-- 识别文件名或目录名里的 `IMDb ID`
-- 调用 `WMDB / TMDB / IMDb`
-- 生成统一的 `MediaItem`
-- 聚合剧、季、集父子关系
-- 持久化索引记录
+媒体库页额外提供这些运维动作：
 
-### 8.4 WebDAV 两阶段刷新
+- `增量更新 WebDAV`
+- `重建 WebDAV 索引`
+- 单条资源手动索引
+- 单条资源删除 `WebDAV` 文件或目录
+- `TV` 模式下媒体库筛选、分区入口、分页按钮都使用可聚焦控件，并尽量恢复到上次浏览位置
 
-当前 `WebDAV` 刷新是两阶段的：
+## 8. 详情与元数据
 
-1. 建立索引
-2. 后台补元数据
+详情页主模型是 `MediaDetailTarget`，它把：
 
-第一阶段优先把目录和基础条目建立出来，保证页面尽快可用。
-
-第二阶段再对需要补齐的条目做 sidecar 或在线 enrichment。
-
-### 8.5 增量刷新
-
-`NasMediaIndexer` 通过以下信息判断是否可以复用旧索引：
-
-- `sourceId`
-- `resourcePath`
-- `modifiedAt`
-- `fileSizeBytes`
-
-这些字段会组成 fingerprint。未变化的条目会直接复用旧记录；新增或指纹变化的条目才会进入后续增量处理。
-
-### 8.6 本地索引存储
-
-`WebDAV` 索引存储在 `NasMediaIndexStore` 中，当前实现为：
-
-- `SembastNasMediaIndexStore`
-- 后端：`Sembast`
-
-索引里保存的不只是“文件列表”，还包括：
-
-- 识别结果
-- 元数据命中状态
-- 外部 ID
-- 海报与背景图
-- 资源技术信息
-- 最终 `MediaItem`
-- 作用域 `scopeKey`
-
-`scopeKey` 用来区分当前索引是否仍适用于当前媒体源配置，例如：
-
-- 选中的分区是否变化
-- 结构推断开关是否变化
-- sidecar 开关是否变化
-- 排除目录关键字是否变化
-
-### 8.7 已选分区优先
-
-无论是 `Emby` 还是 `WebDAV`，仓库当前都尽量只围绕“已选分区”工作：
-
-- 媒体库只展示已选分区
-- 首页模块只引用已选分区
-- 本地搜索只在已选范围内搜索
-- 手动资源匹配也只在已选范围里找
-
-这让 UI、刷新、搜索三条链路的作用域保持一致。
-
-## 9. 详情页与元数据架构
-
-详情页的核心模型是 `MediaDetailTarget`。
-
-它不是简单的页面 DTO，而是把下面几件事合并在一起的“详情上下文”：
-
-- 展示数据
-- 匹配查询词
-- 来源信息
+- 展示信息
+- 搜索词
+- 来源上下文
 - 外部 ID
 - 播放目标
 
-### 9.1 详情页读取顺序
+放在同一个详情上下文中。
 
-详情页会按这个顺序拿数据：
+详情读取顺序大致是：
 
-1. 先拿 seed target
+1. 使用 seed target
 2. 读取本地详情缓存
-3. 合并缓存命中的缺失字段
-4. 必要时自动补齐元数据
+3. 合并缓存中的缺失字段
+4. 视情况补全在线元数据
 5. 对 Emby 播放目标补全真实播放信息
-6. 把最终结果写回详情缓存
+6. 写回本地详情缓存
 
-### 9.2 为什么 NAS 详情页默认不再在线刮削
+对 `WebDAV` 条目，详情页默认优先信任索引阶段产物，不重复做实时在线刮削。
 
-详情页里的自动补元数据有一个重要分支：
+详情页的两个补充点：
 
-- 对普通详情目标，可以按设置继续走 `WMDB / TMDB / IMDb`
-- 对来自 `WebDAV` 且已具备 `sourceId` 的目标，默认跳过自动在线补齐
+- “匹配本地资源”命中 `WebDAV / NAS` 后，资源侧字段会优先使用匹配结果，当前详情页已有的在线元数据只做补充，不再反向覆盖匹配到的本地资源信息
+- 网络图片在展示层支持候选图回退，主图 `404` 或解码失败时会自动尝试下一张候选 artwork
 
-原因是 `WebDAV` 资源应当优先相信索引阶段的结果，避免详情页再次变成“实时刮削入口”。
+当前详情页与元数据链路还额外承担这些能力：
 
-### 9.3 手动索引管理
+- 顶部 Hero 优先使用背景图，不再重复放置海报；文字覆盖区域单独加阴影，未覆盖区域保持原图
+- `TMDB` 已接入 `poster / backdrop / still / profile / logo` 等图片字段，并把 `TMDB x.x` 写入统一评分标签链路
+- 人物头像统一来自 `TMDB profile`，详情页公司 Logo 来自 `TMDB production_companies.logo_path`，不再把 `networks` 混作公司展示
+- 演职员头像可跳转到人物关联影片页，人物作品列表继续复用首页同款海报卡片
+- `TV` 模式下详情页主操作默认优先聚焦“继续播放 / 立即播放”或“搜索资源”，并记住人物、剧集等横向列表的上次焦点
 
-`WebDAV` 详情页额外提供索引管理入口，用于：
+`WebDAV` 详情页还提供 `建立/管理索引` 页面，用于：
 
 - 修改搜索词
 - 修改年份
 - 切换是否按剧集匹配
 - 手动搜索 `WMDB / TMDB / IMDb`
-- 把结果直接写回本地索引和详情缓存
+- 直接写回本地索引和详情缓存
+- 手动应用命中结果时会强制覆盖本地已存在的标题、简介、图片、人物、公司 Logo 和外部 ID，不再只补空字段
+- 详情页“手动更新信息”同样会直接重新搜索，并把命中的在线结果覆盖到当前详情缓存
 
-因此这里改的是“长期可复用的数据”，不是当前页面的一次性临时状态。
+## 9. 搜索与入库联动
 
-## 10. 元数据匹配策略
+搜索页会并发组合这些来源：
 
-元数据模块由 `metadata/` 负责，当前主要分三类客户端：
-
-- `WmdbMetadataClient`
-- `TmdbMetadataClient`
-- `ImdbRatingClient`
-
-### 10.1 职责划分
-
-- `WMDB`：中文标题、简介、豆瓣评分、豆瓣与 IMDb ID
-- `TMDB`：海报、简介、导演、演员、类型、时长
-- `IMDb`：评分补充
-
-### 10.2 优先级
-
-自动匹配会受设置控制：
-
-- 开关是否启用
-- `TMDB` token 是否配置
-- `WMDB / TMDB` 的优先级设置
-
-### 10.3 本地信息优先
-
-无论是索引期还是详情期，整体策略都偏向：
-
-1. 本地 sidecar
-2. 文件名和目录名里的外部 ID
-3. 在线匹配补缺
-
-已有的本地标题、简介、海报并不会轻易被在线结果强制覆盖。
-
-## 11. 搜索架构
-
-搜索页当前没有单独的 controller，而是由页面状态机直接协调搜索任务。
-
-### 11.1 搜索目标
-
-搜索页会动态组合三类目标：
-
-- 全部
 - 本地媒体源
-- 在线搜索服务
+- 在线搜索 provider
 
-### 11.2 并发模型
+当前在线 provider：
 
-一次搜索会拆成多个 operation：
+- `PanSou`
+- `CloudSaver`
 
-- 本地源搜索调用 `searchLocal`
-- 在线源搜索调用 `searchOnline`
+搜索结果会在 provider 侧和页面侧继续做：
 
-这些 operation 会并发启动，结果谁先回来谁先渲染。
-
-### 11.3 本地搜索
-
-本地搜索不是额外索引库，而是直接基于 `MediaRepository.fetchLibrary()` 的结果做评分匹配：
-
-- 标题精确匹配
-- 标题包含
-- 分词命中
-- 简介兜底
-
-### 11.4 在线搜索
-
-在线搜索通过 `SearchRepository` 对外统一，底层目前支持：
-
-- `PanSouApiClient`
-- `CloudSaverApiClient`
-
-搜索结果还会套一层 provider 级过滤：
-
-- 强匹配
-- 过滤词
+- 相同链接去重
 - 网盘类型过滤
+- 过滤词
+- 强匹配
 - 标题长度限制
-- 相同资源 URL 去重
+- `TV` 模式额外会把最近搜索词和上次选择的搜索来源保存在本地，减少重复输入和重复切换
 
-## 12. 网络存储联动
+搜索后的联动链路是：
 
-搜索结果可以继续进入“保存到夸克 -> 触发 SmartStrm -> 刷新媒体源”的链路。
+1. 保存到夸克
+2. 触发 `SmartStrm` Webhook
+3. 延迟刷新指定媒体源
+4. 首页和媒体库读取到新的索引或缓存
 
-### 12.1 夸克保存
+`SmartStrm` 的返回结果会记录到本地日志仓库，供设置页查看和清理。
 
-`QuarkSaveClient` 负责：
+## 10. 播放链路
 
-- 解析分享链接
-- 拉取分享 token
-- 枚举分享内容
-- 确保目标目录存在
-- 发起保存
+播放器页基于 `media_kit`，当前是“三种播放内核”分支：
 
-### 12.2 SmartStrm 触发
+- 内置播放器负责应用内播放、字幕增强、续播和跳过逻辑
+- App 内原生播放器负责在 Android 上以原生容器页承载播放，尽量减少 Flutter 合成层干扰
+- 系统播放器负责把播放地址交给平台默认视频应用
 
-`SmartStrmWebhookClient` 负责：
-
-- 触发 Webhook
-- 记录成功或失败日志
-- 解析新增条目数等返回信息
-
-### 12.3 媒体源刷新
-
-如果网络存储配置里指定了需要刷新的媒体源，搜索页会调用 `MediaRefreshCoordinator`：
-
-- 支持延迟刷新
-- 支持同时刷新多个媒体源
-- 刷新后统一 invalidate 首页相关 provider
-
-这条链路把“搜索保存成功”真正接回了“首页和媒体库内容更新”。
-
-### 12.4 日志留存
-
-`SmartStrm` Webhook 的返回结果会写入本地日志仓库，供设置页查看最近的：
-
-- 任务名
-- Webhook 地址
-- 保存目录
-- HTTP 状态
-- 返回消息
-- 新增条目数
-
-## 13. 播放架构
-
-播放器页基于 `media_kit`。
-
-核心流程：
+主流程大致是：
 
 1. 进入播放器页
 2. 检查 `PlaybackTarget`
-3. 如果是 Emby 且仍需解析，则先补全真实播放信息
-4. 探测启动测速
-5. 调用 `player.open`
-6. 失败时自动重试，最多 3 次
-7. 超过设置的最大打开超时时间则终止
+3. 如果是 Emby，则先补齐真实播放源
+4. 如果当前设置为系统播放器，则按平台分支走外部打开逻辑后直接返回
+5. 如果当前设置为 App 内原生播放器，则在 Android 上拉起原生播放器容器页后直接返回
+6. 否则进行轻量探测和等待态展示
+7. 调用 `player.open`
+8. 失败自动重试，最多 `3` 次
+9. 超过配置的最大打开超时时间则终止
 
-播放器页当前还额外做了轻量启动探针，用于展示：
+当前播放页已落地的能力包括：
 
-- 估算网速
-- 分辨率
-- 格式
-- 码率
+- 播放速度切换
+- 音轨切换
+- 字幕轨切换
+- 字幕偏移
+- 外部字幕加载
+- 在线字幕搜索入口
+- Android `PiP`
+- Android 后台播放状态同步
+- `TV` 遥控器快捷键提示常驻显示，菜单键可直接打开播放设置
+- iOS 后台音频播放会话
 
-## 14. 本地缓存与持久化
+自动续播与自动跳过规则走本地播放记忆链路：
 
-Starflow 当前至少有三类本地持久化数据，它们的职责不同。
+- 电影按条目记录播放进度
+- 电视剧按“剧 -> 集”记录最近一次续播位置
+- 最近播放只保留最近 `20` 条
+- 片头 / 片尾跳过规则按剧绑定，不扩散到其他剧
 
-### 14.1 设置缓存
+平台差异：
 
-- 存储：`SharedPreferences`
-- 内容：应用配置
+- Android 原生播放器容器页当前使用原生 `Activity + Media3/ExoPlayer` 承载播放，不退出 App，但也不提供完整 Flutter 播放器里的高级能力
+- Android 系统播放器优先调用原生 `ACTION_VIEW`，并显式标记 `video/*`
+- 桌面端系统播放器通过临时 `.m3u` 交给系统默认视频应用
+- TV 高性能模式下，如果识别到高码率或高压力片源，会优先尝试切到 App 内原生播放器，再退到系统播放器
+- 系统播放器无法稳定回传进度，因此续播、自动跳过、字幕偏移等能力只在内置播放器里生效
 
-### 14.2 详情缓存
+播放器默认偏好目前包括：
 
-- 存储：`SharedPreferences`
-- 仓库：`LocalStorageCacheRepository`
-- 内容：`MediaDetailTarget`
+- 最大打开超时时间
+- 默认倍速
+- 默认字幕策略
+  - `跟随片源`：打开视频时按片源默认字幕轨处理
+  - `默认关闭`：打开视频时默认不显示字幕
+- 字幕大小
+- 后台播放
+  - 设置中提供独立开关
+  - Android：开启后播放中切后台时允许进入画中画继续播放
+  - iOS：开启后播放中切后台时启用后台音频会话，继续后台播放音频
+- 播放器内核
 
-详情缓存使用多组 lookup key 命中：
+## 11. 设置与配置管理
 
-- `library|sourceId|itemId`
-- `douban|doubanId`
-- `imdb|imdbId`
-- 标准化标题
-- 标准化查询词
+`SettingsController` 负责读取和持久化 `AppSettings`。
 
-### 14.3 WebDAV 索引库
+当前设置范围包括：
 
-- 存储：`Sembast`
-- 仓库：`NasMediaIndexStore`
-- 内容：`NasMediaIndexRecord`
+- 媒体源
+- 搜索服务
+- 豆瓣账号
+- 首页模块
+- Hero 样式与来源
+- 网络存储
+- 元数据与评分
+- 播放超时
+- 后台播放
+- 默认字幕策略
+- 默认倍速
+- 字幕大小
+- 播放器内核
+- 透明磨砂效果
 
-### 14.4 图片缓存
+播放器运行期状态还会额外保存：
 
-图片缓存通过 `persistent_image_cache` 抽象层统一访问：
+- 最近播放
+- 电影续播进度
+- 电视剧当前集与集内进度
+- 按剧绑定的片头 / 片尾跳过规则
 
-- IO 平台走本地持久化实现
-- 非 IO 平台走 stub 或对应实现
+设置页还提供：
 
-它和详情缓存、索引库是分开的，不共享数据模型。
+- 本地缓存查看与清理
+- 在支持文件访问的平台上导出配置到 JSON
+- 在支持文件访问的平台上从 JSON 导入并覆盖当前设置
+- 当部分 Android TV / 定制系统设备无法拉起文件选择器时，改为提示错误并允许用户手动填写导入文件路径或导出目录
 
-### 14.5 本地存储运维入口
+Android TV 下的设置页还额外做了遥控器适配：
 
-设置页已经提供本地存储检查与清理入口，可直接查看并清理：
+- 设置首页主要入口卡片支持焦点选中
+- 多个二级设置页的主要按钮与保存操作支持焦点可达
+- 仍有少量弹窗和编辑流需要继续补齐焦点细节
 
+## 12. 本地持久化
+
+### SharedPreferences
+
+用于保存：
+
+- 应用设置
 - 详情缓存
-- 图片缓存
+- 播放历史
+- 续播进度
+- 按剧绑定的片头 / 片尾跳过规则
+- `SmartStrm` 日志
 
-## 15. 核心模型关系
+### Sembast
 
-可以把最关键的模型关系理解成这样：
+用于保存 `WebDAV` 元数据索引。
 
-- `MediaSourceConfig`：定义“从哪里拿媒体”
-- `MediaCollection`：定义“这个来源下有哪些分区”
-- `MediaItem`：统一的媒体卡片与播放基础模型
-- `MediaDetailTarget`：详情页上下文
-- `PlaybackTarget`：播放器上下文
-- `SearchResult`：搜索展示模型
-- `NasMediaIndexRecord`：`WebDAV` 资源的长期索引记录
+### 持久化图片缓存
 
-其中：
+通过 `persistent_image_cache` 抽象统一访问，不同平台走各自实现或 stub。
 
-- `MediaItem` 是列表层主模型
-- `MediaDetailTarget` 是详情层主模型
-- `PlaybackTarget` 是播放层主模型
+## 13. 平台分支
 
-## 16. 当前架构的几个关键判断
+项目有一层明确的平台适配：
 
-### 16.1 `WebDAV` 不再是页面实时直扫
+- Android 会识别 `TV` 设备
+- TV 模式切换为左侧窄栏磨砂菜单和焦点式交互
+- 设置首页及部分设置子页会优先使用更适合遥控器操作的可聚焦按钮与入口
+- `TvMenuButtonScope` 用来把菜单键语义统一上抛到页面壳
+- `TvFocusMemoryScope` 用来记录首页、搜索、媒体库、详情等页面上次停留的焦点元素
+- IO / Web 平台对本地数据库、图片缓存、配置导入导出各有分支实现
 
-现在 `WebDAV` 的正确理解方式是：
+## 14. 测试覆盖
 
-- `WebDavNasClient` 负责扫描
-- `NasMediaIndexer` 负责把扫描结果转成可复用索引
-- 页面主要读取索引而不是直接读目录
+当前 `test/` 已覆盖的重点包括：
 
-### 16.2 详情页不是唯一的元数据入口
+- 设置模型与迁移
+- 首页装配逻辑
+- 详情缓存
+- `Emby / WebDAV` 客户端
+- `WebDAV` 识别与索引
+- 元数据客户端
+- 搜索 provider 与搜索仓库
+- 夸克保存和 `SmartStrm`
 
-元数据补全现在主要发生在两处：
+## 15. 当前架构判断
 
-- `WebDAV` 索引阶段
-- 非 NAS 详情页自动补齐阶段
+这个仓库目前最重要的三个判断是：
 
-详情页已经不是所有元数据请求的唯一入口。
-
-### 16.3 搜索不是孤立功能
-
-搜索的终点不只是“给用户一个链接”，它还能继续串到：
-
-- 夸克保存
-- `SmartStrm`
-- 媒体源刷新
-- 首页与媒体库更新
-
-这使得搜索成为资源入库链路的一部分。
-
-## 17. 后续扩展点
-
-当前架构已经为下面这些方向留出了空间：
-
-- 增加更多媒体源类型
-- 增加更多在线搜索 provider
-- 继续丰富首页模块
-- 给播放器接入更多控制能力
-- 为 `WebDAV` 索引增加查看、清理、诊断能力
-- 将部分搜索或刮削能力迁移到桥接服务
-
-如果后续继续演进，建议优先保持下面两条不变：
-
-- 页面继续消费统一模型，不直接绑死第三方协议
-- `WebDAV` 继续坚持“索引优先、页面读取缓存”的方向
+1. `WebDAV` 的正确方向是“索引优先”，而不是“页面实时扫目录”
+2. 详情页不是唯一元数据入口，索引阶段已经承担了大量 enrichment 工作
+3. 搜索不是孤立功能，而是资源入库和媒体源刷新的上游触发器

@@ -63,15 +63,40 @@ MediaItem? matchMediaItemByTitles(
 MediaItem? matchMediaItemByExternalIds(
   List<MediaItem> library, {
   String imdbId = '',
+  String tmdbId = '',
+  String tvdbId = '',
+  String wikidataId = '',
 }) {
   final normalizedImdbId = imdbId.trim().toLowerCase();
-  if (normalizedImdbId.isEmpty) {
+  final normalizedTmdbId = tmdbId.trim();
+  final normalizedTvdbId = tvdbId.trim();
+  final normalizedWikidataId = wikidataId.trim().toUpperCase();
+  if (normalizedImdbId.isEmpty &&
+      normalizedTmdbId.isEmpty &&
+      normalizedTvdbId.isEmpty &&
+      normalizedWikidataId.isEmpty) {
     return null;
   }
 
   for (final item in library) {
     if (normalizedImdbId.isNotEmpty &&
         item.imdbId.trim().toLowerCase() == normalizedImdbId) {
+      return item;
+    }
+  }
+  for (final item in library) {
+    if (normalizedTmdbId.isNotEmpty && item.tmdbId.trim() == normalizedTmdbId) {
+      return item;
+    }
+  }
+  for (final item in library) {
+    if (normalizedTvdbId.isNotEmpty && item.tvdbId.trim() == normalizedTvdbId) {
+      return item;
+    }
+  }
+  for (final item in library) {
+    if (normalizedWikidataId.isNotEmpty &&
+        item.wikidataId.trim().toUpperCase() == normalizedWikidataId) {
       return item;
     }
   }

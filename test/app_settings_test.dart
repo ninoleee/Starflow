@@ -10,16 +10,40 @@ void main() {
       'homeHeroBackgroundEnabled': false,
       'translucentEffectsEnabled': false,
       'playbackOpenTimeoutSeconds': 45,
+      'playbackDefaultSpeed': 1.25,
+      'playbackSubtitlePreference': 'off',
+      'playbackSubtitleScale': 'large',
+      'playbackBackgroundPlaybackEnabled': false,
+      'playbackEngine': 'systemPlayer',
+      'playbackDecodeMode': 'softwarePreferred',
     });
 
     expect(settings.homeHeroStyle, HomeHeroStyle.borderless);
     expect(settings.homeHeroBackgroundEnabled, isFalse);
     expect(settings.translucentEffectsEnabled, isFalse);
     expect(settings.playbackOpenTimeoutSeconds, 45);
+    expect(settings.playbackDefaultSpeed, 1.25);
+    expect(
+      settings.playbackSubtitlePreference,
+      PlaybackSubtitlePreference.off,
+    );
+    expect(settings.playbackSubtitleScale, PlaybackSubtitleScale.large);
+    expect(settings.playbackBackgroundPlaybackEnabled, isFalse);
+    expect(settings.playbackEngine, PlaybackEngine.systemPlayer);
+    expect(
+      settings.playbackDecodeMode,
+      PlaybackDecodeMode.softwarePreferred,
+    );
     expect(settings.toJson()['homeHeroStyle'], 'borderless');
     expect(settings.toJson()['homeHeroBackgroundEnabled'], isFalse);
     expect(settings.toJson()['translucentEffectsEnabled'], isFalse);
     expect(settings.toJson()['playbackOpenTimeoutSeconds'], 45);
+    expect(settings.toJson()['playbackDefaultSpeed'], 1.25);
+    expect(settings.toJson()['playbackSubtitlePreference'], 'off');
+    expect(settings.toJson()['playbackSubtitleScale'], 'large');
+    expect(settings.toJson()['playbackBackgroundPlaybackEnabled'], isFalse);
+    expect(settings.toJson()['playbackEngine'], 'systemPlayer');
+    expect(settings.toJson()['playbackDecodeMode'], 'softwarePreferred');
   });
 
   test('app settings default hero style is normal', () {
@@ -35,6 +59,31 @@ void main() {
       isTrue,
     );
     expect(settings.playbackOpenTimeoutSeconds, 20);
+    expect(settings.playbackDefaultSpeed, 1.0);
+    expect(
+      settings.playbackSubtitlePreference,
+      PlaybackSubtitlePreference.auto,
+    );
+    expect(settings.playbackSubtitleScale, PlaybackSubtitleScale.standard);
+    expect(settings.playbackBackgroundPlaybackEnabled, isTrue);
+    expect(settings.playbackEngine, PlaybackEngine.embeddedMpv);
+    expect(settings.playbackDecodeMode, PlaybackDecodeMode.auto);
+    expect(settings.detailAutoLibraryMatchEnabled, isFalse);
+  });
+
+  test('app settings persist native playback container engine', () {
+    final settings = AppSettings.fromJson({
+      'playbackEngine': 'nativeContainer',
+      'playbackDecodeMode': 'hardwarePreferred',
+    });
+
+    expect(settings.playbackEngine, PlaybackEngine.nativeContainer);
+    expect(
+      settings.playbackDecodeMode,
+      PlaybackDecodeMode.hardwarePreferred,
+    );
+    expect(settings.toJson()['playbackEngine'], 'nativeContainer');
+    expect(settings.toJson()['playbackDecodeMode'], 'hardwarePreferred');
   });
 
   test('legacy hero settings migrate to hero module', () {
@@ -56,12 +105,15 @@ void main() {
       'tmdbMetadataMatchEnabled': true,
       'wmdbMetadataMatchEnabled': true,
       'metadataMatchPriority': 'wmdb',
+      'detailAutoLibraryMatchEnabled': true,
     });
 
     expect(settings.tmdbMetadataMatchEnabled, isTrue);
     expect(settings.wmdbMetadataMatchEnabled, isTrue);
     expect(settings.metadataMatchPriority, MetadataMatchProvider.wmdb);
+    expect(settings.detailAutoLibraryMatchEnabled, isTrue);
     expect(settings.toJson()['metadataMatchPriority'], 'wmdb');
+    expect(settings.toJson()['detailAutoLibraryMatchEnabled'], isTrue);
   });
 
   test('app settings persist network storage config', () {

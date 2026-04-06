@@ -56,6 +56,7 @@ class WebDavMetadataSeed {
     required this.seasonNumber,
     required this.episodeNumber,
     required this.imdbId,
+    required this.tmdbId,
     required this.container,
     required this.videoCodec,
     required this.audioCodec,
@@ -86,6 +87,7 @@ class WebDavMetadataSeed {
   final int? seasonNumber;
   final int? episodeNumber;
   final String imdbId;
+  final String tmdbId;
   final String container;
   final String videoCodec;
   final String audioCodec;
@@ -116,6 +118,7 @@ class WebDavMetadataSeed {
     int? seasonNumber,
     int? episodeNumber,
     String? imdbId,
+    String? tmdbId,
     String? container,
     String? videoCodec,
     String? audioCodec,
@@ -146,6 +149,7 @@ class WebDavMetadataSeed {
       seasonNumber: seasonNumber ?? this.seasonNumber,
       episodeNumber: episodeNumber ?? this.episodeNumber,
       imdbId: imdbId ?? this.imdbId,
+      tmdbId: tmdbId ?? this.tmdbId,
       container: container ?? this.container,
       videoCodec: videoCodec ?? this.videoCodec,
       audioCodec: audioCodec ?? this.audioCodec,
@@ -218,6 +222,7 @@ class WebDavScannedItem {
       seasonNumber: metadataSeed.seasonNumber,
       episodeNumber: metadataSeed.episodeNumber,
       imdbId: metadataSeed.imdbId,
+      tmdbId: metadataSeed.tmdbId,
       container: metadataSeed.container,
       videoCodec: metadataSeed.videoCodec,
       audioCodec: metadataSeed.audioCodec,
@@ -256,6 +261,7 @@ class _ParsedNfoMetadata {
     required this.seasonNumber,
     required this.episodeNumber,
     required this.imdbId,
+    required this.tmdbId,
     required this.container,
     required this.videoCodec,
     required this.audioCodec,
@@ -280,6 +286,7 @@ class _ParsedNfoMetadata {
   final int? seasonNumber;
   final int? episodeNumber;
   final String imdbId;
+  final String tmdbId;
   final String container;
   final String videoCodec;
   final String audioCodec;
@@ -441,4 +448,14 @@ class _DirectorySubtreeCacheEntry {
 
   final DateTime directoryModifiedAt;
   final List<_PendingWebDavScannedItem> items;
+}
+
+class _ResolvedPlayableSource {
+  const _ResolvedPlayableSource({
+    required this.streamUrl,
+    required this.headers,
+  });
+
+  final String streamUrl;
+  final Map<String, String> headers;
 }

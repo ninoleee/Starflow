@@ -65,6 +65,7 @@ void main() {
       expect(result.ratingLabels, ['豆瓣 9.2', 'IMDb 7.4']);
       expect(result.doubanId, '1428581');
       expect(result.imdbId, 'tt6035092');
+      expect(result.tmdbId, '135130');
     });
 
     test('maps search lookup and prefers best title match', () async {
@@ -150,6 +151,7 @@ void main() {
       expect(result.directors, ['吴宇森']);
       expect(result.actors, ['周润发', '张国荣']);
       expect(result.titlesForMatching, contains('A Better Tomorrow'));
+      expect(result.tmdbId, isEmpty);
     });
 
     test('falls back to 豆瓣 0 when wmdb does not return douban rating',

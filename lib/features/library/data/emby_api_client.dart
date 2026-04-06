@@ -181,8 +181,7 @@ class EmbyApiClient {
     final requiredHeaders = Map<String, dynamic>.from(
       selectedSource['RequiredHttpHeaders'] as Map? ?? const {},
     );
-    final resolvedSourcePath =
-        (selectedSource['Path'] as String? ?? '').trim();
+    final resolvedSourcePath = (selectedSource['Path'] as String? ?? '').trim();
     final actualAddress = target.actualAddress.trim().isNotEmpty
         ? target.actualAddress
         : resolvedSourcePath;
@@ -191,6 +190,10 @@ class EmbyApiClient {
       title: target.title,
       sourceId: target.sourceId,
       itemId: target.itemId,
+      itemType: target.itemType,
+      year: target.year,
+      seriesId: target.seriesId,
+      seriesTitle: target.seriesTitle,
       preferredMediaSourceId: selectedSource['Id'] as String? ?? '',
       streamUrl: resolvedUri.toString(),
       actualAddress: actualAddress,
@@ -200,6 +203,8 @@ class EmbyApiClient {
       container: selectedSource['Container'] as String? ?? '',
       videoCodec: videoStream?['Codec'] as String? ?? '',
       audioCodec: audioStream?['Codec'] as String? ?? '',
+      seasonNumber: target.seasonNumber,
+      episodeNumber: target.episodeNumber,
       width:
           ((selectedSource['Width'] as num?) ?? (videoStream?['Width'] as num?))
               ?.toInt(),
@@ -507,10 +512,11 @@ class EmbyApiClient {
     final durationLabel = formatRunTimeTicks(runTimeTicks);
     final playbackProgress =
         _resolvePlaybackProgress(userData, runTimeTicks: runTimeTicks);
-    final providerIds = (item['ProviderIds'] as Map?)?.map(
-          (key, value) => MapEntry('$key'.trim(), '$value'.trim()),
-        ) ??
-        const <String, String>{};
+    final providerIds = ((item['ProviderIds'] as Map?) ?? const {}).map(
+      (key, value) => MapEntry('$key'.trim(), '$value'.trim()),
+    )..removeWhere(
+        (key, value) => key.trim().isEmpty || value.trim().isEmpty,
+      );
     final rawIndexNumber = item['IndexNumber'] as int?;
     final rawParentIndexNumber = item['ParentIndexNumber'] as int?;
     final seasonNumber = itemType.trim().toLowerCase() == 'season'
@@ -520,8 +526,7 @@ class EmbyApiClient {
         itemType.trim().toLowerCase() == 'episode' ? rawIndexNumber : null;
     final imageTag = _resolvePrimaryImageTag(item);
     final itemPath = (item['Path'] as String? ?? '').trim();
-    final mediaSourcePath =
-        (mediaSource?['Path'] as String? ?? '').trim();
+    final mediaSourcePath = (mediaSource?['Path'] as String? ?? '').trim();
     final actualAddress =
         mediaSourcePath.isNotEmpty ? mediaSourcePath : itemPath;
 
@@ -560,6 +565,17 @@ class EmbyApiClient {
       episodeNumber: episodeNumber,
       playbackProgress: playbackProgress,
       imdbId: _resolveProviderId(providerIds, const ['Imdb', 'IMDb']),
+      tmdbId: _resolveProviderId(providerIds, const ['Tmdb', 'TMDb', 'tmdb']),
+      tvdbId: _resolveProviderId(providerIds, const ['Tvdb', 'TVDb', 'tvdb']),
+      wikidataId: _resolveProviderId(
+        providerIds,
+        const ['Wikidata', 'WikiData', 'wikidata'],
+      ),
+      tmdbSetId: _resolveProviderId(
+        providerIds,
+        const ['tmdbSet', 'TMDbSet', 'TmdbSet'],
+      ),
+      providerIds: providerIds,
       addedAt: createdAt,
       lastWatchedAt: lastPlayedAt,
     );

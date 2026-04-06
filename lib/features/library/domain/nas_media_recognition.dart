@@ -103,6 +103,19 @@ class NasMediaRecognizer {
       if (parentTitle.trim().isNotEmpty) {
         title = parentTitle.trim();
       }
+    } else if (_looksLikeSeriesFolder(parentRaw)) {
+      final leadingEpisodeNumber = _matchLeadingEpisodeCue(fileBaseName);
+      if (leadingEpisodeNumber != null) {
+        itemType = 'episode';
+        preferSeries = true;
+        seasonNumber = parentSeason ?? grandParentSeason;
+        episodeNumber = leadingEpisodeNumber;
+        if (cleanedParentTitle.trim().isNotEmpty) {
+          title = cleanedParentTitle.trim();
+        }
+      } else {
+        preferSeries = true;
+      }
     } else if (parentLooksLikeSeasonFolder && parentTitle.trim().isNotEmpty) {
       title = parentTitle.trim();
       itemType = 'episode';
@@ -212,6 +225,33 @@ class NasMediaRecognizer {
     return null;
   }
 
+  static int? _matchLeadingEpisodeCue(String input) {
+    final normalized = input.trim();
+    if (normalized.isEmpty) {
+      return null;
+    }
+    final match = RegExp(
+      r'^\s*0*(\d{1,3})(?:[ ._\-]+)(.+)$',
+      caseSensitive: false,
+    ).firstMatch(normalized);
+    if (match == null) {
+      return null;
+    }
+
+    final episodeNumber = int.tryParse(match.group(1) ?? '');
+    if (episodeNumber == null || episodeNumber <= 0) {
+      return null;
+    }
+
+    final remainder = (match.group(2) ?? '').trim();
+    if (remainder.isEmpty) {
+      return episodeNumber;
+    }
+
+    final cleanedRemainder = _cleanLeadingEpisodeRemainder(remainder);
+    return cleanedRemainder.isEmpty ? episodeNumber : null;
+  }
+
   static int? _matchSeason(String input) {
     final normalized = input.trim();
     for (final pattern in const [
@@ -314,6 +354,98 @@ class NasMediaRecognizer {
     return RegExp(
       r'^(s\d{1,2}|season ?\d{1,2}|2160p|1080p|720p|4k|hdr|web ?dl|webrip|bluray|remux|x264|x265|h264|h265|hevc|aac|ac3|eac3|dts|truehd|atmos)$',
     ).hasMatch(normalized);
+  }
+
+  static String _cleanLeadingEpisodeRemainder(String input) {
+    var value = input.trim();
+    if (value.isEmpty) {
+      return '';
+    }
+
+    value = value.replaceAll(RegExp(r'[【\[\(].*?[】\]\)]'), ' ');
+    value = value.replaceAll(RegExp(r'[_\.]+'), ' ');
+    value = value.replaceAll(RegExp(r'[&+/]+'), ' ');
+    final tokens = value
+        .split(RegExp(r'[\s\-_]+'))
+        .map((token) => token.trim())
+        .where((token) => token.isNotEmpty)
+        .toList(growable: false);
+    if (tokens.isEmpty) {
+      return '';
+    }
+
+    const allowedTokens = <String>{
+      '2160p',
+      '1080p',
+      '720p',
+      '480p',
+      '4k',
+      '8k',
+      'uhd',
+      'hdr10+',
+      'hdr',
+      'dovi',
+      'dv',
+      'dolby',
+      'vision',
+      'web',
+      'dl',
+      'webrip',
+      'bluray',
+      'bdrip',
+      'brrip',
+      'remux',
+      'x264',
+      'x265',
+      'h264',
+      'h265',
+      'hevc',
+      'avc',
+      'aac',
+      'ac3',
+      'eac3',
+      'dts',
+      'truehd',
+      'atmos',
+      'proper',
+      'repack',
+      'complete',
+      'multi',
+      'nf',
+      'amzn',
+      'dsnp',
+      'max',
+      'hmax',
+      '国语',
+      '粤语',
+      '国粤',
+      '国',
+      '粤',
+      '中字',
+      '双语',
+      '简繁',
+      '内封',
+      '外挂',
+      '中英字幕',
+      'mp4',
+      'mkv',
+      'avi',
+      'mov',
+      'ts',
+      'm2ts',
+    };
+
+    for (final token in tokens) {
+      final normalizedToken = token.toLowerCase();
+      if (allowedTokens.contains(normalizedToken)) {
+        continue;
+      }
+      if (RegExp(r'^\d{3,4}p$', caseSensitive: false).hasMatch(token)) {
+        continue;
+      }
+      return token;
+    }
+    return '';
   }
 
   static String _stripExtension(String fileName) {

@@ -323,6 +323,9 @@ class _FakeMediaRepository implements MediaRepository {
   }
 
   @override
+  Future<void> cancelActiveWebDavRefreshes() async {}
+
+  @override
   Future<void> refreshSource({
     required String sourceId,
     bool forceFullRescan = false,
@@ -337,6 +340,13 @@ class _FakeMediaRepository implements MediaRepository {
   Future<MediaItem?> matchTitle(String title) async {
     return null;
   }
+
+  @override
+  Future<void> deleteResource({
+    required String sourceId,
+    required String resourcePath,
+    String sectionId = '',
+  }) async {}
 }
 
 class _FakeDiscoveryRepository implements DiscoveryRepository {

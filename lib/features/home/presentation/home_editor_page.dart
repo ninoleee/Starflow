@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -522,13 +524,18 @@ class HomeEditorPage extends ConsumerWidget {
       text: existing?.doubanListUrl ?? initialPreset?.url ?? '',
     );
     var selectedPresetUrl = initialPreset?.url ?? _kCustomDoubanListPresetValue;
+    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final titleFocusNode = FocusNode(debugLabel: 'home-douban-title');
+    final urlFocusNode = FocusNode(debugLabel: 'home-douban-url');
+    final cancelFocusNode = FocusNode(debugLabel: 'home-douban-cancel');
+    final saveFocusNode = FocusNode(debugLabel: 'home-douban-save');
 
     return showDialog<void>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setState) {
-            return AlertDialog(
+            final dialog = AlertDialog(
               title: Text(existing == null ? '新增豆瓣片单' : '编辑豆瓣片单'),
               content: SingleChildScrollView(
                 child: Column(
@@ -567,26 +574,39 @@ class HomeEditorPage extends ConsumerWidget {
                       },
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: titleController,
-                      decoration: const InputDecoration(labelText: '标题'),
+                    wrapTelevisionDialogFieldTraversal(
+                      enabled: isTelevision,
+                      child: TextField(
+                        controller: titleController,
+                        focusNode: titleFocusNode,
+                        autofocus: true,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(labelText: '标题'),
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: urlController,
-                      minLines: 2,
-                      maxLines: 3,
-                      decoration: const InputDecoration(labelText: '片单地址'),
+                    wrapTelevisionDialogFieldTraversal(
+                      enabled: isTelevision,
+                      child: TextField(
+                        controller: urlController,
+                        focusNode: urlFocusNode,
+                        minLines: 2,
+                        maxLines: 3,
+                        textInputAction: TextInputAction.done,
+                        decoration: const InputDecoration(labelText: '片单地址'),
+                      ),
                     ),
                   ],
                 ),
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
+                  focusNode: cancelFocusNode,
+                  onPressed: () => Navigator.of(dialogContext).pop(),
                   child: const Text('取消'),
                 ),
                 FilledButton(
+                  focusNode: saveFocusNode,
                   onPressed: () {
                     final url = urlController.text.trim();
                     if (url.isEmpty) {
@@ -609,16 +629,31 @@ class HomeEditorPage extends ConsumerWidget {
                                   doubanListUrl: url,
                                 ),
                         );
-                    Navigator.of(context).pop();
+                    Navigator.of(dialogContext).pop();
                   },
                   child: const Text('保存'),
                 ),
               ],
             );
+            return wrapTelevisionDialogBackHandling(
+              enabled: isTelevision,
+              dialogContext: dialogContext,
+              inputFocusNodes: [titleFocusNode, urlFocusNode],
+              contentFocusNodes: [titleFocusNode, urlFocusNode],
+              actionFocusNodes: [saveFocusNode, cancelFocusNode],
+              child: dialog,
+            );
           },
         );
       },
-    );
+    ).whenComplete(() {
+      titleController.dispose();
+      urlController.dispose();
+      titleFocusNode.dispose();
+      urlFocusNode.dispose();
+      cancelFocusNode.dispose();
+      saveFocusNode.dispose();
+    });
   }
 
   Future<void> _showEditModuleDialog(
@@ -629,6 +664,10 @@ class HomeEditorPage extends ConsumerWidget {
     final titleController = TextEditingController(text: module.title);
     var interestStatus = module.doubanInterestStatus;
     var suggestionType = module.doubanSuggestionType;
+    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final titleFocusNode = FocusNode(debugLabel: 'home-module-title');
+    final cancelFocusNode = FocusNode(debugLabel: 'home-module-cancel');
+    final saveFocusNode = FocusNode(debugLabel: 'home-module-save');
 
     if (module.type == HomeModuleType.doubanList) {
       return _showDoubanListDialog(
@@ -640,18 +679,23 @@ class HomeEditorPage extends ConsumerWidget {
 
     return showDialog<void>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setState) {
-            return AlertDialog(
+            final dialog = AlertDialog(
               title: const Text('编辑模块'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextField(
-                      controller: titleController,
-                      decoration: const InputDecoration(labelText: '标题'),
+                    wrapTelevisionDialogFieldTraversal(
+                      enabled: isTelevision,
+                      child: TextField(
+                        controller: titleController,
+                        focusNode: titleFocusNode,
+                        autofocus: true,
+                        decoration: const InputDecoration(labelText: '标题'),
+                      ),
                     ),
                     if (module.type == HomeModuleType.doubanInterest) ...[
                       const SizedBox(height: 12),
@@ -702,10 +746,12 @@ class HomeEditorPage extends ConsumerWidget {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
+                  focusNode: cancelFocusNode,
+                  onPressed: () => Navigator.of(dialogContext).pop(),
                   child: const Text('取消'),
                 ),
                 FilledButton(
+                  focusNode: saveFocusNode,
                   onPressed: () {
                     ref
                         .read(settingsControllerProvider.notifier)
@@ -718,16 +764,29 @@ class HomeEditorPage extends ConsumerWidget {
                             doubanSuggestionType: suggestionType,
                           ),
                         );
-                    Navigator.of(context).pop();
+                    Navigator.of(dialogContext).pop();
                   },
                   child: const Text('保存'),
                 ),
               ],
             );
+            return wrapTelevisionDialogBackHandling(
+              enabled: isTelevision,
+              dialogContext: dialogContext,
+              inputFocusNodes: [titleFocusNode],
+              contentFocusNodes: [titleFocusNode],
+              actionFocusNodes: [saveFocusNode, cancelFocusNode],
+              child: dialog,
+            );
           },
         );
       },
-    );
+    ).whenComplete(() {
+      titleController.dispose();
+      titleFocusNode.dispose();
+      cancelFocusNode.dispose();
+      saveFocusNode.dispose();
+    });
   }
 }
 

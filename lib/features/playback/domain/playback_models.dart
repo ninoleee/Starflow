@@ -9,12 +9,18 @@ class PlaybackTarget {
     required this.sourceKind,
     this.actualAddress = '',
     this.itemId = '',
+    this.itemType = '',
+    this.year = 0,
+    this.seriesId = '',
+    this.seriesTitle = '',
     this.preferredMediaSourceId = '',
     this.subtitle = '',
     this.headers = const {},
     this.container = '',
     this.videoCodec = '',
     this.audioCodec = '',
+    this.seasonNumber,
+    this.episodeNumber,
     this.width,
     this.height,
     this.bitrate,
@@ -28,23 +34,102 @@ class PlaybackTarget {
   final MediaSourceKind sourceKind;
   final String actualAddress;
   final String itemId;
+  final String itemType;
+  final int year;
+  final String seriesId;
+  final String seriesTitle;
   final String preferredMediaSourceId;
   final String subtitle;
   final Map<String, String> headers;
   final String container;
   final String videoCodec;
   final String audioCodec;
+  final int? seasonNumber;
+  final int? episodeNumber;
   final int? width;
   final int? height;
   final int? bitrate;
   final int? fileSizeBytes;
 
+  PlaybackTarget copyWith({
+    String? title,
+    String? sourceId,
+    String? streamUrl,
+    String? sourceName,
+    MediaSourceKind? sourceKind,
+    String? actualAddress,
+    String? itemId,
+    String? itemType,
+    int? year,
+    String? seriesId,
+    String? seriesTitle,
+    String? preferredMediaSourceId,
+    String? subtitle,
+    Map<String, String>? headers,
+    String? container,
+    String? videoCodec,
+    String? audioCodec,
+    int? seasonNumber,
+    int? episodeNumber,
+    int? width,
+    int? height,
+    int? bitrate,
+    int? fileSizeBytes,
+  }) {
+    return PlaybackTarget(
+      title: title ?? this.title,
+      sourceId: sourceId ?? this.sourceId,
+      streamUrl: streamUrl ?? this.streamUrl,
+      sourceName: sourceName ?? this.sourceName,
+      sourceKind: sourceKind ?? this.sourceKind,
+      actualAddress: actualAddress ?? this.actualAddress,
+      itemId: itemId ?? this.itemId,
+      itemType: itemType ?? this.itemType,
+      year: year ?? this.year,
+      seriesId: seriesId ?? this.seriesId,
+      seriesTitle: seriesTitle ?? this.seriesTitle,
+      preferredMediaSourceId:
+          preferredMediaSourceId ?? this.preferredMediaSourceId,
+      subtitle: subtitle ?? this.subtitle,
+      headers: headers ?? this.headers,
+      container: container ?? this.container,
+      videoCodec: videoCodec ?? this.videoCodec,
+      audioCodec: audioCodec ?? this.audioCodec,
+      seasonNumber: seasonNumber ?? this.seasonNumber,
+      episodeNumber: episodeNumber ?? this.episodeNumber,
+      width: width ?? this.width,
+      height: height ?? this.height,
+      bitrate: bitrate ?? this.bitrate,
+      fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
+    );
+  }
+
   bool get needsResolution =>
-      streamUrl.trim().isEmpty &&
-      sourceKind == MediaSourceKind.emby &&
-      itemId.trim().isNotEmpty;
+      (streamUrl.trim().isEmpty &&
+          sourceKind == MediaSourceKind.emby &&
+          itemId.trim().isNotEmpty) ||
+      (sourceKind == MediaSourceKind.nas &&
+          (_looksLikeStrmReference(streamUrl) ||
+              (streamUrl.trim().isEmpty &&
+                  _looksLikeStrmReference(actualAddress))));
 
   bool get canPlay => streamUrl.trim().isNotEmpty || needsResolution;
+
+  String get normalizedItemType => itemType.trim().toLowerCase();
+
+  bool get isEpisode => normalizedItemType == 'episode';
+
+  bool get isSeries => normalizedItemType == 'series';
+
+  bool get isMovie => normalizedItemType == 'movie';
+
+  String get resolvedSeriesTitle {
+    final trimmed = seriesTitle.trim();
+    if (trimmed.isNotEmpty) {
+      return trimmed;
+    }
+    return isSeries ? title.trim() : '';
+  }
 
   String get formatLabel {
     final parts = <String>[
@@ -89,6 +174,8 @@ class PlaybackTarget {
       sourceKind: item.sourceKind,
       actualAddress: item.actualAddress,
       itemId: item.playbackItemId,
+      itemType: item.itemType,
+      year: item.year,
       preferredMediaSourceId: item.preferredMediaSourceId,
       subtitle: item.overview,
       headers: item.streamHeaders,
@@ -97,6 +184,8 @@ class PlaybackTarget {
           : _inferContainerFromUrl(item.streamUrl),
       videoCodec: item.videoCodec,
       audioCodec: item.audioCodec,
+      seasonNumber: item.seasonNumber,
+      episodeNumber: item.episodeNumber,
       width: item.width,
       height: item.height,
       bitrate: item.bitrate,
@@ -113,12 +202,18 @@ class PlaybackTarget {
       'sourceKind': sourceKind.name,
       'actualAddress': actualAddress,
       'itemId': itemId,
+      'itemType': itemType,
+      'year': year,
+      'seriesId': seriesId,
+      'seriesTitle': seriesTitle,
       'preferredMediaSourceId': preferredMediaSourceId,
       'subtitle': subtitle,
       'headers': headers,
       'container': container,
       'videoCodec': videoCodec,
       'audioCodec': audioCodec,
+      'seasonNumber': seasonNumber,
+      'episodeNumber': episodeNumber,
       'width': width,
       'height': height,
       'bitrate': bitrate,
@@ -132,17 +227,23 @@ class PlaybackTarget {
       sourceId: json['sourceId'] as String? ?? '',
       streamUrl: json['streamUrl'] as String? ?? '',
       sourceName: json['sourceName'] as String? ?? '',
-      sourceKind: MediaSourceKindX.fromName(json['sourceKind'] as String? ?? ''),
+      sourceKind:
+          MediaSourceKindX.fromName(json['sourceKind'] as String? ?? ''),
       actualAddress: json['actualAddress'] as String? ?? '',
       itemId: json['itemId'] as String? ?? '',
+      itemType: json['itemType'] as String? ?? '',
+      year: (json['year'] as num?)?.toInt() ?? 0,
+      seriesId: json['seriesId'] as String? ?? '',
+      seriesTitle: json['seriesTitle'] as String? ?? '',
       preferredMediaSourceId: json['preferredMediaSourceId'] as String? ?? '',
       subtitle: json['subtitle'] as String? ?? '',
-      headers:
-          (json['headers'] as Map<dynamic, dynamic>? ?? const {})
-              .map((key, value) => MapEntry('$key', '$value')),
+      headers: (json['headers'] as Map<dynamic, dynamic>? ?? const {})
+          .map((key, value) => MapEntry('$key', '$value')),
       container: json['container'] as String? ?? '',
       videoCodec: json['videoCodec'] as String? ?? '',
       audioCodec: json['audioCodec'] as String? ?? '',
+      seasonNumber: (json['seasonNumber'] as num?)?.toInt(),
+      episodeNumber: (json['episodeNumber'] as num?)?.toInt(),
       width: (json['width'] as num?)?.toInt(),
       height: (json['height'] as num?)?.toInt(),
       bitrate: (json['bitrate'] as num?)?.toInt(),
@@ -191,6 +292,16 @@ String _inferContainerFromUrl(String url) {
     return '';
   }
   return candidate;
+}
+
+bool _looksLikeStrmReference(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized.isEmpty) {
+    return false;
+  }
+  final uri = Uri.tryParse(normalized);
+  final path = (uri?.path ?? normalized).trim().toLowerCase();
+  return path.endsWith('.strm');
 }
 
 String _prettyMediaToken(String value) {

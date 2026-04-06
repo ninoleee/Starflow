@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
-import 'package:starflow/core/widgets/starflow_logo.dart';
 import 'package:starflow/features/bootstrap/application/bootstrap_controller.dart';
 
 class BootstrapPage extends ConsumerStatefulWidget {
@@ -66,7 +66,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 260),
+                    constraints: const BoxConstraints(maxWidth: 320),
                     child: TweenAnimationBuilder<double>(
                       tween: Tween(begin: 0, end: 1),
                       duration: const Duration(milliseconds: 820),
@@ -92,32 +92,32 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                         children: [
                           IgnorePointer(
                             child: Container(
-                              width: 244,
-                              height: 244,
+                              width: 280,
+                              height: 280,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 gradient: RadialGradient(
                                   colors: [
                                     const Color(0xFF4F8FFF)
-                                        .withValues(alpha: 0.18),
+                                        .withValues(alpha: 0.12),
                                     const Color(0xFF4F8FFF)
-                                        .withValues(alpha: 0.06),
+                                        .withValues(alpha: 0.03),
                                     Colors.transparent,
                                   ],
-                                  stops: const [0, 0.38, 1],
+                                  stops: const [0, 0.42, 1],
                                 ),
                               ),
                             ),
                           ),
                           IgnorePointer(
                             child: Container(
-                              width: 176,
-                              height: 176,
+                              width: 168,
+                              height: 168,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 gradient: RadialGradient(
                                   colors: [
-                                    Colors.white.withValues(alpha: 0.06),
+                                    Colors.white.withValues(alpha: 0.04),
                                     Colors.transparent,
                                   ],
                                   stops: const [0, 1],
@@ -125,10 +125,9 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                               ),
                             ),
                           ),
-                          const StarflowLogo(
-                            iconSize: 132,
-                            showWordmark: false,
-                            showIconPlate: false,
+                          const _BootstrapLogoMark(
+                            iconSize: 108,
+                            wordmarkSize: 34,
                           ),
                         ],
                       ),
@@ -140,6 +139,115 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
           },
         ),
       ),
+    );
+  }
+}
+
+class _BootstrapLogoMark extends StatefulWidget {
+  const _BootstrapLogoMark({
+    required this.iconSize,
+    required this.wordmarkSize,
+  });
+
+  final double iconSize;
+  final double wordmarkSize;
+
+  @override
+  State<_BootstrapLogoMark> createState() => _BootstrapLogoMarkState();
+}
+
+class _BootstrapLogoMarkState extends State<_BootstrapLogoMark>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final glowScale = 1.0 + (_controller.value * 0.06);
+        final glowOpacity = 0.6 + (_controller.value * 0.4);
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: widget.iconSize,
+              height: widget.iconSize,
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.center,
+                children: [
+                  Transform.scale(
+                    scale: glowScale,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          center: const Alignment(0, 0.2),
+                          radius: 0.76,
+                          colors: [
+                            const Color(0xFF64A0FF)
+                                .withValues(alpha: 0.14 * glowOpacity),
+                            Colors.transparent,
+                          ],
+                        ),
+                      ),
+                      child: SizedBox(
+                        width: widget.iconSize,
+                        height: widget.iconSize,
+                      ),
+                    ),
+                  ),
+                  SvgPicture.asset(
+                    'assets/branding/starflow_logo_primary.svg',
+                    width: widget.iconSize,
+                    height: widget.iconSize,
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: widget.iconSize * 0.21),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Star',
+                  style: TextStyle(
+                    fontSize: widget.wordmarkSize,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -widget.wordmarkSize * 0.03,
+                    color: Colors.white,
+                  ),
+                ),
+                Text(
+                  'flow',
+                  style: TextStyle(
+                    fontSize: widget.wordmarkSize,
+                    fontWeight: FontWeight.w400,
+                    letterSpacing: -widget.wordmarkSize * 0.04,
+                    color: Colors.white.withValues(alpha: 0.48),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
     );
   }
 }

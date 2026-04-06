@@ -25,6 +25,62 @@ class MetadataMatchResolver {
     required AppSettings settings,
     required MetadataMatchRequest request,
   }) async {
+    final normalizedImdbId = request.imdbId.trim();
+    if (normalizedImdbId.isNotEmpty &&
+        settings.tmdbMetadataMatchEnabled &&
+        settings.tmdbReadAccessToken.trim().isNotEmpty) {
+      final match = await _tmdbMetadataClient.matchByImdbId(
+        imdbId: normalizedImdbId,
+        readAccessToken: settings.tmdbReadAccessToken.trim(),
+        preferSeries: request.preferSeries,
+      );
+      if (match != null) {
+        return MetadataMatchResult(
+          provider: MetadataMatchProvider.tmdb,
+          title: match.title,
+          originalTitle: match.originalTitle,
+          posterUrl: match.posterUrl,
+          backdropUrl: match.backdropUrl,
+          logoUrl: match.logoUrl,
+          extraBackdropUrls: match.extraBackdropUrls,
+          overview: match.overview,
+          year: match.year,
+          durationLabel: match.durationLabel,
+          genres: match.genres,
+          directors: match.directors,
+          directorProfiles: match.directorProfiles
+              .map(
+                (item) => MetadataPersonProfile(
+                  name: item.name,
+                  avatarUrl: item.avatarUrl,
+                ),
+              )
+              .toList(),
+          actors: match.actors,
+          actorProfiles: match.actorProfiles
+              .map(
+                (item) => MetadataPersonProfile(
+                  name: item.name,
+                  avatarUrl: item.avatarUrl,
+                ),
+              )
+              .toList(),
+          platforms: match.platforms,
+          platformProfiles: match.platformProfiles
+              .map(
+                (item) => MetadataPersonProfile(
+                  name: item.name,
+                  avatarUrl: item.avatarUrl,
+                ),
+              )
+              .toList(),
+          ratingLabels: match.ratingLabels,
+          imdbId: match.imdbId,
+          tmdbId: '${match.tmdbId}',
+        );
+      }
+    }
+
     for (final provider in _orderedEnabledProviders(settings)) {
       switch (provider) {
         case MetadataMatchProvider.tmdb:
@@ -44,11 +100,22 @@ class MetadataMatchResolver {
               title: match.title,
               originalTitle: match.originalTitle,
               posterUrl: match.posterUrl,
+              backdropUrl: match.backdropUrl,
+              logoUrl: match.logoUrl,
+              extraBackdropUrls: match.extraBackdropUrls,
               overview: match.overview,
               year: match.year,
               durationLabel: match.durationLabel,
               genres: match.genres,
               directors: match.directors,
+              directorProfiles: match.directorProfiles
+                  .map(
+                    (item) => MetadataPersonProfile(
+                      name: item.name,
+                      avatarUrl: item.avatarUrl,
+                    ),
+                  )
+                  .toList(),
               actors: match.actors,
               actorProfiles: match.actorProfiles
                   .map(
@@ -58,7 +125,18 @@ class MetadataMatchResolver {
                     ),
                   )
                   .toList(),
+              platforms: match.platforms,
+              platformProfiles: match.platformProfiles
+                  .map(
+                    (item) => MetadataPersonProfile(
+                      name: item.name,
+                      avatarUrl: item.avatarUrl,
+                    ),
+                  )
+                  .toList(),
+              ratingLabels: match.ratingLabels,
               imdbId: match.imdbId,
+              tmdbId: '${match.tmdbId}',
             );
           }
         case MetadataMatchProvider.wmdb:

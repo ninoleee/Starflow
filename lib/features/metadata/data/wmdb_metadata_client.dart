@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
@@ -98,13 +99,31 @@ class WmdbMetadataClient {
   }
 
   Future<MetadataMatchResult?> _matchByDoubanIdUncached(String doubanId) async {
+    final uri = Uri.https('api.wmdb.tv', '/movie/api', {'id': doubanId});
+    _logRequest(
+      action: 'lookup',
+      uri: uri,
+      details: 'doubanId=$doubanId',
+    );
     final response = await _client.get(
-      Uri.https('api.wmdb.tv', '/movie/api', {'id': doubanId}),
+      uri,
       headers: const {'Accept': 'application/json'},
     );
     if (response.statusCode != 200) {
+      _logFailure(
+        action: 'lookup',
+        uri: uri,
+        response: response,
+        details: 'doubanId=$doubanId',
+      );
       throw WmdbMetadataException('WMDB 查询失败：HTTP ${response.statusCode}');
     }
+    _logSuccess(
+      action: 'lookup',
+      uri: uri,
+      response: response,
+      details: 'doubanId=$doubanId',
+    );
 
     final decoded = jsonDecode(
       utf8.decode(response.bodyBytes, allowMalformed: true),
@@ -130,13 +149,34 @@ class WmdbMetadataClient {
       if (actorHint.isNotEmpty) 'actor': actorHint,
       if (year > 0) 'year': '$year',
     };
+    final uri = Uri.https('api.wmdb.tv', '/api/v1/movie/search', parameters);
+    _logRequest(
+      action: 'search',
+      uri: uri,
+      details:
+          'query=${query.trim()} year=$year preferSeries=$preferSeries actor=$actorHint',
+    );
     final response = await _client.get(
-      Uri.https('api.wmdb.tv', '/api/v1/movie/search', parameters),
+      uri,
       headers: const {'Accept': 'application/json'},
     );
     if (response.statusCode != 200) {
+      _logFailure(
+        action: 'search',
+        uri: uri,
+        response: response,
+        details:
+            'query=${query.trim()} year=$year preferSeries=$preferSeries actor=$actorHint',
+      );
       throw WmdbMetadataException('WMDB 搜索失败：HTTP ${response.statusCode}');
     }
+    _logSuccess(
+      action: 'search',
+      uri: uri,
+      response: response,
+      details:
+          'query=${query.trim()} year=$year preferSeries=$preferSeries actor=$actorHint',
+    );
 
     final decoded = jsonDecode(
       utf8.decode(response.bodyBytes, allowMalformed: true),
@@ -256,6 +296,7 @@ class WmdbMetadataClient {
     final overview = (data['description'] ?? '').trim();
     final year = int.tryParse('${json['year'] ?? ''}') ?? 0;
     final imdbId = '${json['imdbId'] ?? ''}'.trim();
+    final tmdbId = '${json['tmdbId'] ?? ''}'.trim();
     final doubanId = '${json['doubanId'] ?? ''}'.trim();
     final doubanRating = '${json['doubanRating'] ?? ''}'.trim();
     final imdbRating = '${json['imdbRating'] ?? ''}'.trim();
@@ -276,6 +317,7 @@ class WmdbMetadataClient {
       directors: directors,
       actors: actors,
       imdbId: imdbId,
+      tmdbId: tmdbId,
       doubanId: doubanId,
       ratingLabels: [
         _formatDoubanRatingLabel(doubanRating),
@@ -405,6 +447,56 @@ class WmdbMetadataClient {
         .replaceAll(RegExp(r'\s+'), ' ')
         .replaceAll(RegExp(r'[^a-z0-9\u4e00-\u9fff]+'), '')
         .trim();
+  }
+
+  void _logRequest({
+    required String action,
+    required Uri uri,
+    required String details,
+  }) {
+    debugPrint('[WMDB] request action=$action uri=$uri $details');
+  }
+
+  void _logSuccess({
+    required String action,
+    required Uri uri,
+    required http.Response response,
+    required String details,
+  }) {
+    debugPrint(
+      '[WMDB] response action=$action status=${response.statusCode} '
+      'bytes=${response.bodyBytes.length} uri=$uri $details',
+    );
+  }
+
+  void _logFailure({
+    required String action,
+    required Uri uri,
+    required http.Response response,
+    required String details,
+  }) {
+    final retryAfter = response.headers['retry-after'] ?? '';
+    final rateLimit = response.headers['x-ratelimit-limit'] ?? '';
+    final rateRemaining = response.headers['x-ratelimit-remaining'] ?? '';
+    final rateReset = response.headers['x-ratelimit-reset'] ?? '';
+    final bodyPreview = utf8
+        .decode(response.bodyBytes, allowMalformed: true)
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final preview = bodyPreview.length > 300
+        ? '${bodyPreview.substring(0, 300)}...'
+        : bodyPreview;
+    debugPrint(
+      '[WMDB] response action=$action status=${response.statusCode} '
+      'retryAfter=${retryAfter.isEmpty ? '-' : retryAfter} '
+      'rateLimit=${rateLimit.isEmpty ? '-' : rateLimit} '
+      'rateRemaining=${rateRemaining.isEmpty ? '-' : rateRemaining} '
+      'rateReset=${rateReset.isEmpty ? '-' : rateReset} '
+      'bytes=${response.bodyBytes.length} uri=$uri $details',
+    );
+    if (preview.isNotEmpty) {
+      debugPrint('[WMDB] body action=$action $preview');
+    }
   }
 }
 

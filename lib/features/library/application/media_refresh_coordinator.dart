@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
 final mediaRefreshCoordinatorProvider =
@@ -19,7 +20,29 @@ class MediaRefreshCoordinator {
   Future<void> refreshSelectedSources({
     required List<String> sourceIds,
     int delaySeconds = 0,
-    bool forceFullRescan = false,
+  }) async {
+    await _runRefresh(
+      sourceIds: sourceIds,
+      delaySeconds: delaySeconds,
+      forceFullRescan: false,
+    );
+  }
+
+  Future<void> rebuildSelectedSources({
+    required List<String> sourceIds,
+  }) async {
+    await _ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes();
+    await _runRefresh(
+      sourceIds: sourceIds,
+      delaySeconds: 0,
+      forceFullRescan: true,
+    );
+  }
+
+  Future<void> _runRefresh({
+    required List<String> sourceIds,
+    required int delaySeconds,
+    required bool forceFullRescan,
   }) async {
     final normalizedIds = sourceIds
         .map((item) => item.trim())
@@ -48,8 +71,17 @@ class MediaRefreshCoordinator {
       return;
     }
 
+    if (_ref.read(playbackPerformanceModeProvider)) {
+      await _ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes();
+      return;
+    }
+
     if (delaySeconds > 0) {
       await Future<void>.delayed(Duration(seconds: delaySeconds));
+      if (_ref.read(playbackPerformanceModeProvider)) {
+        await _ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes();
+        return;
+      }
     }
 
     final repository = _ref.read(mediaRepositoryProvider);

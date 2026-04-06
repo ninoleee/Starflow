@@ -34,6 +34,7 @@ void main() {
       sourceName: '客厅 Emby',
       sourceKind: MediaSourceKind.emby,
       imdbId: 'tt0092263',
+      tmdbId: '1091',
       playbackTarget: const PlaybackTarget(
         title: '英雄本色',
         sourceId: 'emby-main',
@@ -63,9 +64,22 @@ void main() {
 
     expect(loadedFromDoubanKey, isNotNull);
     expect(loadedFromDoubanKey!.imdbId, 'tt0092263');
+    expect(loadedFromDoubanKey.tmdbId, '1091');
     expect(
         loadedFromDoubanKey.playbackTarget?.actualAddress, '/movies/英雄本色.mkv');
     expect(loadedFromLibraryKey?.posterUrl, 'https://image.example/poster.jpg');
+    expect(
+      (await repository.loadDetailTarget(
+        const MediaDetailTarget(
+          title: '英雄本色',
+          posterUrl: '',
+          overview: '',
+          tmdbId: '1091',
+        ),
+      ))
+          ?.imdbId,
+      'tt0092263',
+    );
 
     final summary = await repository.inspectDetailCache();
     expect(summary.entryCount, 1);

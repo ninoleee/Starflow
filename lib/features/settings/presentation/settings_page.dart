@@ -37,321 +37,390 @@ class SettingsPage extends ConsumerWidget {
           context,
           includeBottomNavigationBar: true,
         ),
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            if (loading) const LinearProgressIndicator(),
-            SectionPanel(
-              title: '媒体源',
-              child: Column(
-                children: [
-                  ...settings.mediaSources.map(
-                    (source) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _SettingsTile(
-                        title: source.name,
-                        value: source.enabled,
-                        onChanged: (value) {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .toggleMediaSource(source.id, value);
-                        },
-                        onEdit: () => _openMediaSourceEditor(
-                          context,
-                          existing: source,
+        child: FocusTraversalGroup(
+          policy: OrderedTraversalPolicy(),
+          child: ListView(
+            padding: EdgeInsets.zero,
+            children: [
+              if (loading) const LinearProgressIndicator(),
+              _SettingsPageHeader(isTelevision: isTelevision),
+              const SizedBox(height: 18),
+              SectionPanel(
+                title: '媒体源',
+                child: Column(
+                  children: [
+                    ...settings.mediaSources.map(
+                      (source) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _SettingsTile(
+                          title: source.name,
+                          value: source.enabled,
+                          onChanged: (value) {
+                            ref
+                                .read(settingsControllerProvider.notifier)
+                                .toggleMediaSource(source.id, value);
+                          },
+                          onEdit: () => _openMediaSourceEditor(
+                            context,
+                            existing: source,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: OutlinedButton.icon(
-                      onPressed: () => _openMediaSourceEditor(context),
-                      icon: const Icon(Icons.add_rounded),
-                      label: const Text('新增媒体源'),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: isTelevision
+                          ? TvAdaptiveButton(
+                              label: '新增媒体源',
+                              icon: Icons.add_rounded,
+                              onPressed: () => _openMediaSourceEditor(context),
+                              variant: TvButtonVariant.outlined,
+                            )
+                          : OutlinedButton.icon(
+                              onPressed: () => _openMediaSourceEditor(context),
+                              icon: const Icon(Icons.add_rounded),
+                              label: const Text('新增媒体源'),
+                            ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 18),
-            SectionPanel(
-              title: '搜索服务',
-              child: Column(
-                children: [
-                  ...settings.searchProviders.map(
-                    (provider) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _SettingsTile(
-                        title: provider.name,
-                        value: provider.enabled,
-                        onChanged: (value) {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .toggleSearchProvider(provider.id, value);
-                        },
-                        onEdit: () => _openSearchProviderEditor(
-                          context,
-                          existing: provider,
-                        ),
-                      ),
-                    ),
-                  ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: OutlinedButton.icon(
-                      onPressed: () => _openSearchProviderEditor(context),
-                      icon: const Icon(Icons.add_rounded),
-                      label: const Text('新增搜索服务'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 18),
-            SectionPanel(
-              title: '元数据与评分',
-              child: ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('打开匹配与评分设置'),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _openMetadataMatchSettings(context),
-              ),
-            ),
-            const SizedBox(height: 18),
-            SectionPanel(
-              title: '网络存储',
-              child: ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('夸克与 STRM'),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _openNetworkStorageSettings(
-                  context,
-                  settings.networkStorage,
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(height: 18),
-            SectionPanel(
-              title: '本地存储',
-              child: ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('查看与清理缓存'),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _openLocalStorageSettings(context),
-              ),
-            ),
-            const SizedBox(height: 18),
-            SectionPanel(
-              title: '配置管理',
-              child: ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('导入与导出配置'),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _openSettingsManagement(context),
-              ),
-            ),
-            const SizedBox(height: 18),
-            SectionPanel(
-              title: '播放',
-              child: Column(
-                children: [
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('最大超时时间'),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text('${settings.playbackOpenTimeoutSeconds}s'),
-                        const SizedBox(width: 6),
-                        const Icon(Icons.chevron_right_rounded),
-                      ],
-                    ),
-                    onTap: () => _openPlaybackSettings(
-                      context,
-                      settings.playbackOpenTimeoutSeconds,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  if (isTelevision)
-                    TvSelectionTile(
-                      title: '透明磨砂效果',
-                      value: settings.translucentEffectsEnabled ? '已开启' : '已关闭',
-                      onPressed: () {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .setTranslucentEffectsEnabled(
-                              !settings.translucentEffectsEnabled,
-                            );
-                      },
-                    )
-                  else
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('透明磨砂效果'),
-                      subtitle: const Text('关闭后减少模糊和毛玻璃效果，提高性能'),
-                      value: settings.translucentEffectsEnabled,
-                      onChanged: (value) {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .setTranslucentEffectsEnabled(value);
-                      },
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 18),
-            SectionPanel(
-              title: '首页模块',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Hero 模块',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                  const SizedBox(height: 10),
-                  if (isTelevision)
-                    TvSelectionTile(
-                      title: '启用 Hero',
-                      value: heroEnabled ? '已开启' : '已关闭',
-                      onPressed: () {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .setHomeHeroEnabled(!heroEnabled);
-                      },
-                    )
-                  else
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('启用 Hero'),
-                      value: heroEnabled,
-                      onChanged: (value) {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .setHomeHeroEnabled(value);
-                      },
-                    ),
-                  const SizedBox(height: 10),
-                  if (isTelevision)
-                    TvSelectionTile(
-                      title: 'Hero 样式',
-                      value: settings.homeHeroStyle.label,
-                      onPressed: heroEnabled
-                          ? () => _openHeroStylePicker(
-                                context,
-                                ref,
-                                settings.homeHeroStyle,
-                              )
-                          : null,
-                    )
-                  else
-                    SegmentedButton<HomeHeroStyle>(
-                      showSelectedIcon: false,
-                      segments: [
-                        for (final style in HomeHeroStyle.values)
-                          ButtonSegment<HomeHeroStyle>(
-                            value: style,
-                            label: Text(style.label),
+              const SizedBox(height: 18),
+              SectionPanel(
+                title: '搜索服务',
+                child: Column(
+                  children: [
+                    ...settings.searchProviders.map(
+                      (provider) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _SettingsTile(
+                          title: provider.name,
+                          value: provider.enabled,
+                          onChanged: (value) {
+                            ref
+                                .read(settingsControllerProvider.notifier)
+                                .toggleSearchProvider(provider.id, value);
+                          },
+                          onEdit: () => _openSearchProviderEditor(
+                            context,
+                            existing: provider,
                           ),
-                      ],
-                      selected: {settings.homeHeroStyle},
-                      onSelectionChanged: heroEnabled
-                          ? (selection) {
-                              if (selection.isEmpty) {
-                                return;
+                        ),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: isTelevision
+                          ? TvAdaptiveButton(
+                              label: '新增搜索服务',
+                              icon: Icons.add_rounded,
+                              onPressed: () =>
+                                  _openSearchProviderEditor(context),
+                              variant: TvButtonVariant.outlined,
+                            )
+                          : OutlinedButton.icon(
+                              onPressed: () =>
+                                  _openSearchProviderEditor(context),
+                              icon: const Icon(Icons.add_rounded),
+                              label: const Text('新增搜索服务'),
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              SectionPanel(
+                title: '元数据与评分',
+                child: _SettingsNavigationTile(
+                  title: '打开匹配与评分设置',
+                  subtitle: settings.detailAutoLibraryMatchEnabled
+                      ? '详情页自动匹配资源：已开启'
+                      : '详情页自动匹配资源：已关闭',
+                  onTap: () => _openMetadataMatchSettings(context),
+                ),
+              ),
+              const SizedBox(height: 18),
+              SectionPanel(
+                title: '网络存储',
+                child: _SettingsNavigationTile(
+                  title: '夸克与 STRM',
+                  onTap: () => _openNetworkStorageSettings(
+                    context,
+                    settings.networkStorage,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              SectionPanel(
+                title: '本地存储',
+                child: _SettingsNavigationTile(
+                  title: '查看与清理缓存',
+                  onTap: () => _openLocalStorageSettings(context),
+                ),
+              ),
+              const SizedBox(height: 18),
+              SectionPanel(
+                title: '配置管理',
+                child: _SettingsNavigationTile(
+                  title: '导入与导出配置',
+                  onTap: () => _openSettingsManagement(context),
+                ),
+              ),
+              const SizedBox(height: 18),
+              SectionPanel(
+                title: '播放',
+                child: Column(
+                  children: [
+                    _SettingsNavigationTile(
+                      title: '播放器与字幕',
+                      subtitle: _playbackSettingsSummary(settings),
+                      onTap: () => _openPlaybackSettings(
+                        context,
+                        settings,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    if (isTelevision)
+                      TvSelectionTile(
+                        title: '高性能模式',
+                        value:
+                            settings.highPerformanceModeEnabled ? '已开启' : '已关闭',
+                        onPressed: () {
+                          ref
+                              .read(settingsControllerProvider.notifier)
+                              .setHighPerformanceModeEnabled(
+                                !settings.highPerformanceModeEnabled,
+                              );
+                        },
+                      )
+                    else
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('高性能模式'),
+                        subtitle: const Text(
+                          '降低 TV 端动画、模糊背景和播放页叠层，优先保证流畅度',
+                        ),
+                        value: settings.highPerformanceModeEnabled,
+                        onChanged: (value) {
+                          ref
+                              .read(settingsControllerProvider.notifier)
+                              .setHighPerformanceModeEnabled(value);
+                        },
+                      ),
+                    const SizedBox(height: 10),
+                    if (isTelevision)
+                      TvSelectionTile(
+                        title: '透明磨砂效果',
+                        value:
+                            settings.translucentEffectsEnabled ? '已开启' : '已关闭',
+                        onPressed: () {
+                          ref
+                              .read(settingsControllerProvider.notifier)
+                              .setTranslucentEffectsEnabled(
+                                !settings.translucentEffectsEnabled,
+                              );
+                        },
+                      )
+                    else
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('透明磨砂效果'),
+                        subtitle: Text(
+                          settings.highPerformanceModeEnabled
+                              ? '高性能模式开启时，会自动进一步压低 TV 端视觉效果'
+                              : '关闭后减少模糊和毛玻璃效果，提高性能',
+                        ),
+                        value: settings.translucentEffectsEnabled,
+                        onChanged: (value) {
+                          ref
+                              .read(settingsControllerProvider.notifier)
+                              .setTranslucentEffectsEnabled(value);
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              SectionPanel(
+                title: '首页模块',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Hero 模块',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 10),
+                    if (isTelevision)
+                      TvSelectionTile(
+                        title: '启用 Hero',
+                        value: heroEnabled ? '已开启' : '已关闭',
+                        onPressed: () {
+                          ref
+                              .read(settingsControllerProvider.notifier)
+                              .setHomeHeroEnabled(!heroEnabled);
+                        },
+                      )
+                    else
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('启用 Hero'),
+                        value: heroEnabled,
+                        onChanged: (value) {
+                          ref
+                              .read(settingsControllerProvider.notifier)
+                              .setHomeHeroEnabled(value);
+                        },
+                      ),
+                    const SizedBox(height: 10),
+                    if (isTelevision)
+                      TvSelectionTile(
+                        title: 'Hero 样式',
+                        value: settings.homeHeroStyle.label,
+                        onPressed: heroEnabled
+                            ? () => _openHeroStylePicker(
+                                  context,
+                                  ref,
+                                  settings.homeHeroStyle,
+                                )
+                            : null,
+                      )
+                    else
+                      SegmentedButton<HomeHeroStyle>(
+                        showSelectedIcon: false,
+                        segments: [
+                          for (final style in HomeHeroStyle.values)
+                            ButtonSegment<HomeHeroStyle>(
+                              value: style,
+                              label: Text(style.label),
+                            ),
+                        ],
+                        selected: {settings.homeHeroStyle},
+                        onSelectionChanged: heroEnabled
+                            ? (selection) {
+                                if (selection.isEmpty) {
+                                  return;
+                                }
+                                final style = selection.first;
+                                ref
+                                    .read(settingsControllerProvider.notifier)
+                                    .setHomeHeroStyle(style);
                               }
-                              final style = selection.first;
-                              ref
-                                  .read(settingsControllerProvider.notifier)
-                                  .setHomeHeroStyle(style);
-                            }
-                          : null,
-                    ),
-                  const SizedBox(height: 14),
-                  if (isTelevision)
-                    TvSelectionTile(
-                      title: '全屏背景图',
-                      value: settings.homeHeroBackgroundEnabled ? '已开启' : '已关闭',
-                      onPressed: () {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .setHomeHeroBackgroundEnabled(
-                              !settings.homeHeroBackgroundEnabled,
-                            );
-                      },
-                    )
-                  else
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('启用 Hero 全屏背景图'),
-                      value: settings.homeHeroBackgroundEnabled,
-                      onChanged: (value) {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .setHomeHeroBackgroundEnabled(value);
-                      },
-                    ),
-                  const SizedBox(height: 10),
-                  if (isTelevision)
-                    TvSelectionTile(
-                      title: 'Hero 数据来源',
-                      value: _heroSourceLabel(
-                        settings: settings,
-                        heroCandidates: heroCandidates,
+                            : null,
                       ),
-                      onPressed: heroEnabled
-                          ? () => _openHeroSourcePicker(
-                                context,
-                                ref,
-                                settings,
-                                heroCandidates,
-                              )
-                          : null,
-                    )
-                  else
-                    DropdownButtonFormField<String>(
-                      initialValue: _resolveHeroModuleSelectionValue(
-                        settings: settings,
-                        heroCandidates: heroCandidates,
+                    const SizedBox(height: 14),
+                    if (isTelevision)
+                      TvSelectionTile(
+                        title: '标题使用 Logo',
+                        value:
+                            settings.homeHeroLogoTitleEnabled ? '已开启' : '已关闭',
+                        onPressed: heroEnabled
+                            ? () {
+                                ref
+                                    .read(settingsControllerProvider.notifier)
+                                    .setHomeHeroLogoTitleEnabled(
+                                      !settings.homeHeroLogoTitleEnabled,
+                                    );
+                              }
+                            : null,
+                      )
+                    else
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('标题优先展示 Logo'),
+                        value: settings.homeHeroLogoTitleEnabled,
+                        onChanged: heroEnabled
+                            ? (value) {
+                                ref
+                                    .read(settingsControllerProvider.notifier)
+                                    .setHomeHeroLogoTitleEnabled(value);
+                              }
+                            : null,
                       ),
-                      decoration: const InputDecoration(
-                        labelText: 'Hero 数据来源',
+                    const SizedBox(height: 14),
+                    if (isTelevision)
+                      TvSelectionTile(
+                        title: '全屏背景图',
+                        value:
+                            settings.homeHeroBackgroundEnabled ? '已开启' : '已关闭',
+                        onPressed: () {
+                          ref
+                              .read(settingsControllerProvider.notifier)
+                              .setHomeHeroBackgroundEnabled(
+                                !settings.homeHeroBackgroundEnabled,
+                              );
+                        },
+                      )
+                    else
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('启用 Hero 全屏背景图'),
+                        value: settings.homeHeroBackgroundEnabled,
+                        onChanged: (value) {
+                          ref
+                              .read(settingsControllerProvider.notifier)
+                              .setHomeHeroBackgroundEnabled(value);
+                        },
                       ),
-                      items: [
-                        const DropdownMenuItem<String>(
-                          value: '',
-                          child: Text('自动选择'),
+                    const SizedBox(height: 10),
+                    if (isTelevision)
+                      TvSelectionTile(
+                        title: 'Hero 数据来源',
+                        value: _heroSourceLabel(
+                          settings: settings,
+                          heroCandidates: heroCandidates,
                         ),
-                        ...heroCandidates.map(
-                          (module) => DropdownMenuItem<String>(
-                            value: module.id,
-                            child: Text(module.title),
+                        onPressed: heroEnabled
+                            ? () => _openHeroSourcePicker(
+                                  context,
+                                  ref,
+                                  settings,
+                                  heroCandidates,
+                                )
+                            : null,
+                      )
+                    else
+                      DropdownButtonFormField<String>(
+                        initialValue: _resolveHeroModuleSelectionValue(
+                          settings: settings,
+                          heroCandidates: heroCandidates,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Hero 数据来源',
+                        ),
+                        items: [
+                          const DropdownMenuItem<String>(
+                            value: '',
+                            child: Text('自动选择'),
                           ),
-                        ),
-                      ],
-                      onChanged: heroEnabled
-                          ? (value) {
-                              ref
-                                  .read(settingsControllerProvider.notifier)
-                                  .setHomeHeroSourceModuleId(value ?? '');
-                            }
-                          : null,
+                          ...heroCandidates.map(
+                            (module) => DropdownMenuItem<String>(
+                              value: module.id,
+                              child: Text(module.title),
+                            ),
+                          ),
+                        ],
+                        onChanged: heroEnabled
+                            ? (value) {
+                                ref
+                                    .read(settingsControllerProvider.notifier)
+                                    .setHomeHeroSourceModuleId(value ?? '');
+                              }
+                            : null,
+                      ),
+                    const SizedBox(height: 14),
+                    _SettingsNavigationTile(
+                      title: '打开首页编辑器',
+                      onTap: () => context.pushNamed('home-editor'),
                     ),
-                  const SizedBox(height: 14),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('打开首页编辑器'),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => context.pushNamed('home-editor'),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: kBottomReservedSpacing),
-          ],
+              const SizedBox(height: kBottomReservedSpacing),
+            ],
+          ),
         ),
       ),
     );
@@ -400,12 +469,19 @@ class SettingsPage extends ConsumerWidget {
 
   Future<void> _openPlaybackSettings(
     BuildContext context,
-    int initialTimeoutSeconds,
+    AppSettings settings,
   ) {
     return Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
         builder: (context) => PlaybackSettingsPage(
-          initialTimeoutSeconds: initialTimeoutSeconds,
+          initialTimeoutSeconds: settings.playbackOpenTimeoutSeconds,
+          initialDefaultSpeed: settings.playbackDefaultSpeed,
+          initialSubtitlePreference: settings.playbackSubtitlePreference,
+          initialSubtitleScale: settings.playbackSubtitleScale,
+          initialBackgroundPlaybackEnabled:
+              settings.playbackBackgroundPlaybackEnabled,
+          initialPlaybackEngine: settings.playbackEngine,
+          initialPlaybackDecodeMode: settings.playbackDecodeMode,
         ),
       ),
     );
@@ -533,6 +609,25 @@ String _heroSourceLabel({
   return '自动选择';
 }
 
+String _playbackSettingsSummary(AppSettings settings) {
+  return [
+    settings.playbackEngine.label,
+    settings.playbackDecodeMode.label,
+    '${settings.playbackOpenTimeoutSeconds}s 超时',
+    '${_formatPlaybackSpeedLabel(settings.playbackDefaultSpeed)} 默认倍速',
+    '字幕 ${settings.playbackSubtitlePreference.label}',
+    settings.playbackSubtitleScale.label,
+    settings.playbackBackgroundPlaybackEnabled ? '后台播放开' : '后台播放关',
+  ].join(' · ');
+}
+
+String _formatPlaybackSpeedLabel(double speed) {
+  if (speed == speed.roundToDouble()) {
+    return '${speed.toStringAsFixed(0)}x';
+  }
+  return '${speed.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '')}x';
+}
+
 class _SettingsTile extends ConsumerWidget {
   const _SettingsTile({
     required this.title,
@@ -551,36 +646,66 @@ class _SettingsTile extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     if (isTelevision) {
-      return TvFocusableAction(
-        onPressed: () => onChanged(!value),
-        borderRadius: BorderRadius.circular(22),
-        child: Container(
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(
-              color: scheme.outlineVariant,
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 720;
+          return Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: scheme.outlineVariant,
+              ),
             ),
-          ),
-          child: ListTile(
-            title: Text(title),
-            subtitle: Text(value ? '已启用' : '已关闭'),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
               children: [
-                OutlinedButton(
-                  onPressed: onEdit,
-                  child: const Text('编辑'),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        value ? '已启用' : '已关闭',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 10),
-                Text(
-                  value ? '开启' : '关闭',
-                  style: Theme.of(context).textTheme.labelLarge,
+                const SizedBox(width: 12),
+                _SettingsTileActionButton(
+                  icon: Icons.edit_outlined,
+                  label: compact ? '' : '编辑',
+                  onPressed: onEdit,
+                  filled: false,
+                ),
+                const SizedBox(width: 8),
+                _SettingsTileActionButton(
+                  icon: value
+                      ? Icons.toggle_off_rounded
+                      : Icons.toggle_on_rounded,
+                  label: value ? '关闭' : '开启',
+                  onPressed: () => onChanged(!value),
                 ),
               ],
             ),
-          ),
-        ),
+          );
+        },
       );
     }
     return Container(
@@ -604,6 +729,139 @@ class _SettingsTile extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _SettingsTileActionButton extends StatelessWidget {
+  const _SettingsTileActionButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.filled = true,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    final foregroundColor = filled ? const Color(0xFF081120) : Colors.white;
+    final backgroundColor =
+        filled ? Colors.white : Colors.white.withValues(alpha: 0.08);
+    final borderColor =
+        filled ? Colors.white : Colors.white.withValues(alpha: 0.22);
+    return TvFocusableAction(
+      onPressed: onPressed,
+      borderRadius: BorderRadius.circular(16),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: borderColor),
+        ),
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: label.isEmpty ? 12 : 14,
+            vertical: 11,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: foregroundColor),
+              if (label.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: foregroundColor,
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsPageHeader extends StatelessWidget {
+  const _SettingsPageHeader({required this.isTelevision});
+
+  final bool isTelevision;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = DecoratedBox(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '设置',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '集中管理媒体源、搜索服务、元数据、网络存储、播放与首页展示。',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!isTelevision) {
+      return content;
+    }
+    return TvFocusableAction(
+      onPressed: () => FocusScope.of(context).nextFocus(),
+      focusId: 'settings:header',
+      borderRadius: BorderRadius.circular(28),
+      child: content,
+    );
+  }
+}
+
+class _SettingsNavigationTile extends ConsumerWidget {
+  const _SettingsNavigationTile({
+    required this.title,
+    required this.onTap,
+    this.subtitle = '',
+  });
+
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    if (isTelevision) {
+      return TvSelectionTile(
+        title: title,
+        value: subtitle,
+        onPressed: onTap,
+      );
+    }
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(title),
+      subtitle: subtitle.trim().isEmpty ? null : Text(subtitle),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: onTap,
     );
   }
 }

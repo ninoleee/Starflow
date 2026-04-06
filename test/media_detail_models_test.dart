@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/domain/playback_models.dart';
 
 void main() {
   group('MediaDetailTarget.needsMetadataMatch', () {
@@ -81,6 +82,92 @@ void main() {
 
       expect(target.availabilityLabel, isEmpty);
       expect(target.isPlayable, isFalse);
+    });
+
+    test('preserves tmdb id from media item', () {
+      final target = MediaDetailTarget.fromMediaItem(
+        MediaItem(
+          id: 'movie-1',
+          title: 'Avatar',
+          overview: '',
+          posterUrl: '',
+          year: 2009,
+          durationLabel: '162分钟',
+          genres: const [],
+          sourceId: 'emby-main',
+          sourceName: 'Home Emby',
+          sourceKind: MediaSourceKind.emby,
+          streamUrl: '',
+          tmdbId: '19995',
+          addedAt: DateTime(2026),
+        ),
+      );
+
+      expect(target.tmdbId, '19995');
+    });
+  });
+
+  group('MediaDetailTarget.canManuallyMatchLibraryResource', () {
+    test('stays available when resource status is none', () {
+      const target = MediaDetailTarget(
+        title: 'The Last of Us',
+        posterUrl: '',
+        overview: '',
+        availabilityLabel: '无',
+        sourceId: 'douban-seed',
+        itemId: 'subject-1',
+        sourceName: '豆瓣',
+      );
+
+      expect(target.needsLibraryMatch, isFalse);
+      expect(target.canManuallyMatchLibraryResource, isTrue);
+    });
+
+    test('stops showing once playable resource is ready', () {
+      const target = MediaDetailTarget(
+        title: 'The Last of Us',
+        posterUrl: '',
+        overview: '',
+        availabilityLabel: '资源已就绪：Emby · Home Emby',
+        playbackTarget: PlaybackTarget(
+          title: 'The Last of Us',
+          sourceId: 'emby-main',
+          streamUrl: 'https://example.com/video.mp4',
+          sourceName: 'Home Emby',
+          sourceKind: MediaSourceKind.emby,
+        ),
+      );
+
+      expect(target.canManuallyMatchLibraryResource, isFalse);
+    });
+  });
+
+  group('MediaDetailTarget.shouldAutoMatchLibraryResource', () {
+    test('auto matches only when local resource is still missing', () {
+      const target = MediaDetailTarget(
+        title: 'The Last of Us',
+        posterUrl: '',
+        overview: '',
+        availabilityLabel: '无',
+      );
+
+      expect(target.needsLibraryMatch, isTrue);
+      expect(target.shouldAutoMatchLibraryResource, isTrue);
+    });
+
+    test('does not auto match when series already has linked resource', () {
+      const target = MediaDetailTarget(
+        title: 'The Last of Us',
+        posterUrl: '',
+        overview: '',
+        sourceId: 'webdav-main',
+        itemId: 'series-1',
+        sourceName: 'WebDAV',
+      );
+
+      expect(target.needsLibraryMatch, isFalse);
+      expect(target.shouldAutoMatchLibraryResource, isFalse);
+      expect(target.canManuallyMatchLibraryResource, isTrue);
     });
   });
 }

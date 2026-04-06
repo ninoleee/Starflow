@@ -14,12 +14,57 @@ extension _WebDavNasClientStructure on WebDavNasClient {
       },
     );
 
+    final context = _buildStructureContext(items);
+    final seriesRootPlans = _buildSeriesRootPlans(context);
+    final seriesRootForResource = _mapSeriesRootForResource(
+      items: items,
+      seriesRootPlans: seriesRootPlans,
+    );
+    final assignment = _assignItemsToStructure(
+      items: items,
+      context: context,
+      seriesRootPlans: seriesRootPlans,
+      seriesRootForResource: seriesRootForResource,
+    );
+    final episodeOverrides = _resolveEpisodeOverrides(
+      context: context,
+      episodeItemsByGroup: assignment.episodeItemsByGroup,
+      seasonOrderByRoot: assignment.seasonOrderByRoot,
+    );
+
+    final resolvedItems = assignment.items
+        .map(
+          (item) => item.copyWith(
+            metadataSeed:
+                episodeOverrides[item.resourceId] ?? item.metadataSeed,
+          ),
+        )
+        .toList(growable: false);
+    webDavTrace(
+      'structure.done',
+      fields: {
+        'resultCount': resolvedItems.length,
+        'episodes': resolvedItems
+            .where((item) => item.metadataSeed.itemType == 'episode')
+            .length,
+        'movies': resolvedItems
+            .where((item) => item.metadataSeed.itemType == 'movie')
+            .length,
+      },
+    );
+    return resolvedItems;
+  }
+
+  _StructureInferenceContext _buildStructureContext(
+    List<_PendingWebDavScannedItem> items,
+  ) {
     final filesByDirectory = <String, List<_PendingWebDavScannedItem>>{};
     final childVideoCountsByDirectory = <String, Map<String, int>>{};
     final childItemsByDirectory =
         <String, Map<String, List<_PendingWebDavScannedItem>>>{};
     final recognitionByResource = <String, NasMediaRecognition>{};
     final explicitEpisodeCountByDirectory = <String, int>{};
+
     for (final item in items) {
       final directoryKey = _segmentsKey(item.relativeDirectories);
       filesByDirectory.putIfAbsent(directoryKey, () => []).add(item);
@@ -47,141 +92,285 @@ extension _WebDavNasClientStructure on WebDavNasClient {
       }
     }
 
+    for (final entry in filesByDirectory.entries) {
+      final childDirectoryNames =
+          childItemsByDirectory[entry.key]?.keys.toList(growable: false) ??
+              const <String>[];
+      webDavTrace(
+        'structure.context.directory',
+        fields: {
+          'directory': entry.key,
+          'directItems': entry.value.length,
+          'childDirs': childDirectoryNames,
+        },
+      );
+    }
+
+    return _StructureInferenceContext(
+      filesByDirectory: filesByDirectory,
+      childVideoCountsByDirectory: childVideoCountsByDirectory,
+      childItemsByDirectory: childItemsByDirectory,
+      recognitionByResource: recognitionByResource,
+      explicitEpisodeCountByDirectory: explicitEpisodeCountByDirectory,
+    );
+  }
+
+  Map<String, _SeriesRootInferencePlan> _buildSeriesRootPlans(
+    _StructureInferenceContext context,
+  ) {
     final seriesRootPlans = <String, _SeriesRootInferencePlan>{};
     final candidateDirectoryKeys = <String>{
-      ...filesByDirectory.keys,
-      ...childVideoCountsByDirectory.keys,
+      ...context.filesByDirectory.keys,
+      ...context.childVideoCountsByDirectory.keys,
     };
     for (final directoryKey in candidateDirectoryKeys) {
       final plan = _buildSeriesRootPlan(
         directoryKey: directoryKey,
-        filesByDirectory: filesByDirectory,
-        childItemsByDirectory: childItemsByDirectory,
-        recognitionByResource: recognitionByResource,
-        explicitEpisodeCountByDirectory: explicitEpisodeCountByDirectory,
+        filesByDirectory: context.filesByDirectory,
+        childItemsByDirectory: context.childItemsByDirectory,
+        recognitionByResource: context.recognitionByResource,
+        explicitEpisodeCountByDirectory:
+            context.explicitEpisodeCountByDirectory,
       );
-      if (plan != null) {
-        seriesRootPlans[directoryKey] = plan;
-        webDavTrace(
-          'structure.seriesRoot',
-          fields: {
-            'directory': directoryKey,
-            'rootItemsAsSpecials': plan.rootItemsAsSpecials,
-            'seasonDirs': plan.seasonNumberByChildDirectory,
-          },
-        );
+      if (plan == null) {
+        continue;
       }
+      seriesRootPlans[directoryKey] = plan;
+      webDavTrace(
+        'structure.seriesRoot',
+        fields: {
+          'directory': directoryKey,
+          'rootItemsAsSpecials': plan.rootItemsAsSpecials,
+          'seasonDirs': plan.seasonNumberByChildDirectory,
+        },
+      );
     }
+    return seriesRootPlans;
+  }
 
+  Map<String, String> _mapSeriesRootForResource({
+    required List<_PendingWebDavScannedItem> items,
+    required Map<String, _SeriesRootInferencePlan> seriesRootPlans,
+  }) {
     final seriesRootForResource = <String, String>{};
     for (final item in items) {
-      for (var length = 0;
-          length <= item.relativeDirectories.length;
-          length++) {
+      String? matchedRootKey;
+      for (var length = item.relativeDirectories.length;
+          length >= 0;
+          length--) {
         final candidateKey =
             _segmentsKey(item.relativeDirectories.take(length));
-        if (seriesRootPlans.containsKey(candidateKey)) {
-          seriesRootForResource[item.resourceId] = candidateKey;
-          break;
+        if (!seriesRootPlans.containsKey(candidateKey)) {
+          continue;
         }
+        matchedRootKey = candidateKey;
+        seriesRootForResource[item.resourceId] = candidateKey;
+        break;
       }
+      webDavTrace(
+        matchedRootKey == null
+            ? 'structure.rootMapping.unassigned'
+            : 'structure.rootMapping.assigned',
+        fields: {
+          'path': item.actualAddress,
+          'relativeDirs': item.relativeDirectories,
+          'resourceId': item.resourceId,
+          'seriesRoot': matchedRootKey,
+        },
+      );
     }
+    return seriesRootForResource;
+  }
 
+  _StructureAssignment _assignItemsToStructure({
+    required List<_PendingWebDavScannedItem> items,
+    required _StructureInferenceContext context,
+    required Map<String, _SeriesRootInferencePlan> seriesRootPlans,
+    required Map<String, String> seriesRootForResource,
+  }) {
     final nextItems = <_PendingWebDavScannedItem>[];
     final episodeItemsByGroup = <String, List<_PendingWebDavScannedItem>>{};
     final seasonOrderByRoot = <String, List<String>>{};
 
     for (final item in items) {
       final seriesRootKey = seriesRootForResource[item.resourceId];
-      final seed = item.metadataSeed;
-      final recognition = recognitionByResource[item.resourceId];
-      final explicitSeasonNumber =
-          seed.seasonNumber ?? recognition?.seasonNumber;
-      final explicitEpisodeNumber =
-          seed.episodeNumber ?? recognition?.episodeNumber;
       if (seriesRootKey != null) {
-        final plan = seriesRootPlans[seriesRootKey]!;
-        final rootDepth = _segmentsFromKey(seriesRootKey).length;
-        final isRootDirectFile = item.relativeDirectories.length == rootDepth;
-        final childDirectoryName =
-            isRootDirectFile ? '' : item.relativeDirectories[rootDepth];
-        final derivedSeasonNumber = isRootDirectFile
-            ? plan.rootItemsAsSpecials
-                ? 0
-                : 1
-            : plan.seasonNumberByChildDirectory[childDirectoryName];
-        final seasonGroupKey = explicitSeasonNumber != null
-            ? _buildExplicitSeasonGroupKey(explicitSeasonNumber)
-            : isRootDirectFile
-                ? (plan.rootItemsAsSpecials
-                    ? _directSeasonGroupKey
-                    : _implicitSeasonGroupKey)
-                : childDirectoryName;
-        final seasonOrder = seasonOrderByRoot.putIfAbsent(
-          seriesRootKey,
-          () => <String>[],
-        );
-        if (!seasonOrder.contains(seasonGroupKey)) {
-          seasonOrder.add(seasonGroupKey);
-        }
-        final nextSeed = seed.copyWith(
-          itemType: 'episode',
-          seasonNumber: explicitSeasonNumber ?? derivedSeasonNumber,
-        );
-        final nextItem = item.copyWith(metadataSeed: nextSeed);
-        webDavTrace(
-          'structure.assignSeriesEpisode',
-          fields: {
-            'path': item.actualAddress,
-            'seriesRoot': seriesRootKey,
-            'seasonGroup': seasonGroupKey,
-            'season': nextSeed.seasonNumber,
-            'episode': explicitEpisodeNumber,
-            'title': nextSeed.title,
-          },
+        final assignment = _assignSeriesEpisode(
+          item: item,
+          seriesRootKey: seriesRootKey,
+          plan: seriesRootPlans[seriesRootKey]!,
+          recognition: context.recognitionByResource[item.resourceId],
+          seasonOrderByRoot: seasonOrderByRoot,
         );
         episodeItemsByGroup
-            .putIfAbsent('$seriesRootKey::$seasonGroupKey', () => [])
-            .add(nextItem);
-        nextItems.add(nextItem);
+            .putIfAbsent(
+                assignment.groupKey, () => <_PendingWebDavScannedItem>[])
+            .add(assignment.item);
+        nextItems.add(assignment.item);
         continue;
       }
 
-      final parentDirectoryKey = _segmentsKey(item.relativeDirectories);
-      final directVideoCount =
-          filesByDirectory[parentDirectoryKey]?.length ?? 0;
-      final childDirectoryCount =
-          childVideoCountsByDirectory[parentDirectoryKey]?.length ?? 0;
-      if (seed.itemType.trim().isEmpty &&
-          directVideoCount == 1 &&
-          childDirectoryCount == 0) {
-        final resolvedItemType =
-            explicitEpisodeNumber != null || explicitSeasonNumber != null
-                ? 'episode'
-                : 'movie';
-        webDavTrace(
-          'structure.singleFileFallback',
-          fields: {
-            'path': item.actualAddress,
-            'resolvedItemType': resolvedItemType,
-            'season': explicitSeasonNumber,
-            'episode': explicitEpisodeNumber,
-          },
-        );
-        nextItems.add(
-          item.copyWith(
-            metadataSeed: seed.copyWith(
-              itemType: resolvedItemType,
-              seasonNumber: explicitSeasonNumber,
-              episodeNumber: explicitEpisodeNumber,
-            ),
-          ),
-        );
-      } else {
-        nextItems.add(item);
-      }
+      nextItems.add(_applySingleFileFallback(item, context));
     }
 
+    return _StructureAssignment(
+      items: nextItems,
+      episodeItemsByGroup: episodeItemsByGroup,
+      seasonOrderByRoot: seasonOrderByRoot,
+    );
+  }
+
+  _AssignedSeriesEpisode _assignSeriesEpisode({
+    required _PendingWebDavScannedItem item,
+    required String seriesRootKey,
+    required _SeriesRootInferencePlan plan,
+    required NasMediaRecognition? recognition,
+    required Map<String, List<String>> seasonOrderByRoot,
+  }) {
+    final seed = item.metadataSeed;
+    final explicitSeasonNumber =
+        seed.seasonNumber ?? recognition?.seasonNumber;
+    final explicitEpisodeNumber =
+        seed.episodeNumber ?? recognition?.episodeNumber;
+    final rootDepth = _segmentsFromKey(seriesRootKey).length;
+    final isRootDirectFile = item.relativeDirectories.length == rootDepth;
+    final childDirectoryName =
+        isRootDirectFile ? '' : item.relativeDirectories[rootDepth];
+    final hintedSeasonNumber = isRootDirectFile
+        ? null
+        : plan.seasonNumberByChildDirectory[childDirectoryName];
+    final derivedSeasonNumber = isRootDirectFile
+        ? plan.rootItemsAsSpecials
+            ? 0
+            : 1
+        : hintedSeasonNumber;
+    final seasonGroupKey = explicitSeasonNumber != null
+        ? _buildExplicitSeasonGroupKey(explicitSeasonNumber)
+        : isRootDirectFile
+            ? (plan.rootItemsAsSpecials
+                ? _directSeasonGroupKey
+                : _implicitSeasonGroupKey)
+            : hintedSeasonNumber != null
+                ? _buildExplicitSeasonGroupKey(hintedSeasonNumber)
+                : childDirectoryName;
+
+    final seasonOrder = seasonOrderByRoot.putIfAbsent(
+      seriesRootKey,
+      () => <String>[],
+    );
+    if (!seasonOrder.contains(seasonGroupKey)) {
+      seasonOrder.add(seasonGroupKey);
+    }
+
+    final nextSeed = seed.copyWith(
+      itemType: 'episode',
+      seasonNumber: explicitSeasonNumber ?? derivedSeasonNumber,
+    );
+    final nextItem = item.copyWith(metadataSeed: nextSeed);
+    webDavTrace(
+      'structure.assignSeriesEpisode',
+      fields: {
+        'path': item.actualAddress,
+        'seriesRoot': seriesRootKey,
+        'seasonGroup': seasonGroupKey,
+        'season': nextSeed.seasonNumber,
+        'episode': explicitEpisodeNumber,
+        'title': nextSeed.title,
+      },
+    );
+    return _AssignedSeriesEpisode(
+      item: nextItem,
+      groupKey: '$seriesRootKey::$seasonGroupKey',
+    );
+  }
+
+  _PendingWebDavScannedItem _applySingleFileFallback(
+    _PendingWebDavScannedItem item,
+    _StructureInferenceContext context,
+  ) {
+    final seed = item.metadataSeed;
+    final recognition = context.recognitionByResource[item.resourceId];
+    final explicitSeasonNumber = seed.seasonNumber ?? recognition?.seasonNumber;
+    final explicitEpisodeNumber =
+        seed.episodeNumber ?? recognition?.episodeNumber;
+    final parentDirectoryKey = _segmentsKey(item.relativeDirectories);
+    final directVideoCount =
+        context.filesByDirectory[parentDirectoryKey]?.length ?? 0;
+    final childDirectoryCount =
+        context.childVideoCountsByDirectory[parentDirectoryKey]?.length ?? 0;
+
+    if (seed.itemType.trim().isNotEmpty ||
+        directVideoCount != 1 ||
+        childDirectoryCount != 0) {
+      return item;
+    }
+
+    final resolvedItemType =
+        explicitEpisodeNumber != null || explicitSeasonNumber != null
+            ? 'episode'
+            : 'movie';
+    webDavTrace(
+      'structure.singleFileFallback',
+      fields: {
+        'path': item.actualAddress,
+        'resolvedItemType': resolvedItemType,
+        'season': explicitSeasonNumber,
+        'episode': explicitEpisodeNumber,
+      },
+    );
+    return item.copyWith(
+      metadataSeed: seed.copyWith(
+        itemType: resolvedItemType,
+        seasonNumber: explicitSeasonNumber,
+        episodeNumber: explicitEpisodeNumber,
+      ),
+    );
+  }
+
+  Map<String, WebDavMetadataSeed> _resolveEpisodeOverrides({
+    required _StructureInferenceContext context,
+    required Map<String, List<_PendingWebDavScannedItem>> episodeItemsByGroup,
+    required Map<String, List<String>> seasonOrderByRoot,
+  }) {
+    final seasonNumberByGroup = _resolveSeasonNumberByGroup(seasonOrderByRoot);
+    final episodeOverrides = <String, WebDavMetadataSeed>{};
+
+    for (final entry in episodeItemsByGroup.entries) {
+      final seasonNumber = seasonNumberByGroup[entry.key];
+      final orderedEpisodes = [...entry.value]
+        ..sort((left, right) => left.actualAddress.toLowerCase().compareTo(
+              right.actualAddress.toLowerCase(),
+            ));
+      for (var index = 0; index < orderedEpisodes.length; index++) {
+        final item = orderedEpisodes[index];
+        final recognition = context.recognitionByResource[item.resourceId];
+        final explicitSeasonNumber =
+            item.metadataSeed.seasonNumber ?? recognition?.seasonNumber;
+        final explicitEpisodeNumber =
+            item.metadataSeed.episodeNumber ?? recognition?.episodeNumber;
+        final isDirectSeasonGroup =
+            entry.key.endsWith('::$_directSeasonGroupKey');
+        final isImplicitSeasonGroup =
+            entry.key.endsWith('::$_implicitSeasonGroupKey');
+        final resolvedSeasonNumber = explicitSeasonNumber ??
+            seasonNumber ??
+            (isDirectSeasonGroup
+                ? 0
+                : isImplicitSeasonGroup
+                    ? 1
+                    : 1);
+        episodeOverrides[item.resourceId] = item.metadataSeed.copyWith(
+          seasonNumber: resolvedSeasonNumber,
+          episodeNumber: explicitEpisodeNumber ?? index + 1,
+        );
+      }
+    }
+    return episodeOverrides;
+  }
+
+  Map<String, int> _resolveSeasonNumberByGroup(
+    Map<String, List<String>> seasonOrderByRoot,
+  ) {
     final seasonNumberByGroup = <String, int>{};
     for (final entry in seasonOrderByRoot.entries) {
       if (entry.value.contains(_directSeasonGroupKey)) {
@@ -222,61 +411,7 @@ extension _WebDavNasClientStructure on WebDavNasClient {
         }
       }
     }
-
-    final episodeOverrides = <String, WebDavMetadataSeed>{};
-    for (final entry in episodeItemsByGroup.entries) {
-      final seasonNumber = seasonNumberByGroup[entry.key];
-      final orderedEpisodes = [...entry.value]..sort(
-          (left, right) => left.actualAddress.toLowerCase().compareTo(
-                right.actualAddress.toLowerCase(),
-              ),
-        );
-      for (var index = 0; index < orderedEpisodes.length; index++) {
-        final item = orderedEpisodes[index];
-        final recognition = recognitionByResource[item.resourceId];
-        final explicitSeasonNumber =
-            item.metadataSeed.seasonNumber ?? recognition?.seasonNumber;
-        final explicitEpisodeNumber =
-            item.metadataSeed.episodeNumber ?? recognition?.episodeNumber;
-        final specialGroupSuffix = '::$_directSeasonGroupKey';
-        final implicitGroupSuffix = '::$_implicitSeasonGroupKey';
-        final isDirectSeasonGroup = entry.key.endsWith(specialGroupSuffix);
-        final isImplicitSeasonGroup = entry.key.endsWith(implicitGroupSuffix);
-        final resolvedSeasonNumber = explicitSeasonNumber ??
-            seasonNumber ??
-            (isDirectSeasonGroup
-                ? 0
-                : isImplicitSeasonGroup
-                    ? 1
-                    : 1);
-        episodeOverrides[item.resourceId] = item.metadataSeed.copyWith(
-          seasonNumber: resolvedSeasonNumber,
-          episodeNumber: explicitEpisodeNumber ?? index + 1,
-        );
-      }
-    }
-
-    final resolvedItems = nextItems
-        .map(
-          (item) => item.copyWith(
-            metadataSeed:
-                episodeOverrides[item.resourceId] ?? item.metadataSeed,
-          ),
-        )
-        .toList(growable: false);
-    webDavTrace(
-      'structure.done',
-      fields: {
-        'resultCount': resolvedItems.length,
-        'episodes': resolvedItems
-            .where((item) => item.metadataSeed.itemType == 'episode')
-            .length,
-        'movies': resolvedItems
-            .where((item) => item.metadataSeed.itemType == 'movie')
-            .length,
-      },
-    );
-    return resolvedItems;
+    return seasonNumberByGroup;
   }
 
   _SeriesRootInferencePlan? _buildSeriesRootPlan({
@@ -315,10 +450,8 @@ extension _WebDavNasClientStructure on WebDavNasClient {
       }
     }
 
-    final hasImplicitRootEpisodes = childGroups.isEmpty &&
-        directItems.length >= 2 &&
-        (directExplicitEpisodeCount >= 2 ||
-            _looksLikeImplicitRootEpisodeBatch(directItems));
+    final hasImplicitRootEpisodes =
+        childGroups.isEmpty && directItems.length >= 2;
     if (hasImplicitRootEpisodes) {
       webDavTrace(
         'structure.plan.implicitSeason',
@@ -334,14 +467,7 @@ extension _WebDavNasClientStructure on WebDavNasClient {
       );
     }
 
-    final validSeasonHints =
-        seasonHintsByChildDirectory.values.toList(growable: false);
-    final hasSeasonDirectories = validSeasonHints.length >= 2 ||
-        (validSeasonHints.length == 1 &&
-            (directItems.isNotEmpty ||
-                childGroups.length == 1 ||
-                childGroups.values.first.length >= 2));
-    if (!hasSeasonDirectories) {
+    if (childGroups.isEmpty) {
       webDavTrace(
         'structure.plan.noSeriesRoot',
         fields: {
@@ -366,8 +492,9 @@ extension _WebDavNasClientStructure on WebDavNasClient {
     return _SeriesRootInferencePlan(
       rootItemsAsSpecials: directItems.isNotEmpty,
       seasonNumberByChildDirectory: {
-        for (final entry in seasonHintsByChildDirectory.entries)
-          entry.key: entry.value.seasonNumber,
+        for (final childDirectoryName in childGroups.keys)
+          childDirectoryName:
+              seasonHintsByChildDirectory[childDirectoryName]?.seasonNumber,
       },
     );
   }
@@ -503,54 +630,6 @@ extension _WebDavNasClientStructure on WebDavNasClient {
         recognition.itemType.trim().toLowerCase() == 'episode';
   }
 
-  bool _looksLikeImplicitRootEpisodeBatch(
-    List<_PendingWebDavScannedItem> items,
-  ) {
-    if (items.length < 2) {
-      return false;
-    }
-    final numberedItems = items
-        .where(
-          (item) => _parseBareEpisodeNumberFromPath(item.actualAddress) != null,
-        )
-        .length;
-    return numberedItems == items.length;
-  }
-
-  int? _parseBareEpisodeNumberFromPath(String actualAddress) {
-    final rawName = actualAddress.split('/').last.trim();
-    if (rawName.isEmpty) {
-      return null;
-    }
-    final fileName = _decodePathSegment(rawName);
-    var baseName = fileName.replaceFirst(RegExp(r'\.[^.]+$'), '');
-    baseName = baseName.replaceFirst(
-      RegExp(r'\.\((mp4|mkv|avi|mov|ts|m2ts|strm)\)$', caseSensitive: false),
-      '',
-    );
-    final match = RegExp(
-      r'^\s*(?:ep(?:isode)?\s*)?0*(\d{1,3})(.*)$',
-      caseSensitive: false,
-    ).firstMatch(baseName);
-    if (match == null) {
-      return null;
-    }
-    final episodeNumber = int.tryParse(match.group(1) ?? '');
-    if (episodeNumber == null || episodeNumber <= 0) {
-      return null;
-    }
-    final remainder = (match.group(2) ?? '')
-        .replaceAll(
-          RegExp(
-            r'\b(?:4k|8k|2160p|1080p|720p|480p|hdr|dv|uhd|sd|hd|hevc|h265|h264|x265|x264|aac|ddp|dd|atmos|remux|webdl|web-dl|webrip|bluray|bdrip|proper|repack|mp4|mkv|avi|mov|ts|m2ts)\b',
-            caseSensitive: false,
-          ),
-          '',
-        )
-        .replaceAll(RegExp(r'[\s._\-\[\]\(\)]+'), '');
-    return remainder.isEmpty ? episodeNumber : null;
-  }
-
   String _buildExplicitSeasonGroupKey(int seasonNumber) {
     return '__season__:$seasonNumber';
   }
@@ -618,4 +697,43 @@ extension _WebDavNasClientStructure on WebDavNasClient {
         .where((segment) => segment.isNotEmpty)
         .toList(growable: false);
   }
+}
+
+class _StructureInferenceContext {
+  const _StructureInferenceContext({
+    required this.filesByDirectory,
+    required this.childVideoCountsByDirectory,
+    required this.childItemsByDirectory,
+    required this.recognitionByResource,
+    required this.explicitEpisodeCountByDirectory,
+  });
+
+  final Map<String, List<_PendingWebDavScannedItem>> filesByDirectory;
+  final Map<String, Map<String, int>> childVideoCountsByDirectory;
+  final Map<String, Map<String, List<_PendingWebDavScannedItem>>>
+      childItemsByDirectory;
+  final Map<String, NasMediaRecognition> recognitionByResource;
+  final Map<String, int> explicitEpisodeCountByDirectory;
+}
+
+class _StructureAssignment {
+  const _StructureAssignment({
+    required this.items,
+    required this.episodeItemsByGroup,
+    required this.seasonOrderByRoot,
+  });
+
+  final List<_PendingWebDavScannedItem> items;
+  final Map<String, List<_PendingWebDavScannedItem>> episodeItemsByGroup;
+  final Map<String, List<String>> seasonOrderByRoot;
+}
+
+class _AssignedSeriesEpisode {
+  const _AssignedSeriesEpisode({
+    required this.item,
+    required this.groupKey,
+  });
+
+  final _PendingWebDavScannedItem item;
+  final String groupKey;
 }

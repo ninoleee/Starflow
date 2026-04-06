@@ -2,13 +2,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
+import 'package:starflow/features/library/application/nas_media_index_revision.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+
+const _posterDebugKeyword = '9号秘事';
 
 enum HomeSectionLayout {
   posterRail,
@@ -124,6 +128,7 @@ final homeModuleByIdProvider =
 });
 
 final homeRecentItemsProvider = FutureProvider<List<MediaItem>>((ref) async {
+  ref.watch(nasMediaIndexRevisionProvider);
   final enabledModules = ref.watch(homeEnabledModulesProvider);
   if (!_needsRecentlyAdded(enabledModules)) {
     return const [];
@@ -144,6 +149,7 @@ final homeCarouselItemsProvider =
 
 final homeSectionProvider =
     FutureProvider.family<HomeSectionViewModel?, String>((ref, moduleId) async {
+  ref.watch(nasMediaIndexRevisionProvider);
   ref.watch(localStorageDetailCacheRevisionProvider);
   final module = ref.watch(homeModuleByIdProvider(moduleId));
   if (module == null) {
@@ -250,6 +256,9 @@ void primeHomeModulesFromWidget(WidgetRef ref) {
 void _primeHomeModulesWithReader(
   T Function<T>(ProviderListenable<T> provider) read,
 ) {
+  if (read(playbackPerformanceModeProvider)) {
+    return;
+  }
   final modules = read(homeEnabledModulesProvider);
   read(homeRecentItemsProvider.future);
   read(homeCarouselItemsProvider.future);
@@ -259,6 +268,9 @@ void _primeHomeModulesWithReader(
 }
 
 Future<void> refreshHomeModules(WidgetRef ref) async {
+  if (ref.read(playbackPerformanceModeProvider)) {
+    return;
+  }
   ref.invalidate(homeRecentItemsProvider);
   ref.invalidate(homeCarouselItemsProvider);
   ref.invalidate(homeSectionProvider);
@@ -330,12 +342,30 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
   MediaDetailTarget seed,
   MediaDetailTarget cached,
 ) {
+  final resolvedPosterUrl =
+      cached.posterUrl.trim().isNotEmpty ? cached.posterUrl : seed.posterUrl;
+  final resolvedPosterHeaders = cached.posterUrl.trim().isNotEmpty
+      ? (cached.posterHeaders.isNotEmpty
+          ? cached.posterHeaders
+          : seed.posterHeaders)
+      : (seed.posterHeaders.isNotEmpty
+          ? seed.posterHeaders
+          : cached.posterHeaders);
+  if (seed.title.contains(_posterDebugKeyword)) {
+    // Debugging poster selection for portrait slots.
+    // ignore: avoid_print
+    print(
+      '[PosterSource][Home] ${seed.title} '
+      'seedPoster=${seed.posterUrl} '
+      'cachedPoster=${cached.posterUrl} '
+      'seedBackdrop=${seed.backdropUrl} '
+      'cachedBackdrop=${cached.backdropUrl} '
+      'resolvedPoster=$resolvedPosterUrl',
+    );
+  }
   return seed.copyWith(
-    posterUrl:
-        seed.posterUrl.trim().isNotEmpty ? seed.posterUrl : cached.posterUrl,
-    posterHeaders: seed.posterHeaders.isNotEmpty
-        ? seed.posterHeaders
-        : cached.posterHeaders,
+    posterUrl: resolvedPosterUrl,
+    posterHeaders: resolvedPosterHeaders,
     backdropUrl: seed.backdropUrl.trim().isNotEmpty
         ? seed.backdropUrl
         : cached.backdropUrl,
@@ -364,12 +394,20 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
         seed.ratingLabels.isNotEmpty ? seed.ratingLabels : cached.ratingLabels,
     genres: seed.genres.isNotEmpty ? seed.genres : cached.genres,
     directors: seed.directors.isNotEmpty ? seed.directors : cached.directors,
+    directorProfiles: seed.directorProfiles.isNotEmpty
+        ? seed.directorProfiles
+        : cached.directorProfiles,
     actors: seed.actors.isNotEmpty ? seed.actors : cached.actors,
     actorProfiles: seed.actorProfiles.isNotEmpty
         ? seed.actorProfiles
         : cached.actorProfiles,
+    platforms: seed.platforms.isNotEmpty ? seed.platforms : cached.platforms,
+    platformProfiles: seed.platformProfiles.isNotEmpty
+        ? seed.platformProfiles
+        : cached.platformProfiles,
     doubanId: seed.doubanId.trim().isNotEmpty ? seed.doubanId : cached.doubanId,
     imdbId: seed.imdbId.trim().isNotEmpty ? seed.imdbId : cached.imdbId,
+    tmdbId: seed.tmdbId.trim().isNotEmpty ? seed.tmdbId : cached.tmdbId,
     playbackTarget: seed.playbackTarget ?? cached.playbackTarget,
   );
 }

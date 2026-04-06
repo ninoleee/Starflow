@@ -54,13 +54,17 @@ class SeedData {
     networkStorage: const NetworkStorageConfig(),
     homeHeroSourceModuleId: '',
     homeHeroStyle: HomeHeroStyle.normal,
+    homeHeroLogoTitleEnabled: false,
     homeHeroBackgroundEnabled: true,
     translucentEffectsEnabled: true,
+    highPerformanceModeEnabled: false,
     tmdbMetadataMatchEnabled: false,
     wmdbMetadataMatchEnabled: false,
     metadataMatchPriority: MetadataMatchProvider.tmdb,
     imdbRatingMatchEnabled: false,
+    detailAutoLibraryMatchEnabled: false,
     tmdbReadAccessToken: '',
+    playbackBackgroundPlaybackEnabled: true,
   );
 
   static const List<MediaItem> seedLibrary = [];

@@ -8,6 +8,7 @@ import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 abstract class MediaRepository {
   Future<List<MediaSourceConfig>> fetchSources();
@@ -32,6 +33,14 @@ abstract class MediaRepository {
   Future<void> refreshSource({
     required String sourceId,
     bool forceFullRescan = false,
+  });
+
+  Future<void> cancelActiveWebDavRefreshes();
+
+  Future<void> deleteResource({
+    required String sourceId,
+    required String resourcePath,
+    String sectionId = '',
   });
 
   Future<List<MediaItem>> fetchChildren({
@@ -216,12 +225,60 @@ class AppMediaRepository implements MediaRepository {
       await _nasMediaIndexer.clearSource(source.id);
       return;
     }
+    if (forceFullRescan) {
+      await _nasMediaIndexer.clearSource(source.id);
+      await ref
+          .read(localStorageCacheRepositoryProvider)
+          .clearDetailCacheForSource(source.id);
+    }
     await _nasMediaIndexer.refreshSource(
       source,
       scopedCollections:
           _hasScopedSections(source) ? selectedCollections : null,
       forceFullRescan: forceFullRescan,
     );
+  }
+
+  @override
+  Future<void> cancelActiveWebDavRefreshes() {
+    return _nasMediaIndexer.cancelAllRefreshTasks();
+  }
+
+  @override
+  Future<void> deleteResource({
+    required String sourceId,
+    required String resourcePath,
+    String sectionId = '',
+  }) async {
+    final normalizedSourceId = sourceId.trim();
+    final normalizedResourcePath = resourcePath.trim();
+    if (normalizedSourceId.isEmpty || normalizedResourcePath.isEmpty) {
+      return;
+    }
+
+    MediaSourceConfig? source;
+    for (final candidate in _enabledSources) {
+      if (candidate.id == normalizedSourceId) {
+        source = candidate;
+        break;
+      }
+    }
+    if (source == null || source.kind != MediaSourceKind.nas) {
+      return;
+    }
+
+    await _webDavNasClient.deleteResource(
+      source,
+      resourcePath: normalizedResourcePath,
+      sectionId: sectionId,
+    );
+    await _nasMediaIndexer.removeResourceScope(
+      sourceId: normalizedSourceId,
+      resourcePath: normalizedResourcePath,
+    );
+    await ref
+        .read(localStorageCacheRepositoryProvider)
+        .clearDetailCacheForSource(normalizedSourceId);
   }
 
   @override
@@ -360,19 +417,20 @@ class AppMediaRepository implements MediaRepository {
           final resolvedSectionId = sectionId!.trim();
           final resolvedSectionName =
               await _resolveSectionName(source, sectionId);
+          final scopedCollections = [
+            MediaCollection(
+              id: resolvedSectionId,
+              title: resolvedSectionName,
+              sourceId: source.id,
+              sourceName: source.name,
+              sourceKind: source.kind,
+            ),
+          ];
           return _SourceFetchResult(
-            items: await _nasMediaIndexer.loadLibrary(
+            items: await _loadNasLibraryWithAutoRebuild(
               source,
               sectionId: resolvedSectionId,
-              scopedCollections: [
-                MediaCollection(
-                  id: resolvedSectionId,
-                  title: resolvedSectionName,
-                  sourceId: source.id,
-                  sourceName: source.name,
-                  sourceKind: source.kind,
-                ),
-              ],
+              scopedCollections: scopedCollections,
               limit: limit,
             ),
           );
@@ -385,7 +443,7 @@ class AppMediaRepository implements MediaRepository {
             return const _SourceFetchResult(items: <MediaItem>[]);
           }
           return _SourceFetchResult(
-            items: await _nasMediaIndexer.loadLibrary(
+            items: await _loadNasLibraryWithAutoRebuild(
               source,
               scopedCollections: selectedCollections,
               limit: limit,
@@ -394,7 +452,7 @@ class AppMediaRepository implements MediaRepository {
         }
 
         return _SourceFetchResult(
-          items: await _nasMediaIndexer.loadLibrary(
+          items: await _loadNasLibraryWithAutoRebuild(
             source,
             limit: limit,
           ),
@@ -450,6 +508,39 @@ class AppMediaRepository implements MediaRepository {
       }),
     );
     return groups.expand((group) => group).toList();
+  }
+
+  Future<List<MediaItem>> _loadNasLibraryWithAutoRebuild(
+    MediaSourceConfig source, {
+    String? sectionId,
+    List<MediaCollection>? scopedCollections,
+    required int limit,
+  }) async {
+    var items = await _nasMediaIndexer.loadLibrary(
+      source,
+      sectionId: sectionId,
+      scopedCollections: scopedCollections,
+      limit: limit,
+    );
+    if (items.isNotEmpty) {
+      return items;
+    }
+
+    final rebuilt = await _nasMediaIndexer.tryAutoRebuildOnEmpty(
+      source,
+      scopedCollections: scopedCollections,
+    );
+    if (!rebuilt) {
+      return items;
+    }
+
+    items = await _nasMediaIndexer.loadLibrary(
+      source,
+      sectionId: sectionId,
+      scopedCollections: scopedCollections,
+      limit: limit,
+    );
+    return items;
   }
 
   Future<List<MediaCollection>> _selectedCollectionsForSource(

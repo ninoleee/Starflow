@@ -160,6 +160,7 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
       seasonNumber: nfoMetadata?.seasonNumber,
       episodeNumber: nfoMetadata?.episodeNumber,
       imdbId: nfoMetadata?.imdbId ?? '',
+      tmdbId: nfoMetadata?.tmdbId ?? '',
       container: _firstNonEmpty(
         nfoMetadata?.container ?? '',
         inferredMediaInfo.container,
@@ -189,6 +190,7 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
         'season': seed.seasonNumber,
         'episode': seed.episodeNumber,
         'imdbId': seed.imdbId,
+        'tmdbId': seed.tmdbId,
         'hasPoster': seed.posterUrl.isNotEmpty,
         'hasBackdrop': seed.backdropUrl.isNotEmpty,
         'hasLogo': seed.logoUrl.isNotEmpty,
@@ -222,6 +224,7 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
       seasonNumber: null,
       episodeNumber: null,
       imdbId: '',
+      tmdbId: '',
       container: inferredMediaInfo.container,
       videoCodec: inferredMediaInfo.videoCodec,
       audioCodec: inferredMediaInfo.audioCodec,
@@ -428,38 +431,70 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     return entry.uri.path.toLowerCase().endsWith('.strm');
   }
 
-  Future<String> _resolvePlayableUrl(
+  bool _looksLikeStrmReference(String value) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return false;
+    }
+    final uri = Uri.tryParse(normalized);
+    final path = (uri?.path ?? normalized).trim().toLowerCase();
+    return path.endsWith('.strm');
+  }
+
+  Future<_ResolvedPlayableSource> _resolvePlayableSource(
     _WebDavEntry entry, {
     required MediaSourceConfig source,
+    required bool resolveStrmTarget,
   }) async {
     if (!_isStrmFile(entry)) {
+      return _ResolvedPlayableSource(
+        streamUrl: entry.uri.toString(),
+        headers: _headersForResolvedStream(source, entry.uri.toString()),
+      );
+    }
+    if (!resolveStrmTarget) {
       webDavTrace(
-        'resolvePlayable.direct',
+        'resolvePlayable.strm.deferred',
         fields: {
           'uri': entry.uri,
           'streamUrl': entry.uri,
         },
       );
-      return entry.uri.toString();
+      return _ResolvedPlayableSource(
+        streamUrl: entry.uri.toString(),
+        headers: _headers(source),
+      );
     }
 
+    final resolvedStreamUrl =
+        await _resolvePlayableUrlFromUri(entry.uri, source: source);
+    return _ResolvedPlayableSource(
+      streamUrl: resolvedStreamUrl,
+      headers: _headersForResolvedStream(source, resolvedStreamUrl),
+    );
+  }
+
+  Future<String> _resolvePlayableUrlFromUri(
+    Uri uri, {
+    required MediaSourceConfig source,
+  }) async {
     webDavTrace(
       'resolvePlayable.strm.start',
       fields: {
-        'uri': entry.uri,
+        'uri': uri,
       },
     );
-    final response = await _client.get(entry.uri, headers: _headers(source));
+    final response = await _client.get(uri, headers: _headers(source));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       webDavTrace(
         'resolvePlayable.strm.error',
         fields: {
-          'uri': entry.uri,
+          'uri': uri,
           'status': response.statusCode,
         },
       );
       throw WebDavNasException(
-        'STRM 读取失败：HTTP ${response.statusCode} (${entry.uri})',
+        'STRM 读取失败：HTTP ${response.statusCode} ($uri)',
       );
     }
 
@@ -474,17 +509,17 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
         webDavTrace(
           'resolvePlayable.strm.done',
           fields: {
-            'uri': entry.uri,
+            'uri': uri,
             'streamUrl': normalized,
           },
         );
         return normalized;
       }
-      final resolved = entry.uri.resolve(normalized).toString();
+      final resolved = uri.resolve(normalized).toString();
       webDavTrace(
         'resolvePlayable.strm.relative',
         fields: {
-          'uri': entry.uri,
+          'uri': uri,
           'streamUrl': resolved,
         },
       );
@@ -493,10 +528,30 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     webDavTrace(
       'resolvePlayable.strm.empty',
       fields: {
-        'uri': entry.uri,
+        'uri': uri,
       },
     );
     return '';
+  }
+
+  Uri? _resolvePlaybackTargetUri(
+    MediaSourceConfig source, {
+    required String streamUrl,
+    required String actualAddress,
+  }) {
+    final directUri = Uri.tryParse(streamUrl);
+    if (directUri != null && directUri.hasScheme) {
+      return directUri;
+    }
+    final normalizedActualAddress = actualAddress.trim();
+    if (normalizedActualAddress.isEmpty) {
+      return null;
+    }
+    return _resolveResourceUri(
+      source,
+      resourcePath: normalizedActualAddress,
+      sectionId: '',
+    );
   }
 
   _WebDavEntry? _findBestNfoEntry(
@@ -811,6 +866,11 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
         type: 'imdb',
         fallbackTag: 'imdbid',
       );
+      final tmdbId = _resolveNfoExternalId(
+        root,
+        type: 'tmdb',
+        fallbackTag: 'tmdbid',
+      );
       final thumbUrl = _resolveThumbUrl(
         entry.uri,
         _xmlSingleText(root, 'thumb'),
@@ -845,6 +905,7 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
         seasonNumber: _tryParseInt(_xmlSingleText(root, 'season')),
         episodeNumber: _tryParseInt(_xmlSingleText(root, 'episode')),
         imdbId: imdbId,
+        tmdbId: tmdbId,
         container: streamDetails.container,
         videoCodec: streamDetails.videoCodec,
         audioCodec: streamDetails.audioCodec,
@@ -1044,6 +1105,8 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
       episodeNumber: primary.episodeNumber ?? secondary.episodeNumber,
       imdbId:
           primary.imdbId.trim().isNotEmpty ? primary.imdbId : secondary.imdbId,
+      tmdbId:
+          primary.tmdbId.trim().isNotEmpty ? primary.tmdbId : secondary.tmdbId,
       container: primary.container.trim().isNotEmpty
           ? primary.container
           : secondary.container,

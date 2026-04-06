@@ -6,6 +6,7 @@ import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/utils/webdav_trace.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/nas_media_recognition.dart';
+import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:xml/xml.dart';
 
 part 'webdav_nas_client_sidecar.dart';
@@ -19,6 +20,9 @@ final webDavNasClientProvider = Provider<WebDavNasClient>((ref) {
 
 class WebDavNasClient {
   WebDavNasClient(this._client);
+
+  static const int _maxConcurrentDirectoryWalks = 4;
+  static const int _maxConcurrentFilePreparations = 8;
 
   final http.Client _client;
   final Map<String, _ParsedNfoMetadata?> _nfoCache =
@@ -116,6 +120,7 @@ class WebDavNasClient {
     String sectionName = '',
     int limit = 200,
     bool? loadSidecarMetadata,
+    bool resolvePlayableStreams = true,
     bool resetCaches = true,
     bool Function()? shouldCancel,
   }) async {
@@ -159,9 +164,92 @@ class WebDavNasClient {
         'limit': limit,
         'structureInference': source.webDavStructureInferenceEnabled,
         'sidecar': shouldLoadSidecarMetadata,
+        'maxConcurrentDirectoryWalks': _maxConcurrentDirectoryWalks,
+        'maxConcurrentFilePreparations': _maxConcurrentFilePreparations,
+        'resolvePlayableStreams': resolvePlayableStreams,
       },
     );
     final visited = <String>{};
+
+    Future<_PendingWebDavScannedItem?> resolvePendingItem(
+      _WebDavEntry entry,
+      List<_WebDavEntry> siblings,
+    ) async {
+      if (_isExcludedByKeyword(entry.uri, source: source)) {
+        webDavTrace(
+          'scan.walk.skipExcludedFile',
+          fields: {
+            'uri': entry.uri,
+            'name': entry.name,
+          },
+        );
+        return null;
+      }
+      if (!_isPlayableVideo(entry)) {
+        webDavTrace(
+          'scan.walk.skipNonPlayable',
+          fields: {
+            'uri': entry.uri,
+            'name': entry.name,
+            'contentType': entry.contentType,
+          },
+        );
+        return null;
+      }
+      final metadata = shouldLoadSidecarMetadata
+          ? await _resolveSidecarMetadata(
+              entry,
+              siblings: siblings,
+              source: source,
+            )
+          : _buildBasicMetadataSeed(entry);
+      _throwIfCancelled(shouldCancel);
+      final resolvedPlayable = await _resolvePlayableSource(
+        entry,
+        source: source,
+        resolveStrmTarget: resolvePlayableStreams,
+      );
+      _throwIfCancelled(shouldCancel);
+      if (resolvedPlayable.streamUrl.trim().isEmpty) {
+        webDavTrace(
+          'scan.walk.skipEmptyStream',
+          fields: {
+            'uri': entry.uri,
+            'name': entry.name,
+          },
+        );
+        return null;
+      }
+      final pendingItem = _PendingWebDavScannedItem(
+        resourceId: entry.uri.toString(),
+        fileName: entry.name,
+        actualAddress: _relativePathForNasDisplay(entry.uri, source: source),
+        sectionId: collectionId,
+        sectionName: collectionName,
+        streamUrl: resolvedPlayable.streamUrl,
+        streamHeaders: resolvedPlayable.headers,
+        addedAt: entry.modifiedAt ?? DateTime.now(),
+        modifiedAt: entry.modifiedAt,
+        fileSizeBytes: entry.sizeBytes,
+        metadataSeed: metadata,
+        relativeDirectories: _relativeDirectorySegmentsFromRoot(
+          fileUri: entry.uri,
+          rootUri: rootUri,
+        ),
+      );
+      webDavTrace(
+        'scan.walk.accept',
+        fields: {
+          'path': pendingItem.actualAddress,
+          'title': pendingItem.metadataSeed.title,
+          'itemType': pendingItem.metadataSeed.itemType,
+          'season': pendingItem.metadataSeed.seasonNumber,
+          'episode': pendingItem.metadataSeed.episodeNumber,
+          'directories': pendingItem.relativeDirectories,
+        },
+      );
+      return pendingItem;
+    }
 
     Future<_DirectoryWalkResult> walk(
       Uri uri,
@@ -237,6 +325,14 @@ class WebDavNasClient {
       final directoryEntries =
           entries.where((entry) => !entry.isSelf).toList(growable: false);
       final collected = <_PendingWebDavScannedItem>[];
+      final fileResultFutures = <int, Future<_PendingWebDavScannedItem?>>{};
+      final childDirectoryResults = <int, Future<_DirectoryWalkResult>>{};
+      final activeDirectoryTasks = <Future<void>>[];
+      final activeFileTasks = <Future<void>>[];
+      final childDirectoryCount =
+          directoryEntries.where((entry) => entry.isCollection).length;
+      final fileEntryCount =
+          directoryEntries.where((entry) => !entry.isCollection).length;
       var truncated = false;
       webDavTrace(
         'scan.walk.entries',
@@ -244,19 +340,21 @@ class WebDavNasClient {
           'uri': uri,
           'depth': depth,
           'entryCount': directoryEntries.length,
+          'childDirectoryCount': childDirectoryCount,
+          'fileEntryCount': fileEntryCount,
+          'maxConcurrentDirectoryWalks': _maxConcurrentDirectoryWalks,
+          'maxConcurrentFilePreparations': _maxConcurrentFilePreparations,
           'directories': directoryEntries
               .where((entry) => entry.isCollection)
               .map((entry) => entry.name)
               .toList(),
         },
       );
-      for (final entry in directoryEntries) {
+      for (var entryIndex = 0;
+          entryIndex < directoryEntries.length;
+          entryIndex++) {
+        final entry = directoryEntries[entryIndex];
         _throwIfCancelled(shouldCancel);
-        final remainingForEntry = remaining - collected.length;
-        if (remainingForEntry <= 0) {
-          truncated = true;
-          break;
-        }
         if (entry.isCollection) {
           webDavTrace(
             'scan.walk.descend',
@@ -266,87 +364,71 @@ class WebDavNasClient {
               'name': entry.name,
             },
           );
-          final childResult = await walk(
+          final childResult = walk(
             entry.uri,
             depth + 1,
-            remainingForEntry,
+            remaining,
             directoryModifiedAt: entry.modifiedAt,
           );
+          childDirectoryResults[entryIndex] = childResult;
+          late final Future<void> completion;
+          completion = childResult.whenComplete(() {
+            activeDirectoryTasks.remove(completion);
+          });
+          activeDirectoryTasks.add(completion);
+          if (activeDirectoryTasks.length >= _maxConcurrentDirectoryWalks) {
+            await Future.any(activeDirectoryTasks);
+            _throwIfCancelled(shouldCancel);
+          }
+          continue;
+        }
+        final fileResult = resolvePendingItem(entry, directoryEntries);
+        fileResultFutures[entryIndex] = fileResult;
+        late final Future<void> completion;
+        completion = fileResult.whenComplete(() {
+          activeFileTasks.remove(completion);
+        });
+        activeFileTasks.add(completion);
+        if (activeFileTasks.length >= _maxConcurrentFilePreparations) {
+          await Future.any(activeFileTasks);
           _throwIfCancelled(shouldCancel);
+        }
+      }
+
+      for (var entryIndex = 0;
+          entryIndex < directoryEntries.length;
+          entryIndex++) {
+        _throwIfCancelled(shouldCancel);
+        final remainingForEntry = remaining - collected.length;
+        if (remainingForEntry <= 0) {
+          truncated = true;
+          break;
+        }
+
+        final pendingFileFuture = fileResultFutures[entryIndex];
+        if (pendingFileFuture != null) {
+          final pendingFile = await pendingFileFuture;
+          if (pendingFile != null) {
+            collected.add(pendingFile);
+            continue;
+          }
+        }
+
+        final childResultFuture = childDirectoryResults[entryIndex];
+        if (childResultFuture == null) {
+          continue;
+        }
+        final childResult = await childResultFuture;
+        _throwIfCancelled(shouldCancel);
+        if (childResult.items.length > remainingForEntry) {
+          collected.addAll(
+            childResult.items.take(remainingForEntry),
+          );
+          truncated = true;
+        } else {
           collected.addAll(childResult.items);
-          truncated = truncated || childResult.truncated;
-          continue;
         }
-        if (_isExcludedByKeyword(entry.uri, source: source)) {
-          webDavTrace(
-            'scan.walk.skipExcludedFile',
-            fields: {
-              'uri': entry.uri,
-              'name': entry.name,
-            },
-          );
-          continue;
-        }
-        if (!_isPlayableVideo(entry)) {
-          webDavTrace(
-            'scan.walk.skipNonPlayable',
-            fields: {
-              'uri': entry.uri,
-              'name': entry.name,
-              'contentType': entry.contentType,
-            },
-          );
-          continue;
-        }
-        final metadata = shouldLoadSidecarMetadata
-            ? await _resolveSidecarMetadata(
-                entry,
-                siblings: directoryEntries,
-                source: source,
-              )
-            : _buildBasicMetadataSeed(entry);
-        _throwIfCancelled(shouldCancel);
-        final streamUrl = await _resolvePlayableUrl(entry, source: source);
-        _throwIfCancelled(shouldCancel);
-        if (streamUrl.trim().isEmpty) {
-          webDavTrace(
-            'scan.walk.skipEmptyStream',
-            fields: {
-              'uri': entry.uri,
-              'name': entry.name,
-            },
-          );
-          continue;
-        }
-        final pendingItem = _PendingWebDavScannedItem(
-          resourceId: entry.uri.toString(),
-          fileName: entry.name,
-          actualAddress: _relativePathForNasDisplay(entry.uri, source: source),
-          sectionId: collectionId,
-          sectionName: collectionName,
-          streamUrl: streamUrl,
-          streamHeaders: _headersForResolvedStream(source, streamUrl),
-          addedAt: entry.modifiedAt ?? DateTime.now(),
-          modifiedAt: entry.modifiedAt,
-          fileSizeBytes: entry.sizeBytes,
-          metadataSeed: metadata,
-          relativeDirectories: _relativeDirectorySegmentsFromRoot(
-            fileUri: entry.uri,
-            rootUri: rootUri,
-          ),
-        );
-        webDavTrace(
-          'scan.walk.accept',
-          fields: {
-            'path': pendingItem.actualAddress,
-            'title': pendingItem.metadataSeed.title,
-            'itemType': pendingItem.metadataSeed.itemType,
-            'season': pendingItem.metadataSeed.seasonNumber,
-            'episode': pendingItem.metadataSeed.episodeNumber,
-            'directories': pendingItem.relativeDirectories,
-          },
-        );
-        collected.add(pendingItem);
+        truncated = truncated || childResult.truncated;
       }
 
       if (!truncated && directoryModifiedAt != null) {
@@ -385,6 +467,8 @@ class WebDavNasClient {
         'rootUri': rootUri,
         'pendingCount': pendingItems.length,
         'resultCount': items.length,
+        'truncated': walkResult.truncated,
+        'maxConcurrentDirectoryWalks': _maxConcurrentDirectoryWalks,
       },
     );
     return items;
@@ -396,6 +480,7 @@ class WebDavNasClient {
     required String sectionId,
     required String sectionName,
     bool? loadSidecarMetadata,
+    bool resolvePlayableStreams = true,
     bool Function()? shouldCancel,
   }) async {
     final endpoint = source.endpoint.trim();
@@ -444,9 +529,13 @@ class WebDavNasClient {
           )
         : _buildBasicMetadataSeed(entry);
     _throwIfCancelled(shouldCancel);
-    final streamUrl = await _resolvePlayableUrl(entry, source: source);
+    final resolvedPlayable = await _resolvePlayableSource(
+      entry,
+      source: source,
+      resolveStrmTarget: resolvePlayableStreams,
+    );
     _throwIfCancelled(shouldCancel);
-    if (streamUrl.trim().isEmpty) {
+    if (resolvedPlayable.streamUrl.trim().isEmpty) {
       return null;
     }
     final collectionName = sectionName.trim().isEmpty
@@ -458,12 +547,118 @@ class WebDavNasClient {
       actualAddress: _relativePathForNasDisplay(entry.uri, source: source),
       sectionId: sectionId,
       sectionName: collectionName,
-      streamUrl: streamUrl,
-      streamHeaders: _headersForResolvedStream(source, streamUrl),
+      streamUrl: resolvedPlayable.streamUrl,
+      streamHeaders: resolvedPlayable.headers,
       addedAt: entry.modifiedAt ?? DateTime.now(),
       modifiedAt: entry.modifiedAt,
       fileSizeBytes: entry.sizeBytes,
       metadataSeed: metadata,
+    );
+  }
+
+  Future<PlaybackTarget> resolvePlaybackTarget({
+    required MediaSourceConfig source,
+    required PlaybackTarget target,
+  }) async {
+    if (target.sourceKind != MediaSourceKind.nas) {
+      return target;
+    }
+    final candidateUrl = target.streamUrl.trim();
+    final candidateAddress = target.actualAddress.trim();
+    final shouldResolveStrm = _looksLikeStrmReference(candidateUrl) ||
+        (candidateUrl.isEmpty && _looksLikeStrmReference(candidateAddress));
+    if (!shouldResolveStrm) {
+      return target;
+    }
+
+    final strmUri = _resolvePlaybackTargetUri(
+      source,
+      streamUrl: candidateUrl,
+      actualAddress: candidateAddress,
+    );
+    if (strmUri == null) {
+      return target;
+    }
+    final resolvedPlayableUrl =
+        await _resolvePlayableUrlFromUri(strmUri, source: source);
+    if (resolvedPlayableUrl.trim().isEmpty) {
+      return target;
+    }
+
+    return PlaybackTarget(
+      title: target.title,
+      sourceId: target.sourceId,
+      streamUrl: resolvedPlayableUrl,
+      sourceName: target.sourceName,
+      sourceKind: target.sourceKind,
+      actualAddress: target.actualAddress,
+      itemId: target.itemId,
+      itemType: target.itemType,
+      year: target.year,
+      seriesId: target.seriesId,
+      seriesTitle: target.seriesTitle,
+      preferredMediaSourceId: target.preferredMediaSourceId,
+      subtitle: target.subtitle,
+      headers: _headersForResolvedStream(source, resolvedPlayableUrl),
+      container: target.container,
+      videoCodec: target.videoCodec,
+      audioCodec: target.audioCodec,
+      seasonNumber: target.seasonNumber,
+      episodeNumber: target.episodeNumber,
+      width: target.width,
+      height: target.height,
+      bitrate: target.bitrate,
+      fileSizeBytes: target.fileSizeBytes,
+    );
+  }
+
+  Future<void> deleteResource(
+    MediaSourceConfig source, {
+    required String resourcePath,
+    String sectionId = '',
+  }) async {
+    final endpoint = source.endpoint.trim();
+    final normalizedResourcePath = resourcePath.trim();
+    if (endpoint.isEmpty || normalizedResourcePath.isEmpty) {
+      return;
+    }
+
+    final targetUri = _resolveResourceUri(
+      source,
+      resourcePath: normalizedResourcePath,
+      sectionId: sectionId,
+    );
+    final response = await _client.delete(
+      targetUri,
+      headers: _headers(source),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('WebDAV 删除失败：HTTP ${response.statusCode}');
+    }
+    _resetScanCaches();
+  }
+
+  Uri _resolveResourceUri(
+    MediaSourceConfig source, {
+    required String resourcePath,
+    required String sectionId,
+  }) {
+    final directUri = Uri.tryParse(resourcePath);
+    if (directUri != null && directUri.hasScheme) {
+      return directUri;
+    }
+
+    final baseUri = Uri.parse(
+      sectionId.trim().isNotEmpty ? sectionId.trim() : _browseRoot(source),
+    );
+    final normalizedBasePath =
+        baseUri.path.endsWith('/') ? baseUri.path : '${baseUri.path}/';
+    final normalizedResourcePath = resourcePath.replaceAll('\\', '/').trim();
+    final resolvedPath = normalizedResourcePath.startsWith('/')
+        ? normalizedResourcePath
+        : '$normalizedBasePath$normalizedResourcePath';
+    return baseUri.replace(
+      path: resolvedPath.replaceAll(RegExp(r'/+'), '/'),
     );
   }
 }

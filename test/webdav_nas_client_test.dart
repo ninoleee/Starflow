@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/domain/playback_models.dart';
 
 void main() {
   group('WebDavNasClient', () {
@@ -193,7 +194,7 @@ void main() {
       expect(items.single.streamUrl, isNotEmpty);
     });
 
-    test('does not force generic child folders into seasons without clues',
+    test('treats generic child folders as seasons and root files as specials',
         () async {
       final client = WebDavNasClient(
         MockClient((request) async {
@@ -237,16 +238,22 @@ void main() {
         limit: 20,
       );
       expect(inferredItems, hasLength(3));
-      expect(
-        inferredItems.every((item) => item.itemType.trim().isEmpty),
-        isTrue,
-      );
-      expect(
-        inferredItems.every(
-          (item) => item.seasonNumber == null && item.episodeNumber == null,
-        ),
-        isTrue,
-      );
+      expect(inferredItems.every((item) => item.itemType == 'episode'), isTrue);
+
+      final rootSpecial =
+          inferredItems.firstWhere((item) => item.title == 'Part A');
+      expect(rootSpecial.seasonNumber, 0);
+      expect(rootSpecial.episodeNumber, 1);
+
+      final arcPartB =
+          inferredItems.firstWhere((item) => item.title == 'Part B');
+      expect(arcPartB.seasonNumber, 1);
+      expect(arcPartB.episodeNumber, 1);
+
+      final arcPartC =
+          inferredItems.firstWhere((item) => item.title == 'Part C');
+      expect(arcPartC.seasonNumber, 1);
+      expect(arcPartC.episodeNumber, 2);
     });
 
     test('treats direct episode-style files as a single implicit season',
@@ -638,6 +645,150 @@ void main() {
         1,
       );
     });
+
+    test('scans sibling season directories concurrently', () async {
+      var activeSeasonPropfinds = 0;
+      var maxConcurrentSeasonPropfinds = 0;
+
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/Concurrent/') {
+            return http.Response(_concurrentRootPropfindResponse, 207);
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/Concurrent/Season%201/') {
+            activeSeasonPropfinds += 1;
+            if (activeSeasonPropfinds > maxConcurrentSeasonPropfinds) {
+              maxConcurrentSeasonPropfinds = activeSeasonPropfinds;
+            }
+            await Future<void>.delayed(const Duration(milliseconds: 30));
+            activeSeasonPropfinds -= 1;
+            return http.Response(_concurrentSeasonOnePropfindResponse, 207);
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/Concurrent/Season%202/') {
+            activeSeasonPropfinds += 1;
+            if (activeSeasonPropfinds > maxConcurrentSeasonPropfinds) {
+              maxConcurrentSeasonPropfinds = activeSeasonPropfinds;
+            }
+            await Future<void>.delayed(const Duration(milliseconds: 30));
+            activeSeasonPropfinds -= 1;
+            return http.Response(_concurrentSeasonTwoPropfindResponse, 207);
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      const source = MediaSourceConfig(
+        id: 'nas-concurrent',
+        name: 'Concurrent NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/dav/Shows/Concurrent/',
+        enabled: true,
+      );
+
+      final items = await client.fetchLibrary(source, limit: 20);
+
+      expect(items, hasLength(2));
+      expect(maxConcurrentSeasonPropfinds, greaterThan(1));
+    });
+
+    test('can defer strm target resolution during WebDAV scans', () async {
+      var strmReadCount = 0;
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/LazyStrm/') {
+            return http.Response(_lazyStrmRootPropfindResponse, 207);
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/LazyStrm/Episode%2001.strm') {
+            strmReadCount += 1;
+            return http.Response(
+              'https://media.example.com/lazy/e01.m3u8\n',
+              200,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      const source = MediaSourceConfig(
+        id: 'nas-lazy-strm',
+        name: 'Lazy STRM NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/dav/Shows/LazyStrm/',
+        enabled: true,
+        username: 'alice',
+        password: 'secret',
+      );
+
+      final items = await client.scanLibrary(
+        source,
+        limit: 20,
+        resolvePlayableStreams: false,
+      );
+
+      expect(items, hasLength(1));
+      expect(strmReadCount, 0);
+      expect(
+        items.single.streamUrl,
+        'https://nas.example.com/dav/Shows/LazyStrm/Episode%2001.strm',
+      );
+      expect(items.single.streamHeaders['Authorization'], startsWith('Basic '));
+    });
+
+    test('resolves deferred nas strm targets before playback', () async {
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/LazyStrm/Episode%2001.strm') {
+            return http.Response(
+              'https://media.example.com/lazy/e01.m3u8\n',
+              200,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      const source = MediaSourceConfig(
+        id: 'nas-lazy-strm',
+        name: 'Lazy STRM NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/dav/Shows/LazyStrm/',
+        enabled: true,
+        username: 'alice',
+        password: 'secret',
+      );
+
+      final resolved = await client.resolvePlaybackTarget(
+        source: source,
+        target: const PlaybackTarget(
+          title: 'Episode 01',
+          sourceId: 'nas-lazy-strm',
+          streamUrl:
+              'https://nas.example.com/dav/Shows/LazyStrm/Episode%2001.strm',
+          sourceName: 'Lazy STRM NAS',
+          sourceKind: MediaSourceKind.nas,
+          actualAddress: '/dav/Shows/LazyStrm/Episode 01.strm',
+          container: 'strm',
+        ),
+      );
+
+      expect(
+        resolved.streamUrl,
+        'https://media.example.com/lazy/e01.m3u8',
+      );
+      expect(resolved.headers, isEmpty);
+    });
   });
 }
 
@@ -960,7 +1111,8 @@ const _chenLuyuRootPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
   </d:response>
 </d:multistatus>''';
 
-const _familyCourtRootPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
+const _familyCourtRootPropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
 <d:multistatus xmlns:d="DAV:">
   <d:response>
     <d:href>/dav/Shows/FamilyCourt/</d:href>
@@ -1302,6 +1454,109 @@ const _repeatableSeasonTwoPropfindResponse =
         <d:resourcetype />
         <d:getcontenttype>video/x-matroska</d:getcontenttype>
         <d:getlastmodified>Sun, 05 Apr 2026 08:06:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _concurrentRootPropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/Concurrent/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Concurrent</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/Concurrent/Season%201/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Season 1</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/Concurrent/Season%202/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Season 2</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _concurrentSeasonOnePropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/Concurrent/Season%201/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Season 1</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/Concurrent/Season%201/Episode%2001.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Episode 01.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _concurrentSeasonTwoPropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/Concurrent/Season%202/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Season 2</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/Concurrent/Season%202/Episode%2002.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Episode 02.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _lazyStrmRootPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/LazyStrm/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>LazyStrm</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/LazyStrm/Episode%2001.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Episode 01.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
       </d:prop>
     </d:propstat>
   </d:response>

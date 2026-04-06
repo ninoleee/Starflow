@@ -1,5 +1,32 @@
 import 'package:starflow/features/library/domain/media_models.dart';
 
+enum NasMetadataFetchStatus {
+  never,
+  succeeded,
+  failed,
+}
+
+extension NasMetadataFetchStatusX on NasMetadataFetchStatus {
+  bool get hasAttempted => this != NasMetadataFetchStatus.never;
+
+  bool get isSuccessful => this == NasMetadataFetchStatus.succeeded;
+
+  static NasMetadataFetchStatus fromJsonValue(Object? value) {
+    final normalized = '$value'.trim().toLowerCase();
+    switch (normalized) {
+      case 'succeeded':
+        return NasMetadataFetchStatus.succeeded;
+      case 'failed':
+        return NasMetadataFetchStatus.failed;
+      case 'never':
+      case '':
+        return NasMetadataFetchStatus.never;
+      default:
+        return NasMetadataFetchStatus.never;
+    }
+  }
+}
+
 class NasMediaIndexRecord {
   const NasMediaIndexRecord({
     required this.id,
@@ -20,10 +47,10 @@ class NasMediaIndexRecord {
     required this.recognizedYear,
     required this.recognizedItemType,
     required this.preferSeries,
-    required this.sidecarMatched,
-    required this.wmdbMatched,
-    required this.tmdbMatched,
-    required this.imdbMatched,
+    required this.sidecarStatus,
+    required this.wmdbStatus,
+    required this.tmdbStatus,
+    required this.imdbStatus,
     required this.item,
     this.recognizedSeasonNumber,
     this.recognizedEpisodeNumber,
@@ -49,11 +76,19 @@ class NasMediaIndexRecord {
   final bool preferSeries;
   final int? recognizedSeasonNumber;
   final int? recognizedEpisodeNumber;
-  final bool sidecarMatched;
-  final bool wmdbMatched;
-  final bool tmdbMatched;
-  final bool imdbMatched;
+  final NasMetadataFetchStatus sidecarStatus;
+  final NasMetadataFetchStatus wmdbStatus;
+  final NasMetadataFetchStatus tmdbStatus;
+  final NasMetadataFetchStatus imdbStatus;
   final MediaItem item;
+
+  bool get sidecarMatched => sidecarStatus.isSuccessful;
+
+  bool get wmdbMatched => wmdbStatus.isSuccessful;
+
+  bool get tmdbMatched => tmdbStatus.isSuccessful;
+
+  bool get imdbMatched => imdbStatus.isSuccessful;
 
   static String buildRecordId({
     required String sourceId,
@@ -84,10 +119,10 @@ class NasMediaIndexRecord {
       'preferSeries': preferSeries,
       'recognizedSeasonNumber': recognizedSeasonNumber,
       'recognizedEpisodeNumber': recognizedEpisodeNumber,
-      'sidecarMatched': sidecarMatched,
-      'wmdbMatched': wmdbMatched,
-      'tmdbMatched': tmdbMatched,
-      'imdbMatched': imdbMatched,
+      'sidecarStatus': sidecarStatus.name,
+      'wmdbStatus': wmdbStatus.name,
+      'tmdbStatus': tmdbStatus.name,
+      'imdbStatus': imdbStatus.name,
       'item': item.toJson(),
     };
   }
@@ -117,10 +152,12 @@ class NasMediaIndexRecord {
       recognizedSeasonNumber: (json['recognizedSeasonNumber'] as num?)?.toInt(),
       recognizedEpisodeNumber:
           (json['recognizedEpisodeNumber'] as num?)?.toInt(),
-      sidecarMatched: json['sidecarMatched'] as bool? ?? false,
-      wmdbMatched: json['wmdbMatched'] as bool? ?? false,
-      tmdbMatched: json['tmdbMatched'] as bool? ?? false,
-      imdbMatched: json['imdbMatched'] as bool? ?? false,
+      sidecarStatus: NasMetadataFetchStatusX.fromJsonValue(
+        json['sidecarStatus'],
+      ),
+      wmdbStatus: NasMetadataFetchStatusX.fromJsonValue(json['wmdbStatus']),
+      tmdbStatus: NasMetadataFetchStatusX.fromJsonValue(json['tmdbStatus']),
+      imdbStatus: NasMetadataFetchStatusX.fromJsonValue(json['imdbStatus']),
       item: MediaItem.fromJson(
         Map<String, dynamic>.from(json['item'] as Map? ?? const {}),
       ),
@@ -134,12 +171,31 @@ class NasMediaIndexSourceState {
     required this.lastIndexedAt,
     required this.recordCount,
     required this.scopeKey,
+    this.emptyAutoRebuildAttempted = false,
   });
 
   final String sourceId;
   final DateTime lastIndexedAt;
   final int recordCount;
   final String scopeKey;
+  final bool emptyAutoRebuildAttempted;
+
+  NasMediaIndexSourceState copyWith({
+    String? sourceId,
+    DateTime? lastIndexedAt,
+    int? recordCount,
+    String? scopeKey,
+    bool? emptyAutoRebuildAttempted,
+  }) {
+    return NasMediaIndexSourceState(
+      sourceId: sourceId ?? this.sourceId,
+      lastIndexedAt: lastIndexedAt ?? this.lastIndexedAt,
+      recordCount: recordCount ?? this.recordCount,
+      scopeKey: scopeKey ?? this.scopeKey,
+      emptyAutoRebuildAttempted:
+          emptyAutoRebuildAttempted ?? this.emptyAutoRebuildAttempted,
+    );
+  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -147,6 +203,7 @@ class NasMediaIndexSourceState {
       'lastIndexedAt': lastIndexedAt.toIso8601String(),
       'recordCount': recordCount,
       'scopeKey': scopeKey,
+      'emptyAutoRebuildAttempted': emptyAutoRebuildAttempted,
     };
   }
 
@@ -158,6 +215,8 @@ class NasMediaIndexSourceState {
               DateTime.now(),
       recordCount: (json['recordCount'] as num?)?.toInt() ?? 0,
       scopeKey: json['scopeKey'] as String? ?? '',
+      emptyAutoRebuildAttempted:
+          json['emptyAutoRebuildAttempted'] as bool? ?? false,
     );
   }
 }

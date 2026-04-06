@@ -1,10 +1,21 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+
+class _PreviousLibraryPageIntent extends Intent {
+  const _PreviousLibraryPageIntent();
+}
+
+class _NextLibraryPageIntent extends Intent {
+  const _NextLibraryPageIntent();
+}
 
 class LibraryPagedGrid extends StatelessWidget {
   const LibraryPagedGrid({
@@ -12,6 +23,9 @@ class LibraryPagedGrid extends StatelessWidget {
     required this.items,
     required this.currentPage,
     required this.onPageChanged,
+    required this.isTelevision,
+    this.focusScopePrefix = 'library',
+    this.onItemContextAction,
     this.emptyMessage = '无',
     this.pageSize = 24,
     this.header,
@@ -20,6 +34,9 @@ class LibraryPagedGrid extends StatelessWidget {
   final List<MediaItem> items;
   final int currentPage;
   final ValueChanged<int> onPageChanged;
+  final bool isTelevision;
+  final String focusScopePrefix;
+  final ValueChanged<MediaItem>? onItemContextAction;
   final String emptyMessage;
   final int pageSize;
   final Widget? header;
@@ -44,7 +61,7 @@ class LibraryPagedGrid extends StatelessWidget {
         .take(normalizedPageSize)
         .toList(growable: false);
 
-    return Column(
+    final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (header != null) ...[
@@ -56,6 +73,8 @@ class LibraryPagedGrid extends StatelessWidget {
           currentPage: safePage,
           totalPages: totalPages,
           onPageChanged: onPageChanged,
+          isTelevision: isTelevision,
+          focusScopePrefix: '$focusScopePrefix:pager:top',
         ),
         const SizedBox(height: 14),
         LayoutBuilder(
@@ -82,11 +101,30 @@ class LibraryPagedGrid extends StatelessWidget {
               ),
               itemBuilder: (context, index) {
                 final item = pageItems[index];
+                final posterAssets = _resolveLibraryPosterAssets(item);
+                final posterAsset = posterAssets.isNotEmpty
+                    ? posterAssets.first
+                    : const _LibraryImageAsset(url: '');
                 return MediaPosterTile(
+                  focusId:
+                      '$focusScopePrefix:item:${item.id.isNotEmpty ? item.id : item.title}:page:$safePage:index:$index',
+                  autofocus: index == 0,
                   title: item.title,
                   subtitle: item.year > 0 ? '${item.year}' : '',
-                  posterUrl: item.posterUrl,
-                  posterHeaders: item.posterHeaders,
+                  posterUrl: posterAsset.url,
+                  posterHeaders: posterAsset.headers,
+                  posterFallbackSources: posterAssets
+                      .skip(1)
+                      .map(
+                        (asset) => AppNetworkImageSource(
+                          url: asset.url,
+                          headers: asset.headers,
+                        ),
+                      )
+                      .toList(growable: false),
+                  onContextAction: onItemContextAction == null
+                      ? null
+                      : () => onItemContextAction!(item),
                   width: null,
                   onTap: () {
                     context.pushNamed(
@@ -106,12 +144,85 @@ class LibraryPagedGrid extends StatelessWidget {
             currentPage: safePage,
             totalPages: totalPages,
             onPageChanged: onPageChanged,
+            isTelevision: isTelevision,
+            focusScopePrefix: '$focusScopePrefix:pager:bottom',
             compact: true,
           ),
         ],
       ],
     );
+
+    if (!isTelevision) {
+      return content;
+    }
+
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.pageUp):
+            _PreviousLibraryPageIntent(),
+        SingleActivator(LogicalKeyboardKey.pageDown):
+            _NextLibraryPageIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _PreviousLibraryPageIntent:
+              CallbackAction<_PreviousLibraryPageIntent>(
+            onInvoke: (_) {
+              if (safePage > 0) {
+                onPageChanged(safePage - 1);
+              }
+              return null;
+            },
+          ),
+          _NextLibraryPageIntent: CallbackAction<_NextLibraryPageIntent>(
+            onInvoke: (_) {
+              if (safePage < totalPages - 1) {
+                onPageChanged(safePage + 1);
+              }
+              return null;
+            },
+          ),
+        },
+        child: content,
+      ),
+    );
   }
+}
+
+class _LibraryImageAsset {
+  const _LibraryImageAsset({
+    required this.url,
+    this.headers = const {},
+  });
+
+  final String url;
+  final Map<String, String> headers;
+}
+
+List<_LibraryImageAsset> _resolveLibraryPosterAssets(MediaItem item) {
+  final assets = <_LibraryImageAsset>[];
+  final seen = <String>{};
+
+  void add(String url, Map<String, String> headers) {
+    final trimmedUrl = url.trim();
+    if (trimmedUrl.isEmpty || !seen.add(trimmedUrl)) {
+      return;
+    }
+    assets.add(
+      _LibraryImageAsset(
+        url: trimmedUrl,
+        headers: headers,
+      ),
+    );
+  }
+
+  add(item.posterUrl, item.posterHeaders);
+  add(item.bannerUrl, item.bannerHeaders);
+  add(item.backdropUrl, item.backdropHeaders);
+  for (final url in item.extraBackdropUrls) {
+    add(url, item.extraBackdropHeaders);
+  }
+  return assets;
 }
 
 class _LibraryPagerSummary extends StatelessWidget {
@@ -120,6 +231,8 @@ class _LibraryPagerSummary extends StatelessWidget {
     required this.currentPage,
     required this.totalPages,
     required this.onPageChanged,
+    required this.isTelevision,
+    required this.focusScopePrefix,
     this.compact = false,
   });
 
@@ -127,6 +240,8 @@ class _LibraryPagerSummary extends StatelessWidget {
   final int currentPage;
   final int totalPages;
   final ValueChanged<int> onPageChanged;
+  final bool isTelevision;
+  final String focusScopePrefix;
   final bool compact;
 
   @override
@@ -166,12 +281,16 @@ class _LibraryPagerSummary extends StatelessWidget {
         _PagerButton(
           icon: Icons.arrow_back_ios_new_rounded,
           enabled: canGoPrevious,
+          isTelevision: isTelevision,
+          focusId: '$focusScopePrefix:previous',
           onTap: () => onPageChanged(currentPage - 1),
         ),
         const SizedBox(width: 8),
         _PagerButton(
           icon: Icons.arrow_forward_ios_rounded,
           enabled: canGoNext,
+          isTelevision: isTelevision,
+          focusId: '$focusScopePrefix:next',
           onTap: () => onPageChanged(currentPage + 1),
         ),
       ],
@@ -183,35 +302,46 @@ class _PagerButton extends StatelessWidget {
   const _PagerButton({
     required this.icon,
     required this.enabled,
+    required this.isTelevision,
+    this.focusId,
     required this.onTap,
   });
 
   final IconData icon;
   final bool enabled;
+  final bool isTelevision;
+  final String? focusId;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final child = Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: enabled
+            ? Colors.white.withValues(alpha: 0.08)
+            : Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Icon(
+        icon,
+        size: 18,
+        color: enabled ? Colors.white : Colors.white.withValues(alpha: 0.26),
+      ),
+    );
+    if (isTelevision) {
+      return TvFocusableAction(
+        onPressed: enabled ? onTap : null,
+        focusId: focusId,
+        borderRadius: BorderRadius.circular(999),
+        child: child,
+      );
+    }
     return InkWell(
       borderRadius: BorderRadius.circular(999),
       onTap: enabled ? onTap : null,
-      child: Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          color: enabled
-              ? Colors.white.withValues(alpha: 0.08)
-              : Colors.white.withValues(alpha: 0.03),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Icon(
-          icon,
-          size: 18,
-          color: enabled
-              ? Colors.white
-              : Colors.white.withValues(alpha: 0.26),
-        ),
-      ),
+      child: child,
     );
   }
 }

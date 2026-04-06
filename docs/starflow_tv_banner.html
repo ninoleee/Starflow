@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Starflow TV Banner</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap');
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 1280px;
+      height: 720px;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Syne', sans-serif;
+    }
+
+    body {
+      background:
+        radial-gradient(circle at 18% 35%, rgba(90, 150, 255, 0.16), transparent 30%),
+        radial-gradient(circle at 85% 20%, rgba(60, 95, 180, 0.16), transparent 24%),
+        linear-gradient(135deg, #060912 0%, #0e1524 48%, #121d33 100%);
+      color: #fff;
+    }
+
+    .banner {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .banner::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 20% 50%, rgba(111, 170, 255, 0.08), transparent 28%),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02), transparent 38%);
+    }
+
+    .content {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      gap: 72px;
+      padding: 0 92px;
+      transform: translateY(-26px);
+    }
+
+    .icon-shell {
+      width: 300px;
+      height: 300px;
+      position: relative;
+      flex: 0 0 auto;
+    }
+
+    .icon-bg {
+      position: absolute;
+      inset: 0;
+      border-radius: 72px;
+      background:
+        radial-gradient(circle at 50% 22%, rgba(120, 165, 255, 0.12), transparent 34%),
+        linear-gradient(145deg, #1c2c4d 0%, #0b1424 100%);
+      box-shadow:
+        0 24px 72px rgba(0, 0, 0, 0.26),
+        inset 0 -18px 36px rgba(0, 0, 0, 0.16);
+    }
+
+    .mark {
+      position: absolute;
+      inset: 32px;
+      display: grid;
+      place-items: center;
+    }
+
+    svg {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .meta {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .wordmark {
+      display: flex;
+      align-items: baseline;
+      letter-spacing: -0.05em;
+      line-height: 1;
+    }
+
+    .word-star {
+      font-size: 146px;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .word-flow {
+      font-size: 146px;
+      font-weight: 400;
+      color: rgba(255, 255, 255, 0.48);
+    }
+  </style>
+</head>
+<body>
+  <div class="banner">
+    <div class="content">
+      <div class="icon-shell">
+        <div class="icon-bg"></div>
+        <div class="mark">
+          <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <g transform="translate(4 1) scale(0.92)">
+              <path d="M14 61 C27 61 33 49 45 49 C56 49 60 57 71 55 C78 54 83 50 88 45"
+                    stroke="url(#grad1)" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+              <path d="M12 70 C27 70 35 57 48 57 C58 57 64 63 77 60 C82 59 86 55 90 50"
+                    stroke="url(#grad2)" stroke-width="2.3" stroke-linecap="round" fill="none"/>
+              <path d="M14 79 C31 79 39 67 54 67 C65 67 70 72 82 69"
+                    stroke="url(#grad3)" stroke-width="1.9" stroke-linecap="round" fill="none"/>
+
+              <path d="M50 14 L53.8 31.2 L71 35 L53.8 38.8 L50 56 L46.2 38.8 L29 35 L46.2 31.2 Z"
+                    fill="url(#starFill)"/>
+              <line x1="50" y1="8" x2="50" y2="15" stroke="#C6DEFF" stroke-opacity="0.92" stroke-width="1.8" stroke-linecap="round"/>
+              <line x1="50" y1="55" x2="50" y2="63" stroke="#A7C8FF" stroke-opacity="0.84" stroke-width="1.8" stroke-linecap="round"/>
+              <line x1="21" y1="35" x2="29" y2="35" stroke="#B7D4FF" stroke-opacity="0.78" stroke-width="1.8" stroke-linecap="round"/>
+              <line x1="71" y1="35" x2="79" y2="35" stroke="#B7D4FF" stroke-opacity="0.78" stroke-width="1.8" stroke-linecap="round"/>
+            </g>
+
+            <defs>
+              <linearGradient id="grad1" x1="14" y1="53" x2="88" y2="53" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#4A86FF" stop-opacity="0.10"/>
+                <stop offset="42%" stop-color="#6FB1FF"/>
+                <stop offset="100%" stop-color="#B2D6FF" stop-opacity="0.38"/>
+              </linearGradient>
+              <linearGradient id="grad2" x1="12" y1="60" x2="90" y2="60" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#3469EB" stop-opacity="0.12"/>
+                <stop offset="46%" stop-color="#5E9EF2"/>
+                <stop offset="100%" stop-color="#8EBFFF" stop-opacity="0.32"/>
+              </linearGradient>
+              <linearGradient id="grad3" x1="14" y1="69" x2="82" y2="69" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#254FBE" stop-opacity="0.10"/>
+                <stop offset="52%" stop-color="#3E78D6"/>
+                <stop offset="100%" stop-color="#78AAEF" stop-opacity="0.26"/>
+              </linearGradient>
+              <linearGradient id="starFill" x1="29" y1="14" x2="71" y2="56" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#F3F9FF"/>
+                <stop offset="100%" stop-color="#8BC0FF"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+      </div>
+
+      <div class="meta">
+        <div class="wordmark">
+          <span class="word-star">Star</span><span class="word-flow">flow</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

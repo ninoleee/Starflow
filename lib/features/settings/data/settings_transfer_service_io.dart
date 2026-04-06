@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:starflow/features/settings/data/settings_transfer_service.dart';
@@ -28,28 +29,54 @@ class LocalFileSettingsTransferService implements SettingsTransferService {
       'exports',
       'settings',
     );
-    final directory = await getDirectoryPath(
-      initialDirectory: exportDirectory,
-      confirmButtonText: '选择这个目录',
-    );
-    if (directory == null || directory.trim().isEmpty) {
-      return null;
+    if (Platform.isIOS) {
+      return p.join(exportDirectory, suggestedName ?? 'starflow-settings.json');
     }
-    return p.join(directory, suggestedName ?? 'starflow-settings.json');
+    try {
+      final directory = await getDirectoryPath(
+        initialDirectory: exportDirectory,
+        confirmButtonText: '选择这个目录',
+      );
+      if (directory == null || directory.trim().isEmpty) {
+        return null;
+      }
+      return p.join(directory, suggestedName ?? 'starflow-settings.json');
+    } on PlatformException catch (error) {
+      throw FileSystemException(
+        '当前设备无法打开目录选择器，请手动填写导出路径。',
+        error.message,
+      );
+    } catch (error) {
+      throw FileSystemException('当前设备无法打开目录选择器，请手动填写导出路径。', '$error');
+    }
   }
 
   @override
   Future<String?> pickImportPath() async {
-    final file = await openFile(
-      acceptedTypeGroups: const [
-        XTypeGroup(
-          label: 'JSON',
-          extensions: ['json'],
-        ),
-      ],
-      confirmButtonText: '导入这个文件',
-    );
-    return file?.path;
+    try {
+      if (Platform.isIOS) {
+        final file = await openFile();
+        return file?.path;
+      }
+      final file = await openFile(
+        acceptedTypeGroups: const [
+          XTypeGroup(
+            label: 'JSON',
+            extensions: ['json'],
+            uniformTypeIdentifiers: ['public.json'],
+          ),
+        ],
+        confirmButtonText: '导入这个文件',
+      );
+      return file?.path;
+    } on PlatformException catch (error) {
+      throw FileSystemException(
+        '当前设备无法打开文件选择器，请手动填写 JSON 文件路径。',
+        error.message,
+      );
+    } catch (error) {
+      throw FileSystemException('当前设备无法打开文件选择器，请手动填写 JSON 文件路径。', '$error');
+    }
   }
 
   @override

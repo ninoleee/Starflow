@@ -93,6 +93,9 @@ void main() {
                     'ProviderIds': {
                       'Imdb': 'tt15239678',
                       'Tmdb': '693134',
+                      'Tvdb': '123456',
+                      'wikidata': 'Q987654',
+                      'tmdbSet': '435259',
                     },
                     'ImageTags': {'Primary': 'poster-1'},
                     'MediaSources': [
@@ -178,6 +181,14 @@ void main() {
       expect(items.first.directors, ['Denis Villeneuve']);
       expect(items.first.actors, ['Timothee Chalamet', 'Zendaya']);
       expect(items.first.imdbId, 'tt15239678');
+      expect(items.first.tmdbId, '693134');
+      expect(items.first.tvdbId, '123456');
+      expect(items.first.wikidataId, 'Q987654');
+      expect(items.first.tmdbSetId, '435259');
+      expect(
+        items.first.providerIds,
+        containsPair('wikidata', 'Q987654'),
+      );
       expect(items.last.playbackProgress, closeTo(0.375, 0.0001));
     });
 

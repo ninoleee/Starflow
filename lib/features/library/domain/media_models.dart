@@ -284,6 +284,11 @@ class MediaItem {
     this.playbackProgress,
     this.doubanId = '',
     this.imdbId = '',
+    this.tmdbId = '',
+    this.tvdbId = '',
+    this.wikidataId = '',
+    this.tmdbSetId = '',
+    this.providerIds = const {},
     this.ratingLabels = const [],
     this.container = '',
     this.videoCodec = '',
@@ -333,6 +338,11 @@ class MediaItem {
   final double? playbackProgress;
   final String doubanId;
   final String imdbId;
+  final String tmdbId;
+  final String tvdbId;
+  final String wikidataId;
+  final String tmdbSetId;
+  final Map<String, String> providerIds;
   final List<String> ratingLabels;
   final String container;
   final String videoCodec;
@@ -385,6 +395,11 @@ class MediaItem {
     double? playbackProgress,
     String? doubanId,
     String? imdbId,
+    String? tmdbId,
+    String? tvdbId,
+    String? wikidataId,
+    String? tmdbSetId,
+    Map<String, String>? providerIds,
     List<String>? ratingLabels,
     String? container,
     String? videoCodec,
@@ -435,6 +450,11 @@ class MediaItem {
       playbackProgress: playbackProgress ?? this.playbackProgress,
       doubanId: doubanId ?? this.doubanId,
       imdbId: imdbId ?? this.imdbId,
+      tmdbId: tmdbId ?? this.tmdbId,
+      tvdbId: tvdbId ?? this.tvdbId,
+      wikidataId: wikidataId ?? this.wikidataId,
+      tmdbSetId: tmdbSetId ?? this.tmdbSetId,
+      providerIds: providerIds ?? this.providerIds,
       ratingLabels: ratingLabels ?? this.ratingLabels,
       container: container ?? this.container,
       videoCodec: videoCodec ?? this.videoCodec,
@@ -487,6 +507,11 @@ class MediaItem {
       'playbackProgress': playbackProgress,
       'doubanId': doubanId,
       'imdbId': imdbId,
+      'tmdbId': tmdbId,
+      'tvdbId': tvdbId,
+      'wikidataId': wikidataId,
+      'tmdbSetId': tmdbSetId,
+      'providerIds': providerIds,
       'ratingLabels': ratingLabels,
       'container': container,
       'videoCodec': videoCodec,
@@ -560,6 +585,12 @@ class MediaItem {
       playbackProgress: (json['playbackProgress'] as num?)?.toDouble(),
       doubanId: json['doubanId'] as String? ?? '',
       imdbId: json['imdbId'] as String? ?? '',
+      tmdbId: json['tmdbId'] as String? ?? '',
+      tvdbId: json['tvdbId'] as String? ?? '',
+      wikidataId: json['wikidataId'] as String? ?? '',
+      tmdbSetId: json['tmdbSetId'] as String? ?? '',
+      providerIds: (json['providerIds'] as Map<dynamic, dynamic>? ?? const {})
+          .map((key, value) => MapEntry('$key', '$value')),
       ratingLabels: (json['ratingLabels'] as List<dynamic>? ?? const [])
           .whereType<String>()
           .toList(growable: false),

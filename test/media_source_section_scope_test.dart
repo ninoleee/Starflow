@@ -215,6 +215,134 @@ void main() {
           isEmpty);
       expect(await repository.fetchLibrary(kind: MediaSourceKind.nas), isEmpty);
     });
+
+    test('rebuilds WebDAV index once when library is empty on first load',
+        () async {
+      final webDavClient = _FakeWebDavNasClient(
+        collections: const [
+          MediaCollection(
+            id: 'https://nas.example.com/dav/Media/Anime/',
+            title: 'Anime',
+            sourceId: 'nas-main',
+            sourceName: '家庭 NAS',
+            sourceKind: MediaSourceKind.nas,
+            subtitle: 'WebDAV 目录',
+          ),
+        ],
+        itemsBySection: {
+          'https://nas.example.com/dav/Media/Anime/': [
+            _item(
+              'nas-1',
+              'One Piece',
+              'https://nas.example.com/dav/Media/Anime/',
+              sourceId: 'nas-main',
+              sourceName: '家庭 NAS',
+              sourceKind: MediaSourceKind.nas,
+            ),
+          ],
+        },
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [
+                MediaSourceConfig(
+                  id: 'nas-main',
+                  name: '家庭 NAS',
+                  kind: MediaSourceKind.nas,
+                  endpoint: 'https://nas.example.com/dav/',
+                  enabled: true,
+                  libraryPath: 'https://nas.example.com/dav/Media/',
+                  featuredSectionIds: [
+                    'https://nas.example.com/dav/Media/Anime/'
+                  ],
+                ),
+              ],
+              searchProviders: const [],
+              homeModules: const [],
+            ),
+          ),
+          webDavNasClientProvider.overrideWithValue(webDavClient),
+          nasMediaIndexStoreProvider.overrideWithValue(
+            SembastNasMediaIndexStore(
+              databaseOpener: () => databaseFactoryMemory.openDatabase(
+                'media-source-section-scope-test-3',
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final repository = container.read(mediaRepositoryProvider);
+      final items = await repository.fetchLibrary(kind: MediaSourceKind.nas);
+
+      expect(items.map((item) => item.title), contains('One Piece'));
+      expect(webDavClient.scanLibraryCallCount, 1);
+    });
+
+    test('does not rebuild WebDAV index again after one empty auto attempt',
+        () async {
+      final webDavClient = _FakeWebDavNasClient(
+        collections: const [
+          MediaCollection(
+            id: 'https://nas.example.com/dav/Media/Anime/',
+            title: 'Anime',
+            sourceId: 'nas-main',
+            sourceName: '家庭 NAS',
+            sourceKind: MediaSourceKind.nas,
+            subtitle: 'WebDAV 目录',
+          ),
+        ],
+        itemsBySection: const {
+          'https://nas.example.com/dav/Media/Anime/': <MediaItem>[],
+        },
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [
+                MediaSourceConfig(
+                  id: 'nas-main',
+                  name: '家庭 NAS',
+                  kind: MediaSourceKind.nas,
+                  endpoint: 'https://nas.example.com/dav/',
+                  enabled: true,
+                  libraryPath: 'https://nas.example.com/dav/Media/',
+                  featuredSectionIds: [
+                    'https://nas.example.com/dav/Media/Anime/'
+                  ],
+                ),
+              ],
+              searchProviders: const [],
+              homeModules: const [],
+            ),
+          ),
+          webDavNasClientProvider.overrideWithValue(webDavClient),
+          nasMediaIndexStoreProvider.overrideWithValue(
+            SembastNasMediaIndexStore(
+              databaseOpener: () => databaseFactoryMemory.openDatabase(
+                'media-source-section-scope-test-4',
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final repository = container.read(mediaRepositoryProvider);
+      expect(await repository.fetchLibrary(kind: MediaSourceKind.nas), isEmpty);
+      expect(webDavClient.scanLibraryCallCount, 1);
+
+      expect(await repository.fetchLibrary(kind: MediaSourceKind.nas), isEmpty);
+      expect(
+        webDavClient.scanLibraryCallCount,
+        1,
+        reason: 'The empty WebDAV source should only auto rebuild once.',
+      );
+    });
   });
 }
 
@@ -281,6 +409,7 @@ class _FakeWebDavNasClient extends WebDavNasClient {
 
   final List<MediaCollection> collections;
   final Map<String, List<MediaItem>> itemsBySection;
+  int scanLibraryCallCount = 0;
 
   @override
   Future<List<MediaCollection>> fetchCollections(
@@ -310,9 +439,11 @@ class _FakeWebDavNasClient extends WebDavNasClient {
     String sectionName = '',
     int limit = 200,
     bool? loadSidecarMetadata,
+    bool resolvePlayableStreams = true,
     bool resetCaches = true,
     bool Function()? shouldCancel,
   }) async {
+    scanLibraryCallCount += 1;
     final items = sectionId?.trim().isNotEmpty == true
         ? (itemsBySection[sectionId] ?? const <MediaItem>[])
         : itemsBySection.values.expand((entries) => entries).toList();
@@ -357,6 +488,7 @@ class _FakeWebDavNasClient extends WebDavNasClient {
               seasonNumber: item.seasonNumber,
               episodeNumber: item.episodeNumber,
               imdbId: item.imdbId,
+              tmdbId: '',
               container: item.container,
               videoCodec: item.videoCodec,
               audioCodec: item.audioCodec,

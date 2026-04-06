@@ -12,8 +12,10 @@ import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
+import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -191,6 +193,75 @@ void main() {
       expect(playback.formatLabel, 'MKV · HEVC · TrueHD');
       expect(playback.fileSizeLabel, '24.0 GB');
       expect(playback.resolutionLabel, '3840x2160');
+    });
+
+    test('prefers cached local resource state for douban detail target',
+        () async {
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'wmdbMetadataMatchEnabled': false,
+              'tmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+            }),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const seedTarget = MediaDetailTarget(
+        title: '天书奇谭',
+        posterUrl: '',
+        overview: '',
+        year: 1983,
+        availabilityLabel: '无',
+        searchQuery: '天书奇谭',
+        doubanId: '1428581',
+        sourceName: '豆瓣',
+      );
+      final cachedTarget = seedTarget.copyWith(
+        availabilityLabel: '资源已就绪：WebDAV · nas',
+        sourceKind: MediaSourceKind.nas,
+        sourceName: 'nas',
+        sourceId: 'media-source-1775415208787',
+        itemId: 'nas-item-1',
+        resourcePath: '/movies/天书奇谭 (1983).strm',
+        playbackTarget: const PlaybackTarget(
+          title: '天书奇谭',
+          sourceId: 'media-source-1775415208787',
+          streamUrl: 'https://webdav.example.com/movies/天书奇谭.mkv',
+          sourceName: 'nas',
+          sourceKind: MediaSourceKind.nas,
+          actualAddress: '/movies/天书奇谭 (1983).strm',
+          itemId: 'nas-item-1',
+          itemType: 'movie',
+        ),
+      );
+
+      await container.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+            seedTarget: seedTarget,
+            resolvedTarget: cachedTarget,
+          );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(seedTarget).future,
+      );
+
+      expect(resolved.availabilityLabel, '资源已就绪：WebDAV · nas');
+      expect(resolved.sourceKind, MediaSourceKind.nas);
+      expect(resolved.sourceName, 'nas');
+      expect(resolved.sourceId, 'media-source-1775415208787');
+      expect(resolved.itemId, 'nas-item-1');
+      expect(resolved.playbackTarget, isNotNull);
+      expect(
+        resolved.playbackTarget!.streamUrl,
+        'https://webdav.example.com/movies/天书奇谭.mkv',
+      );
     });
 
     test('auto enriches douban detail with imdb rating and ids', () async {
@@ -387,6 +458,120 @@ void main() {
       expect(resolved.overview, '来自本地媒体库的简介');
     });
 
+    test('auto enrich prioritizes tmdb imdb-id lookup before title search',
+        () async {
+      var wmdbRequests = 0;
+      var tmdbFindRequests = 0;
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'wmdbMetadataMatchEnabled': true,
+              'tmdbMetadataMatchEnabled': true,
+              'tmdbReadAccessToken': 'tmdb-token',
+              'imdbRatingMatchEnabled': false,
+            }),
+          ),
+          wmdbMetadataClientProvider.overrideWithValue(
+            WmdbMetadataClient(
+              MockClient((request) async {
+                wmdbRequests += 1;
+                return http.Response(
+                  jsonEncode({
+                    'data': [
+                      {
+                        'data': [
+                          {
+                            'name': '黑客帝国',
+                          },
+                        ],
+                        'imdbId': 'tt0133093',
+                        'year': '1999',
+                      },
+                    ],
+                  }),
+                  200,
+                );
+              }),
+            ),
+          ),
+          tmdbMetadataClientProvider.overrideWithValue(
+            TmdbMetadataClient(
+              MockClient((request) async {
+                if (request.url.path == '/3/find/tt0133093') {
+                  tmdbFindRequests += 1;
+                  return http.Response(
+                    jsonEncode({
+                      'movie_results': [
+                        {
+                          'id': 603,
+                          'title': 'The Matrix',
+                          'original_title': 'The Matrix',
+                          'release_date': '1999-03-31',
+                          'popularity': 88.0,
+                        },
+                      ],
+                      'tv_results': const [],
+                    }),
+                    200,
+                  );
+                }
+                if (request.url.path == '/3/movie/603') {
+                  return http.Response(
+                    jsonEncode({
+                      'id': 603,
+                      'title': '黑客帝国',
+                      'original_title': 'The Matrix',
+                      'overview': '一名黑客发现世界的真实面貌。',
+                      'poster_path': '/poster.jpg',
+                      'release_date': '1999-03-31',
+                      'runtime': 136,
+                      'genres': const [],
+                      'credits': {
+                        'cast': const [],
+                        'crew': const [],
+                      },
+                      'external_ids': {
+                        'imdb_id': 'tt0133093',
+                      },
+                    }),
+                    200,
+                  );
+                }
+                throw UnsupportedError('Unexpected request: ${request.url}');
+              }),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const target = MediaDetailTarget(
+        title: 'The Matrix',
+        posterUrl: '',
+        overview: '',
+        year: 1999,
+        availabilityLabel: '无',
+        searchQuery: 'The Matrix',
+        imdbId: 'tt0133093',
+        sourceId: 'emby-main',
+        sourceName: 'Home Emby',
+        sourceKind: MediaSourceKind.emby,
+      );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(target).future,
+      );
+
+      expect(resolved.imdbId, 'tt0133093');
+      expect(tmdbFindRequests, 1);
+      expect(wmdbRequests, 1);
+    });
+
     test('keeps existing douban label when wmdb also returns douban rating',
         () async {
       final container = ProviderContainer(
@@ -509,6 +694,9 @@ class _FakeMediaRepository implements MediaRepository {
   }
 
   @override
+  Future<void> cancelActiveWebDavRefreshes() async {}
+
+  @override
   Future<void> refreshSource({
     required String sourceId,
     bool forceFullRescan = false,
@@ -523,4 +711,11 @@ class _FakeMediaRepository implements MediaRepository {
   Future<MediaItem?> matchTitle(String title) async {
     return null;
   }
+
+  @override
+  Future<void> deleteResource({
+    required String sourceId,
+    required String resourcePath,
+    String sectionId = '',
+  }) async {}
 }

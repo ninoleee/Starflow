@@ -318,26 +318,46 @@ class _NetworkStorageSettingsPageState
                   spacing: 12,
                   runSpacing: 12,
                   children: [
-                    OutlinedButton.icon(
-                      onPressed: _isTestingQuarkConnection
-                          ? null
-                          : _testQuarkConnection,
-                      icon: _isTestingQuarkConnection
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.cloud_done_outlined),
-                      label: Text(
-                        _isTestingQuarkConnection ? '测试中...' : '测试夸克连接',
+                    if (isTelevision)
+                      TvAdaptiveButton(
+                        label: _isTestingQuarkConnection ? '测试中...' : '测试夸克连接',
+                        icon: Icons.cloud_done_outlined,
+                        onPressed: _isTestingQuarkConnection
+                            ? null
+                            : _testQuarkConnection,
+                        variant: TvButtonVariant.outlined,
+                      )
+                    else
+                      OutlinedButton.icon(
+                        onPressed: _isTestingQuarkConnection
+                            ? null
+                            : _testQuarkConnection,
+                        icon: _isTestingQuarkConnection
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.cloud_done_outlined),
+                        label: Text(
+                          _isTestingQuarkConnection ? '测试中...' : '测试夸克连接',
+                        ),
                       ),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _pickQuarkFolder,
-                      icon: const Icon(Icons.folder_open_rounded),
-                      label: const Text('选择默认保存文件夹'),
-                    ),
+                    if (isTelevision)
+                      TvAdaptiveButton(
+                        label: '选择默认保存文件夹',
+                        icon: Icons.folder_open_rounded,
+                        onPressed: _pickQuarkFolder,
+                        variant: TvButtonVariant.outlined,
+                      )
+                    else
+                      OutlinedButton.icon(
+                        onPressed: _pickQuarkFolder,
+                        icon: const Icon(Icons.folder_open_rounded),
+                        label: const Text('选择默认保存文件夹'),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -383,31 +403,56 @@ class _NetworkStorageSettingsPageState
                   spacing: 12,
                   runSpacing: 12,
                   children: [
-                    OutlinedButton.icon(
-                      onPressed:
-                          _isTestingSmartStrm ? null : _testSmartStrmTask,
-                      icon: _isTestingSmartStrm
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.bolt_rounded),
-                      label: Text(
-                        _isTestingSmartStrm ? '测试中...' : '测试 STRM 任务',
+                    if (isTelevision)
+                      TvAdaptiveButton(
+                        label: _isTestingSmartStrm ? '测试中...' : '测试 STRM 任务',
+                        icon: Icons.bolt_rounded,
+                        onPressed:
+                            _isTestingSmartStrm ? null : _testSmartStrmTask,
+                        variant: TvButtonVariant.outlined,
+                      )
+                    else
+                      OutlinedButton.icon(
+                        onPressed:
+                            _isTestingSmartStrm ? null : _testSmartStrmTask,
+                        icon: _isTestingSmartStrm
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.bolt_rounded),
+                        label: Text(
+                          _isTestingSmartStrm ? '测试中...' : '测试 STRM 任务',
+                        ),
                       ),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => const SmartStrmLogsPage(),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.receipt_long_rounded),
-                      label: const Text('查看日志'),
-                    ),
+                    if (isTelevision)
+                      TvAdaptiveButton(
+                        label: '查看日志',
+                        icon: Icons.receipt_long_rounded,
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (context) => const SmartStrmLogsPage(),
+                            ),
+                          );
+                        },
+                        variant: TvButtonVariant.outlined,
+                      )
+                    else
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (context) => const SmartStrmLogsPage(),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.receipt_long_rounded),
+                        label: const Text('查看日志'),
+                      ),
                   ],
                 ),
                 _SectionTitle(theme: theme, label: '刷新媒体源'),
@@ -432,22 +477,46 @@ class _NetworkStorageSettingsPageState
                     spacing: 12,
                     runSpacing: 12,
                     children: [
-                      TextButton(
-                        onPressed: () {
-                          setState(() {
-                            _refreshSourceIds = refreshableSourceIds;
-                          });
-                        },
-                        child: const Text('全选'),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          setState(() {
-                            _refreshSourceIds.clear();
-                          });
-                        },
-                        child: const Text('清空'),
-                      ),
+                      if (isTelevision)
+                        TvAdaptiveButton(
+                          label: '全选',
+                          icon: Icons.select_all_rounded,
+                          onPressed: () {
+                            setState(() {
+                              _refreshSourceIds = refreshableSourceIds;
+                            });
+                          },
+                          variant: TvButtonVariant.text,
+                        )
+                      else
+                        TextButton(
+                          onPressed: () {
+                            setState(() {
+                              _refreshSourceIds = refreshableSourceIds;
+                            });
+                          },
+                          child: const Text('全选'),
+                        ),
+                      if (isTelevision)
+                        TvAdaptiveButton(
+                          label: '清空',
+                          icon: Icons.clear_all_rounded,
+                          onPressed: () {
+                            setState(() {
+                              _refreshSourceIds.clear();
+                            });
+                          },
+                          variant: TvButtonVariant.text,
+                        )
+                      else
+                        TextButton(
+                          onPressed: () {
+                            setState(() {
+                              _refreshSourceIds.clear();
+                            });
+                          },
+                          child: const Text('清空'),
+                        ),
                     ],
                   ),
                   ...refreshableSources.map(
@@ -502,10 +571,20 @@ class _NetworkStorageSettingsPageState
               right: 0,
               child: OverlayToolbar(
                 onBack: _handleCloseRequest,
-                trailing: TextButton(
-                  onPressed: _saveDraft,
-                  child: const Text('保存'),
-                ),
+                trailing: isTelevision
+                    ? Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: TvAdaptiveButton(
+                          label: '保存',
+                          icon: Icons.save_rounded,
+                          onPressed: _saveDraft,
+                          variant: TvButtonVariant.text,
+                        ),
+                      )
+                    : TextButton(
+                        onPressed: _saveDraft,
+                        child: const Text('保存'),
+                      ),
               ),
             ),
           ],
@@ -585,33 +664,54 @@ class _NetworkStorageSettingsPageState
     int maxLines = 1,
   }) async {
     final controller = TextEditingController(text: initialValue);
+    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final inputFocusNode = FocusNode(debugLabel: 'network-text-dialog-field');
+    final cancelFocusNode = FocusNode(debugLabel: 'network-text-dialog-cancel');
+    final saveFocusNode = FocusNode(debugLabel: 'network-text-dialog-save');
     final result = await showDialog<String>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
+      builder: (dialogContext) {
+        final dialog = AlertDialog(
           title: Text(title),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            minLines: minLines,
-            maxLines: maxLines,
-            decoration: InputDecoration(hintText: hintText),
-            onSubmitted: (value) => Navigator.of(context).pop(value),
+          content: wrapTelevisionDialogFieldTraversal(
+            enabled: isTelevision,
+            child: TextField(
+              controller: controller,
+              focusNode: inputFocusNode,
+              autofocus: true,
+              minLines: minLines,
+              maxLines: maxLines,
+              decoration: InputDecoration(hintText: hintText),
+              onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
+            ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              focusNode: cancelFocusNode,
+              onPressed: () => Navigator.of(dialogContext).pop(),
               child: const Text('取消'),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(context).pop(controller.text),
+              focusNode: saveFocusNode,
+              onPressed: () => Navigator.of(dialogContext).pop(controller.text),
               child: const Text('保存'),
             ),
           ],
         );
+        return wrapTelevisionDialogBackHandling(
+          enabled: isTelevision,
+          dialogContext: dialogContext,
+          inputFocusNodes: [inputFocusNode],
+          contentFocusNodes: [inputFocusNode],
+          actionFocusNodes: [saveFocusNode, cancelFocusNode],
+          child: dialog,
+        );
       },
     );
     controller.dispose();
+    inputFocusNode.dispose();
+    cancelFocusNode.dispose();
+    saveFocusNode.dispose();
     return result;
   }
 }

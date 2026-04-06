@@ -63,5 +63,33 @@ void main() {
       expect(result.seasonNumber, isNull);
       expect(result.episodeNumber, 1);
     });
+
+    test(
+        'treats leading numeric release names as episode cues in series folder',
+        () {
+      final result = NasMediaRecognizer.recognize(
+        'Shows/正义女神/01-4K.国&粤.(mkv).strm',
+      );
+
+      expect(result.title, '正义女神');
+      expect(result.parentTitle, '正义女神');
+      expect(result.itemType, 'episode');
+      expect(result.preferSeries, isTrue);
+      expect(result.seasonNumber, isNull);
+      expect(result.episodeNumber, 1);
+    });
+
+    test('does not treat movie titles starting with numbers as episode cues',
+        () {
+      final result = NasMediaRecognizer.recognize(
+        'Movies/十二怒汉/12 Angry Men (1957).mkv',
+      );
+
+      expect(result.title, '12 Angry Men');
+      expect(result.itemType, isEmpty);
+      expect(result.preferSeries, isTrue);
+      expect(result.seasonNumber, isNull);
+      expect(result.episodeNumber, isNull);
+    });
   });
 }

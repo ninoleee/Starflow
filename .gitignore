@@ -27,3 +27,5 @@ linux/flutter/ephemeral/
 macos/Flutter/ephemeral/
 windows/flutter/ephemeral/
 web/.dart_tool/
+nas_metadata_index_device.db
+assets/bootstrap/embedded_settings.json

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
 
-class AppPageBackground extends StatelessWidget {
+class AppPageBackground extends ConsumerWidget {
   const AppPageBackground({
     super.key,
     required this.child,
@@ -11,8 +14,14 @@ class AppPageBackground extends StatelessWidget {
   final EdgeInsets contentPadding;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final highPerformanceModeEnabled = ref.watch(
+      appSettingsProvider.select((settings) => settings.highPerformanceModeEnabled),
+    );
+    final simplifyTelevisionEffects =
+        isTelevision && highPerformanceModeEnabled;
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -28,39 +37,40 @@ class AppPageBackground extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          const IgnorePointer(
-            child: Stack(
-              children: [
-                _GlowBlob(
-                  alignment: Alignment.topLeft,
-                  offset: Offset(-36, -44),
-                  size: 220,
-                  colors: [
-                    Color(0x40215FEE),
-                    Color(0x00215FEE),
-                  ],
-                ),
-                _GlowBlob(
-                  alignment: Alignment.topRight,
-                  offset: Offset(42, -24),
-                  size: 196,
-                  colors: [
-                    Color(0x2617B26A),
-                    Color(0x0017B26A),
-                  ],
-                ),
-                _GlowBlob(
-                  alignment: Alignment.bottomCenter,
-                  offset: Offset(0, 84),
-                  size: 260,
-                  colors: [
-                    Color(0x18F59E0B),
-                    Color(0x00F59E0B),
-                  ],
-                ),
-              ],
+          if (!simplifyTelevisionEffects)
+            const IgnorePointer(
+              child: Stack(
+                children: [
+                  _GlowBlob(
+                    alignment: Alignment.topLeft,
+                    offset: Offset(-36, -44),
+                    size: 220,
+                    colors: [
+                      Color(0x40215FEE),
+                      Color(0x00215FEE),
+                    ],
+                  ),
+                  _GlowBlob(
+                    alignment: Alignment.topRight,
+                    offset: Offset(42, -24),
+                    size: 196,
+                    colors: [
+                      Color(0x2617B26A),
+                      Color(0x0017B26A),
+                    ],
+                  ),
+                  _GlowBlob(
+                    alignment: Alignment.bottomCenter,
+                    offset: Offset(0, 84),
+                    size: 260,
+                    colors: [
+                      Color(0x18F59E0B),
+                      Color(0x00F59E0B),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
           Padding(
             padding: contentPadding,
             child: child,

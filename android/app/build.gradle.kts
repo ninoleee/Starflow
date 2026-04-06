@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.example.starflow"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = maxOf(flutter.compileSdkVersion, 31)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -17,6 +17,13 @@ android {
 
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_17.toString()
+    }
+
+    signingConfigs {
+        getByName("debug") {
+            enableV1Signing = true
+            enableV2Signing = true
+        }
     }
 
     defaultConfig {
@@ -41,4 +48,10 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("androidx.appcompat:appcompat:1.7.0")
 }

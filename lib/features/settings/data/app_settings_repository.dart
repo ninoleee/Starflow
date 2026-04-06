@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/core/utils/seed_data.dart';
@@ -17,13 +18,16 @@ final appSettingsRepositoryProvider = Provider<AppSettingsRepository>(
 
 class LocalAppSettingsRepository implements AppSettingsRepository {
   static const _settingsKey = 'starflow.settings.v1';
+  static const _bundledSettingsKey = 'assets/bootstrap/embedded_settings.json';
 
   @override
   Future<AppSettings> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_settingsKey);
     if (raw == null || raw.isEmpty) {
-      return SeedData.defaultSettings;
+      final fallback = await _loadBundledOrDefaultSettings();
+      await save(fallback);
+      return fallback;
     }
 
     try {
@@ -36,7 +40,9 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
       }
       return sanitized;
     } catch (_) {
-      return SeedData.defaultSettings;
+      final fallback = await _loadBundledOrDefaultSettings();
+      await save(fallback);
+      return fallback;
     }
   }
 
@@ -44,6 +50,20 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
   Future<void> save(AppSettings settings) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_settingsKey, jsonEncode(settings.toJson()));
+  }
+
+  Future<AppSettings> _loadBundledOrDefaultSettings() async {
+    try {
+      final bundledRaw = await rootBundle.loadString(_bundledSettingsKey);
+      if (bundledRaw.trim().isEmpty) {
+        return SeedData.defaultSettings;
+      }
+      final decoded = Map<String, dynamic>.from(jsonDecode(bundledRaw) as Map);
+      final settings = AppSettings.fromJson(decoded);
+      return _stripLegacyDemoData(_migrateLegacyNetworkStorage(settings));
+    } catch (_) {
+      return SeedData.defaultSettings;
+    }
   }
 
   AppSettings _migrateLegacyNetworkStorage(AppSettings settings) {

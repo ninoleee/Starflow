@@ -69,9 +69,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _resolvedUserId = e?.userId ?? '';
     _resolvedServerId = e?.serverId ?? '';
     _resolvedDeviceId = e?.deviceId ?? '';
-    _savedFeaturedSectionIds = e == null
-        ? const [kNoSectionsSelectedSentinel]
-        : [...e.featuredSectionIds];
+    _savedFeaturedSectionIds = e == null ? const [] : [...e.featuredSectionIds];
     _selectedSectionIds = e?.selectedSectionIds.toSet() ?? <String>{};
     _connectionMessage = _initialConnectionMessage(e);
     _advancedTokenExpanded = _tokenController.text.trim().isNotEmpty;
@@ -238,7 +236,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         return;
       }
       _selectedNasPath = '';
-      _savedFeaturedSectionIds = const [kNoSectionsSelectedSentinel];
+      _savedFeaturedSectionIds = const [];
       _availableSections = const [];
       _selectedSectionIds.clear();
       _didHydrateSectionSelection = false;
@@ -406,7 +404,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _selectedNasPath = pickedPath;
     setState(() {
       _boundWebDavEndpoint = endpoint;
-      _savedFeaturedSectionIds = const [kNoSectionsSelectedSentinel];
+      _savedFeaturedSectionIds = const [];
       _availableSections = const [];
       _selectedSectionIds.clear();
       _didHydrateSectionSelection = false;
@@ -597,9 +595,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                     if (value != null) {
                       setState(() {
                         _kind = value;
-                        _savedFeaturedSectionIds = const [
-                          kNoSectionsSelectedSentinel,
-                        ];
+                        _savedFeaturedSectionIds = const [];
                         _didHydrateSectionSelection = false;
                         _availableSections = const [];
                         _selectedSectionIds.clear();
@@ -702,7 +698,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                     ),
                   ),
                 ],
-                _SectionTitle(theme: theme, label: '内容范围'),
+                _SectionTitle(theme: theme, label: '选择分区'),
                 if (_availableSections.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
@@ -743,7 +739,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Text(
-                      '未读取分区',
+                      '未选择分区',
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -838,7 +834,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                             ? null
                             : _onFetchEmbySections,
                         child: Text(
-                          _isLoadingSections ? '读取中…' : '读取分区',
+                          _isLoadingSections ? '读取中…' : '选择分区',
                         ),
                       ),
                     ],
@@ -869,7 +865,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                                   _endpointController.text.trim().isEmpty
                               ? null
                               : _onFetchNasSections,
-                          child: Text(_isLoadingSections ? '读取中…' : '读取分区'),
+                          child: Text(_isLoadingSections ? '读取中…' : '选择分区'),
                         ),
                       ],
                     ),

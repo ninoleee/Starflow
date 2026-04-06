@@ -2,6 +2,8 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
+const _posterDebugKeyword = '9号秘事';
+
 Future<List<MediaItem>> resolveLibraryItemsWithCachedDetails({
   required List<MediaItem> items,
   required LocalStorageCacheRepository localStorageCacheRepository,
@@ -24,12 +26,30 @@ MediaItem _mergeCachedLibraryItem(
   MediaItem item,
   MediaDetailTarget cached,
 ) {
+  final resolvedPosterUrl =
+      cached.posterUrl.trim().isNotEmpty ? cached.posterUrl : item.posterUrl;
+  final resolvedPosterHeaders = cached.posterUrl.trim().isNotEmpty
+      ? (cached.posterHeaders.isNotEmpty
+          ? cached.posterHeaders
+          : item.posterHeaders)
+      : (item.posterHeaders.isNotEmpty
+          ? item.posterHeaders
+          : cached.posterHeaders);
+  if (item.title.contains(_posterDebugKeyword)) {
+    // Debugging poster selection for portrait slots.
+    // ignore: avoid_print
+    print(
+      '[PosterSource][Library] ${item.title} '
+      'itemPoster=${item.posterUrl} '
+      'cachedPoster=${cached.posterUrl} '
+      'itemBackdrop=${item.backdropUrl} '
+      'cachedBackdrop=${cached.backdropUrl} '
+      'resolvedPoster=$resolvedPosterUrl',
+    );
+  }
   return item.copyWith(
-    posterUrl:
-        item.posterUrl.trim().isNotEmpty ? item.posterUrl : cached.posterUrl,
-    posterHeaders: item.posterHeaders.isNotEmpty
-        ? item.posterHeaders
-        : cached.posterHeaders,
+    posterUrl: resolvedPosterUrl,
+    posterHeaders: resolvedPosterHeaders,
     backdropUrl: item.backdropUrl.trim().isNotEmpty
         ? item.backdropUrl
         : cached.backdropUrl,
@@ -59,6 +79,7 @@ MediaItem _mergeCachedLibraryItem(
     actors: item.actors.isNotEmpty ? item.actors : cached.actors,
     doubanId: item.doubanId.trim().isNotEmpty ? item.doubanId : cached.doubanId,
     imdbId: item.imdbId.trim().isNotEmpty ? item.imdbId : cached.imdbId,
+    tmdbId: item.tmdbId.trim().isNotEmpty ? item.tmdbId : cached.tmdbId,
     ratingLabels:
         item.ratingLabels.isNotEmpty ? item.ratingLabels : cached.ratingLabels,
   );

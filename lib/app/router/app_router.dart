@@ -1,14 +1,18 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/bootstrap/presentation/bootstrap_page.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/details/presentation/metadata_index_management_page.dart';
+import 'package:starflow/features/details/presentation/person_credits_page.dart';
 import 'package:starflow/features/home/presentation/home_editor_page.dart';
 import 'package:starflow/features/home/presentation/home_module_collection_page.dart';
 import 'package:starflow/features/home/presentation/home_page.dart';
@@ -141,6 +145,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
+        path: '/person-credits',
+        name: 'person-credits',
+        builder: (context, state) {
+          final target = state.extra as PersonCreditsPageTarget?;
+          if (target == null) {
+            return const _MissingDetailTargetPage();
+          }
+          return PersonCreditsPage(target: target);
+        },
+      ),
+      GoRoute(
         path: '/metadata-index',
         name: 'metadata-index',
         pageBuilder: (context, state) {
@@ -228,6 +243,12 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
         (settings) => settings.translucentEffectsEnabled,
       ),
     );
+    final highPerformanceModeEnabled = ref.watch(
+      appSettingsProvider.select((settings) => settings.highPerformanceModeEnabled),
+    );
+    final effectiveTelevisionEffectsEnabled =
+        translucentEffectsEnabled &&
+        !(isTelevision && highPerformanceModeEnabled);
 
     return Scaffold(
       extendBody: true,
@@ -236,6 +257,7 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
           ? _TelevisionNavigationShell(
               currentIndex: widget.navigationShell.currentIndex,
               onDestinationSelected: widget.navigationShell.goBranch,
+              translucentEffectsEnabled: effectiveTelevisionEffectsEnabled,
               child: widget.navigationShell,
             )
           : NotificationListener<ScrollNotification>(
@@ -318,16 +340,18 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
   }
 }
 
-class _TelevisionNavigationShell extends StatelessWidget {
+class _TelevisionNavigationShell extends StatefulWidget {
   const _TelevisionNavigationShell({
     required this.currentIndex,
     required this.onDestinationSelected,
     required this.child,
+    required this.translucentEffectsEnabled,
   });
 
   final int currentIndex;
   final ValueChanged<int> onDestinationSelected;
   final Widget child;
+  final bool translucentEffectsEnabled;
 
   static const _items = [
     _NavigationItemData(
@@ -353,49 +377,263 @@ class _TelevisionNavigationShell extends StatelessWidget {
   ];
 
   @override
+  State<_TelevisionNavigationShell> createState() =>
+      _TelevisionNavigationShellState();
+}
+
+class _TelevisionNavigationShellState extends State<_TelevisionNavigationShell> {
+  late final List<FocusNode> _destinationFocusNodes = List.generate(
+    _TelevisionNavigationShell._items.length,
+    (index) => FocusNode(debugLabel: 'tv-nav-$index'),
+  );
+  bool _isExitDialogVisible = false;
+
+  @override
+  void dispose() {
+    for (final node in _destinationFocusNodes) {
+      node.dispose();
+    }
+    super.dispose();
+  }
+
+  void _focusCurrentDestination() {
+    if (_destinationFocusNodes.isEmpty) {
+      return;
+    }
+    final index = widget.currentIndex.clamp(
+      0,
+      _destinationFocusNodes.length - 1,
+    );
+    _destinationFocusNodes[index].requestFocus();
+  }
+
+  bool get _isSidebarFocused => _destinationFocusNodes.any(
+        (node) => node.hasFocus || node.hasPrimaryFocus,
+      );
+
+  Future<void> _handleRootBackNavigation() async {
+    if (!mounted) {
+      return;
+    }
+    if (!_isSidebarFocused) {
+      _focusCurrentDestination();
+      return;
+    }
+    if (_isExitDialogVisible) {
+      return;
+    }
+
+    _isExitDialogVisible = true;
+    final shouldExit = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) {
+            return AlertDialog(
+              title: const Text('退出 Starflow？'),
+              content: const Text('再次确认后将关闭当前应用。'),
+              actions: [
+                TextButton(
+                  autofocus: true,
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: const Text('退出'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+    _isExitDialogVisible = false;
+
+    if (shouldExit) {
+      await SystemNavigator.pop();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 18, 12, 18),
-            child: DecoratedBox(
+    final sidebar = ClipRRect(
+      borderRadius: BorderRadius.circular(28),
+      child: widget.translucentEffectsEnabled
+          ? BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 26, sigmaY: 26),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(28),
+                  color: const Color(0x160F1724),
+                ),
+                child: _TelevisionSidebarContent(
+                  currentIndex: widget.currentIndex,
+                  focusNodes: _destinationFocusNodes,
+                  onDestinationSelected: widget.onDestinationSelected,
+                ),
+              ),
+            )
+          : DecoratedBox(
               decoration: BoxDecoration(
-                color: const Color(0x22111C2B),
                 borderRadius: BorderRadius.circular(28),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.12),
-                ),
+                color: const Color(0xCC101926),
               ),
-              child: NavigationRail(
-                backgroundColor: Colors.transparent,
-                extended: true,
-                minExtendedWidth: 168,
-                selectedIndex: currentIndex,
-                onDestinationSelected: onDestinationSelected,
-                labelType: NavigationRailLabelType.none,
-                leading: const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 12, 16, 20),
-                  child: Icon(
-                    Icons.live_tv_rounded,
-                    color: Colors.white,
-                    size: 26,
-                  ),
-                ),
-                destinations: [
-                  for (final item in _items)
-                    NavigationRailDestination(
-                      icon: Icon(item.icon),
-                      selectedIcon: Icon(item.selectedIcon),
-                      label: Text(item.label),
-                    ),
-                ],
+              child: _TelevisionSidebarContent(
+                currentIndex: widget.currentIndex,
+                focusNodes: _destinationFocusNodes,
+                onDestinationSelected: widget.onDestinationSelected,
               ),
+            ),
+    );
+
+    return TvMenuButtonScope(
+      onMenuButtonPressed: _focusCurrentDestination,
+      child: PopScope<void>(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, result) {
+          if (didPop) {
+            return;
+          }
+          unawaited(_handleRootBackNavigation());
+        },
+        child: Row(
+          children: [
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 8, 10, 8),
+                child: sidebar,
+              ),
+            ),
+            Expanded(
+              child: _TelevisionContentFocusBoundary(
+                focusSidebar: _focusCurrentDestination,
+                isSidebarFocused: () => _isSidebarFocused,
+                child: widget.child,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TelevisionContentFocusBoundary extends StatelessWidget {
+  const _TelevisionContentFocusBoundary({
+    required this.focusSidebar,
+    required this.isSidebarFocused,
+    required this.child,
+  });
+
+  final VoidCallback focusSidebar;
+  final bool Function() isSidebarFocused;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Actions(
+      actions: <Type, Action<Intent>>{
+        DirectionalFocusIntent: CallbackAction<DirectionalFocusIntent>(
+          onInvoke: (intent) {
+            final primaryFocus = FocusManager.instance.primaryFocus;
+            if (primaryFocus == null || isSidebarFocused()) {
+              return null;
+            }
+
+            final moved = primaryFocus.focusInDirection(intent.direction);
+            if (!moved && intent.direction == TraversalDirection.left) {
+              focusSidebar();
+            }
+            return null;
+          },
+        ),
+      },
+      child: child,
+    );
+  }
+}
+
+class _TelevisionSidebarContent extends StatelessWidget {
+  const _TelevisionSidebarContent({
+    required this.currentIndex,
+    required this.focusNodes,
+    required this.onDestinationSelected,
+  });
+
+  final int currentIndex;
+  final List<FocusNode> focusNodes;
+  final ValueChanged<int> onDestinationSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 82,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(height: 10),
+          for (var index = 0;
+              index < _TelevisionNavigationShell._items.length;
+              index++) ...[
+            _TelevisionNavigationDestination(
+              item: _TelevisionNavigationShell._items[index],
+              selected: index == currentIndex,
+              focusNode: focusNodes[index],
+              autofocus: index == currentIndex,
+              onPressed: () => onDestinationSelected(index),
+            ),
+            if (index != _TelevisionNavigationShell._items.length - 1)
+              const SizedBox(height: 10),
+          ],
+          const SizedBox(height: 10),
+        ],
+      ),
+    );
+  }
+}
+
+class _TelevisionNavigationDestination extends StatelessWidget {
+  const _TelevisionNavigationDestination({
+    required this.item,
+    required this.selected,
+    required this.focusNode,
+    required this.autofocus,
+    required this.onPressed,
+  });
+
+  final _NavigationItemData item;
+  final bool selected;
+  final FocusNode focusNode;
+  final bool autofocus;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final foregroundColor = selected ? Colors.white : const Color(0xD9E8F7FF);
+    final backgroundColor = selected
+        ? Colors.white.withValues(alpha: 0.10)
+        : Colors.transparent;
+
+    return TvFocusableAction(
+      focusNode: focusNode,
+      autofocus: autofocus,
+      onPressed: onPressed,
+      borderRadius: BorderRadius.circular(18),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: SizedBox(
+          width: 56,
+          height: 56,
+          child: Center(
+            child: Icon(
+              selected ? item.selectedIcon : item.icon,
+              color: foregroundColor,
+              size: 24,
             ),
           ),
         ),
-        Expanded(child: child),
-      ],
+      ),
     );
   }
 }

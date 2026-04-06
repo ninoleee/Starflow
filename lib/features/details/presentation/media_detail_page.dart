@@ -10,6 +10,7 @@ import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/details/presentation/person_credits_page.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -19,6 +20,8 @@ import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart';
+import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -207,9 +210,12 @@ bool _shouldAutoEnrichMetadataTarget({
           target.imdbId.trim().isEmpty);
   final needsTmdb = settings.tmdbMetadataMatchEnabled &&
       settings.tmdbReadAccessToken.trim().isNotEmpty &&
-      (target.needsMetadataMatch || target.imdbId.trim().isEmpty);
+      (target.needsMetadataMatch ||
+          target.imdbId.trim().isEmpty ||
+          target.backdropUrl.trim().isEmpty ||
+          target.logoUrl.trim().isEmpty);
   final needsImdb =
-      settings.imdbRatingMatchEnabled && target.needsImdbRatingMatch;
+      _shouldUseStandaloneImdbRating(settings) && target.needsImdbRatingMatch;
   return needsWmdb || needsTmdb || needsImdb;
 }
 
@@ -217,6 +223,11 @@ String _detailMetadataQuery(MediaDetailTarget target) {
   final raw =
       target.searchQuery.trim().isEmpty ? target.title : target.searchQuery;
   return raw.trim();
+}
+
+bool _prefersSeriesMetadata(MediaDetailTarget target) {
+  final itemType = target.itemType.trim().toLowerCase();
+  return itemType == 'series' || itemType == 'season' || itemType == 'episode';
 }
 
 bool _needsRatingLabel(MediaDetailTarget target, {required String keyword}) {
@@ -233,19 +244,193 @@ bool _hasRatingLabelKeyword(Iterable<String> labels, String keyword) {
   );
 }
 
+bool _shouldUseStandaloneImdbRating(AppSettings settings) {
+  return settings.imdbRatingMatchEnabled &&
+      (!settings.tmdbMetadataMatchEnabled ||
+          settings.tmdbReadAccessToken.trim().isEmpty);
+}
+
+bool _isEpisodeLikeTarget(MediaDetailTarget target) {
+  return target.itemType.trim().toLowerCase() == 'episode' &&
+      target.seasonNumber != null &&
+      target.seasonNumber! >= 0 &&
+      target.episodeNumber != null &&
+      target.episodeNumber! > 0;
+}
+
+Future<String> _resolveTmdbBackdropForTarget({
+  required AppSettings settings,
+  required TmdbMetadataClient tmdbMetadataClient,
+  required MediaDetailTarget target,
+  required TmdbMetadataMatch match,
+}) async {
+  if (_isEpisodeLikeTarget(target) &&
+      match.isSeries &&
+      match.tmdbId > 0 &&
+      settings.tmdbReadAccessToken.trim().isNotEmpty) {
+    try {
+      final stillUrl = await tmdbMetadataClient.fetchEpisodeStillUrl(
+        seriesId: match.tmdbId,
+        seasonNumber: target.seasonNumber!,
+        episodeNumber: target.episodeNumber!,
+        readAccessToken: settings.tmdbReadAccessToken.trim(),
+      );
+      if (stillUrl.trim().isNotEmpty) {
+        return stillUrl.trim();
+      }
+    } catch (_) {
+      // Ignore episode still failures and keep the title-level backdrop.
+    }
+  }
+  return match.backdropUrl.trim();
+}
+
+String _resolveTmdbBannerForTarget({
+  required MediaDetailTarget target,
+  required TmdbMetadataMatch match,
+  required String resolvedBackdropUrl,
+}) {
+  if (!_isEpisodeLikeTarget(target)) {
+    return '';
+  }
+  final seriesBackdrop = match.backdropUrl.trim();
+  if (seriesBackdrop.isEmpty || seriesBackdrop == resolvedBackdropUrl.trim()) {
+    return '';
+  }
+  return seriesBackdrop;
+}
+
+List<String> _resolveTmdbExtraBackdropUrlsForTarget({
+  required MediaDetailTarget target,
+  required TmdbMetadataMatch match,
+  required String resolvedBackdropUrl,
+}) {
+  final bannerUrl = _resolveTmdbBannerForTarget(
+    target: target,
+    match: match,
+    resolvedBackdropUrl: resolvedBackdropUrl,
+  );
+  return _mergeUniqueImageUrls([
+    if (bannerUrl.isNotEmpty) bannerUrl,
+    ...match.extraBackdropUrls,
+  ])
+      .where((item) => item != resolvedBackdropUrl.trim())
+      .toList(growable: false);
+}
+
 Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
   required AppSettings settings,
   required MediaDetailTarget target,
   required WmdbMetadataClient wmdbMetadataClient,
   required TmdbMetadataClient tmdbMetadataClient,
   required ImdbRatingClient imdbRatingClient,
+  bool forceSearch = false,
+  bool forceReplace = false,
 }) async {
   var nextTarget = target;
   final initialQuery = _detailMetadataQuery(target);
   final traceKey = _detailTraceKey(target);
+  final preferredImdbId = _resolvePreferredImdbId(
+    target.imdbId,
+    initialQuery,
+  );
+  var imdbIdMetadataMatched = false;
+
+  if (preferredImdbId.isNotEmpty &&
+      settings.tmdbMetadataMatchEnabled &&
+      settings.tmdbReadAccessToken.trim().isNotEmpty) {
+    try {
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'tmdb',
+        'request imdbId=$preferredImdbId preferSeries=${_prefersSeriesMetadata(nextTarget)}',
+      );
+      final tmdbMatch = await tmdbMetadataClient.matchByImdbId(
+        imdbId: preferredImdbId,
+        readAccessToken: settings.tmdbReadAccessToken.trim(),
+        preferSeries: _prefersSeriesMetadata(nextTarget),
+      );
+      if (tmdbMatch != null) {
+        imdbIdMetadataMatched = true;
+        DebugTraceOnce.logMetadata(
+          traceKey,
+          'tmdb',
+          'matched title=${tmdbMatch.title} imdbId=${tmdbMatch.imdbId}',
+        );
+        final resolvedBackdropUrl = await _resolveTmdbBackdropForTarget(
+          settings: settings,
+          tmdbMetadataClient: tmdbMetadataClient,
+          target: nextTarget,
+          match: tmdbMatch,
+        );
+        nextTarget = _applyMetadataMatchToDetailTarget(
+          nextTarget,
+          MetadataMatchResult(
+            provider: MetadataMatchProvider.tmdb,
+            title: tmdbMatch.title,
+            originalTitle: tmdbMatch.originalTitle,
+            posterUrl: tmdbMatch.posterUrl,
+            backdropUrl: resolvedBackdropUrl,
+            logoUrl: tmdbMatch.logoUrl,
+            bannerUrl: _resolveTmdbBannerForTarget(
+              target: nextTarget,
+              match: tmdbMatch,
+              resolvedBackdropUrl: resolvedBackdropUrl,
+            ),
+            extraBackdropUrls: _resolveTmdbExtraBackdropUrlsForTarget(
+              target: nextTarget,
+              match: tmdbMatch,
+              resolvedBackdropUrl: resolvedBackdropUrl,
+            ),
+            overview: tmdbMatch.overview,
+            year: tmdbMatch.year,
+            durationLabel: tmdbMatch.durationLabel,
+            genres: tmdbMatch.genres,
+            directors: tmdbMatch.directors,
+            directorProfiles: tmdbMatch.directorProfiles
+                .map(
+                  (item) => MetadataPersonProfile(
+                    name: item.name,
+                    avatarUrl: item.avatarUrl,
+                  ),
+                )
+                .toList(),
+            actors: tmdbMatch.actors,
+            actorProfiles: tmdbMatch.actorProfiles
+                .map(
+                  (item) => MetadataPersonProfile(
+                    name: item.name,
+                    avatarUrl: item.avatarUrl,
+                  ),
+                )
+                .toList(),
+            platforms: tmdbMatch.platforms,
+            platformProfiles: tmdbMatch.platformProfiles
+                .map(
+                  (item) => MetadataPersonProfile(
+                    name: item.name,
+                    avatarUrl: item.avatarUrl,
+                  ),
+                )
+                .toList(),
+            ratingLabels: tmdbMatch.ratingLabels,
+            imdbId: tmdbMatch.imdbId,
+            tmdbId: '${tmdbMatch.tmdbId}',
+          ),
+          replaceExisting: forceReplace,
+        );
+      } else {
+        DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'no match');
+      }
+    } catch (_) {
+      DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'failed');
+    }
+  }
 
   if (settings.wmdbMetadataMatchEnabled &&
-      (nextTarget.needsMetadataMatch ||
+      !imdbIdMetadataMatched &&
+      (forceSearch ||
+          nextTarget.needsMetadataMatch ||
           _needsRatingLabel(nextTarget, keyword: '豆瓣') ||
           nextTarget.needsImdbRatingMatch ||
           nextTarget.doubanId.trim().isEmpty ||
@@ -263,7 +448,7 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
           : await wmdbMetadataClient.matchTitle(
               query: initialQuery,
               year: nextTarget.year,
-              preferSeries: nextTarget.isSeries,
+              preferSeries: _prefersSeriesMetadata(nextTarget),
               actors: nextTarget.actors,
             );
       if (wmdbMatch != null) {
@@ -273,7 +458,11 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
           'matched title=${wmdbMatch.title} imdbId=${wmdbMatch.imdbId} '
               'ratings=${wmdbMatch.ratingLabels.join(' | ')}',
         );
-        nextTarget = _applyManualMetadataMatch(nextTarget, wmdbMatch);
+        nextTarget = _applyMetadataMatchToDetailTarget(
+          nextTarget,
+          wmdbMatch,
+          replaceExisting: forceReplace,
+        );
       } else {
         DebugTraceOnce.logMetadata(traceKey, 'wmdb', 'no match');
       }
@@ -284,20 +473,22 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
   }
 
   if (settings.tmdbMetadataMatchEnabled &&
-      settings.tmdbReadAccessToken.trim().isNotEmpty) {
+      settings.tmdbReadAccessToken.trim().isNotEmpty &&
+      !imdbIdMetadataMatched &&
+      (forceSearch || nextTarget.imdbId.trim().isEmpty)) {
     try {
       final currentQuery = _detailMetadataQuery(nextTarget);
       DebugTraceOnce.logMetadata(
         traceKey,
         'tmdb',
         'request query=${currentQuery.isEmpty ? initialQuery : currentQuery} '
-            'year=${nextTarget.year} preferSeries=${nextTarget.isSeries}',
+            'year=${nextTarget.year} preferSeries=${_prefersSeriesMetadata(nextTarget)}',
       );
       final tmdbMatch = await tmdbMetadataClient.matchTitle(
         query: currentQuery.isEmpty ? initialQuery : currentQuery,
         readAccessToken: settings.tmdbReadAccessToken.trim(),
         year: nextTarget.year,
-        preferSeries: nextTarget.isSeries,
+        preferSeries: _prefersSeriesMetadata(nextTarget),
       );
       if (tmdbMatch != null) {
         DebugTraceOnce.logMetadata(
@@ -305,18 +496,44 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
           'tmdb',
           'matched title=${tmdbMatch.title} imdbId=${tmdbMatch.imdbId}',
         );
-        nextTarget = _applyManualMetadataMatch(
+        final resolvedBackdropUrl = await _resolveTmdbBackdropForTarget(
+          settings: settings,
+          tmdbMetadataClient: tmdbMetadataClient,
+          target: nextTarget,
+          match: tmdbMatch,
+        );
+        nextTarget = _applyMetadataMatchToDetailTarget(
           nextTarget,
           MetadataMatchResult(
             provider: MetadataMatchProvider.tmdb,
             title: tmdbMatch.title,
             originalTitle: tmdbMatch.originalTitle,
             posterUrl: tmdbMatch.posterUrl,
+            backdropUrl: resolvedBackdropUrl,
+            logoUrl: tmdbMatch.logoUrl,
+            bannerUrl: _resolveTmdbBannerForTarget(
+              target: nextTarget,
+              match: tmdbMatch,
+              resolvedBackdropUrl: resolvedBackdropUrl,
+            ),
+            extraBackdropUrls: _resolveTmdbExtraBackdropUrlsForTarget(
+              target: nextTarget,
+              match: tmdbMatch,
+              resolvedBackdropUrl: resolvedBackdropUrl,
+            ),
             overview: tmdbMatch.overview,
             year: tmdbMatch.year,
             durationLabel: tmdbMatch.durationLabel,
             genres: tmdbMatch.genres,
             directors: tmdbMatch.directors,
+            directorProfiles: tmdbMatch.directorProfiles
+                .map(
+                  (item) => MetadataPersonProfile(
+                    name: item.name,
+                    avatarUrl: item.avatarUrl,
+                  ),
+                )
+                .toList(),
             actors: tmdbMatch.actors,
             actorProfiles: tmdbMatch.actorProfiles
                 .map(
@@ -326,8 +543,20 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
                   ),
                 )
                 .toList(),
+            platforms: tmdbMatch.platforms,
+            platformProfiles: tmdbMatch.platformProfiles
+                .map(
+                  (item) => MetadataPersonProfile(
+                    name: item.name,
+                    avatarUrl: item.avatarUrl,
+                  ),
+                )
+                .toList(),
+            ratingLabels: tmdbMatch.ratingLabels,
             imdbId: tmdbMatch.imdbId,
+            tmdbId: '${tmdbMatch.tmdbId}',
           ),
+          replaceExisting: forceReplace,
         );
       } else {
         DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'no match');
@@ -338,7 +567,8 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
     }
   }
 
-  if (settings.imdbRatingMatchEnabled && nextTarget.needsImdbRatingMatch) {
+  if (_shouldUseStandaloneImdbRating(settings) &&
+      (forceSearch || nextTarget.needsImdbRatingMatch)) {
     try {
       final currentQuery = _detailMetadataQuery(nextTarget);
       DebugTraceOnce.logMetadata(
@@ -350,7 +580,7 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
       final ratingMatch = await imdbRatingClient.matchRating(
         query: currentQuery.isEmpty ? initialQuery : currentQuery,
         year: nextTarget.year,
-        preferSeries: nextTarget.isSeries,
+        preferSeries: _prefersSeriesMetadata(nextTarget),
         imdbId: nextTarget.imdbId,
       );
       if (ratingMatch != null) {
@@ -369,9 +599,11 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
         }
         nextTarget = nextTarget.copyWith(
           ratingLabels: nextRatings,
-          imdbId: nextTarget.imdbId.trim().isEmpty
-              ? ratingMatch.imdbId
-              : nextTarget.imdbId,
+          imdbId: forceReplace
+              ? _firstNonEmpty(ratingMatch.imdbId, nextTarget.imdbId)
+              : (nextTarget.imdbId.trim().isEmpty
+                  ? ratingMatch.imdbId
+                  : nextTarget.imdbId),
         );
       } else {
         DebugTraceOnce.logMetadata(traceKey, 'imdb', 'no match');
@@ -385,6 +617,28 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
   return nextTarget;
 }
 
+String _resolvePreferredImdbId(String currentImdbId, String query) {
+  final normalizedCurrent = _normalizeImdbId(currentImdbId);
+  if (normalizedCurrent.isNotEmpty) {
+    return normalizedCurrent;
+  }
+  return _extractImdbIdFromText(query);
+}
+
+String _extractImdbIdFromText(String value) {
+  final match =
+      RegExp(r'\btt\d{7,9}\b', caseSensitive: false).firstMatch(value);
+  return _normalizeImdbId(match?.group(0) ?? '');
+}
+
+String _normalizeImdbId(String value) {
+  final trimmed = value.trim().toLowerCase();
+  if (!RegExp(r'^tt\d{7,9}$').hasMatch(trimmed)) {
+    return '';
+  }
+  return trimmed;
+}
+
 String _detailTraceKey(MediaDetailTarget target) {
   final id = [
     target.title.trim(),
@@ -392,6 +646,7 @@ String _detailTraceKey(MediaDetailTarget target) {
     target.sourceId.trim(),
     target.itemId.trim(),
     target.doubanId.trim(),
+    target.tmdbId.trim(),
   ].where((item) => item.isNotEmpty).join('|');
   return id.isEmpty ? 'detail' : id;
 }
@@ -400,6 +655,9 @@ MediaDetailTarget _mergeCachedDetailTarget({
   required MediaDetailTarget current,
   required MediaDetailTarget cached,
 }) {
+  final preferCachedResourceState =
+      _hasResolvedLocalResourceState(cached) &&
+      !_hasResolvedLocalResourceState(current);
   return current.copyWith(
     posterUrl: current.posterUrl.trim().isNotEmpty
         ? current.posterUrl
@@ -424,9 +682,10 @@ MediaDetailTarget _mergeCachedDetailTarget({
     bannerHeaders: current.bannerHeaders.isNotEmpty
         ? current.bannerHeaders
         : cached.bannerHeaders,
-    extraBackdropUrls: current.extraBackdropUrls.isNotEmpty
-        ? current.extraBackdropUrls
-        : cached.extraBackdropUrls,
+    extraBackdropUrls: _mergeUniqueImageUrls([
+      ...current.extraBackdropUrls,
+      ...cached.extraBackdropUrls,
+    ]),
     extraBackdropHeaders: current.extraBackdropHeaders.isNotEmpty
         ? current.extraBackdropHeaders
         : cached.extraBackdropHeaders,
@@ -439,13 +698,25 @@ MediaDetailTarget _mergeCachedDetailTarget({
     genres: current.genres.isNotEmpty ? current.genres : cached.genres,
     directors:
         current.directors.isNotEmpty ? current.directors : cached.directors,
+    directorProfiles: current.directorProfiles.isNotEmpty
+        ? current.directorProfiles
+        : cached.directorProfiles,
     actors: current.actors.isNotEmpty ? current.actors : cached.actors,
     actorProfiles: current.actorProfiles.isNotEmpty
         ? current.actorProfiles
         : cached.actorProfiles,
-    availabilityLabel: current.availabilityLabel.trim().isNotEmpty
-        ? current.availabilityLabel
-        : cached.availabilityLabel,
+    platforms:
+        current.platforms.isNotEmpty ? current.platforms : cached.platforms,
+    platformProfiles: current.platformProfiles.isNotEmpty
+        ? current.platformProfiles
+        : cached.platformProfiles,
+    availabilityLabel: preferCachedResourceState
+        ? (cached.availabilityLabel.trim().isNotEmpty
+            ? cached.availabilityLabel
+            : current.availabilityLabel)
+        : (current.availabilityLabel.trim().isNotEmpty
+            ? current.availabilityLabel
+            : cached.availabilityLabel),
     searchQuery: current.searchQuery.trim().isNotEmpty
         ? current.searchQuery
         : cached.searchQuery,
@@ -470,11 +741,45 @@ MediaDetailTarget _mergeCachedDetailTarget({
     doubanId:
         current.doubanId.trim().isNotEmpty ? current.doubanId : cached.doubanId,
     imdbId: current.imdbId.trim().isNotEmpty ? current.imdbId : cached.imdbId,
-    sourceKind: current.sourceKind ?? cached.sourceKind,
-    sourceName: current.sourceName.trim().isNotEmpty
-        ? current.sourceName
-        : cached.sourceName,
+    tmdbId: current.tmdbId.trim().isNotEmpty ? current.tmdbId : cached.tmdbId,
+    tvdbId: current.tvdbId.trim().isNotEmpty ? current.tvdbId : cached.tvdbId,
+    wikidataId: current.wikidataId.trim().isNotEmpty
+        ? current.wikidataId
+        : cached.wikidataId,
+    tmdbSetId: current.tmdbSetId.trim().isNotEmpty
+        ? current.tmdbSetId
+        : cached.tmdbSetId,
+    providerIds: current.providerIds.isNotEmpty
+        ? current.providerIds
+        : cached.providerIds,
+    sourceKind: preferCachedResourceState
+        ? (cached.sourceKind ?? current.sourceKind)
+        : (current.sourceKind ?? cached.sourceKind),
+    sourceName: preferCachedResourceState
+        ? (cached.sourceName.trim().isNotEmpty
+            ? cached.sourceName
+            : current.sourceName)
+        : (current.sourceName.trim().isNotEmpty
+            ? current.sourceName
+            : cached.sourceName),
+    seasonNumber: current.seasonNumber ?? cached.seasonNumber,
+    episodeNumber: current.episodeNumber ?? cached.episodeNumber,
   );
+}
+
+bool _hasResolvedLocalResourceState(MediaDetailTarget target) {
+  if (target.playbackTarget?.canPlay == true) {
+    return true;
+  }
+  if (target.sourceId.trim().isNotEmpty && target.itemId.trim().isNotEmpty) {
+    return true;
+  }
+  if (!_isUnavailableAvailabilityLabel(target.availabilityLabel) &&
+      (target.sourceName.trim().isNotEmpty ||
+          target.resourcePath.trim().isNotEmpty)) {
+    return true;
+  }
+  return false;
 }
 
 PlaybackTarget? _mergeCachedPlaybackTarget(
@@ -502,6 +807,14 @@ PlaybackTarget? _mergeCachedPlaybackTarget(
         ? current.actualAddress
         : cached.actualAddress,
     itemId: current.itemId.trim().isNotEmpty ? current.itemId : cached.itemId,
+    itemType:
+        current.itemType.trim().isNotEmpty ? current.itemType : cached.itemType,
+    year: current.year > 0 ? current.year : cached.year,
+    seriesId:
+        current.seriesId.trim().isNotEmpty ? current.seriesId : cached.seriesId,
+    seriesTitle: current.seriesTitle.trim().isNotEmpty
+        ? current.seriesTitle
+        : cached.seriesTitle,
     preferredMediaSourceId: current.preferredMediaSourceId.trim().isNotEmpty
         ? current.preferredMediaSourceId
         : cached.preferredMediaSourceId,
@@ -517,6 +830,8 @@ PlaybackTarget? _mergeCachedPlaybackTarget(
     audioCodec: current.audioCodec.trim().isNotEmpty
         ? current.audioCodec
         : cached.audioCodec,
+    seasonNumber: current.seasonNumber ?? cached.seasonNumber,
+    episodeNumber: current.episodeNumber ?? cached.episodeNumber,
     width: current.width ?? cached.width,
     height: current.height ?? cached.height,
     bitrate: current.bitrate ?? cached.bitrate,
@@ -532,15 +847,34 @@ bool _hasMetadataChanged(
       current.backdropUrl != next.backdropUrl ||
       current.logoUrl != next.logoUrl ||
       current.bannerUrl != next.bannerUrl ||
+      !_sameStrings(current.extraBackdropUrls, next.extraBackdropUrls) ||
       current.overview != next.overview ||
       current.year != next.year ||
       current.durationLabel != next.durationLabel ||
       !_sameStrings(current.ratingLabels, next.ratingLabels) ||
       !_sameStrings(current.genres, next.genres) ||
       !_sameStrings(current.directors, next.directors) ||
+      !_samePeople(
+        current.directorProfiles,
+        next.directorProfiles,
+      ) ||
       !_sameStrings(current.actors, next.actors) ||
+      !_samePeople(
+        current.actorProfiles,
+        next.actorProfiles,
+      ) ||
+      !_sameStrings(current.platforms, next.platforms) ||
+      !_samePeople(
+        current.platformProfiles,
+        next.platformProfiles,
+      ) ||
       current.doubanId != next.doubanId ||
-      current.imdbId != next.imdbId;
+      current.imdbId != next.imdbId ||
+      current.tmdbId != next.tmdbId ||
+      current.tvdbId != next.tvdbId ||
+      current.wikidataId != next.wikidataId ||
+      current.tmdbSetId != next.tmdbSetId ||
+      !_sameMaps(current.providerIds, next.providerIds);
 }
 
 bool _sameStrings(List<String> left, List<String> right) {
@@ -549,6 +883,25 @@ bool _sameStrings(List<String> left, List<String> right) {
   }
   for (var index = 0; index < left.length; index++) {
     if (left[index] != right[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _samePeople(
+  List<MediaPersonProfile> left,
+  List<MediaPersonProfile> right,
+) {
+  if (identical(left, right)) {
+    return true;
+  }
+  if (left.length != right.length) {
+    return false;
+  }
+  for (var index = 0; index < left.length; index++) {
+    if (left[index].name != right[index].name ||
+        left[index].avatarUrl != right[index].avatarUrl) {
       return false;
     }
   }
@@ -568,7 +921,7 @@ Future<MetadataMatchResult?> _tryPreferredMetadataMatch({
         query: query,
         doubanId: target.doubanId,
         year: target.year,
-        preferSeries: target.isSeries,
+        preferSeries: _prefersSeriesMetadata(target),
         actors: target.actors,
       ),
     );
@@ -582,6 +935,7 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
   required MediaDetailTarget target,
   required String query,
   MetadataMatchResult? metadataMatch,
+  void Function(List<_LibraryMatchCandidate> matches)? onProgress,
 }) async {
   const detailLibraryMatchLimit = 2000;
   const maxMatches = 32;
@@ -600,6 +954,66 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
     }
   }
 
+  List<_LibraryMatchCandidate> snapshot() {
+    final out = byId.values.toList()..sort((a, b) => b.score.compareTo(a.score));
+    if (out.length <= maxMatches) {
+      return out;
+    }
+    return out.take(maxMatches).toList(growable: false);
+  }
+
+  List<_LibraryMatchCandidate> buildCandidates(List<MediaItem> items) {
+    final matches = <_LibraryMatchCandidate>[];
+    final imdbId = _resolveManualMatchImdbId(target, metadataMatch);
+    final tmdbId = _resolveManualMatchTmdbId(target, metadataMatch);
+    final tvdbId = _resolveManualMatchTvdbId(target);
+    final wikidataId = _resolveManualMatchWikidataId(target);
+    final hasExternalIds = imdbId.trim().isNotEmpty ||
+        tmdbId.trim().isNotEmpty ||
+        tvdbId.trim().isNotEmpty ||
+        wikidataId.trim().isNotEmpty;
+    final exactMatched = matchMediaItemByExternalIds(
+      items,
+      imdbId: imdbId,
+      tmdbId: tmdbId,
+      tvdbId: tvdbId,
+      wikidataId: wikidataId,
+    );
+    if (exactMatched != null) {
+      matches.add(
+        _LibraryMatchCandidate(
+          item: exactMatched,
+          matchReason: _externalIdMatchReason(
+            exactMatched,
+            imdbId: imdbId,
+            tmdbId: tmdbId,
+            tvdbId: tvdbId,
+            wikidataId: wikidataId,
+          ),
+          score: 1e9,
+        ),
+      );
+    }
+    if (hasExternalIds) {
+      return matches;
+    }
+    for (final scored in listScoredMediaItemsMatchingTitles(
+      items,
+      titles: titles,
+      year: year,
+      maxResults: maxMatches,
+    )) {
+      matches.add(
+        _LibraryMatchCandidate(
+          item: scored.item,
+          matchReason: _titleMatchReason(year),
+          score: scored.score,
+        ),
+      );
+    }
+    return matches;
+  }
+
   List<MediaCollection> collections;
   try {
     collections = await mediaRepository.fetchCollections(
@@ -609,6 +1023,7 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
     collections = const [];
   }
 
+  final tasks = <Future<List<_LibraryMatchCandidate>>>[];
   if (collections.isNotEmpty) {
     final rankedCollections = collections.toList()
       ..sort((left, right) {
@@ -628,76 +1043,51 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
         }
         return left.title.compareTo(right.title);
       });
-
-    final imdbId = _resolveManualMatchImdbId(target, metadataMatch);
     for (final collection in rankedCollections) {
-      try {
-        final items = await mediaRepository.fetchLibrary(
-          kind: MediaSourceKind.emby,
-          sourceId: collection.sourceId,
-          sectionId: collection.id,
-          limit: detailLibraryMatchLimit,
-        );
-        final exactMatched = matchMediaItemByExternalIds(
-          items,
-          imdbId: imdbId,
-        );
-        if (exactMatched != null) {
-          upsert(
-            _LibraryMatchCandidate(
-              item: exactMatched,
-              matchReason: _externalIdMatchReason(
-                exactMatched,
-                imdbId: imdbId,
-              ),
-              score: 1e9,
-            ),
+      tasks.add(() async {
+        try {
+          final items = await mediaRepository.fetchLibrary(
+            kind: MediaSourceKind.emby,
+            sourceId: collection.sourceId,
+            sectionId: collection.id,
+            limit: detailLibraryMatchLimit,
           );
+          return buildCandidates(items);
+        } catch (_) {
+          return const <_LibraryMatchCandidate>[];
         }
-        for (final scored in listScoredMediaItemsMatchingTitles(
-          items,
-          titles: titles,
-          year: year,
-          maxResults: maxMatches,
-        )) {
-          upsert(
-            _LibraryMatchCandidate(
-              item: scored.item,
-              matchReason: _titleMatchReason(year),
-              score: scored.score,
-            ),
-          );
-        }
-      } catch (_) {}
+      }());
     }
   }
 
-  try {
-    final nasLibrary = await mediaRepository.fetchLibrary(
-      kind: MediaSourceKind.nas,
-      limit: detailLibraryMatchLimit,
-    );
-    for (final scored in listScoredMediaItemsMatchingTitles(
-      nasLibrary,
-      titles: titles,
-      year: year,
-      maxResults: maxMatches,
-    )) {
-      upsert(
-        _LibraryMatchCandidate(
-          item: scored.item,
-          matchReason: _titleMatchReason(year),
-          score: scored.score,
-        ),
+  tasks.add(() async {
+    try {
+      final nasLibrary = await mediaRepository.fetchLibrary(
+        kind: MediaSourceKind.nas,
+        limit: detailLibraryMatchLimit,
       );
+      return buildCandidates(nasLibrary);
+    } catch (_) {
+      return const <_LibraryMatchCandidate>[];
     }
-  } catch (_) {}
+  }());
 
-  final out = byId.values.toList()..sort((a, b) => b.score.compareTo(a.score));
-  if (out.length <= maxMatches) {
-    return out;
+  for (final task in tasks) {
+    unawaited(
+      task.then((matches) {
+        if (matches.isEmpty) {
+          return;
+        }
+        for (final match in matches) {
+          upsert(match);
+        }
+        onProgress?.call(snapshot());
+      }).catchError((_) {}),
+    );
   }
-  return out.take(maxMatches).toList();
+
+  await Future.wait(tasks);
+  return snapshot();
 }
 
 List<MediaDetailTarget> _candidatesToMergedTargets(
@@ -794,13 +1184,29 @@ int _resolveManualMatchYear(
 String _externalIdMatchReason(
   MediaItem item, {
   required String imdbId,
+  required String tmdbId,
+  required String tvdbId,
+  required String wikidataId,
 }) {
   final reasons = <String>[];
   final normalizedImdbId = imdbId.trim().toLowerCase();
+  final normalizedTmdbId = tmdbId.trim();
+  final normalizedTvdbId = tvdbId.trim();
+  final normalizedWikidataId = wikidataId.trim().toUpperCase();
 
   if (normalizedImdbId.isNotEmpty &&
       item.imdbId.trim().toLowerCase() == normalizedImdbId) {
     reasons.add('IMDb ID');
+  }
+  if (normalizedTmdbId.isNotEmpty && item.tmdbId.trim() == normalizedTmdbId) {
+    reasons.add('TMDB ID');
+  }
+  if (normalizedTvdbId.isNotEmpty && item.tvdbId.trim() == normalizedTvdbId) {
+    reasons.add('TVDB ID');
+  }
+  if (normalizedWikidataId.isNotEmpty &&
+      item.wikidataId.trim().toUpperCase() == normalizedWikidataId) {
+    reasons.add('Wikidata ID');
   }
 
   if (reasons.isEmpty) {
@@ -825,6 +1231,39 @@ String _resolveManualMatchImdbId(
     return current;
   }
   return metadataMatch?.imdbId.trim() ?? '';
+}
+
+String _resolveManualMatchTmdbId(
+  MediaDetailTarget target,
+  MetadataMatchResult? metadataMatch,
+) {
+  final current = target.tmdbId.trim();
+  if (current.isNotEmpty) {
+    return current;
+  }
+  return metadataMatch?.tmdbId.trim() ?? '';
+}
+
+String _resolveManualMatchTvdbId(MediaDetailTarget target) {
+  final current = target.tvdbId.trim();
+  if (current.isNotEmpty) {
+    return current;
+  }
+  return target.providerIds['Tvdb']?.trim() ??
+      target.providerIds['TVDb']?.trim() ??
+      target.providerIds['tvdb']?.trim() ??
+      '';
+}
+
+String _resolveManualMatchWikidataId(MediaDetailTarget target) {
+  final current = target.wikidataId.trim();
+  if (current.isNotEmpty) {
+    return current;
+  }
+  return target.providerIds['Wikidata']?.trim() ??
+      target.providerIds['WikiData']?.trim() ??
+      target.providerIds['wikidata']?.trim() ??
+      '';
 }
 
 int _scoreManualMatchCollection(
@@ -1011,28 +1450,39 @@ MediaDetailTarget _mergeMatchedLibraryTarget({
 }) {
   return matched.copyWith(
     title: current.title,
-    posterUrl: _firstNonEmpty(current.posterUrl, matched.posterUrl),
-    posterHeaders: current.posterHeaders.isNotEmpty
-        ? current.posterHeaders
-        : matched.posterHeaders,
-    backdropUrl: _firstNonEmpty(current.backdropUrl, matched.backdropUrl),
-    backdropHeaders: current.backdropHeaders.isNotEmpty
-        ? current.backdropHeaders
-        : matched.backdropHeaders,
-    logoUrl: _firstNonEmpty(current.logoUrl, matched.logoUrl),
-    logoHeaders: current.logoHeaders.isNotEmpty
-        ? current.logoHeaders
-        : matched.logoHeaders,
-    bannerUrl: _firstNonEmpty(current.bannerUrl, matched.bannerUrl),
-    bannerHeaders: current.bannerHeaders.isNotEmpty
-        ? current.bannerHeaders
-        : matched.bannerHeaders,
-    extraBackdropUrls: current.extraBackdropUrls.isNotEmpty
-        ? current.extraBackdropUrls
-        : matched.extraBackdropUrls,
-    extraBackdropHeaders: current.extraBackdropHeaders.isNotEmpty
-        ? current.extraBackdropHeaders
-        : matched.extraBackdropHeaders,
+    posterUrl: _firstNonEmpty(matched.posterUrl, current.posterUrl),
+    posterHeaders: matched.posterUrl.trim().isNotEmpty
+        ? matched.posterHeaders
+        : (current.posterHeaders.isNotEmpty
+            ? current.posterHeaders
+            : matched.posterHeaders),
+    backdropUrl: _firstNonEmpty(matched.backdropUrl, current.backdropUrl),
+    backdropHeaders: matched.backdropUrl.trim().isNotEmpty
+        ? matched.backdropHeaders
+        : (current.backdropHeaders.isNotEmpty
+            ? current.backdropHeaders
+            : matched.backdropHeaders),
+    logoUrl: _firstNonEmpty(matched.logoUrl, current.logoUrl),
+    logoHeaders: matched.logoUrl.trim().isNotEmpty
+        ? matched.logoHeaders
+        : (current.logoHeaders.isNotEmpty
+            ? current.logoHeaders
+            : matched.logoHeaders),
+    bannerUrl: _firstNonEmpty(matched.bannerUrl, current.bannerUrl),
+    bannerHeaders: matched.bannerUrl.trim().isNotEmpty
+        ? matched.bannerHeaders
+        : (current.bannerHeaders.isNotEmpty
+            ? current.bannerHeaders
+            : matched.bannerHeaders),
+    extraBackdropUrls: _mergeUniqueImageUrls([
+      ...matched.extraBackdropUrls,
+      ...current.extraBackdropUrls,
+    ]),
+    extraBackdropHeaders: matched.extraBackdropUrls.isNotEmpty
+        ? matched.extraBackdropHeaders
+        : (current.extraBackdropHeaders.isNotEmpty
+            ? current.extraBackdropHeaders
+            : matched.extraBackdropHeaders),
     overview: current.hasUsefulOverview ? current.overview : matched.overview,
     year: current.year > 0 ? current.year : matched.year,
     durationLabel: current.durationLabel.trim().isNotEmpty
@@ -1041,60 +1491,209 @@ MediaDetailTarget _mergeMatchedLibraryTarget({
     genres: current.genres.isNotEmpty ? current.genres : matched.genres,
     directors:
         current.directors.isNotEmpty ? current.directors : matched.directors,
+    directorProfiles: current.directorProfiles.isNotEmpty
+        ? current.directorProfiles
+        : matched.directorProfiles,
     actors: current.actors.isNotEmpty ? current.actors : matched.actors,
     actorProfiles: current.actorProfiles.isNotEmpty
         ? current.actorProfiles
         : matched.actorProfiles,
+    platforms:
+        current.platforms.isNotEmpty ? current.platforms : matched.platforms,
+    platformProfiles: current.platformProfiles.isNotEmpty
+        ? current.platformProfiles
+        : matched.platformProfiles,
     ratingLabels: _mergeLabels(
       matched.ratingLabels,
       current.ratingLabels,
     ),
     doubanId: current.doubanId,
     imdbId: current.imdbId,
+    tmdbId: current.tmdbId.trim().isNotEmpty ? current.tmdbId : matched.tmdbId,
+    tvdbId: current.tvdbId.trim().isNotEmpty ? current.tvdbId : matched.tvdbId,
+    wikidataId: current.wikidataId.trim().isNotEmpty
+        ? current.wikidataId
+        : matched.wikidataId,
+    tmdbSetId: current.tmdbSetId.trim().isNotEmpty
+        ? current.tmdbSetId
+        : matched.tmdbSetId,
+    providerIds: current.providerIds.isNotEmpty
+        ? current.providerIds
+        : matched.providerIds,
   );
 }
 
-MediaDetailTarget _applyManualMetadataMatch(
+MediaDetailTarget _applyMetadataMatchToDetailTarget(
   MediaDetailTarget target,
-  MetadataMatchResult match,
-) {
+  MetadataMatchResult match, {
+  bool replaceExisting = false,
+}) {
   final filteredMatchRatingLabels = _filterSupplementalRatingLabels(
     existing: target.ratingLabels,
     supplemental: match.ratingLabels,
   );
+  final resolvedDirectorProfiles = match.directorProfiles.isNotEmpty
+      ? _toMediaPersonProfiles(match.directorProfiles)
+      : const <MediaPersonProfile>[];
+  final resolvedActorProfiles = match.actorProfiles.isNotEmpty
+      ? _toMediaPersonProfiles(match.actorProfiles)
+      : const <MediaPersonProfile>[];
+  final resolvedPlatformProfiles = match.platformProfiles.isNotEmpty
+      ? _toMediaPersonProfiles(match.platformProfiles)
+      : const <MediaPersonProfile>[];
+  final shouldReplaceCompanies = match.provider == MetadataMatchProvider.tmdb;
   return target.copyWith(
-    posterUrl:
-        target.posterUrl.trim().isNotEmpty ? target.posterUrl : match.posterUrl,
-    posterHeaders: target.posterHeaders,
-    overview: target.hasUsefulOverview
-        ? target.overview
-        : (match.overview.trim().isNotEmpty ? match.overview : target.overview),
-    year: target.year > 0 ? target.year : match.year,
-    durationLabel: match.durationLabel.trim().isNotEmpty
-        ? (target.durationLabel.trim().isNotEmpty
-            ? target.durationLabel
-            : match.durationLabel)
-        : target.durationLabel,
-    genres: target.genres.isNotEmpty ? target.genres : match.genres,
-    directors: target.directors.isNotEmpty ? target.directors : match.directors,
-    actors: target.actors.isNotEmpty ? target.actors : match.actors,
-    actorProfiles: target.actorProfiles.isNotEmpty
-        ? target.actorProfiles
-        : match.actorProfiles.isNotEmpty
-            ? match.actorProfiles
-                .map(
-                  (item) => MediaPersonProfile(
-                    name: item.name,
-                    avatarUrl: item.avatarUrl,
-                  ),
-                )
-                .toList()
-            : target.actorProfiles,
+    posterUrl: replaceExisting
+        ? _firstNonEmpty(match.posterUrl, target.posterUrl)
+        : (target.posterUrl.trim().isNotEmpty
+            ? target.posterUrl
+            : match.posterUrl),
+    posterHeaders: replaceExisting
+        ? (match.posterUrl.trim().isNotEmpty
+            ? const <String, String>{}
+            : target.posterHeaders)
+        : target.posterHeaders,
+    backdropUrl: replaceExisting
+        ? _firstNonEmpty(match.backdropUrl, target.backdropUrl)
+        : (target.backdropUrl.trim().isNotEmpty
+            ? target.backdropUrl
+            : match.backdropUrl),
+    backdropHeaders: replaceExisting
+        ? (match.backdropUrl.trim().isNotEmpty
+            ? const <String, String>{}
+            : target.backdropHeaders)
+        : target.backdropHeaders,
+    logoUrl: replaceExisting
+        ? _firstNonEmpty(match.logoUrl, target.logoUrl)
+        : (target.logoUrl.trim().isNotEmpty ? target.logoUrl : match.logoUrl),
+    logoHeaders: replaceExisting
+        ? (match.logoUrl.trim().isNotEmpty
+            ? const <String, String>{}
+            : target.logoHeaders)
+        : target.logoHeaders,
+    bannerUrl: replaceExisting
+        ? _firstNonEmpty(match.bannerUrl, target.bannerUrl)
+        : (target.bannerUrl.trim().isNotEmpty
+            ? target.bannerUrl
+            : match.bannerUrl),
+    bannerHeaders: replaceExisting
+        ? (match.bannerUrl.trim().isNotEmpty
+            ? const <String, String>{}
+            : target.bannerHeaders)
+        : target.bannerHeaders,
+    extraBackdropUrls: replaceExisting
+        ? (match.extraBackdropUrls.isNotEmpty
+            ? _mergeUniqueImageUrls(match.extraBackdropUrls)
+            : target.extraBackdropUrls)
+        : _mergeUniqueImageUrls([
+            ...target.extraBackdropUrls,
+            ...match.extraBackdropUrls,
+          ]),
+    extraBackdropHeaders: replaceExisting
+        ? (match.extraBackdropUrls.isNotEmpty
+            ? const <String, String>{}
+            : target.extraBackdropHeaders)
+        : target.extraBackdropHeaders,
+    overview: replaceExisting
+        ? _firstNonEmpty(match.overview, target.overview)
+        : (target.hasUsefulOverview
+            ? target.overview
+            : (match.overview.trim().isNotEmpty
+                ? match.overview
+                : target.overview)),
+    year: replaceExisting
+        ? (match.year > 0 ? match.year : target.year)
+        : (target.year > 0 ? target.year : match.year),
+    durationLabel: replaceExisting
+        ? _firstNonEmpty(match.durationLabel, target.durationLabel)
+        : (match.durationLabel.trim().isNotEmpty
+            ? (target.durationLabel.trim().isNotEmpty
+                ? target.durationLabel
+                : match.durationLabel)
+            : target.durationLabel),
+    genres: replaceExisting
+        ? (match.genres.isNotEmpty ? match.genres : target.genres)
+        : (target.genres.isNotEmpty ? target.genres : match.genres),
+    directors: replaceExisting
+        ? (match.directors.isNotEmpty ? match.directors : target.directors)
+        : (target.directors.isNotEmpty ? target.directors : match.directors),
+    directorProfiles: replaceExisting
+        ? (resolvedDirectorProfiles.isNotEmpty
+            ? resolvedDirectorProfiles
+            : target.directorProfiles)
+        : (target.directorProfiles.isNotEmpty
+            ? target.directorProfiles
+            : resolvedDirectorProfiles.isNotEmpty
+                ? resolvedDirectorProfiles
+                : target.directorProfiles),
+    actors: replaceExisting
+        ? (match.actors.isNotEmpty ? match.actors : target.actors)
+        : (target.actors.isNotEmpty ? target.actors : match.actors),
+    actorProfiles: replaceExisting
+        ? (resolvedActorProfiles.isNotEmpty
+            ? resolvedActorProfiles
+            : target.actorProfiles)
+        : (target.actorProfiles.isNotEmpty
+            ? target.actorProfiles
+            : resolvedActorProfiles.isNotEmpty
+                ? resolvedActorProfiles
+                : target.actorProfiles),
+    platforms: shouldReplaceCompanies
+        ? match.platforms
+        : (replaceExisting
+            ? (match.platforms.isNotEmpty ? match.platforms : target.platforms)
+            : (target.platforms.isNotEmpty
+                ? target.platforms
+                : match.platforms)),
+    platformProfiles: shouldReplaceCompanies
+        ? resolvedPlatformProfiles
+        : (replaceExisting
+            ? (resolvedPlatformProfiles.isNotEmpty
+                ? resolvedPlatformProfiles
+                : target.platformProfiles)
+            : (target.platformProfiles.isNotEmpty
+                ? target.platformProfiles
+                : resolvedPlatformProfiles.isNotEmpty
+                    ? resolvedPlatformProfiles
+                    : target.platformProfiles)),
     ratingLabels: _mergeLabels(target.ratingLabels, filteredMatchRatingLabels),
-    doubanId:
-        target.doubanId.trim().isNotEmpty ? target.doubanId : match.doubanId,
-    imdbId: target.imdbId.trim().isNotEmpty ? target.imdbId : match.imdbId,
+    doubanId: replaceExisting
+        ? _firstNonEmpty(match.doubanId, target.doubanId)
+        : (target.doubanId.trim().isNotEmpty
+            ? target.doubanId
+            : match.doubanId),
+    imdbId: replaceExisting
+        ? _firstNonEmpty(match.imdbId, target.imdbId)
+        : (target.imdbId.trim().isNotEmpty ? target.imdbId : match.imdbId),
+    tmdbId: replaceExisting
+        ? _firstNonEmpty(match.tmdbId, target.tmdbId)
+        : (target.tmdbId.trim().isNotEmpty ? target.tmdbId : match.tmdbId),
   );
+}
+
+List<MediaPersonProfile> _toMediaPersonProfiles(
+  List<MetadataPersonProfile> profiles,
+) {
+  return profiles
+      .map(
+        (item) => MediaPersonProfile(
+          name: item.name,
+          avatarUrl: item.avatarUrl,
+        ),
+      )
+      .toList(growable: false);
+}
+
+bool _sameMaps(Map<String, String> left, Map<String, String> right) {
+  if (left.length != right.length) {
+    return false;
+  }
+  for (final entry in left.entries) {
+    if (right[entry.key] != entry.value) {
+      return false;
+    }
+  }
+  return true;
 }
 
 List<String> _filterSupplementalRatingLabels({
@@ -1129,6 +1728,19 @@ List<String> _mergeLabels(List<String> primary, List<String> secondary) {
     if (seen.add(key)) {
       merged.add(trimmed);
     }
+  }
+  return merged;
+}
+
+List<String> _mergeUniqueImageUrls(Iterable<String> values) {
+  final seen = <String>{};
+  final merged = <String>[];
+  for (final value in values) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty || !seen.add(trimmed)) {
+      continue;
+    }
+    merged.add(trimmed);
   }
   return merged;
 }
@@ -1224,6 +1836,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   List<MediaDetailTarget> _libraryMatchChoices = const [];
   int _selectedLibraryMatchIndex = 0;
   int _detailSessionId = 0;
+  final TvFocusMemoryController _tvFocusMemoryController =
+      TvFocusMemoryController();
 
   @override
   void initState() {
@@ -1250,6 +1864,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   @override
   void dispose() {
     _detailSessionId += 1;
+    _tvFocusMemoryController.dispose();
     super.dispose();
   }
 
@@ -1266,12 +1881,17 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
         unawaited(ref.read(seriesBrowserProvider(currentTarget).future));
       }
 
+      final settings = ref.read(appSettingsProvider);
+      if (!settings.detailAutoLibraryMatchEnabled) {
+        return;
+      }
+
       final resolved =
           await ref.read(enrichedDetailTargetProvider(widget.target).future);
       if (!_isSessionActive(sessionId) || _manualOverrideTarget != null) {
         return;
       }
-      if (!_shouldShowLocalResourceMatcher(resolved)) {
+      if (!_shouldAutoMatchLocalResource(resolved)) {
         return;
       }
       await _matchLocalResource(
@@ -1318,6 +1938,30 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       target: currentTarget,
       query: query,
       metadataMatch: metadataMatch,
+      onProgress: (partialCandidates) {
+        if (!_isSessionActive(activeSessionId)) {
+          return;
+        }
+        final partialMerged = _candidatesToMergedTargets(
+          currentTarget,
+          partialCandidates,
+          query,
+        );
+        if (partialMerged.isEmpty) {
+          return;
+        }
+        setState(() {
+          if (partialMerged.length == 1) {
+            _libraryMatchChoices = const [];
+            _selectedLibraryMatchIndex = 0;
+            _manualOverrideTarget = partialMerged.first;
+          } else {
+            _libraryMatchChoices = partialMerged;
+            _selectedLibraryMatchIndex = 0;
+            _manualOverrideTarget = partialMerged.first;
+          }
+        });
+      },
     );
 
     if (!_isSessionActive(activeSessionId)) {
@@ -1394,6 +2038,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   Future<void> _refreshMetadata(
     MediaDetailTarget currentTarget, {
     int? sessionId,
+    bool showFeedback = true,
   }) async {
     final activeSessionId = sessionId ?? _detailSessionId;
     if (_isRefreshingMetadata || !_isSessionActive(activeSessionId)) {
@@ -1411,6 +2056,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       wmdbMetadataClient: ref.read(wmdbMetadataClientProvider),
       tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
       imdbRatingClient: ref.read(imdbRatingClientProvider),
+      forceSearch: true,
+      forceReplace: true,
     );
     final changed = _hasMetadataChanged(currentTarget, nextTarget);
 
@@ -1432,6 +2079,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
               resolvedTarget: nextTarget,
             ),
       );
+    }
+
+    if (!showFeedback) {
+      return;
     }
 
     if (!mounted) {
@@ -1477,12 +2128,16 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     final seriesAsync = ref.watch(seriesBrowserProvider(target));
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF030914),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          DecoratedBox(
+    return TvFocusMemoryScope(
+      controller: _tvFocusMemoryController,
+      scopeId: 'detail',
+      enabled: isTelevision,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF030914),
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            DecoratedBox(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 colors: [
@@ -1514,6 +2169,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                             return _DetailBlock(
                               title: '剧集',
                               child: _EpisodeBrowser(
+                                seriesTarget: target,
                                 groups: browser.groups,
                                 selectedGroupId: selectedGroup.id,
                                 onSeasonSelected: (groupId) {
@@ -1547,7 +2203,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                         ),
                       if (target.overview.trim().isNotEmpty)
                         _DetailBlock(
-                          title: '剧情简介',
+                          title: _overviewSectionTitle(target),
                           child: Text(
                             target.overview,
                             style: const TextStyle(
@@ -1557,29 +2213,66 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                             ),
                           ),
                         ),
-                      if (target.directors.isNotEmpty ||
+                      if (_buildDetailGalleryImages(target).isNotEmpty)
+                        _DetailBlock(
+                          title: '剧照',
+                          child: _DetailImageGallery(
+                            images: _buildDetailGalleryImages(target),
+                          ),
+                        ),
+                      if (target.resolvedDirectorProfiles.isNotEmpty ||
                           target.resolvedActorProfiles.isNotEmpty)
                         _DetailBlock(
                           title: '演职员',
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (target.directors.isNotEmpty) ...[
+                              if (target
+                                  .resolvedDirectorProfiles.isNotEmpty) ...[
                                 const _InfoLabel('导演'),
                                 const SizedBox(height: 10),
-                                _NameRail(names: target.directors),
+                                _PersonRail(
+                                  people: target.resolvedDirectorProfiles,
+                                  focusScopePrefix: 'detail:director',
+                                  onPersonTap: (person) {
+                                    context.pushNamed(
+                                      'person-credits',
+                                      extra: PersonCreditsPageTarget(
+                                        person: person,
+                                        role: PersonCreditsRole.director,
+                                      ),
+                                    );
+                                  },
+                                ),
                               ],
-                              if (target.directors.isNotEmpty &&
+                              if (target.resolvedDirectorProfiles.isNotEmpty &&
                                   target.resolvedActorProfiles.isNotEmpty)
                                 const SizedBox(height: 18),
                               if (target.resolvedActorProfiles.isNotEmpty) ...[
                                 const _InfoLabel('演员'),
                                 const SizedBox(height: 10),
-                                _ActorRail(
-                                  actors: target.resolvedActorProfiles,
+                                _PersonRail(
+                                  people: target.resolvedActorProfiles,
+                                  focusScopePrefix: 'detail:actor',
+                                  onPersonTap: (person) {
+                                    context.pushNamed(
+                                      'person-credits',
+                                      extra: PersonCreditsPageTarget(
+                                        person: person,
+                                        role: PersonCreditsRole.actor,
+                                      ),
+                                    );
+                                  },
                                 ),
                               ],
                             ],
+                          ),
+                        ),
+                      if (target.resolvedPlatformProfiles.isNotEmpty)
+                        _DetailBlock(
+                          title: '公司',
+                          child: _PlatformRail(
+                            platforms: target.resolvedPlatformProfiles,
                           ),
                         ),
                       if (target.sourceName.trim().isNotEmpty ||
@@ -1654,8 +2347,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                   ),
                                 ),
                               ],
-                              if (_shouldShowLocalResourceMatcher(target) ||
-                                  _libraryMatchChoices.length > 1) ...[
+                              if (_canShowManualResourceMatchButton(target)) ...[
                                 const SizedBox(height: 12),
                                 Align(
                                   alignment: Alignment.centerLeft,
@@ -1663,24 +2355,27 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                       ? TvAdaptiveButton(
                                           label: _isMatchingLocalResource
                                               ? '匹配中...'
-                                              : _libraryMatchChoices.length > 1
-                                                  ? '重新匹配本地资源'
-                                                  : '匹配本地资源',
+                                              : '重新匹配资源',
                                           icon: Icons.link_rounded,
+                                          focusId:
+                                              'detail:resource:match-library',
                                           onPressed: _isMatchingLocalResource
                                               ? null
-                                              : () => _matchLocalResource(target),
+                                              : () =>
+                                                  _matchLocalResource(target),
                                           variant: TvButtonVariant.text,
                                         )
                                       : TextButton.icon(
                                           onPressed: _isMatchingLocalResource
                                               ? null
-                                              : () => _matchLocalResource(target),
+                                              : () =>
+                                                  _matchLocalResource(target),
                                           icon: _isMatchingLocalResource
                                               ? const SizedBox(
                                                   width: 14,
                                                   height: 14,
-                                                  child: CircularProgressIndicator(
+                                                  child:
+                                                      CircularProgressIndicator(
                                                     strokeWidth: 2,
                                                   ),
                                                 )
@@ -1691,9 +2386,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                           label: Text(
                                             _isMatchingLocalResource
                                                 ? '匹配中...'
-                                                : _libraryMatchChoices.length > 1
-                                                    ? '重新匹配本地资源'
-                                                    : '匹配本地资源',
+                                                : '重新匹配资源',
                                           ),
                                           style: TextButton.styleFrom(
                                             foregroundColor: Colors.white,
@@ -1701,8 +2394,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                               horizontal: 0,
                                               vertical: 0,
                                             ),
-                                            tapTargetSize:
-                                                MaterialTapTargetSize.shrinkWrap,
+                                            tapTargetSize: MaterialTapTargetSize
+                                                .shrinkWrap,
                                           ),
                                         ),
                                 ),
@@ -1715,6 +2408,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                       ? TvAdaptiveButton(
                                           label: '建立/管理索引',
                                           icon: Icons.manage_search_rounded,
+                                          focusId:
+                                              'detail:resource:metadata-index',
                                           onPressed: () =>
                                               _openMetadataIndexManager(target),
                                           variant: TvButtonVariant.text,
@@ -1733,8 +2428,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                               horizontal: 0,
                                               vertical: 0,
                                             ),
-                                            tapTargetSize:
-                                                MaterialTapTargetSize.shrinkWrap,
+                                            tapTargetSize: MaterialTapTargetSize
+                                                .shrinkWrap,
                                           ),
                                         ),
                                 ),
@@ -1749,6 +2444,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                               ? '更新中...'
                                               : '手动更新信息',
                                           icon: Icons.refresh_rounded,
+                                          focusId:
+                                              'detail:resource:refresh-metadata',
                                           onPressed: _isRefreshingMetadata
                                               ? null
                                               : () => _refreshMetadata(target),
@@ -1762,7 +2459,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                               ? const SizedBox(
                                                   width: 14,
                                                   height: 14,
-                                                  child: CircularProgressIndicator(
+                                                  child:
+                                                      CircularProgressIndicator(
                                                     strokeWidth: 2,
                                                   ),
                                                 )
@@ -1781,8 +2479,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                               horizontal: 0,
                                               vertical: 0,
                                             ),
-                                            tapTargetSize:
-                                                MaterialTapTargetSize.shrinkWrap,
+                                            tapTargetSize: MaterialTapTargetSize
+                                                .shrinkWrap,
                                           ),
                                         ),
                                 ),
@@ -1815,16 +2513,17 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
               ],
             ),
           ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: OverlayToolbar(
-              leadingColor: Colors.white,
-              onBack: () => context.pop(),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: OverlayToolbar(
+                leadingColor: Colors.white,
+                onBack: () => context.pop(),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1842,10 +2541,27 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
 }
 
 bool _shouldShowLocalResourceMatcher(MediaDetailTarget target) {
+  return target.canManuallyMatchLibraryResource;
+}
+
+bool _shouldAutoMatchLocalResource(MediaDetailTarget target) {
   final availability = target.availabilityLabel.trim();
-  return target.needsLibraryMatch &&
-      !target.isPlayable &&
+  return !target.isPlayable &&
+      target.needsLibraryMatch &&
       (availability.isEmpty || availability == '无');
+}
+
+bool _canShowManualResourceMatchButton(MediaDetailTarget target) {
+  if (_shouldShowLocalResourceMatcher(target)) {
+    return true;
+  }
+  if (_isUnavailableAvailabilityLabel(target.availabilityLabel)) {
+    return true;
+  }
+  if (target.sourceId.trim().isNotEmpty || target.itemId.trim().isNotEmpty) {
+    return true;
+  }
+  return target.title.trim().isNotEmpty || target.searchQuery.trim().isNotEmpty;
 }
 
 bool _canManageMetadataIndex(MediaDetailTarget target) {
@@ -1916,6 +2632,24 @@ bool _isMeaningfulDurationLabel(String label) {
   return trimmed.isNotEmpty && trimmed != '时长未知' && trimmed != '文件';
 }
 
+String _overviewSectionTitle(MediaDetailTarget target) {
+  if (target.itemType.trim().toLowerCase() == 'episode') {
+    final seriesTitle = target.playbackTarget?.seriesTitle.trim() ?? '';
+    if (seriesTitle.isNotEmpty) {
+      return seriesTitle;
+    }
+  }
+  final title = target.title.trim();
+  if (title.isNotEmpty) {
+    return title;
+  }
+  final query = target.searchQuery.trim();
+  if (query.isNotEmpty) {
+    return query;
+  }
+  return '剧情简介';
+}
+
 String _availabilityFeedbackLabel(String label) {
   final trimmed = label.trim();
   if (trimmed.startsWith('资源已就绪：')) {
@@ -1927,6 +2661,10 @@ String _availabilityFeedbackLabel(String label) {
   return trimmed;
 }
 
+bool _isUnavailableAvailabilityLabel(String label) {
+  return _availabilityFeedbackLabel(label) == '无';
+}
+
 class _HeroSection extends StatelessWidget {
   const _HeroSection({required this.target});
 
@@ -1934,8 +2672,11 @@ class _HeroSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final screenHeight = MediaQuery.sizeOf(context).height;
+    final isCompact = screenWidth < 760;
     final heroHeight = math.max(560.0, math.min(screenHeight * 0.76, 760.0));
+    final hasHeroLogo = target.logoUrl.trim().isNotEmpty;
     final metadata = <String>[
       ...target.ratingLabels.where((item) => item.trim().isNotEmpty),
       if (target.year > 0) '${target.year}',
@@ -1955,37 +2696,37 @@ class _HeroSection extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           _BackdropImage(
-            imageUrl: target.backdropUrl.trim().isNotEmpty
-                ? target.backdropUrl
-                : target.posterUrl,
-            imageHeaders: target.backdropUrl.trim().isNotEmpty
-                ? target.backdropHeaders
-                : target.posterHeaders,
+            imageUrl: _resolvePrimaryBackdropAsset(target).url,
+            imageHeaders: _resolvePrimaryBackdropAsset(target).headers,
+            fallbackSources: _buildPrimaryBackdropFallbackSources(target),
           ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Colors.black.withValues(alpha: 0.08),
-                  Colors.black.withValues(alpha: 0.22),
-                  const Color(0xFF030914),
-                ],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: const [0, 0.48, 1],
-              ),
-            ),
-          ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Colors.black.withValues(alpha: 0.52),
-                  Colors.black.withValues(alpha: 0.18),
-                  Colors.transparent,
-                ],
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
+          IgnorePointer(
+            child: Align(
+              alignment: Alignment.bottomLeft,
+              child: FractionallySizedBox(
+                widthFactor: isCompact ? 1 : (hasHeroLogo ? 0.76 : 0.64),
+                heightFactor: isCompact ? 0.74 : 0.84,
+                alignment: Alignment.bottomLeft,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: isCompact
+                          ? const Alignment(-0.72, 0.96)
+                          : const Alignment(-0.96, 0.96),
+                      radius: isCompact ? 1.22 : 1.08,
+                      colors: [
+                        Colors.black.withValues(
+                          alpha: hasHeroLogo ? 0.82 : 0.74,
+                        ),
+                        Colors.black.withValues(
+                          alpha: hasHeroLogo ? 0.44 : 0.32,
+                        ),
+                        Colors.transparent,
+                      ],
+                      stops: const [0, 0.5, 1],
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -1997,11 +2738,6 @@ class _HeroSection extends StatelessWidget {
               padding: EdgeInsets.only(top: kToolbarHeight),
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final isCompact = constraints.maxWidth < 760;
-                  final poster = _PosterArt(
-                    posterUrl: target.posterUrl,
-                    posterHeaders: target.posterHeaders,
-                  );
                   final content = _HeroContent(
                     target: target,
                     metadata: metadata,
@@ -2012,21 +2748,13 @@ class _HeroSection extends StatelessWidget {
                     return Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        poster,
-                        const SizedBox(height: 18),
-                        content,
-                      ],
+                      children: [content],
                     );
                   }
 
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      poster,
-                      const SizedBox(width: 24),
-                      Expanded(child: content),
-                    ],
+                    children: [Expanded(child: content)],
                   );
                 },
               ),
@@ -2053,13 +2781,23 @@ class _HeroContent extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final hasLogo = target.logoUrl.trim().isNotEmpty;
+    final resumeEntry =
+        ref.watch(playbackResumeForDetailTargetProvider(target)).valueOrNull;
+    final showResumeAction =
+        resumeEntry != null && (target.isSeries || resumeEntry.canResume);
+    final primaryPlaybackTarget = _resolvePrimaryPlaybackTarget(
+        target, resumeEntry,
+        preferResume: showResumeAction);
+    final primaryPlaybackLabel = showResumeAction ? '继续播放' : '立即播放';
+    final canSearchResource = target.searchQuery.trim().isNotEmpty;
+    final searchAutofocus = primaryPlaybackTarget == null && canSearchResource;
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 560),
+      constraints: BoxConstraints(maxWidth: hasLogo ? 760 : 560),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (metadata.isNotEmpty)
+          if (!hasLogo && metadata.isNotEmpty)
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -2089,12 +2827,12 @@ class _HeroContent extends ConsumerWidget {
                   )
                   .toList(),
             ),
-          if (metadata.isNotEmpty) const SizedBox(height: 14),
+          if (!hasLogo && metadata.isNotEmpty) const SizedBox(height: 14),
           if (hasLogo)
             ConstrainedBox(
               constraints: const BoxConstraints(
-                maxWidth: 320,
-                maxHeight: 92,
+                maxWidth: 520,
+                maxHeight: 148,
               ),
               child: AppNetworkImage(
                 target.logoUrl,
@@ -2128,8 +2866,40 @@ class _HeroContent extends ConsumerWidget {
                     height: 1.04,
                   ),
             ),
+          if (hasLogo && metadata.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: metadata
+                  .map(
+                    (item) => Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 11,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.08),
+                        ),
+                      ),
+                      child: Text(
+                        item,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
           if (peopleLine.trim().isNotEmpty) ...[
-            const SizedBox(height: 12),
+            SizedBox(height: hasLogo ? 14 : 12),
             Text(
               peopleLine,
               maxLines: 2,
@@ -2141,23 +2911,27 @@ class _HeroContent extends ConsumerWidget {
               ),
             ),
           ],
-          const SizedBox(height: 20),
+          SizedBox(height: hasLogo ? 24 : 20),
           Wrap(
             spacing: 10,
             runSpacing: 10,
             children: [
-              if (target.isPlayable)
+              if (primaryPlaybackTarget != null)
                 isTelevision
                     ? TvAdaptiveButton(
-                        label: '立即播放',
+                        label: primaryPlaybackLabel,
                         icon: Icons.play_arrow_rounded,
+                        focusId: 'detail:hero:play',
+                        autofocus: true,
                         onPressed: () {
-                          context.pushNamed('player', extra: target.playbackTarget);
+                          context.pushNamed('player',
+                              extra: primaryPlaybackTarget);
                         },
                       )
                     : FilledButton.icon(
                         onPressed: () {
-                          context.pushNamed('player', extra: target.playbackTarget);
+                          context.pushNamed('player',
+                              extra: primaryPlaybackTarget);
                         },
                         style: FilledButton.styleFrom(
                           backgroundColor: Colors.white,
@@ -2168,13 +2942,15 @@ class _HeroContent extends ConsumerWidget {
                           ),
                         ),
                         icon: const Icon(Icons.play_arrow_rounded),
-                        label: const Text('立即播放'),
+                        label: Text(primaryPlaybackLabel),
                       ),
               if (!target.isPlayable && target.searchQuery.trim().isNotEmpty)
                 isTelevision
                     ? TvAdaptiveButton(
                         label: '搜索资源',
                         icon: Icons.search_rounded,
+                        focusId: 'detail:hero:search',
+                        autofocus: searchAutofocus,
                         onPressed: () {
                           context.goNamed(
                             'search',
@@ -2205,6 +2981,8 @@ class _HeroContent extends ConsumerWidget {
                     ? TvAdaptiveButton(
                         label: '搜索资源',
                         icon: Icons.search_rounded,
+                        focusId: 'detail:hero:search',
+                        autofocus: searchAutofocus,
                         onPressed: () {
                           context.goNamed(
                             'search',
@@ -2246,10 +3024,12 @@ class _BackdropImage extends StatelessWidget {
   const _BackdropImage({
     required this.imageUrl,
     this.imageHeaders = const {},
+    this.fallbackSources = const [],
   });
 
   final String imageUrl;
   final Map<String, String> imageHeaders;
+  final List<AppNetworkImageSource> fallbackSources;
 
   @override
   Widget build(BuildContext context) {
@@ -2257,82 +3037,15 @@ class _BackdropImage extends StatelessWidget {
       return const ColoredBox(color: Color(0xFF0A1423));
     }
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        AppNetworkImage(
-          imageUrl,
-          headers: imageHeaders,
-          fit: BoxFit.cover,
-          alignment: Alignment.topCenter,
-          errorBuilder: (context, error, stackTrace) {
-            return const ColoredBox(color: Color(0xFF0A1423));
-          },
-        ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: const Color(0xFF081120).withValues(alpha: 0.28),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _PosterArt extends StatelessWidget {
-  const _PosterArt({
-    required this.posterUrl,
-    this.posterHeaders = const {},
-  });
-
-  final String posterUrl;
-  final Map<String, String> posterHeaders;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 168,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.28),
-            blurRadius: 28,
-            offset: const Offset(0, 16),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: AspectRatio(
-          aspectRatio: 0.69,
-          child: Container(
-            color: const Color(0xFF0D192A),
-            child: posterUrl.trim().isEmpty
-                ? const Icon(
-                    Icons.movie_creation_outlined,
-                    size: 42,
-                    color: Colors.white70,
-                  )
-                : AppNetworkImage(
-                    posterUrl,
-                    headers: posterHeaders,
-                    fit: BoxFit.cover,
-                    cacheWidth: 720,
-                    filterQuality: FilterQuality.low,
-                    errorBuilder: (context, error, stackTrace) {
-                      return const Center(
-                        child: Icon(
-                          Icons.movie_creation_outlined,
-                          size: 42,
-                          color: Colors.white70,
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ),
-      ),
+    return AppNetworkImage(
+      imageUrl,
+      headers: imageHeaders,
+      fallbackSources: fallbackSources,
+      fit: BoxFit.cover,
+      alignment: Alignment.topCenter,
+      errorBuilder: (context, error, stackTrace) {
+        return const ColoredBox(color: Color(0xFF0A1423));
+      },
     );
   }
 }
@@ -2385,11 +3098,13 @@ List<MediaItem> _sortEpisodes(List<MediaItem> items) {
 
 class _EpisodeBrowser extends StatelessWidget {
   const _EpisodeBrowser({
+    required this.seriesTarget,
     required this.groups,
     required this.selectedGroupId,
     required this.onSeasonSelected,
   });
 
+  final MediaDetailTarget seriesTarget;
   final List<_EpisodeGroup> groups;
   final String selectedGroupId;
   final ValueChanged<String> onSeasonSelected;
@@ -2420,6 +3135,8 @@ class _EpisodeBrowser extends StatelessWidget {
                 return _SeasonChip(
                   label: group.label,
                   selected: selected,
+                  focusId: 'detail:season:${group.id}',
+                  autofocus: index == 0,
                   onTap: () => onSeasonSelected(group.id),
                 );
               },
@@ -2438,7 +3155,13 @@ class _EpisodeBrowser extends StatelessWidget {
               final episode = selectedGroup.episodes[index];
               return SizedBox(
                 width: 292,
-                child: _EpisodeCard(item: episode),
+                child: _EpisodeCard(
+                  item: episode,
+                  seriesTarget: seriesTarget,
+                  focusId:
+                      'detail:episode:${episode.id.isNotEmpty ? episode.id : '${episode.seasonNumber ?? 0}-${episode.episodeNumber ?? index}'}',
+                  autofocus: index == 0,
+                ),
               );
             },
           ),
@@ -2453,25 +3176,30 @@ class _SeasonChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.focusId,
+    this.autofocus = false,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final String? focusId;
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
     return TvFocusableAction(
       onPressed: onTap,
+      focusId: focusId,
+      autofocus: autofocus,
       borderRadius: BorderRadius.circular(999),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: selected ? Colors.white : Colors.white.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
-            color: selected
-                ? Colors.white
-                : Colors.white.withValues(alpha: 0.08),
+            color:
+                selected ? Colors.white : Colors.white.withValues(alpha: 0.08),
           ),
         ),
         child: Padding(
@@ -2490,158 +3218,179 @@ class _SeasonChip extends StatelessWidget {
   }
 }
 
-class _EpisodeCard extends StatelessWidget {
-  const _EpisodeCard({required this.item});
+class _EpisodeCard extends ConsumerWidget {
+  const _EpisodeCard({
+    required this.item,
+    required this.seriesTarget,
+    this.focusId,
+    this.autofocus = false,
+  });
 
   final MediaItem item;
+  final MediaDetailTarget seriesTarget;
+  final String? focusId;
+  final bool autofocus;
 
   @override
-  Widget build(BuildContext context) {
-    final badgeText = _episodeBadgeText(item);
+  Widget build(BuildContext context, WidgetRef ref) {
+    final playbackEntry =
+        ref.watch(playbackEntryForMediaItemProvider(item)).valueOrNull;
+    final badgeText = _episodeBadgeText(item, playbackEntry);
     final summary = _episodeSummary(item);
     final onOpen = item.isPlayable
         ? () {
             context.pushNamed(
               'player',
-              extra: item.isPlayable ? _itemToPlaybackTarget(item) : null,
+              extra: item.isPlayable
+                  ? _itemToPlaybackTarget(
+                      item,
+                      seriesTarget: seriesTarget,
+                    )
+                  : null,
             );
           }
         : null;
     return TvFocusableAction(
       onPressed: onOpen,
+      focusId: focusId,
+      autofocus: autofocus,
       borderRadius: BorderRadius.circular(24),
       child: DecoratedBox(
-          decoration: BoxDecoration(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
             color: Colors.white.withValues(alpha: 0.06),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.06),
-            ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _EpisodeArtwork(item: item),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.black.withValues(alpha: 0.18),
-                            Colors.transparent,
-                            Colors.black.withValues(alpha: 0.12),
-                            Colors.black.withValues(alpha: 0.58),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomCenter,
-                          stops: const [0, 0.34, 0.62, 1],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: 16 / 9,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _EpisodeArtwork(item: item),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.black.withValues(alpha: 0.18),
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.12),
+                          Colors.black.withValues(alpha: 0.58),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomCenter,
+                        stops: const [0, 0.34, 0.62, 1],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 14,
+                    right: 46,
+                    top: 14,
+                    child: Text(
+                      item.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        height: 1.25,
+                        shadows: [
+                          Shadow(
+                            color: Color(0xAA000000),
+                            blurRadius: 16,
+                            offset: Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 12,
+                    bottom: 12,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 214),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.46),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          badgeText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                     ),
-                    Positioned(
-                      left: 14,
-                      right: 46,
-                      top: 14,
+                  ),
+                  Positioned(
+                    right: 12,
+                    bottom: 12,
+                    child: Icon(
+                      item.isPlayable
+                          ? Icons.play_circle_fill_rounded
+                          : Icons.lock_outline_rounded,
+                      color: item.isPlayable
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.42),
+                      size: 28,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
                       child: Text(
-                        item.title,
-                        maxLines: 2,
+                        summary,
+                        maxLines: 6,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          height: 1.25,
-                          shadows: [
-                            Shadow(
-                              color: Color(0xAA000000),
-                              blurRadius: 16,
-                              offset: Offset(0, 3),
-                            ),
-                          ],
+                          color: Color(0xFFD7E0F1),
+                          fontSize: 13,
+                          height: 1.45,
                         ),
-                      ),
-                    ),
-                    Positioned(
-                      left: 12,
-                      bottom: 12,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 214),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.46),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            badgeText,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      right: 12,
-                      bottom: 12,
-                      child: Icon(
-                        item.isPlayable
-                            ? Icons.play_circle_fill_rounded
-                            : Icons.lock_outline_rounded,
-                        color: item.isPlayable
-                            ? Colors.white
-                            : Colors.white.withValues(alpha: 0.42),
-                        size: 28,
                       ),
                     ),
                   ],
                 ),
               ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          summary,
-                          maxLines: 6,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Color(0xFFD7E0F1),
-                            fontSize: 13,
-                            height: 1.45,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  String _episodeBadgeText(MediaItem item) {
+  String _episodeBadgeText(
+    MediaItem item,
+    PlaybackProgressEntry? playbackEntry,
+  ) {
     final entries = <String>[
       item.episodeNumber != null ? '第 ${item.episodeNumber} 集' : '剧集',
       if (item.durationLabel.trim().isNotEmpty && item.durationLabel != '时长未知')
         item.durationLabel,
-      if (_progressLabel(item).trim().isNotEmpty) _progressLabel(item),
+      if (_progressLabel(item, playbackEntry).trim().isNotEmpty)
+        _progressLabel(item, playbackEntry),
     ];
     return entries.join(' · ');
   }
@@ -2663,8 +3412,11 @@ class _EpisodeCard extends StatelessWidget {
     return fallback.join(' · ');
   }
 
-  String _progressLabel(MediaItem item) {
-    final progress = item.playbackProgress;
+  String _progressLabel(
+    MediaItem item,
+    PlaybackProgressEntry? playbackEntry,
+  ) {
+    final progress = playbackEntry?.progress ?? item.playbackProgress;
     if (progress == null || progress <= 0) {
       return '';
     }
@@ -2682,12 +3434,14 @@ class _EpisodeArtwork extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (item.posterUrl.trim().isNotEmpty) {
+    final artwork = _resolveEpisodeArtworkAsset(item);
+    if (artwork.url.isNotEmpty) {
       return ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         child: AppNetworkImage(
-          item.posterUrl,
-          headers: item.posterHeaders,
+          artwork.url,
+          headers: artwork.headers,
+          fallbackSources: _buildEpisodeArtworkFallbackSources(item),
           fit: BoxFit.cover,
           errorBuilder: (context, error, stackTrace) => _EpisodeArtworkFallback(
             item: item,
@@ -2731,8 +3485,33 @@ class _EpisodeArtworkFallback extends StatelessWidget {
   }
 }
 
-PlaybackTarget _itemToPlaybackTarget(MediaItem item) {
-  return PlaybackTarget.fromMediaItem(item);
+PlaybackTarget? _resolvePrimaryPlaybackTarget(
+  MediaDetailTarget target,
+  PlaybackProgressEntry? resumeEntry, {
+  required bool preferResume,
+}) {
+  if (resumeEntry != null && preferResume) {
+    return resumeEntry.target;
+  }
+  return target.playbackTarget;
+}
+
+PlaybackTarget _itemToPlaybackTarget(
+  MediaItem item, {
+  MediaDetailTarget? seriesTarget,
+}) {
+  final base = PlaybackTarget.fromMediaItem(item);
+  if (seriesTarget == null) {
+    return base;
+  }
+  final isSeriesLike = seriesTarget.itemType.trim().toLowerCase() == 'series';
+  if (!isSeriesLike) {
+    return base;
+  }
+  return base.copyWith(
+    seriesId: seriesTarget.itemId,
+    seriesTitle: seriesTarget.title,
+  );
 }
 
 class _DetailBlock extends StatelessWidget {
@@ -2784,54 +3563,23 @@ class _InfoLabel extends StatelessWidget {
   }
 }
 
-class _NameRail extends StatelessWidget {
-  const _NameRail({required this.names});
+class _PersonRail extends StatelessWidget {
+  const _PersonRail({
+    required this.people,
+    required this.focusScopePrefix,
+    required this.onPersonTap,
+  });
 
-  final List<String> names;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      children: names
-          .where((item) => item.trim().isNotEmpty)
-          .map(
-            (item) => Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.06),
-                ),
-              ),
-              child: Text(
-                item,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          )
-          .toList(),
-    );
-  }
-}
-
-class _ActorRail extends StatelessWidget {
-  const _ActorRail({required this.actors});
-
-  final List<MediaPersonProfile> actors;
+  final List<MediaPersonProfile> people;
+  final String focusScopePrefix;
+  final ValueChanged<MediaPersonProfile> onPersonTap;
 
   @override
   Widget build(BuildContext context) {
-    final visibleActors = actors
+    final visiblePeople = people
         .where((item) => item.name.trim().isNotEmpty)
         .toList(growable: false);
-    if (visibleActors.isEmpty) {
+    if (visiblePeople.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -2840,30 +3588,36 @@ class _ActorRail extends StatelessWidget {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
-        itemCount: visibleActors.length,
+        itemCount: visiblePeople.length,
         separatorBuilder: (context, index) => const SizedBox(width: 14),
         itemBuilder: (context, index) {
-          final actor = visibleActors[index];
-          return SizedBox(
-            width: 86,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                _ActorAvatar(actor: actor),
-                const SizedBox(height: 10),
-                Text(
-                  actor.name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    height: 1.3,
+          final person = visiblePeople[index];
+          return TvFocusableAction(
+            onPressed: () => onPersonTap(person),
+            focusId: '$focusScopePrefix:${person.name}',
+            autofocus: index == 0,
+            borderRadius: BorderRadius.circular(18),
+            child: SizedBox(
+              width: 86,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  _PersonAvatar(person: person),
+                  const SizedBox(height: 10),
+                  Text(
+                    person.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           );
         },
@@ -2872,14 +3626,14 @@ class _ActorRail extends StatelessWidget {
   }
 }
 
-class _ActorAvatar extends StatelessWidget {
-  const _ActorAvatar({required this.actor});
+class _PersonAvatar extends StatelessWidget {
+  const _PersonAvatar({required this.person});
 
-  final MediaPersonProfile actor;
+  final MediaPersonProfile person;
 
   @override
   Widget build(BuildContext context) {
-    final avatarUrl = actor.avatarUrl.trim();
+    final avatarUrl = person.avatarUrl.trim();
     return Container(
       width: 74,
       height: 74,
@@ -2894,7 +3648,7 @@ class _ActorAvatar extends StatelessWidget {
       child: avatarUrl.isEmpty
           ? Center(
               child: Text(
-                _actorInitial(actor.name),
+                _personInitial(person.name),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 24,
@@ -2908,7 +3662,7 @@ class _ActorAvatar extends StatelessWidget {
               errorBuilder: (context, error, stackTrace) {
                 return Center(
                   child: Text(
-                    _actorInitial(actor.name),
+                    _personInitial(person.name),
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 24,
@@ -2922,7 +3676,59 @@ class _ActorAvatar extends StatelessWidget {
   }
 }
 
-String _actorInitial(String name) {
+class _PlatformRail extends StatelessWidget {
+  const _PlatformRail({required this.platforms});
+
+  final List<MediaPersonProfile> platforms;
+
+  @override
+  Widget build(BuildContext context) {
+    final visiblePlatforms = platforms
+        .where(
+          (item) =>
+              item.name.trim().isNotEmpty && item.avatarUrl.trim().isNotEmpty,
+        )
+        .toList(growable: false);
+    if (visiblePlatforms.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Wrap(
+      spacing: 24,
+      runSpacing: 18,
+      children: visiblePlatforms
+          .map((platform) => _PlatformLogo(platform: platform))
+          .toList(growable: false),
+    );
+  }
+}
+
+class _PlatformLogo extends StatelessWidget {
+  const _PlatformLogo({required this.platform});
+
+  final MediaPersonProfile platform;
+
+  @override
+  Widget build(BuildContext context) {
+    final logoUrl = platform.avatarUrl.trim();
+    if (logoUrl.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return SizedBox(
+      width: 108,
+      height: 34,
+      child: AppNetworkImage(
+        logoUrl,
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) {
+          return const SizedBox.shrink();
+        },
+      ),
+    );
+  }
+}
+
+String _personInitial(String name) {
   final trimmed = name.trim();
   if (trimmed.isEmpty) {
     return '?';
@@ -2992,4 +3798,183 @@ class _ResourceFact {
   final String label;
   final String value;
   final bool selectable;
+}
+
+class _DetailImageAsset {
+  const _DetailImageAsset({
+    required this.url,
+    this.headers = const {},
+  });
+
+  final String url;
+  final Map<String, String> headers;
+}
+
+class _DetailImageGallery extends StatelessWidget {
+  const _DetailImageGallery({required this.images});
+
+  final List<_DetailImageAsset> images;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 164,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        itemCount: images.length,
+        separatorBuilder: (context, index) => const SizedBox(width: 14),
+        itemBuilder: (context, index) {
+          final image = images[index];
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(22),
+            child: AspectRatio(
+              aspectRatio: 16 / 9,
+              child: SizedBox(
+                width: 268,
+                child: AppNetworkImage(
+                  image.url,
+                  headers: image.headers,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return const ColoredBox(color: Color(0xFF0D192A));
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+_DetailImageAsset _resolvePrimaryBackdropAsset(MediaDetailTarget target) {
+  if (target.backdropUrl.trim().isNotEmpty) {
+    return _DetailImageAsset(
+      url: target.backdropUrl.trim(),
+      headers: target.backdropHeaders,
+    );
+  }
+  if (target.bannerUrl.trim().isNotEmpty) {
+    return _DetailImageAsset(
+      url: target.bannerUrl.trim(),
+      headers: target.bannerHeaders,
+    );
+  }
+  if (target.extraBackdropUrls.isNotEmpty) {
+    return _DetailImageAsset(
+      url: target.extraBackdropUrls.first,
+      headers: target.extraBackdropHeaders,
+    );
+  }
+  if (target.posterUrl.trim().isNotEmpty) {
+    return _DetailImageAsset(
+      url: target.posterUrl.trim(),
+      headers: target.posterHeaders,
+    );
+  }
+  return const _DetailImageAsset(url: '');
+}
+
+List<AppNetworkImageSource> _buildPrimaryBackdropFallbackSources(
+  MediaDetailTarget target,
+) {
+  final sources = <AppNetworkImageSource>[];
+  final seen = <String>{target.backdropUrl.trim()};
+
+  void add(String url, Map<String, String> headers) {
+    final trimmedUrl = url.trim();
+    if (trimmedUrl.isEmpty || !seen.add(trimmedUrl)) {
+      return;
+    }
+    sources.add(
+      AppNetworkImageSource(
+        url: trimmedUrl,
+        headers: headers,
+      ),
+    );
+  }
+
+  add(target.bannerUrl, target.bannerHeaders);
+  for (final url in target.extraBackdropUrls) {
+    add(url, target.extraBackdropHeaders);
+  }
+  add(target.posterUrl, target.posterHeaders);
+  return sources;
+}
+
+List<_DetailImageAsset> _buildDetailGalleryImages(MediaDetailTarget target) {
+  final seen = <String>{};
+  final images = <_DetailImageAsset>[];
+
+  void add(String url, Map<String, String> headers) {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty || !seen.add(trimmed)) {
+      return;
+    }
+    images.add(_DetailImageAsset(url: trimmed, headers: headers));
+  }
+
+  add(target.backdropUrl, target.backdropHeaders);
+  add(target.bannerUrl, target.bannerHeaders);
+  for (final url in target.extraBackdropUrls) {
+    add(url, target.extraBackdropHeaders);
+  }
+  return images;
+}
+
+_DetailImageAsset _resolveEpisodeArtworkAsset(MediaItem item) {
+  if (item.backdropUrl.trim().isNotEmpty) {
+    return _DetailImageAsset(
+      url: item.backdropUrl.trim(),
+      headers: item.backdropHeaders,
+    );
+  }
+  if (item.bannerUrl.trim().isNotEmpty) {
+    return _DetailImageAsset(
+      url: item.bannerUrl.trim(),
+      headers: item.bannerHeaders,
+    );
+  }
+  if (item.extraBackdropUrls.isNotEmpty) {
+    return _DetailImageAsset(
+      url: item.extraBackdropUrls.first,
+      headers: item.extraBackdropHeaders,
+    );
+  }
+  if (item.posterUrl.trim().isNotEmpty) {
+    return _DetailImageAsset(
+      url: item.posterUrl.trim(),
+      headers: item.posterHeaders,
+    );
+  }
+  return const _DetailImageAsset(url: '');
+}
+
+List<AppNetworkImageSource> _buildEpisodeArtworkFallbackSources(
+  MediaItem item,
+) {
+  final sources = <AppNetworkImageSource>[];
+  final seen = <String>{item.backdropUrl.trim()};
+
+  void add(String url, Map<String, String> headers) {
+    final trimmedUrl = url.trim();
+    if (trimmedUrl.isEmpty || !seen.add(trimmedUrl)) {
+      return;
+    }
+    sources.add(
+      AppNetworkImageSource(
+        url: trimmedUrl,
+        headers: headers,
+      ),
+    );
+  }
+
+  add(item.bannerUrl, item.bannerHeaders);
+  for (final url in item.extraBackdropUrls) {
+    add(url, item.extraBackdropHeaders);
+  }
+  add(item.posterUrl, item.posterHeaders);
+  return sources;
 }

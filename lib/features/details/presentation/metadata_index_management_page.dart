@@ -17,6 +17,7 @@ import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 
 class MetadataIndexManagementPage extends ConsumerStatefulWidget {
   const MetadataIndexManagementPage({
@@ -58,7 +59,9 @@ class _MetadataIndexManagementPageState
     _yearController = TextEditingController(
       text: widget.target.year > 0 ? '${widget.target.year}' : '',
     );
-    _preferSeries = widget.target.isSeries;
+    final itemType = widget.target.itemType.trim().toLowerCase();
+    _preferSeries =
+        itemType == 'series' || itemType == 'season' || itemType == 'episode';
     _recordFuture = _loadRecord();
   }
 
@@ -79,7 +82,11 @@ class _MetadataIndexManagementPageState
   Future<void> _runSearch() async {
     final query = _queryController.text.trim();
     final year = int.tryParse(_yearController.text.trim()) ?? 0;
-    if (query.isEmpty) {
+    final preferredImdbId = _resolvePreferredImdbId(
+      widget.target.imdbId,
+      query,
+    );
+    if (query.isEmpty && preferredImdbId.isEmpty) {
       _showSnackBar('请先输入要搜索的片名');
       return;
     }
@@ -95,8 +102,54 @@ class _MetadataIndexManagementPageState
     });
 
     final settings = ref.read(appSettingsProvider);
+    Future<(MetadataMatchResult?, String)> resolveTmdb() async {
+      final token = settings.tmdbReadAccessToken.trim();
+      if (token.isEmpty) {
+        return (null, '未配置 TMDB Read Access Token。');
+      }
+      try {
+        final client = ref.read(tmdbMetadataClientProvider);
+        final result = preferredImdbId.isNotEmpty
+            ? await client.matchByImdbId(
+                imdbId: preferredImdbId,
+                readAccessToken: token,
+                preferSeries: _preferSeries,
+              )
+            : await client.matchTitle(
+                query: query,
+                readAccessToken: token,
+                year: year,
+                preferSeries: _preferSeries,
+              );
+        return (
+          result == null ? null : _tmdbToMetadataMatch(result),
+          result == null ? '没有匹配到 TMDB 结果。' : '',
+        );
+      } catch (error) {
+        return (null, '$error');
+      }
+    }
 
-    final Future<(MetadataMatchResult?, String)> wmdbFuture = () async {
+    Future<(ImdbRatingPreview?, String)> resolveImdb() async {
+      if (_hasTmdbAvailable(settings)) {
+        return (null, 'TMDB 可用时跳过独立 IMDb 评分查询。');
+      }
+      try {
+        final result = await ref.read(imdbRatingClientProvider).previewMatch(
+              query: preferredImdbId.isNotEmpty ? preferredImdbId : query,
+              year: year,
+              preferSeries: _preferSeries,
+            );
+        return (result, result == null ? '没有匹配到 IMDb 评分。' : '');
+      } catch (error) {
+        return (null, '$error');
+      }
+    }
+
+    Future<(MetadataMatchResult?, String)> resolveWmdb() async {
+      if (query.isEmpty) {
+        return (null, 'IMDb ID 查询已跳过 WMDB 标题搜索。');
+      }
       try {
         final result = await ref.read(wmdbMetadataClientProvider).matchTitle(
               query: query,
@@ -108,45 +161,15 @@ class _MetadataIndexManagementPageState
       } catch (error) {
         return (null, '$error');
       }
-    }();
+    }
 
-    final Future<(MetadataMatchResult?, String)> tmdbFuture = () async {
-      final token = settings.tmdbReadAccessToken.trim();
-      if (token.isEmpty) {
-        return (null, '未配置 TMDB Read Access Token。');
-      }
-      try {
-        final result = await ref.read(tmdbMetadataClientProvider).matchTitle(
-              query: query,
-              readAccessToken: token,
-              year: year,
-              preferSeries: _preferSeries,
-            );
-        return (
-          result == null ? null : _tmdbToMetadataMatch(result),
-          result == null ? '没有匹配到 TMDB 结果。' : '',
-        );
-      } catch (error) {
-        return (null, '$error');
-      }
-    }();
-
-    final Future<(ImdbRatingPreview?, String)> imdbFuture = () async {
-      try {
-        final result = await ref.read(imdbRatingClientProvider).previewMatch(
-              query: query,
-              year: year,
-              preferSeries: _preferSeries,
-            );
-        return (result, result == null ? '没有匹配到 IMDb 评分。' : '');
-      } catch (error) {
-        return (null, '$error');
-      }
-    }();
-
-    final wmdbResolved = await wmdbFuture;
-    final tmdbResolved = await tmdbFuture;
-    final imdbResolved = await imdbFuture;
+    final tmdbResolved = await resolveTmdb();
+    final imdbResolved = await resolveImdb();
+    final shouldFallbackToTitleSearch = preferredImdbId.isEmpty ||
+        (tmdbResolved.$1 == null && imdbResolved.$1 == null);
+    final wmdbResolved = shouldFallbackToTitleSearch
+        ? await resolveWmdb()
+        : (null, '已优先命中 IMDb ID，跳过标题 WMDB 搜索。');
     if (!mounted) {
       return;
     }
@@ -162,17 +185,51 @@ class _MetadataIndexManagementPageState
     });
   }
 
+  String _resolvePreferredImdbId(String currentImdbId, String query) {
+    final normalizedCurrent = _normalizeImdbId(currentImdbId);
+    if (normalizedCurrent.isNotEmpty) {
+      return normalizedCurrent;
+    }
+    final match =
+        RegExp(r'\btt\d{7,9}\b', caseSensitive: false).firstMatch(query);
+    return _normalizeImdbId(match?.group(0) ?? '');
+  }
+
+  String _normalizeImdbId(String value) {
+    final trimmed = value.trim().toLowerCase();
+    if (!RegExp(r'^tt\d{7,9}$').hasMatch(trimmed)) {
+      return '';
+    }
+    return trimmed;
+  }
+
+  bool _hasTmdbAvailable(AppSettings settings) {
+    return settings.tmdbMetadataMatchEnabled &&
+        settings.tmdbReadAccessToken.trim().isNotEmpty;
+  }
+
   MetadataMatchResult _tmdbToMetadataMatch(TmdbMetadataMatch match) {
     return MetadataMatchResult(
       provider: MetadataMatchProvider.tmdb,
       title: match.title,
       originalTitle: match.originalTitle,
       posterUrl: match.posterUrl,
+      backdropUrl: match.backdropUrl,
+      logoUrl: match.logoUrl,
+      extraBackdropUrls: match.extraBackdropUrls,
       overview: match.overview,
       year: match.year,
       durationLabel: match.durationLabel,
       genres: match.genres,
       directors: match.directors,
+      directorProfiles: match.directorProfiles
+          .map(
+            (item) => MetadataPersonProfile(
+              name: item.name,
+              avatarUrl: item.avatarUrl,
+            ),
+          )
+          .toList(growable: false),
       actors: match.actors,
       actorProfiles: match.actorProfiles
           .map(
@@ -182,7 +239,18 @@ class _MetadataIndexManagementPageState
             ),
           )
           .toList(growable: false),
+      platforms: match.platforms,
+      platformProfiles: match.platformProfiles
+          .map(
+            (item) => MetadataPersonProfile(
+              name: item.name,
+              avatarUrl: item.avatarUrl,
+            ),
+          )
+          .toList(growable: false),
+      ratingLabels: match.ratingLabels,
       imdbId: match.imdbId,
+      tmdbId: '${match.tmdbId}',
     );
   }
 
@@ -206,15 +274,20 @@ class _MetadataIndexManagementPageState
         _showSnackBar('没有找到可写回的索引记录');
         return;
       }
+      final resolvedTarget = _applyMetadataResultToTarget(
+        updatedTarget,
+        match,
+        imdbRatingMatch: _resolvedImdbMatch(match.imdbId),
+      );
       await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
             seedTarget: widget.target,
-            resolvedTarget: updatedTarget,
+            resolvedTarget: resolvedTarget,
           );
       _invalidateReaders();
       if (!mounted) {
         return;
       }
-      context.pop(updatedTarget);
+      context.pop(resolvedTarget);
     } catch (error) {
       _showSnackBar('写入索引失败：$error');
     } finally {
@@ -246,15 +319,20 @@ class _MetadataIndexManagementPageState
         _showSnackBar('没有找到可写回的索引记录');
         return;
       }
+      final resolvedTarget = _applyMetadataResultToTarget(
+        updatedTarget,
+        null,
+        imdbRatingMatch: imdbMatch,
+      );
       await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
             seedTarget: widget.target,
-            resolvedTarget: updatedTarget,
+            resolvedTarget: resolvedTarget,
           );
       _invalidateReaders();
       if (!mounted) {
         return;
       }
-      context.pop(updatedTarget);
+      context.pop(resolvedTarget);
     } catch (error) {
       _showSnackBar('写入评分失败：$error');
     } finally {
@@ -281,6 +359,140 @@ class _MetadataIndexManagementPageState
       ratingLabel: preview.ratingLabel,
       voteCount: preview.voteCount,
     );
+  }
+
+  MediaDetailTarget _applyMetadataResultToTarget(
+    MediaDetailTarget target,
+    MetadataMatchResult? match, {
+    ImdbRatingMatch? imdbRatingMatch,
+  }) {
+    var nextTarget = target;
+    if (match != null) {
+      final directorProfiles = match.directorProfiles
+          .map(
+            (item) => MediaPersonProfile(
+              name: item.name,
+              avatarUrl: item.avatarUrl,
+            ),
+          )
+          .toList(growable: false);
+      final actorProfiles = match.actorProfiles
+          .map(
+            (item) => MediaPersonProfile(
+              name: item.name,
+              avatarUrl: item.avatarUrl,
+            ),
+          )
+          .toList(growable: false);
+      final platformProfiles = match.platformProfiles
+          .map(
+            (item) => MediaPersonProfile(
+              name: item.name,
+              avatarUrl: item.avatarUrl,
+            ),
+          )
+          .toList(growable: false);
+      nextTarget = nextTarget.copyWith(
+        title: match.title.trim().isNotEmpty ? match.title : nextTarget.title,
+        posterUrl: match.posterUrl.trim().isNotEmpty
+            ? match.posterUrl
+            : nextTarget.posterUrl,
+        posterHeaders: match.posterUrl.trim().isNotEmpty
+            ? const <String, String>{}
+            : nextTarget.posterHeaders,
+        backdropUrl: match.backdropUrl.trim().isNotEmpty
+            ? match.backdropUrl
+            : nextTarget.backdropUrl,
+        backdropHeaders: match.backdropUrl.trim().isNotEmpty
+            ? const <String, String>{}
+            : nextTarget.backdropHeaders,
+        logoUrl: match.logoUrl.trim().isNotEmpty
+            ? match.logoUrl
+            : nextTarget.logoUrl,
+        logoHeaders: match.logoUrl.trim().isNotEmpty
+            ? const <String, String>{}
+            : nextTarget.logoHeaders,
+        bannerUrl: match.bannerUrl.trim().isNotEmpty
+            ? match.bannerUrl
+            : nextTarget.bannerUrl,
+        bannerHeaders: match.bannerUrl.trim().isNotEmpty
+            ? const <String, String>{}
+            : nextTarget.bannerHeaders,
+        extraBackdropUrls: match.extraBackdropUrls.isNotEmpty
+            ? match.extraBackdropUrls
+            : nextTarget.extraBackdropUrls,
+        extraBackdropHeaders: match.extraBackdropUrls.isNotEmpty
+            ? const <String, String>{}
+            : nextTarget.extraBackdropHeaders,
+        overview: match.overview.trim().isNotEmpty
+            ? match.overview
+            : nextTarget.overview,
+        year: match.year > 0 ? match.year : nextTarget.year,
+        durationLabel: match.durationLabel.trim().isNotEmpty
+            ? match.durationLabel
+            : nextTarget.durationLabel,
+        genres: match.genres.isNotEmpty ? match.genres : nextTarget.genres,
+        directors:
+            match.directors.isNotEmpty ? match.directors : nextTarget.directors,
+        directorProfiles: directorProfiles.isNotEmpty
+            ? directorProfiles
+            : nextTarget.directorProfiles,
+        actors: match.actors.isNotEmpty ? match.actors : nextTarget.actors,
+        actorProfiles:
+            actorProfiles.isNotEmpty ? actorProfiles : nextTarget.actorProfiles,
+        platforms: match.provider == MetadataMatchProvider.tmdb
+            ? match.platforms
+            : (match.platforms.isNotEmpty
+                ? match.platforms
+                : nextTarget.platforms),
+        platformProfiles: match.provider == MetadataMatchProvider.tmdb
+            ? platformProfiles
+            : (platformProfiles.isNotEmpty
+                ? platformProfiles
+                : nextTarget.platformProfiles),
+        ratingLabels: _mergeLabels(nextTarget.ratingLabels, match.ratingLabels),
+        doubanId: match.doubanId.trim().isNotEmpty
+            ? match.doubanId
+            : nextTarget.doubanId,
+        imdbId:
+            match.imdbId.trim().isNotEmpty ? match.imdbId : nextTarget.imdbId,
+        tmdbId:
+            match.tmdbId.trim().isNotEmpty ? match.tmdbId : nextTarget.tmdbId,
+      );
+    }
+    if (imdbRatingMatch != null &&
+        imdbRatingMatch.ratingLabel.trim().isNotEmpty) {
+      nextTarget = nextTarget.copyWith(
+        imdbId: imdbRatingMatch.imdbId.trim().isNotEmpty
+            ? imdbRatingMatch.imdbId
+            : nextTarget.imdbId,
+        ratingLabels: _mergeLabels(
+          nextTarget.ratingLabels,
+          [imdbRatingMatch.ratingLabel],
+        ),
+      );
+    }
+    return nextTarget;
+  }
+
+  List<String> _mergeLabels(
+    List<String> primary,
+    List<String> secondary,
+  ) {
+    final seen = <String>{};
+    final merged = <String>[];
+    for (final label in [...primary, ...secondary]) {
+      final trimmed = label.trim();
+      if (trimmed.isEmpty) {
+        continue;
+      }
+      final normalized = trimmed.toLowerCase();
+      if (!seen.add(normalized)) {
+        continue;
+      }
+      merged.add(trimmed);
+    }
+    return merged;
   }
 
   void _invalidateReaders() {
@@ -596,6 +808,8 @@ class _ProviderResultCard extends StatelessWidget {
                       '豆瓣 ID：${result!.doubanId}',
                     if (result!.imdbId.trim().isNotEmpty)
                       'IMDb ID：${result!.imdbId}',
+                    if (result!.tmdbId.trim().isNotEmpty)
+                      'TMDB ID：${result!.tmdbId}',
                     if (result!.ratingLabels.isNotEmpty)
                       '评分：${result!.ratingLabels.join(' · ')}',
                   ],

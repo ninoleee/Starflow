@@ -147,6 +147,11 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(imdbRatingMatchEnabled: enabled));
   }
 
+  Future<void> setDetailAutoLibraryMatchEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(detailAutoLibraryMatchEnabled: enabled));
+  }
+
   Future<void> setTmdbReadAccessToken(String token) async {
     final current = state.valueOrNull ?? await _repository.load();
     await _persist(current.copyWith(tmdbReadAccessToken: token.trim()));
@@ -156,6 +161,29 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     final current = state.valueOrNull ?? await _repository.load();
     await _persist(
       current.copyWith(playbackOpenTimeoutSeconds: seconds.clamp(1, 600)),
+    );
+  }
+
+  Future<void> savePlaybackPreferences({
+    required int openTimeoutSeconds,
+    required double defaultSpeed,
+    required PlaybackSubtitlePreference subtitlePreference,
+    required PlaybackSubtitleScale subtitleScale,
+    required bool backgroundPlaybackEnabled,
+    required PlaybackEngine playbackEngine,
+    required PlaybackDecodeMode playbackDecodeMode,
+  }) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(
+      current.copyWith(
+        playbackOpenTimeoutSeconds: openTimeoutSeconds.clamp(1, 600),
+        playbackDefaultSpeed: defaultSpeed.clamp(0.75, 2.0),
+        playbackSubtitlePreference: subtitlePreference,
+        playbackSubtitleScale: subtitleScale,
+        playbackBackgroundPlaybackEnabled: backgroundPlaybackEnabled,
+        playbackEngine: playbackEngine,
+        playbackDecodeMode: playbackDecodeMode,
+      ),
     );
   }
 
@@ -185,9 +213,19 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(homeHeroBackgroundEnabled: enabled));
   }
 
+  Future<void> setHomeHeroLogoTitleEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(homeHeroLogoTitleEnabled: enabled));
+  }
+
   Future<void> setTranslucentEffectsEnabled(bool enabled) async {
     final current = state.valueOrNull ?? await _repository.load();
     await _persist(current.copyWith(translucentEffectsEnabled: enabled));
+  }
+
+  Future<void> setHighPerformanceModeEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(highPerformanceModeEnabled: enabled));
   }
 
   Future<void> toggleHomeModule(String id, bool enabled) async {

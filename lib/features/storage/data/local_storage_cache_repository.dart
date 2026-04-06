@@ -121,6 +121,41 @@ class LocalStorageCacheRepository {
     _notifyDetailCacheChanged?.call();
   }
 
+  Future<void> clearDetailCacheForSource(String sourceId) async {
+    final normalizedSourceId = sourceId.trim();
+    if (normalizedSourceId.isEmpty) {
+      return;
+    }
+
+    final payload = await _loadDetailPayload();
+    if (payload.records.isEmpty || payload.lookupKeys.isEmpty) {
+      return;
+    }
+
+    final recordIdsToRemove = payload.records.values
+        .where(
+          (record) => record.target.sourceId.trim() == normalizedSourceId,
+        )
+        .map((record) => record.id)
+        .toSet();
+    if (recordIdsToRemove.isEmpty) {
+      return;
+    }
+
+    final nextRecords = Map<String, _CachedDetailRecord>.from(payload.records)
+      ..removeWhere((key, _) => recordIdsToRemove.contains(key));
+    final nextLookupKeys = Map<String, String>.from(payload.lookupKeys)
+      ..removeWhere((_, recordId) => recordIdsToRemove.contains(recordId));
+
+    await _saveDetailPayload(
+      _DetailCachePayload(
+        records: nextRecords,
+        lookupKeys: nextLookupKeys,
+      ),
+    );
+    _notifyDetailCacheChanged?.call();
+  }
+
   Future<void> clearCache(LocalStorageCacheType type) async {
     switch (type) {
       case LocalStorageCacheType.detailData:
@@ -157,11 +192,31 @@ class LocalStorageCacheRepository {
       addKey('imdb|$imdbId');
     }
 
+    final tmdbId = target.tmdbId.trim();
+    if (tmdbId.isNotEmpty) {
+      addKey('tmdb|$tmdbId');
+    }
+
+    final tvdbId = target.tvdbId.trim();
+    if (tvdbId.isNotEmpty) {
+      addKey('tvdb|$tvdbId');
+    }
+
+    final wikidataId = target.wikidataId.trim().toUpperCase();
+    if (wikidataId.isNotEmpty) {
+      addKey('wikidata|$wikidataId');
+    }
+
     final normalizedTitle = _normalizeLookupText(target.title);
     if (normalizedTitle.isNotEmpty) {
       addKey(
         'title|$normalizedTitle|${target.year}|${target.isSeries ? 'series' : 'movie'}',
       );
+      if (target.year > 0) {
+        addKey('title|$normalizedTitle|${target.year}');
+      }
+      addKey('title|$normalizedTitle|${target.isSeries ? 'series' : 'movie'}');
+      addKey('title|$normalizedTitle');
     }
 
     final query = target.searchQuery.trim();
@@ -170,6 +225,11 @@ class LocalStorageCacheRepository {
       addKey(
         'query|$normalizedQuery|${target.year}|${target.isSeries ? 'series' : 'movie'}',
       );
+      if (target.year > 0) {
+        addKey('query|$normalizedQuery|${target.year}');
+      }
+      addKey('query|$normalizedQuery|${target.isSeries ? 'series' : 'movie'}');
+      addKey('query|$normalizedQuery');
     }
 
     return keys.toList(growable: false);

@@ -12,7 +12,7 @@ PersistentImageCache createPersistentImageCache() => _IoPersistentImageCache();
 class _IoPersistentImageCache implements PersistentImageCache {
   _IoPersistentImageCache() : _client = http.Client();
 
-  static const int _maxMemoryEntries = 96;
+  static const int _maxMemoryEntries = 48;
 
   final http.Client _client;
   final LinkedHashMap<String, Uint8List> _memoryCache = LinkedHashMap();

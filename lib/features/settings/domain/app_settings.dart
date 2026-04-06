@@ -76,6 +76,162 @@ extension HomeHeroStyleX on HomeHeroStyle {
   }
 }
 
+enum PlaybackSubtitlePreference {
+  auto,
+  off,
+}
+
+extension PlaybackSubtitlePreferenceX on PlaybackSubtitlePreference {
+  String get label {
+    switch (this) {
+      case PlaybackSubtitlePreference.auto:
+        return '跟随片源';
+      case PlaybackSubtitlePreference.off:
+        return '默认关闭';
+    }
+  }
+
+  String get description {
+    switch (this) {
+      case PlaybackSubtitlePreference.auto:
+        return '打开视频时按片源默认字幕轨处理';
+      case PlaybackSubtitlePreference.off:
+        return '打开视频时默认不显示字幕';
+    }
+  }
+
+  static PlaybackSubtitlePreference fromName(String raw) {
+    return switch (raw) {
+      'off' => PlaybackSubtitlePreference.off,
+      'auto' => PlaybackSubtitlePreference.auto,
+      _ => PlaybackSubtitlePreference.auto,
+    };
+  }
+}
+
+enum PlaybackEngine {
+  embeddedMpv,
+  nativeContainer,
+  systemPlayer,
+}
+
+extension PlaybackEngineX on PlaybackEngine {
+  String get label {
+    switch (this) {
+      case PlaybackEngine.embeddedMpv:
+        return '内置 MPV';
+      case PlaybackEngine.nativeContainer:
+        return 'App 内原生播放器';
+      case PlaybackEngine.systemPlayer:
+        return '系统播放器';
+    }
+  }
+
+  String get description {
+    switch (this) {
+      case PlaybackEngine.embeddedMpv:
+        return '使用应用内置播放器，支持字幕、音轨和倍速控制。';
+      case PlaybackEngine.nativeContainer:
+        return 'Android 上使用 App 内原生播放器容器页，优先追求播放性能，部分高级播放设置不可用。';
+      case PlaybackEngine.systemPlayer:
+        return '交给系统默认的视频播放器处理。';
+    }
+  }
+
+  static PlaybackEngine fromName(String raw) {
+    return switch (raw) {
+      'systemPlayer' => PlaybackEngine.systemPlayer,
+      'nativeContainer' => PlaybackEngine.nativeContainer,
+      'embeddedMpv' => PlaybackEngine.embeddedMpv,
+      _ => PlaybackEngine.embeddedMpv,
+    };
+  }
+}
+
+enum PlaybackDecodeMode {
+  auto,
+  hardwarePreferred,
+  softwarePreferred,
+}
+
+extension PlaybackDecodeModeX on PlaybackDecodeMode {
+  String get label {
+    switch (this) {
+      case PlaybackDecodeMode.auto:
+        return '自动';
+      case PlaybackDecodeMode.hardwarePreferred:
+        return '硬解优先';
+      case PlaybackDecodeMode.softwarePreferred:
+        return '软解优先';
+    }
+  }
+
+  String get description {
+    switch (this) {
+      case PlaybackDecodeMode.auto:
+        return '按设备能力自动选择；TV 高性能模式下会更积极地优先硬解。';
+      case PlaybackDecodeMode.hardwarePreferred:
+        return '尽量优先使用硬件解码，适合高码率和 4K 片源。';
+      case PlaybackDecodeMode.softwarePreferred:
+        return '尽量优先使用软件解码，兼容性更高，但更吃 CPU。';
+    }
+  }
+
+  static PlaybackDecodeMode fromName(String raw) {
+    return switch (raw) {
+      'hardwarePreferred' => PlaybackDecodeMode.hardwarePreferred,
+      'softwarePreferred' => PlaybackDecodeMode.softwarePreferred,
+      'auto' => PlaybackDecodeMode.auto,
+      _ => PlaybackDecodeMode.auto,
+    };
+  }
+}
+
+enum PlaybackSubtitleScale {
+  compact,
+  standard,
+  large,
+  xLarge,
+}
+
+extension PlaybackSubtitleScaleX on PlaybackSubtitleScale {
+  String get label {
+    switch (this) {
+      case PlaybackSubtitleScale.compact:
+        return '偏小';
+      case PlaybackSubtitleScale.standard:
+        return '标准';
+      case PlaybackSubtitleScale.large:
+        return '偏大';
+      case PlaybackSubtitleScale.xLarge:
+        return '超大';
+    }
+  }
+
+  double get textScale {
+    switch (this) {
+      case PlaybackSubtitleScale.compact:
+        return 0.9;
+      case PlaybackSubtitleScale.standard:
+        return 1.0;
+      case PlaybackSubtitleScale.large:
+        return 1.15;
+      case PlaybackSubtitleScale.xLarge:
+        return 1.3;
+    }
+  }
+
+  static PlaybackSubtitleScale fromName(String raw) {
+    return switch (raw) {
+      'compact' => PlaybackSubtitleScale.compact,
+      'large' => PlaybackSubtitleScale.large,
+      'xLarge' => PlaybackSubtitleScale.xLarge,
+      'standard' => PlaybackSubtitleScale.standard,
+      _ => PlaybackSubtitleScale.standard,
+    };
+  }
+}
+
 class HomeModuleConfig {
   const HomeModuleConfig({
     required this.id,
@@ -402,14 +558,23 @@ class AppSettings {
     this.networkStorage = const NetworkStorageConfig(),
     this.homeHeroSourceModuleId = '',
     this.homeHeroStyle = HomeHeroStyle.normal,
+    this.homeHeroLogoTitleEnabled = false,
     this.homeHeroBackgroundEnabled = true,
     this.translucentEffectsEnabled = true,
+    this.highPerformanceModeEnabled = false,
     this.tmdbMetadataMatchEnabled = false,
     this.wmdbMetadataMatchEnabled = false,
     this.metadataMatchPriority = MetadataMatchProvider.tmdb,
     this.imdbRatingMatchEnabled = false,
+    this.detailAutoLibraryMatchEnabled = false,
     this.tmdbReadAccessToken = '',
     this.playbackOpenTimeoutSeconds = 20,
+    this.playbackDefaultSpeed = 1.0,
+    this.playbackSubtitlePreference = PlaybackSubtitlePreference.auto,
+    this.playbackSubtitleScale = PlaybackSubtitleScale.standard,
+    this.playbackBackgroundPlaybackEnabled = true,
+    this.playbackEngine = PlaybackEngine.embeddedMpv,
+    this.playbackDecodeMode = PlaybackDecodeMode.auto,
   });
 
   final List<MediaSourceConfig> mediaSources;
@@ -419,14 +584,23 @@ class AppSettings {
   final NetworkStorageConfig networkStorage;
   final String homeHeroSourceModuleId;
   final HomeHeroStyle homeHeroStyle;
+  final bool homeHeroLogoTitleEnabled;
   final bool homeHeroBackgroundEnabled;
   final bool translucentEffectsEnabled;
+  final bool highPerformanceModeEnabled;
   final bool tmdbMetadataMatchEnabled;
   final bool wmdbMetadataMatchEnabled;
   final MetadataMatchProvider metadataMatchPriority;
   final bool imdbRatingMatchEnabled;
+  final bool detailAutoLibraryMatchEnabled;
   final String tmdbReadAccessToken;
   final int playbackOpenTimeoutSeconds;
+  final double playbackDefaultSpeed;
+  final PlaybackSubtitlePreference playbackSubtitlePreference;
+  final PlaybackSubtitleScale playbackSubtitleScale;
+  final bool playbackBackgroundPlaybackEnabled;
+  final PlaybackEngine playbackEngine;
+  final PlaybackDecodeMode playbackDecodeMode;
 
   AppSettings copyWith({
     List<MediaSourceConfig>? mediaSources,
@@ -436,14 +610,23 @@ class AppSettings {
     NetworkStorageConfig? networkStorage,
     String? homeHeroSourceModuleId,
     HomeHeroStyle? homeHeroStyle,
+    bool? homeHeroLogoTitleEnabled,
     bool? homeHeroBackgroundEnabled,
     bool? translucentEffectsEnabled,
+    bool? highPerformanceModeEnabled,
     bool? tmdbMetadataMatchEnabled,
     bool? wmdbMetadataMatchEnabled,
     MetadataMatchProvider? metadataMatchPriority,
     bool? imdbRatingMatchEnabled,
+    bool? detailAutoLibraryMatchEnabled,
     String? tmdbReadAccessToken,
     int? playbackOpenTimeoutSeconds,
+    double? playbackDefaultSpeed,
+    PlaybackSubtitlePreference? playbackSubtitlePreference,
+    PlaybackSubtitleScale? playbackSubtitleScale,
+    bool? playbackBackgroundPlaybackEnabled,
+    PlaybackEngine? playbackEngine,
+    PlaybackDecodeMode? playbackDecodeMode,
   }) {
     return AppSettings(
       mediaSources: mediaSources ?? this.mediaSources,
@@ -454,10 +637,14 @@ class AppSettings {
       homeHeroSourceModuleId:
           homeHeroSourceModuleId ?? this.homeHeroSourceModuleId,
       homeHeroStyle: homeHeroStyle ?? this.homeHeroStyle,
+      homeHeroLogoTitleEnabled:
+          homeHeroLogoTitleEnabled ?? this.homeHeroLogoTitleEnabled,
       homeHeroBackgroundEnabled:
           homeHeroBackgroundEnabled ?? this.homeHeroBackgroundEnabled,
       translucentEffectsEnabled:
           translucentEffectsEnabled ?? this.translucentEffectsEnabled,
+      highPerformanceModeEnabled:
+          highPerformanceModeEnabled ?? this.highPerformanceModeEnabled,
       tmdbMetadataMatchEnabled:
           tmdbMetadataMatchEnabled ?? this.tmdbMetadataMatchEnabled,
       wmdbMetadataMatchEnabled:
@@ -466,9 +653,22 @@ class AppSettings {
           metadataMatchPriority ?? this.metadataMatchPriority,
       imdbRatingMatchEnabled:
           imdbRatingMatchEnabled ?? this.imdbRatingMatchEnabled,
+      detailAutoLibraryMatchEnabled:
+          detailAutoLibraryMatchEnabled ?? this.detailAutoLibraryMatchEnabled,
       tmdbReadAccessToken: tmdbReadAccessToken ?? this.tmdbReadAccessToken,
       playbackOpenTimeoutSeconds:
           playbackOpenTimeoutSeconds ?? this.playbackOpenTimeoutSeconds,
+      playbackDefaultSpeed: playbackDefaultSpeed == null
+          ? this.playbackDefaultSpeed
+          : playbackDefaultSpeed.clamp(0.75, 2.0),
+      playbackSubtitlePreference:
+          playbackSubtitlePreference ?? this.playbackSubtitlePreference,
+      playbackSubtitleScale:
+          playbackSubtitleScale ?? this.playbackSubtitleScale,
+      playbackBackgroundPlaybackEnabled: playbackBackgroundPlaybackEnabled ??
+          this.playbackBackgroundPlaybackEnabled,
+      playbackEngine: playbackEngine ?? this.playbackEngine,
+      playbackDecodeMode: playbackDecodeMode ?? this.playbackDecodeMode,
     );
   }
 
@@ -481,14 +681,23 @@ class AppSettings {
       'networkStorage': networkStorage.toJson(),
       'homeHeroSourceModuleId': homeHeroSourceModuleId,
       'homeHeroStyle': homeHeroStyle.name,
+      'homeHeroLogoTitleEnabled': homeHeroLogoTitleEnabled,
       'homeHeroBackgroundEnabled': homeHeroBackgroundEnabled,
       'translucentEffectsEnabled': translucentEffectsEnabled,
+      'highPerformanceModeEnabled': highPerformanceModeEnabled,
       'tmdbMetadataMatchEnabled': tmdbMetadataMatchEnabled,
       'wmdbMetadataMatchEnabled': wmdbMetadataMatchEnabled,
       'metadataMatchPriority': metadataMatchPriority.name,
       'imdbRatingMatchEnabled': imdbRatingMatchEnabled,
+      'detailAutoLibraryMatchEnabled': detailAutoLibraryMatchEnabled,
       'tmdbReadAccessToken': tmdbReadAccessToken,
       'playbackOpenTimeoutSeconds': playbackOpenTimeoutSeconds,
+      'playbackDefaultSpeed': playbackDefaultSpeed,
+      'playbackSubtitlePreference': playbackSubtitlePreference.name,
+      'playbackSubtitleScale': playbackSubtitleScale.name,
+      'playbackBackgroundPlaybackEnabled': playbackBackgroundPlaybackEnabled,
+      'playbackEngine': playbackEngine.name,
+      'playbackDecodeMode': playbackDecodeMode.name,
     };
   }
 
@@ -536,10 +745,14 @@ class AppSettings {
       homeHeroStyle: HomeHeroStyleX.fromName(
         json['homeHeroStyle'] as String? ?? '',
       ),
+      homeHeroLogoTitleEnabled:
+          json['homeHeroLogoTitleEnabled'] as bool? ?? false,
       homeHeroBackgroundEnabled:
           json['homeHeroBackgroundEnabled'] as bool? ?? true,
       translucentEffectsEnabled:
           json['translucentEffectsEnabled'] as bool? ?? true,
+      highPerformanceModeEnabled:
+          json['highPerformanceModeEnabled'] as bool? ?? false,
       tmdbMetadataMatchEnabled: json['tmdbMetadataMatchEnabled'] as bool? ??
           legacyImdbAutoMatchEnabled,
       wmdbMetadataMatchEnabled:
@@ -548,10 +761,29 @@ class AppSettings {
         json['metadataMatchPriority'] as String? ?? '',
       ),
       imdbRatingMatchEnabled: json['imdbRatingMatchEnabled'] as bool? ?? false,
+      detailAutoLibraryMatchEnabled:
+          json['detailAutoLibraryMatchEnabled'] as bool? ?? false,
       tmdbReadAccessToken: json['tmdbReadAccessToken'] as String? ?? '',
       playbackOpenTimeoutSeconds:
           ((json['playbackOpenTimeoutSeconds'] as num?)?.toInt() ?? 20)
               .clamp(1, 600),
+      playbackDefaultSpeed:
+          ((json['playbackDefaultSpeed'] as num?)?.toDouble() ?? 1.0)
+              .clamp(0.75, 2.0),
+      playbackSubtitlePreference: PlaybackSubtitlePreferenceX.fromName(
+        json['playbackSubtitlePreference'] as String? ?? '',
+      ),
+      playbackSubtitleScale: PlaybackSubtitleScaleX.fromName(
+        json['playbackSubtitleScale'] as String? ?? '',
+      ),
+      playbackBackgroundPlaybackEnabled:
+          json['playbackBackgroundPlaybackEnabled'] as bool? ?? true,
+      playbackEngine: PlaybackEngineX.fromName(
+        json['playbackEngine'] as String? ?? '',
+      ),
+      playbackDecodeMode: PlaybackDecodeModeX.fromName(
+        json['playbackDecodeMode'] as String? ?? '',
+      ),
     );
   }
 }
