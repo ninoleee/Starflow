@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
@@ -449,8 +450,7 @@ class _PlaybackSubtitleSettingsPageState
                   } else {
                     next.remove(source);
                   }
-                  _draftOnlineSubtitleSources =
-                      next.toList(growable: false);
+                  _draftOnlineSubtitleSources = next.toList(growable: false);
                 });
               },
             ),
@@ -463,7 +463,8 @@ class _PlaybackSubtitleSettingsPageState
   }
 
   Future<void> _openSubtitlePreferencePicker() async {
-    final selection = await showSettingsOptionDialog<PlaybackSubtitlePreference>(
+    final selection =
+        await showSettingsOptionDialog<PlaybackSubtitlePreference>(
       context: context,
       title: '选择默认字幕策略',
       options: PlaybackSubtitlePreference.values,

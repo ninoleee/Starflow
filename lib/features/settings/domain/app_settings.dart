@@ -931,9 +931,7 @@ List<OnlineSubtitleSource> _parseOnlineSubtitleSources(Object? raw) {
       .map(OnlineSubtitleSourceX.fromName)
       .toSet()
       .toList(growable: false);
-  return sources.isEmpty
-      ? const [OnlineSubtitleSource.assrt]
-      : sources;
+  return sources.isEmpty ? const [OnlineSubtitleSource.assrt] : sources;
 }
 
 String searchSourceSettingIdForMediaSource(String sourceId) {

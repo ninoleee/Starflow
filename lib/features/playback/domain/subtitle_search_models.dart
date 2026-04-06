@@ -241,10 +241,9 @@ class SubtitleSearchSelection {
     return SubtitleSearchSelection(
       cachedPath: json['cachedPath'] as String? ?? '',
       displayName: json['displayName'] as String? ?? '',
-      subtitleFilePath:
-          subtitleFilePath == null || subtitleFilePath.isEmpty
-              ? null
-              : subtitleFilePath,
+      subtitleFilePath: subtitleFilePath == null || subtitleFilePath.isEmpty
+          ? null
+          : subtitleFilePath,
     );
   }
 }

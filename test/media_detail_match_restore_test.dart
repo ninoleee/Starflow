@@ -7,6 +7,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -203,6 +204,98 @@ void main() {
     expect(find.text('外挂字幕'), findsOneWidget);
     expect(find.textContaining('Planet Earth II S01E01'), findsOneWidget);
   });
+
+  testWidgets('detail page auto searches subtitles for playable target',
+      (tester) async {
+    const playableTarget = MediaDetailTarget(
+      title: 'Planet Earth II',
+      posterUrl: '',
+      overview: '',
+      year: 2016,
+      availabilityLabel: '资源已就绪：WebDAV · nas-A',
+      searchQuery: 'Planet Earth II',
+      sourceId: 'nas-a',
+      itemId: 'planet-earth-ii-s01e01',
+      itemType: 'episode',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'nas-A',
+      playbackTarget: PlaybackTarget(
+        title: 'Planet Earth II',
+        sourceId: 'nas-a',
+        streamUrl: 'https://example.com/planet-earth-ii-s01e01.mkv',
+        sourceName: 'nas-A',
+        sourceKind: MediaSourceKind.nas,
+        itemId: 'planet-earth-ii-s01e01',
+        itemType: 'episode',
+        seriesTitle: 'Planet Earth II',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+    const subtitleResult = SubtitleSearchResult(
+      id: 'subtitle-1',
+      source: OnlineSubtitleSource.assrt,
+      providerLabel: 'ASSRT',
+      title: 'Planet Earth II S01E01',
+      version: 'WEB-DL',
+      formatLabel: 'ASS',
+      languageLabel: '中英双语',
+      sourceLabel: 'ASSRT',
+      publishDateLabel: '2024-01-01',
+      downloadCount: 21,
+      ratingLabel: '评分 9',
+      downloadUrl: 'https://assrt.net/download/1/subtitle.ass',
+      detailUrl: 'https://assrt.net/sub/1',
+      packageName: 'Planet.Earth.II.ass',
+      packageKind: SubtitlePackageKind.subtitleFile,
+    );
+    final cacheRepository = _RecordingRestoreCacheRepository();
+    final subtitleRepository = _FakeOnlineSubtitleRepository(
+      results: const [subtitleResult],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'tmdbMetadataMatchEnabled': false,
+              'wmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+              'detailAutoLibraryMatchEnabled': false,
+              'onlineSubtitleSources': ['assrt'],
+            }),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            const _NoopMediaRepository(),
+          ),
+          localStorageCacheRepositoryProvider
+              .overrideWithValue(cacheRepository),
+          onlineSubtitleRepositoryProvider
+              .overrideWithValue(subtitleRepository),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(target: playableTarget),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(subtitleRepository.searchQueries, ['Planet Earth II S01E01']);
+    expect(subtitleRepository.lastMaxResults, 10);
+    expect(subtitleRepository.lastSources, [OnlineSubtitleSource.assrt]);
+    expect(find.text('外挂字幕'), findsOneWidget);
+    expect(find.text('不加载外挂字幕'), findsOneWidget);
+    expect(cacheRepository.lastSavedState?.subtitleSearchChoices.length, 1);
+    expect(cacheRepository.lastSavedState?.selectedSubtitleSearchIndex, -1);
+  });
 }
 
 class _FakeRestoreCacheRepository extends LocalStorageCacheRepository {
@@ -212,13 +305,69 @@ class _FakeRestoreCacheRepository extends LocalStorageCacheRepository {
   final CachedDetailState? cachedState;
 
   @override
-  Future<CachedDetailState?> loadDetailState(MediaDetailTarget seedTarget) async {
+  Future<CachedDetailState?> loadDetailState(
+      MediaDetailTarget seedTarget) async {
     return cachedState;
   }
 
   @override
-  Future<MediaDetailTarget?> loadDetailTarget(MediaDetailTarget seedTarget) async {
+  Future<MediaDetailTarget?> loadDetailTarget(
+      MediaDetailTarget seedTarget) async {
     return cachedState?.target;
+  }
+}
+
+class _RecordingRestoreCacheRepository extends LocalStorageCacheRepository {
+  _RecordingRestoreCacheRepository()
+      : super(preferences: _MemoryPreferencesStore());
+
+  CachedDetailState? lastSavedState;
+
+  @override
+  Future<void> saveDetailTarget({
+    required MediaDetailTarget seedTarget,
+    required MediaDetailTarget resolvedTarget,
+    DetailMetadataRefreshStatus? metadataRefreshStatus,
+    List<MediaDetailTarget>? libraryMatchChoices,
+    int? selectedLibraryMatchIndex,
+    List<CachedSubtitleSearchOption>? subtitleSearchChoices,
+    int? selectedSubtitleSearchIndex,
+  }) async {
+    lastSavedState = CachedDetailState(
+      target: resolvedTarget,
+      libraryMatchChoices: libraryMatchChoices ?? const [],
+      selectedLibraryMatchIndex: selectedLibraryMatchIndex ?? 0,
+      subtitleSearchChoices: subtitleSearchChoices ?? const [],
+      selectedSubtitleSearchIndex: selectedSubtitleSearchIndex ?? -1,
+      metadataRefreshStatus:
+          metadataRefreshStatus ?? DetailMetadataRefreshStatus.never,
+    );
+  }
+}
+
+class _FakeOnlineSubtitleRepository implements OnlineSubtitleRepository {
+  _FakeOnlineSubtitleRepository({required this.results});
+
+  final List<SubtitleSearchResult> results;
+  final List<String> searchQueries = <String>[];
+  List<OnlineSubtitleSource> lastSources = const [];
+  int lastMaxResults = 0;
+
+  @override
+  Future<SubtitleDownloadResult> download(SubtitleSearchResult result) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<List<SubtitleSearchResult>> search(
+    String query, {
+    List<OnlineSubtitleSource> sources = const [OnlineSubtitleSource.assrt],
+    int maxResults = 0,
+  }) async {
+    searchQueries.add(query);
+    lastSources = sources.toList(growable: false);
+    lastMaxResults = maxResults;
+    return results;
   }
 }
 
