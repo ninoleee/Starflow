@@ -835,7 +835,9 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                               onChanged: (checked) {
                                 setState(() {
                                   _didHydrateSectionSelection = true;
-                                  final nextSelection = {..._selectedSectionIds};
+                                  final nextSelection = {
+                                    ..._selectedSectionIds
+                                  };
                                   if (checked) {
                                     nextSelection.add(section.id);
                                   } else {
@@ -1347,11 +1349,11 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
                                   value: folder.id,
                                   onPressed: () {
                                     setState(() {
-                                    _currentPath = folder.id;
-                                  });
-                                },
-                              ),
-                            )
+                                      _currentPath = folder.id;
+                                    });
+                                  },
+                                ),
+                              )
                             : Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
                                 child: StarflowSelectionTile(

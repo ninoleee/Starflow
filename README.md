@@ -117,7 +117,9 @@
 - 详情页本地资源匹配还可通过 `设置 -> 元数据与评分 -> 匹配来源` 限制到指定来源；未单独勾选时默认使用全部已启用的 `Emby / WebDAV` 来源，已保存来源失效时也会自动回退到全部已启用来源
 - 详情页“匹配本地资源”命中 `WebDAV / NAS` 后，会优先采用匹配到的本地资源信息与图片，再用当前详情页已有元数据做补充
 - 手动匹配过程中会按搜索源并发执行；只要某个源先命中，详情页就会立即展示结果，但不会打断其他源继续搜索
-- 豆瓣等在线详情页如果已经缓存过本地资源匹配结果，再次进入时会优先复用已缓存的资源状态、来源和播放信息，不再退回显示“无”
+- 手动匹配命中多个本地资源时，会把整组候选资源和当前选中项一起缓存；再次进入详情页时会恢复资源选择器，不再只剩下一个候选
+- 退出详情页时，当前页本地资源匹配会话会立即失效；还没启动的后续来源任务不会继续执行，已经返回的结果也不会再回写当前页面
+- 豆瓣等在线详情页如果已经缓存过本地资源匹配结果，再次进入时会优先复用已缓存的资源状态、来源、播放信息和多候选选择状态，不再退回显示“无”或丢失候选列表
 - `WMDB / TMDB / IMDb` 用于补全标题、简介、评分、外部 ID 和 artwork
 - `TMDB` 当前已接入 `poster / backdrop / still / profile / logo` 等图片字段；人物头像来自 `profile`，详情页公司 Logo 来自 `production_companies.logo_path`，并展示 `TMDB x.x` 评分；`IMDb` 评分仍由独立补全链路兜底
 - 本地 sidecar 信息优先级高于在线补全
@@ -411,6 +413,7 @@ Web 开发代理：
 - 应用内主 Logo：`assets/branding/starflow_logo_primary.svg`
 - 启动页首帧图标：`assets/branding/starflow_launch_logo.png`
 - 导出脚本：`tool/generate_brand_assets.py`
+- 当前外部 Logo 高倍基准图：`build/brand_assets/app_icon_raw_capture.png`
 - 当前外部 Logo 统一母版：`build/brand_assets/starflow_app_icon_master.png`
 
 重新生成外部图标资源：
@@ -432,7 +435,10 @@ C:\anaconda3\python.exe tool\generate_brand_assets.py
 补充说明：
 
 - 外部 App Icon 已不再走 HTML 截图链路，当前是由脚本直接根据 `assets/branding/starflow_icon_master.svg` 程序化生成统一母版
+- `build/brand_assets/app_icon_raw_capture.png` 是从矢量母版直接输出的高倍基准图
 - `build/brand_assets/starflow_app_icon_master.png` 是用于各平台缩放分发的统一母版
+- Android 启动器小图标与 TV 横幅里的小方形 Logo 当前都复用同一份矢量母版
+- 小尺寸启动器图标不再额外做锐化，避免星星周边出现黑色描边或暗边
 - Android TV Banner 仍然通过 `docs/starflow_tv_banner.html` + 本机 Edge 无头渲染导出
 - 启动页第一帧与外部启动器图标不是同一层资源；启动页当前使用 `assets/branding/starflow_launch_logo.png`
 

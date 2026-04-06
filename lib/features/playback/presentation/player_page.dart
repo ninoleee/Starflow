@@ -725,7 +725,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     runSpacing: 8,
                     children: [
                       for (final step in _kSubtitleDelaySteps)
-                        OutlinedButton(
+                        StarflowButton(
+                          label: step == 0
+                              ? '重置'
+                              : step > 0
+                                  ? '+${step.toStringAsFixed(step == step.roundToDouble() ? 0 : 1)}s'
+                                  : '${step.toStringAsFixed(step == step.roundToDouble() ? 0 : 1)}s',
                           onPressed: () async {
                             final nextDelay =
                                 step == 0 ? 0.0 : currentDelay + step;
@@ -734,22 +739,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                               currentDelay = _subtitleDelaySeconds;
                             });
                           },
-                          child: Text(
-                            step == 0
-                                ? '重置'
-                                : step > 0
-                                    ? '+${step.toStringAsFixed(step == step.roundToDouble() ? 0 : 1)}s'
-                                    : '${step.toStringAsFixed(step == step.roundToDouble() ? 0 : 1)}s',
-                          ),
+                          variant: StarflowButtonVariant.secondary,
+                          compact: true,
                         ),
                     ],
                   ),
                 ],
               ),
               actions: [
-                TextButton(
+                StarflowButton(
+                  label: '关闭',
                   onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('关闭'),
+                  variant: StarflowButtonVariant.ghost,
+                  compact: true,
                 ),
               ],
             );
@@ -812,9 +814,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
               '请在其他设备上搜索：\n$query 字幕',
             ),
             actions: [
-              TextButton(
+              StarflowButton(
+                label: '知道了',
                 onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('知道了'),
+                variant: StarflowButtonVariant.ghost,
+                compact: true,
               ),
             ],
           );
@@ -910,48 +914,54 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
+                  StarflowToggleTile(
+                    title: '自动跳过',
+                    subtitle: target.resolvedSeriesTitle.isEmpty
+                        ? '只对当前绑定的剧集生效'
+                        : '只对《${target.resolvedSeriesTitle}》生效',
                     value: enabled,
                     onChanged: (value) {
                       setDialogState(() {
                         enabled = value;
                       });
                     },
-                    title: const Text('自动跳过'),
-                    subtitle: Text(
-                      target.resolvedSeriesTitle.isEmpty
-                          ? '只对当前绑定的剧集生效'
-                          : '只对《${target.resolvedSeriesTitle}》生效',
-                    ),
                   ),
                   const SizedBox(height: 8),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('片头结束位置'),
-                    subtitle: Text(
-                      introDuration > Duration.zero
-                          ? _formatClockDuration(introDuration)
-                          : '未设置',
-                    ),
-                    trailing: TextButton(
+                  StarflowSelectionTile(
+                    title: '片头结束位置',
+                    subtitle: introDuration > Duration.zero
+                        ? _formatClockDuration(introDuration)
+                        : '未设置',
+                    onPressed: () {
+                      setDialogState(() {
+                        introDuration = currentPosition;
+                      });
+                    },
+                    trailing: StarflowButton(
+                      label: '用当前位置',
                       onPressed: () {
                         setDialogState(() {
                           introDuration = currentPosition;
                         });
                       },
-                      child: const Text('用当前位置'),
+                      variant: StarflowButtonVariant.secondary,
+                      compact: true,
                     ),
                   ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('片尾提前跳过'),
-                    subtitle: Text(
-                      outroDuration > Duration.zero
-                          ? '距结尾 ${_formatClockDuration(outroDuration)}'
-                          : '未设置',
-                    ),
-                    trailing: TextButton(
+                  StarflowSelectionTile(
+                    title: '片尾提前跳过',
+                    subtitle: outroDuration > Duration.zero
+                        ? '距结尾 ${_formatClockDuration(outroDuration)}'
+                        : '未设置',
+                    onPressed: !canCaptureOutro
+                        ? null
+                        : () {
+                            setDialogState(() {
+                              outroDuration = playerDuration - currentPosition;
+                            });
+                          },
+                    trailing: StarflowButton(
+                      label: '用当前位置',
                       onPressed: !canCaptureOutro
                           ? null
                           : () {
@@ -960,7 +970,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                     playerDuration - currentPosition;
                               });
                             },
-                      child: const Text('用当前位置'),
+                      variant: StarflowButtonVariant.secondary,
+                      compact: true,
                     ),
                   ),
                   if (playerDuration > Duration.zero)
@@ -974,7 +985,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 ],
               ),
               actions: [
-                TextButton(
+                StarflowButton(
+                  label: '清空',
                   onPressed: () {
                     setDialogState(() {
                       enabled = false;
@@ -982,13 +994,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                       outroDuration = Duration.zero;
                     });
                   },
-                  child: const Text('清空'),
+                  variant: StarflowButtonVariant.secondary,
+                  compact: true,
                 ),
-                TextButton(
+                StarflowButton(
+                  label: '取消',
                   onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('取消'),
+                  variant: StarflowButtonVariant.ghost,
+                  compact: true,
                 ),
-                FilledButton(
+                StarflowButton(
+                  label: '保存',
                   onPressed: () async {
                     final nextPreference = SeriesSkipPreference(
                       seriesKey: seriesKey,
@@ -1013,7 +1029,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     _syncSkipFlagsWithCurrentPosition();
                     Navigator.of(dialogContext).pop();
                   },
-                  child: const Text('保存'),
+                  compact: true,
                 ),
               ],
             );
@@ -1286,10 +1302,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                           ),
                           child: OverlayToolbar(
                             onBack: () => context.pop(),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.tune_rounded),
-                              color: Colors.white,
+                            trailing: StarflowIconButton(
+                              icon: Icons.tune_rounded,
                               tooltip: '播放设置',
+                              variant: StarflowButtonVariant.ghost,
                               onPressed: _player == null
                                   ? null
                                   : () => _showPlaybackOptions(
@@ -2026,9 +2042,11 @@ class _PlaybackOptionsDialog extends StatelessWidget {
         ),
       ),
       actions: [
-        TextButton(
+        StarflowButton(
+          label: '关闭',
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('关闭'),
+          variant: StarflowButtonVariant.ghost,
+          compact: true,
         ),
       ],
     );
@@ -2093,20 +2111,40 @@ class _PlaybackSubtitleOptionsDialog extends StatelessWidget {
               onPressed: onSearchSubtitlesOnline,
             ),
             const SizedBox(height: 10),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('默认字幕大小'),
-              subtitle: Text(
-                '$defaultSubtitleScaleLabel，可在设置页修改',
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '默认字幕大小',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$defaultSubtitleScaleLabel，可在设置页修改',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
               ),
             ),
           ],
         ),
       ),
       actions: [
-        TextButton(
+        StarflowButton(
+          label: '关闭',
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('关闭'),
+          variant: StarflowButtonVariant.ghost,
+          compact: true,
         ),
       ],
     );
@@ -2128,22 +2166,10 @@ class _PlaybackOptionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (isTelevision) {
-      return TvSelectionTile(
-        title: title,
-        value: value,
-        onPressed: () {
-          unawaited(onPressed());
-        },
-      );
-    }
-
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(title),
-      subtitle: Text(value),
-      trailing: const Icon(Icons.chevron_right_rounded),
-      onTap: () {
+    return StarflowSelectionTile(
+      title: title,
+      subtitle: value,
+      onPressed: () {
         unawaited(onPressed());
       },
     );

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 
 class SectionPanel extends StatelessWidget {
   const SectionPanel({
@@ -58,18 +59,11 @@ class SectionPanel extends StatelessWidget {
               if (actionLabel != null &&
                   actionLabel!.trim().isNotEmpty &&
                   onActionPressed != null)
-                TextButton(
+                StarflowButton(
+                  label: actionLabel!,
                   onPressed: onActionPressed,
-                  style: TextButton.styleFrom(
-                    backgroundColor:
-                        theme.colorScheme.primary.withValues(alpha: 0.08),
-                    foregroundColor: theme.colorScheme.primary,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
-                    ),
-                  ),
-                  child: Text(actionLabel!),
+                  variant: StarflowButtonVariant.secondary,
+                  compact: true,
                 ),
             ],
           ),

@@ -88,17 +88,22 @@ class _DoubanAccountEditorPageState
         title: const Text('保存修改？'),
         content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
         actions: [
-          TextButton(
+          StarflowButton(
+            label: '取消',
             onPressed: () => Navigator.of(dialogContext).pop('cancel'),
-            child: const Text('取消'),
+            variant: StarflowButtonVariant.ghost,
+            compact: true,
           ),
-          TextButton(
+          StarflowButton(
+            label: '不保存',
             onPressed: () => Navigator.of(dialogContext).pop('discard'),
-            child: const Text('不保存'),
+            variant: StarflowButtonVariant.secondary,
+            compact: true,
           ),
-          FilledButton(
+          StarflowButton(
+            label: '保存',
             onPressed: () => Navigator.of(dialogContext).pop('save'),
-            child: const Text('保存'),
+            compact: true,
           ),
         ],
       ),
@@ -167,9 +172,8 @@ class _DoubanAccountEditorPageState
                     onPressed: () => setState(() => _enabled = !_enabled),
                   )
                 else
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('启用豆瓣模块'),
+                  StarflowToggleTile(
+                    title: '启用豆瓣模块',
                     value: _enabled,
                     onChanged: (value) => setState(() => _enabled = value),
                   ),
@@ -192,9 +196,11 @@ class _DoubanAccountEditorPageState
                           variant: TvButtonVariant.text,
                         ),
                       )
-                    : TextButton(
+                    : StarflowButton(
+                        label: '保存',
                         onPressed: _saveDraft,
-                        child: const Text('保存'),
+                        variant: StarflowButtonVariant.ghost,
+                        compact: true,
                       ),
               ),
             ),

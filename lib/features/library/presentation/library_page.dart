@@ -117,45 +117,28 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
           child: ListView(
             padding: EdgeInsets.zero,
             children: [
-              if (isTelevision)
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    for (var index = 0; index < LibraryFilter.values.length; index++)
-                      _LibraryFilterChip(
-                        filter: LibraryFilter.values[index],
-                        selected: LibraryFilter.values[index] == _filter,
-                        focusId:
-                            'library:filter:${LibraryFilter.values[index].name}',
-                        autofocus: index == 0,
-                        onPressed: () {
-                          setState(() {
-                            _filter = LibraryFilter.values[index];
-                            _currentPage = 0;
-                          });
-                        },
-                      ),
-                  ],
-                )
-              else
-                SegmentedButton<LibraryFilter>(
-                  segments: LibraryFilter.values
-                      .map(
-                        (filter) => ButtonSegment(
-                          value: filter,
-                          label: Text(filter.label),
-                        ),
-                      )
-                      .toList(),
-                  selected: {_filter},
-                  onSelectionChanged: (value) {
-                    setState(() {
-                      _filter = value.first;
-                      _currentPage = 0;
-                    });
-                  },
-                ),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (var index = 0;
+                      index < LibraryFilter.values.length;
+                      index++)
+                    _LibraryFilterChip(
+                      filter: LibraryFilter.values[index],
+                      selected: LibraryFilter.values[index] == _filter,
+                      focusId:
+                          'library:filter:${LibraryFilter.values[index].name}',
+                      autofocus: index == 0 && isTelevision,
+                      onPressed: () {
+                        setState(() {
+                          _filter = LibraryFilter.values[index];
+                          _currentPage = 0;
+                        });
+                      },
+                    ),
+                ],
+              ),
               const SizedBox(height: 18),
               if (rebuildableSourceIds.isNotEmpty) ...[
                 Align(
@@ -170,21 +153,21 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                               ? '更新中...'
                               : '增量更新 WebDAV',
                           icon: Icons.refresh_rounded,
-                          onPressed:
-                              _isIncrementalRefreshing || _isForceRescanning
-                                  ? null
-                                  : () =>
-                                      _runIncrementalRefresh(rebuildableSourceIds),
+                          onPressed: _isIncrementalRefreshing ||
+                                  _isForceRescanning
+                              ? null
+                              : () =>
+                                  _runIncrementalRefresh(rebuildableSourceIds),
                           variant: TvButtonVariant.outlined,
                           focusId: 'library:refresh:incremental',
                         )
                       else
                         OutlinedButton.icon(
-                          onPressed:
-                              _isIncrementalRefreshing || _isForceRescanning
-                                  ? null
-                                  : () =>
-                                      _runIncrementalRefresh(rebuildableSourceIds),
+                          onPressed: _isIncrementalRefreshing ||
+                                  _isForceRescanning
+                              ? null
+                              : () =>
+                                  _runIncrementalRefresh(rebuildableSourceIds),
                           icon: _isIncrementalRefreshing
                               ? const SizedBox(
                                   width: 16,
@@ -267,6 +250,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                               ),
                             );
                           }
+
                           if (isTelevision) {
                             return _LibraryCollectionChip(
                               label: collection.title,
@@ -275,13 +259,8 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                               onPressed: onOpen,
                             );
                           }
-                          return ActionChip(
-                            backgroundColor:
-                                Colors.white.withValues(alpha: 0.06),
-                            side: BorderSide(
-                              color: Colors.white.withValues(alpha: 0.06),
-                            ),
-                            label: Text(collection.title),
+                          return _LibraryCollectionChip(
+                            label: collection.title,
                             onPressed: onOpen,
                           );
                         },
@@ -304,7 +283,8 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                         _currentPage = page;
                       });
                     },
-                    onItemContextAction: (item) => _handleItemContextAction(item),
+                    onItemContextAction: (item) =>
+                        _handleItemContextAction(item),
                     emptyMessage: '无',
                     header: Text(
                       _filter == LibraryFilter.all
@@ -371,13 +351,16 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                   : '这会对当前启用的 WebDAV 媒体源执行全量重扫，忽略已有指纹并重新抓取 sidecar、WMDB、TMDB 和 IMDb 信息。',
             ),
             actions: [
-              TextButton(
+              StarflowButton(
+                label: '取消',
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('取消'),
+                variant: StarflowButtonVariant.ghost,
+                compact: true,
               ),
-              FilledButton(
+              StarflowButton(
+                label: '开始重扫',
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('开始重扫'),
+                compact: true,
               ),
             ],
           ),
@@ -471,37 +454,50 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
       builder: (context) => SafeArea(
         child: Wrap(
           children: [
-            ListTile(
-              title: Text(item.title),
-              subtitle: Text(
-                item.actualAddress.trim().isEmpty
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: StarflowSelectionTile(
+                title: item.title,
+                subtitle: item.actualAddress.trim().isEmpty
                     ? item.sourceName
                     : item.actualAddress,
+                onPressed: null,
+                trailing: const SizedBox.shrink(),
               ),
             ),
-            ListTile(
-              leading: const Icon(Icons.restart_alt_rounded),
-              title: const Text('重建当前源索引'),
-              onTap: () => Navigator.of(context)
-                  .pop(_LibraryItemAction.rebuildSourceIndex),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: StarflowSelectionTile(
+                leading: const Icon(Icons.restart_alt_rounded),
+                title: '重建当前源索引',
+                onPressed: () => Navigator.of(context)
+                    .pop(_LibraryItemAction.rebuildSourceIndex),
+              ),
             ),
-            ListTile(
-              leading: const Icon(Icons.manage_search_rounded),
-              title: const Text('手动索引'),
-              onTap: () =>
-                  Navigator.of(context).pop(_LibraryItemAction.manualIndex),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: StarflowSelectionTile(
+                leading: const Icon(Icons.manage_search_rounded),
+                title: '手动索引',
+                onPressed: () =>
+                    Navigator.of(context).pop(_LibraryItemAction.manualIndex),
+              ),
             ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline_rounded),
-              title: Text(item.isFolder ||
-                      item.itemType == 'series' ||
-                      item.itemType == 'season'
-                  ? '删除目录'
-                  : '删除文件'),
-              textColor: Theme.of(context).colorScheme.error,
-              iconColor: Theme.of(context).colorScheme.error,
-              onTap: () =>
-                  Navigator.of(context).pop(_LibraryItemAction.deleteResource),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: StarflowSelectionTile(
+                leading: Icon(
+                  Icons.delete_outline_rounded,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                title: item.isFolder ||
+                        item.itemType == 'series' ||
+                        item.itemType == 'season'
+                    ? '删除目录'
+                    : '删除文件',
+                onPressed: () => Navigator.of(context)
+                    .pop(_LibraryItemAction.deleteResource),
+              ),
             ),
           ],
         ),
@@ -541,13 +537,17 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                   : '将从 WebDAV 删除“${item.title}”对应文件，并从本地索引中移除该条目。',
             ),
             actions: [
-              TextButton(
+              StarflowButton(
+                label: '取消',
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('取消'),
+                variant: StarflowButtonVariant.ghost,
+                compact: true,
               ),
-              FilledButton(
+              StarflowButton(
+                label: '确认删除',
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('确认删除'),
+                variant: StarflowButtonVariant.danger,
+                compact: true,
               ),
             ],
           ),
@@ -596,37 +596,12 @@ class _LibraryFilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TvFocusableAction(
+    return StarflowChipButton(
+      label: filter.label,
+      selected: selected,
       onPressed: onPressed,
       focusId: focusId,
       autofocus: autofocus,
-      borderRadius: BorderRadius.circular(999),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: selected
-              ? Colors.white
-              : Theme.of(context)
-                  .colorScheme
-                  .surfaceContainerHighest
-                  .withValues(alpha: 0.82),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: selected
-                ? Colors.white
-                : Theme.of(context).colorScheme.outlineVariant,
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-          child: Text(
-            filter.label,
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: selected ? const Color(0xFF081120) : Colors.white,
-                  fontWeight: FontWeight.w800,
-                ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -646,28 +621,12 @@ class _LibraryCollectionChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TvFocusableAction(
+    return StarflowChipButton(
+      label: label,
+      selected: false,
       onPressed: onPressed,
       focusId: focusId,
       autofocus: autofocus,
-      borderRadius: BorderRadius.circular(999),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Text(
-            label,
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-        ),
-      ),
     );
   }
 }

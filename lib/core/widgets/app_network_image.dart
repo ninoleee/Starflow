@@ -3,9 +3,11 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:starflow/core/storage/persistent_image_cache.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
+import 'package:starflow/features/playback/application/playback_session.dart';
 
 typedef AppNetworkImageErrorBuilder = Widget Function(
     BuildContext context, Object error, StackTrace? stackTrace);
@@ -21,7 +23,7 @@ class AppNetworkImageSource {
   final Map<String, String> headers;
 }
 
-class AppNetworkImage extends StatefulWidget {
+class AppNetworkImage extends ConsumerStatefulWidget {
   const AppNetworkImage(
     this.url, {
     super.key,
@@ -54,17 +56,17 @@ class AppNetworkImage extends StatefulWidget {
   final List<AppNetworkImageSource> fallbackSources;
 
   @override
-  State<AppNetworkImage> createState() => _AppNetworkImageState();
+  ConsumerState<AppNetworkImage> createState() => _AppNetworkImageState();
 }
 
-class _AppNetworkImageState extends State<AppNetworkImage> {
+class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   Future<_ResolvedImageContent>? _resolvedImageFuture;
   bool _hasLoggedImageInfo = false;
 
   @override
   void initState() {
     super.initState();
-    _resolvedImageFuture = _resolveImageFuture();
+    _refreshResolvedImageFuture();
   }
 
   @override
@@ -76,9 +78,20 @@ class _AppNetworkImageState extends State<AppNetworkImage> {
           oldWidget.fallbackSources,
           widget.fallbackSources,
         )) {
-      _resolvedImageFuture = _resolveImageFuture();
+      _refreshResolvedImageFuture(force: true);
       _hasLoggedImageInfo = false;
     }
+  }
+
+  void _refreshResolvedImageFuture({bool force = false}) {
+    final backgroundWorkSuspended = ref.read(backgroundWorkSuspendedProvider);
+    if (backgroundWorkSuspended) {
+      if (force) {
+        _resolvedImageFuture = null;
+      }
+      return;
+    }
+    _resolvedImageFuture = _resolveImageFuture();
   }
 
   Future<_ResolvedImageContent>? _resolveImageFuture() {
@@ -118,6 +131,7 @@ class _AppNetworkImageState extends State<AppNetworkImage> {
 
   @override
   Widget build(BuildContext context) {
+    final backgroundWorkSuspended = ref.watch(backgroundWorkSuspendedProvider);
     final trimmedUrl = widget.url.trim();
     if (trimmedUrl.isEmpty) {
       return _buildError(
@@ -125,6 +139,12 @@ class _AppNetworkImageState extends State<AppNetworkImage> {
         StateError('Image URL is empty.'),
       );
     }
+
+    if (backgroundWorkSuspended) {
+      return _buildLoading(context);
+    }
+
+    _resolvedImageFuture ??= _resolveImageFuture();
 
     return FutureBuilder<_ResolvedImageContent>(
       future: _resolvedImageFuture,
@@ -195,7 +215,7 @@ class _AppNetworkImageState extends State<AppNetworkImage> {
           headers: (headers?.isNotEmpty ?? false)
               ? headers!
               : (networkImageHeadersForUrl(trimmedUrl) ??
-                    const <String, String>{}),
+                  const <String, String>{}),
         ),
       );
     }

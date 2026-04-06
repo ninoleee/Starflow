@@ -191,38 +191,62 @@ class HomeEditorPage extends ConsumerWidget {
                                       .outlineVariant,
                                 ),
                               ),
-                              child: ListTile(
-                                title: Text(module.title),
-                                leading: ReorderableDragStartListener(
-                                  index: index,
-                                  child:
-                                      const Icon(Icons.drag_indicator_rounded),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
                                 ),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
+                                child: Row(
                                   children: [
-                                    IconButton(
-                                      onPressed: () => _showEditModuleDialog(
-                                          context, ref, module),
-                                      icon: const Icon(Icons.edit_outlined),
+                                    ReorderableDragStartListener(
+                                      index: index,
+                                      child: const Icon(
+                                        Icons.drag_indicator_rounded,
+                                      ),
                                     ),
-                                    IconButton(
+                                    const SizedBox(width: 12),
+                                    Expanded(child: Text(module.title)),
+                                    StarflowIconButton(
+                                      icon: Icons.edit_outlined,
+                                      tooltip: '编辑',
+                                      variant: StarflowButtonVariant.secondary,
+                                      onPressed: () => _showEditModuleDialog(
+                                        context,
+                                        ref,
+                                        module,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    StarflowIconButton(
+                                      icon: Icons.close_rounded,
+                                      tooltip: '删除',
+                                      variant: StarflowButtonVariant.danger,
                                       onPressed: () {
                                         ref
                                             .read(settingsControllerProvider
                                                 .notifier)
                                             .removeHomeModule(module.id);
                                       },
-                                      icon: const Icon(Icons.close_rounded),
                                     ),
-                                    Switch(
-                                      value: module.enabled,
-                                      onChanged: (value) {
+                                    const SizedBox(width: 8),
+                                    StarflowButton(
+                                      label: module.enabled ? '关闭' : '开启',
+                                      icon: module.enabled
+                                          ? Icons.toggle_off_rounded
+                                          : Icons.toggle_on_rounded,
+                                      onPressed: () {
                                         ref
                                             .read(settingsControllerProvider
                                                 .notifier)
-                                            .toggleHomeModule(module.id, value);
+                                            .toggleHomeModule(
+                                              module.id,
+                                              !module.enabled,
+                                            );
                                       },
+                                      variant: module.enabled
+                                          ? StarflowButtonVariant.secondary
+                                          : StarflowButtonVariant.primary,
+                                      compact: true,
                                     ),
                                   ],
                                 ),
@@ -609,12 +633,15 @@ class HomeEditorPage extends ConsumerWidget {
                 ),
               ),
               actions: [
-                TextButton(
+                StarflowButton(
+                  label: '取消',
                   focusNode: cancelFocusNode,
                   onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('取消'),
+                  variant: StarflowButtonVariant.ghost,
+                  compact: true,
                 ),
-                FilledButton(
+                StarflowButton(
+                  label: '保存',
                   focusNode: saveFocusNode,
                   onPressed: () {
                     final url = urlController.text.trim();
@@ -640,7 +667,7 @@ class HomeEditorPage extends ConsumerWidget {
                         );
                     Navigator.of(dialogContext).pop();
                   },
-                  child: const Text('保存'),
+                  compact: true,
                 ),
               ],
             );
@@ -754,12 +781,15 @@ class HomeEditorPage extends ConsumerWidget {
                 ),
               ),
               actions: [
-                TextButton(
+                StarflowButton(
+                  label: '取消',
                   focusNode: cancelFocusNode,
                   onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('取消'),
+                  variant: StarflowButtonVariant.ghost,
+                  compact: true,
                 ),
-                FilledButton(
+                StarflowButton(
+                  label: '保存',
                   focusNode: saveFocusNode,
                   onPressed: () {
                     ref
@@ -775,7 +805,7 @@ class HomeEditorPage extends ConsumerWidget {
                         );
                     Navigator.of(dialogContext).pop();
                   },
-                  child: const Text('保存'),
+                  compact: true,
                 ),
               ],
             );
@@ -834,19 +864,12 @@ class _AddModuleTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-        title: Text(title),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: StarflowSelectionTile(
+        title: title,
+        onPressed: onTap,
         trailing: const Icon(Icons.add_circle_outline_rounded),
-        onTap: onTap,
       ),
     );
   }
@@ -866,28 +889,14 @@ class _SourceCategoryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(22),
-        onTap: onTap,
-        child: Ink(
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: scheme.outlineVariant),
-          ),
-          child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: scheme.primary.withValues(alpha: 0.12),
-              foregroundColor: scheme.primary,
-              child: Icon(icon),
-            ),
-            title: Text(title),
-            trailing: const Icon(Icons.chevron_right_rounded),
-          ),
-        ),
+    return StarflowSelectionTile(
+      leading: CircleAvatar(
+        backgroundColor: scheme.primary.withValues(alpha: 0.12),
+        foregroundColor: scheme.primary,
+        child: Icon(icon),
       ),
+      title: title,
+      onPressed: onTap,
     );
   }
 }

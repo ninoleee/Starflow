@@ -1,7 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:starflow/core/storage/app_preferences_store.dart';
+import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
@@ -48,22 +49,19 @@ final recentPlaybackEntriesProvider =
 
 class PlaybackMemoryRepository {
   PlaybackMemoryRepository({
-    SharedPreferences? sharedPreferences,
+    AppPreferencesStore? preferences,
     void Function()? notifyChanged,
-  })  : _sharedPreferences = sharedPreferences,
+  })  : _preferences = preferences ?? AppPreferencesStore(),
         _notifyChanged = notifyChanged;
 
   static const _storageKey = 'starflow.playback.memory.v1';
   static const recentEntryLimit = 20;
 
-  SharedPreferences? _sharedPreferences;
+  final AppPreferencesStore _preferences;
   final void Function()? _notifyChanged;
 
-  Future<SharedPreferences> _prefs() async {
-    return _sharedPreferences ??= await SharedPreferences.getInstance();
-  }
-
-  Future<PlaybackProgressEntry?> loadEntryForTarget(PlaybackTarget target) async {
+  Future<PlaybackProgressEntry?> loadEntryForTarget(
+      PlaybackTarget target) async {
     final key = buildPlaybackItemKey(target);
     if (key.isEmpty) {
       return null;
@@ -101,7 +99,8 @@ class PlaybackMemoryRepository {
     return snapshot.items[itemKey];
   }
 
-  Future<List<PlaybackProgressEntry>> loadRecentEntries({int limit = 20}) async {
+  Future<List<PlaybackProgressEntry>> loadRecentEntries(
+      {int limit = 20}) async {
     final snapshot = await _loadSnapshot();
     final entries = snapshot.items.values.toList()
       ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
@@ -110,7 +109,8 @@ class PlaybackMemoryRepository {
         );
   }
 
-  Future<SeriesSkipPreference?> loadSkipPreference(PlaybackTarget target) async {
+  Future<SeriesSkipPreference?> loadSkipPreference(
+      PlaybackTarget target) async {
     final seriesKey = buildSeriesKeyForTarget(target);
     if (seriesKey.isEmpty) {
       return null;
@@ -129,13 +129,12 @@ class PlaybackMemoryRepository {
       return;
     }
 
-    final clampedDuration =
-        duration.isNegative ? Duration.zero : duration;
+    final clampedDuration = duration.isNegative ? Duration.zero : duration;
     final clampedPosition = position.isNegative ? Duration.zero : position;
-    final safePosition = clampedDuration > Duration.zero &&
-            clampedPosition > clampedDuration
-        ? clampedDuration
-        : clampedPosition;
+    final safePosition =
+        clampedDuration > Duration.zero && clampedPosition > clampedDuration
+            ? clampedDuration
+            : clampedPosition;
     final progress = clampedDuration.inMilliseconds <= 0
         ? 0.0
         : (safePosition.inMilliseconds / clampedDuration.inMilliseconds)
@@ -204,14 +203,22 @@ class PlaybackMemoryRepository {
   }
 
   Future<void> clearAll() async {
-    final prefs = await _prefs();
-    await prefs.remove(_storageKey);
+    await _preferences.remove(_storageKey);
     _notifyChanged?.call();
   }
 
+  Future<LocalStorageCacheSummary> inspectSummary() async {
+    final raw = await _preferences.getString(_storageKey) ?? '';
+    final snapshot = await _loadSnapshot();
+    return LocalStorageCacheSummary(
+      type: LocalStorageCacheType.playbackMemory,
+      entryCount: snapshot.items.length + snapshot.skipPreferences.length,
+      totalBytes: utf8.encode(raw).length,
+    );
+  }
+
   Future<PlaybackMemorySnapshot> _loadSnapshot() async {
-    final prefs = await _prefs();
-    final raw = prefs.getString(_storageKey);
+    final raw = await _preferences.getString(_storageKey);
     if (raw == null || raw.isEmpty) {
       return const PlaybackMemorySnapshot();
     }
@@ -226,8 +233,7 @@ class PlaybackMemoryRepository {
   }
 
   Future<void> _saveSnapshot(PlaybackMemorySnapshot snapshot) async {
-    final prefs = await _prefs();
-    await prefs.setString(_storageKey, jsonEncode(snapshot.toJson()));
+    await _preferences.setString(_storageKey, jsonEncode(snapshot.toJson()));
   }
 
   void _pruneRecentEntries(Map<String, PlaybackProgressEntry> items) {
@@ -237,7 +243,8 @@ class PlaybackMemoryRepository {
 
     final sorted = items.values.toList()
       ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
-    final allowed = sorted.take(recentEntryLimit).map((entry) => entry.key).toSet();
+    final allowed =
+        sorted.take(recentEntryLimit).map((entry) => entry.key).toSet();
     items.removeWhere((key, _) => !allowed.contains(key));
   }
 

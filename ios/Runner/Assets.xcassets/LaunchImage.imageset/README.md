@@ -8,6 +8,7 @@
 - 启动页首帧当前与 `assets/branding/starflow_launch_logo.png` 保持同源
 - `tool/generate_brand_assets.py` 会同步更新这里的 `LaunchImage.png / @2x / @3x`
 - 外部 App Icon 当前同样由仓库根目录下的 `tool/generate_brand_assets.py` 统一生成
+- 外部 App Icon 当前以 `assets/branding/starflow_icon_master.svg` 为统一矢量源
 - 如果你只是要更新桌面、启动器、安装包里看到的 App 图标，不需要改这里
 
 如果你要同步更新启动页视觉，推荐直接运行：

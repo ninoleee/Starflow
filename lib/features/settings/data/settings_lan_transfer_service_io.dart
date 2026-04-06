@@ -164,6 +164,9 @@ class SettingsLanTransferService {
 
       if (request.method == 'POST' && path == '/upload') {
         final body = await utf8.decoder.bind(request).join();
+        if (body.trim().isEmpty) {
+          throw const FormatException('上传内容为空，请重新选择配置文件。');
+        }
         final decoded = jsonDecode(body);
         if (decoded is! Map) {
           throw const FormatException('配置内容不是合法的 JSON 对象。');
@@ -171,7 +174,11 @@ class SettingsLanTransferService {
         final imported = AppSettings.fromJson(
           Map<String, dynamic>.from(decoded),
         );
-        await importSettings(imported);
+        try {
+          await importSettings(imported);
+        } catch (error) {
+          throw StateError('配置已上传，但电视端保存失败：$error');
+        }
         eventsController.add(
           const SettingsLanTransferEvent(
             message: '手机上传成功，电视端配置已直接替换并生效。',
@@ -336,8 +343,7 @@ class SettingsLanTransferService {
     final escapedDownloadPath = _escape('/download?$tokenQuery');
     final escapedUrls = urls
         .map(
-          (url) =>
-              '<li><a href="${_escape(url)}">${_escape(url)}</a></li>',
+          (url) => '<li><a href="${_escape(url)}">${_escape(url)}</a></li>',
         )
         .join();
     return '''

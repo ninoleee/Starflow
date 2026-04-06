@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
@@ -14,6 +13,7 @@ import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
+import 'package:starflow/features/search/data/search_preferences_repository.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -35,9 +35,6 @@ class SearchPage extends ConsumerStatefulWidget {
 }
 
 class _SearchPageState extends ConsumerState<SearchPage> {
-  static const _kRecentSearchesPreferenceKey = 'search.recentQueries';
-  static const _kSelectedTargetsPreferenceKey = 'search.selectedTargetIds';
-
   late final TextEditingController _controller;
   final TvFocusMemoryController _tvFocusMemoryController =
       TvFocusMemoryController();
@@ -82,11 +79,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   }
 
   Future<void> _loadTelevisionPreferences() async {
-    final prefs = await SharedPreferences.getInstance();
-    final recentQueries =
-        prefs.getStringList(_kRecentSearchesPreferenceKey) ?? const <String>[];
-    final selectedTargets =
-        prefs.getStringList(_kSelectedTargetsPreferenceKey) ?? const <String>[];
+    final preferences = ref.read(searchPreferencesRepositoryProvider);
+    final recentQueries = await preferences.loadRecentQueries();
+    final selectedTargets = await preferences.loadSelectedTargetIds();
     if (!mounted) {
       return;
     }
@@ -106,11 +101,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   }
 
   Future<void> _persistSelectedTargets() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(
-      _kSelectedTargetsPreferenceKey,
-      _selectedTargetIds.toList(growable: false),
-    );
+    await ref.read(searchPreferencesRepositoryProvider).saveSelectedTargetIds(
+          _selectedTargetIds.toList(growable: false),
+        );
   }
 
   Future<void> _rememberQuery(String keyword) async {
@@ -129,8 +122,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         _recentQueries = nextQueries;
       });
     }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_kRecentSearchesPreferenceKey, nextQueries);
+    await ref
+        .read(searchPreferencesRepositoryProvider)
+        .saveRecentQueries(nextQueries);
   }
 
   Future<void> _runRecentQuery(String query) async {
@@ -280,9 +274,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                                 onSubmitted: (_) => _performSearch(),
                                 decoration: InputDecoration(
                                   hintText: '搜索电影、剧集或番剧资源',
-                                  suffixIcon: IconButton(
-                                    onPressed: _performSearch,
-                                    icon: const Icon(Icons.search_rounded),
+                                  suffixIcon: Padding(
+                                    padding: const EdgeInsets.all(6),
+                                    child: StarflowIconButton(
+                                      icon: Icons.search_rounded,
+                                      tooltip: '搜索',
+                                      onPressed: _performSearch,
+                                      variant: StarflowButtonVariant.ghost,
+                                      size: 40,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -478,15 +478,18 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             ),
           ),
           actions: [
-            TextButton(
+            StarflowButton(
+              label: '取消',
               focusNode: cancelFocusNode,
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('取消'),
+              variant: StarflowButtonVariant.ghost,
+              compact: true,
             ),
-            FilledButton(
+            StarflowButton(
+              label: '搜索',
               focusNode: confirmFocusNode,
               onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-              child: const Text('搜索'),
+              compact: true,
             ),
           ],
         );
@@ -990,22 +993,12 @@ class _SearchResultCard extends ConsumerWidget {
                                 : SizedBox(
                                     width: 32,
                                     height: 32,
-                                    child: IconButton(
-                                      padding: EdgeInsets.zero,
+                                    child: StarflowIconButton(
+                                      size: 32,
                                       tooltip: '保存到夸克',
+                                      variant: StarflowButtonVariant.ghost,
                                       onPressed: isSaving ? null : onSave,
-                                      icon: isSaving
-                                          ? const SizedBox(
-                                              width: 14,
-                                              height: 14,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                              ),
-                                            )
-                                          : const Icon(
-                                              Icons.bookmark_add_rounded,
-                                              size: 18,
-                                            ),
+                                      icon: Icons.bookmark_add_rounded,
                                     ),
                                   ),
                           ),
@@ -1150,13 +1143,17 @@ class _SearchResultCard extends ConsumerWidget {
             ),
             actions: [
               if (resourceUri != null)
-                TextButton(
+                StarflowButton(
+                  label: '打开链接',
                   onPressed: () => _openResourceUrl(context, resourceUri),
-                  child: const Text('打开链接'),
+                  variant: StarflowButtonVariant.secondary,
+                  compact: true,
                 ),
-              TextButton(
+              StarflowButton(
+                label: '关闭',
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('关闭'),
+                variant: StarflowButtonVariant.ghost,
+                compact: true,
               ),
             ],
           );
@@ -1360,32 +1357,12 @@ class _SearchHistoryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TvFocusableAction(
+    return StarflowChipButton(
+      label: label,
       onPressed: onPressed,
       focusId: focusId,
       autofocus: autofocus,
-      borderRadius: BorderRadius.circular(999),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Theme.of(context)
-              .colorScheme
-              .surfaceContainerHighest
-              .withValues(alpha: 0.82),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Text(
-            label,
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-        ),
-      ),
+      selected: false,
     );
   }
 }
@@ -1409,41 +1386,12 @@ class _SearchTargetChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!isTelevision) {
-      return FilterChip(
-        label: Text(target.label),
-        selected: selected,
-        onSelected: (_) => onPressed(),
-      );
-    }
-
-    return TvFocusableAction(
+    return StarflowChipButton(
+      label: target.label,
+      selected: selected,
       onPressed: onPressed,
       focusId: focusId,
       autofocus: autofocus,
-      borderRadius: BorderRadius.circular(999),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: selected
-              ? Colors.white
-              : Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: selected
-                ? Colors.white
-                : Theme.of(context).colorScheme.outlineVariant,
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Text(
-            target.label,
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: selected ? const Color(0xFF081120) : null,
-                ),
-          ),
-        ),
-      ),
     );
   }
 }

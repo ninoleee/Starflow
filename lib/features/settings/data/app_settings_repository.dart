@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -19,11 +19,11 @@ final appSettingsRepositoryProvider = Provider<AppSettingsRepository>(
 class LocalAppSettingsRepository implements AppSettingsRepository {
   static const _settingsKey = 'starflow.settings.v1';
   static const _bundledSettingsKey = 'assets/bootstrap/embedded_settings.json';
+  final AppPreferencesStore _preferences = AppPreferencesStore();
 
   @override
   Future<AppSettings> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_settingsKey);
+    final raw = await _preferences.getString(_settingsKey);
     if (raw == null || raw.isEmpty) {
       final fallback = await _loadBundledOrDefaultSettings();
       await save(fallback);
@@ -48,8 +48,7 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
 
   @override
   Future<void> save(AppSettings settings) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_settingsKey, jsonEncode(settings.toJson()));
+    await _preferences.setString(_settingsKey, jsonEncode(settings.toJson()));
   }
 
   Future<AppSettings> _loadBundledOrDefaultSettings() async {

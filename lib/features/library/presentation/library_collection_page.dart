@@ -5,6 +5,7 @@ import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/application/library_cached_items.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/application/nas_media_index_revision.dart';
@@ -124,37 +125,50 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage> {
       builder: (context) => SafeArea(
         child: Wrap(
           children: [
-            ListTile(
-              title: Text(item.title),
-              subtitle: Text(
-                item.actualAddress.trim().isEmpty
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: StarflowSelectionTile(
+                title: item.title,
+                subtitle: item.actualAddress.trim().isEmpty
                     ? item.sourceName
                     : item.actualAddress,
+                onPressed: null,
+                trailing: const SizedBox.shrink(),
               ),
             ),
-            ListTile(
-              leading: const Icon(Icons.restart_alt_rounded),
-              title: const Text('重建当前源索引'),
-              onTap: () => Navigator.of(context)
-                  .pop(_LibraryCollectionItemAction.rebuildSourceIndex),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: StarflowSelectionTile(
+                leading: const Icon(Icons.restart_alt_rounded),
+                title: '重建当前源索引',
+                onPressed: () => Navigator.of(context)
+                    .pop(_LibraryCollectionItemAction.rebuildSourceIndex),
+              ),
             ),
-            ListTile(
-              leading: const Icon(Icons.manage_search_rounded),
-              title: const Text('手动索引'),
-              onTap: () => Navigator.of(context)
-                  .pop(_LibraryCollectionItemAction.manualIndex),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: StarflowSelectionTile(
+                leading: const Icon(Icons.manage_search_rounded),
+                title: '手动索引',
+                onPressed: () => Navigator.of(context)
+                    .pop(_LibraryCollectionItemAction.manualIndex),
+              ),
             ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline_rounded),
-              title: Text(item.isFolder ||
-                      item.itemType == 'series' ||
-                      item.itemType == 'season'
-                  ? '删除目录'
-                  : '删除文件'),
-              textColor: Theme.of(context).colorScheme.error,
-              iconColor: Theme.of(context).colorScheme.error,
-              onTap: () => Navigator.of(context)
-                  .pop(_LibraryCollectionItemAction.deleteResource),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: StarflowSelectionTile(
+                leading: Icon(
+                  Icons.delete_outline_rounded,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                title: item.isFolder ||
+                        item.itemType == 'series' ||
+                        item.itemType == 'season'
+                    ? '删除目录'
+                    : '删除文件',
+                onPressed: () => Navigator.of(context)
+                    .pop(_LibraryCollectionItemAction.deleteResource),
+              ),
             ),
           ],
         ),
@@ -196,13 +210,17 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage> {
                   : '将从 WebDAV 删除“${item.title}”对应文件，并从本地索引中移除该条目。',
             ),
             actions: [
-              TextButton(
+              StarflowButton(
+                label: '取消',
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('取消'),
+                variant: StarflowButtonVariant.ghost,
+                compact: true,
               ),
-              FilledButton(
+              StarflowButton(
+                label: '确认删除',
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('确认删除'),
+                variant: StarflowButtonVariant.danger,
+                compact: true,
               ),
             ],
           ),

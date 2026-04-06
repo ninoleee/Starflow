@@ -47,10 +47,17 @@ class OverlayToolbar extends ConsumerWidget {
                   ),
                 )
               else
-                IconButton(
-                  icon: const Icon(Icons.arrow_back_rounded),
-                  color: color,
+                TvFocusableAction(
                   onPressed: backAction,
+                  borderRadius: BorderRadius.circular(14),
+                  visualStyle: TvFocusVisualStyle.subtle,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      Icons.arrow_back_rounded,
+                      color: color,
+                    ),
+                  ),
                 ),
               const Spacer(),
               if (trailing != null) trailing!,

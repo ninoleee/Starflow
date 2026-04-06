@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sembast/sembast.dart';
+import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_index_store_impl_stub.dart'
     if (dart.library.html) 'package:starflow/features/library/data/nas_media_index_store_impl_web.dart'
@@ -22,6 +25,10 @@ abstract class NasMediaIndexStore {
     required NasMediaIndexSourceState state,
   });
 
+  Future<LocalStorageCacheSummary> inspectSummary();
+
+  Future<void> clearAll();
+
   Future<void> clearSource(String sourceId);
 }
 
@@ -40,6 +47,15 @@ class SembastNasMediaIndexStore implements NasMediaIndexStore {
 
   Future<Database> _database() {
     return _databaseFuture ??= _databaseOpener();
+  }
+
+  @override
+  Future<void> clearAll() async {
+    final database = await _database();
+    await database.transaction((transaction) async {
+      await _recordStore.delete(transaction);
+      await _sourceStore.delete(transaction);
+    });
   }
 
   @override
@@ -128,5 +144,23 @@ class SembastNasMediaIndexStore implements NasMediaIndexStore {
             state.toJson(),
           );
     });
+  }
+
+  @override
+  Future<LocalStorageCacheSummary> inspectSummary() async {
+    final database = await _database();
+    final records = await _recordStore.find(database);
+    final states = await _sourceStore.find(database);
+    final totalBytes = utf8
+            .encode(jsonEncode(records.map((item) => item.value).toList()))
+            .length +
+        utf8
+            .encode(jsonEncode(states.map((item) => item.value).toList()))
+            .length;
+    return LocalStorageCacheSummary(
+      type: LocalStorageCacheType.nasMetadataIndex,
+      entryCount: records.length,
+      totalBytes: totalBytes,
+    );
   }
 }

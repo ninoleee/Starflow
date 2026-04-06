@@ -18,6 +18,7 @@ import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
@@ -84,7 +85,8 @@ class _HomePageState extends ConsumerState<HomePage> {
       ),
     );
     final highPerformanceModeEnabled = ref.watch(
-      appSettingsProvider.select((settings) => settings.highPerformanceModeEnabled),
+      appSettingsProvider
+          .select((settings) => settings.highPerformanceModeEnabled),
     );
     final simplifyTelevisionEffects =
         isTelevision && highPerformanceModeEnabled;
@@ -339,7 +341,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   void _scheduleHeroMetadataRefresh(List<_FeaturedHeroItem> items) {
-    if (items.isEmpty) {
+    if (items.isEmpty || ref.read(backgroundWorkSuspendedProvider)) {
       return;
     }
 
@@ -361,7 +363,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
+      if (!mounted || ref.read(backgroundWorkSuspendedProvider)) {
         return;
       }
       unawaited(_refreshHeroMetadataInBackground(candidates));
@@ -371,6 +373,9 @@ class _HomePageState extends ConsumerState<HomePage> {
   Future<void> _refreshHeroMetadataInBackground(
     List<MediaDetailTarget> targets,
   ) async {
+    if (ref.read(backgroundWorkSuspendedProvider)) {
+      return;
+    }
     try {
       await Future.wait(
         targets.map(_refreshSingleHeroMetadataIfNeeded),
@@ -384,6 +389,9 @@ class _HomePageState extends ConsumerState<HomePage> {
   Future<void> _refreshSingleHeroMetadataIfNeeded(
     MediaDetailTarget target,
   ) async {
+    if (ref.read(backgroundWorkSuspendedProvider)) {
+      return;
+    }
     try {
       if (!_needsHeroMetadataRefresh(target)) {
         return;
@@ -408,6 +416,10 @@ class _HomePageState extends ConsumerState<HomePage> {
 
       final settings = ref.read(appSettingsProvider);
       if (!_canAttemptHeroMetadataRefresh(settings, target)) {
+        return;
+      }
+
+      if (ref.read(backgroundWorkSuspendedProvider)) {
         return;
       }
 
@@ -469,10 +481,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     AppSettings settings,
     MediaDetailTarget target,
   ) {
-    final query = (target.searchQuery.trim().isEmpty
-            ? target.title
-            : target.searchQuery)
-        .trim();
+    final query =
+        (target.searchQuery.trim().isEmpty ? target.title : target.searchQuery)
+            .trim();
     if (query.isEmpty && target.doubanId.trim().isEmpty) {
       return false;
     }

@@ -20,6 +20,7 @@ import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
+import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -32,7 +33,20 @@ final enrichedDetailTargetProvider =
   ref,
   target,
 ) async {
+  final backgroundWorkSuspended = ref.watch(backgroundWorkSuspendedProvider);
   final settings = ref.watch(appSettingsProvider);
+  if (backgroundWorkSuspended) {
+    final localStorageCacheRepository =
+        ref.read(localStorageCacheRepositoryProvider);
+    final cachedTarget =
+        await localStorageCacheRepository.loadDetailTarget(target);
+    return cachedTarget == null
+        ? target
+        : _mergeCachedDetailTarget(
+            current: target,
+            cached: cachedTarget,
+          );
+  }
   return _resolveDetailTargetIfNeeded(
     ref: ref,
     settings: settings,
@@ -983,6 +997,7 @@ Future<MetadataMatchResult?> _tryPreferredMetadataMatch({
 Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
   required MediaRepository mediaRepository,
   required List<MediaSourceConfig> allowedSources,
+  required _LibraryMatchTaskController controller,
   required MediaDetailTarget target,
   required String query,
   MetadataMatchResult? metadataMatch,
@@ -990,6 +1005,7 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
 }) async {
   const detailLibraryMatchLimit = 2000;
   const maxMatches = 32;
+  const maxConcurrentTasks = 4;
   final titles = _buildManualMatchTitles(
     target: target,
     query: query,
@@ -1015,6 +1031,7 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
   }
 
   List<_LibraryMatchCandidate> buildCandidates(List<MediaItem> items) {
+    controller.throwIfCancelled();
     final matches = <_LibraryMatchCandidate>[];
     final imdbId = _resolveManualMatchImdbId(target, metadataMatch);
     final tmdbId = _resolveManualMatchTmdbId(target, metadataMatch);
@@ -1055,6 +1072,7 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
       year: year,
       maxResults: maxMatches,
     )) {
+      controller.throwIfCancelled();
       matches.add(
         _LibraryMatchCandidate(
           item: scored.item,
@@ -1066,17 +1084,19 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
     return matches;
   }
 
-  final tasks = <Future<List<_LibraryMatchCandidate>>>[];
+  final taskFactories = <Future<List<_LibraryMatchCandidate>> Function()>[];
   final allowedEmbySources = allowedSources
       .where((source) => source.kind == MediaSourceKind.emby)
       .toList(growable: false);
   for (final source in allowedEmbySources) {
+    controller.throwIfCancelled();
     List<MediaCollection> collections;
     try {
       collections = await mediaRepository.fetchCollections(
         kind: MediaSourceKind.emby,
         sourceId: source.id,
       );
+      controller.throwIfCancelled();
     } catch (_) {
       collections = const [];
     }
@@ -1103,7 +1123,8 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
         return left.title.compareTo(right.title);
       });
     for (final collection in rankedCollections) {
-      tasks.add(() async {
+      taskFactories.add(() async {
+        controller.throwIfCancelled();
         try {
           final items = await mediaRepository.fetchLibrary(
             kind: MediaSourceKind.emby,
@@ -1111,11 +1132,14 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
             sectionId: collection.id,
             limit: detailLibraryMatchLimit,
           );
+          controller.throwIfCancelled();
           return buildCandidates(items);
+        } on _LibraryMatchCancelledException {
+          rethrow;
         } catch (_) {
           return const <_LibraryMatchCandidate>[];
         }
-      }());
+      });
     }
   }
 
@@ -1123,36 +1147,71 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
       .where((source) => source.kind == MediaSourceKind.nas)
       .toList(growable: false);
   for (final source in allowedNasSources) {
-    tasks.add(() async {
+    taskFactories.add(() async {
+      controller.throwIfCancelled();
       try {
         final nasLibrary = await mediaRepository.fetchLibrary(
           kind: MediaSourceKind.nas,
           sourceId: source.id,
           limit: detailLibraryMatchLimit,
         );
+        controller.throwIfCancelled();
         return buildCandidates(nasLibrary);
+      } on _LibraryMatchCancelledException {
+        rethrow;
       } catch (_) {
         return const <_LibraryMatchCandidate>[];
       }
-    }());
+    });
   }
 
-  for (final task in tasks) {
-    unawaited(
-      task.then((matches) {
-        if (matches.isEmpty) {
-          return;
-        }
-        for (final match in matches) {
-          upsert(match);
-        }
-        onProgress?.call(snapshot());
-      }).catchError((_) {}),
-    );
+  if (taskFactories.isEmpty) {
+    return snapshot();
   }
 
-  await Future.wait(tasks);
+  var nextTaskIndex = 0;
+  Future<void> runWorker() async {
+    while (true) {
+      controller.throwIfCancelled();
+      if (nextTaskIndex >= taskFactories.length) {
+        return;
+      }
+      final taskIndex = nextTaskIndex++;
+      final matches = await taskFactories[taskIndex]();
+      controller.throwIfCancelled();
+      if (matches.isEmpty) {
+        continue;
+      }
+      for (final match in matches) {
+        upsert(match);
+      }
+      onProgress?.call(snapshot());
+    }
+  }
+
+  final workerCount = math.min(maxConcurrentTasks, taskFactories.length);
+  await Future.wait(List.generate(workerCount, (_) => runWorker()));
   return snapshot();
+}
+
+class _LibraryMatchTaskController {
+  bool _isCancelled = false;
+
+  bool get cancelled => _isCancelled;
+
+  void cancel() {
+    _isCancelled = true;
+  }
+
+  void throwIfCancelled() {
+    if (_isCancelled) {
+      throw const _LibraryMatchCancelledException();
+    }
+  }
+}
+
+class _LibraryMatchCancelledException implements Exception {
+  const _LibraryMatchCancelledException();
 }
 
 List<MediaSourceConfig> _resolveLibraryMatchSources(AppSettings settings) {
@@ -1920,6 +1979,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   List<MediaDetailTarget> _libraryMatchChoices = const [];
   int _selectedLibraryMatchIndex = 0;
   int _detailSessionId = 0;
+  _LibraryMatchTaskController? _activeLibraryMatchController;
   final TvFocusMemoryController _tvFocusMemoryController =
       TvFocusMemoryController();
 
@@ -1935,6 +1995,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     if (oldWidget.target.itemId != widget.target.itemId ||
         oldWidget.target.title != widget.target.title ||
         oldWidget.target.searchQuery != widget.target.searchQuery) {
+      _cancelActiveLibraryMatch();
       _selectedSeasonId = '';
       _manualOverrideTarget = null;
       _isMatchingLocalResource = false;
@@ -1947,14 +2008,28 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
 
   @override
   void dispose() {
+    _cancelActiveLibraryMatch();
     _detailSessionId += 1;
     _tvFocusMemoryController.dispose();
     super.dispose();
   }
 
+  void _cancelActiveLibraryMatch() {
+    _activeLibraryMatchController?.cancel();
+    _activeLibraryMatchController = null;
+  }
+
   void _startDetailTasks() {
     final sessionId = ++_detailSessionId;
     Future<void>.microtask(() async {
+      if (ref.read(backgroundWorkSuspendedProvider)) {
+        return;
+      }
+      if (!_isSessionActive(sessionId)) {
+        return;
+      }
+
+      await _restoreCachedLibraryMatchState(sessionId);
       if (!_isSessionActive(sessionId)) {
         return;
       }
@@ -1966,13 +2041,16 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       }
 
       final settings = ref.read(appSettingsProvider);
-      if (!settings.detailAutoLibraryMatchEnabled) {
+      if (!settings.detailAutoLibraryMatchEnabled ||
+          ref.read(backgroundWorkSuspendedProvider)) {
         return;
       }
 
       final resolved =
           await ref.read(enrichedDetailTargetProvider(widget.target).future);
-      if (!_isSessionActive(sessionId) || _manualOverrideTarget != null) {
+      if (!_isSessionActive(sessionId) ||
+          _manualOverrideTarget != null ||
+          ref.read(backgroundWorkSuspendedProvider)) {
         return;
       }
       if (!_shouldAutoMatchLocalResource(resolved)) {
@@ -1990,6 +2068,37 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     return mounted && _detailSessionId == sessionId;
   }
 
+  bool _isLibraryMatchActive(
+    int sessionId,
+    _LibraryMatchTaskController controller,
+  ) {
+    return _isSessionActive(sessionId) &&
+        identical(_activeLibraryMatchController, controller) &&
+        !controller.cancelled;
+  }
+
+  Future<void> _restoreCachedLibraryMatchState(int sessionId) async {
+    final cachedState = await ref
+        .read(localStorageCacheRepositoryProvider)
+        .loadDetailState(widget.target);
+    if (!_isSessionActive(sessionId) || cachedState == null) {
+      return;
+    }
+    final cachedChoices = cachedState.libraryMatchChoices;
+    if (cachedChoices.length <= 1) {
+      return;
+    }
+    final selectedIndex = cachedState.selectedLibraryMatchIndex.clamp(
+      0,
+      cachedChoices.length - 1,
+    );
+    setState(() {
+      _libraryMatchChoices = cachedChoices;
+      _selectedLibraryMatchIndex = selectedIndex;
+      _manualOverrideTarget = cachedChoices[selectedIndex];
+    });
+  }
+
   Future<void> _matchLocalResource(
     MediaDetailTarget currentTarget, {
     int? sessionId,
@@ -2000,125 +2109,151 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       return;
     }
 
+    final controller = _LibraryMatchTaskController();
+    _cancelActiveLibraryMatch();
+    _activeLibraryMatchController = controller;
     setState(() {
       _isMatchingLocalResource = true;
       _libraryMatchChoices = const [];
       _selectedLibraryMatchIndex = 0;
     });
 
-    final settings = ref.read(appSettingsProvider);
-    final query = currentTarget.searchQuery.trim().isEmpty
-        ? currentTarget.title
-        : currentTarget.searchQuery;
-    final metadataMatch = await _tryPreferredMetadataMatch(
-      metadataMatchResolver: ref.read(metadataMatchResolverProvider),
-      settings: settings,
-      target: currentTarget,
-      query: query,
-    );
-    final allowedSources = _resolveLibraryMatchSources(settings);
-
-    final candidates = await _findAllLibraryMatchCandidates(
-      mediaRepository: ref.read(mediaRepositoryProvider),
-      allowedSources: allowedSources,
-      target: currentTarget,
-      query: query,
-      metadataMatch: metadataMatch,
-      onProgress: (partialCandidates) {
-        if (!_isSessionActive(activeSessionId)) {
-          return;
-        }
-        final partialMerged = _candidatesToMergedTargets(
-          currentTarget,
-          partialCandidates,
-          query,
-        );
-        if (partialMerged.isEmpty) {
-          return;
-        }
-        setState(() {
-          if (partialMerged.length == 1) {
-            _libraryMatchChoices = const [];
-            _selectedLibraryMatchIndex = 0;
-            _manualOverrideTarget = partialMerged.first;
-          } else {
-            _libraryMatchChoices = partialMerged;
-            _selectedLibraryMatchIndex = 0;
-            _manualOverrideTarget = partialMerged.first;
-          }
-        });
-      },
-    );
-
-    if (!_isSessionActive(activeSessionId)) {
-      return;
-    }
-
-    final merged = _candidatesToMergedTargets(
-      currentTarget,
-      candidates,
-      query,
-    );
-
-    setState(() {
-      _isMatchingLocalResource = false;
-      if (merged.isEmpty) {
-        _libraryMatchChoices = const [];
-        _selectedLibraryMatchIndex = 0;
-      } else if (merged.length == 1) {
-        _libraryMatchChoices = const [];
-        _manualOverrideTarget = merged.first;
-        _selectedLibraryMatchIndex = 0;
-      } else {
-        _libraryMatchChoices = merged;
-        _selectedLibraryMatchIndex = 0;
-        _manualOverrideTarget = merged.first;
+    try {
+      final settings = ref.read(appSettingsProvider);
+      final query = currentTarget.searchQuery.trim().isEmpty
+          ? currentTarget.title
+          : currentTarget.searchQuery;
+      final metadataMatch = await _tryPreferredMetadataMatch(
+        metadataMatchResolver: ref.read(metadataMatchResolverProvider),
+        settings: settings,
+        target: currentTarget,
+        query: query,
+      );
+      controller.throwIfCancelled();
+      if (!_isLibraryMatchActive(activeSessionId, controller)) {
+        throw const _LibraryMatchCancelledException();
       }
-    });
+      final allowedSources = _resolveLibraryMatchSources(settings);
 
-    if (merged.length == 1) {
+      final candidates = await _findAllLibraryMatchCandidates(
+        mediaRepository: ref.read(mediaRepositoryProvider),
+        allowedSources: allowedSources,
+        controller: controller,
+        target: currentTarget,
+        query: query,
+        metadataMatch: metadataMatch,
+        onProgress: (partialCandidates) {
+          if (!_isLibraryMatchActive(activeSessionId, controller)) {
+            return;
+          }
+          final partialMerged = _candidatesToMergedTargets(
+            currentTarget,
+            partialCandidates,
+            query,
+          );
+          if (partialMerged.isEmpty) {
+            return;
+          }
+          setState(() {
+            if (partialMerged.length == 1) {
+              _libraryMatchChoices = const [];
+              _selectedLibraryMatchIndex = 0;
+              _manualOverrideTarget = partialMerged.first;
+            } else {
+              _libraryMatchChoices = partialMerged;
+              _selectedLibraryMatchIndex = 0;
+              _manualOverrideTarget = partialMerged.first;
+            }
+          });
+        },
+      );
+
+      controller.throwIfCancelled();
+      if (!_isLibraryMatchActive(activeSessionId, controller)) {
+        throw const _LibraryMatchCancelledException();
+      }
+
+      final merged = _candidatesToMergedTargets(
+        currentTarget,
+        candidates,
+        query,
+      );
+
+      setState(() {
+        _isMatchingLocalResource = false;
+        if (merged.isEmpty) {
+          _libraryMatchChoices = const [];
+          _selectedLibraryMatchIndex = 0;
+        } else if (merged.length == 1) {
+          _libraryMatchChoices = const [];
+          _manualOverrideTarget = merged.first;
+          _selectedLibraryMatchIndex = 0;
+        } else {
+          _libraryMatchChoices = merged;
+          _selectedLibraryMatchIndex = 0;
+          _manualOverrideTarget = merged.first;
+        }
+      });
+
       unawaited(
         ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
               seedTarget: currentTarget,
-              resolvedTarget: merged.first,
+              resolvedTarget: merged.isEmpty ? currentTarget : merged.first,
+              libraryMatchChoices:
+                  merged.length > 1 ? merged : const <MediaDetailTarget>[],
+              selectedLibraryMatchIndex: 0,
             ),
       );
-    }
 
-    if (!_isSessionActive(activeSessionId) || !showFeedback) {
-      return;
-    }
+      if (!_isLibraryMatchActive(activeSessionId, controller) ||
+          !showFeedback) {
+        return;
+      }
 
-    if (!mounted) {
-      return;
-    }
-    final messenger = ScaffoldMessenger.of(context);
-    if (merged.isEmpty) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('没有找到可匹配的本地资源')),
-      );
-      return;
-    }
+      if (!mounted) {
+        return;
+      }
+      final messenger = ScaffoldMessenger.of(context);
+      if (merged.isEmpty) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('没有找到可匹配的本地资源')),
+        );
+        return;
+      }
 
-    if (merged.length == 1) {
-      final matched = merged.first;
+      if (merged.length == 1) {
+        final matched = merged.first;
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              matched.availabilityLabel.trim().isNotEmpty
+                  ? '已匹配到 ${_availabilityFeedbackLabel(matched.availabilityLabel)}'
+                  : '已匹配到 ${matched.sourceKind?.label ?? '资源'} · ${matched.sourceName}',
+            ),
+          ),
+        );
+        return;
+      }
+
       messenger.showSnackBar(
         SnackBar(
-          content: Text(
-            matched.availabilityLabel.trim().isNotEmpty
-                ? '已匹配到 ${_availabilityFeedbackLabel(matched.availabilityLabel)}'
-                : '已匹配到 ${matched.sourceKind?.label ?? '资源'} · ${matched.sourceName}',
-          ),
+          content: Text('匹配到 ${merged.length} 个本地资源，可在下方选择'),
         ),
       );
+    } on _LibraryMatchCancelledException {
       return;
+    } finally {
+      final isCurrentController =
+          identical(_activeLibraryMatchController, controller);
+      if (isCurrentController) {
+        _activeLibraryMatchController = null;
+      }
+      if (mounted && isCurrentController && _isMatchingLocalResource) {
+        setState(() {
+          _isMatchingLocalResource = false;
+        });
+      }
     }
-
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text('匹配到 ${merged.length} 个本地资源，可在下方选择'),
-      ),
-    );
   }
 
   Future<void> _refreshMetadata(
@@ -2230,6 +2365,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
             seedTarget: widget.target,
             resolvedTarget: resolvedTarget,
+            libraryMatchChoices: _libraryMatchChoices,
+            selectedLibraryMatchIndex: resolvedIndex,
           ),
     );
   }
@@ -2290,36 +2427,55 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                   : Colors.white.withValues(alpha: 0.08),
                             ),
                           ),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.symmetric(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
                               horizontal: 14,
-                              vertical: 4,
+                              vertical: 10,
                             ),
-                            leading: Icon(
-                              isSelected
-                                  ? Icons.check_circle_rounded
-                                  : Icons.radio_button_unchecked_rounded,
-                              color: Colors.white,
-                            ),
-                            title: Text(
-                              _libraryMatchOptionLabel(candidate),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            subtitle: candidate.availabilityLabel.trim().isEmpty
-                                ? null
-                                : Text(
-                                    candidate.availabilityLabel,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Color(0xFF9DB0CF),
-                                    ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  isSelected
+                                      ? Icons.check_circle_rounded
+                                      : Icons.radio_button_unchecked_rounded,
+                                  color: Colors.white,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _libraryMatchOptionLabel(candidate),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      if (candidate.availabilityLabel
+                                          .trim()
+                                          .isNotEmpty)
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(top: 4),
+                                          child: Text(
+                                            candidate.availabilityLabel,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Color(0xFF9DB0CF),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
                                   ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       );

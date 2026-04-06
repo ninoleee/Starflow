@@ -130,6 +130,10 @@ class MediaDetailTarget {
         (needsLibraryMatch || availability.isEmpty || availability == '无');
   }
 
+  bool get shouldAutoMatchLibraryResource {
+    return !isPlayable && needsLibraryMatch;
+  }
+
   bool get needsImdbRatingMatch {
     return ratingLabels.every(
       (label) => !label.toLowerCase().startsWith('imdb '),

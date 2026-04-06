@@ -948,9 +948,7 @@ class StarflowCheckboxTile extends StatelessWidget {
       focusId: focusId,
       autofocus: autofocus,
       trailing: Icon(
-        value
-            ? Icons.check_box_rounded
-            : Icons.check_box_outline_blank_rounded,
+        value ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
         size: 22,
         color: value ? scheme.primary : scheme.onSurfaceVariant,
       ),

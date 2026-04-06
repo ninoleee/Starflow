@@ -107,6 +107,7 @@ lib/
 - 同一脚本也会同步生成启动页所用的 `assets/branding/starflow_launch_logo.png` 与 iOS `LaunchImage.imageset`
 - 同一脚本也负责生成 Android TV Banner
 - 外部 App Icon 当前以 `assets/branding/starflow_icon_master.svg` 为设计源
+- 脚本会先从矢量母版直接生成 `build/brand_assets/app_icon_raw_capture.png`
 - 脚本会直接程序化生成统一分发母版 `build/brand_assets/starflow_app_icon_master.png`
 - 最后再缩放分发到各平台资源目录
 
@@ -300,6 +301,8 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - `设置 -> 元数据与评分 -> 匹配来源` 会直接限制详情页本地资源匹配的实际扫描范围；只会扫描被选中的已启用 `Emby / WebDAV` 来源
 - 如果“匹配来源”未单独勾选，则默认使用全部已启用来源；如果保存的来源 ID 已失效，则自动回退到全部已启用来源
 - 手动匹配按多个搜索源并发执行，先命中的结果会立刻显示，但不会取消其余源的搜索
+- 如果一次手动匹配命中多个本地资源，详情缓存会连同候选列表和当前选中项一起保存；后续重新进入详情页时会直接恢复这组候选
+- 退出详情页时，当前页的本地资源匹配会话会立即取消；未启动的后续队列不会再继续执行，已经返回的结果也不会再影响已离开的页面
 
 ## 9. 搜索与入库联动
 
@@ -521,6 +524,8 @@ Android TV 下的设置页还额外做了遥控器适配：
 - Android、iOS、macOS、Web、Windows 的外部 App Icon 都由 `tool/generate_brand_assets.py` 生成
 - Android TV Banner 也由同一脚本生成
 - 启动页首帧图标与 iOS 原生 LaunchImage 也由同一脚本同步生成
+- Android 启动器小图标与 TV 横幅里的小方形 Logo 复用同一份 `assets/branding/starflow_icon_master.svg`
+- 小尺寸外部图标当前不再做额外锐化，避免星星边缘出现暗边
 - 当前约定以 `build/brand_assets/starflow_app_icon_master.png` 作为统一母版，再缩放到各平台资源，避免手工替换时出现偏移或不对称
 
 ## 14. 测试覆盖

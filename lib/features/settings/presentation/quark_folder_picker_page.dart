@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 
 class QuarkFolderPickerPage extends ConsumerStatefulWidget {
@@ -122,8 +123,9 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
                 runSpacing: 8,
                 children: [
                   for (var index = 0; index < _breadcrumbs.length; index++)
-                    ActionChip(
-                      label: Text(_breadcrumbs[index].path),
+                    StarflowChipButton(
+                      label: _breadcrumbs[index].path,
+                      selected: index == _breadcrumbs.length - 1,
                       onPressed: index == _breadcrumbs.length - 1
                           ? null
                           : () => _goBackTo(index),
@@ -139,12 +141,14 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
                 const Text('当前目录下没有子文件夹')
               else
                 ..._entries.map(
-                  (entry) => ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.folder_outlined),
-                    title: Text(entry.name),
-                    subtitle: Text(entry.path),
-                    onTap: () => _goToEntry(entry),
+                  (entry) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: StarflowSelectionTile(
+                      leading: const Icon(Icons.folder_outlined),
+                      title: entry.name,
+                      subtitle: entry.path,
+                      onPressed: () => _goToEntry(entry),
+                    ),
                   ),
                 ),
               const SizedBox(height: kBottomReservedSpacing),
@@ -155,9 +159,11 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
             left: 0,
             right: 0,
             child: OverlayToolbar(
-              trailing: TextButton(
+              trailing: StarflowButton(
+                label: '选择',
                 onPressed: _selectCurrent,
-                child: const Text('选择'),
+                variant: StarflowButtonVariant.ghost,
+                compact: true,
               ),
             ),
           ),

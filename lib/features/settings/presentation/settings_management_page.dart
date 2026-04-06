@@ -317,13 +317,16 @@ class _SettingsManagementPageState
               title: const Text('导入配置'),
               content: const Text('导入后会覆盖当前设置，是否继续？'),
               actions: [
-                TextButton(
+                StarflowButton(
+                  label: '取消',
                   onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('取消'),
+                  variant: StarflowButtonVariant.ghost,
+                  compact: true,
                 ),
-                FilledButton(
+                StarflowButton(
+                  label: '继续导入',
                   onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('继续导入'),
+                  compact: true,
                 ),
               ],
             );
@@ -377,7 +380,8 @@ class _SettingsLanTransferDialog extends StatefulWidget {
       _SettingsLanTransferDialogState();
 }
 
-class _SettingsLanTransferDialogState extends State<_SettingsLanTransferDialog> {
+class _SettingsLanTransferDialogState
+    extends State<_SettingsLanTransferDialog> {
   late final StreamSubscription<SettingsLanTransferEvent> _subscription;
   late final FocusNode _closeFocusNode;
   String _statusMessage = '服务已启动，手机访问下方地址后即可上传或下载配置。';
@@ -476,10 +480,11 @@ class _SettingsLanTransferDialogState extends State<_SettingsLanTransferDialog> 
         ),
       ),
       actions: [
-        FilledButton(
+        StarflowButton(
+          label: '关闭服务',
           focusNode: _closeFocusNode,
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('关闭服务'),
+          compact: true,
         ),
       ],
     );
@@ -537,9 +542,12 @@ class _PathEditor extends ConsumerWidget {
           ),
         ),
         const SizedBox(width: 12),
-        OutlinedButton(
+        StarflowButton(
+          label: actionLabel,
+          icon: icon,
           onPressed: onActionPressed,
-          child: Text(actionLabel),
+          variant: StarflowButtonVariant.secondary,
+          compact: true,
         ),
       ],
     );
@@ -609,16 +617,19 @@ class _PathEditor extends ConsumerWidget {
               ),
             ),
             actions: [
-              TextButton(
+              StarflowButton(
+                label: '取消',
                 focusNode: cancelFocusNode,
                 onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('取消'),
+                variant: StarflowButtonVariant.ghost,
+                compact: true,
               ),
-              FilledButton(
+              StarflowButton(
+                label: '确定',
                 focusNode: confirmFocusNode,
                 onPressed: () =>
                     Navigator.of(dialogContext).pop(dialogController.text),
-                child: const Text('确定'),
+                compact: true,
               ),
             ],
           );
@@ -673,10 +684,11 @@ class _ActionButton extends StatelessWidget {
       );
     }
 
-    return FilledButton.icon(
+    return StarflowButton(
+      label: label,
+      icon: icon,
       onPressed: onPressed,
-      icon: Icon(icon),
-      label: Text(label),
+      compact: true,
     );
   }
 }

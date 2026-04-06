@@ -242,7 +242,8 @@ class SettingsPage extends ConsumerWidget {
                             onPressed: heroEnabled
                                 ? () {
                                     ref
-                                        .read(settingsControllerProvider.notifier)
+                                        .read(
+                                            settingsControllerProvider.notifier)
                                         .setHomeHeroStyle(style);
                                   }
                                 : null,
@@ -397,7 +398,8 @@ class SettingsPage extends ConsumerWidget {
                               ),
                               onChanged: (checked) {
                                 setState(() {
-                                  final id = searchSourceSettingIdForMediaSource(
+                                  final id =
+                                      searchSourceSettingIdForMediaSource(
                                     source.id,
                                   );
                                   if (checked) {
@@ -522,35 +524,6 @@ class SettingsPage extends ConsumerWidget {
         builder: (context) => const SettingsManagementPage(),
       ),
     );
-  }
-
-  Future<void> _openHeroStylePicker(
-    BuildContext context,
-    WidgetRef ref,
-    HomeHeroStyle current,
-  ) async {
-    final selection = await showDialog<HomeHeroStyle>(
-      context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: const Text('选择 Hero 样式'),
-          children: [
-            for (final style in HomeHeroStyle.values)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(context).pop(style),
-                child:
-                    Text(style == current ? '${style.label}  当前' : style.label),
-              ),
-          ],
-        );
-      },
-    );
-    if (selection == null) {
-      return;
-    }
-    await ref
-        .read(settingsControllerProvider.notifier)
-        .setHomeHeroStyle(selection);
   }
 
   Future<void> _openHeroSourcePicker(

@@ -172,6 +172,7 @@ C:\anaconda3\python.exe tool\generate_brand_assets.py
 当前脚本会优先使用：
 
 - `assets/branding/starflow_icon_master.svg` 程序化生成外部 App Icon 统一母版
+- `build/brand_assets/app_icon_raw_capture.png` 保存从矢量母版直接导出的高倍基准图
 - `assets/branding/starflow_launch_logo.png` 作为启动页首帧图标输出目标
 - `docs/starflow_tv_banner.html` 生成 TV Banner
 - `build/brand_assets/starflow_app_icon_master.png` 作为各平台分发缩放前的统一母版
@@ -180,8 +181,12 @@ C:\anaconda3\python.exe tool\generate_brand_assets.py
 
 - 这条链路主要依赖本地文件与本机浏览器，不依赖在线元数据服务
 - 外部 App Icon 已不再依赖 HTML 截图，当前以 `svg` 母版程序化导出
+- Android 启动器小图标与 TV 横幅里的小方形 Logo 共用同一份矢量源
+- 小尺寸图标不再额外锐化，避免星星周边出现黑色描边
 - TV Banner 仍然依赖本机 Microsoft Edge 无头渲染 `docs/starflow_tv_banner.html`
 - 如果后续换了外部 Logo 设计，只需要重新执行一次脚本，不要手工逐个平台替换
 - 当“详情页自动匹配本地资源”关闭时，进入详情页不会自动触发本地资源匹配，只能手动点击“重新匹配资源”
 - 本地资源手动匹配采用并发搜索；某个源先返回时会先展示该结果，但其余搜索源仍会继续完成
-- 豆瓣等在线详情如果此前已经缓存过本地资源命中结果，重新进入详情页时会直接复用缓存中的资源状态与播放信息
+- 如果一次手动匹配命中多个本地资源，候选列表和当前选中项也会一并写入本地详情缓存
+- 豆瓣等在线详情如果此前已经缓存过本地资源命中结果，重新进入详情页时会直接复用缓存中的资源状态、播放信息和多候选资源选择状态
+- 退出详情页时，当前页的本地资源匹配会话会立刻失效；未启动的后续来源任务不会继续执行

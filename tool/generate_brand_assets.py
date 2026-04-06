@@ -763,7 +763,7 @@ def render_app_icon_from_svg(
 
         stroke_gradient_id = parse_url_reference(child.get("stroke"))
         if stroke_gradient_id:
-            points = path_commands_to_points(commands, curve_steps=120)
+            points = path_commands_to_points(commands, curve_steps=36)
             gradient = nested_gradients[stroke_gradient_id]
             width = max(int(round(transform_nested_length(parse_svg_number(child.get("stroke-width"), 1.0)))), 1)
             stroke_mask = Image.new("L", size, 0)
@@ -843,10 +843,6 @@ def resize_image(source: Path, destination: Path, size: tuple[int, int]) -> None
     destination.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(source) as image:
         rendered = image.convert("RGBA").resize(size, Image.Resampling.LANCZOS)
-        if max(size) <= 256:
-            rendered = rendered.filter(
-                ImageFilter.UnsharpMask(radius=1.15, percent=165, threshold=1)
-            )
         rendered.save(destination)
     print(f"Generated {destination.relative_to(ROOT)}")
 

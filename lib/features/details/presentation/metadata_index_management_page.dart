@@ -660,15 +660,14 @@ class _MetadataIndexManagementPageState
                                               ),
                                             ),
                                           )
-                                        : SwitchListTile(
+                                        : StarflowToggleTile(
+                                            title: '按剧集优先匹配',
                                             value: _preferSeries,
                                             onChanged: (value) {
                                               setState(() {
                                                 _preferSeries = value;
                                               });
                                             },
-                                            contentPadding: EdgeInsets.zero,
-                                            title: const Text('按剧集优先匹配'),
                                           ),
                                   ),
                                 ],

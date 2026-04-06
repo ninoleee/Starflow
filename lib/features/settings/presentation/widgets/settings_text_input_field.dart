@@ -117,16 +117,19 @@ class SettingsTextInputField extends ConsumerWidget {
               ),
             ),
             actions: [
-              TextButton(
+              StarflowButton(
+                label: '取消',
                 focusNode: cancelFocusNode,
                 onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('取消'),
+                variant: StarflowButtonVariant.ghost,
+                compact: true,
               ),
-              FilledButton(
+              StarflowButton(
+                label: '保存',
                 focusNode: confirmFocusNode,
                 onPressed: () =>
                     Navigator.of(dialogContext).pop(dialogController.text),
-                child: const Text('保存'),
+                compact: true,
               ),
             ],
           );

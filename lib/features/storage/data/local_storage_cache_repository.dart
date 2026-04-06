@@ -1,10 +1,11 @@
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 final localStorageCacheRepositoryProvider =
     Provider<LocalStorageCacheRepository>(
@@ -40,37 +41,22 @@ extension DetailMetadataRefreshStatusX on DetailMetadataRefreshStatus {
 
 class LocalStorageCacheRepository {
   LocalStorageCacheRepository({
+    PreferencesStore? preferences,
     SharedPreferences? sharedPreferences,
     void Function()? notifyDetailCacheChanged,
-  })  : _sharedPreferences = sharedPreferences,
+  })  : assert(preferences == null || sharedPreferences == null),
+        _preferences = preferences ??
+            (sharedPreferences == null
+                ? AppPreferencesStore()
+                : SharedPreferencesStore(sharedPreferences)),
         _notifyDetailCacheChanged = notifyDetailCacheChanged;
 
   static const _detailCacheKey = 'starflow.local_storage.detail_cache.v1';
 
-  SharedPreferences? _sharedPreferences;
+  final PreferencesStore _preferences;
   final void Function()? _notifyDetailCacheChanged;
 
-  Future<SharedPreferences> _prefs() async {
-    return _sharedPreferences ??= await SharedPreferences.getInstance();
-  }
-
-  Future<MediaDetailTarget?> loadDetailTarget(
-      MediaDetailTarget seedTarget) async {
-    final payload = await _loadDetailPayload();
-    for (final lookupKey in buildLookupKeys(seedTarget)) {
-      final recordId = payload.lookupKeys[lookupKey];
-      if (recordId == null) {
-        continue;
-      }
-      final record = payload.records[recordId];
-      if (record != null) {
-        return record.target;
-      }
-    }
-    return null;
-  }
-
-  Future<DetailMetadataRefreshStatus> loadDetailMetadataRefreshStatus(
+  Future<CachedDetailState?> loadDetailState(
     MediaDetailTarget seedTarget,
   ) async {
     final payload = await _loadDetailPayload();
@@ -81,16 +67,35 @@ class LocalStorageCacheRepository {
       }
       final record = payload.records[recordId];
       if (record != null) {
-        return record.metadataRefreshStatus;
+        return CachedDetailState(
+          target: record.target,
+          libraryMatchChoices: record.libraryMatchChoices,
+          selectedLibraryMatchIndex: record.selectedLibraryMatchIndex,
+          metadataRefreshStatus: record.metadataRefreshStatus,
+        );
       }
     }
-    return DetailMetadataRefreshStatus.never;
+    return null;
+  }
+
+  Future<MediaDetailTarget?> loadDetailTarget(
+      MediaDetailTarget seedTarget) async {
+    return (await loadDetailState(seedTarget))?.target;
+  }
+
+  Future<DetailMetadataRefreshStatus> loadDetailMetadataRefreshStatus(
+    MediaDetailTarget seedTarget,
+  ) async {
+    return (await loadDetailState(seedTarget))?.metadataRefreshStatus ??
+        DetailMetadataRefreshStatus.never;
   }
 
   Future<void> saveDetailTarget({
     required MediaDetailTarget seedTarget,
     required MediaDetailTarget resolvedTarget,
     DetailMetadataRefreshStatus? metadataRefreshStatus,
+    List<MediaDetailTarget>? libraryMatchChoices,
+    int? selectedLibraryMatchIndex,
   }) async {
     final lookupKeys = {
       ...buildLookupKeys(seedTarget),
@@ -117,14 +122,24 @@ class LocalStorageCacheRepository {
       ...lookupKeys,
     }.toList(growable: false)
       ..sort();
+    final nextLibraryMatchChoices = libraryMatchChoices != null
+        ? List<MediaDetailTarget>.unmodifiable(libraryMatchChoices)
+        : existing?.libraryMatchChoices ?? const <MediaDetailTarget>[];
+    final normalizedSelectedLibraryMatchIndex = nextLibraryMatchChoices.isEmpty
+        ? 0
+        : (selectedLibraryMatchIndex ??
+                existing?.selectedLibraryMatchIndex ??
+                0)
+            .clamp(0, nextLibraryMatchChoices.length - 1);
 
     final nextRecord = _CachedDetailRecord(
       id: recordId,
       lookupKeys: mergedLookupKeys,
       updatedAt: DateTime.now(),
       target: resolvedTarget,
-      metadataRefreshStatus:
-          metadataRefreshStatus ??
+      libraryMatchChoices: nextLibraryMatchChoices,
+      selectedLibraryMatchIndex: normalizedSelectedLibraryMatchIndex,
+      metadataRefreshStatus: metadataRefreshStatus ??
           existing?.metadataRefreshStatus ??
           DetailMetadataRefreshStatus.never,
     );
@@ -150,8 +165,7 @@ class LocalStorageCacheRepository {
   }
 
   Future<LocalStorageCacheSummary> inspectDetailCache() async {
-    final prefs = await _prefs();
-    final raw = prefs.getString(_detailCacheKey) ?? '';
+    final raw = await _preferences.getString(_detailCacheKey) ?? '';
     final payload = await _loadDetailPayload();
     return LocalStorageCacheSummary(
       type: LocalStorageCacheType.detailData,
@@ -161,8 +175,7 @@ class LocalStorageCacheRepository {
   }
 
   Future<void> clearDetailCache() async {
-    final prefs = await _prefs();
-    await prefs.remove(_detailCacheKey);
+    await _preferences.remove(_detailCacheKey);
     _notifyDetailCacheChanged?.call();
   }
 
@@ -203,6 +216,10 @@ class LocalStorageCacheRepository {
 
   Future<void> clearCache(LocalStorageCacheType type) async {
     switch (type) {
+      case LocalStorageCacheType.nasMetadataIndex:
+      case LocalStorageCacheType.playbackMemory:
+      case LocalStorageCacheType.televisionSearchPreferences:
+        return;
       case LocalStorageCacheType.detailData:
         await clearDetailCache();
         return;
@@ -281,8 +298,7 @@ class LocalStorageCacheRepository {
   }
 
   Future<_DetailCachePayload> _loadDetailPayload() async {
-    final prefs = await _prefs();
-    final raw = prefs.getString(_detailCacheKey);
+    final raw = await _preferences.getString(_detailCacheKey);
     if (raw == null || raw.isEmpty) {
       return const _DetailCachePayload();
     }
@@ -297,9 +313,22 @@ class LocalStorageCacheRepository {
   }
 
   Future<void> _saveDetailPayload(_DetailCachePayload payload) async {
-    final prefs = await _prefs();
-    await prefs.setString(_detailCacheKey, jsonEncode(payload.toJson()));
+    await _preferences.setString(_detailCacheKey, jsonEncode(payload.toJson()));
   }
+}
+
+class CachedDetailState {
+  const CachedDetailState({
+    required this.target,
+    this.libraryMatchChoices = const [],
+    this.selectedLibraryMatchIndex = 0,
+    this.metadataRefreshStatus = DetailMetadataRefreshStatus.never,
+  });
+
+  final MediaDetailTarget target;
+  final List<MediaDetailTarget> libraryMatchChoices;
+  final int selectedLibraryMatchIndex;
+  final DetailMetadataRefreshStatus metadataRefreshStatus;
 }
 
 String _normalizeLookupText(String value) {
@@ -353,6 +382,8 @@ class _CachedDetailRecord {
     required this.lookupKeys,
     required this.updatedAt,
     required this.target,
+    this.libraryMatchChoices = const [],
+    this.selectedLibraryMatchIndex = 0,
     this.metadataRefreshStatus = DetailMetadataRefreshStatus.never,
   });
 
@@ -360,6 +391,8 @@ class _CachedDetailRecord {
   final List<String> lookupKeys;
   final DateTime updatedAt;
   final MediaDetailTarget target;
+  final List<MediaDetailTarget> libraryMatchChoices;
+  final int selectedLibraryMatchIndex;
   final DetailMetadataRefreshStatus metadataRefreshStatus;
 
   Map<String, dynamic> toJson() {
@@ -368,6 +401,9 @@ class _CachedDetailRecord {
       'lookupKeys': lookupKeys,
       'updatedAt': updatedAt.toIso8601String(),
       'target': target.toJson(),
+      'libraryMatchChoices':
+          libraryMatchChoices.map((item) => item.toJson()).toList(),
+      'selectedLibraryMatchIndex': selectedLibraryMatchIndex,
       'metadataRefreshStatus': metadataRefreshStatus.name,
     };
   }
@@ -385,6 +421,16 @@ class _CachedDetailRecord {
           (json['target'] as Map?) ?? const {},
         ),
       ),
+      libraryMatchChoices:
+          (json['libraryMatchChoices'] as List<dynamic>? ?? const [])
+              .map(
+                (item) => MediaDetailTarget.fromJson(
+                  Map<String, dynamic>.from(item as Map),
+                ),
+              )
+              .toList(growable: false),
+      selectedLibraryMatchIndex:
+          (json['selectedLibraryMatchIndex'] as num?)?.toInt() ?? 0,
       metadataRefreshStatus: DetailMetadataRefreshStatusX.fromJsonValue(
         json['metadataRefreshStatus'],
       ),

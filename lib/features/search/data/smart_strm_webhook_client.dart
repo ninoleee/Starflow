@@ -3,24 +3,16 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
-import 'package:starflow/features/search/data/smart_strm_log_repository.dart';
 
 final smartStrmWebhookClientProvider = Provider<SmartStrmWebhookClient>((ref) {
   final client = ref.watch(starflowHttpClientProvider);
-  return SmartStrmWebhookClient(
-    client,
-    logRepository: ref.read(smartStrmWebhookLogRepositoryProvider),
-  );
+  return SmartStrmWebhookClient(client);
 });
 
 class SmartStrmWebhookClient {
-  SmartStrmWebhookClient(
-    this._client, {
-    SmartStrmWebhookLogRepository? logRepository,
-  }) : _logRepository = logRepository;
+  SmartStrmWebhookClient(this._client);
 
   final http.Client _client;
-  final SmartStrmWebhookLogRepository? _logRepository;
 
   Future<SmartStrmTriggerResult> triggerTask({
     required String webhookUrl,
@@ -58,33 +50,12 @@ class SmartStrmWebhookClient {
       );
 
       final payload = _decode(response);
-      final payloadText = _stringifyPayload(response, payload);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         final message = 'SmartStrm Webhook 请求失败：HTTP ${response.statusCode}';
-        await _appendLog(
-          success: false,
-          webhookUrl: trimmedUrl,
-          taskName: trimmedTask,
-          storagePath: trimmedStoragePath,
-          message: message,
-          httpStatusCode: response.statusCode,
-          addedCount: _extractAddedCount(payload),
-          payloadText: payloadText,
-        );
         throw SmartStrmWebhookException(message);
       }
       if (_looksLikeFailure(payload)) {
         final message = _resolveErrorMessage(payload) ?? 'SmartStrm 返回了失败结果';
-        await _appendLog(
-          success: false,
-          webhookUrl: trimmedUrl,
-          taskName: trimmedTask,
-          storagePath: trimmedStoragePath,
-          message: message,
-          httpStatusCode: response.statusCode,
-          addedCount: _extractAddedCount(payload),
-          payloadText: payloadText,
-        );
         throw SmartStrmWebhookException(message);
       }
       final result = SmartStrmTriggerResult(
@@ -92,31 +63,12 @@ class SmartStrmWebhookClient {
         addedCount: _extractAddedCount(payload),
         rawPayload: payload,
       );
-      await _appendLog(
-        success: true,
-        webhookUrl: trimmedUrl,
-        taskName: trimmedTask,
-        storagePath: trimmedStoragePath,
-        message:
-            result.message.trim().isEmpty ? 'SmartStrm 任务触发成功' : result.message,
-        httpStatusCode: response.statusCode,
-        addedCount: result.addedCount,
-        payloadText: payloadText,
-      );
       return result;
     } catch (error) {
       if (error is SmartStrmWebhookException) {
         rethrow;
       }
       final message = 'SmartStrm Webhook 请求异常：$error';
-      await _appendLog(
-        success: false,
-        webhookUrl: trimmedUrl,
-        taskName: trimmedTask,
-        storagePath: trimmedStoragePath,
-        message: message,
-        payloadText: '',
-      );
       throw SmartStrmWebhookException(message);
     }
   }
@@ -249,52 +201,6 @@ class SmartStrmWebhookClient {
     return message.isEmpty ? null : message;
   }
 
-  String _stringifyPayload(
-    http.Response response,
-    Map<String, dynamic> payload,
-  ) {
-    if (payload.isNotEmpty) {
-      try {
-        return const JsonEncoder.withIndent('  ').convert(payload);
-      } catch (_) {
-        return payload.toString();
-      }
-    }
-    final body = utf8.decode(response.bodyBytes, allowMalformed: true).trim();
-    if (body.isEmpty) {
-      return '';
-    }
-    return body.length > 4000 ? '${body.substring(0, 4000)}…' : body;
-  }
-
-  Future<void> _appendLog({
-    required bool success,
-    required String webhookUrl,
-    required String taskName,
-    required String storagePath,
-    required String message,
-    int? httpStatusCode,
-    int? addedCount,
-    String payloadText = '',
-  }) async {
-    final repository = _logRepository;
-    if (repository == null) {
-      return;
-    }
-    await repository.append(
-      SmartStrmWebhookLogEntry(
-        createdAt: DateTime.now(),
-        success: success,
-        webhookUrl: webhookUrl,
-        taskName: taskName,
-        storagePath: storagePath,
-        message: message,
-        httpStatusCode: httpStatusCode,
-        addedCount: addedCount,
-        payloadText: payloadText,
-      ),
-    );
-  }
 }
 
 class SmartStrmTriggerResult {

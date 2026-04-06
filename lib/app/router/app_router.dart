@@ -19,6 +19,7 @@ import 'package:starflow/features/home/presentation/home_page.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/presentation/library_collection_page.dart';
 import 'package:starflow/features/library/presentation/library_page.dart';
+import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/presentation/player_page.dart';
 import 'package:starflow/features/search/presentation/search_page.dart';
@@ -238,17 +239,28 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final backgroundWorkSuspended = ref.watch(backgroundWorkSuspendedProvider);
     final translucentEffectsEnabled = ref.watch(
       appSettingsProvider.select(
         (settings) => settings.translucentEffectsEnabled,
       ),
     );
     final highPerformanceModeEnabled = ref.watch(
-      appSettingsProvider.select((settings) => settings.highPerformanceModeEnabled),
+      appSettingsProvider
+          .select((settings) => settings.highPerformanceModeEnabled),
     );
-    final effectiveTelevisionEffectsEnabled =
-        translucentEffectsEnabled &&
+    final effectiveTelevisionEffectsEnabled = translucentEffectsEnabled &&
         !(isTelevision && highPerformanceModeEnabled);
+    final shellChild = HeroMode(
+      enabled: !backgroundWorkSuspended,
+      child: TickerMode(
+        enabled: !backgroundWorkSuspended,
+        child: IgnorePointer(
+          ignoring: backgroundWorkSuspended,
+          child: widget.navigationShell,
+        ),
+      ),
+    );
 
     return Scaffold(
       extendBody: true,
@@ -258,11 +270,11 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
               currentIndex: widget.navigationShell.currentIndex,
               onDestinationSelected: widget.navigationShell.goBranch,
               translucentEffectsEnabled: effectiveTelevisionEffectsEnabled,
-              child: widget.navigationShell,
+              child: shellChild,
             )
           : NotificationListener<ScrollNotification>(
               onNotification: _handleScrollNotification,
-              child: widget.navigationShell,
+              child: shellChild,
             ),
       bottomNavigationBar: isTelevision
           ? null
@@ -381,7 +393,8 @@ class _TelevisionNavigationShell extends StatefulWidget {
       _TelevisionNavigationShellState();
 }
 
-class _TelevisionNavigationShellState extends State<_TelevisionNavigationShell> {
+class _TelevisionNavigationShellState
+    extends State<_TelevisionNavigationShell> {
   late final List<FocusNode> _destinationFocusNodes = List.generate(
     _TelevisionNavigationShell._items.length,
     (index) => FocusNode(debugLabel: 'tv-nav-$index'),
@@ -612,9 +625,8 @@ class _TelevisionNavigationDestination extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final foregroundColor = selected ? Colors.white : const Color(0xD9E8F7FF);
-    final backgroundColor = selected
-        ? Colors.white.withValues(alpha: 0.10)
-        : Colors.transparent;
+    final backgroundColor =
+        selected ? Colors.white.withValues(alpha: 0.10) : Colors.transparent;
 
     return TvFocusableAction(
       focusNode: focusNode,

@@ -12,7 +12,6 @@ import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/quark_folder_picker_page.dart';
-import 'package:starflow/features/settings/presentation/smart_strm_logs_page.dart';
 
 class NetworkStorageSettingsPage extends ConsumerStatefulWidget {
   const NetworkStorageSettingsPage({super.key, required this.initial});
@@ -333,22 +332,14 @@ class _NetworkStorageSettingsPageState
                         variant: TvButtonVariant.outlined,
                       )
                     else
-                      OutlinedButton.icon(
+                      StarflowButton(
+                        label: _isTestingQuarkConnection ? '测试中...' : '测试夸克连接',
+                        icon: Icons.cloud_done_outlined,
                         onPressed: _isTestingQuarkConnection
                             ? null
                             : _testQuarkConnection,
-                        icon: _isTestingQuarkConnection
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.cloud_done_outlined),
-                        label: Text(
-                          _isTestingQuarkConnection ? '测试中...' : '测试夸克连接',
-                        ),
+                        variant: StarflowButtonVariant.secondary,
+                        compact: true,
                       ),
                     if (isTelevision)
                       TvAdaptiveButton(
@@ -358,10 +349,12 @@ class _NetworkStorageSettingsPageState
                         variant: TvButtonVariant.outlined,
                       )
                     else
-                      OutlinedButton.icon(
+                      StarflowButton(
+                        label: '选择默认保存文件夹',
+                        icon: Icons.folder_open_rounded,
                         onPressed: _pickQuarkFolder,
-                        icon: const Icon(Icons.folder_open_rounded),
-                        label: const Text('选择默认保存文件夹'),
+                        variant: StarflowButtonVariant.secondary,
+                        compact: true,
                       ),
                   ],
                 ),
@@ -417,46 +410,13 @@ class _NetworkStorageSettingsPageState
                         variant: TvButtonVariant.outlined,
                       )
                     else
-                      OutlinedButton.icon(
+                      StarflowButton(
+                        label: _isTestingSmartStrm ? '测试中...' : '测试 STRM 任务',
+                        icon: Icons.bolt_rounded,
                         onPressed:
                             _isTestingSmartStrm ? null : _testSmartStrmTask,
-                        icon: _isTestingSmartStrm
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.bolt_rounded),
-                        label: Text(
-                          _isTestingSmartStrm ? '测试中...' : '测试 STRM 任务',
-                        ),
-                      ),
-                    if (isTelevision)
-                      TvAdaptiveButton(
-                        label: '查看日志',
-                        icon: Icons.receipt_long_rounded,
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) => const SmartStrmLogsPage(),
-                            ),
-                          );
-                        },
-                        variant: TvButtonVariant.outlined,
-                      )
-                    else
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) => const SmartStrmLogsPage(),
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.receipt_long_rounded),
-                        label: const Text('查看日志'),
+                        variant: StarflowButtonVariant.secondary,
+                        compact: true,
                       ),
                   ],
                 ),
@@ -494,13 +454,16 @@ class _NetworkStorageSettingsPageState
                           variant: TvButtonVariant.text,
                         )
                       else
-                        TextButton(
+                        StarflowButton(
+                          label: '全选',
+                          icon: Icons.select_all_rounded,
                           onPressed: () {
                             setState(() {
                               _refreshSourceIds = refreshableSourceIds;
                             });
                           },
-                          child: const Text('全选'),
+                          variant: StarflowButtonVariant.ghost,
+                          compact: true,
                         ),
                       if (isTelevision)
                         TvAdaptiveButton(
@@ -514,13 +477,16 @@ class _NetworkStorageSettingsPageState
                           variant: TvButtonVariant.text,
                         )
                       else
-                        TextButton(
+                        StarflowButton(
+                          label: '清空',
+                          icon: Icons.clear_all_rounded,
                           onPressed: () {
                             setState(() {
                               _refreshSourceIds.clear();
                             });
                           },
-                          child: const Text('清空'),
+                          variant: StarflowButtonVariant.ghost,
+                          compact: true,
                         ),
                     ],
                   ),
@@ -547,22 +513,24 @@ class _NetworkStorageSettingsPageState
                               },
                             ),
                           )
-                        : CheckboxListTile(
-                            contentPadding: EdgeInsets.zero,
-                            value: selectedRefreshSourceIds.contains(source.id),
-                            title: Text(source.name),
-                            controlAffinity: ListTileControlAffinity.leading,
-                            onChanged: (value) {
-                              setState(() {
-                                final next = {..._refreshSourceIds};
-                                if (value == true) {
-                                  next.add(source.id);
-                                } else {
-                                  next.remove(source.id);
-                                }
-                                _refreshSourceIds = next;
-                              });
-                            },
+                        : Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: StarflowCheckboxTile(
+                              title: source.name,
+                              value:
+                                  selectedRefreshSourceIds.contains(source.id),
+                              onChanged: (value) {
+                                setState(() {
+                                  final next = {..._refreshSourceIds};
+                                  if (value) {
+                                    next.add(source.id);
+                                  } else {
+                                    next.remove(source.id);
+                                  }
+                                  _refreshSourceIds = next;
+                                });
+                              },
+                            ),
                           ),
                   ),
                 ] else
@@ -586,9 +554,11 @@ class _NetworkStorageSettingsPageState
                           variant: TvButtonVariant.text,
                         ),
                       )
-                    : TextButton(
+                    : StarflowButton(
+                        label: '保存',
                         onPressed: _saveDraft,
-                        child: const Text('保存'),
+                        variant: StarflowButtonVariant.ghost,
+                        compact: true,
                       ),
               ),
             ),
@@ -691,15 +661,18 @@ class _NetworkStorageSettingsPageState
             ),
           ),
           actions: [
-            TextButton(
+            StarflowButton(
+              label: '取消',
               focusNode: cancelFocusNode,
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('取消'),
+              variant: StarflowButtonVariant.ghost,
+              compact: true,
             ),
-            FilledButton(
+            StarflowButton(
+              label: '保存',
               focusNode: saveFocusNode,
               onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-              child: const Text('保存'),
+              compact: true,
             ),
           ],
         );
