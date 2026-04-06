@@ -1108,16 +1108,12 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                             onPressed: _confirmDeleteMediaSource,
                             variant: TvButtonVariant.outlined,
                           )
-                        : TextButton.icon(
-                            icon: Icon(
-                              Icons.delete_outline_rounded,
-                              color: theme.colorScheme.error,
-                            ),
-                            label: Text(
-                              '删除此媒体源',
-                              style: TextStyle(color: theme.colorScheme.error),
-                            ),
+                        : StarflowButton(
+                            label: '删除此媒体源',
+                            icon: Icons.delete_outline_rounded,
                             onPressed: _confirmDeleteMediaSource,
+                            variant: StarflowButtonVariant.danger,
+                            compact: true,
                           ),
                   ),
                 ],
@@ -1351,21 +1347,24 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
                                   value: folder.id,
                                   onPressed: () {
                                     setState(() {
+                                    _currentPath = folder.id;
+                                  });
+                                },
+                              ),
+                            )
+                            : Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: StarflowSelectionTile(
+                                  leading:
+                                      const Icon(Icons.folder_open_rounded),
+                                  title: folder.title,
+                                  subtitle: folder.id,
+                                  onPressed: () {
+                                    setState(() {
                                       _currentPath = folder.id;
                                     });
                                   },
                                 ),
-                              )
-                            : ListTile(
-                                contentPadding: EdgeInsets.zero,
-                                leading: const Icon(Icons.folder_open_rounded),
-                                title: Text(folder.title),
-                                subtitle: Text(folder.id),
-                                onTap: () {
-                                  setState(() {
-                                    _currentPath = folder.id;
-                                  });
-                                },
                               ),
                       const SizedBox(height: kBottomReservedSpacing),
                     ],
@@ -1406,12 +1405,13 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
                             ),
                           )
                         else
-                          IconButton(
+                          StarflowIconButton(
+                            variant: StarflowButtonVariant.ghost,
                             onPressed: () {
                               _skipAutoSaveOnPop = true;
                               Navigator.of(context).pop(_currentPath);
                             },
-                            icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                            icon: Icons.arrow_back_ios_new_rounded,
                           ),
                         Expanded(
                           child: Text(
@@ -1438,12 +1438,14 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
                             ),
                           )
                         else
-                          TextButton(
+                          StarflowButton(
+                            label: '选这里',
                             onPressed: () {
                               _skipAutoSaveOnPop = true;
                               Navigator.of(context).pop(_currentPath);
                             },
-                            child: const Text('选这里'),
+                            variant: StarflowButtonVariant.ghost,
+                            compact: true,
                           ),
                       ],
                     ),

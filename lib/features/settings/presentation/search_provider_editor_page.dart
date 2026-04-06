@@ -241,17 +241,22 @@ class _SearchProviderEditorPageState
         title: const Text('保存修改？'),
         content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
         actions: [
-          TextButton(
+          StarflowButton(
+            label: '取消',
             onPressed: () => Navigator.of(dialogContext).pop('cancel'),
-            child: const Text('取消'),
+            variant: StarflowButtonVariant.ghost,
+            compact: true,
           ),
-          TextButton(
+          StarflowButton(
+            label: '不保存',
             onPressed: () => Navigator.of(dialogContext).pop('discard'),
-            child: const Text('不保存'),
+            variant: StarflowButtonVariant.secondary,
+            compact: true,
           ),
-          FilledButton(
+          StarflowButton(
+            label: '保存',
             onPressed: () => Navigator.of(dialogContext).pop('save'),
-            child: const Text('保存'),
+            compact: true,
           ),
         ],
       ),
@@ -354,16 +359,17 @@ class _SearchProviderEditorPageState
         title: const Text('删除搜索服务'),
         content: Text('确定删除「$name」？该操作无法撤销。'),
         actions: [
-          TextButton(
+          StarflowButton(
+            label: '取消',
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消'),
+            variant: StarflowButtonVariant.ghost,
+            compact: true,
           ),
-          TextButton(
+          StarflowButton(
+            label: '删除',
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(ctx).colorScheme.error,
-            ),
-            child: const Text('删除'),
+            variant: StarflowButtonVariant.danger,
+            compact: true,
           ),
         ],
       ),
@@ -458,20 +464,13 @@ class _SearchProviderEditorPageState
                               _isTestingConnection ? null : _testConnection,
                           variant: TvButtonVariant.outlined,
                         )
-                      : OutlinedButton.icon(
+                      : StarflowButton(
+                          label: _isTestingConnection ? '测试中...' : '测试连接',
+                          icon: Icons.network_check_rounded,
                           onPressed:
                               _isTestingConnection ? null : _testConnection,
-                          icon: _isTestingConnection
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.network_check_rounded),
-                          label: Text(
-                            _isTestingConnection ? '测试中...' : '测试连接',
-                          ),
+                          variant: StarflowButtonVariant.secondary,
+                          compact: true,
                         ),
                 ),
                 if (_connectionTestMessage.isNotEmpty) ...[
@@ -604,41 +603,49 @@ class _SearchProviderEditorPageState
                         padding: const EdgeInsets.only(bottom: 8),
                         child: Row(
                           children: [
-                            TextButton(
+                            StarflowButton(
+                              label: '全选',
+                              icon: Icons.select_all_rounded,
                               onPressed: () {
                                 setState(() {
                                   _selectedCloudTypes =
                                       SearchCloudType.values.toSet();
                                 });
                               },
-                              child: const Text('全选'),
+                              variant: StarflowButtonVariant.ghost,
+                              compact: true,
                             ),
-                            TextButton(
+                            const SizedBox(width: 8),
+                            StarflowButton(
+                              label: '清空',
+                              icon: Icons.clear_all_rounded,
                               onPressed: () {
                                 setState(() {
                                   _selectedCloudTypes = <SearchCloudType>{};
                                 });
                               },
-                              child: const Text('清空'),
+                              variant: StarflowButtonVariant.ghost,
+                              compact: true,
                             ),
                           ],
                         ),
                       ),
                       ...SearchCloudType.values.map(
-                        (item) => CheckboxListTile(
-                          contentPadding: EdgeInsets.zero,
-                          controlAffinity: ListTileControlAffinity.trailing,
-                          value: _selectedCloudTypes.contains(item),
-                          title: Text(item.label),
-                          onChanged: (selected) {
-                            setState(() {
-                              if (selected ?? false) {
-                                _selectedCloudTypes.add(item);
-                              } else {
-                                _selectedCloudTypes.remove(item);
-                              }
-                            });
-                          },
+                        (item) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: StarflowCheckboxTile(
+                            title: item.label,
+                            value: _selectedCloudTypes.contains(item),
+                            onChanged: (selected) {
+                              setState(() {
+                                if (selected) {
+                                  _selectedCloudTypes.add(item);
+                                } else {
+                                  _selectedCloudTypes.remove(item);
+                                }
+                              });
+                            },
+                          ),
                         ),
                       ),
                     ],
@@ -711,9 +718,8 @@ class _SearchProviderEditorPageState
                     },
                   )
                 else
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('强匹配'),
+                  StarflowToggleTile(
+                    title: '强匹配',
                     value: _strongMatchEnabled,
                     onChanged: (value) {
                       setState(() => _strongMatchEnabled = value);
@@ -747,9 +753,8 @@ class _SearchProviderEditorPageState
                     onPressed: () => setState(() => _enabled = !_enabled),
                   )
                 else
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('启用此搜索服务'),
+                  StarflowToggleTile(
+                    title: '启用此搜索服务',
                     value: _enabled,
                     onChanged: (value) => setState(() => _enabled = value),
                   ),
@@ -764,16 +769,12 @@ class _SearchProviderEditorPageState
                             onPressed: _confirmDeleteSearchProvider,
                             variant: TvButtonVariant.outlined,
                           )
-                        : TextButton.icon(
-                            icon: Icon(
-                              Icons.delete_outline_rounded,
-                              color: theme.colorScheme.error,
-                            ),
-                            label: Text(
-                              '删除此搜索服务',
-                              style: TextStyle(color: theme.colorScheme.error),
-                            ),
+                        : StarflowButton(
+                            label: '删除此搜索服务',
+                            icon: Icons.delete_outline_rounded,
                             onPressed: _confirmDeleteSearchProvider,
+                            variant: StarflowButtonVariant.danger,
+                            compact: true,
                           ),
                   ),
                 ],
@@ -796,9 +797,11 @@ class _SearchProviderEditorPageState
                           variant: TvButtonVariant.text,
                         ),
                       )
-                    : TextButton(
+                    : StarflowButton(
+                        label: '保存',
                         onPressed: _saveDraft,
-                        child: const Text('保存'),
+                        variant: StarflowButtonVariant.ghost,
+                        compact: true,
                       ),
               ),
             ),

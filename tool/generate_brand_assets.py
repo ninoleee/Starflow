@@ -766,18 +766,12 @@ def render_app_icon_from_svg(
             points = path_commands_to_points(commands, curve_steps=120)
             gradient = nested_gradients[stroke_gradient_id]
             width = max(int(round(transform_nested_length(parse_svg_number(child.get("stroke-width"), 1.0)))), 1)
-            for index in range(len(points) - 1):
-                midpoint = (
-                    (points[index][0] + points[index + 1][0]) / 2.0,
-                    (points[index][1] + points[index + 1][1]) / 2.0,
-                )
-                color = apply_opacity(sample_linear_gradient_color(gradient, midpoint), opacity)
-                draw.line(
-                    [points[index], points[index + 1]],
-                    fill=color,
-                    width=width,
-                    joint="curve",
-                )
+            stroke_mask = Image.new("L", size, 0)
+            ImageDraw.Draw(stroke_mask).line(points, fill=255, width=width, joint="curve")
+            if opacity < 1.0:
+                stroke_mask = stroke_mask.point(lambda value: int(value * opacity))
+            stroke_image = draw_linear_gradient(size, gradient["start"], gradient["end"], gradient["stops"])
+            apply_masked_image(image, stroke_image, stroke_mask)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(output_path)

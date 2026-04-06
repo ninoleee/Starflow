@@ -145,17 +145,22 @@ class _NetworkStorageSettingsPageState
         title: const Text('保存修改？'),
         content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
         actions: [
-          TextButton(
+          StarflowButton(
+            label: '取消',
             onPressed: () => Navigator.of(dialogContext).pop('cancel'),
-            child: const Text('取消'),
+            variant: StarflowButtonVariant.ghost,
+            compact: true,
           ),
-          TextButton(
+          StarflowButton(
+            label: '不保存',
             onPressed: () => Navigator.of(dialogContext).pop('discard'),
-            child: const Text('不保存'),
+            variant: StarflowButtonVariant.secondary,
+            compact: true,
           ),
-          FilledButton(
+          StarflowButton(
+            label: '保存',
             onPressed: () => Navigator.of(dialogContext).pop('save'),
-            child: const Text('保存'),
+            compact: true,
           ),
         ],
       ),
