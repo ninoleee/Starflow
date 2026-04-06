@@ -28,6 +28,7 @@ class _NetworkStorageSettingsPageState
   late final TextEditingController _quarkCookieController;
   late final TextEditingController _smartStrmWebhookController;
   late final TextEditingController _smartStrmTaskNameController;
+  late final TextEditingController _smartStrmDelayController;
   late final TextEditingController _refreshDelayController;
   late String _quarkFolderId;
   late String _quarkFolderPath;
@@ -48,6 +49,11 @@ class _NetworkStorageSettingsPageState
     _smartStrmTaskNameController = TextEditingController(
       text: widget.initial.smartStrmTaskName,
     );
+    _smartStrmDelayController = TextEditingController(
+      text: widget.initial.smartStrmDelaySeconds > 0
+          ? '${widget.initial.smartStrmDelaySeconds}'
+          : '',
+    );
     _refreshDelayController = TextEditingController(
       text: widget.initial.refreshDelaySeconds > 0
           ? '${widget.initial.refreshDelaySeconds}'
@@ -67,6 +73,7 @@ class _NetworkStorageSettingsPageState
     _quarkCookieController.dispose();
     _smartStrmWebhookController.dispose();
     _smartStrmTaskNameController.dispose();
+    _smartStrmDelayController.dispose();
     _refreshDelayController.dispose();
     super.dispose();
   }
@@ -83,7 +90,15 @@ class _NetworkStorageSettingsPageState
   }
 
   int _refreshDelaySeconds() {
-    final text = _refreshDelayController.text.trim();
+    return _parseDelaySeconds(_refreshDelayController.text);
+  }
+
+  int _smartStrmDelaySeconds() {
+    return _parseDelaySeconds(_smartStrmDelayController.text);
+  }
+
+  int _parseDelaySeconds(String rawText) {
+    final text = rawText.trim();
     if (text.isEmpty) {
       return 1;
     }
@@ -101,6 +116,7 @@ class _NetworkStorageSettingsPageState
       quarkSaveFolderPath: _quarkFolderPath,
       smartStrmWebhookUrl: _smartStrmWebhookController.text.trim(),
       smartStrmTaskName: _smartStrmTaskNameController.text.trim(),
+      smartStrmDelaySeconds: _smartStrmDelaySeconds(),
       refreshMediaSourceIds: _refreshSourceIds
           .where(refreshableSourceIds.contains)
           .toList(growable: false),
@@ -243,7 +259,7 @@ class _NetworkStorageSettingsPageState
             webhookUrl: _smartStrmWebhookController.text.trim(),
             taskName: _smartStrmTaskNameController.text.trim(),
             storagePath: _quarkFolderPath == '/' ? '' : _quarkFolderPath,
-            delay: _refreshDelaySeconds(),
+            delay: _smartStrmDelaySeconds(),
           );
       if (!mounted) {
         return;
@@ -317,7 +333,6 @@ class _NetworkStorageSettingsPageState
                       hintText: '用于搜索结果一键保存到夸克网盘',
                     ),
                   ),
-                const SizedBox(height: 12),
                 Wrap(
                   spacing: 12,
                   runSpacing: 12,
@@ -397,6 +412,23 @@ class _NetworkStorageSettingsPageState
                     ),
                   ),
                 const SizedBox(height: 12),
+                if (isTelevision)
+                  TvSelectionTile(
+                    title: 'STRM 触发等待时间',
+                    value: '${_smartStrmDelaySeconds()} 秒',
+                    onPressed: _openSmartStrmDelayPicker,
+                  )
+                else
+                  TextField(
+                    controller: _smartStrmDelayController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'STRM 触发等待时间（秒）',
+                      hintText: '1',
+                      helperText: '保存到夸克后，等待多久再触发 Smart STRM 任务。',
+                    ),
+                  ),
+                const SizedBox(height: 12),
                 Wrap(
                   spacing: 12,
                   runSpacing: 12,
@@ -420,10 +452,10 @@ class _NetworkStorageSettingsPageState
                       ),
                   ],
                 ),
-                _SectionTitle(theme: theme, label: '刷新媒体源'),
+                _SectionTitle(theme: theme, label: '自动增量刷新索引'),
                 if (isTelevision)
                   TvSelectionTile(
-                    title: '延迟刷新秒数',
+                    title: '索引刷新等待时间',
                     value: '${_refreshDelaySeconds()} 秒',
                     onPressed: _openRefreshDelayPicker,
                   )
@@ -432,8 +464,9 @@ class _NetworkStorageSettingsPageState
                     controller: _refreshDelayController,
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(
-                      labelText: '延迟刷新秒数',
+                      labelText: '索引刷新等待时间（秒）',
                       hintText: '1',
+                      helperText: '任务结束后，等待多久再自动执行媒体库增量刷新。',
                     ),
                   ),
                 const SizedBox(height: 12),
@@ -613,7 +646,7 @@ class _NetworkStorageSettingsPageState
       context: context,
       builder: (context) {
         return SimpleDialog(
-          title: const Text('选择延迟刷新秒数'),
+          title: const Text('选择索引刷新等待时间'),
           children: [
             for (final seconds in options)
               SimpleDialogOption(
@@ -628,6 +661,31 @@ class _NetworkStorageSettingsPageState
     if (selected == null) return;
     setState(() {
       _refreshDelayController.text = '$selected';
+    });
+  }
+
+  Future<void> _openSmartStrmDelayPicker() async {
+    const options = [1, 3, 5, 10, 15, 30, 60];
+    final current = _smartStrmDelaySeconds();
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (context) {
+        return SimpleDialog(
+          title: const Text('选择 STRM 触发等待时间'),
+          children: [
+            for (final seconds in options)
+              SimpleDialogOption(
+                onPressed: () => Navigator.of(context).pop(seconds),
+                child:
+                    Text(seconds == current ? '$seconds 秒  当前' : '$seconds 秒'),
+              ),
+          ],
+        );
+      },
+    );
+    if (selected == null) return;
+    setState(() {
+      _smartStrmDelayController.text = '$selected';
     });
   }
 

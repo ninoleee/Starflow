@@ -7,6 +7,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 final playbackHistoryRevisionProvider = StateProvider<int>((ref) => 0);
 
@@ -49,15 +50,20 @@ final recentPlaybackEntriesProvider =
 
 class PlaybackMemoryRepository {
   PlaybackMemoryRepository({
-    AppPreferencesStore? preferences,
+    PreferencesStore? preferences,
+    SharedPreferences? sharedPreferences,
     void Function()? notifyChanged,
-  })  : _preferences = preferences ?? AppPreferencesStore(),
+  })  : assert(preferences == null || sharedPreferences == null),
+        _preferences = preferences ??
+            (sharedPreferences == null
+                ? AppPreferencesStore()
+                : SharedPreferencesStore(sharedPreferences)),
         _notifyChanged = notifyChanged;
 
   static const _storageKey = 'starflow.playback.memory.v1';
   static const recentEntryLimit = 20;
 
-  final AppPreferencesStore _preferences;
+  final PreferencesStore _preferences;
   final void Function()? _notifyChanged;
 
   Future<PlaybackProgressEntry?> loadEntryForTarget(

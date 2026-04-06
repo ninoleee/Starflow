@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
@@ -2321,9 +2322,29 @@ class _MemoryNasMediaIndexStore implements NasMediaIndexStore {
       <String, NasMediaIndexSourceState>{};
 
   @override
+  Future<void> clearAll() async {
+    _records.clear();
+    _states.clear();
+  }
+
+  @override
   Future<void> clearSource(String sourceId) async {
     _records.remove(sourceId);
     _states.remove(sourceId);
+  }
+
+  @override
+  Future<LocalStorageCacheSummary> inspectSummary() async {
+    final recordList = _records.values.expand((items) => items).toList();
+    return LocalStorageCacheSummary(
+      type: LocalStorageCacheType.nasMetadataIndex,
+      entryCount: recordList.length,
+      totalBytes: utf8
+          .encode(
+            jsonEncode(recordList.map((record) => record.toJson()).toList()),
+          )
+          .length,
+    );
   }
 
   @override

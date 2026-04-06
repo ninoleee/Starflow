@@ -793,8 +793,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           );
       var triggeredTask = false;
       SmartStrmTriggerResult? smartStrmResult;
-      final refreshDelaySeconds = _networkStorageDelaySeconds(storage);
-      final smartStrmDelaySeconds = refreshDelaySeconds;
+      final refreshDelaySeconds = _mediaRefreshDelaySeconds(storage);
+      final smartStrmDelaySeconds = _smartStrmDelaySeconds(storage);
       if (storage.smartStrmWebhookUrl.trim().isNotEmpty &&
           storage.smartStrmTaskName.trim().isNotEmpty) {
         smartStrmResult =
@@ -874,8 +874,13 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     }
   }
 
-  int _networkStorageDelaySeconds(NetworkStorageConfig storage) {
+  int _mediaRefreshDelaySeconds(NetworkStorageConfig storage) {
     final configured = storage.refreshDelaySeconds;
+    return configured <= 0 ? 1 : configured;
+  }
+
+  int _smartStrmDelaySeconds(NetworkStorageConfig storage) {
+    final configured = storage.smartStrmDelaySeconds;
     return configured <= 0 ? 1 : configured;
   }
 

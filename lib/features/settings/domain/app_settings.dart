@@ -489,6 +489,7 @@ class NetworkStorageConfig {
     this.quarkSaveFolderPath = '/',
     this.smartStrmWebhookUrl = '',
     this.smartStrmTaskName = '',
+    this.smartStrmDelaySeconds = 1,
     this.refreshMediaSourceIds = const [],
     this.refreshDelaySeconds = 1,
   });
@@ -498,6 +499,7 @@ class NetworkStorageConfig {
   final String quarkSaveFolderPath;
   final String smartStrmWebhookUrl;
   final String smartStrmTaskName;
+  final int smartStrmDelaySeconds;
   final List<String> refreshMediaSourceIds;
   final int refreshDelaySeconds;
 
@@ -505,6 +507,7 @@ class NetworkStorageConfig {
     return quarkCookie.trim().isNotEmpty ||
         smartStrmWebhookUrl.trim().isNotEmpty ||
         smartStrmTaskName.trim().isNotEmpty ||
+        smartStrmDelaySeconds != 1 ||
         quarkSaveFolderId.trim() != '0' ||
         quarkSaveFolderPath.trim() != '/' ||
         refreshMediaSourceIds.isNotEmpty ||
@@ -517,6 +520,7 @@ class NetworkStorageConfig {
     String? quarkSaveFolderPath,
     String? smartStrmWebhookUrl,
     String? smartStrmTaskName,
+    int? smartStrmDelaySeconds,
     List<String>? refreshMediaSourceIds,
     int? refreshDelaySeconds,
   }) {
@@ -526,6 +530,8 @@ class NetworkStorageConfig {
       quarkSaveFolderPath: quarkSaveFolderPath ?? this.quarkSaveFolderPath,
       smartStrmWebhookUrl: smartStrmWebhookUrl ?? this.smartStrmWebhookUrl,
       smartStrmTaskName: smartStrmTaskName ?? this.smartStrmTaskName,
+      smartStrmDelaySeconds:
+          smartStrmDelaySeconds ?? this.smartStrmDelaySeconds,
       refreshMediaSourceIds:
           refreshMediaSourceIds ?? this.refreshMediaSourceIds,
       refreshDelaySeconds: refreshDelaySeconds ?? this.refreshDelaySeconds,
@@ -539,6 +545,7 @@ class NetworkStorageConfig {
       'quarkSaveFolderPath': quarkSaveFolderPath,
       'smartStrmWebhookUrl': smartStrmWebhookUrl,
       'smartStrmTaskName': smartStrmTaskName,
+      'smartStrmDelaySeconds': smartStrmDelaySeconds,
       'refreshMediaSourceIds': refreshMediaSourceIds,
       'refreshDelaySeconds': refreshDelaySeconds,
     };
@@ -547,12 +554,18 @@ class NetworkStorageConfig {
   factory NetworkStorageConfig.fromJson(Map<String, dynamic> json) {
     final resolvedRefreshDelaySeconds =
         (json['refreshDelaySeconds'] as num?)?.toInt() ?? 1;
+    final resolvedSmartStrmDelaySeconds =
+        (json['smartStrmDelaySeconds'] as num?)?.toInt() ??
+            resolvedRefreshDelaySeconds;
     return NetworkStorageConfig(
       quarkCookie: json['quarkCookie'] as String? ?? '',
       quarkSaveFolderId: json['quarkSaveFolderId'] as String? ?? '0',
       quarkSaveFolderPath: json['quarkSaveFolderPath'] as String? ?? '/',
       smartStrmWebhookUrl: json['smartStrmWebhookUrl'] as String? ?? '',
       smartStrmTaskName: json['smartStrmTaskName'] as String? ?? '',
+      smartStrmDelaySeconds: resolvedSmartStrmDelaySeconds <= 0
+          ? 1
+          : resolvedSmartStrmDelaySeconds,
       refreshMediaSourceIds:
           (json['refreshMediaSourceIds'] as List<dynamic>? ?? const [])
               .whereType<String>()

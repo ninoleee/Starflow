@@ -251,9 +251,8 @@ class NasMediaIndexer {
       return null;
     }
 
-    final selectedRecords = targetIndices
-        .map((index) => records[index])
-        .toList(growable: false);
+    final selectedRecords =
+        targetIndices.map((index) => records[index]).toList(growable: false);
     final shouldAttemptSidecar = source.webDavSidecarScrapingEnabled &&
         selectedRecords.any(
           (record) => !_hasAttemptStatus(record.sidecarStatus),
@@ -1268,9 +1267,14 @@ class NasMediaIndexer {
         record.item.tmdbId.trim().isNotEmpty ||
         record.item.doubanId.trim().isNotEmpty;
     if (prefersStructureGrouping && structureSeriesTitle.isNotEmpty) {
+      final normalizedParentTitle = _normalizeMetadataQueryToken(parentTitle);
+      final normalizedStructureTitle =
+          _normalizeMetadataQueryToken(structureSeriesTitle);
       if (itemType == 'episode' &&
           parentTitle.isNotEmpty &&
-          !parentLooksLikeSeason) {
+          !parentLooksLikeSeason &&
+          normalizedParentTitle.isNotEmpty &&
+          normalizedParentTitle == normalizedStructureTitle) {
         return parentTitle;
       }
       return structureSeriesTitle;
@@ -1709,6 +1713,19 @@ class NasMediaIndexer {
     final commonPath = _commonDirectoryPath(
       records.map((record) => record.resourcePath),
     );
+    final commonSegments = _pathSegments(commonPath);
+    final explicitSeasonLabel = commonSegments.firstWhere(
+      _looksLikeSeasonFolderLabel,
+      orElse: () => '',
+    );
+    if (explicitSeasonLabel.isNotEmpty) {
+      if (_looksLikeNumericTopicSeason(explicitSeasonLabel)) {
+        return explicitSeasonLabel;
+      }
+      if (_parseSeasonNumberFromLabel(explicitSeasonLabel) != null) {
+        return '第 $seasonNumber 季';
+      }
+    }
     final lastSegment = _lastPathSegment(commonPath);
     if (lastSegment.isEmpty) {
       return '第 $seasonNumber 季';

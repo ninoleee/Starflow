@@ -40,36 +40,95 @@ String normalizePreferencesKey(String key) {
 class AppPreferencesStore implements PreferencesStore {
   AppPreferencesStore({
     SharedPreferencesAsync? preferences,
-  }) : _preferences = preferences ?? SharedPreferencesAsync(options: _options);
+    SharedPreferences? sharedPreferences,
+  })  : _preferences = preferences,
+        _sharedPreferences = sharedPreferences;
 
   static final SharedPreferencesOptions _options =
       _buildSharedPreferencesOptions();
 
-  final SharedPreferencesAsync _preferences;
+  SharedPreferencesAsync? _preferences;
+  SharedPreferences? _sharedPreferences;
 
   @override
-  Future<String?> getString(String key) {
-    return _preferences.getString(normalizePreferencesKey(key));
+  Future<String?> getString(String key) async {
+    final normalizedKey = normalizePreferencesKey(key);
+    final asyncPreferences = _resolveAsyncPreferences();
+    if (asyncPreferences != null) {
+      return asyncPreferences.getString(normalizedKey);
+    }
+    return (await _resolveSharedPreferences()).getString(normalizedKey);
   }
 
   @override
-  Future<List<String>?> getStringList(String key) {
-    return _preferences.getStringList(normalizePreferencesKey(key));
+  Future<List<String>?> getStringList(String key) async {
+    final normalizedKey = normalizePreferencesKey(key);
+    final asyncPreferences = _resolveAsyncPreferences();
+    if (asyncPreferences != null) {
+      return asyncPreferences.getStringList(normalizedKey);
+    }
+    return (await _resolveSharedPreferences()).getStringList(normalizedKey);
   }
 
   @override
-  Future<void> setString(String key, String value) {
-    return _preferences.setString(normalizePreferencesKey(key), value);
+  Future<void> setString(String key, String value) async {
+    final normalizedKey = normalizePreferencesKey(key);
+    final asyncPreferences = _resolveAsyncPreferences();
+    if (asyncPreferences != null) {
+      await asyncPreferences.setString(normalizedKey, value);
+      return;
+    }
+    await (await _resolveSharedPreferences()).setString(normalizedKey, value);
   }
 
   @override
-  Future<void> setStringList(String key, List<String> value) {
-    return _preferences.setStringList(normalizePreferencesKey(key), value);
+  Future<void> setStringList(String key, List<String> value) async {
+    final normalizedKey = normalizePreferencesKey(key);
+    final asyncPreferences = _resolveAsyncPreferences();
+    if (asyncPreferences != null) {
+      await asyncPreferences.setStringList(normalizedKey, value);
+      return;
+    }
+    await (await _resolveSharedPreferences())
+        .setStringList(normalizedKey, value);
   }
 
   @override
-  Future<void> remove(String key) {
-    return _preferences.remove(normalizePreferencesKey(key));
+  Future<void> remove(String key) async {
+    final normalizedKey = normalizePreferencesKey(key);
+    final asyncPreferences = _resolveAsyncPreferences();
+    if (asyncPreferences != null) {
+      await asyncPreferences.remove(normalizedKey);
+      return;
+    }
+    await (await _resolveSharedPreferences()).remove(normalizedKey);
+  }
+
+  SharedPreferencesAsync? _resolveAsyncPreferences() {
+    if (_sharedPreferences != null) {
+      return null;
+    }
+    final existing = _preferences;
+    if (existing != null) {
+      return existing;
+    }
+    try {
+      final created = SharedPreferencesAsync(options: _options);
+      _preferences = created;
+      return created;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<SharedPreferences> _resolveSharedPreferences() async {
+    final existing = _sharedPreferences;
+    if (existing != null) {
+      return existing;
+    }
+    final created = await SharedPreferences.getInstance();
+    _sharedPreferences = created;
+    return created;
   }
 }
 

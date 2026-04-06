@@ -200,7 +200,6 @@ class SmartStrmWebhookClient {
     final message = _extractMessage(payload);
     return message.isEmpty ? null : message;
   }
-
 }
 
 class SmartStrmTriggerResult {
