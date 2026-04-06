@@ -1,3 +1,5 @@
+import 'package:starflow/features/playback/domain/playback_models.dart';
+
 enum SubtitleSearchApplyMode {
   downloadAndApply,
   downloadOnly;
@@ -53,6 +55,31 @@ class SubtitleSearchRequest {
   }
 }
 
+enum OnlineSubtitleSource {
+  assrt;
+}
+
+extension OnlineSubtitleSourceX on OnlineSubtitleSource {
+  String get label {
+    return switch (this) {
+      OnlineSubtitleSource.assrt => 'ASSRT',
+    };
+  }
+
+  String get description {
+    return switch (this) {
+      OnlineSubtitleSource.assrt => '国内常用字幕站，适合电影和剧集常规搜索。',
+    };
+  }
+
+  static OnlineSubtitleSource fromName(String raw) {
+    return switch (raw.trim()) {
+      'assrt' => OnlineSubtitleSource.assrt,
+      _ => OnlineSubtitleSource.assrt,
+    };
+  }
+}
+
 enum SubtitlePackageKind {
   subtitleFile,
   zipArchive,
@@ -70,6 +97,7 @@ enum SubtitlePackageKind {
 class SubtitleSearchResult {
   const SubtitleSearchResult({
     required this.id,
+    required this.source,
     required this.providerLabel,
     required this.title,
     required this.version,
@@ -86,6 +114,7 @@ class SubtitleSearchResult {
   });
 
   final String id;
+  final OnlineSubtitleSource source;
   final String providerLabel;
   final String title;
   final String version;
@@ -127,6 +156,51 @@ class SubtitleSearchResult {
     ];
     return parts.join(' · ');
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'source': source.name,
+      'providerLabel': providerLabel,
+      'title': title,
+      'version': version,
+      'formatLabel': formatLabel,
+      'languageLabel': languageLabel,
+      'sourceLabel': sourceLabel,
+      'publishDateLabel': publishDateLabel,
+      'downloadCount': downloadCount,
+      'ratingLabel': ratingLabel,
+      'downloadUrl': downloadUrl,
+      'detailUrl': detailUrl,
+      'packageName': packageName,
+      'packageKind': packageKind.name,
+    };
+  }
+
+  factory SubtitleSearchResult.fromJson(Map<String, dynamic> json) {
+    return SubtitleSearchResult(
+      id: json['id'] as String? ?? '',
+      source: OnlineSubtitleSourceX.fromName(json['source'] as String? ?? ''),
+      providerLabel: json['providerLabel'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      version: json['version'] as String? ?? '',
+      formatLabel: json['formatLabel'] as String? ?? '',
+      languageLabel: json['languageLabel'] as String? ?? '',
+      sourceLabel: json['sourceLabel'] as String? ?? '',
+      publishDateLabel: json['publishDateLabel'] as String? ?? '',
+      downloadCount: (json['downloadCount'] as num?)?.toInt() ?? 0,
+      ratingLabel: json['ratingLabel'] as String? ?? '',
+      downloadUrl: json['downloadUrl'] as String? ?? '',
+      detailUrl: json['detailUrl'] as String? ?? '',
+      packageName: json['packageName'] as String? ?? '',
+      packageKind: switch (json['packageKind'] as String? ?? '') {
+        'subtitleFile' => SubtitlePackageKind.subtitleFile,
+        'zipArchive' => SubtitlePackageKind.zipArchive,
+        'rarArchive' => SubtitlePackageKind.rarArchive,
+        _ => SubtitlePackageKind.unsupported,
+      },
+    );
+  }
 }
 
 class SubtitleDownloadResult {
@@ -153,4 +227,78 @@ class SubtitleSearchSelection {
   final String? subtitleFilePath;
 
   bool get canApply => (subtitleFilePath ?? '').trim().isNotEmpty;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'cachedPath': cachedPath,
+      'displayName': displayName,
+      'subtitleFilePath': subtitleFilePath,
+    };
+  }
+
+  factory SubtitleSearchSelection.fromJson(Map<String, dynamic> json) {
+    final subtitleFilePath = (json['subtitleFilePath'] as String?)?.trim();
+    return SubtitleSearchSelection(
+      cachedPath: json['cachedPath'] as String? ?? '',
+      displayName: json['displayName'] as String? ?? '',
+      subtitleFilePath:
+          subtitleFilePath == null || subtitleFilePath.isEmpty
+              ? null
+              : subtitleFilePath,
+    );
+  }
+}
+
+class CachedSubtitleSearchOption {
+  const CachedSubtitleSearchOption({
+    required this.result,
+    this.selection,
+  });
+
+  final SubtitleSearchResult result;
+  final SubtitleSearchSelection? selection;
+
+  CachedSubtitleSearchOption copyWith({
+    SubtitleSearchResult? result,
+    SubtitleSearchSelection? selection,
+    bool clearSelection = false,
+  }) {
+    return CachedSubtitleSearchOption(
+      result: result ?? this.result,
+      selection: clearSelection ? null : (selection ?? this.selection),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'result': result.toJson(),
+      'selection': selection?.toJson(),
+    };
+  }
+
+  factory CachedSubtitleSearchOption.fromJson(Map<String, dynamic> json) {
+    return CachedSubtitleSearchOption(
+      result: SubtitleSearchResult.fromJson(
+        Map<String, dynamic>.from((json['result'] as Map?) ?? const {}),
+      ),
+      selection: (json['selection'] as Map?) == null
+          ? null
+          : SubtitleSearchSelection.fromJson(
+              Map<String, dynamic>.from(json['selection'] as Map),
+            ),
+    );
+  }
+}
+
+String buildSubtitleSearchQuery(PlaybackTarget target) {
+  final baseTitle = target.seriesTitle.trim().isNotEmpty
+      ? target.seriesTitle.trim()
+      : target.title.trim();
+  final parts = <String>[
+    if (baseTitle.isNotEmpty) baseTitle,
+    if (target.seasonNumber != null && target.episodeNumber != null)
+      'S${target.seasonNumber!.toString().padLeft(2, '0')}E${target.episodeNumber!.toString().padLeft(2, '0')}',
+    if (!target.isEpisode && target.year > 0) '${target.year}',
+  ];
+  return parts.join(' ').trim();
 }

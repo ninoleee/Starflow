@@ -7,6 +7,7 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/data/subtitle_search_host_bridge.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
 
 class SubtitleSearchPage extends ConsumerStatefulWidget {
   const SubtitleSearchPage({
@@ -73,8 +74,21 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     });
 
     try {
+      final sources = ref.read(appSettingsProvider).onlineSubtitleSources;
+      if (sources.isEmpty) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _results = const [];
+          _isSearching = false;
+          _errorMessage = '请先在设置里启用至少一个在线字幕来源';
+        });
+        return;
+      }
       final results = await ref.read(onlineSubtitleRepositoryProvider).search(
             query,
+            sources: sources,
           );
       if (!mounted) {
         return;
@@ -100,8 +114,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     if (_busyResultId != null) {
       return;
     }
-    if (widget.request.applyMode ==
-            SubtitleSearchApplyMode.downloadAndApply &&
+    if (widget.request.applyMode == SubtitleSearchApplyMode.downloadAndApply &&
         !result.canAutoLoad) {
       _showMessage('当前先支持自动加载 ZIP / SRT / ASS / SSA / VTT 字幕');
       return;
@@ -111,9 +124,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       _busyResultId = result.id;
     });
     try {
-      final downloadResult = await ref
-          .read(onlineSubtitleRepositoryProvider)
-          .download(result);
+      final downloadResult =
+          await ref.read(onlineSubtitleRepositoryProvider).download(result);
       final selection = SubtitleSearchSelection(
         cachedPath: downloadResult.cachedPath,
         displayName: downloadResult.displayName,
@@ -164,8 +176,14 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     final applyMode = request.applyMode;
     final title = request.title.trim().isEmpty ? '在线字幕' : request.title.trim();
 
-    return WillPopScope(
-      onWillPop: _handleClose,
+    return PopScope<Object?>(
+      canPop: !request.standalone,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop || !request.standalone) {
+          return;
+        }
+        await _handleClose();
+      },
       child: Scaffold(
         appBar: AppBar(
           title: Text(applyMode == SubtitleSearchApplyMode.downloadOnly
@@ -174,8 +192,9 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_rounded),
             onPressed: () async {
-              if (await _handleClose() && mounted) {
-                Navigator.of(context).maybePop();
+              final navigator = Navigator.of(context);
+              if (await _handleClose()) {
+                navigator.maybePop();
               }
             },
           ),

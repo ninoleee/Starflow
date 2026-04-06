@@ -1,6 +1,7 @@
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
+import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 
 enum HomeModuleType {
@@ -488,6 +489,7 @@ class NetworkStorageConfig {
     this.quarkSaveFolderId = '0',
     this.quarkSaveFolderPath = '/',
     this.syncDeleteQuarkEnabled = false,
+    this.syncDeleteQuarkWebDavDirectories = const [],
     this.smartStrmWebhookUrl = '',
     this.smartStrmTaskName = '',
     this.smartStrmDelaySeconds = 1,
@@ -499,6 +501,7 @@ class NetworkStorageConfig {
   final String quarkSaveFolderId;
   final String quarkSaveFolderPath;
   final bool syncDeleteQuarkEnabled;
+  final List<NetworkStorageWebDavDirectory> syncDeleteQuarkWebDavDirectories;
   final String smartStrmWebhookUrl;
   final String smartStrmTaskName;
   final int smartStrmDelaySeconds;
@@ -513,6 +516,7 @@ class NetworkStorageConfig {
         quarkSaveFolderId.trim() != '0' ||
         quarkSaveFolderPath.trim() != '/' ||
         syncDeleteQuarkEnabled ||
+        syncDeleteQuarkWebDavDirectories.isNotEmpty ||
         refreshMediaSourceIds.isNotEmpty ||
         refreshDelaySeconds != 1;
   }
@@ -522,6 +526,7 @@ class NetworkStorageConfig {
     String? quarkSaveFolderId,
     String? quarkSaveFolderPath,
     bool? syncDeleteQuarkEnabled,
+    List<NetworkStorageWebDavDirectory>? syncDeleteQuarkWebDavDirectories,
     String? smartStrmWebhookUrl,
     String? smartStrmTaskName,
     int? smartStrmDelaySeconds,
@@ -534,6 +539,8 @@ class NetworkStorageConfig {
       quarkSaveFolderPath: quarkSaveFolderPath ?? this.quarkSaveFolderPath,
       syncDeleteQuarkEnabled:
           syncDeleteQuarkEnabled ?? this.syncDeleteQuarkEnabled,
+      syncDeleteQuarkWebDavDirectories: syncDeleteQuarkWebDavDirectories ??
+          this.syncDeleteQuarkWebDavDirectories,
       smartStrmWebhookUrl: smartStrmWebhookUrl ?? this.smartStrmWebhookUrl,
       smartStrmTaskName: smartStrmTaskName ?? this.smartStrmTaskName,
       smartStrmDelaySeconds:
@@ -550,6 +557,9 @@ class NetworkStorageConfig {
       'quarkSaveFolderId': quarkSaveFolderId,
       'quarkSaveFolderPath': quarkSaveFolderPath,
       'syncDeleteQuarkEnabled': syncDeleteQuarkEnabled,
+      'syncDeleteQuarkWebDavDirectories': syncDeleteQuarkWebDavDirectories
+          .map((item) => item.toJson())
+          .toList(growable: false),
       'smartStrmWebhookUrl': smartStrmWebhookUrl,
       'smartStrmTaskName': smartStrmTaskName,
       'smartStrmDelaySeconds': smartStrmDelaySeconds,
@@ -569,6 +579,18 @@ class NetworkStorageConfig {
       quarkSaveFolderId: json['quarkSaveFolderId'] as String? ?? '0',
       quarkSaveFolderPath: json['quarkSaveFolderPath'] as String? ?? '/',
       syncDeleteQuarkEnabled: json['syncDeleteQuarkEnabled'] as bool? ?? false,
+      syncDeleteQuarkWebDavDirectories:
+          (json['syncDeleteQuarkWebDavDirectories'] as List<dynamic>? ??
+                  const [])
+              .whereType<Map>()
+              .map(
+                (item) => NetworkStorageWebDavDirectory.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .where((item) => item.sourceId.isNotEmpty)
+              .where((item) => item.directoryId.isNotEmpty)
+              .toList(growable: false),
       smartStrmWebhookUrl: json['smartStrmWebhookUrl'] as String? ?? '',
       smartStrmTaskName: json['smartStrmTaskName'] as String? ?? '',
       smartStrmDelaySeconds: resolvedSmartStrmDelaySeconds <= 0
@@ -582,6 +604,52 @@ class NetworkStorageConfig {
               .toList(growable: false),
       refreshDelaySeconds:
           resolvedRefreshDelaySeconds <= 0 ? 1 : resolvedRefreshDelaySeconds,
+    );
+  }
+}
+
+class NetworkStorageWebDavDirectory {
+  const NetworkStorageWebDavDirectory({
+    required this.sourceId,
+    this.sourceName = '',
+    required this.directoryId,
+    this.directoryLabel = '',
+  });
+
+  final String sourceId;
+  final String sourceName;
+  final String directoryId;
+  final String directoryLabel;
+
+  NetworkStorageWebDavDirectory copyWith({
+    String? sourceId,
+    String? sourceName,
+    String? directoryId,
+    String? directoryLabel,
+  }) {
+    return NetworkStorageWebDavDirectory(
+      sourceId: sourceId ?? this.sourceId,
+      sourceName: sourceName ?? this.sourceName,
+      directoryId: directoryId ?? this.directoryId,
+      directoryLabel: directoryLabel ?? this.directoryLabel,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'sourceId': sourceId,
+      'sourceName': sourceName,
+      'directoryId': directoryId,
+      'directoryLabel': directoryLabel,
+    };
+  }
+
+  factory NetworkStorageWebDavDirectory.fromJson(Map<String, dynamic> json) {
+    return NetworkStorageWebDavDirectory(
+      sourceId: (json['sourceId'] as String? ?? '').trim(),
+      sourceName: (json['sourceName'] as String? ?? '').trim(),
+      directoryId: (json['directoryId'] as String? ?? '').trim(),
+      directoryLabel: (json['directoryLabel'] as String? ?? '').trim(),
     );
   }
 }
@@ -611,6 +679,7 @@ class AppSettings {
     this.playbackDefaultSpeed = 1.0,
     this.playbackSubtitlePreference = PlaybackSubtitlePreference.auto,
     this.playbackSubtitleScale = PlaybackSubtitleScale.standard,
+    this.onlineSubtitleSources = const [OnlineSubtitleSource.assrt],
     this.playbackBackgroundPlaybackEnabled = true,
     this.playbackEngine = PlaybackEngine.embeddedMpv,
     this.playbackDecodeMode = PlaybackDecodeMode.auto,
@@ -639,6 +708,7 @@ class AppSettings {
   final double playbackDefaultSpeed;
   final PlaybackSubtitlePreference playbackSubtitlePreference;
   final PlaybackSubtitleScale playbackSubtitleScale;
+  final List<OnlineSubtitleSource> onlineSubtitleSources;
   final bool playbackBackgroundPlaybackEnabled;
   final PlaybackEngine playbackEngine;
   final PlaybackDecodeMode playbackDecodeMode;
@@ -667,6 +737,7 @@ class AppSettings {
     double? playbackDefaultSpeed,
     PlaybackSubtitlePreference? playbackSubtitlePreference,
     PlaybackSubtitleScale? playbackSubtitleScale,
+    List<OnlineSubtitleSource>? onlineSubtitleSources,
     bool? playbackBackgroundPlaybackEnabled,
     PlaybackEngine? playbackEngine,
     PlaybackDecodeMode? playbackDecodeMode,
@@ -711,6 +782,8 @@ class AppSettings {
           playbackSubtitlePreference ?? this.playbackSubtitlePreference,
       playbackSubtitleScale:
           playbackSubtitleScale ?? this.playbackSubtitleScale,
+      onlineSubtitleSources:
+          onlineSubtitleSources ?? this.onlineSubtitleSources,
       playbackBackgroundPlaybackEnabled: playbackBackgroundPlaybackEnabled ??
           this.playbackBackgroundPlaybackEnabled,
       playbackEngine: playbackEngine ?? this.playbackEngine,
@@ -743,6 +816,8 @@ class AppSettings {
       'playbackDefaultSpeed': playbackDefaultSpeed,
       'playbackSubtitlePreference': playbackSubtitlePreference.name,
       'playbackSubtitleScale': playbackSubtitleScale.name,
+      'onlineSubtitleSources':
+          onlineSubtitleSources.map((item) => item.name).toList(),
       'playbackBackgroundPlaybackEnabled': playbackBackgroundPlaybackEnabled,
       'playbackEngine': playbackEngine.name,
       'playbackDecodeMode': playbackDecodeMode.name,
@@ -827,6 +902,8 @@ class AppSettings {
       playbackSubtitleScale: PlaybackSubtitleScaleX.fromName(
         json['playbackSubtitleScale'] as String? ?? '',
       ),
+      onlineSubtitleSources:
+          _parseOnlineSubtitleSources(json['onlineSubtitleSources']),
       playbackBackgroundPlaybackEnabled:
           json['playbackBackgroundPlaybackEnabled'] as bool? ?? true,
       playbackEngine: PlaybackEngineX.fromName(
@@ -846,6 +923,17 @@ List<String> _parseNormalizedStringList(Object? raw) {
       .where((item) => item.isNotEmpty)
       .toSet()
       .toList(growable: false);
+}
+
+List<OnlineSubtitleSource> _parseOnlineSubtitleSources(Object? raw) {
+  final sources = (raw as List<dynamic>? ?? const <dynamic>[])
+      .whereType<String>()
+      .map(OnlineSubtitleSourceX.fromName)
+      .toSet()
+      .toList(growable: false);
+  return sources.isEmpty
+      ? const [OnlineSubtitleSource.assrt]
+      : sources;
 }
 
 String searchSourceSettingIdForMediaSource(String sourceId) {

@@ -4,7 +4,6 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.SharedPreferences
-import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -27,6 +26,8 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterActivityLaunchConfigs
 import org.json.JSONObject
 import java.io.File
 import java.nio.charset.StandardCharsets
@@ -47,6 +48,9 @@ class NativePlaybackActivity : Activity() {
     private var subtitleDelayMs: Long = 0L
     private var externalSubtitleSource: ExternalSubtitleSource? = null
     private var lastSavedPositionMs: Long = -1L
+    private var subtitleSearchActive = false
+    private var resumePlaybackAfterSubtitleSearch = false
+    private var nextInitializePlayWhenReady: Boolean? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,6 +60,7 @@ class NativePlaybackActivity : Activity() {
             .ifEmpty { "{}" }
         playbackItemKey = intent.getStringExtra(EXTRA_PLAYBACK_ITEM_KEY)?.trim().orEmpty()
         seriesKey = intent.getStringExtra(EXTRA_SERIES_KEY)?.trim().orEmpty()
+        restoreExternalSubtitleSourceFromTarget()
 
         setContentView(R.layout.native_player_view)
         playerView = findViewById<PlayerView>(R.id.native_player_view).apply {
@@ -83,7 +88,6 @@ class NativePlaybackActivity : Activity() {
         }
         findViewById<View>(R.id.native_online_subtitle_search)?.setOnClickListener {
             openOnlineSubtitleSearch()
-            playerView.showController()
         }
         enterImmersiveMode()
     }
@@ -96,11 +100,18 @@ class NativePlaybackActivity : Activity() {
     override fun onResume() {
         super.onResume()
         enterImmersiveMode()
+        restoreVideoSurfaceIfNeeded()
         playerView.onResume()
-        player?.playWhenReady = true
+        if (!subtitleSearchActive && resumePlaybackAfterSubtitleSearch) {
+            player?.playWhenReady = true
+            resumePlaybackAfterSubtitleSearch = false
+        }
     }
 
     override fun onPause() {
+        if (subtitleSearchActive) {
+            hideVideoSurfaceForOverlay()
+        }
         persistPlaybackProgress()
         playerView.onPause()
         super.onPause()
@@ -214,7 +225,8 @@ class NativePlaybackActivity : Activity() {
         baseMediaItem = initialMediaItem
 
         exoPlayer.apply {
-            playWhenReady = true
+            playWhenReady = nextInitializePlayWhenReady ?: true
+            nextInitializePlayWhenReady = null
             repeatMode = Player.REPEAT_MODE_OFF
             setMediaItem(initialMediaItem)
             if (restoredResumePositionMs > 5_000L) {
@@ -225,6 +237,9 @@ class NativePlaybackActivity : Activity() {
 
         player = exoPlayer
         playerView.player = exoPlayer
+        if (externalSubtitleSource != null) {
+            applyExternalSubtitleConfiguration(showFeedback = false)
+        }
         playerView.showController()
         if (restoredResumePositionMs > 5_000L) {
             showToast("已从 ${formatClockDuration(restoredResumePositionMs)} 继续播放")
@@ -301,17 +316,29 @@ class NativePlaybackActivity : Activity() {
             return
         }
 
+        val currentPlayer = player
+        resumePlaybackAfterSubtitleSearch = currentPlayer?.playWhenReady == true
+        nextInitializePlayWhenReady = currentPlayer?.playWhenReady
+        subtitleSearchActive = true
+        currentPlayer?.playWhenReady = false
+        hideVideoSurfaceForOverlay()
+
         try {
             startActivityForResult(
-                Intent(this, SubtitleSearchActivity::class.java).apply {
-                    putExtra(
-                        SubtitleSearchActivity.EXTRA_INITIAL_ROUTE,
-                        buildSubtitleSearchRoute(query),
-                    )
-                },
+                FlutterActivity.NewEngineIntentBuilder(SubtitleSearchActivity::class.java)
+                    .initialRoute(buildSubtitleSearchRoute(query))
+                    .backgroundMode(FlutterActivityLaunchConfigs.BackgroundMode.opaque)
+                    .build(this),
                 REQUEST_CODE_SUBTITLE_SEARCH,
             )
         } catch (_: Throwable) {
+            subtitleSearchActive = false
+            restoreVideoSurfaceIfNeeded()
+            if (resumePlaybackAfterSubtitleSearch) {
+                currentPlayer?.playWhenReady = true
+                resumePlaybackAfterSubtitleSearch = false
+            }
+            nextInitializePlayWhenReady = null
             showToast("打开字幕搜索失败")
         }
     }
@@ -343,11 +370,6 @@ class NativePlaybackActivity : Activity() {
         return parts.joinToString(" ").trim()
     }
 
-    private fun isTelevision(): Boolean {
-        val currentMode = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
-        return currentMode == Configuration.UI_MODE_TYPE_TELEVISION
-    }
-
     private fun buildSubtitleSearchRoute(query: String): String {
         return Uri.Builder()
             .path("/subtitle-search")
@@ -371,7 +393,14 @@ class NativePlaybackActivity : Activity() {
     }
 
     private fun handleSubtitleSearchResult(resultCode: Int, data: Intent?) {
+        subtitleSearchActive = false
+        restoreVideoSurfaceIfNeeded()
+        val shouldResumePlayback = resumePlaybackAfterSubtitleSearch
+        resumePlaybackAfterSubtitleSearch = false
         if (resultCode != RESULT_OK || data == null) {
+            if (shouldResumePlayback) {
+                player?.playWhenReady = true
+            }
             return
         }
 
@@ -383,6 +412,9 @@ class NativePlaybackActivity : Activity() {
             .orEmpty()
         if (subtitleFilePath.isNotEmpty()) {
             loadCachedSubtitleFile(subtitleFilePath, displayName)
+            if (shouldResumePlayback) {
+                player?.playWhenReady = true
+            }
             return
         }
 
@@ -392,6 +424,21 @@ class NativePlaybackActivity : Activity() {
         if (cachedPath.isNotEmpty()) {
             showToast("字幕已下载到缓存，但当前结果暂不能直接挂载")
         }
+        if (shouldResumePlayback) {
+            player?.playWhenReady = true
+        }
+    }
+
+    private fun hideVideoSurfaceForOverlay() {
+        playerView.hideController()
+        playerView.visibility = View.INVISIBLE
+        playerView.videoSurfaceView?.visibility = View.INVISIBLE
+    }
+
+    private fun restoreVideoSurfaceIfNeeded() {
+        playerView.visibility = View.VISIBLE
+        playerView.videoSurfaceView?.visibility = View.VISIBLE
+        playerView.showController()
     }
 
     private fun loadExternalSubtitle(uri: Uri, intentFlags: Int) {
@@ -419,18 +466,38 @@ class NativePlaybackActivity : Activity() {
         applyExternalSubtitleConfiguration()
     }
 
+    private fun restoreExternalSubtitleSourceFromTarget() {
+        val targetObject = try {
+            JSONObject(playbackTargetJson)
+        } catch (_: Throwable) {
+            JSONObject()
+        }
+        val subtitleFilePath = targetObject.optString("externalSubtitleFilePath").trim()
+        if (subtitleFilePath.isEmpty()) {
+            return
+        }
+        val displayName = targetObject.optString("externalSubtitleDisplayName").trim()
+        prepareCachedSubtitleFile(subtitleFilePath, displayName)
+    }
+
     private fun loadCachedSubtitleFile(filePath: String, displayName: String) {
-        val file = File(filePath)
-        if (!file.exists() || !file.isFile) {
+        if (!prepareCachedSubtitleFile(filePath, displayName)) {
             showToast("缓存字幕文件不存在")
             return
+        }
+        applyExternalSubtitleConfiguration()
+    }
+
+    private fun prepareCachedSubtitleFile(filePath: String, displayName: String): Boolean {
+        val file = File(filePath)
+        if (!file.exists() || !file.isFile) {
+            return false
         }
 
         val uri = Uri.fromFile(file)
         val mimeType = resolveSubtitleMimeType(uri)
         if (mimeType == null) {
-            showToast("暂不支持该字幕格式")
-            return
+            return false
         }
 
         externalSubtitleSource = ExternalSubtitleSource(
@@ -438,10 +505,10 @@ class NativePlaybackActivity : Activity() {
             mimeType = mimeType,
             displayName = displayName.ifBlank { file.name },
         )
-        applyExternalSubtitleConfiguration()
+        return true
     }
 
-    private fun applyExternalSubtitleConfiguration() {
+    private fun applyExternalSubtitleConfiguration(showFeedback: Boolean = true) {
         val currentPlayer = player ?: return
         val source = externalSubtitleSource ?: return
         val sourceMediaItem = baseMediaItem ?: currentPlayer.currentMediaItem ?: return
@@ -460,13 +527,15 @@ class NativePlaybackActivity : Activity() {
         currentPlayer.setMediaItem(updatedMediaItem, currentPosition)
         currentPlayer.prepare()
         currentPlayer.playWhenReady = shouldResumePlayback
-        showToast(
-            if (subtitleDelayMs == 0L) {
-                "外挂字幕已加载"
-            } else {
-                "外挂字幕已加载，偏移 ${formatSubtitleDelayLabel(subtitleDelayMs)}"
-            },
-        )
+        if (showFeedback) {
+            showToast(
+                if (subtitleDelayMs == 0L) {
+                    "外挂字幕已加载"
+                } else {
+                    "外挂字幕已加载，偏移 ${formatSubtitleDelayLabel(subtitleDelayMs)}"
+                },
+            )
+        }
         playerView.showController()
     }
 

@@ -15,6 +15,8 @@ class PlaybackTarget {
     this.seriesTitle = '',
     this.preferredMediaSourceId = '',
     this.subtitle = '',
+    this.externalSubtitleFilePath = '',
+    this.externalSubtitleDisplayName = '',
     this.headers = const {},
     this.container = '',
     this.videoCodec = '',
@@ -40,6 +42,8 @@ class PlaybackTarget {
   final String seriesTitle;
   final String preferredMediaSourceId;
   final String subtitle;
+  final String externalSubtitleFilePath;
+  final String externalSubtitleDisplayName;
   final Map<String, String> headers;
   final String container;
   final String videoCodec;
@@ -65,6 +69,8 @@ class PlaybackTarget {
     String? seriesTitle,
     String? preferredMediaSourceId,
     String? subtitle,
+    String? externalSubtitleFilePath,
+    String? externalSubtitleDisplayName,
     Map<String, String>? headers,
     String? container,
     String? videoCodec,
@@ -91,6 +97,10 @@ class PlaybackTarget {
       preferredMediaSourceId:
           preferredMediaSourceId ?? this.preferredMediaSourceId,
       subtitle: subtitle ?? this.subtitle,
+      externalSubtitleFilePath:
+          externalSubtitleFilePath ?? this.externalSubtitleFilePath,
+      externalSubtitleDisplayName:
+          externalSubtitleDisplayName ?? this.externalSubtitleDisplayName,
       headers: headers ?? this.headers,
       container: container ?? this.container,
       videoCodec: videoCodec ?? this.videoCodec,
@@ -178,6 +188,8 @@ class PlaybackTarget {
       year: item.year,
       preferredMediaSourceId: item.preferredMediaSourceId,
       subtitle: item.overview,
+      externalSubtitleFilePath: '',
+      externalSubtitleDisplayName: '',
       headers: item.streamHeaders,
       container: item.container.trim().isNotEmpty
           ? item.container
@@ -208,6 +220,8 @@ class PlaybackTarget {
       'seriesTitle': seriesTitle,
       'preferredMediaSourceId': preferredMediaSourceId,
       'subtitle': subtitle,
+      'externalSubtitleFilePath': externalSubtitleFilePath,
+      'externalSubtitleDisplayName': externalSubtitleDisplayName,
       'headers': headers,
       'container': container,
       'videoCodec': videoCodec,
@@ -237,6 +251,10 @@ class PlaybackTarget {
       seriesTitle: json['seriesTitle'] as String? ?? '',
       preferredMediaSourceId: json['preferredMediaSourceId'] as String? ?? '',
       subtitle: json['subtitle'] as String? ?? '',
+      externalSubtitleFilePath:
+          json['externalSubtitleFilePath'] as String? ?? '',
+      externalSubtitleDisplayName:
+          json['externalSubtitleDisplayName'] as String? ?? '',
       headers: (json['headers'] as Map<dynamic, dynamic>? ?? const {})
           .map((key, value) => MapEntry('$key', '$value')),
       container: json['container'] as String? ?? '',

@@ -458,12 +458,17 @@ private final class NativePlaybackViewController: AVPlayerViewController {
 
   private func dismissSubtitleSearch(completion: (() -> Void)? = nil) {
     let controller = subtitleSearchController
-    cleanupSubtitleSearchSession()
+    subtitleSearchChannel?.setMethodCallHandler(nil)
+    subtitleSearchChannel = nil
     if let controller {
       controller.dismiss(animated: true) {
+        self.subtitleSearchController = nil
+        self.subtitleSearchEngine = nil
         completion?()
       }
     } else {
+      subtitleSearchController = nil
+      subtitleSearchEngine = nil
       completion?()
     }
   }

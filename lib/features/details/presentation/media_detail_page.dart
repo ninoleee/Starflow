@@ -21,9 +21,11 @@ import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
+import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
+import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -1978,6 +1980,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   bool _isRefreshingMetadata = false;
   List<MediaDetailTarget> _libraryMatchChoices = const [];
   int _selectedLibraryMatchIndex = 0;
+  List<CachedSubtitleSearchOption> _subtitleSearchChoices = const [];
+  int _selectedSubtitleSearchIndex = -1;
+  bool _isSearchingSubtitles = false;
+  String? _busySubtitleResultId;
+  String? _subtitleSearchStatusMessage;
+  String _lastAutoSubtitleSearchKey = '';
   int _detailSessionId = 0;
   _LibraryMatchTaskController? _activeLibraryMatchController;
   final TvFocusMemoryController _tvFocusMemoryController =
@@ -2002,6 +2010,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       _isRefreshingMetadata = false;
       _libraryMatchChoices = const [];
       _selectedLibraryMatchIndex = 0;
+      _subtitleSearchChoices = const [];
+      _selectedSubtitleSearchIndex = -1;
+      _isSearchingSubtitles = false;
+      _busySubtitleResultId = null;
+      _subtitleSearchStatusMessage = null;
+      _lastAutoSubtitleSearchKey = '';
       _startDetailTasks();
     }
   }
@@ -2029,7 +2043,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
         return;
       }
 
-      await _restoreCachedLibraryMatchState(sessionId);
+      await _restoreCachedDetailState(sessionId);
       if (!_isSessionActive(sessionId)) {
         return;
       }
@@ -2077,7 +2091,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
         !controller.cancelled;
   }
 
-  Future<void> _restoreCachedLibraryMatchState(int sessionId) async {
+  Future<void> _restoreCachedDetailState(int sessionId) async {
     final cachedState = await ref
         .read(localStorageCacheRepositoryProvider)
         .loadDetailState(widget.target);
@@ -2085,17 +2099,21 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       return;
     }
     final cachedChoices = cachedState.libraryMatchChoices;
-    if (cachedChoices.length <= 1) {
-      return;
-    }
-    final selectedIndex = cachedState.selectedLibraryMatchIndex.clamp(
-      0,
-      cachedChoices.length - 1,
-    );
     setState(() {
-      _libraryMatchChoices = cachedChoices;
-      _selectedLibraryMatchIndex = selectedIndex;
-      _manualOverrideTarget = cachedChoices[selectedIndex];
+      if (cachedChoices.length > 1) {
+        final selectedIndex = cachedState.selectedLibraryMatchIndex.clamp(
+          0,
+          cachedChoices.length - 1,
+        );
+        _libraryMatchChoices = cachedChoices;
+        _selectedLibraryMatchIndex = selectedIndex;
+        _manualOverrideTarget = cachedChoices[selectedIndex];
+      }
+      _subtitleSearchChoices = cachedState.subtitleSearchChoices;
+      _selectedSubtitleSearchIndex = _normalizeSubtitleSearchIndex(
+        cachedState.selectedSubtitleSearchIndex,
+        choices: cachedState.subtitleSearchChoices,
+      );
     });
   }
 
@@ -2518,11 +2536,492 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     }
   }
 
+  int _normalizeSubtitleSearchIndex(
+    int index, {
+    List<CachedSubtitleSearchOption>? choices,
+  }) {
+    final resolvedChoices = choices ?? _subtitleSearchChoices;
+    if (resolvedChoices.isEmpty) {
+      return -1;
+    }
+    return index.clamp(-1, resolvedChoices.length - 1);
+  }
+
+  int get _currentSubtitleSearchIndex {
+    return _normalizeSubtitleSearchIndex(_selectedSubtitleSearchIndex);
+  }
+
+  CachedSubtitleSearchOption? get _selectedSubtitleSearchChoice {
+    final index = _currentSubtitleSearchIndex;
+    if (index < 0 || index >= _subtitleSearchChoices.length) {
+      return null;
+    }
+    return _subtitleSearchChoices[index];
+  }
+
+  MediaDetailTarget _decorateTargetWithSelectedSubtitle(
+      MediaDetailTarget target) {
+    final playbackTarget = target.playbackTarget;
+    if (playbackTarget == null) {
+      return target;
+    }
+    final selection = _selectedSubtitleSearchChoice?.selection;
+    final decoratedPlayback = playbackTarget.copyWith(
+      externalSubtitleFilePath:
+          selection?.subtitleFilePath?.trim().isNotEmpty == true
+              ? selection!.subtitleFilePath!.trim()
+              : '',
+      externalSubtitleDisplayName:
+          selection?.subtitleFilePath?.trim().isNotEmpty == true
+              ? selection!.displayName.trim()
+              : '',
+    );
+    return target.copyWith(playbackTarget: decoratedPlayback);
+  }
+
+  void _scheduleAutoSubtitleSearchIfNeeded(MediaDetailTarget target) {
+    final playbackTarget = target.playbackTarget;
+    if (playbackTarget == null ||
+        !target.isPlayable ||
+        _isSearchingSubtitles ||
+        _subtitleSearchChoices.isNotEmpty) {
+      return;
+    }
+    final sources = ref.read(appSettingsProvider).onlineSubtitleSources;
+    if (sources.isEmpty) {
+      return;
+    }
+    final query = buildSubtitleSearchQuery(playbackTarget).trim();
+    if (query.isEmpty || _lastAutoSubtitleSearchKey == query) {
+      return;
+    }
+    _lastAutoSubtitleSearchKey = query;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(_searchSubtitlesForDetail(target, showFeedback: false));
+    });
+  }
+
+  Future<void> _searchSubtitlesForDetail(
+    MediaDetailTarget target, {
+    bool showFeedback = true,
+  }) async {
+    final playbackTarget = target.playbackTarget;
+    if (playbackTarget == null || !target.isPlayable) {
+      if (showFeedback && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('当前资源还不能直接播放，暂时无法搜索字幕')),
+        );
+      }
+      return;
+    }
+    if (_isSearchingSubtitles) {
+      return;
+    }
+
+    final sources = ref.read(appSettingsProvider).onlineSubtitleSources;
+    if (sources.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _subtitleSearchStatusMessage = '请先在设置里启用至少一个在线字幕来源';
+        });
+      }
+      if (showFeedback && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请先在设置里启用至少一个在线字幕来源')),
+        );
+      }
+      return;
+    }
+
+    final query = buildSubtitleSearchQuery(playbackTarget).trim();
+    if (query.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _subtitleSearchStatusMessage = '缺少片名信息，暂时无法搜索字幕';
+        });
+      }
+      if (showFeedback && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('缺少片名信息，暂时无法搜索字幕')),
+        );
+      }
+      return;
+    }
+
+    final previousChoices = _subtitleSearchChoices;
+    final previousSelectedId = _selectedSubtitleSearchChoice?.result.id;
+
+    if (mounted) {
+      setState(() {
+        _isSearchingSubtitles = true;
+        _subtitleSearchStatusMessage = null;
+      });
+    }
+
+    try {
+      final results = await ref.read(onlineSubtitleRepositoryProvider).search(
+            query,
+            sources: sources,
+            maxResults: 10,
+          );
+      final nextChoices = _mergeSubtitleSearchChoices(
+        previousChoices: previousChoices,
+        results: results,
+      );
+      final nextSelectedIndex = previousSelectedId == null
+          ? -1
+          : nextChoices
+              .indexWhere((item) => item.result.id == previousSelectedId);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _subtitleSearchChoices = nextChoices;
+        _selectedSubtitleSearchIndex = _normalizeSubtitleSearchIndex(
+          nextSelectedIndex,
+          choices: nextChoices,
+        );
+        _isSearchingSubtitles = false;
+        _subtitleSearchStatusMessage =
+            nextChoices.isEmpty ? '没有找到可直接加载的字幕结果' : null;
+      });
+      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+            seedTarget: widget.target,
+            resolvedTarget: target,
+            subtitleSearchChoices: nextChoices,
+            selectedSubtitleSearchIndex: _selectedSubtitleSearchIndex,
+          );
+      if (!showFeedback || !mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            nextChoices.isEmpty
+                ? '没有找到可直接加载的字幕结果'
+                : '已找到 ${nextChoices.length} 条可用字幕',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isSearchingSubtitles = false;
+        _subtitleSearchStatusMessage = '$error';
+      });
+      if (showFeedback) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('字幕搜索失败：$error')),
+        );
+      }
+    }
+  }
+
+  List<CachedSubtitleSearchOption> _mergeSubtitleSearchChoices({
+    required List<CachedSubtitleSearchOption> previousChoices,
+    required List<SubtitleSearchResult> results,
+  }) {
+    final previousById = <String, CachedSubtitleSearchOption>{
+      for (final choice in previousChoices) choice.result.id: choice,
+    };
+    return results
+        .where((item) => item.canAutoLoad)
+        .take(10)
+        .map(
+          (result) =>
+              previousById[result.id]?.copyWith(result: result) ??
+              CachedSubtitleSearchOption(result: result),
+        )
+        .toList(growable: false);
+  }
+
+  Future<void> _applySelectedSubtitleSearchIndex(
+    MediaDetailTarget target,
+    int index,
+  ) async {
+    if (_isSearchingSubtitles || _subtitleSearchChoices.isEmpty) {
+      return;
+    }
+    final resolvedIndex = _normalizeSubtitleSearchIndex(index);
+    if (resolvedIndex < 0) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _selectedSubtitleSearchIndex = -1;
+      });
+      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+            seedTarget: widget.target,
+            resolvedTarget: target,
+            subtitleSearchChoices: _subtitleSearchChoices,
+            selectedSubtitleSearchIndex: -1,
+          );
+      return;
+    }
+
+    final choice = _subtitleSearchChoices[resolvedIndex];
+    if (choice.selection?.canApply == true) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _selectedSubtitleSearchIndex = resolvedIndex;
+      });
+      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+            seedTarget: widget.target,
+            resolvedTarget: target,
+            subtitleSearchChoices: _subtitleSearchChoices,
+            selectedSubtitleSearchIndex: resolvedIndex,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('播放时会自动加载这条外挂字幕')),
+        );
+      }
+      return;
+    }
+
+    if (_busySubtitleResultId != null) {
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _busySubtitleResultId = choice.result.id;
+        _subtitleSearchStatusMessage = null;
+      });
+    }
+
+    try {
+      final download = await ref
+          .read(onlineSubtitleRepositoryProvider)
+          .download(choice.result);
+      final selection = SubtitleSearchSelection(
+        cachedPath: download.cachedPath,
+        displayName: download.displayName,
+        subtitleFilePath: download.subtitleFilePath,
+      );
+      if (!selection.canApply) {
+        throw StateError('字幕已缓存，但当前结果暂不能直接挂载播放');
+      }
+      final nextChoices = [
+        for (var i = 0; i < _subtitleSearchChoices.length; i++)
+          if (i == resolvedIndex)
+            _subtitleSearchChoices[i].copyWith(selection: selection)
+          else
+            _subtitleSearchChoices[i],
+      ];
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _subtitleSearchChoices = nextChoices;
+        _selectedSubtitleSearchIndex = resolvedIndex;
+        _busySubtitleResultId = null;
+      });
+      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+            seedTarget: widget.target,
+            resolvedTarget: target,
+            subtitleSearchChoices: nextChoices,
+            selectedSubtitleSearchIndex: resolvedIndex,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('字幕已缓存，播放时会自动加载')),
+        );
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _busySubtitleResultId = null;
+        _subtitleSearchStatusMessage = '$error';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('加载字幕失败：$error')),
+      );
+    }
+  }
+
+  String _subtitleSearchChoiceLabel(CachedSubtitleSearchOption choice) {
+    final parts = <String>[
+      if (choice.result.title.trim().isNotEmpty) choice.result.title.trim(),
+      if (choice.result.summaryLine.trim().isNotEmpty)
+        choice.result.summaryLine.trim(),
+      if (choice.selection?.canApply == true) '已缓存',
+    ];
+    return parts.join(' · ');
+  }
+
+  Future<void> _openTelevisionSubtitlePicker(MediaDetailTarget target) async {
+    if (_subtitleSearchChoices.isEmpty || _isSearchingSubtitles) {
+      return;
+    }
+
+    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final selectedIndex = _currentSubtitleSearchIndex;
+    final optionFocusNodes = List<FocusNode>.generate(
+      _subtitleSearchChoices.length + 1,
+      (index) => FocusNode(
+        debugLabel: 'detail-subtitle-option-$index',
+      ),
+    );
+    final closeFocusNode = FocusNode(debugLabel: 'detail-subtitle-close');
+    try {
+      final nextIndex = await showDialog<int>(
+        context: context,
+        builder: (dialogContext) {
+          final dialog = AlertDialog(
+            title: const Text('选择外挂字幕'),
+            content: SizedBox(
+              width: 500,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.58,
+                ),
+                child: FocusTraversalGroup(
+                  policy: OrderedTraversalPolicy(),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: _subtitleSearchChoices.length + 1,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final subtitleIndex = index - 1;
+                      final isNone = subtitleIndex < 0;
+                      final isSelected = subtitleIndex == selectedIndex;
+                      final choice =
+                          isNone ? null : _subtitleSearchChoices[subtitleIndex];
+                      final title = isNone
+                          ? '不加载外挂字幕'
+                          : _subtitleSearchChoiceLabel(choice!);
+                      return TvFocusableAction(
+                        focusNode: optionFocusNodes[index],
+                        focusId: 'detail:subtitle:option:$index',
+                        autofocus: index ==
+                            (selectedIndex + 1).clamp(
+                              0,
+                              optionFocusNodes.length - 1,
+                            ),
+                        onPressed: () =>
+                            Navigator.of(dialogContext).pop(subtitleIndex),
+                        borderRadius: BorderRadius.circular(18),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? Colors.white.withValues(alpha: 0.14)
+                                : Colors.white.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: isSelected
+                                  ? Colors.white.withValues(alpha: 0.4)
+                                  : Colors.white.withValues(alpha: 0.08),
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  isSelected
+                                      ? Icons.check_circle_rounded
+                                      : Icons.radio_button_unchecked_rounded,
+                                  color: Colors.white,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        title,
+                                        maxLines: 3,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      if (choice != null &&
+                                          choice.result.detailLine
+                                              .trim()
+                                              .isNotEmpty)
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(top: 4),
+                                          child: Text(
+                                            choice.result.detailLine,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Color(0xFF9DB0CF),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+            actions: [
+              TvAdaptiveButton(
+                label: '关闭',
+                icon: Icons.close_rounded,
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                focusNode: closeFocusNode,
+                variant: TvButtonVariant.outlined,
+                focusId: 'detail:subtitle:close',
+              ),
+            ],
+          );
+          return wrapTelevisionDialogBackHandling(
+            enabled: isTelevision,
+            dialogContext: dialogContext,
+            inputFocusNodes: const <FocusNode>[],
+            contentFocusNodes: optionFocusNodes,
+            actionFocusNodes: [closeFocusNode],
+            child: dialog,
+          );
+        },
+      );
+      if (!mounted || nextIndex == null || nextIndex == selectedIndex) {
+        return;
+      }
+      await _applySelectedSubtitleSearchIndex(target, nextIndex);
+    } finally {
+      for (final focusNode in optionFocusNodes) {
+        focusNode.dispose();
+      }
+      closeFocusNode.dispose();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final seedTarget = _manualOverrideTarget ?? widget.target;
     final targetAsync = ref.watch(enrichedDetailTargetProvider(seedTarget));
     final target = targetAsync.valueOrNull ?? seedTarget;
+    final playbackTargetDecorated = _decorateTargetWithSelectedSubtitle(target);
+    _scheduleAutoSubtitleSearchIfNeeded(target);
     final seriesAsync = ref.watch(seriesBrowserProvider(target));
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
 
@@ -2550,7 +3049,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
               child: ListView(
                 padding: EdgeInsets.zero,
                 children: [
-                  _HeroSection(target: target),
+                  _HeroSection(target: playbackTargetDecorated),
                   Padding(
                     padding: EdgeInsets.zero,
                     child: Column(
@@ -2744,6 +3243,158 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                               },
                                       ),
                                     ),
+                                ],
+                                if (target.isPlayable) ...[
+                                  const SizedBox(height: 12),
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: isTelevision
+                                        ? TvAdaptiveButton(
+                                            label: _isSearchingSubtitles
+                                                ? '搜索字幕中...'
+                                                : (_subtitleSearchChoices
+                                                        .isEmpty
+                                                    ? '搜索字幕'
+                                                    : '刷新字幕'),
+                                            icon: Icons.subtitles_rounded,
+                                            focusId:
+                                                'detail:resource:search-subtitle',
+                                            onPressed: _isSearchingSubtitles
+                                                ? null
+                                                : () =>
+                                                    _searchSubtitlesForDetail(
+                                                      target,
+                                                    ),
+                                            variant: TvButtonVariant.text,
+                                          )
+                                        : TextButton.icon(
+                                            onPressed: _isSearchingSubtitles
+                                                ? null
+                                                : () =>
+                                                    _searchSubtitlesForDetail(
+                                                      target,
+                                                    ),
+                                            icon: _isSearchingSubtitles
+                                                ? const SizedBox(
+                                                    width: 14,
+                                                    height: 14,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                                  )
+                                                : const Icon(
+                                                    Icons.subtitles_rounded,
+                                                    size: 16,
+                                                  ),
+                                            label: Text(
+                                              _isSearchingSubtitles
+                                                  ? '搜索字幕中...'
+                                                  : (_subtitleSearchChoices
+                                                          .isEmpty
+                                                      ? '搜索字幕'
+                                                      : '刷新字幕'),
+                                            ),
+                                            style: TextButton.styleFrom(
+                                              foregroundColor: Colors.white,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 0,
+                                                vertical: 0,
+                                              ),
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                            ),
+                                          ),
+                                  ),
+                                  if (_subtitleSearchChoices.isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    const _InfoLabel('外挂字幕'),
+                                    const SizedBox(height: 8),
+                                    if (isTelevision)
+                                      TvSelectionTile(
+                                        title: '外挂字幕',
+                                        value: _currentSubtitleSearchIndex < 0
+                                            ? '不加载外挂字幕'
+                                            : _subtitleSearchChoiceLabel(
+                                                _subtitleSearchChoices[
+                                                    _currentSubtitleSearchIndex],
+                                              ),
+                                        onPressed: _busySubtitleResultId != null
+                                            ? null
+                                            : () =>
+                                                _openTelevisionSubtitlePicker(
+                                                  target,
+                                                ),
+                                        focusId:
+                                            'detail:resource:subtitle-selector',
+                                      )
+                                    else
+                                      DropdownButtonHideUnderline(
+                                        child: DropdownButton<int>(
+                                          value: _currentSubtitleSearchIndex,
+                                          isExpanded: true,
+                                          dropdownColor:
+                                              const Color(0xFF142235),
+                                          iconEnabledColor: Colors.white70,
+                                          style: const TextStyle(
+                                            color: Color(0xFFDCE6F8),
+                                            fontSize: 14,
+                                            height: 1.35,
+                                          ),
+                                          items: [
+                                            const DropdownMenuItem<int>(
+                                              value: -1,
+                                              child: Text('不加载外挂字幕'),
+                                            ),
+                                            ...List.generate(
+                                              _subtitleSearchChoices.length,
+                                              (i) => DropdownMenuItem<int>(
+                                                value: i,
+                                                child: Text(
+                                                  _subtitleSearchChoiceLabel(
+                                                    _subtitleSearchChoices[i],
+                                                  ),
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                          onChanged:
+                                              (_busySubtitleResultId != null ||
+                                                      _isSearchingSubtitles)
+                                                  ? null
+                                                  : (i) {
+                                                      if (i == null) {
+                                                        return;
+                                                      }
+                                                      unawaited(
+                                                        _applySelectedSubtitleSearchIndex(
+                                                          target,
+                                                          i,
+                                                        ),
+                                                      );
+                                                    },
+                                        ),
+                                      ),
+                                  ],
+                                  if (_subtitleSearchStatusMessage
+                                          ?.trim()
+                                          .isNotEmpty ==
+                                      true) ...[
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      _subtitleSearchStatusMessage!,
+                                      style: const TextStyle(
+                                        color: Color(0xFF9DB0CF),
+                                        fontSize: 13,
+                                        height: 1.45,
+                                      ),
+                                    ),
+                                  ],
                                 ],
                                 if (_canShowManualResourceMatchButton(
                                     target)) ...[
@@ -3648,7 +4299,7 @@ class _EpisodeCard extends ConsumerWidget {
         ref.watch(playbackEntryForMediaItemProvider(item)).valueOrNull;
     final badgeText = _episodeBadgeText(item, playbackEntry);
     final summary = _episodeSummary(item);
-    final onOpen = item.isPlayable
+    final onPlay = item.isPlayable
         ? () {
             context.pushNamed(
               'player',
@@ -3661,110 +4312,136 @@ class _EpisodeCard extends ConsumerWidget {
             );
           }
         : null;
-    return TvFocusableAction(
-      onPressed: onOpen,
-      focusId: focusId,
-      autofocus: autofocus,
-      borderRadius: BorderRadius.circular(24),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.06),
-          ),
+    void onOpenDetail() {
+      context.pushNamed(
+        'detail',
+        extra: _episodeToDetailTarget(
+          item,
+          seriesTarget: seriesTarget,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AspectRatio(
-              aspectRatio: 16 / 9,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  _EpisodeArtwork(item: item),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          Colors.black.withValues(alpha: 0.18),
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.12),
-                          Colors.black.withValues(alpha: 0.58),
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomCenter,
-                        stops: const [0, 0.34, 0.62, 1],
+      );
+    }
+
+    final effectiveFocusId = focusId?.trim() ?? '';
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.06),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TvFocusableAction(
+            onPressed: onPlay,
+            focusId: effectiveFocusId.isEmpty ? null : '$effectiveFocusId:play',
+            autofocus: autofocus && onPlay != null,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            child: ClipRRect(
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _EpisodeArtwork(item: item),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.black.withValues(alpha: 0.18),
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.12),
+                            Colors.black.withValues(alpha: 0.58),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomCenter,
+                          stops: const [0, 0.34, 0.62, 1],
+                        ),
                       ),
                     ),
-                  ),
-                  Positioned(
-                    left: 14,
-                    right: 46,
-                    top: 14,
-                    child: Text(
-                      item.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        height: 1.25,
-                        shadows: [
-                          Shadow(
-                            color: Color(0xAA000000),
-                            blurRadius: 16,
-                            offset: Offset(0, 3),
+                    Positioned(
+                      left: 14,
+                      right: 46,
+                      top: 14,
+                      child: Text(
+                        item.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          height: 1.25,
+                          shadows: [
+                            Shadow(
+                              color: Color(0xAA000000),
+                              blurRadius: 16,
+                              offset: Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 12,
+                      bottom: 12,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 214),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
                           ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 12,
-                    bottom: 12,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 214),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.46),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          badgeText,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.46),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            badgeText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                  Positioned(
-                    right: 12,
-                    bottom: 12,
-                    child: Icon(
-                      item.isPlayable
-                          ? Icons.play_circle_fill_rounded
-                          : Icons.lock_outline_rounded,
-                      color: item.isPlayable
-                          ? Colors.white
-                          : Colors.white.withValues(alpha: 0.42),
-                      size: 28,
+                    Positioned(
+                      right: 12,
+                      bottom: 12,
+                      child: Icon(
+                        item.isPlayable
+                            ? Icons.play_circle_fill_rounded
+                            : Icons.lock_outline_rounded,
+                        color: item.isPlayable
+                            ? Colors.white
+                            : Colors.white.withValues(alpha: 0.42),
+                        size: 28,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-            Expanded(
+          ),
+          Expanded(
+            child: TvFocusableAction(
+              onPressed: onOpenDetail,
+              focusId:
+                  effectiveFocusId.isEmpty ? null : '$effectiveFocusId:detail',
+              autofocus: autofocus && onPlay == null,
+              borderRadius: const BorderRadius.vertical(
+                bottom: Radius.circular(24),
+              ),
+              visualStyle: TvFocusVisualStyle.subtle,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
                 child: Column(
@@ -3782,12 +4459,31 @@ class _EpisodeCard extends ConsumerWidget {
                         ),
                       ),
                     ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: const [
+                        Icon(
+                          Icons.open_in_new_rounded,
+                          size: 14,
+                          color: Color(0xFF9DB0CF),
+                        ),
+                        SizedBox(width: 6),
+                        Text(
+                          '查看单集详情',
+                          style: TextStyle(
+                            color: Color(0xFF9DB0CF),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -3902,7 +4598,14 @@ PlaybackTarget? _resolvePrimaryPlaybackTarget(
   required bool preferResume,
 }) {
   if (resumeEntry != null && preferResume) {
-    return resumeEntry.target;
+    final targetSubtitle = target.playbackTarget;
+    if (targetSubtitle == null) {
+      return resumeEntry.target;
+    }
+    return resumeEntry.target.copyWith(
+      externalSubtitleFilePath: targetSubtitle.externalSubtitleFilePath,
+      externalSubtitleDisplayName: targetSubtitle.externalSubtitleDisplayName,
+    );
   }
   return target.playbackTarget;
 }
@@ -3922,6 +4625,64 @@ PlaybackTarget _itemToPlaybackTarget(
   return base.copyWith(
     seriesId: seriesTarget.itemId,
     seriesTitle: seriesTarget.title,
+  );
+}
+
+MediaDetailTarget _episodeToDetailTarget(
+  MediaItem item, {
+  required MediaDetailTarget seriesTarget,
+}) {
+  final seriesQuery = seriesTarget.searchQuery.trim().isNotEmpty
+      ? seriesTarget.searchQuery.trim()
+      : seriesTarget.title.trim();
+  final target = MediaDetailTarget.fromMediaItem(
+    item,
+    searchQuery: seriesQuery.isNotEmpty ? seriesQuery : item.title,
+  );
+  final useOwnPoster = target.posterUrl.trim().isNotEmpty;
+  final useOwnBackdrop = target.backdropUrl.trim().isNotEmpty;
+  final useOwnLogo = target.logoUrl.trim().isNotEmpty;
+  final useOwnBanner = target.bannerUrl.trim().isNotEmpty;
+  final useOwnExtraBackdrops = target.extraBackdropUrls.isNotEmpty;
+  return target.copyWith(
+    playbackTarget: item.isPlayable
+        ? _itemToPlaybackTarget(item, seriesTarget: seriesTarget)
+        : target.playbackTarget,
+    posterUrl: useOwnPoster ? target.posterUrl : seriesTarget.posterUrl,
+    posterHeaders:
+        useOwnPoster ? target.posterHeaders : seriesTarget.posterHeaders,
+    backdropUrl: useOwnBackdrop ? target.backdropUrl : seriesTarget.backdropUrl,
+    backdropHeaders:
+        useOwnBackdrop ? target.backdropHeaders : seriesTarget.backdropHeaders,
+    logoUrl: useOwnLogo ? target.logoUrl : seriesTarget.logoUrl,
+    logoHeaders: useOwnLogo ? target.logoHeaders : seriesTarget.logoHeaders,
+    bannerUrl: useOwnBanner ? target.bannerUrl : seriesTarget.bannerUrl,
+    bannerHeaders:
+        useOwnBanner ? target.bannerHeaders : seriesTarget.bannerHeaders,
+    extraBackdropUrls: useOwnExtraBackdrops
+        ? target.extraBackdropUrls
+        : seriesTarget.extraBackdropUrls,
+    extraBackdropHeaders: useOwnExtraBackdrops
+        ? target.extraBackdropHeaders
+        : seriesTarget.extraBackdropHeaders,
+    doubanId: target.doubanId.trim().isNotEmpty
+        ? target.doubanId
+        : seriesTarget.doubanId,
+    imdbId:
+        target.imdbId.trim().isNotEmpty ? target.imdbId : seriesTarget.imdbId,
+    tmdbId:
+        target.tmdbId.trim().isNotEmpty ? target.tmdbId : seriesTarget.tmdbId,
+    tvdbId:
+        target.tvdbId.trim().isNotEmpty ? target.tvdbId : seriesTarget.tvdbId,
+    wikidataId: target.wikidataId.trim().isNotEmpty
+        ? target.wikidataId
+        : seriesTarget.wikidataId,
+    tmdbSetId: target.tmdbSetId.trim().isNotEmpty
+        ? target.tmdbSetId
+        : seriesTarget.tmdbSetId,
+    providerIds: target.providerIds.isNotEmpty
+        ? target.providerIds
+        : seriesTarget.providerIds,
   );
 }
 

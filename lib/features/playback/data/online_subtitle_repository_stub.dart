@@ -10,7 +10,11 @@ class UnsupportedOnlineSubtitleRepository implements OnlineSubtitleRepository {
   const UnsupportedOnlineSubtitleRepository();
 
   @override
-  Future<List<SubtitleSearchResult>> search(String query) {
+  Future<List<SubtitleSearchResult>> search(
+    String query, {
+    List<OnlineSubtitleSource> sources = const [OnlineSubtitleSource.assrt],
+    int maxResults = 0,
+  }) {
     throw UnsupportedError('当前平台暂不支持应用内在线字幕搜索。');
   }
 

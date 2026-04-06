@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
@@ -25,9 +24,17 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
   Future<Directory>? _cacheDirectoryFuture;
 
   @override
-  Future<List<SubtitleSearchResult>> search(String query) async {
+  Future<List<SubtitleSearchResult>> search(
+    String query, {
+    List<OnlineSubtitleSource> sources = const [OnlineSubtitleSource.assrt],
+    int maxResults = 0,
+  }) async {
     final normalizedQuery = query.trim();
     if (normalizedQuery.isEmpty) {
+      return const [];
+    }
+    final enabledSources = sources.toSet();
+    if (!enabledSources.contains(OnlineSubtitleSource.assrt)) {
       return const [];
     }
 
@@ -43,7 +50,11 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
       throw StateError('字幕搜索失败：HTTP ${response.statusCode}');
     }
 
-    return parseAssrtSearchHtml(response.body);
+    final results = parseAssrtSearchHtml(response.body);
+    if (maxResults <= 0 || results.length <= maxResults) {
+      return results;
+    }
+    return results.take(maxResults).toList(growable: false);
   }
 
   @override
@@ -74,7 +85,8 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
       );
     }
 
-    final response = await _client.get(Uri.parse(normalizedUrl), headers: const {
+    final response =
+        await _client.get(Uri.parse(normalizedUrl), headers: const {
       'Accept': '*/*',
       'Referer': 'https://assrt.net/',
     });
@@ -164,12 +176,14 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
           : '评分 ${ratingValue.trim()}${ratingCount > 0 ? ' · $ratingCount 人' : ''}';
       final packageName = _extractPackageName(downloadUrl);
       final packageKind = _resolvePackageKind(packageName);
-      final id = RegExp(r'/download/(\d+)/').firstMatch(downloadUrl)?.group(1) ??
-          _stableHash(downloadUrl);
+      final id =
+          RegExp(r'/download/(\d+)/').firstMatch(downloadUrl)?.group(1) ??
+              _stableHash(downloadUrl);
 
       results.add(
         SubtitleSearchResult(
           id: id,
+          source: OnlineSubtitleSource.assrt,
           providerLabel: 'ASSRT',
           title: title,
           version: version,
@@ -188,8 +202,7 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
     }
 
     results.sort((left, right) {
-      final supportOrder =
-          _packageKindSortValue(left.packageKind).compareTo(
+      final supportOrder = _packageKindSortValue(left.packageKind).compareTo(
         _packageKindSortValue(right.packageKind),
       );
       if (supportOrder != 0) {
@@ -311,9 +324,7 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
       ),
     );
     final content = selected.content;
-    final bytes = content is List<int>
-        ? content
-        : utf8.encode('$content');
+    final bytes = List<int>.from(content);
     await outputFile.writeAsBytes(bytes, flush: true);
     return outputFile;
   }
@@ -431,10 +442,7 @@ int _subtitleCandidateScore({
 }
 
 String _normalizeCandidateText(String value) {
-  return value
-      .trim()
-      .toLowerCase()
-      .replaceAll(
+  return value.trim().toLowerCase().replaceAll(
         RegExp(r'[\s\-_.,:;!?/\\|()\[\]{}<>《》【】"“”·]+'),
         '',
       );

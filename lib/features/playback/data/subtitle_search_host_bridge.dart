@@ -4,7 +4,8 @@ import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 class SubtitleSearchHostBridge {
   SubtitleSearchHostBridge._();
 
-  static const MethodChannel _channel = MethodChannel('starflow/subtitle_search');
+  static const MethodChannel _channel =
+      MethodChannel('starflow/subtitle_search');
 
   static Future<bool> finishSelection(SubtitleSearchSelection selection) async {
     try {

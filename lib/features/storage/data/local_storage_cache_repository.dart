@@ -5,6 +5,7 @@ import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 final localStorageCacheRepositoryProvider =
@@ -71,6 +72,8 @@ class LocalStorageCacheRepository {
           target: record.target,
           libraryMatchChoices: record.libraryMatchChoices,
           selectedLibraryMatchIndex: record.selectedLibraryMatchIndex,
+          subtitleSearchChoices: record.subtitleSearchChoices,
+          selectedSubtitleSearchIndex: record.selectedSubtitleSearchIndex,
           metadataRefreshStatus: record.metadataRefreshStatus,
         );
       }
@@ -96,6 +99,8 @@ class LocalStorageCacheRepository {
     DetailMetadataRefreshStatus? metadataRefreshStatus,
     List<MediaDetailTarget>? libraryMatchChoices,
     int? selectedLibraryMatchIndex,
+    List<CachedSubtitleSearchOption>? subtitleSearchChoices,
+    int? selectedSubtitleSearchIndex,
   }) async {
     final lookupKeys = {
       ...buildLookupKeys(seedTarget),
@@ -131,6 +136,17 @@ class LocalStorageCacheRepository {
                 existing?.selectedLibraryMatchIndex ??
                 0)
             .clamp(0, nextLibraryMatchChoices.length - 1);
+    final nextSubtitleSearchChoices = subtitleSearchChoices != null
+        ? List<CachedSubtitleSearchOption>.unmodifiable(subtitleSearchChoices)
+        : existing?.subtitleSearchChoices ??
+            const <CachedSubtitleSearchOption>[];
+    final normalizedSelectedSubtitleSearchIndex =
+        nextSubtitleSearchChoices.isEmpty
+            ? -1
+            : (selectedSubtitleSearchIndex ??
+                    existing?.selectedSubtitleSearchIndex ??
+                    -1)
+                .clamp(-1, nextSubtitleSearchChoices.length - 1);
 
     final nextRecord = _CachedDetailRecord(
       id: recordId,
@@ -139,6 +155,8 @@ class LocalStorageCacheRepository {
       target: resolvedTarget,
       libraryMatchChoices: nextLibraryMatchChoices,
       selectedLibraryMatchIndex: normalizedSelectedLibraryMatchIndex,
+      subtitleSearchChoices: nextSubtitleSearchChoices,
+      selectedSubtitleSearchIndex: normalizedSelectedSubtitleSearchIndex,
       metadataRefreshStatus: metadataRefreshStatus ??
           existing?.metadataRefreshStatus ??
           DetailMetadataRefreshStatus.never,
@@ -450,6 +468,8 @@ class LocalStorageCacheRepository {
           List<MediaDetailTarget>.unmodifiable(normalizedChoices),
       selectedLibraryMatchIndex:
           normalizedChoices.isEmpty ? 0 : nextSelectedIndex,
+      subtitleSearchChoices: record.subtitleSearchChoices,
+      selectedSubtitleSearchIndex: record.selectedSubtitleSearchIndex,
       metadataRefreshStatus: record.metadataRefreshStatus,
     );
   }
@@ -460,12 +480,16 @@ class CachedDetailState {
     required this.target,
     this.libraryMatchChoices = const [],
     this.selectedLibraryMatchIndex = 0,
+    this.subtitleSearchChoices = const [],
+    this.selectedSubtitleSearchIndex = -1,
     this.metadataRefreshStatus = DetailMetadataRefreshStatus.never,
   });
 
   final MediaDetailTarget target;
   final List<MediaDetailTarget> libraryMatchChoices;
   final int selectedLibraryMatchIndex;
+  final List<CachedSubtitleSearchOption> subtitleSearchChoices;
+  final int selectedSubtitleSearchIndex;
   final DetailMetadataRefreshStatus metadataRefreshStatus;
 }
 
@@ -673,6 +697,8 @@ class _CachedDetailRecord {
     required this.target,
     this.libraryMatchChoices = const [],
     this.selectedLibraryMatchIndex = 0,
+    this.subtitleSearchChoices = const [],
+    this.selectedSubtitleSearchIndex = -1,
     this.metadataRefreshStatus = DetailMetadataRefreshStatus.never,
   });
 
@@ -682,6 +708,8 @@ class _CachedDetailRecord {
   final MediaDetailTarget target;
   final List<MediaDetailTarget> libraryMatchChoices;
   final int selectedLibraryMatchIndex;
+  final List<CachedSubtitleSearchOption> subtitleSearchChoices;
+  final int selectedSubtitleSearchIndex;
   final DetailMetadataRefreshStatus metadataRefreshStatus;
 
   Map<String, dynamic> toJson() {
@@ -693,6 +721,9 @@ class _CachedDetailRecord {
       'libraryMatchChoices':
           libraryMatchChoices.map((item) => item.toJson()).toList(),
       'selectedLibraryMatchIndex': selectedLibraryMatchIndex,
+      'subtitleSearchChoices':
+          subtitleSearchChoices.map((item) => item.toJson()).toList(),
+      'selectedSubtitleSearchIndex': selectedSubtitleSearchIndex,
       'metadataRefreshStatus': metadataRefreshStatus.name,
     };
   }
@@ -720,6 +751,17 @@ class _CachedDetailRecord {
               .toList(growable: false),
       selectedLibraryMatchIndex:
           (json['selectedLibraryMatchIndex'] as num?)?.toInt() ?? 0,
+      subtitleSearchChoices:
+          (json['subtitleSearchChoices'] as List<dynamic>? ?? const [])
+              .whereType<Map>()
+              .map(
+                (item) => CachedSubtitleSearchOption.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .toList(growable: false),
+      selectedSubtitleSearchIndex:
+          (json['selectedSubtitleSearchIndex'] as num?)?.toInt() ?? -1,
       metadataRefreshStatus: DetailMetadataRefreshStatusX.fromJsonValue(
         json['metadataRefreshStatus'],
       ),

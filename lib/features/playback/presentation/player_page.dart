@@ -72,13 +72,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Duration _latestDuration = Duration.zero;
   DateTime? _lastProgressPersistedAt;
   Duration _lastPersistedPosition = Duration.zero;
+  late final StateController<bool> _playbackPerformanceModeController;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    ref.read(playbackPerformanceModeProvider.notifier).state =
-        ref.read(appSettingsProvider).highPerformanceModeEnabled;
+    _playbackPerformanceModeController = ref.read(
+      playbackPerformanceModeProvider.notifier,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _playbackPerformanceModeController.state =
+          ref.read(appSettingsProvider).highPerformanceModeEnabled;
+    });
     unawaited(_bindPictureInPictureSupport());
     _initialize();
   }
@@ -86,7 +95,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    ref.read(playbackPerformanceModeProvider.notifier).state = false;
+    Future<void>(() {
+      _playbackPerformanceModeController.state = false;
+    });
     unawaited(_persistPlaybackProgress(force: true));
     unawaited(_teardownPictureInPicture());
     unawaited(_playerErrorSubscription?.cancel());
@@ -256,6 +267,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         timeout: Duration(seconds: timeoutSeconds),
       );
       await _applyStartupPlaybackPreferences(playback.player);
+      await _applyStartupExternalSubtitle(playback.player, resolvedTarget);
 
       if (!mounted) {
         await playback.errorSubscription.cancel();
@@ -786,6 +798,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     Player player,
     String path, {
     String? displayName,
+    bool showFeedback = true,
   }) async {
     final resolvedPath = path.trim();
     if (resolvedPath.isEmpty) {
@@ -803,14 +816,32 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       ),
       failureMessage: '加载字幕失败',
     );
-    _showMessage('外挂字幕已加载');
+    if (showFeedback) {
+      _showMessage('外挂字幕已加载');
+    }
+  }
+
+  Future<void> _applyStartupExternalSubtitle(
+    Player player,
+    PlaybackTarget target,
+  ) async {
+    final subtitlePath = target.externalSubtitleFilePath.trim();
+    if (subtitlePath.isEmpty) {
+      return;
+    }
+    await _applyExternalSubtitlePath(
+      player,
+      subtitlePath,
+      displayName: target.externalSubtitleDisplayName,
+      showFeedback: false,
+    );
   }
 
   Future<void> _showOnlineSubtitleSearch(
     Player player,
     PlaybackTarget target,
   ) async {
-    final query = _buildSubtitleSearchQuery(target);
+    final query = buildSubtitleSearchQuery(target);
     if (query.trim().isEmpty) {
       _showMessage('缺少片名信息，暂时无法搜索字幕');
       return;
@@ -826,6 +857,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       ).toLocation(),
     );
     if (selection == null) {
+      return;
+    }
+    if (!mounted) {
       return;
     }
     if (!selection.canApply) {
@@ -1553,11 +1587,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
               _selectAudioTrack(player, tracks, current),
           onAdjustSubtitleDelay: () => _openSubtitleDelayDialog(player),
           onLoadExternalSubtitle: () => _loadExternalSubtitle(player),
-          onSearchSubtitlesOnline: () =>
-              _showOnlineSubtitleSearch(
-                player,
-                _resolvedTarget ?? widget.target,
-              ),
+          onSearchSubtitlesOnline: () => _showOnlineSubtitleSearch(
+            player,
+            _resolvedTarget ?? widget.target,
+          ),
           onConfigureSeriesSkip: () => _configureSeriesSkipPreference(player),
         );
       },
@@ -2220,19 +2253,6 @@ String _formatSeriesSkipPreferenceLabel(
       '片尾 ${_formatClockDuration(preference.outroDuration)}',
   ];
   return parts.join(' · ');
-}
-
-String _buildSubtitleSearchQuery(PlaybackTarget target) {
-  final baseTitle = target.seriesTitle.trim().isNotEmpty
-      ? target.seriesTitle.trim()
-      : target.title.trim();
-  final parts = <String>[
-    if (baseTitle.isNotEmpty) baseTitle,
-    if (target.seasonNumber != null && target.episodeNumber != null)
-      'S${target.seasonNumber!.toString().padLeft(2, '0')}E${target.episodeNumber!.toString().padLeft(2, '0')}',
-    if (!target.isEpisode && target.year > 0) '${target.year}',
-  ];
-  return parts.join(' ');
 }
 
 String _formatClockDuration(Duration value) {

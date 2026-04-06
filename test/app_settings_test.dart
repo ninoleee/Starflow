@@ -13,6 +13,7 @@ void main() {
       'playbackDefaultSpeed': 1.25,
       'playbackSubtitlePreference': 'off',
       'playbackSubtitleScale': 'large',
+      'onlineSubtitleSources': ['assrt'],
       'playbackBackgroundPlaybackEnabled': false,
       'playbackEngine': 'systemPlayer',
       'playbackDecodeMode': 'softwarePreferred',
@@ -28,6 +29,7 @@ void main() {
       PlaybackSubtitlePreference.off,
     );
     expect(settings.playbackSubtitleScale, PlaybackSubtitleScale.large);
+    expect(settings.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
     expect(settings.playbackBackgroundPlaybackEnabled, isFalse);
     expect(settings.playbackEngine, PlaybackEngine.systemPlayer);
     expect(
@@ -41,6 +43,7 @@ void main() {
     expect(settings.toJson()['playbackDefaultSpeed'], 1.25);
     expect(settings.toJson()['playbackSubtitlePreference'], 'off');
     expect(settings.toJson()['playbackSubtitleScale'], 'large');
+    expect(settings.toJson()['onlineSubtitleSources'], ['assrt']);
     expect(settings.toJson()['playbackBackgroundPlaybackEnabled'], isFalse);
     expect(settings.toJson()['playbackEngine'], 'systemPlayer');
     expect(settings.toJson()['playbackDecodeMode'], 'softwarePreferred');
@@ -65,6 +68,7 @@ void main() {
       PlaybackSubtitlePreference.auto,
     );
     expect(settings.playbackSubtitleScale, PlaybackSubtitleScale.standard);
+    expect(settings.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
     expect(settings.playbackBackgroundPlaybackEnabled, isTrue);
     expect(settings.playbackEngine, PlaybackEngine.embeddedMpv);
     expect(settings.playbackDecodeMode, PlaybackDecodeMode.auto);
@@ -150,6 +154,14 @@ void main() {
         'quarkSaveFolderId': '123',
         'quarkSaveFolderPath': '/影视',
         'syncDeleteQuarkEnabled': true,
+        'syncDeleteQuarkWebDavDirectories': [
+          {
+            'sourceId': 'nas-main',
+            'sourceName': '家庭 NAS',
+            'directoryId': 'https://nas.example.com/dav/movies/',
+            'directoryLabel': 'nas.example.com/dav/movies/',
+          },
+        ],
         'smartStrmWebhookUrl': 'http://localhost:8024/webhook/abc',
         'smartStrmTaskName': 'movie_task',
         'refreshMediaSourceIds': ['emby-a', 'webdav-b'],
@@ -161,6 +173,19 @@ void main() {
     expect(settings.networkStorage.quarkSaveFolderId, '123');
     expect(settings.networkStorage.quarkSaveFolderPath, '/影视');
     expect(settings.networkStorage.syncDeleteQuarkEnabled, isTrue);
+    expect(
+      settings.networkStorage.syncDeleteQuarkWebDavDirectories,
+      hasLength(1),
+    );
+    expect(
+      settings.networkStorage.syncDeleteQuarkWebDavDirectories.single.sourceId,
+      'nas-main',
+    );
+    expect(
+      settings
+          .networkStorage.syncDeleteQuarkWebDavDirectories.single.directoryId,
+      'https://nas.example.com/dav/movies/',
+    );
     expect(
       settings.networkStorage.smartStrmWebhookUrl,
       'http://localhost:8024/webhook/abc',
@@ -177,6 +202,17 @@ void main() {
     expect(json['quarkSaveFolderId'], '123');
     expect(json['quarkSaveFolderPath'], '/影视');
     expect(json['syncDeleteQuarkEnabled'], isTrue);
+    expect(
+      json['syncDeleteQuarkWebDavDirectories'],
+      [
+        {
+          'sourceId': 'nas-main',
+          'sourceName': '家庭 NAS',
+          'directoryId': 'https://nas.example.com/dav/movies/',
+          'directoryLabel': 'nas.example.com/dav/movies/',
+        },
+      ],
+    );
     expect(json['smartStrmWebhookUrl'], 'http://localhost:8024/webhook/abc');
     expect(json['smartStrmTaskName'], 'movie_task');
     expect(json['refreshMediaSourceIds'], ['emby-a', 'webdav-b']);
@@ -190,6 +226,7 @@ void main() {
     expect(settings.networkStorage.quarkSaveFolderId, '0');
     expect(settings.networkStorage.quarkSaveFolderPath, '/');
     expect(settings.networkStorage.syncDeleteQuarkEnabled, isFalse);
+    expect(settings.networkStorage.syncDeleteQuarkWebDavDirectories, isEmpty);
     expect(settings.networkStorage.smartStrmWebhookUrl, isEmpty);
     expect(settings.networkStorage.smartStrmTaskName, isEmpty);
     expect(settings.networkStorage.refreshMediaSourceIds, isEmpty);

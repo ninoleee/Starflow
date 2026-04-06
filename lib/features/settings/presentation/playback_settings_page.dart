@@ -12,6 +12,7 @@ class PlaybackSettingsPage extends ConsumerStatefulWidget {
     required this.initialDefaultSpeed,
     required this.initialSubtitlePreference,
     required this.initialSubtitleScale,
+    required this.initialOnlineSubtitleSources,
     required this.initialBackgroundPlaybackEnabled,
     required this.initialPlaybackEngine,
     required this.initialPlaybackDecodeMode,
@@ -21,6 +22,7 @@ class PlaybackSettingsPage extends ConsumerStatefulWidget {
   final double initialDefaultSpeed;
   final PlaybackSubtitlePreference initialSubtitlePreference;
   final PlaybackSubtitleScale initialSubtitleScale;
+  final List<OnlineSubtitleSource> initialOnlineSubtitleSources;
   final bool initialBackgroundPlaybackEnabled;
   final PlaybackEngine initialPlaybackEngine;
   final PlaybackDecodeMode initialPlaybackDecodeMode;
@@ -37,6 +39,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   late double _draftPlaybackSpeed;
   late PlaybackSubtitlePreference _draftSubtitlePreference;
   late PlaybackSubtitleScale _draftSubtitleScale;
+  late List<OnlineSubtitleSource> _draftOnlineSubtitleSources;
   late bool _draftBackgroundPlaybackEnabled;
   late PlaybackEngine _draftPlaybackEngine;
   late PlaybackDecodeMode _draftPlaybackDecodeMode;
@@ -51,6 +54,8 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     _draftPlaybackSpeed = widget.initialDefaultSpeed.clamp(0.75, 2.0);
     _draftSubtitlePreference = widget.initialSubtitlePreference;
     _draftSubtitleScale = widget.initialSubtitleScale;
+    _draftOnlineSubtitleSources =
+        widget.initialOnlineSubtitleSources.toList(growable: false);
     _draftBackgroundPlaybackEnabled = widget.initialBackgroundPlaybackEnabled;
     _draftPlaybackEngine = widget.initialPlaybackEngine;
     _draftPlaybackDecodeMode = widget.initialPlaybackDecodeMode;
@@ -73,6 +78,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
           defaultSpeed: _draftPlaybackSpeed,
           subtitlePreference: _draftSubtitlePreference,
           subtitleScale: _draftSubtitleScale,
+          onlineSubtitleSources: _draftOnlineSubtitleSources,
           backgroundPlaybackEnabled: _draftBackgroundPlaybackEnabled,
           playbackEngine: _draftPlaybackEngine,
           playbackDecodeMode: _draftPlaybackDecodeMode,
@@ -88,6 +94,10 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
         (_draftPlaybackSpeed - widget.initialDefaultSpeed).abs() > 0.0001 ||
         _draftSubtitlePreference != widget.initialSubtitlePreference ||
         _draftSubtitleScale != widget.initialSubtitleScale ||
+        !_sameSubtitleSources(
+          _draftOnlineSubtitleSources,
+          widget.initialOnlineSubtitleSources,
+        ) ||
         _draftBackgroundPlaybackEnabled !=
             widget.initialBackgroundPlaybackEnabled ||
         _draftPlaybackEngine != widget.initialPlaybackEngine ||
@@ -241,6 +251,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
         builder: (context) => PlaybackSubtitleSettingsPage(
           initialSubtitlePreference: _draftSubtitlePreference,
           initialSubtitleScale: _draftSubtitleScale,
+          initialOnlineSubtitleSources: _draftOnlineSubtitleSources,
         ),
       ),
     );
@@ -250,6 +261,8 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     setState(() {
       _draftSubtitlePreference = result.preference;
       _draftSubtitleScale = result.scale;
+      _draftOnlineSubtitleSources =
+          result.onlineSubtitleSources.toList(growable: false);
     });
   }
 
@@ -293,7 +306,10 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   }
 
   String _subtitleSettingsSummary() {
-    return '${_draftSubtitlePreference.label} · ${_draftSubtitleScale.label}';
+    final sourceLabel = _draftOnlineSubtitleSources.isEmpty
+        ? '未启用在线字幕源'
+        : _draftOnlineSubtitleSources.map((item) => item.label).join(' / ');
+    return '${_draftSubtitlePreference.label} · ${_draftSubtitleScale.label} · $sourceLabel';
   }
 
   String _buildPlaybackDecodeModeDescription() {
@@ -318,10 +334,12 @@ class PlaybackSubtitleSettingsPage extends ConsumerStatefulWidget {
     super.key,
     required this.initialSubtitlePreference,
     required this.initialSubtitleScale,
+    required this.initialOnlineSubtitleSources,
   });
 
   final PlaybackSubtitlePreference initialSubtitlePreference;
   final PlaybackSubtitleScale initialSubtitleScale;
+  final List<OnlineSubtitleSource> initialOnlineSubtitleSources;
 
   @override
   ConsumerState<PlaybackSubtitleSettingsPage> createState() =>
@@ -332,6 +350,7 @@ class _PlaybackSubtitleSettingsPageState
     extends ConsumerState<PlaybackSubtitleSettingsPage> {
   late PlaybackSubtitlePreference _draftSubtitlePreference;
   late PlaybackSubtitleScale _draftSubtitleScale;
+  late List<OnlineSubtitleSource> _draftOnlineSubtitleSources;
   bool _closingWithResult = false;
 
   @override
@@ -339,12 +358,15 @@ class _PlaybackSubtitleSettingsPageState
     super.initState();
     _draftSubtitlePreference = widget.initialSubtitlePreference;
     _draftSubtitleScale = widget.initialSubtitleScale;
+    _draftOnlineSubtitleSources =
+        widget.initialOnlineSubtitleSources.toList(growable: false);
   }
 
   _PlaybackSubtitleDraft _buildDraft() {
     return _PlaybackSubtitleDraft(
       preference: _draftSubtitlePreference,
       scale: _draftSubtitleScale,
+      onlineSubtitleSources: _draftOnlineSubtitleSources,
     );
   }
 
@@ -406,6 +428,35 @@ class _PlaybackSubtitleSettingsPageState
             value: _draftSubtitleScale.label,
             onPressed: _openSubtitleScalePicker,
           ),
+          const SizedBox(height: 18),
+          Text(
+            '在线字幕来源',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 10),
+          for (final source in OnlineSubtitleSource.values) ...[
+            SettingsToggleTile(
+              title: source.label,
+              subtitle: source.description,
+              value: _draftOnlineSubtitleSources.contains(source),
+              onChanged: (value) {
+                setState(() {
+                  final next = _draftOnlineSubtitleSources.toSet();
+                  if (value) {
+                    next.add(source);
+                  } else {
+                    next.remove(source);
+                  }
+                  _draftOnlineSubtitleSources =
+                      next.toList(growable: false);
+                });
+              },
+            ),
+            if (source != OnlineSubtitleSource.values.last)
+              const SizedBox(height: 12),
+          ],
         ],
       ),
     );
@@ -448,8 +499,25 @@ class _PlaybackSubtitleDraft {
   const _PlaybackSubtitleDraft({
     required this.preference,
     required this.scale,
+    required this.onlineSubtitleSources,
   });
 
   final PlaybackSubtitlePreference preference;
   final PlaybackSubtitleScale scale;
+  final List<OnlineSubtitleSource> onlineSubtitleSources;
+}
+
+bool _sameSubtitleSources(
+  List<OnlineSubtitleSource> left,
+  List<OnlineSubtitleSource> right,
+) {
+  if (left.length != right.length) {
+    return false;
+  }
+  final leftSet = left.toSet();
+  final rightSet = right.toSet();
+  if (leftSet.length != rightSet.length) {
+    return false;
+  }
+  return leftSet.containsAll(rightSet);
 }

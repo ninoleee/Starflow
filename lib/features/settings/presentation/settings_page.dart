@@ -501,6 +501,7 @@ class SettingsPage extends ConsumerWidget {
           initialDefaultSpeed: settings.playbackDefaultSpeed,
           initialSubtitlePreference: settings.playbackSubtitlePreference,
           initialSubtitleScale: settings.playbackSubtitleScale,
+          initialOnlineSubtitleSources: settings.onlineSubtitleSources,
           initialBackgroundPlaybackEnabled:
               settings.playbackBackgroundPlaybackEnabled,
           initialPlaybackEngine: settings.playbackEngine,

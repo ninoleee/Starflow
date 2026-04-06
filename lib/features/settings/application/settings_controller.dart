@@ -195,6 +195,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     required double defaultSpeed,
     required PlaybackSubtitlePreference subtitlePreference,
     required PlaybackSubtitleScale subtitleScale,
+    required List<OnlineSubtitleSource> onlineSubtitleSources,
     required bool backgroundPlaybackEnabled,
     required PlaybackEngine playbackEngine,
     required PlaybackDecodeMode playbackDecodeMode,
@@ -206,6 +207,8 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         playbackDefaultSpeed: defaultSpeed.clamp(0.75, 2.0),
         playbackSubtitlePreference: subtitlePreference,
         playbackSubtitleScale: subtitleScale,
+        onlineSubtitleSources:
+            onlineSubtitleSources.toSet().toList(growable: false),
         playbackBackgroundPlaybackEnabled: backgroundPlaybackEnabled,
         playbackEngine: playbackEngine,
         playbackDecodeMode: playbackDecodeMode,

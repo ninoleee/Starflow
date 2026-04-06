@@ -1,16 +1,15 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
-import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 abstract class MediaRepository {
@@ -660,37 +659,58 @@ class AppMediaRepository implements MediaRepository {
       );
       return null;
     }
-    final List<NasMediaIndexRecord> scopeRecords = isDirectoryScope
-        ? await _nasMediaIndexer.loadRecordsInScope(
-            sourceId: source.id,
-            resourcePath: effectiveResourcePath,
-          )
-        : const <NasMediaIndexRecord>[];
-    if (!isDirectoryScope &&
-        !_looksLikeStrmResourcePath(effectiveResourcePath)) {
+    final matchedScope = _matchSyncDeleteWebDavDirectory(
+      source: source,
+      resourcePath: effectiveResourcePath,
+      directories: networkStorage.syncDeleteQuarkWebDavDirectories,
+    );
+    if (matchedScope == null) {
       _logQuarkSyncDelete(
         'prepare.skip',
         fields: {
-          'reason': 'not_strm',
+          'reason': 'resource_outside_selected_scope',
           'sourceId': source.id,
+          'sourceName': source.name,
           'resourcePath': resourcePath,
           'effectiveResourcePath': effectiveResourcePath,
+          'configuredScopes': networkStorage.syncDeleteQuarkWebDavDirectories
+              .map(
+                (item) =>
+                    '${item.sourceName}[${item.sourceId}]=>${item.directoryId}',
+              )
+              .toList(growable: false),
         },
       );
       return null;
     }
-    if (isDirectoryScope && scopeRecords.isEmpty) {
+    if (_isExactSyncDeleteScopeRoot(
+      resourcePath: effectiveResourcePath,
+      scopeDirectoryId: matchedScope.directory.directoryId,
+    )) {
       _logQuarkSyncDelete(
         'prepare.skip',
         fields: {
-          'reason': 'directory_scope_without_records',
+          'reason': 'selected_scope_root_deleted',
           'sourceId': source.id,
           'resourcePath': resourcePath,
           'effectiveResourcePath': effectiveResourcePath,
+          'scopeDirectoryId': matchedScope.directory.directoryId,
         },
       );
       return null;
     }
+    _logQuarkSyncDelete(
+      'prepare.scopeMatched',
+      fields: {
+        'sourceId': source.id,
+        'resourcePath': resourcePath,
+        'effectiveResourcePath': effectiveResourcePath,
+        'isDirectoryScope': isDirectoryScope,
+        'scopeMatchMode': matchedScope.matchMode,
+        'scopeDirectoryId': matchedScope.directory.directoryId,
+        'scopeDirectoryLabel': matchedScope.directory.directoryLabel,
+      },
+    );
 
     final cookie = networkStorage.quarkCookie.trim();
     final parentFid = networkStorage.quarkSaveFolderId.trim();
@@ -708,39 +728,9 @@ class AppMediaRepository implements MediaRepository {
       return null;
     }
 
-    final resolvedTargetUrl = await _resolveScopeQuarkTargetUrl(
-      source: source,
-      resourcePath: resourcePath,
-      effectiveResourcePath: effectiveResourcePath,
-      sectionId: sectionId,
-      scopeRecords: scopeRecords,
-    );
-    _logQuarkSyncDelete(
-      'prepare.resolvedTarget',
-      fields: {
-        'sourceId': source.id,
-        'resourcePath': resourcePath,
-        'effectiveResourcePath': effectiveResourcePath,
-        'isDirectoryScope': isDirectoryScope,
-        'scopeRecordCount': isDirectoryScope ? scopeRecords.length : 0,
-        'resolvedTargetUrl': resolvedTargetUrl,
-      },
-    );
-    if (!_looksLikeQuarkNetdiskUrl(resolvedTargetUrl)) {
-      _logQuarkSyncDelete(
-        'prepare.skip',
-        fields: {
-          'reason': 'resolved_target_not_quark',
-          'sourceId': source.id,
-          'resourcePath': resourcePath,
-          'resolvedTargetUrl': resolvedTargetUrl,
-        },
-      );
-      return null;
-    }
-
-    final candidateNames = _buildQuarkDirectoryNameCandidates(
-      effectiveResourcePath,
+    final candidateNames = _buildScopedQuarkDirectoryNameCandidates(
+      resourcePath: effectiveResourcePath,
+      scopeDirectoryId: matchedScope.directory.directoryId,
       treatAsDirectoryScope: isDirectoryScope,
     );
     _logQuarkSyncDelete(
@@ -801,72 +791,6 @@ class AppMediaRepository implements MediaRepository {
       name: matchedDirectory.name,
       path: matchedDirectory.path,
     );
-  }
-
-  Future<String> _resolveScopeQuarkTargetUrl({
-    required MediaSourceConfig source,
-    required String resourcePath,
-    required String effectiveResourcePath,
-    required String sectionId,
-    required List<NasMediaIndexRecord> scopeRecords,
-  }) async {
-    if (!_looksLikePlayableResourcePath(effectiveResourcePath)) {
-      for (final record in scopeRecords) {
-        if (!_looksLikeStrmResourcePath(record.resourcePath)) {
-          continue;
-        }
-        final resolvedTargetUrl = await _resolveStrmTargetUrlSafely(
-          source: source,
-          resourcePath: record.resourceId.trim().isNotEmpty
-              ? record.resourceId
-              : record.resourcePath,
-          sectionId: record.sectionId,
-        );
-        _logQuarkSyncDelete(
-          'prepare.scopeRecordResolved',
-          fields: {
-            'scopeResourcePath': effectiveResourcePath,
-            'recordResourceId': record.resourceId,
-            'recordResourcePath': record.resourcePath,
-            'resolvedTargetUrl': resolvedTargetUrl,
-          },
-        );
-        if (_looksLikeQuarkNetdiskUrl(resolvedTargetUrl)) {
-          return resolvedTargetUrl;
-        }
-      }
-      return '';
-    }
-
-    return _resolveStrmTargetUrlSafely(
-      source: source,
-      resourcePath: resourcePath,
-      sectionId: sectionId,
-    );
-  }
-
-  Future<String> _resolveStrmTargetUrlSafely({
-    required MediaSourceConfig source,
-    required String resourcePath,
-    required String sectionId,
-  }) async {
-    try {
-      return await _webDavNasClient.resolveStrmTargetUrl(
-        source: source,
-        resourcePath: resourcePath,
-        sectionId: sectionId,
-      );
-    } catch (error) {
-      _logQuarkSyncDelete(
-        'prepare.resolveTargetError',
-        fields: {
-          'sourceId': source.id,
-          'resourcePath': resourcePath,
-          'error': error,
-        },
-      );
-      return '';
-    }
   }
 
   Future<QuarkDirectoryEntry?> _findMatchingQuarkDirectory({
@@ -1000,6 +924,137 @@ class AppMediaRepository implements MediaRepository {
     }
   }
 
+  _MatchedSyncDeleteScope? _matchSyncDeleteWebDavDirectory({
+    required MediaSourceConfig source,
+    required String resourcePath,
+    required List<NetworkStorageWebDavDirectory> directories,
+  }) {
+    _MatchedSyncDeleteScope? exactMatch;
+    _MatchedSyncDeleteScope? sourceNameMatch;
+    _MatchedSyncDeleteScope? uniquePathFallback;
+    final pathOnlyMatches = <_MatchedSyncDeleteScope>[];
+    final normalizedSourceName = source.name.trim().toLowerCase();
+
+    _MatchedSyncDeleteScope withGreaterDepth(
+      _MatchedSyncDeleteScope? current,
+      _MatchedSyncDeleteScope next,
+    ) {
+      if (current == null || next.depth > current.depth) {
+        return next;
+      }
+      return current;
+    }
+
+    for (final directory in directories) {
+      final alignedScopeSegments = _alignedScopeSegments(
+        resourcePath: resourcePath,
+        scopeDirectoryId: directory.directoryId,
+      );
+      if (alignedScopeSegments == null) {
+        continue;
+      }
+      final candidate = _MatchedSyncDeleteScope(
+        directory: directory,
+        depth: alignedScopeSegments.length,
+        matchMode: 'path_only',
+      );
+      if (directory.sourceId.trim() == source.id.trim()) {
+        exactMatch = withGreaterDepth(
+          exactMatch,
+          candidate.copyWith(matchMode: 'source_id'),
+        );
+        continue;
+      }
+      final normalizedDirectorySourceName =
+          directory.sourceName.trim().toLowerCase();
+      if (normalizedSourceName.isNotEmpty &&
+          normalizedDirectorySourceName.isNotEmpty &&
+          normalizedDirectorySourceName == normalizedSourceName) {
+        sourceNameMatch = withGreaterDepth(
+          sourceNameMatch,
+          candidate.copyWith(matchMode: 'source_name'),
+        );
+        continue;
+      }
+      pathOnlyMatches.add(candidate);
+    }
+
+    if (exactMatch != null) {
+      return exactMatch;
+    }
+    if (sourceNameMatch != null) {
+      return sourceNameMatch;
+    }
+    if (pathOnlyMatches.length == 1) {
+      uniquePathFallback = pathOnlyMatches.single;
+    }
+    return uniquePathFallback;
+  }
+
+  bool _isExactSyncDeleteScopeRoot({
+    required String resourcePath,
+    required String scopeDirectoryId,
+  }) {
+    final resourceSegments = _pathSegments(_uriPath(resourcePath));
+    final alignedScopeSegments = _alignedScopeSegments(
+      resourcePath: resourcePath,
+      scopeDirectoryId: scopeDirectoryId,
+    );
+    if (alignedScopeSegments == null) {
+      return false;
+    }
+    return resourceSegments.length == alignedScopeSegments.length;
+  }
+
+  List<String> _buildScopedQuarkDirectoryNameCandidates({
+    required String resourcePath,
+    required String scopeDirectoryId,
+    required bool treatAsDirectoryScope,
+  }) {
+    final resourceSegments = _pathSegments(_uriPath(resourcePath));
+    final scopeSegments = _alignedScopeSegments(
+          resourcePath: resourcePath,
+          scopeDirectoryId: scopeDirectoryId,
+        ) ??
+        const <String>[];
+    final candidates = <String>[];
+    final seen = <String>{};
+
+    void addCandidate(String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty || !seen.add(trimmed)) {
+        return;
+      }
+      candidates.add(trimmed);
+    }
+
+    if (resourceSegments.length > scopeSegments.length) {
+      final relativeSegments = resourceSegments.sublist(scopeSegments.length);
+      final scopeRootName =
+          relativeSegments.length == 1 && !treatAsDirectoryScope
+              ? _stripFileExtension(relativeSegments.first)
+              : relativeSegments.first;
+      for (final candidate in _buildQuarkDirectoryCandidateVariations(
+        scopeRootName,
+      )) {
+        addCandidate(candidate);
+      }
+    }
+
+    final shouldAppendFallback = treatAsDirectoryScope ||
+        resourceSegments.length > scopeSegments.length + 1;
+    if (shouldAppendFallback) {
+      for (final candidate in _buildQuarkDirectoryNameCandidates(
+        resourcePath,
+        treatAsDirectoryScope: treatAsDirectoryScope,
+      )) {
+        addCandidate(candidate);
+      }
+    }
+
+    return candidates;
+  }
+
   List<String> _buildQuarkDirectoryNameCandidates(
     String resourcePath, {
     required bool treatAsDirectoryScope,
@@ -1021,37 +1076,7 @@ class AppMediaRepository implements MediaRepository {
       return const [];
     }
 
-    final candidates = <String>{};
-
-    void addCandidate(String value) {
-      final trimmed = value.trim().replaceAll(RegExp(r'\s+'), ' ');
-      if (trimmed.isNotEmpty) {
-        candidates.add(trimmed);
-      }
-    }
-
-    addCandidate(rawRootName);
-    addCandidate(rawRootName.replaceAll(RegExp(r'\{[^}]+\}'), ' '));
-    addCandidate(rawRootName.replaceAll(RegExp(r'\[[^\]]+\]'), ' '));
-    addCandidate(
-      rawRootName
-          .replaceAll(RegExp(r'\{[^}]+\}'), ' ')
-          .replaceAll(RegExp(r'\[[^\]]+\]'), ' ')
-          .replaceAll(RegExp(r'\(\d{4}\)'), ' '),
-    );
-    addCandidate(
-      rawRootName
-          .replaceAll(RegExp(r'\{[^}]+\}'), ' ')
-          .replaceAll(RegExp(r'\[[^\]]+\]'), ' ')
-          .replaceAll(RegExp(r'\(\d{4}\)'), ' ')
-          .replaceAll(
-            RegExp(r'\b(?:2160p|1080p|720p|4k|remux|web-dl|bluray)\b',
-                caseSensitive: false),
-            ' ',
-          ),
-    );
-
-    return candidates.toList(growable: false);
+    return _buildQuarkDirectoryCandidateVariations(rawRootName);
   }
 
   String _resolveMediaRootDirectoryName(List<String> directories) {
@@ -1073,22 +1098,6 @@ class AppMediaRepository implements MediaRepository {
       return nearestNonSeason;
     }
     return lastDirectory;
-  }
-
-  bool _looksLikeStrmResourcePath(String value) {
-    return _uriPath(value).toLowerCase().endsWith('.strm');
-  }
-
-  bool _looksLikeQuarkNetdiskUrl(String value) {
-    final uri = Uri.tryParse(value.trim());
-    if (uri == null || !uri.hasScheme) {
-      return false;
-    }
-    final host = uri.host.toLowerCase();
-    return host == 'pan.quark.cn' ||
-        host == 'drive-pc.quark.cn' ||
-        host == 'drive.quark.cn' ||
-        host.endsWith('.quark.cn');
   }
 
   String _normalizeQuarkDirectoryComparisonText(String value) {
@@ -1146,6 +1155,86 @@ class AppMediaRepository implements MediaRepository {
     return RegExp(r'^\s*\d{1,2}(?:[ ._\-]|$)').hasMatch(value);
   }
 
+  List<String> _buildQuarkDirectoryCandidateVariations(String rawValue) {
+    final candidates = <String>[];
+    final seen = <String>{};
+
+    void addCandidate(String value) {
+      final trimmed = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+      if (trimmed.isEmpty || !seen.add(trimmed)) {
+        return;
+      }
+      candidates.add(trimmed);
+    }
+
+    addCandidate(rawValue);
+    addCandidate(rawValue.replaceAll(RegExp(r'\{[^}]+\}'), ' '));
+    addCandidate(rawValue.replaceAll(RegExp(r'\[[^\]]+\]'), ' '));
+    addCandidate(
+      rawValue
+          .replaceAll(RegExp(r'\{[^}]+\}'), ' ')
+          .replaceAll(RegExp(r'\[[^\]]+\]'), ' ')
+          .replaceAll(RegExp(r'\(\d{4}\)'), ' '),
+    );
+    addCandidate(
+      rawValue
+          .replaceAll(RegExp(r'\{[^}]+\}'), ' ')
+          .replaceAll(RegExp(r'\[[^\]]+\]'), ' ')
+          .replaceAll(RegExp(r'\(\d{4}\)'), ' ')
+          .replaceAll(
+            RegExp(r'\b(?:2160p|1080p|720p|4k|remux|web-dl|bluray)\b',
+                caseSensitive: false),
+            ' ',
+          ),
+    );
+    return candidates;
+  }
+
+  String _stripFileExtension(String value) {
+    final trimmed = value.trim();
+    final dotIndex = trimmed.lastIndexOf('.');
+    if (dotIndex <= 0) {
+      return trimmed;
+    }
+    return trimmed.substring(0, dotIndex);
+  }
+
+  List<String>? _alignedScopeSegments({
+    required String resourcePath,
+    required String scopeDirectoryId,
+  }) {
+    final resourceSegments = _pathSegments(_uriPath(resourcePath));
+    final scopeSegments = _pathSegments(_uriPath(scopeDirectoryId));
+    if (resourceSegments.isEmpty || scopeSegments.isEmpty) {
+      return null;
+    }
+    for (var start = 0; start < scopeSegments.length; start++) {
+      final candidate = scopeSegments.sublist(start);
+      if (candidate.length > resourceSegments.length) {
+        continue;
+      }
+      if (_startsWithSegments(resourceSegments, candidate)) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  bool _startsWithSegments(
+    List<String> value,
+    List<String> prefix,
+  ) {
+    if (prefix.length > value.length) {
+      return false;
+    }
+    for (var index = 0; index < prefix.length; index++) {
+      if (value[index] != prefix[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   String _uriPath(String value) {
     final trimmed = value.trim();
     if (trimmed.isEmpty) {
@@ -1175,16 +1264,7 @@ class AppMediaRepository implements MediaRepository {
   void _logQuarkSyncDelete(
     String action, {
     Map<String, Object?> fields = const {},
-  }) {
-    final buffer = StringBuffer('[QuarkSyncDelete] $action');
-    if (fields.isNotEmpty) {
-      final normalizedFields = fields.entries
-          .map((entry) => '${entry.key}=${entry.value}')
-          .join(' | ');
-      buffer.write(' | $normalizedFields');
-    }
-    debugPrint(buffer.toString());
-  }
+  }) {}
 }
 
 class _SourceFetchResult {
@@ -1211,4 +1291,28 @@ class _MatchedQuarkDirectory {
   final String fid;
   final String name;
   final String path;
+}
+
+class _MatchedSyncDeleteScope {
+  const _MatchedSyncDeleteScope({
+    required this.directory,
+    required this.depth,
+    required this.matchMode,
+  });
+
+  final NetworkStorageWebDavDirectory directory;
+  final int depth;
+  final String matchMode;
+
+  _MatchedSyncDeleteScope copyWith({
+    NetworkStorageWebDavDirectory? directory,
+    int? depth,
+    String? matchMode,
+  }) {
+    return _MatchedSyncDeleteScope(
+      directory: directory ?? this.directory,
+      depth: depth ?? this.depth,
+      matchMode: matchMode ?? this.matchMode,
+    );
+  }
 }

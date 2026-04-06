@@ -23,7 +23,7 @@ import 'package:starflow/features/storage/data/local_storage_cache_repository.da
 void main() {
   group('AppMediaRepository synced Quark delete', () {
     test(
-        'deletes the matched Quark directory after deleting a WebDAV strm file',
+        'deletes the matched Quark directory after deleting a file inside the selected WebDAV scope',
         () async {
       const source = MediaSourceConfig(
         id: 'nas-main',
@@ -32,9 +32,7 @@ void main() {
         endpoint: 'https://nas.example.com/dav/',
         enabled: true,
       );
-      final webDavClient = _RecordingWebDavNasClient(
-        resolvedTargetUrl: 'https://pan.quark.cn/s/abc123',
-      );
+      final webDavClient = _RecordingWebDavNasClient();
       final quarkClient = _RecordingQuarkSaveClient(
         directories: const [
           QuarkDirectoryEntry(
@@ -58,12 +56,21 @@ void main() {
                 quarkSaveFolderId: 'folder-root',
                 quarkSaveFolderPath: '/保存目录',
                 syncDeleteQuarkEnabled: true,
+                syncDeleteQuarkWebDavDirectories: [
+                  NetworkStorageWebDavDirectory(
+                    sourceId: 'nas-main',
+                    sourceName: '家庭 NAS',
+                    directoryId: 'https://nas.example.com/dav/Shows/',
+                    directoryLabel: 'nas.example.com/dav/Shows/',
+                  ),
+                ],
               ),
             ),
           ),
           embyApiClientProvider.overrideWithValue(
             EmbyApiClient(
-                MockClient((request) async => http.Response('', 200))),
+              MockClient((request) async => http.Response('', 200)),
+            ),
           ),
           webDavNasClientProvider.overrideWithValue(webDavClient),
           quarkSaveClientProvider.overrideWithValue(quarkClient),
@@ -90,11 +97,14 @@ void main() {
       expect(cacheRepository.clearedResources, hasLength(1));
       expect(cacheRepository.clearedResources.single.resourceId, resourcePath);
       expect(
-          cacheRepository.clearedResources.single.resourcePath, resourcePath);
+        cacheRepository.clearedResources.single.resourcePath,
+        resourcePath,
+      );
       expect(cacheRepository.clearedResources.single.treatAsScope, isFalse);
     });
 
-    test('skips Quark deletion when the resolved strm target is not Quark',
+    test(
+        'skips Quark deletion when the deleted path is outside the selected WebDAV scope',
         () async {
       const source = MediaSourceConfig(
         id: 'nas-main',
@@ -103,9 +113,7 @@ void main() {
         endpoint: 'https://nas.example.com/dav/',
         enabled: true,
       );
-      final webDavClient = _RecordingWebDavNasClient(
-        resolvedTargetUrl: 'https://media.example.com/stream.m3u8',
-      );
+      final webDavClient = _RecordingWebDavNasClient();
       final quarkClient = _RecordingQuarkSaveClient(
         directories: const [
           QuarkDirectoryEntry(
@@ -128,12 +136,21 @@ void main() {
                 quarkSaveFolderId: 'folder-root',
                 quarkSaveFolderPath: '/保存目录',
                 syncDeleteQuarkEnabled: true,
+                syncDeleteQuarkWebDavDirectories: [
+                  NetworkStorageWebDavDirectory(
+                    sourceId: 'nas-main',
+                    sourceName: '家庭 NAS',
+                    directoryId: 'https://nas.example.com/dav/Movies/',
+                    directoryLabel: 'nas.example.com/dav/Movies/',
+                  ),
+                ],
               ),
             ),
           ),
           embyApiClientProvider.overrideWithValue(
             EmbyApiClient(
-                MockClient((request) async => http.Response('', 200))),
+              MockClient((request) async => http.Response('', 200)),
+            ),
           ),
           webDavNasClientProvider.overrideWithValue(webDavClient),
           quarkSaveClientProvider.overrideWithValue(quarkClient),
@@ -165,9 +182,7 @@ void main() {
         endpoint: 'https://nas.example.com/dav/',
         enabled: true,
       );
-      final webDavClient = _RecordingWebDavNasClient(
-        resolvedTargetUrl: 'https://pan.quark.cn/s/series123',
-      );
+      final webDavClient = _RecordingWebDavNasClient();
       final quarkClient = _RecordingQuarkSaveClient(
         directories: const [
           QuarkDirectoryEntry(
@@ -177,17 +192,7 @@ void main() {
           ),
         ],
       );
-      final indexer = _FakeNasMediaIndexer(
-        scopeRecords: [
-          _scopeRecord(
-            sourceId: source.id,
-            resourceId:
-                'https://nas.example.com/dav/movies/strm/quark/%E8%AF%B7%E6%B1%82%E6%95%91%E6%8F%B4/Send%20Help%20(2026).strm',
-            resourcePath: '/movies/strm/quark/请求救援/Send Help (2026).strm',
-            sectionId: 'https://nas.example.com/dav/movies/',
-          ),
-        ],
-      );
+      final indexer = _FakeNasMediaIndexer();
       final container = ProviderContainer(
         overrides: [
           appSettingsProvider.overrideWithValue(
@@ -200,12 +205,22 @@ void main() {
                 quarkSaveFolderId: 'folder-root',
                 quarkSaveFolderPath: '/保存目录',
                 syncDeleteQuarkEnabled: true,
+                syncDeleteQuarkWebDavDirectories: [
+                  NetworkStorageWebDavDirectory(
+                    sourceId: 'nas-main',
+                    sourceName: '家庭 NAS',
+                    directoryId:
+                        'https://nas.example.com/dav/movies/strm/quark/',
+                    directoryLabel: 'nas.example.com/dav/movies/strm/quark/',
+                  ),
+                ],
               ),
             ),
           ),
           embyApiClientProvider.overrideWithValue(
             EmbyApiClient(
-                MockClient((request) async => http.Response('', 200))),
+              MockClient((request) async => http.Response('', 200)),
+            ),
           ),
           webDavNasClientProvider.overrideWithValue(webDavClient),
           quarkSaveClientProvider.overrideWithValue(quarkClient),
@@ -226,25 +241,84 @@ void main() {
       expect(quarkClient.listParentFids, ['folder-root']);
       expect(quarkClient.deletedFids, ['quark-dir-series']);
     });
+
+    test(
+        'can still match selected WebDAV scope by source name when source id changed',
+        () async {
+      const source = MediaSourceConfig(
+        id: 'media-source-1775415208787',
+        name: 'nas',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://webdav.nux.ink/',
+        enabled: true,
+      );
+      final webDavClient = _RecordingWebDavNasClient();
+      final quarkClient = _RecordingQuarkSaveClient(
+        directories: const [
+          QuarkDirectoryEntry(
+            fid: 'quark-dir-mitang',
+            name: '密探',
+            path: '/来自：分享/密探',
+          ),
+        ],
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [source],
+              searchProviders: const [],
+              homeModules: const [],
+              networkStorage: const NetworkStorageConfig(
+                quarkCookie: 'foo=bar',
+                quarkSaveFolderId: 'folder-root',
+                quarkSaveFolderPath: '/来自：分享',
+                syncDeleteQuarkEnabled: true,
+                syncDeleteQuarkWebDavDirectories: [
+                  NetworkStorageWebDavDirectory(
+                    sourceId: 'media-source-old',
+                    sourceName: 'nas',
+                    directoryId:
+                        'https://webdav.nux.ink/home/AL123456/movies/strm/quark/',
+                    directoryLabel:
+                        'webdav.nux.ink/home/AL123456/movies/strm/quark/',
+                  ),
+                ],
+              ),
+            ),
+          ),
+          embyApiClientProvider.overrideWithValue(
+            EmbyApiClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          webDavNasClientProvider.overrideWithValue(webDavClient),
+          quarkSaveClientProvider.overrideWithValue(quarkClient),
+          nasMediaIndexerProvider.overrideWithValue(_FakeNasMediaIndexer()),
+          localStorageCacheRepositoryProvider
+              .overrideWithValue(_RecordingLocalStorageCacheRepository()),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final repository = container.read(mediaRepositoryProvider);
+
+      await repository.deleteResource(
+        sourceId: source.id,
+        resourcePath: '/movies/strm/quark/密探',
+      );
+
+      expect(quarkClient.listParentFids, ['folder-root']);
+      expect(quarkClient.deletedFids, ['quark-dir-mitang']);
+    });
   });
 }
 
 class _RecordingWebDavNasClient extends WebDavNasClient {
-  _RecordingWebDavNasClient({
-    required this.resolvedTargetUrl,
-  }) : super(MockClient((request) async => http.Response('', 200)));
+  _RecordingWebDavNasClient()
+      : super(MockClient((request) async => http.Response('', 200)));
 
-  final String resolvedTargetUrl;
   final List<String> deletedResourcePaths = <String>[];
-
-  @override
-  Future<String> resolveStrmTargetUrl({
-    required MediaSourceConfig source,
-    required String resourcePath,
-    String sectionId = '',
-  }) async {
-    return resolvedTargetUrl;
-  }
 
   @override
   Future<void> deleteResource(
@@ -289,28 +363,30 @@ class _RecordingQuarkSaveClient extends QuarkSaveClient {
 }
 
 class _FakeNasMediaIndexer extends NasMediaIndexer {
-  _FakeNasMediaIndexer({
-    this.scopeRecords = const [],
-  }) : super(
+  _FakeNasMediaIndexer()
+      : super(
           store: SembastNasMediaIndexStore(
             databaseOpener: () => databaseFactoryMemory.openDatabase(
               'media-repository-delete-sync-quark-test',
             ),
           ),
           webDavNasClient: WebDavNasClient(
-              MockClient((request) async => http.Response('', 200))),
+            MockClient((request) async => http.Response('', 200)),
+          ),
           wmdbMetadataClient: WmdbMetadataClient(
-              MockClient((request) async => http.Response('', 200))),
+            MockClient((request) async => http.Response('', 200)),
+          ),
           tmdbMetadataClient: TmdbMetadataClient(
-              MockClient((request) async => http.Response('', 200))),
+            MockClient((request) async => http.Response('', 200)),
+          ),
           imdbRatingClient: ImdbRatingClient(
-              MockClient((request) async => http.Response('', 200))),
+            MockClient((request) async => http.Response('', 200)),
+          ),
           readSettings: () => SeedData.defaultSettings,
           progressController: WebDavScrapeProgressController(),
         );
 
   final List<String> removedScopes = <String>[];
-  final List<NasMediaIndexRecord> scopeRecords;
 
   @override
   Future<NasMediaIndexRecord?> loadRecord({
@@ -333,7 +409,7 @@ class _FakeNasMediaIndexer extends NasMediaIndexer {
     required String sourceId,
     required String resourcePath,
   }) async {
-    return scopeRecords;
+    return const <NasMediaIndexRecord>[];
   }
 }
 
@@ -374,56 +450,4 @@ class _ClearedResourceRequest {
   final String resourceId;
   final String resourcePath;
   final bool treatAsScope;
-}
-
-NasMediaIndexRecord _scopeRecord({
-  required String sourceId,
-  required String resourceId,
-  required String resourcePath,
-  required String sectionId,
-}) {
-  return NasMediaIndexRecord(
-    id: NasMediaIndexRecord.buildRecordId(
-      sourceId: sourceId,
-      resourceId: resourceId,
-    ),
-    sourceId: sourceId,
-    sectionId: sectionId,
-    sectionName: 'movies',
-    resourceId: resourceId,
-    resourcePath: resourcePath,
-    fingerprint: 'fingerprint',
-    fileSizeBytes: 0,
-    modifiedAt: DateTime.utc(2026, 4, 7),
-    indexedAt: DateTime.utc(2026, 4, 7),
-    scrapedAt: DateTime.utc(2026, 4, 7),
-    recognizedTitle: '请求救援',
-    searchQuery: '请求救援',
-    originalFileName: 'Send Help (2026).strm',
-    parentTitle: '请求救援',
-    recognizedYear: 2026,
-    recognizedItemType: 'movie',
-    preferSeries: false,
-    sidecarStatus: NasMetadataFetchStatus.never,
-    wmdbStatus: NasMetadataFetchStatus.never,
-    tmdbStatus: NasMetadataFetchStatus.never,
-    imdbStatus: NasMetadataFetchStatus.never,
-    item: MediaItem(
-      id: resourceId,
-      title: '请求救援',
-      overview: '',
-      posterUrl: '',
-      year: 2026,
-      durationLabel: '文件',
-      genres: const [],
-      sectionId: sectionId,
-      sectionName: 'movies',
-      sourceId: sourceId,
-      sourceName: '家庭 NAS',
-      sourceKind: MediaSourceKind.nas,
-      streamUrl: resourceId,
-      actualAddress: resourcePath,
-      addedAt: DateTime.utc(2026, 4, 7),
-    ),
-  );
 }

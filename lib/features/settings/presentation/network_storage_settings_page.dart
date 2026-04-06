@@ -10,6 +10,7 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/quark_directory_manager_page.dart';
 import 'package:starflow/features/settings/presentation/quark_folder_picker_page.dart';
+import 'package:starflow/features/settings/presentation/webdav_directory_picker_page.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
@@ -33,6 +34,7 @@ class _NetworkStorageSettingsPageState
   late String _quarkFolderId;
   late String _quarkFolderPath;
   late bool _syncDeleteQuarkEnabled;
+  late List<NetworkStorageWebDavDirectory> _syncDeleteQuarkWebDavDirectories;
   late Set<String> _refreshSourceIds;
   bool _skipAutoSaveOnPop = false;
   bool _isTestingQuarkConnection = false;
@@ -67,6 +69,9 @@ class _NetworkStorageSettingsPageState
         ? '/'
         : widget.initial.quarkSaveFolderPath.trim();
     _syncDeleteQuarkEnabled = widget.initial.syncDeleteQuarkEnabled;
+    _syncDeleteQuarkWebDavDirectories = [
+      ...widget.initial.syncDeleteQuarkWebDavDirectories,
+    ];
     _refreshSourceIds = widget.initial.refreshMediaSourceIds.toSet();
   }
 
@@ -91,6 +96,14 @@ class _NetworkStorageSettingsPageState
         .toList(growable: false);
   }
 
+  List<MediaSourceConfig> _syncDeleteWebDavSources(AppSettings settings) {
+    return settings.mediaSources
+        .where(
+          (source) => source.enabled && source.kind == MediaSourceKind.nas,
+        )
+        .toList(growable: false);
+  }
+
   int _refreshDelaySeconds() {
     return _parseDelaySeconds(_refreshDelayController.text);
   }
@@ -109,14 +122,17 @@ class _NetworkStorageSettingsPageState
   }
 
   NetworkStorageConfig _buildDraft() {
-    final refreshableSourceIds = _refreshableMediaSources(
-      ref.read(appSettingsProvider),
-    ).map((source) => source.id).toSet();
+    final settings = ref.read(appSettingsProvider);
+    final refreshableSourceIds =
+        _refreshableMediaSources(settings).map((source) => source.id).toSet();
     return NetworkStorageConfig(
       quarkCookie: _quarkCookieController.text.trim(),
       quarkSaveFolderId: _quarkFolderId,
       quarkSaveFolderPath: _quarkFolderPath,
       syncDeleteQuarkEnabled: _syncDeleteQuarkEnabled,
+      syncDeleteQuarkWebDavDirectories: _normalizedSyncDeleteDirectories(
+        settings,
+      ),
       smartStrmWebhookUrl: _smartStrmWebhookController.text.trim(),
       smartStrmTaskName: _smartStrmTaskNameController.text.trim(),
       smartStrmDelaySeconds: _smartStrmDelaySeconds(),
@@ -125,6 +141,53 @@ class _NetworkStorageSettingsPageState
           .toList(growable: false),
       refreshDelaySeconds: _refreshDelaySeconds(),
     );
+  }
+
+  List<NetworkStorageWebDavDirectory> _normalizedSyncDeleteDirectories(
+    AppSettings settings,
+  ) {
+    final sourceNameById = {
+      for (final source in settings.mediaSources)
+        source.id.trim(): source.name.trim(),
+    };
+    final seen = <String>{};
+    final normalized = <NetworkStorageWebDavDirectory>[];
+    for (final item in _syncDeleteQuarkWebDavDirectories) {
+      final sourceId = item.sourceId.trim();
+      final directoryId = item.directoryId.trim();
+      if (sourceId.isEmpty || directoryId.isEmpty) {
+        continue;
+      }
+      final dedupeKey = '$sourceId::$directoryId';
+      if (!seen.add(dedupeKey)) {
+        continue;
+      }
+      final resolvedSourceName =
+          sourceNameById[sourceId]?.trim().isNotEmpty == true
+              ? sourceNameById[sourceId]!.trim()
+              : item.sourceName.trim();
+      final resolvedDirectoryLabel = item.directoryLabel.trim().isNotEmpty
+          ? item.directoryLabel.trim()
+          : _pathLabel(directoryId);
+      normalized.add(
+        NetworkStorageWebDavDirectory(
+          sourceId: sourceId,
+          sourceName: resolvedSourceName,
+          directoryId: directoryId,
+          directoryLabel: resolvedDirectoryLabel,
+        ),
+      );
+    }
+    return normalized;
+  }
+
+  String _pathLabel(String raw) {
+    final uri = Uri.tryParse(raw.trim());
+    if (uri == null) {
+      return raw.trim();
+    }
+    final path = uri.path.isEmpty ? '/' : uri.path;
+    return '${uri.host}$path';
   }
 
   Future<void> _saveDraft({bool popAfterSave = true}) async {
@@ -250,6 +313,70 @@ class _NetworkStorageSettingsPageState
     );
   }
 
+  Future<void> _pickSyncDeleteWebDavDirectory(MediaSourceConfig source) async {
+    FocusScope.of(context).unfocus();
+    final initialPath = _syncDeleteQuarkWebDavDirectories
+            .lastWhere(
+              (item) => item.sourceId == source.id,
+              orElse: () => NetworkStorageWebDavDirectory(
+                sourceId: source.id,
+                directoryId: source.libraryPath.trim(),
+              ),
+            )
+            .directoryId
+            .trim()
+            .isNotEmpty
+        ? _syncDeleteQuarkWebDavDirectories
+            .lastWhere(
+              (item) => item.sourceId == source.id,
+              orElse: () => NetworkStorageWebDavDirectory(
+                sourceId: source.id,
+                directoryId: source.libraryPath.trim(),
+              ),
+            )
+            .directoryId
+            .trim()
+        : source.libraryPath.trim();
+    final picked = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(
+        builder: (context) => WebDavDirectoryPickerPage(
+          source: source,
+          initialPath: initialPath,
+        ),
+      ),
+    );
+    if (picked == null || !mounted) {
+      return;
+    }
+    final trimmed = picked.trim();
+    if (trimmed.isEmpty) {
+      return;
+    }
+    setState(() {
+      _syncDeleteQuarkWebDavDirectories = [
+        ..._syncDeleteQuarkWebDavDirectories,
+        NetworkStorageWebDavDirectory(
+          sourceId: source.id,
+          sourceName: source.name,
+          directoryId: trimmed,
+          directoryLabel: _pathLabel(trimmed),
+        ),
+      ];
+    });
+  }
+
+  void _removeSyncDeleteWebDavDirectory(NetworkStorageWebDavDirectory target) {
+    setState(() {
+      _syncDeleteQuarkWebDavDirectories = _syncDeleteQuarkWebDavDirectories
+          .where(
+            (item) =>
+                item.sourceId != target.sourceId ||
+                item.directoryId != target.directoryId,
+          )
+          .toList(growable: false);
+    });
+  }
+
   Future<void> _testSmartStrmTask() async {
     FocusScope.of(context).unfocus();
     setState(() => _isTestingSmartStrm = true);
@@ -289,6 +416,9 @@ class _NetworkStorageSettingsPageState
   Widget build(BuildContext context) {
     final settings = ref.watch(appSettingsProvider);
     final refreshableSources = _refreshableMediaSources(settings);
+    final syncDeleteWebDavSources = _syncDeleteWebDavSources(settings);
+    final selectedSyncDeleteDirectories =
+        _normalizedSyncDeleteDirectories(settings);
     final refreshableSourceIds =
         refreshableSources.map((source) => source.id).toSet();
     final selectedRefreshSourceIds =
@@ -349,7 +479,7 @@ class _NetworkStorageSettingsPageState
           StarflowToggleTile(
             title: '同步删除夸克目录',
             subtitle:
-                '开启后，删除已匹配到夸克直链的 WebDAV .strm 文件时，也会到当前夸克保存目录里删除对应影片或剧集目录。',
+                '开启后，删除命中下方监听目录中的 WebDAV 文件或文件夹时，也会到当前夸克保存目录里删除匹配到的影片或剧集目录。',
             value: _syncDeleteQuarkEnabled,
             onChanged: (value) {
               setState(() {
@@ -357,6 +487,57 @@ class _NetworkStorageSettingsPageState
               });
             },
           ),
+          const SizedBox(height: 12),
+          const SettingsSectionTitle(label: 'WebDAV 删除监听目录'),
+          Text(
+            '只会在这里选中的 WebDAV 目录范围内触发夸克同步删除。',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 12),
+          if (syncDeleteWebDavSources.isNotEmpty)
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final source in syncDeleteWebDavSources)
+                  SettingsActionButton(
+                    label: '添加 ${source.name}',
+                    icon: Icons.folder_open_rounded,
+                    onPressed: () => _pickSyncDeleteWebDavDirectory(source),
+                    variant: StarflowButtonVariant.ghost,
+                  ),
+              ],
+            )
+          else
+            const Text('无已启用的 WebDAV 来源'),
+          const SizedBox(height: 12),
+          if (selectedSyncDeleteDirectories.isNotEmpty)
+            ...selectedSyncDeleteDirectories.map(
+              (directory) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: SettingsSelectionTile(
+                  title: directory.sourceName.isEmpty
+                      ? directory.sourceId
+                      : directory.sourceName,
+                  subtitle: directory.directoryLabel.isEmpty
+                      ? _pathLabel(directory.directoryId)
+                      : directory.directoryLabel,
+                  value: '监听中',
+                  onPressed: null,
+                  leading: const Icon(Icons.folder_copy_outlined),
+                  trailing: IconButton(
+                    tooltip: '移除',
+                    onPressed: () =>
+                        _removeSyncDeleteWebDavDirectory(directory),
+                    icon: const Icon(Icons.delete_outline_rounded),
+                  ),
+                ),
+              ),
+            )
+          else
+            const Text('未选择目录'),
           const SettingsSectionTitle(label: 'SmartStrm'),
           SettingsTextInputField(
             controller: _smartStrmWebhookController,
