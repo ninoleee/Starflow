@@ -1384,14 +1384,6 @@ class _TelevisionSearchInput extends StatelessWidget {
         ),
         const SizedBox(width: 12),
         TvAdaptiveButton(
-          label: '编辑',
-          icon: Icons.edit_rounded,
-          onPressed: onEditQuery,
-          variant: TvButtonVariant.outlined,
-          focusId: 'search:query-edit',
-        ),
-        const SizedBox(width: 12),
-        TvAdaptiveButton(
           label: '搜索',
           icon: Icons.search_rounded,
           onPressed: onSearch,
