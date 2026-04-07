@@ -16,12 +16,17 @@ import UIKit
   ) -> Bool {
     installFlutterTouchRateCorrectionWorkaroundIfNeeded()
     let launched = super.application(application, didFinishLaunchingWithOptions: launchOptions)
-    installPlatformChannelIfNeeded()
+    ensurePlatformChannelInstalled()
     return launched
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    ensurePlatformChannelInstalled()
+  }
+
+  func ensurePlatformChannelInstalled() {
+    installPlatformChannelIfNeeded()
   }
 
   private func installFlutterTouchRateCorrectionWorkaroundIfNeeded() {
