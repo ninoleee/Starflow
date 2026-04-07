@@ -14,7 +14,6 @@ import 'package:starflow/core/platform/background_playback.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
-import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
@@ -33,6 +32,10 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 
 class _OpenPlaybackOptionsIntent extends Intent {
   const _OpenPlaybackOptionsIntent();
+}
+
+class _ShowTvPlaybackChromeIntent extends Intent {
+  const _ShowTvPlaybackChromeIntent();
 }
 
 class PlayerPage extends ConsumerStatefulWidget {
@@ -71,7 +74,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _isInPictureInPictureMode = false;
   bool _subtitleDelaySupported = false;
   double _subtitleDelaySeconds = 0;
-  bool _tvPurePlaybackMode = false;
+  bool _tvPlaybackChromeVisible = false;
   bool _tvExitDialogVisible = false;
   bool _introSkipApplied = false;
   bool _outroSkipApplied = false;
@@ -80,6 +83,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   DateTime? _lastProgressPersistedAt;
   Duration _lastPersistedPosition = Duration.zero;
   late final StateController<bool> _playbackPerformanceModeController;
+  Timer? _tvPlaybackChromeHideTimer;
 
   @override
   void initState() {
@@ -102,6 +106,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _tvPlaybackChromeHideTimer?.cancel();
     Future<void>(() {
       _playbackPerformanceModeController.state = false;
     });
@@ -287,6 +292,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         playing,
       ) {
         unawaited(_syncBackgroundPlayback(enabled: playing));
+        if (_isTelevisionPlaybackDevice) {
+          if (!playing) {
+            _showTvPlaybackChrome(autoHide: false);
+          } else if (_tvPlaybackChromeVisible) {
+            _scheduleTvPlaybackChromeHide();
+          }
+        }
         if (!playing) {
           unawaited(_persistPlaybackProgress(force: true));
         }
@@ -1346,10 +1358,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final activeTarget = _resolvedTarget ?? widget.target;
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final playbackSettings = ref.watch(appSettingsProvider);
-    final showMinimalPlayerChromeBase = _isInPictureInPictureMode ||
-        playbackSettings.highPerformanceModeEnabled;
-    final showMinimalPlayerChrome =
-        showMinimalPlayerChromeBase || (isTelevision && _tvPurePlaybackMode);
+    final showMinimalPlayerChrome = _isInPictureInPictureMode ||
+        (!isTelevision && playbackSettings.highPerformanceModeEnabled);
 
     return PopScope<Object?>(
       canPop: !isTelevision,
@@ -1357,11 +1367,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         if (didPop || !isTelevision) {
           return;
         }
-        unawaited(
-          _handleTvBack(
-            showMinimalPlayerChromeBase: showMinimalPlayerChromeBase,
-          ),
-        );
+        unawaited(_handleTvBack());
       },
       child: Shortcuts(
         shortcuts: isTelevision
@@ -1379,6 +1385,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 SingleActivator(LogicalKeyboardKey.mediaPlay): ActivateIntent(),
                 SingleActivator(LogicalKeyboardKey.mediaPause):
                     ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.arrowUp):
+                    _ShowTvPlaybackChromeIntent(),
+                SingleActivator(LogicalKeyboardKey.arrowDown):
+                    _OpenPlaybackOptionsIntent(),
                 SingleActivator(LogicalKeyboardKey.contextMenu):
                     _OpenPlaybackOptionsIntent(),
                 SingleActivator(LogicalKeyboardKey.gameButtonY):
@@ -1394,11 +1404,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             DismissIntent: CallbackAction<DismissIntent>(
               onInvoke: (_) {
                 if (isTelevision) {
-                  unawaited(
-                    _handleTvBack(
-                      showMinimalPlayerChromeBase: showMinimalPlayerChromeBase,
-                    ),
-                  );
+                  unawaited(_handleTvBack());
                 } else {
                   context.pop();
                 }
@@ -1414,10 +1420,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             _OpenPlaybackOptionsIntent:
                 CallbackAction<_OpenPlaybackOptionsIntent>(
               onInvoke: (_) {
+                if (isTelevision) {
+                  _showTvPlaybackChrome(autoHide: false);
+                }
                 _showPlaybackOptions(
                   isTelevision: isTelevision,
                   settings: playbackSettings,
                 );
+                return null;
+              },
+            ),
+            _ShowTvPlaybackChromeIntent:
+                CallbackAction<_ShowTvPlaybackChromeIntent>(
+              onInvoke: (_) {
+                if (isTelevision) {
+                  _showTvPlaybackChrome();
+                }
                 return null;
               },
             ),
@@ -1457,118 +1475,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                           isTelevision: isTelevision,
                           settings: playbackSettings,
                         )
-                      : Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            ColoredBox(
-                              color: Colors.black,
-                              child: Center(
-                                child: AspectRatio(
-                                  aspectRatio: _currentAspectRatio(),
-                                  child: _buildVideoSurface(
-                                    theme,
-                                    isTelevision: isTelevision,
-                                    settings: playbackSettings,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Positioned(
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      Colors.black.withValues(alpha: 0.62),
-                                      Colors.black.withValues(alpha: 0.22),
-                                      Colors.transparent,
-                                    ],
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                  ),
-                                ),
-                                child: OverlayToolbar(
-                                  onBack: () => unawaited(
-                                    _handleTvBack(
-                                      showMinimalPlayerChromeBase:
-                                          showMinimalPlayerChromeBase,
-                                      allowRoutePop: !isTelevision,
-                                    ),
-                                  ),
-                                  trailing: isTelevision
-                                      ? StarflowIconButton(
-                                          icon: Icons.tune_rounded,
-                                          tooltip: '播放设置',
-                                          variant: StarflowButtonVariant.ghost,
-                                          onPressed: _player == null
-                                              ? null
-                                              : () => _showPlaybackOptions(
-                                                    isTelevision: isTelevision,
-                                                    settings: playbackSettings,
-                                                  ),
-                                        )
-                                      : null,
-                                ),
-                              ),
-                            ),
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              bottom: 0,
-                              child: IgnorePointer(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: [
-                                        Colors.transparent,
-                                        Colors.black.withValues(alpha: 0.16),
-                                        Colors.black.withValues(alpha: 0.62),
-                                      ],
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                    ),
-                                  ),
-                                  child: SafeArea(
-                                    top: false,
-                                    child: Padding(
-                                      padding: const EdgeInsets.fromLTRB(
-                                          18, 40, 18, 18),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            activeTarget.title,
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.headlineSmall
-                                                ?.copyWith(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 6),
-                                          Text(
-                                            '${activeTarget.sourceKind.label} · ${activeTarget.sourceName}',
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.bodyMedium
-                                                ?.copyWith(
-                                              color: const Color(0xCCFFFFFF),
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
+                      : _buildTvPlaybackSurface(
+                          theme,
+                          activeTarget: activeTarget,
+                          playbackSettings: playbackSettings,
                         ),
             ),
           ),
@@ -1577,21 +1487,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     );
   }
 
-  Future<void> _handleTvBack({
-    required bool showMinimalPlayerChromeBase,
-    bool allowRoutePop = false,
-  }) async {
+  Future<void> _handleTvBack() async {
     if (!mounted) {
       return;
     }
-    if (allowRoutePop) {
-      context.pop();
-      return;
-    }
-    if (!showMinimalPlayerChromeBase && !_tvPurePlaybackMode) {
-      setState(() {
-        _tvPurePlaybackMode = true;
-      });
+    if (_tvPlaybackChromeVisible) {
+      _hideTvPlaybackChrome();
       return;
     }
     if (_tvExitDialogVisible) {
@@ -1627,12 +1528,252 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     context.pop();
   }
 
+  Widget _buildTvPlaybackSurface(
+    ThemeData theme, {
+    required PlaybackTarget activeTarget,
+    required AppSettings playbackSettings,
+  }) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        ColoredBox(
+          color: Colors.black,
+          child: Center(
+            child: AspectRatio(
+              aspectRatio: _currentAspectRatio(),
+              child: _buildVideoSurface(
+                theme,
+                isTelevision: true,
+                settings: playbackSettings,
+              ),
+            ),
+          ),
+        ),
+        if (_tvPlaybackChromeVisible)
+          _buildTvPlaybackChrome(
+            theme,
+            activeTarget: activeTarget,
+            playbackSettings: playbackSettings,
+          ),
+      ],
+    );
+  }
+
+  Widget _buildTvPlaybackChrome(
+    ThemeData theme, {
+    required PlaybackTarget activeTarget,
+    required AppSettings playbackSettings,
+  }) {
+    final player = _player;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.black.withValues(alpha: 0.68),
+                  Colors.black.withValues(alpha: 0.26),
+                  Colors.transparent,
+                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Row(
+                  children: [
+                    const Spacer(),
+                    StarflowIconButton(
+                      icon: Icons.tune_rounded,
+                      tooltip: '播放设置',
+                      variant: StarflowButtonVariant.ghost,
+                      onPressed: player == null
+                          ? null
+                          : () {
+                              _showTvPlaybackChrome(autoHide: false);
+                              _showPlaybackOptions(
+                                isTelevision: true,
+                                settings: playbackSettings,
+                              );
+                            },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.transparent,
+                  Colors.black.withValues(alpha: 0.18),
+                  Colors.black.withValues(alpha: 0.78),
+                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 52, 18, 18),
+                child: StreamBuilder<Duration>(
+                  stream: player?.stream.position,
+                  initialData: player?.state.position ?? _latestPosition,
+                  builder: (context, positionSnapshot) {
+                    final position = positionSnapshot.data ?? _latestPosition;
+                    return StreamBuilder<Duration>(
+                      stream: player?.stream.duration,
+                      initialData: player?.state.duration ?? _latestDuration,
+                      builder: (context, durationSnapshot) {
+                        final duration = durationSnapshot.data ?? _latestDuration;
+                        return StreamBuilder<bool>(
+                          stream: player?.stream.playing,
+                          initialData: player?.state.playing ?? false,
+                          builder: (context, playingSnapshot) {
+                            final playing = playingSnapshot.data ?? false;
+                            return StreamBuilder<double>(
+                              stream: player?.stream.bufferingPercentage,
+                              initialData:
+                                  player?.state.bufferingPercentage ?? 0,
+                              builder: (context, bufferingSnapshot) {
+                                final durationMs = duration.inMilliseconds;
+                                final playedProgress = durationMs <= 0
+                                    ? 0.0
+                                    : (position.inMilliseconds / durationMs)
+                                        .clamp(0.0, 1.0);
+                                final rawBuffered =
+                                    (bufferingSnapshot.data ?? 0) / 100;
+                                final bufferedProgress =
+                                    rawBuffered.clamp(playedProgress, 1.0);
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      activeTarget.title,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.headlineSmall
+                                          ?.copyWith(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      '${activeTarget.sourceKind.label} · ${activeTarget.sourceName}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodyMedium
+                                          ?.copyWith(
+                                        color: const Color(0xCCFFFFFF),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 18),
+                                    _TvPlaybackProgressBar(
+                                      playedProgress: playedProgress,
+                                      bufferedProgress: bufferedProgress,
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          playing
+                                              ? Icons.pause_circle_filled_rounded
+                                              : Icons.play_circle_fill_rounded,
+                                          color: Colors.white,
+                                          size: 22,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          '${_formatClockDuration(position)} / ${_formatClockDuration(duration)}',
+                                          style: theme.textTheme.titleSmall
+                                              ?.copyWith(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const Spacer(),
+                                        Text(
+                                          'OK ${playing ? '暂停' : '播放'}',
+                                          style: theme.textTheme.bodyMedium
+                                              ?.copyWith(
+                                            color: const Color(0xE6FFFFFF),
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 14),
+                                        Text(
+                                          '左右 10 秒',
+                                          style: theme.textTheme.bodyMedium
+                                              ?.copyWith(
+                                            color: const Color(0xCCFFFFFF),
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 14),
+                                        Text(
+                                          '下 更多',
+                                          style: theme.textTheme.bodyMedium
+                                              ?.copyWith(
+                                            color: const Color(0xCCFFFFFF),
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 14),
+                                        Text(
+                                          '返回 退出',
+                                          style: theme.textTheme.bodyMedium
+                                              ?.copyWith(
+                                            color: const Color(0xCCFFFFFF),
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                );
+                              },
+                            );
+                          },
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _togglePlayback() async {
     final player = _player;
     if (!_isReady || player == null) {
       return;
     }
     await player.playOrPause();
+    if (_isTelevisionPlaybackDevice) {
+      _showTvPlaybackChrome(autoHide: player.state.playing);
+    }
   }
 
   Future<void> _seekRelative(Duration delta) async {
@@ -1643,6 +1784,78 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final current = player.state.position;
     final target = current + delta;
     await player.seek(target < Duration.zero ? Duration.zero : target);
+    if (_isTelevisionPlaybackDevice) {
+      _showTvPlaybackChrome();
+    }
+  }
+
+  void _showTvPlaybackChrome({bool autoHide = true}) {
+    _tvPlaybackChromeHideTimer?.cancel();
+    if (mounted && !_tvPlaybackChromeVisible) {
+      setState(() {
+        _tvPlaybackChromeVisible = true;
+      });
+    }
+    if (autoHide) {
+      _scheduleTvPlaybackChromeHide();
+    }
+  }
+
+  void _scheduleTvPlaybackChromeHide() {
+    _tvPlaybackChromeHideTimer?.cancel();
+    _tvPlaybackChromeHideTimer = Timer(const Duration(seconds: 4), () {
+      if (!mounted || !_tvPlaybackChromeVisible) {
+        return;
+      }
+      setState(() {
+        _tvPlaybackChromeVisible = false;
+      });
+    });
+  }
+
+  void _hideTvPlaybackChrome() {
+    _tvPlaybackChromeHideTimer?.cancel();
+    if (!mounted || !_tvPlaybackChromeVisible) {
+      return;
+    }
+    setState(() {
+      _tvPlaybackChromeVisible = false;
+    });
+  }
+
+  Future<void> _openCurrentSubtitleSelector() async {
+    final player = _player;
+    if (player == null) {
+      return;
+    }
+    await _selectSubtitleTrack(
+      player,
+      player.state.tracks.subtitle,
+      player.state.track.subtitle,
+    );
+  }
+
+  Future<void> _openCurrentAudioSelector() async {
+    final player = _player;
+    if (player == null) {
+      return;
+    }
+    await _selectAudioTrack(
+      player,
+      player.state.tracks.audio,
+      player.state.track.audio,
+    );
+  }
+
+  Future<void> _enterPictureInPictureManually() async {
+    if (!_pictureInPictureSupported || _isInPictureInPictureMode) {
+      return;
+    }
+    final size = _currentPictureInPictureAspectRatio();
+    await AndroidPictureInPictureController.enter(
+      aspectRatioWidth: size.width,
+      aspectRatioHeight: size.height,
+    );
   }
 
   Widget _buildVideoSurface(
@@ -1782,9 +1995,29 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         ? kDefaultMaterialVideoControlsThemeDataFullscreen
         : kDefaultMaterialVideoControlsThemeData;
     return base.copyWith(
+      topButtonBar: [
+        MaterialCustomButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => context.pop(),
+        ),
+        const Spacer(),
+        if (_pictureInPictureSupported && !_isInPictureInPictureMode)
+          MaterialCustomButton(
+            icon: const Icon(Icons.picture_in_picture_alt_rounded),
+            onPressed: _enterPictureInPictureManually,
+          ),
+      ],
       bottomButtonBar: [
         const MaterialPositionIndicator(),
         const Spacer(),
+        MaterialCustomButton(
+          icon: const Icon(Icons.closed_caption_rounded),
+          onPressed: _openCurrentSubtitleSelector,
+        ),
+        MaterialCustomButton(
+          icon: const Icon(Icons.audiotrack_rounded),
+          onPressed: _openCurrentAudioSelector,
+        ),
         MaterialCustomButton(
           icon: const Icon(Icons.tune_rounded),
           onPressed: () => _showPlaybackOptions(
@@ -1805,6 +2038,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         ? kDefaultMaterialDesktopVideoControlsThemeDataFullscreen
         : kDefaultMaterialDesktopVideoControlsThemeData;
     return base.copyWith(
+      topButtonBar: [
+        MaterialDesktopCustomButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => context.pop(),
+        ),
+        const Spacer(),
+        if (_pictureInPictureSupported && !_isInPictureInPictureMode)
+          MaterialDesktopCustomButton(
+            icon: const Icon(Icons.picture_in_picture_alt_rounded),
+            onPressed: _enterPictureInPictureManually,
+          ),
+      ],
       bottomButtonBar: [
         const MaterialDesktopSkipPreviousButton(),
         const MaterialDesktopPlayOrPauseButton(),
@@ -1812,6 +2057,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         const MaterialDesktopVolumeButton(),
         const MaterialDesktopPositionIndicator(),
         const Spacer(),
+        MaterialDesktopCustomButton(
+          icon: const Icon(Icons.closed_caption_rounded),
+          onPressed: _openCurrentSubtitleSelector,
+        ),
+        MaterialDesktopCustomButton(
+          icon: const Icon(Icons.audiotrack_rounded),
+          onPressed: _openCurrentAudioSelector,
+        ),
         MaterialDesktopCustomButton(
           icon: const Icon(Icons.tune_rounded),
           onPressed: () => _showPlaybackOptions(
@@ -2134,6 +2387,48 @@ class _PlayerStartupOverlay extends StatelessWidget {
       return '识别中';
     }
     return parts.join(' · ');
+  }
+}
+
+class _TvPlaybackProgressBar extends StatelessWidget {
+  const _TvPlaybackProgressBar({
+    required this.playedProgress,
+    required this.bufferedProgress,
+  });
+
+  final double playedProgress;
+  final double bufferedProgress;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(999),
+      child: SizedBox(
+        height: 6,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(
+              color: Colors.white.withValues(alpha: 0.18),
+            ),
+            FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: bufferedProgress.clamp(0.0, 1.0),
+              child: ColoredBox(
+                color: Colors.white.withValues(alpha: 0.34),
+              ),
+            ),
+            FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: playedProgress.clamp(0.0, 1.0),
+              child: const ColoredBox(
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

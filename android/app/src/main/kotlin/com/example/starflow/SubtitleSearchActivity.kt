@@ -10,7 +10,8 @@ class SubtitleSearchActivity : FlutterActivity() {
     private var subtitleSearchChannel: MethodChannel? = null
 
     override fun getInitialRoute(): String {
-        return intent.getStringExtra(EXTRA_INITIAL_ROUTE)?.trim().orEmpty()
+        return super.getInitialRoute()?.trim().orEmpty()
+            .ifEmpty { intent.getStringExtra(EXTRA_INITIAL_ROUTE)?.trim().orEmpty() }
             .ifEmpty { "/subtitle-search?standalone=1" }
     }
 

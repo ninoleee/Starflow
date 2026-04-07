@@ -2473,6 +2473,16 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   }
 
   Future<void> _openTelevisionLibraryMatchPicker() async {
+    await _openTelevisionLibraryMatchPickerDialog(title: '选择本地资源');
+  }
+
+  Future<void> _openTelevisionPlayableVariantPicker() async {
+    await _openTelevisionLibraryMatchPickerDialog(title: '选择播放版本');
+  }
+
+  Future<void> _openTelevisionLibraryMatchPickerDialog({
+    required String title,
+  }) async {
     if (_libraryMatchChoices.length <= 1 || _isMatchingLocalResource) {
       return;
     }
@@ -2491,7 +2501,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
         context: context,
         builder: (dialogContext) {
           final dialog = AlertDialog(
-            title: const Text('选择本地资源'),
+            title: Text(title),
             content: SizedBox(
               width: 460,
               child: ConstrainedBox(
@@ -2619,6 +2629,58 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     }
   }
 
+  Widget _buildLibraryMatchSelectionControl({
+    required bool isTelevision,
+    required String title,
+    required String focusId,
+    required VoidCallback televisionOnPressed,
+  }) {
+    if (_libraryMatchChoices.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    if (isTelevision) {
+      return TvSelectionTile(
+        title: title,
+        value: _libraryMatchOptionLabel(
+          _libraryMatchChoices[_currentLibraryMatchIndex],
+        ),
+        onPressed: _isMatchingLocalResource ? null : televisionOnPressed,
+        focusId: focusId,
+      );
+    }
+    return DropdownButtonHideUnderline(
+      child: DropdownButton<int>(
+        value: _currentLibraryMatchIndex,
+        isExpanded: true,
+        dropdownColor: const Color(0xFF142235),
+        iconEnabledColor: Colors.white70,
+        style: const TextStyle(
+          color: Color(0xFFDCE6F8),
+          fontSize: 14,
+          height: 1.35,
+        ),
+        items: List.generate(_libraryMatchChoices.length, (i) {
+          return DropdownMenuItem<int>(
+            value: i,
+            child: Text(
+              _libraryMatchOptionLabel(_libraryMatchChoices[i]),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          );
+        }),
+        onChanged: _isMatchingLocalResource
+            ? null
+            : (i) {
+                if (i == null) {
+                  return;
+                }
+                _applySelectedLibraryMatchIndex(i);
+              },
+      ),
+    );
+  }
+
   bool _shouldShowPlayableVariantSwitcher(MediaDetailTarget target) {
     final itemType = target.itemType.trim().toLowerCase();
     return target.isPlayable &&
@@ -2630,6 +2692,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
 
   Widget _buildPlayableVariantSwitcherBlock(MediaDetailTarget target) {
     final currentIndex = _currentLibraryMatchIndex;
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final currentChoice = _libraryMatchChoices[currentIndex];
+    final currentChoiceSubtitle = _movieVariantOptionSubtitle(currentChoice)
+        .trim();
     return _DetailBlock(
       title: '播放版本',
       child: Column(
@@ -2644,34 +2710,23 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
             ),
           ),
           const SizedBox(height: 12),
-          for (var index = 0; index < _libraryMatchChoices.length; index++) ...[
-            if (index > 0) const SizedBox(height: 10),
-            Builder(
-              builder: (context) {
-                final candidate = _libraryMatchChoices[index];
-                final isSelected = index == currentIndex;
-                return StarflowSelectionTile(
-                  title: _libraryMatchOptionLabel(candidate),
-                  subtitle: _movieVariantOptionSubtitle(candidate),
-                  onPressed: _isMatchingLocalResource
-                      ? null
-                      : () {
-                          if (index == currentIndex) {
-                            return;
-                          }
-                          _applySelectedLibraryMatchIndex(index);
-                        },
-                  focusId: 'detail:resource:playable-variant:$index',
-                  trailing: Icon(
-                    isSelected
-                        ? Icons.check_circle_rounded
-                        : Icons.chevron_right_rounded,
-                    color: isSelected
-                        ? Theme.of(context).colorScheme.primary
-                        : Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                );
-              },
+          const _InfoLabel('当前版本'),
+          const SizedBox(height: 8),
+          _buildLibraryMatchSelectionControl(
+            isTelevision: isTelevision,
+            title: '当前版本',
+            focusId: 'detail:resource:playable-variant-selector',
+            televisionOnPressed: _openTelevisionPlayableVariantPicker,
+          ),
+          if (currentChoiceSubtitle.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              currentChoiceSubtitle,
+              style: const TextStyle(
+                color: Color(0xFF90A0BD),
+                fontSize: 13.5,
+                height: 1.5,
+              ),
             ),
           ],
         ],

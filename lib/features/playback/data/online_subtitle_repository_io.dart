@@ -58,7 +58,11 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
 
     if (enabledSources.contains(OnlineSubtitleSource.assrt)) {
       try {
-        final assrtResults = await _searchAssrt(normalizedQuery);
+        final assrtResults = await _searchSourceWithFallback(
+          normalizedQuery,
+          source: OnlineSubtitleSource.assrt,
+          searcher: _searchAssrt,
+        );
         results.addAll(assrtResults);
         subtitleSearchTrace(
           'repository.search.source-finished',
@@ -87,7 +91,11 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
 
     if (enabledSources.contains(OnlineSubtitleSource.subhd)) {
       try {
-        final subhdResults = await _searchSubhd(normalizedQuery);
+        final subhdResults = await _searchSourceWithFallback(
+          normalizedQuery,
+          source: OnlineSubtitleSource.subhd,
+          searcher: _searchSubhd,
+        );
         results.addAll(subhdResults);
         subtitleSearchTrace(
           'repository.search.source-finished',
@@ -116,7 +124,11 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
 
     if (enabledSources.contains(OnlineSubtitleSource.yify)) {
       try {
-        final yifyResults = await _searchYify(normalizedQuery);
+        final yifyResults = await _searchSourceWithFallback(
+          normalizedQuery,
+          source: OnlineSubtitleSource.yify,
+          searcher: _searchYify,
+        );
         results.addAll(yifyResults);
         subtitleSearchTrace(
           'repository.search.source-finished',
@@ -173,6 +185,79 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
     return limitedResults;
   }
 
+  Future<List<SubtitleSearchResult>> _searchSourceWithFallback(
+    String query, {
+    required OnlineSubtitleSource source,
+    required Future<List<SubtitleSearchResult>> Function(String query) searcher,
+  }) async {
+    final variants = buildSubtitleSearchQueryVariants(query);
+    if (variants.isEmpty) {
+      return const [];
+    }
+
+    Object? lastError;
+    StackTrace? lastStackTrace;
+    List<SubtitleSearchResult> lastResults = const [];
+
+    for (var index = 0; index < variants.length; index++) {
+      final variant = variants[index];
+      final isFallback = index > 0;
+      if (isFallback) {
+        subtitleSearchTrace(
+          'repository.search.fallback-query',
+          fields: {
+            'source': source.name,
+            'originalQuery': query,
+            'fallbackQuery': variant,
+            'attempt': index + 1,
+          },
+        );
+      }
+
+      try {
+        final variantResults = await searcher(variant);
+        lastResults = variantResults;
+        if (variantResults.isNotEmpty || index == variants.length - 1) {
+          if (isFallback) {
+            subtitleSearchTrace(
+              'repository.search.fallback-result',
+              fields: {
+                'source': source.name,
+                'fallbackQuery': variant,
+                'count': variantResults.length,
+                'sample': _sampleResultTitles(variantResults),
+              },
+            );
+          }
+          return variantResults;
+        }
+      } catch (error, stackTrace) {
+        lastError = error;
+        lastStackTrace = stackTrace;
+        if (index == variants.length - 1) {
+          Error.throwWithStackTrace(error, stackTrace);
+        }
+        subtitleSearchTrace(
+          isFallback
+              ? 'repository.search.fallback-query-failed'
+              : 'repository.search.primary-query-failed',
+          fields: {
+            'source': source.name,
+            'query': variant,
+            'originalQuery': query,
+          },
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+
+    if (lastError != null && lastStackTrace != null) {
+      Error.throwWithStackTrace(lastError, lastStackTrace);
+    }
+    return lastResults;
+  }
+
   Future<List<SubtitleSearchResult>> _searchAssrt(String query) async {
     final uri = Uri.https('assrt.net', '/sub/', {
       'searchword': query,
@@ -199,6 +284,17 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
         'snippet': _responseSnippet(body),
       },
     );
+    if (isAssrtErrorResponse(response.statusCode, body)) {
+      subtitleSearchTrace(
+        'repository.assrt.error-page',
+        fields: {
+          'query': query,
+          'status': response.statusCode,
+          'snippet': _responseSnippet(body),
+        },
+      );
+      throw StateError('ASSRT 当前返回错误页，暂时无法搜索字幕，请改用其他字幕源重试');
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('字幕搜索失败：HTTP ${response.statusCode}');
     }
@@ -1173,6 +1269,51 @@ bool _looksLikeEpisodeQuery(String query) {
   ).hasMatch(normalized);
 }
 
+@visibleForTesting
+List<String> buildSubtitleSearchQueryVariants(String query) {
+  final normalized = _normalizeWhitespace(query);
+  if (normalized.isEmpty) {
+    return const [];
+  }
+
+  final variants = <String>[];
+  final pending = <String>[normalized];
+  final seen = <String>{};
+
+  while (pending.isNotEmpty) {
+    final current = pending.removeAt(0);
+    if (!seen.add(current)) {
+      continue;
+    }
+    variants.add(current);
+
+    final withoutEpisode = _stripTrailingEpisodeToken(current);
+    if (withoutEpisode.isNotEmpty && !seen.contains(withoutEpisode)) {
+      pending.add(withoutEpisode);
+    }
+
+    final withoutYear = _stripTrailingYearToken(current);
+    if (withoutYear.isNotEmpty && !seen.contains(withoutYear)) {
+      pending.add(withoutYear);
+    }
+  }
+  return variants;
+}
+
+@visibleForTesting
+bool isAssrtErrorResponse(int statusCode, String body) {
+  final normalized = body.trim();
+  if (statusCode >= 400) {
+    return true;
+  }
+  if (normalized.isEmpty) {
+    return false;
+  }
+  return normalized.contains('java.money.noMoneyException') ||
+      normalized.contains('请您通过Email报告指向此页面的网址') ||
+      normalized.contains('啊呀');
+}
+
 String _readResponseBody(http.Response response) {
   try {
     return utf8.decode(response.bodyBytes, allowMalformed: true);
@@ -1319,6 +1460,32 @@ int _subtitleCandidateScore({
 int _parseLooseInt(String value) {
   final match = RegExp(r'(\d+)').firstMatch(value);
   return int.tryParse(match?.group(1) ?? '') ?? 0;
+}
+
+String _stripTrailingEpisodeToken(String query) {
+  final trimmed = query.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  return _normalizeWhitespace(
+    trimmed.replaceFirst(
+      RegExp(
+        r'\s*(?:s\d{1,2}e\d{1,2}|season\s*\d+\s*episode\s*\d+|第\s*\d+\s*季\s*第\s*\d+\s*集|第\s*\d+\s*集)\s*$',
+        caseSensitive: false,
+      ),
+      '',
+    ),
+  );
+}
+
+String _stripTrailingYearToken(String query) {
+  final trimmed = query.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  return _normalizeWhitespace(
+    trimmed.replaceFirst(RegExp(r'\s+(?:19|20)\d{2}\s*$'), ''),
+  );
 }
 
 String _normalizeCandidateText(String value) {

@@ -3,6 +3,38 @@ import 'package:starflow/features/playback/data/online_subtitle_repository_io.da
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 
 void main() {
+  group('buildSubtitleSearchQueryVariants', () {
+    test('falls back from episode query to title only', () {
+      expect(
+        buildSubtitleSearchQueryVariants('请求救援 S01E01'),
+        ['请求救援 S01E01', '请求救援'],
+      );
+    });
+
+    test('falls back from movie query with year to title only', () {
+      expect(
+        buildSubtitleSearchQueryVariants('Dune Part Two 2024'),
+        ['Dune Part Two 2024', 'Dune Part Two'],
+      );
+    });
+  });
+
+  group('isAssrtErrorResponse', () {
+    test('detects ASSRT error pages from body markers', () {
+      expect(
+        isAssrtErrorResponse(
+          200,
+          '<html><title>啊呀</title>java.money.noMoneyException 请您通过Email报告指向此页面的网址</html>',
+        ),
+        isTrue,
+      );
+    });
+
+    test('treats 4xx responses as errors', () {
+      expect(isAssrtErrorResponse(402, ''), isTrue);
+    });
+  });
+
   group('AssrtSubtitleRepository.parseAssrtSearchHtml', () {
     test('parses ASSRT search results and prioritizes auto-loadable entries',
         () {
