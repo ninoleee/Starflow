@@ -813,6 +813,6 @@ private extension CMTime {
 
 private extension Int64 {
   var clampedToNonNegative: Int64 {
-    return max(self, 0)
+    return Swift.max(self, 0)
   }
 }
