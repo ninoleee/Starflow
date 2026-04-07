@@ -11,6 +11,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:path/path.dart' as p;
 import 'package:starflow/core/platform/android_picture_in_picture.dart';
 import 'package:starflow/core/platform/background_playback.dart';
+import 'package:starflow/core/platform/playback_system_session.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
@@ -72,6 +73,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _isReady = false;
   bool _pictureInPictureSupported = false;
   bool _isInPictureInPictureMode = false;
+  bool _playbackSystemSessionBound = false;
   bool _subtitleDelaySupported = false;
   double _subtitleDelaySeconds = 0;
   bool _tvPlaybackChromeVisible = false;
@@ -82,6 +84,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Duration _latestDuration = Duration.zero;
   DateTime? _lastProgressPersistedAt;
   Duration _lastPersistedPosition = Duration.zero;
+  Duration _lastPlaybackSystemSessionPosition = Duration.zero;
+  Duration _lastPlaybackSystemSessionDuration = Duration.zero;
+  bool _lastPlaybackSystemSessionPlaying = false;
+  bool _lastPlaybackSystemSessionBuffering = false;
+  String _lastPlaybackSystemSessionTitle = '';
+  String _lastPlaybackSystemSessionSubtitle = '';
   late final StateController<bool> _playbackPerformanceModeController;
   Timer? _tvPlaybackChromeHideTimer;
 
@@ -100,6 +108,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           ref.read(appSettingsProvider).highPerformanceModeEnabled;
     });
     unawaited(_bindPictureInPictureSupport());
+    unawaited(_bindPlaybackSystemSession());
     _initialize();
   }
 
@@ -112,6 +121,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     });
     unawaited(_persistPlaybackProgress(force: true));
     unawaited(_teardownPictureInPicture());
+    unawaited(_teardownPlaybackSystemSession());
     unawaited(_playerErrorSubscription?.cancel());
     unawaited(_playerPlayingSubscription?.cancel());
     unawaited(_playerPositionSubscription?.cancel());
@@ -219,6 +229,122 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     await BackgroundPlaybackController.setEnabled(shouldEnable);
   }
 
+  Future<void> _bindPlaybackSystemSession() async {
+    if (!PlaybackSystemSessionController.isSupportedPlatform ||
+        _playbackSystemSessionBound) {
+      return;
+    }
+    await PlaybackSystemSessionController.attach(_handlePlaybackRemoteCommand);
+    _playbackSystemSessionBound = true;
+  }
+
+  Future<void> _teardownPlaybackSystemSession() async {
+    if (PlaybackSystemSessionController.isSupportedPlatform) {
+      await PlaybackSystemSessionController.setActive(false);
+      await PlaybackSystemSessionController.detach();
+    }
+    _playbackSystemSessionBound = false;
+  }
+
+  Future<void> _syncPlaybackSystemSession({bool force = false}) async {
+    if (!PlaybackSystemSessionController.isSupportedPlatform) {
+      return;
+    }
+
+    final player = _player;
+    if (!_isReady || player == null) {
+      if (force) {
+        await PlaybackSystemSessionController.setActive(false);
+      }
+      return;
+    }
+
+    final title = _buildPlaybackSystemSessionTitle();
+    final subtitle = _buildPlaybackSystemSessionSubtitle();
+
+    final state = PlaybackSystemSessionState(
+      title: title,
+      subtitle: subtitle,
+      position: player.state.position,
+      duration: player.state.duration,
+      playing: player.state.playing,
+      buffering: player.state.buffering,
+      speed: player.state.rate,
+      canSeek: true,
+    );
+
+    final positionChanged =
+        (state.position - _lastPlaybackSystemSessionPosition).inSeconds != 0;
+    final durationChanged =
+        state.duration != _lastPlaybackSystemSessionDuration;
+    final playingChanged = state.playing != _lastPlaybackSystemSessionPlaying;
+    final bufferingChanged =
+        state.buffering != _lastPlaybackSystemSessionBuffering;
+    final titleChanged = title != _lastPlaybackSystemSessionTitle;
+    final subtitleChanged = subtitle != _lastPlaybackSystemSessionSubtitle;
+
+    if (!force &&
+        !positionChanged &&
+        !durationChanged &&
+        !playingChanged &&
+        !bufferingChanged &&
+        !titleChanged &&
+        !subtitleChanged) {
+      return;
+    }
+
+    _lastPlaybackSystemSessionPosition = state.position;
+    _lastPlaybackSystemSessionDuration = state.duration;
+    _lastPlaybackSystemSessionPlaying = state.playing;
+    _lastPlaybackSystemSessionBuffering = state.buffering;
+    _lastPlaybackSystemSessionTitle = state.title;
+    _lastPlaybackSystemSessionSubtitle = state.subtitle;
+
+    await PlaybackSystemSessionController.setActive(true);
+    await PlaybackSystemSessionController.update(state);
+  }
+
+  Future<void> _handlePlaybackRemoteCommand(
+    PlaybackRemoteCommand command,
+  ) async {
+    switch (command.type) {
+      case PlaybackRemoteCommandType.play:
+        await _setPlayWhenReady(true);
+        break;
+      case PlaybackRemoteCommandType.pause:
+      case PlaybackRemoteCommandType.stop:
+      case PlaybackRemoteCommandType.becomingNoisy:
+      case PlaybackRemoteCommandType.interruptionPause:
+        await _setPlayWhenReady(false);
+        await _persistPlaybackProgress(force: true);
+        break;
+      case PlaybackRemoteCommandType.toggle:
+        await _togglePlayback();
+        break;
+      case PlaybackRemoteCommandType.seekForward:
+      case PlaybackRemoteCommandType.next:
+        await _seekRelative(_kSeekStep);
+        break;
+      case PlaybackRemoteCommandType.seekBackward:
+      case PlaybackRemoteCommandType.previous:
+        await _seekRelative(-_kSeekStep);
+        break;
+      case PlaybackRemoteCommandType.seekTo:
+        final position = command.position;
+        if (position != null) {
+          await _seekTo(position);
+        }
+        break;
+      case PlaybackRemoteCommandType.interruptionResume:
+        await _setPlayWhenReady(true);
+        break;
+    }
+  }
+
+  Future<void> _showAirPlayRoutePicker() async {
+    await PlaybackSystemSessionController.showAirPlayPicker();
+  }
+
   _PictureInPictureAspectRatio _currentPictureInPictureAspectRatio() {
     final width = _player?.state.width ?? 0;
     final height = _player?.state.height ?? 0;
@@ -226,6 +352,36 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       return _PictureInPictureAspectRatio(width: width, height: height);
     }
     return const _PictureInPictureAspectRatio(width: 16, height: 9);
+  }
+
+  String _buildPlaybackSystemSessionTitle() {
+    final target = _resolvedTarget ?? widget.target;
+    final seasonNumber = target.seasonNumber;
+    final episodeNumber = target.episodeNumber;
+    if (target.isEpisode &&
+        seasonNumber != null &&
+        seasonNumber > 0 &&
+        episodeNumber != null &&
+        episodeNumber > 0) {
+      return '${target.title} · S${seasonNumber.toString().padLeft(2, '0')}'
+          'E${episodeNumber.toString().padLeft(2, '0')}';
+    }
+    return target.title.trim().isEmpty ? 'Starflow' : target.title.trim();
+  }
+
+  String _buildPlaybackSystemSessionSubtitle() {
+    final target = _resolvedTarget ?? widget.target;
+    if (target.isEpisode) {
+      final seriesTitle = target.resolvedSeriesTitle.trim();
+      if (seriesTitle.isNotEmpty) {
+        return seriesTitle;
+      }
+    }
+    final parts = <String>[
+      if (target.sourceName.trim().isNotEmpty) target.sourceName.trim(),
+      if (target.formatLabel.trim().isNotEmpty) target.formatLabel.trim(),
+    ];
+    return parts.join(' · ');
   }
 
   Future<void> _initialize() async {
@@ -292,6 +448,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         playing,
       ) {
         unawaited(_syncBackgroundPlayback(enabled: playing));
+        unawaited(_syncPlaybackSystemSession(force: true));
         if (_isTelevisionPlaybackDevice) {
           if (!playing) {
             _showTvPlaybackChrome(autoHide: false);
@@ -307,6 +464,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         duration,
       ) {
         _latestDuration = duration;
+        unawaited(_syncPlaybackSystemSession());
       });
       _playerPositionSubscription = playback.player.stream.position.listen((
         position,
@@ -314,6 +472,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _latestPosition = position;
         _maybeApplyAutoSkip(playback.player, position);
         unawaited(_persistPlaybackProgress());
+        unawaited(_syncPlaybackSystemSession());
       });
       setState(() {
         _player = playback.player;
@@ -327,6 +486,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       await _restorePlaybackProgress(playback.player, resumeEntry);
       _syncSkipFlagsWithCurrentPosition();
       unawaited(_syncBackgroundPlayback(enabled: true));
+      unawaited(_syncPlaybackSystemSession(force: true));
     } catch (error) {
       if (!mounted) {
         return;
@@ -335,6 +495,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _error = _buildPlaybackErrorMessage(error);
       });
       unawaited(_syncBackgroundPlayback(enabled: false));
+      unawaited(_teardownPlaybackSystemSession());
     }
   }
 
@@ -1672,7 +1833,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                       stream: player?.stream.duration,
                       initialData: player?.state.duration ?? _latestDuration,
                       builder: (context, durationSnapshot) {
-                        final duration = durationSnapshot.data ?? _latestDuration;
+                        final duration =
+                            durationSnapshot.data ?? _latestDuration;
                         return StreamBuilder<bool>(
                           stream: player?.stream.playing,
                           initialData: player?.state.playing ?? false,
@@ -1711,8 +1873,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                       '${activeTarget.sourceKind.label} · ${activeTarget.sourceName}',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.bodyMedium
-                                          ?.copyWith(
+                                      style:
+                                          theme.textTheme.bodyMedium?.copyWith(
                                         color: const Color(0xCCFFFFFF),
                                         fontWeight: FontWeight.w600,
                                       ),
@@ -1727,7 +1889,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                       children: [
                                         Icon(
                                           playing
-                                              ? Icons.pause_circle_filled_rounded
+                                              ? Icons
+                                                  .pause_circle_filled_rounded
                                               : Icons.play_circle_fill_rounded,
                                           color: Colors.white,
                                           size: 22,
@@ -1808,6 +1971,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     }
   }
 
+  Future<void> _setPlayWhenReady(bool playing) async {
+    final player = _player;
+    if (!_isReady || player == null) {
+      return;
+    }
+    if (playing) {
+      await player.play();
+    } else {
+      await player.pause();
+    }
+    if (_isTelevisionPlaybackDevice) {
+      _showTvPlaybackChrome(autoHide: playing);
+    }
+    await _syncPlaybackSystemSession(force: true);
+  }
+
   Future<void> _seekRelative(Duration delta) async {
     final player = _player;
     if (!_isReady || player == null) {
@@ -1819,6 +1998,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (_isTelevisionPlaybackDevice) {
       _showTvPlaybackChrome();
     }
+  }
+
+  Future<void> _seekTo(Duration position) async {
+    final player = _player;
+    if (!_isReady || player == null) {
+      return;
+    }
+    await player.seek(position < Duration.zero ? Duration.zero : position);
+    if (_isTelevisionPlaybackDevice) {
+      _showTvPlaybackChrome();
+    }
+    await _syncPlaybackSystemSession(force: true);
   }
 
   void _showTvPlaybackChrome({bool autoHide = true}) {
@@ -2059,6 +2250,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           onPressed: () => context.pop(),
         ),
         const Spacer(),
+        if (PlaybackSystemSessionController.supportsAirPlayPicker)
+          MaterialCustomButton(
+            icon: const Icon(Icons.airplay_rounded),
+            onPressed: _showAirPlayRoutePicker,
+          ),
         if (_pictureInPictureSupported && !_isInPictureInPictureMode)
           MaterialCustomButton(
             icon: const Icon(Icons.picture_in_picture_alt_rounded),
@@ -2102,6 +2298,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           onPressed: () => context.pop(),
         ),
         const Spacer(),
+        if (PlaybackSystemSessionController.supportsAirPlayPicker)
+          MaterialDesktopCustomButton(
+            icon: const Icon(Icons.airplay_rounded),
+            onPressed: _showAirPlayRoutePicker,
+          ),
         if (_pictureInPictureSupported && !_isInPictureInPictureMode)
           MaterialDesktopCustomButton(
             icon: const Icon(Icons.picture_in_picture_alt_rounded),

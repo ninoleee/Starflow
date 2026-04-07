@@ -1,6 +1,7 @@
 import Flutter
 import AVFoundation
 import AVKit
+import MediaPlayer
 import ObjectiveC.runtime
 import UIKit
 
@@ -8,8 +9,13 @@ import UIKit
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private static var didInstallTouchRateCorrectionWorkaround = false
   private var platformChannel: FlutterMethodChannel?
+  private var playbackSessionChannel: FlutterMethodChannel?
   private let settingsDocumentExporter = SettingsDocumentExporter()
   private let nativePlaybackStore = NativePlaybackMemoryStore()
+  private lazy var playbackSystemSessionBridge = PlaybackSystemSessionBridge {
+    [weak self] in
+    self?.resolveTopViewController()
+  }
 
   override func application(
     _ application: UIApplication,
@@ -28,6 +34,7 @@ import UIKit
 
   func ensurePlatformChannelInstalled() {
     installPlatformChannelIfNeeded()
+    installPlaybackSessionChannelIfNeeded()
   }
 
   private func installFlutterTouchRateCorrectionWorkaroundIfNeeded() {
@@ -104,6 +111,21 @@ import UIKit
       }
     }
     platformChannel = channel
+  }
+
+  private func installPlaybackSessionChannelIfNeeded() {
+    guard playbackSessionChannel == nil,
+      let controller = resolveFlutterViewController()
+    else {
+      return
+    }
+
+    let channel = FlutterMethodChannel(
+      name: "starflow/playback_session",
+      binaryMessenger: controller.binaryMessenger
+    )
+    playbackSystemSessionBridge.bind(to: channel)
+    playbackSessionChannel = channel
   }
 
   private func resolveFlutterViewController() -> FlutterViewController? {
@@ -370,6 +392,7 @@ private final class NativePlaybackViewController: AVPlayerViewController,
   private let playbackStore: NativePlaybackMemoryStore
   private let isoFormatter = ISO8601DateFormatter()
   private let request: NativePlaybackRequest
+  private let airPlayRoutePickerView = AVRoutePickerView()
   private let onlineSubtitleButton = UIButton(type: .system)
   private var subtitleSearchEngine: FlutterEngine?
   private var subtitleSearchChannel: FlutterMethodChannel?
@@ -381,6 +404,7 @@ private final class NativePlaybackViewController: AVPlayerViewController,
   private var subtitleButtonAutoHideWorkItem: DispatchWorkItem?
   private var appObservers: [NSObjectProtocol] = []
   private var lastSavedPositionMs: Int64 = -1
+  private var remoteCommandsInstalled = false
 
   init(request: NativePlaybackRequest, playbackStore: NativePlaybackMemoryStore) {
     self.request = request
@@ -405,8 +429,10 @@ private final class NativePlaybackViewController: AVPlayerViewController,
     allowsPictureInPicturePlayback = true
     updatesNowPlayingInfoCenter = true
     title = request.title
+    configureAudioSession(enabled: true)
     configureOverlayButtons()
     configurePlayer()
+    installRemoteCommands()
     registerAppLifecycleObservers()
   }
 
@@ -445,9 +471,11 @@ private final class NativePlaybackViewController: AVPlayerViewController,
       let seekTime = CMTime(value: CMTimeValue(resumePositionMs), timescale: CMTimeScale(1000))
       player.seek(to: seekTime, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
         player.play()
+        self.updateNowPlayingInfo()
       }
     } else {
       player.play()
+      updateNowPlayingInfo()
     }
   }
 
@@ -455,6 +483,13 @@ private final class NativePlaybackViewController: AVPlayerViewController,
     guard let overlayView = contentOverlayView else {
       return
     }
+
+    airPlayRoutePickerView.removeFromSuperview()
+    airPlayRoutePickerView.translatesAutoresizingMaskIntoConstraints = false
+    airPlayRoutePickerView.prioritizesVideoDevices = true
+    airPlayRoutePickerView.tintColor = .white
+    airPlayRoutePickerView.activeTintColor = .systemBlue
+    overlayView.addSubview(airPlayRoutePickerView)
 
     onlineSubtitleButton.removeFromSuperview()
     onlineSubtitleButton.translatesAutoresizingMaskIntoConstraints = false
@@ -480,6 +515,16 @@ private final class NativePlaybackViewController: AVPlayerViewController,
     overlayTapGestureRecognizer = recognizer
 
     NSLayoutConstraint.activate([
+      airPlayRoutePickerView.trailingAnchor.constraint(
+        equalTo: overlayView.safeAreaLayoutGuide.trailingAnchor,
+        constant: -18
+      ),
+      airPlayRoutePickerView.topAnchor.constraint(
+        equalTo: overlayView.safeAreaLayoutGuide.topAnchor,
+        constant: 16
+      ),
+      airPlayRoutePickerView.widthAnchor.constraint(equalToConstant: 34),
+      airPlayRoutePickerView.heightAnchor.constraint(equalToConstant: 34),
       onlineSubtitleButton.trailingAnchor.constraint(
         equalTo: overlayView.safeAreaLayoutGuide.trailingAnchor,
         constant: -18
@@ -647,6 +692,157 @@ private final class NativePlaybackViewController: AVPlayerViewController,
     present(alert, animated: true)
   }
 
+  private func configureAudioSession(enabled: Bool) {
+    let session = AVAudioSession.sharedInstance()
+    do {
+      if enabled {
+        try session.setCategory(
+          .playback,
+          mode: .moviePlayback,
+          options: [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
+        )
+        try session.setActive(true)
+      } else {
+        try session.setActive(false, options: [.notifyOthersOnDeactivation])
+      }
+    } catch {
+    }
+  }
+
+  private func installRemoteCommands() {
+    guard !remoteCommandsInstalled else {
+      return
+    }
+
+    let commandCenter = MPRemoteCommandCenter.shared()
+    commandCenter.playCommand.removeTarget(nil)
+    commandCenter.pauseCommand.removeTarget(nil)
+    commandCenter.togglePlayPauseCommand.removeTarget(nil)
+    commandCenter.stopCommand.removeTarget(nil)
+    commandCenter.skipForwardCommand.removeTarget(nil)
+    commandCenter.skipBackwardCommand.removeTarget(nil)
+    commandCenter.changePlaybackPositionCommand.removeTarget(nil)
+
+    commandCenter.playCommand.isEnabled = true
+    commandCenter.pauseCommand.isEnabled = true
+    commandCenter.togglePlayPauseCommand.isEnabled = true
+    commandCenter.stopCommand.isEnabled = true
+    commandCenter.skipForwardCommand.isEnabled = true
+    commandCenter.skipBackwardCommand.isEnabled = true
+    commandCenter.changePlaybackPositionCommand.isEnabled = true
+    commandCenter.skipForwardCommand.preferredIntervals = [10]
+    commandCenter.skipBackwardCommand.preferredIntervals = [10]
+
+    commandCenter.playCommand.addTarget { [weak self] _ in
+      self?.player?.play()
+      self?.updateNowPlayingInfo()
+      return .success
+    }
+    commandCenter.pauseCommand.addTarget { [weak self] _ in
+      self?.player?.pause()
+      self?.updateNowPlayingInfo()
+      return .success
+    }
+    commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
+      guard let self, let player = self.player else {
+        return .commandFailed
+      }
+      if player.timeControlStatus == .paused {
+        player.play()
+      } else {
+        player.pause()
+      }
+      self.updateNowPlayingInfo()
+      return .success
+    }
+    commandCenter.stopCommand.addTarget { [weak self] _ in
+      self?.player?.pause()
+      self?.updateNowPlayingInfo()
+      return .success
+    }
+    commandCenter.skipForwardCommand.addTarget { [weak self] _ in
+      self?.seekBy(seconds: 10)
+      return .success
+    }
+    commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
+      self?.seekBy(seconds: -10)
+      return .success
+    }
+    commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
+      guard let self, let event = event as? MPChangePlaybackPositionCommandEvent else {
+        return .commandFailed
+      }
+      let time = CMTime(seconds: event.positionTime, preferredTimescale: 600)
+      self.player?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+      self.updateNowPlayingInfo()
+      return .success
+    }
+
+    remoteCommandsInstalled = true
+  }
+
+  private func uninstallRemoteCommands() {
+    guard remoteCommandsInstalled else {
+      return
+    }
+    let commandCenter = MPRemoteCommandCenter.shared()
+    commandCenter.playCommand.removeTarget(nil)
+    commandCenter.pauseCommand.removeTarget(nil)
+    commandCenter.togglePlayPauseCommand.removeTarget(nil)
+    commandCenter.stopCommand.removeTarget(nil)
+    commandCenter.skipForwardCommand.removeTarget(nil)
+    commandCenter.skipBackwardCommand.removeTarget(nil)
+    commandCenter.changePlaybackPositionCommand.removeTarget(nil)
+    remoteCommandsInstalled = false
+  }
+
+  private func seekBy(seconds: Double) {
+    guard let player else {
+      return
+    }
+    let currentSeconds = player.currentTime().seconds
+    let nextSeconds = max(currentSeconds.isFinite ? currentSeconds + seconds : seconds, 0.0)
+    let time = CMTime(seconds: nextSeconds, preferredTimescale: 600)
+    player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+    updateNowPlayingInfo()
+  }
+
+  private func updateNowPlayingInfo() {
+    guard let player else {
+      return
+    }
+
+    let targetObject = playbackStore.decodeTargetJson(request.playbackTargetJson)
+    let seriesTitle = (targetObject["seriesTitle"] as? String)?.nonEmptyTrimmed ?? ""
+    let sourceName = (targetObject["sourceName"] as? String)?.nonEmptyTrimmed ?? ""
+    var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+    info[MPMediaItemPropertyTitle] = request.title.isEmpty ? "Starflow" : request.title
+
+    let subtitle = !seriesTitle.isEmpty ? seriesTitle : sourceName
+    if subtitle.isEmpty {
+      info.removeValue(forKey: MPMediaItemPropertyAlbumTitle)
+      info.removeValue(forKey: MPMediaItemPropertyArtist)
+    } else {
+      info[MPMediaItemPropertyAlbumTitle] = subtitle
+      info[MPMediaItemPropertyArtist] = subtitle
+    }
+
+    let durationSeconds = player.currentItem?.duration.seconds ?? 0
+    if durationSeconds.isFinite && durationSeconds > 0 {
+      info[MPMediaItemPropertyPlaybackDuration] = durationSeconds
+    } else {
+      info.removeValue(forKey: MPMediaItemPropertyPlaybackDuration)
+    }
+
+    let elapsedSeconds = player.currentTime().seconds
+    info[MPNowPlayingInfoPropertyElapsedPlaybackTime] =
+      elapsedSeconds.isFinite ? max(elapsedSeconds, 0.0) : 0.0
+    info[MPNowPlayingInfoPropertyPlaybackRate] =
+      player.timeControlStatus == .playing ? max(Double(player.rate), 1.0) : 0.0
+    info[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+  }
+
   private func installPlaybackStateObserver(for player: AVPlayer) {
     playbackStateObservation = player.observe(
       \.timeControlStatus,
@@ -670,6 +866,7 @@ private final class NativePlaybackViewController: AVPlayerViewController,
       subtitleButtonAutoHideWorkItem?.cancel()
       setOnlineSubtitleButtonHidden(false, animated: true)
     }
+    updateNowPlayingInfo()
   }
 
   private func scheduleOnlineSubtitleButtonAutoHide() {
@@ -730,6 +927,7 @@ private final class NativePlaybackViewController: AVPlayerViewController,
         queue: .main
       ) { [weak self] _ in
         self?.persistPlaybackProgress(force: true)
+        self?.updateNowPlayingInfo()
       }
     )
     appObservers.append(
@@ -739,6 +937,7 @@ private final class NativePlaybackViewController: AVPlayerViewController,
         queue: .main
       ) { [weak self] _ in
         self?.persistPlaybackProgress(force: true)
+        self?.updateNowPlayingInfo()
       }
     )
     appObservers.append(
@@ -750,6 +949,70 @@ private final class NativePlaybackViewController: AVPlayerViewController,
         self?.persistPlaybackProgress(force: true)
       }
     )
+    appObservers.append(
+      center.addObserver(
+        forName: AVAudioSession.interruptionNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] notification in
+        self?.handleAudioSessionInterruption(notification)
+      }
+    )
+    appObservers.append(
+      center.addObserver(
+        forName: AVAudioSession.routeChangeNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] notification in
+        self?.handleAudioRouteChange(notification)
+      }
+    )
+  }
+
+  private func handleAudioSessionInterruption(_ notification: Notification) {
+    let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt ?? 0
+    guard let interruptionType = AVAudioSession.InterruptionType(rawValue: rawType) else {
+      return
+    }
+
+    switch interruptionType {
+    case .began:
+      player?.pause()
+      updateNowPlayingInfo()
+    case .ended:
+      let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+      let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
+      if options.contains(.shouldResume) {
+        player?.play()
+        updateNowPlayingInfo()
+      }
+    @unknown default:
+      break
+    }
+  }
+
+  private func handleAudioRouteChange(_ notification: Notification) {
+    let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
+    guard let reason = AVAudioSession.RouteChangeReason(rawValue: rawReason),
+      reason == .oldDeviceUnavailable
+    else {
+      return
+    }
+
+    let previousRoute =
+      notification.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription
+    let shouldPause = previousRoute?.outputs.contains(where: { output in
+      switch output.portType {
+      case .headphones, .bluetoothA2DP, .bluetoothLE, .bluetoothHFP, .lineOut, .usbAudio:
+        return true
+      default:
+        return false
+      }
+    }) ?? false
+    if shouldPause {
+      player?.pause()
+      updateNowPlayingInfo()
+    }
   }
 
   private func installTimeObserver(for player: AVPlayer) {
@@ -759,6 +1022,7 @@ private final class NativePlaybackViewController: AVPlayerViewController,
       queue: .main
     ) { [weak self] _ in
       self?.persistPlaybackProgress()
+      self?.updateNowPlayingInfo()
     }
   }
 
@@ -769,11 +1033,13 @@ private final class NativePlaybackViewController: AVPlayerViewController,
       queue: .main
     ) { [weak self] _ in
       self?.persistPlaybackProgress(force: true)
+      self?.updateNowPlayingInfo()
     }
   }
 
   private func teardownPlayback() {
-    if !appObservers.isEmpty || player != nil {
+    let hadPlayback = !appObservers.isEmpty || player != nil
+    if hadPlayback {
       persistPlaybackProgress(force: true)
     }
 
@@ -804,6 +1070,11 @@ private final class NativePlaybackViewController: AVPlayerViewController,
     appObservers.removeAll()
 
     player?.pause()
+    uninstallRemoteCommands()
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    if hadPlayback {
+      configureAudioSession(enabled: false)
+    }
   }
 
   private func persistPlaybackProgress(force: Bool = false) {

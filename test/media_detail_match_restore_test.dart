@@ -117,8 +117,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('播放版本'), findsOneWidget);
-    expect(find.text('nas-A · 测试影片 · 版本A'), findsOneWidget);
-    expect(find.text('nas-B · 测试影片 · 版本B'), findsOneWidget);
+    final dropdown = tester.widget<DropdownButton<int>>(
+      find.byType(DropdownButton<int>),
+    );
+    final labels = dropdown.items!
+        .map((item) => (item.child as Text).data ?? '')
+        .toList(growable: false);
+    expect(dropdown.value, 1);
+    expect(labels, contains('nas-A · 测试影片 · 版本A'));
+    expect(labels, contains('nas-B · 测试影片 · 版本B'));
   });
 
   testWidgets(
@@ -229,8 +236,153 @@ void main() {
 
     expect(find.text('播放版本'), findsOneWidget);
     expect(find.text('本地资源'), findsNothing);
-    expect(find.text('nas-A · 第 1 集 · 版本A'), findsOneWidget);
-    expect(find.text('nas-B · 第 1 集 · 版本B'), findsOneWidget);
+    final dropdown = tester.widget<DropdownButton<int>>(
+      find.byType(DropdownButton<int>),
+    );
+    final labels = dropdown.items!
+        .map((item) => (item.child as Text).data ?? '')
+        .toList(growable: false);
+    expect(dropdown.value, 1);
+    expect(labels, contains('nas-A · 第 1 集 · 版本A'));
+    expect(labels, contains('nas-B · 第 1 集 · 版本B'));
+  });
+
+  testWidgets(
+      'detail page keeps series episode browser after restoring playable library choice',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const seedTarget = MediaDetailTarget(
+      title: '测试剧',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '无',
+      searchQuery: '测试剧',
+      sourceId: 'emby-main',
+      itemId: 'series-1',
+      itemType: 'series',
+      sectionId: 'shows',
+      sectionName: '剧集',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+    );
+    const choiceA = MediaDetailTarget(
+      title: '测试剧',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：Emby · 客厅 Emby',
+      searchQuery: '测试剧',
+      sourceId: 'emby-main',
+      itemId: 'episode-a',
+      itemType: 'episode',
+      sectionId: 'shows',
+      sectionName: '版本A',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '测试剧',
+        sourceId: 'emby-main',
+        streamUrl: 'https://emby.example/Items/episode-a/stream.mkv',
+        sourceName: '客厅 Emby',
+        sourceKind: MediaSourceKind.emby,
+        itemId: 'episode-a',
+        itemType: 'episode',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+    const choiceB = MediaDetailTarget(
+      title: '测试剧',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：Emby · 客厅 Emby',
+      searchQuery: '测试剧',
+      sourceId: 'emby-main',
+      itemId: 'episode-b',
+      itemType: 'episode',
+      sectionId: 'shows',
+      sectionName: '版本B',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '测试剧',
+        sourceId: 'emby-main',
+        streamUrl: 'https://emby.example/Items/episode-b/stream.mkv',
+        sourceName: '客厅 Emby',
+        sourceKind: MediaSourceKind.emby,
+        itemId: 'episode-b',
+        itemType: 'episode',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'tmdbMetadataMatchEnabled': false,
+              'wmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+              'detailAutoLibraryMatchEnabled': false,
+            }),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            const _SeriesRestoreMediaRepository(),
+          ),
+          localStorageCacheRepositoryProvider.overrideWithValue(
+            _FakeRestoreCacheRepository(
+              cachedState: const CachedDetailState(
+                target: choiceB,
+                libraryMatchChoices: [choiceA, choiceB],
+                selectedLibraryMatchIndex: 1,
+              ),
+            ),
+          ),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(target: seedTarget),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('剧集'), findsWidgets);
+    await tester.scrollUntilVisible(
+      find.text('测试剧 第 1 集'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('测试剧 第 1 集'), findsOneWidget);
+    expect(find.text('本地资源'), findsOneWidget);
+    final dropdown = tester.widget<DropdownButton<int>>(
+      find.byType(DropdownButton<int>),
+    );
+    final labels = dropdown.items!
+        .map((item) => (item.child as Text).data ?? '')
+        .toList(growable: false);
+    expect(dropdown.value, 1);
+    expect(labels, contains('客厅 Emby · 测试剧 · 版本A'));
+    expect(labels, contains('客厅 Emby · 测试剧 · 版本B'));
   });
 
   testWidgets('detail page shows external-id reason as alternative ids',
@@ -759,6 +911,71 @@ class _SingleMatchMediaRepository implements MediaRepository {
     required String sourceId,
     bool forceFullRescan = false,
   }) async {}
+}
+
+class _SeriesRestoreMediaRepository extends _NoopMediaRepository {
+  const _SeriesRestoreMediaRepository();
+
+  @override
+  Future<List<MediaItem>> fetchChildren({
+    required String sourceId,
+    required String parentId,
+    String sectionId = '',
+    String sectionName = '',
+    int limit = 200,
+  }) async {
+    if (sourceId != 'emby-main') {
+      return const <MediaItem>[];
+    }
+    if (parentId == 'series-1') {
+      return [
+        MediaItem(
+          id: 'season-1',
+          title: '第 1 季',
+          overview: '',
+          posterUrl: '',
+          year: 2026,
+          durationLabel: '剧集',
+          genres: const [],
+          itemType: 'season',
+          sectionId: 'shows',
+          sectionName: '剧集',
+          sourceId: 'emby-main',
+          sourceName: '客厅 Emby',
+          sourceKind: MediaSourceKind.emby,
+          streamUrl: '',
+          playbackItemId: '',
+          seasonNumber: 1,
+          addedAt: DateTime.utc(2026, 4, 7),
+        ),
+      ];
+    }
+    if (parentId == 'season-1') {
+      return [
+        MediaItem(
+          id: 'episode-1',
+          title: '测试剧 第 1 集',
+          overview: '',
+          posterUrl: '',
+          year: 2026,
+          durationLabel: '45 分钟',
+          genres: const [],
+          itemType: 'episode',
+          sectionId: 'shows',
+          sectionName: '剧集',
+          sourceId: 'emby-main',
+          sourceName: '客厅 Emby',
+          sourceKind: MediaSourceKind.emby,
+          streamUrl: 'https://emby.example/Items/episode-1/stream.mkv',
+          playbackItemId: 'episode-1',
+          seasonNumber: 1,
+          episodeNumber: 1,
+          addedAt: DateTime.utc(2026, 4, 7),
+        ),
+      ];
+    }
+    return const <MediaItem>[];
+  }
 }
 
 class _MemoryPreferencesStore implements PreferencesStore {

@@ -46,6 +46,28 @@ class LibraryCollectionPage extends ConsumerStatefulWidget {
 
 class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage> {
   int _currentPage = 0;
+  final ScrollController _scrollController = ScrollController();
+  final FocusNode _headerFocusNode =
+      FocusNode(debugLabel: 'library-collection-header');
+
+  @override
+  void dispose() {
+    _headerFocusNode.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _returnToTop() {
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_headerFocusNode.canRequestFocus) {
+        return;
+      }
+      _headerFocusNode.requestFocus();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -53,64 +75,86 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage> {
     final itemsAsync = ref.watch(libraryCollectionItemsProvider(target));
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
 
-    return Scaffold(
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          AppPageBackground(
-            child: ListView(
-              padding: overlayToolbarPagePadding(context),
-              children: [
-                Text(
-                  target.title,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  target.subtitle.trim().isEmpty
-                      ? '${target.sourceKind.label} · ${target.sourceName}'
-                      : '${target.sourceName} · ${target.subtitle}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFF90A0BD),
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-                const SizedBox(height: 20),
-                itemsAsync.when(
-                  data: (items) {
-                    return LibraryPagedGrid(
-                      items: items,
-                      currentPage: _currentPage,
-                      isTelevision: isTelevision,
-                      onPageChanged: (page) {
-                        setState(() {
-                          _currentPage = page;
-                        });
+    final headerContent = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          target.title,
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          target.subtitle.trim().isEmpty
+              ? '${target.sourceKind.label} · ${target.sourceName}'
+              : '${target.sourceName} · ${target.subtitle}',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: const Color(0xFF90A0BD),
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+      ],
+    );
+
+    return TvReturnToTopScope(
+      onReturnToTop: _returnToTop,
+      child: Scaffold(
+        body: TvDirectionalFocusBoundary(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              AppPageBackground(
+                child: ListView(
+                  controller: _scrollController,
+                  padding: overlayToolbarPagePadding(context),
+                  children: [
+                    if (isTelevision)
+                      TvFocusableAction(
+                        onPressed: () => FocusScope.of(context).nextFocus(),
+                        focusNode: _headerFocusNode,
+                        focusId: 'library-collection:header',
+                        borderRadius: BorderRadius.circular(20),
+                        child: headerContent,
+                      )
+                    else
+                      headerContent,
+                    const SizedBox(height: 20),
+                    itemsAsync.when(
+                      data: (items) {
+                        return LibraryPagedGrid(
+                          items: items,
+                          currentPage: _currentPage,
+                          isTelevision: isTelevision,
+                          onPageChanged: (page) {
+                            setState(() {
+                              _currentPage = page;
+                            });
+                          },
+                          onItemContextAction: (item) =>
+                              _handleItemContextAction(item),
+                          emptyMessage: '无',
+                        );
                       },
-                      onItemContextAction: (item) =>
-                          _handleItemContextAction(item),
-                      emptyMessage: '无',
-                    );
-                  },
-                  loading: () =>
-                      const Center(child: CircularProgressIndicator()),
-                  error: (error, stackTrace) => Text('加载失败：$error'),
+                      loading: () =>
+                          const Center(child: CircularProgressIndicator()),
+                      error: (error, stackTrace) => Text('加载失败：$error'),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: OverlayToolbar(
+                  onBack: () => context.pop(),
+                ),
+              ),
+            ],
           ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: OverlayToolbar(
-              onBack: () => context.pop(),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

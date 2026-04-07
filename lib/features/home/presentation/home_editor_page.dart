@@ -230,10 +230,10 @@ class HomeEditorPage extends ConsumerWidget {
                                     ),
                                     const SizedBox(width: 8),
                                     StarflowButton(
-                                      label: module.enabled ? '关闭' : '开启',
+                                      label: module.enabled ? '开启' : '关闭',
                                       icon: module.enabled
-                                          ? Icons.toggle_off_rounded
-                                          : Icons.toggle_on_rounded,
+                                          ? Icons.toggle_on_rounded
+                                          : Icons.toggle_off_rounded,
                                       onPressed: () {
                                         ref
                                             .read(settingsControllerProvider
@@ -244,8 +244,8 @@ class HomeEditorPage extends ConsumerWidget {
                                             );
                                       },
                                       variant: module.enabled
-                                          ? StarflowButtonVariant.secondary
-                                          : StarflowButtonVariant.primary,
+                                          ? StarflowButtonVariant.primary
+                                          : StarflowButtonVariant.secondary,
                                       compact: true,
                                     ),
                                   ],

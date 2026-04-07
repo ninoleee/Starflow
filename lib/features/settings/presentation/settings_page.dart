@@ -19,11 +19,18 @@ import 'package:starflow/features/settings/presentation/playback_settings_page.d
 import 'package:starflow/features/settings/presentation/search_provider_editor_page.dart';
 import 'package:starflow/features/settings/presentation/settings_management_page.dart';
 
-class SettingsPage extends ConsumerWidget {
+class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SettingsPage> createState() => _SettingsPageState();
+
+  Widget buildPage(
+    BuildContext context,
+    WidgetRef ref, {
+    required ScrollController scrollController,
+    required FocusNode headerFocusNode,
+  }) {
     final settings = ref.watch(appSettingsProvider);
     final loading = ref.watch(settingsControllerProvider).isLoading;
     final heroCandidates = ref.watch(homeHeroModuleCandidatesProvider);
@@ -31,344 +38,368 @@ class SettingsPage extends ConsumerWidget {
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final heroEnabled = heroModule?.enabled ?? false;
 
-    return Scaffold(
-      body: AppPageBackground(
-        contentPadding: appPageContentPadding(
-          context,
-          includeBottomNavigationBar: true,
-        ),
-        child: FocusTraversalGroup(
-          policy: OrderedTraversalPolicy(),
-          child: ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              if (loading) const LinearProgressIndicator(),
-              _SettingsPageHeader(isTelevision: isTelevision),
-              const SizedBox(height: 18),
-              SectionPanel(
-                title: '媒体源',
-                child: Column(
-                  children: [
-                    ...settings.mediaSources.map(
-                      (source) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _SettingsTile(
-                          title: source.name,
-                          value: source.enabled,
-                          onChanged: (value) {
-                            ref
-                                .read(settingsControllerProvider.notifier)
-                                .toggleMediaSource(source.id, value);
-                          },
-                          onEdit: () => _openMediaSourceEditor(
-                            context,
-                            existing: source,
-                          ),
-                        ),
-                      ),
-                    ),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: StarflowButton(
-                        label: '新增媒体源',
-                        icon: Icons.add_rounded,
-                        onPressed: () => _openMediaSourceEditor(context),
-                        variant: StarflowButtonVariant.secondary,
-                        compact: true,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 18),
-              SectionPanel(
-                title: '搜索服务',
-                child: Column(
-                  children: [
-                    ...settings.searchProviders.map(
-                      (provider) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _SettingsTile(
-                          title: provider.name,
-                          value: provider.enabled,
-                          onChanged: (value) {
-                            ref
-                                .read(settingsControllerProvider.notifier)
-                                .toggleSearchProvider(provider.id, value);
-                          },
-                          onEdit: () => _openSearchProviderEditor(
-                            context,
-                            existing: provider,
-                          ),
-                        ),
-                      ),
-                    ),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: StarflowButton(
-                        label: '新增搜索服务',
-                        icon: Icons.add_rounded,
-                        onPressed: () => _openSearchProviderEditor(context),
-                        variant: StarflowButtonVariant.secondary,
-                        compact: true,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    _SettingsNavigationTile(
-                      title: '搜索来源',
-                      subtitle: _searchSourceSummary(settings),
-                      onTap: () =>
-                          _openSearchSourcePicker(context, ref, settings),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 18),
-              SectionPanel(
-                title: '元数据与评分',
-                child: Column(
-                  children: [
-                    _SettingsNavigationTile(
-                      title: '打开匹配与评分设置',
-                      subtitle: settings.detailAutoLibraryMatchEnabled
-                          ? '详情页自动匹配资源：已开启'
-                          : '详情页自动匹配资源：已关闭',
-                      onTap: () => _openMetadataMatchSettings(context),
-                    ),
-                    const SizedBox(height: 10),
-                    _SettingsNavigationTile(
-                      title: '匹配来源',
-                      subtitle: _libraryMatchSourceSummary(settings),
-                      onTap: () =>
-                          _openLibraryMatchSourcePicker(context, ref, settings),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 18),
-              SectionPanel(
-                title: '网络存储',
-                child: _SettingsNavigationTile(
-                  title: '夸克与 STRM',
-                  onTap: () => _openNetworkStorageSettings(
-                    context,
-                    settings.networkStorage,
+    return TvReturnToTopScope(
+      onReturnToTop: () {
+        if (scrollController.hasClients) {
+          scrollController.jumpTo(0);
+        }
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!headerFocusNode.canRequestFocus) {
+            return;
+          }
+          headerFocusNode.requestFocus();
+        });
+      },
+      child: Scaffold(
+        body: TvDirectionalFocusBoundary(
+          child: AppPageBackground(
+            contentPadding: appPageContentPadding(
+              context,
+              includeBottomNavigationBar: true,
+            ),
+            child: FocusTraversalGroup(
+              policy: OrderedTraversalPolicy(),
+              child: ListView(
+                controller: scrollController,
+                padding: EdgeInsets.zero,
+                children: [
+                  if (loading) const LinearProgressIndicator(),
+                  _SettingsPageHeader(
+                    isTelevision: isTelevision,
+                    focusNode: headerFocusNode,
                   ),
-                ),
-              ),
-              const SizedBox(height: 18),
-              SectionPanel(
-                title: '本地存储',
-                child: _SettingsNavigationTile(
-                  title: '查看分类与清理',
-                  onTap: () => _openLocalStorageSettings(context),
-                ),
-              ),
-              const SizedBox(height: 18),
-              SectionPanel(
-                title: '配置管理',
-                child: _SettingsNavigationTile(
-                  title: '导入与导出配置',
-                  onTap: () => _openSettingsManagement(context),
-                ),
-              ),
-              const SizedBox(height: 18),
-              SectionPanel(
-                title: '播放',
-                child: Column(
-                  children: [
-                    _SettingsNavigationTile(
-                      title: '播放器与字幕',
-                      subtitle: _playbackSettingsSummary(settings),
-                      onTap: () => _openPlaybackSettings(
-                        context,
-                        settings,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 18),
-              SectionPanel(
-                title: '外观',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '应用界面',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    const SizedBox(height: 10),
-                    StarflowToggleTile(
-                      title: '高性能模式',
-                      subtitle: _highPerformanceModeSummary(),
-                      value: settings.highPerformanceModeEnabled,
-                      onChanged: (value) {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .setHighPerformanceModeEnabled(value);
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    StarflowToggleTile(
-                      title: '透明磨砂效果',
-                      subtitle: _translucentEffectsSummary(settings),
-                      value: _effectiveTranslucentEffectsEnabled(settings),
-                      onChanged: settings.highPerformanceModeEnabled
-                          ? null
-                          : (value) {
-                              ref
-                                  .read(settingsControllerProvider.notifier)
-                                  .setTranslucentEffectsEnabled(value);
-                            },
-                    ),
-                    const SizedBox(height: 10),
-                    StarflowToggleTile(
-                      title: '自动隐藏菜单栏',
-                      subtitle: _autoHideNavigationBarSummary(settings),
-                      value: settings.autoHideNavigationBarEnabled,
-                      onChanged: (value) {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .setAutoHideNavigationBarEnabled(value);
-                      },
-                    ),
-                    const SizedBox(height: 18),
-                    Text(
-                      '首页 Hero',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      'Hero 展示方式',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
+                  const SizedBox(height: 18),
+                  SectionPanel(
+                    title: '媒体源',
+                    child: Column(
                       children: [
-                        for (final mode in HomeHeroDisplayMode.values)
-                          StarflowChipButton(
-                            label: mode.label,
-                            selected: mode == settings.homeHeroDisplayMode,
-                            onPressed: heroEnabled
-                                ? () {
-                                    ref
-                                        .read(
-                                            settingsControllerProvider.notifier)
-                                        .setHomeHeroDisplayMode(mode);
-                                  }
-                                : null,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      'Hero 样式',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        for (final style in HomeHeroStyle.values)
-                          StarflowChipButton(
-                            label: style.label,
-                            selected: style == settings.homeHeroStyle,
-                            onPressed: heroEnabled
-                                ? () {
-                                    ref
-                                        .read(
-                                            settingsControllerProvider.notifier)
-                                        .setHomeHeroStyle(style);
-                                  }
-                                : null,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    StarflowToggleTile(
-                      title: '标题优先展示 Logo',
-                      value: settings.homeHeroLogoTitleEnabled,
-                      onChanged: heroEnabled
-                          ? (value) {
-                              ref
-                                  .read(settingsControllerProvider.notifier)
-                                  .setHomeHeroLogoTitleEnabled(value);
-                            }
-                          : null,
-                    ),
-                    const SizedBox(height: 14),
-                    StarflowToggleTile(
-                      title: '启用 Hero 全屏背景图',
-                      value: settings.homeHeroBackgroundEnabled,
-                      onChanged: (value) {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .setHomeHeroBackgroundEnabled(value);
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 18),
-              SectionPanel(
-                title: '首页模块',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Hero 模块',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    const SizedBox(height: 10),
-                    StarflowToggleTile(
-                      title: '启用 Hero',
-                      value: heroEnabled,
-                      onChanged: (value) {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .setHomeHeroEnabled(value);
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    StarflowSelectionTile(
-                      title: 'Hero 数据来源',
-                      value: _heroSourceLabel(
-                        settings: settings,
-                        heroCandidates: heroCandidates,
-                      ),
-                      onPressed: heroEnabled
-                          ? () => _openHeroSourcePicker(
+                        ...settings.mediaSources.map(
+                          (source) => Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _SettingsTile(
+                              title: source.name,
+                              value: source.enabled,
+                              onChanged: (value) {
+                                ref
+                                    .read(settingsControllerProvider.notifier)
+                                    .toggleMediaSource(source.id, value);
+                              },
+                              onEdit: () => _openMediaSourceEditor(
                                 context,
-                                ref,
-                                settings,
-                                heroCandidates,
-                              )
-                          : null,
+                                existing: source,
+                              ),
+                            ),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: StarflowButton(
+                            label: '新增媒体源',
+                            icon: Icons.add_rounded,
+                            onPressed: () => _openMediaSourceEditor(context),
+                            variant: StarflowButtonVariant.secondary,
+                            compact: true,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 14),
-                    _SettingsNavigationTile(
-                      title: '打开首页编辑器',
-                      onTap: () => context.pushNamed('home-editor'),
+                  ),
+                  const SizedBox(height: 18),
+                  SectionPanel(
+                    title: '搜索服务',
+                    child: Column(
+                      children: [
+                        ...settings.searchProviders.map(
+                          (provider) => Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _SettingsTile(
+                              title: provider.name,
+                              value: provider.enabled,
+                              onChanged: (value) {
+                                ref
+                                    .read(settingsControllerProvider.notifier)
+                                    .toggleSearchProvider(provider.id, value);
+                              },
+                              onEdit: () => _openSearchProviderEditor(
+                                context,
+                                existing: provider,
+                              ),
+                            ),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: StarflowButton(
+                            label: '新增搜索服务',
+                            icon: Icons.add_rounded,
+                            onPressed: () => _openSearchProviderEditor(context),
+                            variant: StarflowButtonVariant.secondary,
+                            compact: true,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        _SettingsNavigationTile(
+                          title: '搜索来源',
+                          subtitle: _searchSourceSummary(settings),
+                          onTap: () =>
+                              _openSearchSourcePicker(context, ref, settings),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 18),
+                  SectionPanel(
+                    title: '元数据与评分',
+                    child: Column(
+                      children: [
+                        _SettingsNavigationTile(
+                          title: '打开匹配与评分设置',
+                          subtitle: settings.detailAutoLibraryMatchEnabled
+                              ? '详情页自动匹配资源：已开启'
+                              : '详情页自动匹配资源：已关闭',
+                          onTap: () => _openMetadataMatchSettings(context),
+                        ),
+                        const SizedBox(height: 10),
+                        _SettingsNavigationTile(
+                          title: '匹配来源',
+                          subtitle: _libraryMatchSourceSummary(settings),
+                          onTap: () => _openLibraryMatchSourcePicker(
+                              context, ref, settings),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  SectionPanel(
+                    title: '网络存储',
+                    child: _SettingsNavigationTile(
+                      title: '夸克与 STRM',
+                      onTap: () => _openNetworkStorageSettings(
+                        context,
+                        settings.networkStorage,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  SectionPanel(
+                    title: '本地存储',
+                    child: _SettingsNavigationTile(
+                      title: '查看分类与清理',
+                      onTap: () => _openLocalStorageSettings(context),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  SectionPanel(
+                    title: '配置管理',
+                    child: _SettingsNavigationTile(
+                      title: '导入与导出配置',
+                      onTap: () => _openSettingsManagement(context),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  SectionPanel(
+                    title: '播放',
+                    child: Column(
+                      children: [
+                        _SettingsNavigationTile(
+                          title: '播放器与字幕',
+                          subtitle: _playbackSettingsSummary(settings),
+                          onTap: () => _openPlaybackSettings(
+                            context,
+                            settings,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  SectionPanel(
+                    title: '外观',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '应用界面',
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                        ),
+                        const SizedBox(height: 10),
+                        StarflowToggleTile(
+                          title: '高性能模式',
+                          subtitle: _highPerformanceModeSummary(),
+                          value: settings.highPerformanceModeEnabled,
+                          onChanged: (value) {
+                            ref
+                                .read(settingsControllerProvider.notifier)
+                                .setHighPerformanceModeEnabled(value);
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                        StarflowToggleTile(
+                          title: '透明磨砂效果',
+                          subtitle: _translucentEffectsSummary(settings),
+                          value: _effectiveTranslucentEffectsEnabled(settings),
+                          onChanged: settings.highPerformanceModeEnabled
+                              ? null
+                              : (value) {
+                                  ref
+                                      .read(settingsControllerProvider.notifier)
+                                      .setTranslucentEffectsEnabled(value);
+                                },
+                        ),
+                        const SizedBox(height: 10),
+                        StarflowToggleTile(
+                          title: '自动隐藏菜单栏',
+                          subtitle: _autoHideNavigationBarSummary(settings),
+                          value: settings.autoHideNavigationBarEnabled,
+                          onChanged: (value) {
+                            ref
+                                .read(settingsControllerProvider.notifier)
+                                .setAutoHideNavigationBarEnabled(value);
+                          },
+                        ),
+                        const SizedBox(height: 18),
+                        Text(
+                          '首页 Hero',
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'Hero 展示方式',
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            for (final mode in HomeHeroDisplayMode.values)
+                              StarflowChipButton(
+                                label: mode.label,
+                                selected: mode == settings.homeHeroDisplayMode,
+                                onPressed: heroEnabled
+                                    ? () {
+                                        ref
+                                            .read(settingsControllerProvider
+                                                .notifier)
+                                            .setHomeHeroDisplayMode(mode);
+                                      }
+                                    : null,
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          'Hero 样式',
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            for (final style in HomeHeroStyle.values)
+                              StarflowChipButton(
+                                label: style.label,
+                                selected: style == settings.homeHeroStyle,
+                                onPressed: heroEnabled
+                                    ? () {
+                                        ref
+                                            .read(settingsControllerProvider
+                                                .notifier)
+                                            .setHomeHeroStyle(style);
+                                      }
+                                    : null,
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        StarflowToggleTile(
+                          title: '标题优先展示 Logo',
+                          value: settings.homeHeroLogoTitleEnabled,
+                          onChanged: heroEnabled
+                              ? (value) {
+                                  ref
+                                      .read(settingsControllerProvider.notifier)
+                                      .setHomeHeroLogoTitleEnabled(value);
+                                }
+                              : null,
+                        ),
+                        const SizedBox(height: 14),
+                        StarflowToggleTile(
+                          title: '启用 Hero 全屏背景图',
+                          value: settings.homeHeroBackgroundEnabled,
+                          onChanged: (value) {
+                            ref
+                                .read(settingsControllerProvider.notifier)
+                                .setHomeHeroBackgroundEnabled(value);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  SectionPanel(
+                    title: '首页模块',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Hero 模块',
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                        ),
+                        const SizedBox(height: 10),
+                        StarflowToggleTile(
+                          title: '启用 Hero',
+                          value: heroEnabled,
+                          onChanged: (value) {
+                            ref
+                                .read(settingsControllerProvider.notifier)
+                                .setHomeHeroEnabled(value);
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                        StarflowSelectionTile(
+                          title: 'Hero 数据来源',
+                          value: _heroSourceLabel(
+                            settings: settings,
+                            heroCandidates: heroCandidates,
+                          ),
+                          onPressed: heroEnabled
+                              ? () => _openHeroSourcePicker(
+                                    context,
+                                    ref,
+                                    settings,
+                                    heroCandidates,
+                                  )
+                              : null,
+                        ),
+                        const SizedBox(height: 14),
+                        _SettingsNavigationTile(
+                          title: '打开首页编辑器',
+                          onTap: () => context.pushNamed('home-editor'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: kBottomReservedSpacing),
+                ],
               ),
-              const SizedBox(height: kBottomReservedSpacing),
-            ],
+            ),
           ),
         ),
       ),
@@ -737,6 +768,28 @@ class SettingsPage extends ConsumerWidget {
   }
 }
 
+class _SettingsPageState extends ConsumerState<SettingsPage> {
+  final ScrollController _scrollController = ScrollController();
+  final FocusNode _headerFocusNode = FocusNode(debugLabel: 'settings-header');
+
+  @override
+  void dispose() {
+    _headerFocusNode.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.buildPage(
+      context,
+      ref,
+      scrollController: _scrollController,
+      headerFocusNode: _headerFocusNode,
+    );
+  }
+}
+
 String _resolveHeroModuleSelectionValue({
   required AppSettings settings,
   required List<HomeModuleConfig> heroCandidates,
@@ -995,9 +1048,13 @@ class _SettingsTile extends StatelessWidget {
 }
 
 class _SettingsPageHeader extends StatelessWidget {
-  const _SettingsPageHeader({required this.isTelevision});
+  const _SettingsPageHeader({
+    required this.isTelevision,
+    this.focusNode,
+  });
 
   final bool isTelevision;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -1033,6 +1090,7 @@ class _SettingsPageHeader extends StatelessWidget {
     }
     return TvFocusableAction(
       onPressed: () => FocusScope.of(context).nextFocus(),
+      focusNode: focusNode,
       focusId: 'settings:header',
       borderRadius: BorderRadius.circular(28),
       child: content,

@@ -753,10 +753,11 @@ class _TelevisionContentFocusBoundary extends StatelessWidget {
               return null;
             }
 
-            final moved = primaryFocus.focusInDirection(intent.direction);
-            if (!moved && intent.direction == TraversalDirection.left) {
-              focusSidebar();
-            }
+            handleTvDirectionalFocusBoundary(
+              context,
+              intent.direction,
+              onMoveLeftOut: focusSidebar,
+            );
             return null;
           },
         ),

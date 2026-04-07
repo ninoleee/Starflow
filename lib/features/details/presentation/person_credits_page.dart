@@ -59,13 +59,30 @@ class PersonCreditsPage extends ConsumerStatefulWidget {
 }
 
 class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage> {
+  final ScrollController _scrollController = ScrollController();
+  final FocusNode _headerFocusNode =
+      FocusNode(debugLabel: 'person-credits-header');
   final TvFocusMemoryController _tvFocusMemoryController =
       TvFocusMemoryController();
 
   @override
   void dispose() {
+    _headerFocusNode.dispose();
+    _scrollController.dispose();
     _tvFocusMemoryController.dispose();
     super.dispose();
+  }
+
+  void _returnToTop() {
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_headerFocusNode.canRequestFocus) {
+        return;
+      }
+      _headerFocusNode.requestFocus();
+    });
   }
 
   @override
@@ -78,43 +95,53 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage> {
       controller: _tvFocusMemoryController,
       scopeId: 'person-credits',
       enabled: isTelevision,
-      child: Scaffold(
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            AppPageBackground(
-              child: ListView(
-                padding: overlayToolbarPagePadding(context),
-                children: [
-                  _PersonCreditsHeader(target: target),
-                  const SizedBox(height: 22),
-                  resultAsync.when(
-                    data: (result) {
-                      if (result.items.isEmpty) {
-                        return _EmptyState(message: result.message);
-                      }
-                      return _PersonCreditsGrid(items: result.items);
-                    },
-                    loading: () => const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 48),
-                      child: Center(child: CircularProgressIndicator()),
-                    ),
-                    error: (error, stackTrace) => _EmptyState(
-                      message: '加载关联影片失败：$error',
-                    ),
+      child: TvReturnToTopScope(
+        onReturnToTop: _returnToTop,
+        child: Scaffold(
+          body: TvDirectionalFocusBoundary(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                AppPageBackground(
+                  child: ListView(
+                    controller: _scrollController,
+                    padding: overlayToolbarPagePadding(context),
+                    children: [
+                      _PersonCreditsHeader(
+                        target: target,
+                        isTelevision: isTelevision,
+                        focusNode: _headerFocusNode,
+                      ),
+                      const SizedBox(height: 22),
+                      resultAsync.when(
+                        data: (result) {
+                          if (result.items.isEmpty) {
+                            return _EmptyState(message: result.message);
+                          }
+                          return _PersonCreditsGrid(items: result.items);
+                        },
+                        loading: () => const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 48),
+                          child: Center(child: CircularProgressIndicator()),
+                        ),
+                        error: (error, stackTrace) => _EmptyState(
+                          message: '加载关联影片失败：$error',
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: OverlayToolbar(
+                    onBack: () => context.pop(),
+                  ),
+                ),
+              ],
             ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: OverlayToolbar(
-                onBack: () => context.pop(),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -263,14 +290,20 @@ List<AppNetworkImageSource> _buildPosterFallbackSources(
 }
 
 class _PersonCreditsHeader extends StatelessWidget {
-  const _PersonCreditsHeader({required this.target});
+  const _PersonCreditsHeader({
+    required this.target,
+    required this.isTelevision,
+    this.focusNode,
+  });
 
   final PersonCreditsPageTarget target;
+  final bool isTelevision;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Row(
+    final content = Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         _PersonAvatar(person: target.person, size: 72),
@@ -298,6 +331,16 @@ class _PersonCreditsHeader extends StatelessWidget {
           ),
         ),
       ],
+    );
+    if (!isTelevision) {
+      return content;
+    }
+    return TvFocusableAction(
+      onPressed: () => FocusScope.of(context).nextFocus(),
+      focusNode: focusNode,
+      focusId: 'person-credits:header',
+      borderRadius: BorderRadius.circular(20),
+      child: content,
     );
   }
 }

@@ -14,6 +14,7 @@ enum TvButtonVariant {
 enum TvFocusVisualStyle {
   prominent,
   subtle,
+  floating,
 }
 
 enum StarflowButtonVariant {
@@ -103,6 +104,89 @@ class TvMenuButtonScope extends InheritedWidget {
   @override
   bool updateShouldNotify(TvMenuButtonScope oldWidget) {
     return onMenuButtonPressed != oldWidget.onMenuButtonPressed;
+  }
+}
+
+class TvReturnToTopScope extends InheritedWidget {
+  const TvReturnToTopScope({
+    super.key,
+    required this.onReturnToTop,
+    required super.child,
+  });
+
+  final VoidCallback onReturnToTop;
+
+  static TvReturnToTopScope? maybeOf(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<TvReturnToTopScope>();
+  }
+
+  @override
+  bool updateShouldNotify(TvReturnToTopScope oldWidget) {
+    return onReturnToTop != oldWidget.onReturnToTop;
+  }
+}
+
+bool handleTvDirectionalFocusBoundary(
+  BuildContext context,
+  TraversalDirection direction, {
+  VoidCallback? onMoveLeftOut,
+}) {
+  final primaryFocus = FocusManager.instance.primaryFocus;
+  if (primaryFocus == null) {
+    return false;
+  }
+
+  final moved = primaryFocus.focusInDirection(direction);
+  if (moved) {
+    return true;
+  }
+
+  if (direction == TraversalDirection.left) {
+    final fallback = onMoveLeftOut ??
+        TvMenuButtonScope.maybeOf(primaryFocus.context ?? context)
+            ?.onMenuButtonPressed;
+    fallback?.call();
+    return fallback != null;
+  }
+
+  if (direction == TraversalDirection.up) {
+    final callback = TvReturnToTopScope.maybeOf(
+      primaryFocus.context ?? context,
+    )?.onReturnToTop;
+    callback?.call();
+    return callback != null;
+  }
+
+  return false;
+}
+
+class TvDirectionalFocusBoundary extends StatelessWidget {
+  const TvDirectionalFocusBoundary({
+    super.key,
+    required this.child,
+    this.onMoveLeftOut,
+  });
+
+  final Widget child;
+  final VoidCallback? onMoveLeftOut;
+
+  @override
+  Widget build(BuildContext context) {
+    return Actions(
+      actions: <Type, Action<Intent>>{
+        DirectionalFocusIntent: CallbackAction<DirectionalFocusIntent>(
+          onInvoke: (intent) {
+            handleTvDirectionalFocusBoundary(
+              context,
+              intent.direction,
+              onMoveLeftOut: onMoveLeftOut,
+            );
+            return null;
+          },
+        ),
+      },
+      child: child,
+    );
   }
 }
 
@@ -224,7 +308,7 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
         return;
       }
 
-      final scrollable = Scrollable.maybeOf(context);
+      final scrollable = _findVerticalScrollable();
       if (scrollable == null) {
         return;
       }
@@ -267,6 +351,21 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
         curve: Curves.easeOutCubic,
       );
     });
+  }
+
+  ScrollableState? _findVerticalScrollable() {
+    ScrollableState? verticalScrollable;
+    context.visitAncestorElements((element) {
+      if (element is StatefulElement && element.state is ScrollableState) {
+        final scrollable = element.state as ScrollableState;
+        if (scrollable.position.axis == Axis.vertical) {
+          verticalScrollable = scrollable;
+          return false;
+        }
+      }
+      return true;
+    });
+    return verticalScrollable;
   }
 
   @override
@@ -320,8 +419,49 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
         isTelevision && highPerformanceModeEnabled;
     final useSubtleVisualStyle =
         widget.visualStyle == TvFocusVisualStyle.subtle;
+    final useFloatingVisualStyle =
+        widget.visualStyle == TvFocusVisualStyle.floating;
 
     if (useHighPerformanceFocusStyle) {
+      final highPerformanceChild = useFloatingVisualStyle
+          ? DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: widget.borderRadius,
+                boxShadow: _isFocused
+                    ? [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.24),
+                          blurRadius: 20,
+                          offset: const Offset(0, 10),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Transform.translate(
+                offset: Offset(0, _isFocused ? -5 : 0),
+                child: widget.child,
+              ),
+            )
+          : Container(
+              padding: EdgeInsets.all(useSubtleVisualStyle ? 1 : 2),
+              decoration: BoxDecoration(
+                borderRadius: widget.borderRadius,
+                border: Border.all(
+                  color: _isFocused
+                      ? Colors.white
+                      : hasContextAction
+                          ? Colors.white.withValues(alpha: 0.08)
+                          : Colors.white.withValues(alpha: 0),
+                  width: _isFocused ? (useSubtleVisualStyle ? 1.8 : 2.2) : 1,
+                ),
+                color: _isFocused
+                    ? Colors.white.withValues(
+                        alpha: useSubtleVisualStyle ? 0.02 : 0.035,
+                      )
+                    : Colors.transparent,
+              ),
+              child: widget.child,
+            );
       return FocusableActionDetector(
         focusNode: effectiveFocusNode,
         autofocus: shouldAutofocus,
@@ -364,23 +504,68 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
             },
           ),
         },
-        child: Container(
-          padding: EdgeInsets.all(useSubtleVisualStyle ? 1 : 2),
+        child: highPerformanceChild,
+      );
+    }
+
+    if (useFloatingVisualStyle) {
+      return FocusableActionDetector(
+        focusNode: effectiveFocusNode,
+        autofocus: shouldAutofocus,
+        enabled: enabled,
+        onShowFocusHighlight: (value) {
+          _handleFocusHighlightChange(
+            value: value,
+            memoryEnabled: memoryEnabled,
+            memoryScope: memoryScope,
+            focusId: focusId,
+          );
+        },
+        shortcuts: const <ShortcutActivator, Intent>{
+          SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.gameButtonA): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.contextMenu):
+              TvContextMenuIntent(),
+          SingleActivator(LogicalKeyboardKey.gameButtonY):
+              TvContextMenuIntent(),
+        },
+        actions: <Type, Action<Intent>>{
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              widget.onPressed?.call();
+              return null;
+            },
+          ),
+          TvContextMenuIntent: CallbackAction<TvContextMenuIntent>(
+            onInvoke: (_) {
+              final contextAction = widget.onContextAction;
+              if (contextAction != null) {
+                contextAction();
+              } else {
+                TvMenuButtonScope.maybeOf(context)?.onMenuButtonPressed();
+              }
+              return null;
+            },
+          ),
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          transform: Matrix4.translationValues(0, _isFocused ? -6 : 0, 0),
           decoration: BoxDecoration(
             borderRadius: widget.borderRadius,
-            border: Border.all(
-              color: _isFocused
-                  ? Colors.white
-                  : hasContextAction
-                      ? Colors.white.withValues(alpha: 0.08)
-                      : Colors.white.withValues(alpha: 0),
-              width: _isFocused ? (useSubtleVisualStyle ? 1.8 : 2.2) : 1,
-            ),
-            color: _isFocused
-                ? Colors.white.withValues(
-                    alpha: useSubtleVisualStyle ? 0.02 : 0.035,
-                  )
-                : Colors.transparent,
+            boxShadow: _isFocused
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.22),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
+                  ]
+                : null,
           ),
           child: widget.child,
         ),
@@ -733,6 +918,13 @@ class StarflowChipButton extends StatelessWidget {
         : (isDark
             ? Colors.white.withValues(alpha: 0.18)
             : theme.colorScheme.outlineVariant);
+    final labelStyle = theme.textTheme.labelLarge?.copyWith(
+      color: foregroundColor,
+      fontWeight: FontWeight.w700,
+      fontFamilyFallback: theme.textTheme.titleSmall?.fontFamilyFallback,
+      height: 1.2,
+      leadingDistribution: TextLeadingDistribution.even,
+    );
     return TvFocusableAction(
       onPressed: onPressed,
       autofocus: autofocus,
@@ -748,23 +940,31 @@ class StarflowChipButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(999),
             border: Border.all(color: borderColor),
           ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (icon != null) ...[
-                  Icon(icon, size: 18, color: foregroundColor),
-                  const SizedBox(width: 8),
-                ],
-                Text(
-                  label,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: foregroundColor,
-                    fontWeight: FontWeight.w700,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 46),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 13, 16, 14),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  if (icon != null) ...[
+                    Icon(icon, size: 18, color: foregroundColor),
+                    const SizedBox(width: 8),
+                  ],
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      strutStyle: labelStyle == null
+                          ? null
+                          : StrutStyle.fromTextStyle(labelStyle),
+                      style: labelStyle,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

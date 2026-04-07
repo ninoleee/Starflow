@@ -1,6 +1,7 @@
 package com.example.starflow
 
 import android.app.PictureInPictureParams
+import android.app.PendingIntent
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.Configuration
@@ -14,8 +15,22 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private var platformChannel: MethodChannel? = null
+    private var playbackSessionChannel: MethodChannel? = null
     private var playbackPictureInPictureEnabled = false
     private var playbackPictureInPictureAspectRatio = Rational(16, 9)
+    private val playbackSystemSessionManager by lazy {
+        PlaybackSystemSessionManager(
+            context = applicationContext,
+            sessionTag = "starflow_flutter_playback",
+            contentIntentFactory = { buildPlaybackContentIntent() },
+        ) { command, positionMs ->
+            val payload = mutableMapOf<String, Any>("command" to command)
+            if (positionMs != null) {
+                payload["positionMs"] = positionMs
+            }
+            playbackSessionChannel?.invokeMethod("onPlaybackRemoteCommand", payload)
+        }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -112,6 +127,37 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        playbackSessionChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "starflow/playback_session"
+        )
+        playbackSessionChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setActive" -> {
+                    playbackSystemSessionManager.setActive(
+                        call.argument<Boolean>("active") == true,
+                    )
+                    result.success(true)
+                }
+                "update" -> {
+                    val arguments = call.arguments as? Map<*, *> ?: emptyMap<String, Any>()
+                    playbackSystemSessionManager.update(
+                        PlaybackSystemSessionState.fromMap(arguments),
+                    )
+                    result.success(true)
+                }
+                "showAirPlayPicker" -> {
+                    result.success(false)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        playbackSessionChannel?.setMethodCallHandler(null)
+        playbackSystemSessionManager.release()
+        super.onDestroy()
     }
 
     override fun onUserLeaveHint() {
@@ -174,5 +220,16 @@ class MainActivity : FlutterActivity() {
             return true
         }
         return enterPictureInPictureMode(buildPictureInPictureParams())
+    }
+
+    private fun buildPlaybackContentIntent(): PendingIntent? {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName) ?: return null
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_IMMUTABLE
+        } else {
+            0
+        }
+        return PendingIntent.getActivity(this, 0, launchIntent, flags)
     }
 }

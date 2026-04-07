@@ -2,6 +2,8 @@ package com.example.starflow
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.PendingIntent
+import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -16,6 +18,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Toast
+import android.util.Rational
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -57,6 +60,38 @@ class NativePlaybackActivity : Activity() {
     private var nextInitializePlayWhenReady: Boolean? = null
     private var pendingControllerFocusTarget = ControllerFocusTarget.NONE
     private var exitConfirmationDialog: AlertDialog? = null
+    private val playbackSystemSessionManager by lazy {
+        PlaybackSystemSessionManager(
+            context = applicationContext,
+            sessionTag = "starflow_native_playback",
+            contentIntentFactory = { buildPlaybackContentIntent() },
+        ) { command, positionMs ->
+            handlePlaybackSystemCommand(command, positionMs)
+        }
+    }
+    private val playerListener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            syncPlaybackSystemSession()
+            if (isTelevisionDevice) {
+                if (isPlaying) {
+                    showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
+                }
+            }
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            syncPlaybackSystemSession()
+            updatePictureInPictureParams()
+        }
+
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int,
+        ) {
+            syncPlaybackSystemSession()
+        }
+    }
     private val isTelevisionDevice: Boolean by lazy {
         val currentMode = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
         currentMode == Configuration.UI_MODE_TYPE_TELEVISION ||
@@ -102,6 +137,7 @@ class NativePlaybackActivity : Activity() {
         findViewById<View>(R.id.native_online_subtitle_search)?.setOnClickListener {
             openOnlineSubtitleSearch()
         }
+        updatePictureInPictureParams()
         enterImmersiveMode()
     }
 
@@ -115,6 +151,7 @@ class NativePlaybackActivity : Activity() {
         enterImmersiveMode()
         restoreVideoSurfaceIfNeeded()
         playerView.onResume()
+        syncPlaybackSystemSession()
         if (!subtitleSearchActive && resumePlaybackAfterSubtitleSearch) {
             player?.playWhenReady = true
             resumePlaybackAfterSubtitleSearch = false
@@ -134,14 +171,39 @@ class NativePlaybackActivity : Activity() {
         exitConfirmationDialog?.dismiss()
         exitConfirmationDialog = null
         persistPlaybackProgress(force = true)
-        releasePlayer()
+        if (isFinishing) {
+            releasePlayer()
+        }
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        releasePlayer()
+        playbackSystemSessionManager.release()
+        super.onDestroy()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
             enterImmersiveMode()
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        enterPictureInPictureIfPossible()
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        if (isInPictureInPictureMode) {
+            playerView.hideController()
+        } else if (!subtitleSearchActive) {
+            showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
         }
     }
 
@@ -379,12 +441,15 @@ class NativePlaybackActivity : Activity() {
             }
             prepare()
         }
+        exoPlayer.addListener(playerListener)
 
         player = exoPlayer
         playerView.player = exoPlayer
+        playbackSystemSessionManager.setActive(true)
         if (externalSubtitleSource != null) {
             applyExternalSubtitleConfiguration(showFeedback = false)
         }
+        syncPlaybackSystemSession()
         showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
         if (restoredResumePositionMs > 5_000L) {
             showToast("已从 ${formatClockDuration(restoredResumePositionMs)} 继续播放")
@@ -409,8 +474,149 @@ class NativePlaybackActivity : Activity() {
 
     private fun releasePlayer() {
         playerView.player = null
+        player?.removeListener(playerListener)
         player?.release()
         player = null
+        playbackSystemSessionManager.setActive(false)
+    }
+
+    private fun syncPlaybackSystemSession() {
+        val currentPlayer = player ?: return
+        val state = PlaybackSystemSessionState(
+            title = buildSystemSessionTitle(),
+            subtitle = buildSystemSessionSubtitle(),
+            positionMs = currentPlayer.currentPosition.coerceAtLeast(0L),
+            durationMs = currentPlayer.duration.takeIf { it > 0L } ?: 0L,
+            playing = currentPlayer.isPlaying,
+            buffering = currentPlayer.playbackState == Player.STATE_BUFFERING,
+            speed = currentPlayer.playbackParameters.speed,
+            canSeek = true,
+        )
+        playbackSystemSessionManager.update(state)
+    }
+
+    private fun handlePlaybackSystemCommand(command: String, positionMs: Long?) {
+        when (command) {
+            "play" -> setPlayWhenReady(true)
+            "pause",
+            "stop",
+            "becomingNoisy",
+            "interruptionPause" -> {
+                setPlayWhenReady(false)
+                persistPlaybackProgress(force = true)
+            }
+            "toggle" -> togglePlayback()
+            "seekForward",
+            "next" -> seekBy(10_000L)
+            "seekBackward",
+            "previous" -> seekBy(-10_000L)
+            "seekTo" -> {
+                val currentPlayer = player ?: return
+                currentPlayer.seekTo((positionMs ?: 0L).coerceAtLeast(0L))
+                syncPlaybackSystemSession()
+            }
+            "interruptionResume" -> setPlayWhenReady(true)
+        }
+    }
+
+    private fun buildSystemSessionTitle(): String {
+        val title = intent.getStringExtra(EXTRA_TITLE)?.trim().orEmpty()
+        val targetObject = try {
+            JSONObject(playbackTargetJson)
+        } catch (_: Throwable) {
+            JSONObject()
+        }
+        val seasonNumber = targetObject.optInt("seasonNumber", 0)
+        val episodeNumber = targetObject.optInt("episodeNumber", 0)
+        if (seasonNumber > 0 && episodeNumber > 0 && title.isNotEmpty()) {
+            return "$title · S${seasonNumber.toString().padStart(2, '0')}" +
+                "E${episodeNumber.toString().padStart(2, '0')}"
+        }
+        return if (title.isEmpty()) "Starflow" else title
+    }
+
+    private fun buildSystemSessionSubtitle(): String {
+        val targetObject = try {
+            JSONObject(playbackTargetJson)
+        } catch (_: Throwable) {
+            JSONObject()
+        }
+        val itemType = targetObject.optString("itemType").trim().lowercase()
+        val seriesTitle = targetObject.optString("seriesTitle").trim()
+        if (itemType == "episode" && seriesTitle.isNotEmpty()) {
+            return seriesTitle
+        }
+        val sourceName = targetObject.optString("sourceName").trim()
+        val formatParts = buildList {
+            val container = targetObject.optString("container").trim()
+            val videoCodec = targetObject.optString("videoCodec").trim()
+            val audioCodec = targetObject.optString("audioCodec").trim()
+            if (sourceName.isNotEmpty()) {
+                add(sourceName)
+            }
+            if (container.isNotEmpty()) {
+                add(container.uppercase())
+            }
+            if (videoCodec.isNotEmpty()) {
+                add(videoCodec.uppercase())
+            }
+            if (audioCodec.isNotEmpty()) {
+                add(audioCodec.uppercase())
+            }
+        }
+        return formatParts.joinToString(" · ")
+    }
+
+    private fun buildPlaybackContentIntent(): PendingIntent? {
+        val activityIntent = Intent(this, NativePlaybackActivity::class.java).apply {
+            replaceExtras(intent)
+            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_IMMUTABLE
+        } else {
+            0
+        }
+        return PendingIntent.getActivity(this, 0, activityIntent, flags)
+    }
+
+    private fun updatePictureInPictureParams() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return
+        }
+        setPictureInPictureParams(
+            PictureInPictureParams.Builder()
+                .setAspectRatio(buildPictureInPictureAspectRatio())
+                .build(),
+        )
+    }
+
+    private fun enterPictureInPictureIfPossible() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || isTelevisionDevice) {
+            return
+        }
+        val currentPlayer = player ?: return
+        if (!currentPlayer.isPlaying || isInPictureInPictureMode) {
+            return
+        }
+        updatePictureInPictureParams()
+        enterPictureInPictureMode(
+            PictureInPictureParams.Builder()
+                .setAspectRatio(buildPictureInPictureAspectRatio())
+                .build(),
+        )
+    }
+
+    private fun buildPictureInPictureAspectRatio(): Rational {
+        val currentPlayer = player
+        val videoSize = currentPlayer?.videoSize
+        val width = videoSize?.width ?: 0
+        val height = videoSize?.height ?: 0
+        return if (width > 0 && height > 0) {
+            Rational(width, height)
+        } else {
+            Rational(16, 9)
+        }
     }
 
     private fun openExternalSubtitlePicker() {
