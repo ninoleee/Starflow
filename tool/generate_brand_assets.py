@@ -27,7 +27,6 @@ TV_BANNER_SCALE = 3
 TV_BANNER_CAPTURE_VIEWPORT = (1280, 815)
 
 APP_ICON_TARGETS: dict[Path, tuple[int, int]] = {
-    ROOT / "assets/branding/starflow_launch_logo.png": (512, 512),
     ROOT / "android/app/src/main/res/drawable-nodpi/icon_preview_sharp.png": (1024, 1024),
     ROOT / "android/app/src/main/res/mipmap-mdpi/ic_launcher.png": (48, 48),
     ROOT / "android/app/src/main/res/mipmap-hdpi/ic_launcher.png": (72, 72),
@@ -66,6 +65,10 @@ APP_ICON_TARGETS: dict[Path, tuple[int, int]] = {
 TV_BANNER_TARGETS: dict[Path, tuple[int, int]] = {
     ROOT / "android/app/src/main/res/drawable-nodpi/tv_banner_hd.png": (1280, 720),
     ROOT / "android/app/src/main/res/drawable-nodpi/tv_banner_preview.png": (1280, 720),
+}
+
+LAUNCH_LOGO_TARGETS: dict[Path, tuple[int, int]] = {
+    ROOT / "assets/branding/starflow_launch_logo.png": (512, 512),
 }
 
 LAUNCH_IMAGE_TARGETS: dict[Path, tuple[int, int]] = {
