@@ -200,6 +200,63 @@ void main() {
     expect(records.single.wmdbStatus, NasMetadataFetchStatus.succeeded);
   });
 
+  test('NasMediaIndexer reuses indexed cache for WebDAV id matching', () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-match-cache',
+      name: 'WebDAV Match Cache',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Movies/',
+      enabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'movie-cache-1',
+          path: 'Movies/Dune.Part.Two.2024.2160p.mkv',
+          title: 'Dune: Part Two',
+          itemType: 'movie',
+          seasonNumber: 0,
+          episodeNumber: 0,
+          imdbId: 'tt15239678',
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    expect(client.scanCallCount, 1);
+
+    final matches = await indexer.loadCachedLibraryMatchItems(
+      source,
+      imdbId: 'tt15239678',
+    );
+
+    expect(matches, hasLength(1));
+    expect(matches.single.id, 'movie-cache-1');
+    expect(matches.single.imdbId, 'tt15239678');
+    expect(client.scanCallCount, 1);
+  });
+
   test('NasMediaIndexer manual metadata overwrites existing movie metadata',
       () async {
     final store = _MemoryNasMediaIndexStore();
@@ -1109,6 +1166,84 @@ void main() {
     expect(movie.itemType, 'movie');
     expect(movie.streamUrl, isNotEmpty);
     expect(movie.title, '星球大战：最后的绝地武士 2160p remux (2017)');
+  });
+
+  test(
+      'NasMediaIndexer manual movie metadata converts misgrouped single-resource series back to movie',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-manual-movie-fix',
+      name: 'WebDAV Manual Movie Fix',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Movies/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'manual-movie-1',
+          path: 'Movies/Misclassified Movie/Misclassified.Movie.2024.mkv',
+          title: 'Misclassified Movie',
+          itemType: '',
+          seasonNumber: null,
+          episodeNumber: null,
+          hasSidecarMatch: false,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    final initialLibrary = await indexer.loadLibrary(source, limit: 20);
+    expect(initialLibrary, hasLength(1));
+    expect(initialLibrary.single.itemType, 'series');
+
+    final updatedTarget = await indexer.applyManualMetadata(
+      target: MediaDetailTarget.fromMediaItem(initialLibrary.single),
+      searchQuery: '修正后的电影',
+      metadataMatch: const MetadataMatchResult(
+        provider: MetadataMatchProvider.tmdb,
+        mediaType: MetadataMediaType.movie,
+        title: '修正后的电影',
+        originalTitle: 'Misclassified Movie',
+        imdbId: 'tt9900001',
+        tmdbId: '99001',
+      ),
+    );
+
+    expect(updatedTarget, isNotNull);
+    expect(updatedTarget!.itemType, 'movie');
+
+    final library = await indexer.loadLibrary(source, limit: 20);
+    expect(library, hasLength(1));
+    expect(library.single.itemType, 'movie');
+    expect(library.single.title, '修正后的电影');
+
+    final records = await store.loadSourceRecords(source.id);
+    expect(records.single.item.itemType, 'movie');
+    expect(records.single.recognizedItemType, 'movie');
+    expect(records.single.preferSeries, isFalse);
   });
 
   test(

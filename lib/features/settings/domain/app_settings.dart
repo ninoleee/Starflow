@@ -57,26 +57,50 @@ extension HomeModuleTypeX on HomeModuleType {
   }
 }
 
-enum HomeHeroStyle {
+enum HomeHeroDisplayMode {
   normal,
   borderless,
+}
+
+extension HomeHeroDisplayModeX on HomeHeroDisplayMode {
+  String get label {
+    switch (this) {
+      case HomeHeroDisplayMode.normal:
+        return 'normal';
+      case HomeHeroDisplayMode.borderless:
+        return 'borderless';
+    }
+  }
+
+  static HomeHeroDisplayMode fromName(String raw) {
+    return switch (raw) {
+      'borderless' => HomeHeroDisplayMode.borderless,
+      'normal' => HomeHeroDisplayMode.normal,
+      _ => HomeHeroDisplayMode.normal,
+    };
+  }
+}
+
+enum HomeHeroStyle {
+  composite,
+  poster,
 }
 
 extension HomeHeroStyleX on HomeHeroStyle {
   String get label {
     switch (this) {
-      case HomeHeroStyle.normal:
-        return 'normal';
-      case HomeHeroStyle.borderless:
-        return 'borderless';
+      case HomeHeroStyle.composite:
+        return '复合';
+      case HomeHeroStyle.poster:
+        return '海报';
     }
   }
 
   static HomeHeroStyle fromName(String raw) {
     return switch (raw) {
-      'borderless' => HomeHeroStyle.borderless,
-      'normal' => HomeHeroStyle.normal,
-      _ => HomeHeroStyle.normal,
+      'composite' => HomeHeroStyle.composite,
+      'poster' => HomeHeroStyle.poster,
+      _ => HomeHeroStyle.composite,
     };
   }
 }
@@ -662,10 +686,12 @@ class AppSettings {
     required this.homeModules,
     this.networkStorage = const NetworkStorageConfig(),
     this.homeHeroSourceModuleId = '',
-    this.homeHeroStyle = HomeHeroStyle.normal,
+    this.homeHeroDisplayMode = HomeHeroDisplayMode.normal,
+    this.homeHeroStyle = HomeHeroStyle.composite,
     this.homeHeroLogoTitleEnabled = false,
     this.homeHeroBackgroundEnabled = true,
     this.translucentEffectsEnabled = true,
+    this.autoHideNavigationBarEnabled = true,
     this.highPerformanceModeEnabled = false,
     this.tmdbMetadataMatchEnabled = false,
     this.wmdbMetadataMatchEnabled = false,
@@ -691,10 +717,12 @@ class AppSettings {
   final List<HomeModuleConfig> homeModules;
   final NetworkStorageConfig networkStorage;
   final String homeHeroSourceModuleId;
+  final HomeHeroDisplayMode homeHeroDisplayMode;
   final HomeHeroStyle homeHeroStyle;
   final bool homeHeroLogoTitleEnabled;
   final bool homeHeroBackgroundEnabled;
   final bool translucentEffectsEnabled;
+  final bool autoHideNavigationBarEnabled;
   final bool highPerformanceModeEnabled;
   final bool tmdbMetadataMatchEnabled;
   final bool wmdbMetadataMatchEnabled;
@@ -720,10 +748,12 @@ class AppSettings {
     List<HomeModuleConfig>? homeModules,
     NetworkStorageConfig? networkStorage,
     String? homeHeroSourceModuleId,
+    HomeHeroDisplayMode? homeHeroDisplayMode,
     HomeHeroStyle? homeHeroStyle,
     bool? homeHeroLogoTitleEnabled,
     bool? homeHeroBackgroundEnabled,
     bool? translucentEffectsEnabled,
+    bool? autoHideNavigationBarEnabled,
     bool? highPerformanceModeEnabled,
     bool? tmdbMetadataMatchEnabled,
     bool? wmdbMetadataMatchEnabled,
@@ -750,6 +780,7 @@ class AppSettings {
       networkStorage: networkStorage ?? this.networkStorage,
       homeHeroSourceModuleId:
           homeHeroSourceModuleId ?? this.homeHeroSourceModuleId,
+      homeHeroDisplayMode: homeHeroDisplayMode ?? this.homeHeroDisplayMode,
       homeHeroStyle: homeHeroStyle ?? this.homeHeroStyle,
       homeHeroLogoTitleEnabled:
           homeHeroLogoTitleEnabled ?? this.homeHeroLogoTitleEnabled,
@@ -757,6 +788,8 @@ class AppSettings {
           homeHeroBackgroundEnabled ?? this.homeHeroBackgroundEnabled,
       translucentEffectsEnabled:
           translucentEffectsEnabled ?? this.translucentEffectsEnabled,
+      autoHideNavigationBarEnabled:
+          autoHideNavigationBarEnabled ?? this.autoHideNavigationBarEnabled,
       highPerformanceModeEnabled:
           highPerformanceModeEnabled ?? this.highPerformanceModeEnabled,
       tmdbMetadataMatchEnabled:
@@ -799,10 +832,12 @@ class AppSettings {
       'homeModules': homeModules.map((item) => item.toJson()).toList(),
       'networkStorage': networkStorage.toJson(),
       'homeHeroSourceModuleId': homeHeroSourceModuleId,
+      'homeHeroDisplayMode': homeHeroDisplayMode.name,
       'homeHeroStyle': homeHeroStyle.name,
       'homeHeroLogoTitleEnabled': homeHeroLogoTitleEnabled,
       'homeHeroBackgroundEnabled': homeHeroBackgroundEnabled,
       'translucentEffectsEnabled': translucentEffectsEnabled,
+      'autoHideNavigationBarEnabled': autoHideNavigationBarEnabled,
       'highPerformanceModeEnabled': highPerformanceModeEnabled,
       'tmdbMetadataMatchEnabled': tmdbMetadataMatchEnabled,
       'wmdbMetadataMatchEnabled': wmdbMetadataMatchEnabled,
@@ -828,6 +863,7 @@ class AppSettings {
     final legacyImdbAutoMatchEnabled =
         json['imdbAutoMatchEnabled'] as bool? ?? false;
     final legacyHeroEnabled = json['homeHeroEnabled'] as bool? ?? true;
+    final rawHomeHeroStyle = (json['homeHeroStyle'] as String? ?? '').trim();
     final rawHomeModules = (json['homeModules'] as List<dynamic>? ?? [])
         .map(
           (item) => HomeModuleConfig.fromJson(
@@ -865,8 +901,13 @@ class AppSettings {
         ),
       ),
       homeHeroSourceModuleId: json['homeHeroSourceModuleId'] as String? ?? '',
-      homeHeroStyle: HomeHeroStyleX.fromName(
-        json['homeHeroStyle'] as String? ?? '',
+      homeHeroDisplayMode: json.containsKey('homeHeroDisplayMode')
+          ? HomeHeroDisplayModeX.fromName(
+              json['homeHeroDisplayMode'] as String? ?? '',
+            )
+          : _parseLegacyHomeHeroDisplayMode(rawHomeHeroStyle),
+      homeHeroStyle: _parseHomeHeroStyle(
+        rawHomeHeroStyle,
       ),
       homeHeroLogoTitleEnabled:
           json['homeHeroLogoTitleEnabled'] as bool? ?? false,
@@ -874,6 +915,8 @@ class AppSettings {
           json['homeHeroBackgroundEnabled'] as bool? ?? true,
       translucentEffectsEnabled:
           json['translucentEffectsEnabled'] as bool? ?? true,
+      autoHideNavigationBarEnabled:
+          json['autoHideNavigationBarEnabled'] as bool? ?? true,
       highPerformanceModeEnabled:
           json['highPerformanceModeEnabled'] as bool? ?? false,
       tmdbMetadataMatchEnabled: json['tmdbMetadataMatchEnabled'] as bool? ??
@@ -914,6 +957,21 @@ class AppSettings {
       ),
     );
   }
+}
+
+HomeHeroDisplayMode _parseLegacyHomeHeroDisplayMode(String raw) {
+  return switch (raw) {
+    'borderless' => HomeHeroDisplayMode.borderless,
+    _ => HomeHeroDisplayMode.normal,
+  };
+}
+
+HomeHeroStyle _parseHomeHeroStyle(String raw) {
+  return switch (raw) {
+    'poster' => HomeHeroStyle.poster,
+    'composite' => HomeHeroStyle.composite,
+    _ => HomeHeroStyle.composite,
+  };
 }
 
 List<String> _parseNormalizedStringList(Object? raw) {

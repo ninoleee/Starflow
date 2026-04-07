@@ -5,11 +5,13 @@ import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
-  test('app settings persist home hero style and visual effect switches', () {
+  test('app settings persist home hero display mode, style and switches', () {
     final settings = AppSettings.fromJson({
-      'homeHeroStyle': 'borderless',
+      'homeHeroDisplayMode': 'borderless',
+      'homeHeroStyle': 'poster',
       'homeHeroBackgroundEnabled': false,
       'translucentEffectsEnabled': false,
+      'autoHideNavigationBarEnabled': false,
       'playbackOpenTimeoutSeconds': 45,
       'playbackDefaultSpeed': 1.25,
       'playbackSubtitlePreference': 'off',
@@ -20,9 +22,11 @@ void main() {
       'playbackDecodeMode': 'softwarePreferred',
     });
 
-    expect(settings.homeHeroStyle, HomeHeroStyle.borderless);
+    expect(settings.homeHeroDisplayMode, HomeHeroDisplayMode.borderless);
+    expect(settings.homeHeroStyle, HomeHeroStyle.poster);
     expect(settings.homeHeroBackgroundEnabled, isFalse);
     expect(settings.translucentEffectsEnabled, isFalse);
+    expect(settings.autoHideNavigationBarEnabled, isFalse);
     expect(settings.playbackOpenTimeoutSeconds, 45);
     expect(settings.playbackDefaultSpeed, 1.25);
     expect(
@@ -37,9 +41,11 @@ void main() {
       settings.playbackDecodeMode,
       PlaybackDecodeMode.softwarePreferred,
     );
-    expect(settings.toJson()['homeHeroStyle'], 'borderless');
+    expect(settings.toJson()['homeHeroDisplayMode'], 'borderless');
+    expect(settings.toJson()['homeHeroStyle'], 'poster');
     expect(settings.toJson()['homeHeroBackgroundEnabled'], isFalse);
     expect(settings.toJson()['translucentEffectsEnabled'], isFalse);
+    expect(settings.toJson()['autoHideNavigationBarEnabled'], isFalse);
     expect(settings.toJson()['playbackOpenTimeoutSeconds'], 45);
     expect(settings.toJson()['playbackDefaultSpeed'], 1.25);
     expect(settings.toJson()['playbackSubtitlePreference'], 'off');
@@ -50,12 +56,14 @@ void main() {
     expect(settings.toJson()['playbackDecodeMode'], 'softwarePreferred');
   });
 
-  test('app settings default hero style is normal', () {
+  test('app settings default hero display mode and style', () {
     final settings = AppSettings.fromJson(const {});
 
-    expect(settings.homeHeroStyle, HomeHeroStyle.normal);
+    expect(settings.homeHeroDisplayMode, HomeHeroDisplayMode.normal);
+    expect(settings.homeHeroStyle, HomeHeroStyle.composite);
     expect(settings.homeHeroBackgroundEnabled, isTrue);
     expect(settings.translucentEffectsEnabled, isTrue);
+    expect(settings.autoHideNavigationBarEnabled, isTrue);
     expect(
       settings.homeModules
           .firstWhere((item) => item.type == HomeModuleType.hero)
@@ -76,6 +84,17 @@ void main() {
     expect(settings.detailAutoLibraryMatchEnabled, isFalse);
   });
 
+  test('legacy poster hero style migrates to poster artwork style', () {
+    final settings = AppSettings.fromJson({
+      'homeHeroStyle': 'poster',
+    });
+
+    expect(settings.homeHeroStyle, HomeHeroStyle.poster);
+    expect(settings.homeHeroDisplayMode, HomeHeroDisplayMode.normal);
+    expect(settings.toJson()['homeHeroStyle'], 'poster');
+    expect(settings.toJson()['homeHeroDisplayMode'], 'normal');
+  });
+
   test('app settings persist native playback container engine', () {
     final settings = AppSettings.fromJson({
       'playbackEngine': 'nativeContainer',
@@ -91,7 +110,7 @@ void main() {
     expect(settings.toJson()['playbackDecodeMode'], 'hardwarePreferred');
   });
 
-  test('legacy hero settings migrate to hero module', () {
+  test('legacy hero display mode and module settings migrate', () {
     final settings = AppSettings.fromJson({
       'homeHeroEnabled': false,
       'homeHeroStyle': 'borderless',
@@ -102,7 +121,8 @@ void main() {
         .firstWhere((item) => item.type == HomeModuleType.hero);
 
     expect(heroModule.enabled, isFalse);
-    expect(settings.homeHeroStyle, HomeHeroStyle.borderless);
+    expect(settings.homeHeroDisplayMode, HomeHeroDisplayMode.borderless);
+    expect(settings.homeHeroStyle, HomeHeroStyle.composite);
   });
 
   test('app settings persist metadata match preferences', () {

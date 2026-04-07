@@ -11,6 +11,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:path/path.dart' as p;
 import 'package:starflow/core/platform/android_picture_in_picture.dart';
 import 'package:starflow/core/platform/background_playback.dart';
+import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
@@ -50,6 +51,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   static const _kSpeedOptions = <double>[0.75, 1.0, 1.25, 1.5, 2.0];
   static const _kSubtitleDelaySteps = <double>[-2, -1, -0.5, 0, 0.5, 1, 2];
   static const _kProgressPersistInterval = Duration(seconds: 8);
+  static const int _kDefaultMpvBufferSizeBytes = 32 * 1024 * 1024;
+  static const int _kNetworkMpvBufferSizeBytes = 64 * 1024 * 1024;
+  static const int _kHeavyMpvBufferSizeBytes = 96 * 1024 * 1024;
+  static const int _kAggressiveMpvBufferSizeBytes = 128 * 1024 * 1024;
 
   Player? _player;
   VideoController? _videoController;
@@ -66,6 +71,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _isInPictureInPictureMode = false;
   bool _subtitleDelaySupported = false;
   double _subtitleDelaySeconds = 0;
+  bool _tvPurePlaybackMode = false;
+  bool _tvExitDialogVisible = false;
   bool _introSkipApplied = false;
   bool _outroSkipApplied = false;
   Duration _latestPosition = Duration.zero;
@@ -356,9 +363,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     required Duration timeout,
   }) async {
     final player = Player(
-      configuration: const PlayerConfiguration(
+      configuration: PlayerConfiguration(
         title: 'Starflow',
         logLevel: MPVLogLevel.warn,
+        bufferSize: _resolveMpvBufferSizeBytes(resolvedTarget),
       ),
     );
     final videoController = VideoController(
@@ -390,6 +398,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     });
 
     try {
+      await _applyMpvPerformanceTuning(player, resolvedTarget);
       await Future.any<void>([
         player.open(
           Media(
@@ -481,6 +490,129 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         return 'auto';
       case PlaybackDecodeMode.softwarePreferred:
         return 'no';
+    }
+  }
+
+  bool get _isTelevisionPlaybackDevice =>
+      ref.read(isTelevisionProvider).valueOrNull ?? false;
+
+  int _resolveMpvBufferSizeBytes(PlaybackTarget target) {
+    if (_shouldUseAggressiveMpvTuning(target)) {
+      return _kAggressiveMpvBufferSizeBytes;
+    }
+    if (_isHeavyPlaybackTarget(target)) {
+      return _kHeavyMpvBufferSizeBytes;
+    }
+    if (_isLikelyRemotePlaybackTarget(target)) {
+      return _kNetworkMpvBufferSizeBytes;
+    }
+    return _kDefaultMpvBufferSizeBytes;
+  }
+
+  bool _isLikelyRemotePlaybackTarget(PlaybackTarget target) {
+    final uri = Uri.tryParse(target.streamUrl.trim());
+    final scheme = uri?.scheme.toLowerCase() ?? '';
+    return switch (scheme) {
+      'http' || 'https' || 'rtsp' || 'rtmp' || 'ftp' || 'ftps' => true,
+      _ => false,
+    };
+  }
+
+  bool _isHeavyPlaybackTarget(PlaybackTarget target) {
+    final width = target.width ?? 0;
+    final height = target.height ?? 0;
+    final bitrate = target.bitrate ?? 0;
+    final codec = target.videoCodec.trim().toLowerCase();
+    final is4k = width >= 3840 || height >= 2160;
+    final isHevc = codec == 'hevc' || codec == 'h265' || codec == 'x265';
+    final isAv1 = codec == 'av1';
+    final veryHighBitrate = bitrate >= 24000000;
+    final heavyHevc = isHevc && (is4k || bitrate >= 14000000);
+    final heavyAv1 = isAv1 && bitrate >= 10000000;
+    return is4k || veryHighBitrate || heavyHevc || heavyAv1;
+  }
+
+  bool _shouldUseAggressiveMpvTuning(PlaybackTarget target) {
+    if (_highPerformanceModeEnabled) {
+      return true;
+    }
+    if (!_isHeavyPlaybackTarget(target)) {
+      return false;
+    }
+    return _isTelevisionPlaybackDevice ||
+        _playbackDecodeMode == PlaybackDecodeMode.softwarePreferred;
+  }
+
+  Future<void> _applyMpvPerformanceTuning(
+    Player player,
+    PlaybackTarget target,
+  ) async {
+    if (kIsWeb) {
+      return;
+    }
+
+    final native = player.platform;
+    if (native == null) {
+      return;
+    }
+
+    final remotePlayback = _isLikelyRemotePlaybackTarget(target);
+    final heavyPlayback = _isHeavyPlaybackTarget(target);
+    final aggressiveTuning = _shouldUseAggressiveMpvTuning(target);
+
+    Future<void> setOption(String name, String value) async {
+      try {
+        await (native as dynamic).setProperty(name, value);
+      } catch (_) {
+        // Keep playback available even if a tuning hint is unsupported.
+      }
+    }
+
+    Future<void> runCommand(List<String> command) async {
+      try {
+        await (native as dynamic).command(command);
+      } catch (_) {
+        // Keep playback available even if a tuning hint is unsupported.
+      }
+    }
+
+    if (aggressiveTuning) {
+      await runCommand(const ['apply-profile', 'fast']);
+    }
+
+    if (remotePlayback) {
+      await setOption(
+        'demuxer-readahead-secs',
+        aggressiveTuning
+            ? '16'
+            : heavyPlayback
+                ? '10'
+                : '6',
+      );
+      await setOption(
+        'demuxer-hysteresis-secs',
+        aggressiveTuning ? '8' : '4',
+      );
+      await setOption(
+        'cache-pause-wait',
+        aggressiveTuning
+            ? '1.5'
+            : heavyPlayback
+                ? '1.0'
+                : '0.6',
+      );
+      if (aggressiveTuning || heavyPlayback) {
+        await setOption('cache-pause-initial', 'yes');
+      }
+    }
+
+    if (aggressiveTuning || heavyPlayback) {
+      await setOption('vd-lavc-dr', 'yes');
+    }
+
+    if (_playbackDecodeMode == PlaybackDecodeMode.softwarePreferred &&
+        (aggressiveTuning || heavyPlayback)) {
+      await setOption('vd-lavc-skiploopfilter', 'nonref');
     }
   }
 
@@ -842,30 +974,60 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     PlaybackTarget target,
   ) async {
     final query = buildSubtitleSearchQuery(target);
+    final initialInput = buildSubtitleSearchInitialInput(target);
+    final request = SubtitleSearchRequest(
+      query: query,
+      title: initialInput,
+      initialInput: initialInput,
+      applyMode: SubtitleSearchApplyMode.downloadAndApply,
+    );
+    final location = request.toLocation();
+    subtitleSearchTrace(
+      'player.open-subtitle-search',
+      fields: {
+        'targetTitle': target.title.trim(),
+        'seriesTitle': target.seriesTitle.trim(),
+        'season': target.seasonNumber,
+        'episode': target.episodeNumber,
+        'query': query,
+        'initialInput': initialInput,
+        'location': location,
+      },
+    );
     if (query.trim().isEmpty) {
+      subtitleSearchTrace('player.open-subtitle-search.skip-empty-query');
       _showMessage('缺少片名信息，暂时无法搜索字幕');
       return;
     }
 
-    final selection = await context.push<SubtitleSearchSelection>(
-      SubtitleSearchRequest(
-        query: query,
-        title: target.resolvedSeriesTitle.isNotEmpty
-            ? target.resolvedSeriesTitle
-            : target.title.trim(),
-        applyMode: SubtitleSearchApplyMode.downloadAndApply,
-      ).toLocation(),
-    );
+    final selection = await context.push<SubtitleSearchSelection>(location);
     if (selection == null) {
+      subtitleSearchTrace('player.open-subtitle-search.cancelled');
       return;
     }
     if (!mounted) {
       return;
     }
     if (!selection.canApply) {
+      subtitleSearchTrace(
+        'player.open-subtitle-search.selection-not-applyable',
+        fields: {
+          'cachedPath': selection.cachedPath,
+          'displayName': selection.displayName,
+          'subtitleFilePath': selection.subtitleFilePath ?? '',
+        },
+      );
       _showMessage('字幕已缓存，但当前结果暂不能直接挂载播放');
       return;
     }
+    subtitleSearchTrace(
+      'player.open-subtitle-search.selection',
+      fields: {
+        'cachedPath': selection.cachedPath,
+        'displayName': selection.displayName,
+        'subtitleFilePath': selection.subtitleFilePath ?? '',
+      },
+    );
     await _applyExternalSubtitlePath(
       player,
       selection.subtitleFilePath!,
@@ -1184,195 +1346,285 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final activeTarget = _resolvedTarget ?? widget.target;
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final playbackSettings = ref.watch(appSettingsProvider);
-    final showMinimalPlayerChrome = _isInPictureInPictureMode ||
+    final showMinimalPlayerChromeBase = _isInPictureInPictureMode ||
         playbackSettings.highPerformanceModeEnabled;
+    final showMinimalPlayerChrome =
+        showMinimalPlayerChromeBase || (isTelevision && _tvPurePlaybackMode);
 
-    return Shortcuts(
-      shortcuts: isTelevision
-          ? const <ShortcutActivator, Intent>{
-              SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
-              SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
-              SingleActivator(LogicalKeyboardKey.backspace): DismissIntent(),
-              SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
-              SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-              SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
-              SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
-              SingleActivator(LogicalKeyboardKey.mediaPlayPause):
-                  ActivateIntent(),
-              SingleActivator(LogicalKeyboardKey.mediaPlay): ActivateIntent(),
-              SingleActivator(LogicalKeyboardKey.mediaPause): ActivateIntent(),
-              SingleActivator(LogicalKeyboardKey.contextMenu):
-                  _OpenPlaybackOptionsIntent(),
-              SingleActivator(LogicalKeyboardKey.gameButtonY):
-                  _OpenPlaybackOptionsIntent(),
-              SingleActivator(LogicalKeyboardKey.arrowLeft):
-                  DirectionalFocusIntent(TraversalDirection.left),
-              SingleActivator(LogicalKeyboardKey.arrowRight):
-                  DirectionalFocusIntent(TraversalDirection.right),
-            }
-          : const <ShortcutActivator, Intent>{},
-      child: Actions(
-        actions: <Type, Action<Intent>>{
-          DismissIntent: CallbackAction<DismissIntent>(
-            onInvoke: (_) {
-              context.pop();
-              return null;
-            },
+    return PopScope<Object?>(
+      canPop: !isTelevision,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop || !isTelevision) {
+          return;
+        }
+        unawaited(
+          _handleTvBack(
+            showMinimalPlayerChromeBase: showMinimalPlayerChromeBase,
           ),
-          ActivateIntent: CallbackAction<ActivateIntent>(
-            onInvoke: (_) {
-              _togglePlayback();
-              return null;
-            },
-          ),
-          _OpenPlaybackOptionsIntent:
-              CallbackAction<_OpenPlaybackOptionsIntent>(
-            onInvoke: (_) {
-              _showPlaybackOptions(
-                isTelevision: isTelevision,
-                settings: playbackSettings,
-              );
-              return null;
-            },
-          ),
-          DirectionalFocusIntent: CallbackAction<DirectionalFocusIntent>(
-            onInvoke: (intent) {
-              if (intent.direction == TraversalDirection.left) {
-                _seekRelative(-_kSeekStep);
-              } else if (intent.direction == TraversalDirection.right) {
-                _seekRelative(_kSeekStep);
+        );
+      },
+      child: Shortcuts(
+        shortcuts: isTelevision
+            ? const <ShortcutActivator, Intent>{
+                SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
+                SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
+                SingleActivator(LogicalKeyboardKey.backspace): DismissIntent(),
+                SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.numpadEnter):
+                    ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.mediaPlayPause):
+                    ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.mediaPlay): ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.mediaPause):
+                    ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.contextMenu):
+                    _OpenPlaybackOptionsIntent(),
+                SingleActivator(LogicalKeyboardKey.gameButtonY):
+                    _OpenPlaybackOptionsIntent(),
+                SingleActivator(LogicalKeyboardKey.arrowLeft):
+                    DirectionalFocusIntent(TraversalDirection.left),
+                SingleActivator(LogicalKeyboardKey.arrowRight):
+                    DirectionalFocusIntent(TraversalDirection.right),
               }
-              return null;
-            },
-          ),
-        },
-        child: Focus(
-          autofocus: true,
-          canRequestFocus: isTelevision,
-          child: Scaffold(
-            backgroundColor: Colors.black,
-            body: showMinimalPlayerChrome
-                ? ColoredBox(
-                    color: Colors.black,
-                    child: Center(
-                      child: AspectRatio(
-                        aspectRatio: _currentAspectRatio(),
-                        child: _buildVideoSurface(
+            : const <ShortcutActivator, Intent>{},
+        child: Actions(
+          actions: <Type, Action<Intent>>{
+            DismissIntent: CallbackAction<DismissIntent>(
+              onInvoke: (_) {
+                if (isTelevision) {
+                  unawaited(
+                    _handleTvBack(
+                      showMinimalPlayerChromeBase: showMinimalPlayerChromeBase,
+                    ),
+                  );
+                } else {
+                  context.pop();
+                }
+                return null;
+              },
+            ),
+            ActivateIntent: CallbackAction<ActivateIntent>(
+              onInvoke: (_) {
+                _togglePlayback();
+                return null;
+              },
+            ),
+            _OpenPlaybackOptionsIntent:
+                CallbackAction<_OpenPlaybackOptionsIntent>(
+              onInvoke: (_) {
+                _showPlaybackOptions(
+                  isTelevision: isTelevision,
+                  settings: playbackSettings,
+                );
+                return null;
+              },
+            ),
+            DirectionalFocusIntent: CallbackAction<DirectionalFocusIntent>(
+              onInvoke: (intent) {
+                if (intent.direction == TraversalDirection.left) {
+                  _seekRelative(-_kSeekStep);
+                } else if (intent.direction == TraversalDirection.right) {
+                  _seekRelative(_kSeekStep);
+                }
+                return null;
+              },
+            ),
+          },
+          child: Focus(
+            autofocus: true,
+            canRequestFocus: isTelevision,
+            child: Scaffold(
+              backgroundColor: Colors.black,
+              body: showMinimalPlayerChrome
+                  ? ColoredBox(
+                      color: Colors.black,
+                      child: Center(
+                        child: AspectRatio(
+                          aspectRatio: _currentAspectRatio(),
+                          child: _buildVideoSurface(
+                            theme,
+                            isTelevision: isTelevision,
+                            settings: playbackSettings,
+                          ),
+                        ),
+                      ),
+                    )
+                  : !isTelevision
+                      ? _buildVideoSurface(
                           theme,
                           isTelevision: isTelevision,
                           settings: playbackSettings,
-                        ),
-                      ),
-                    ),
-                  )
-                : Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      ColoredBox(
-                        color: Colors.black,
-                        child: Center(
-                          child: AspectRatio(
-                            aspectRatio: _currentAspectRatio(),
-                            child: _buildVideoSurface(
-                              theme,
-                              isTelevision: isTelevision,
-                              settings: playbackSettings,
-                            ),
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                Colors.black.withValues(alpha: 0.62),
-                                Colors.black.withValues(alpha: 0.22),
-                                Colors.transparent,
-                              ],
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                            ),
-                          ),
-                          child: OverlayToolbar(
-                            onBack: () => context.pop(),
-                            trailing: StarflowIconButton(
-                              icon: Icons.tune_rounded,
-                              tooltip: '播放设置',
-                              variant: StarflowButtonVariant.ghost,
-                              onPressed: _player == null
-                                  ? null
-                                  : () => _showPlaybackOptions(
-                                        isTelevision: isTelevision,
-                                        settings: playbackSettings,
-                                      ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        child: IgnorePointer(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  Colors.transparent,
-                                  Colors.black.withValues(alpha: 0.16),
-                                  Colors.black.withValues(alpha: 0.62),
-                                ],
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                              ),
-                            ),
-                            child: SafeArea(
-                              top: false,
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(18, 40, 18, 18),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      activeTarget.title,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.headlineSmall
-                                          ?.copyWith(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      '${activeTarget.sourceKind.label} · ${activeTarget.sourceName}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style:
-                                          theme.textTheme.bodyMedium?.copyWith(
-                                        color: const Color(0xCCFFFFFF),
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
+                        )
+                      : Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ColoredBox(
+                              color: Colors.black,
+                              child: Center(
+                                child: AspectRatio(
+                                  aspectRatio: _currentAspectRatio(),
+                                  child: _buildVideoSurface(
+                                    theme,
+                                    isTelevision: isTelevision,
+                                    settings: playbackSettings,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
+                            Positioned(
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Colors.black.withValues(alpha: 0.62),
+                                      Colors.black.withValues(alpha: 0.22),
+                                      Colors.transparent,
+                                    ],
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                  ),
+                                ),
+                                child: OverlayToolbar(
+                                  onBack: () => unawaited(
+                                    _handleTvBack(
+                                      showMinimalPlayerChromeBase:
+                                          showMinimalPlayerChromeBase,
+                                      allowRoutePop: !isTelevision,
+                                    ),
+                                  ),
+                                  trailing: isTelevision
+                                      ? StarflowIconButton(
+                                          icon: Icons.tune_rounded,
+                                          tooltip: '播放设置',
+                                          variant: StarflowButtonVariant.ghost,
+                                          onPressed: _player == null
+                                              ? null
+                                              : () => _showPlaybackOptions(
+                                                    isTelevision: isTelevision,
+                                                    settings: playbackSettings,
+                                                  ),
+                                        )
+                                      : null,
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              child: IgnorePointer(
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        Colors.transparent,
+                                        Colors.black.withValues(alpha: 0.16),
+                                        Colors.black.withValues(alpha: 0.62),
+                                      ],
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                    ),
+                                  ),
+                                  child: SafeArea(
+                                    top: false,
+                                    child: Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                          18, 40, 18, 18),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            activeTarget.title,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: theme.textTheme.headlineSmall
+                                                ?.copyWith(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            '${activeTarget.sourceKind.label} · ${activeTarget.sourceName}',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: theme.textTheme.bodyMedium
+                                                ?.copyWith(
+                                              color: const Color(0xCCFFFFFF),
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
-                  ),
+            ),
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _handleTvBack({
+    required bool showMinimalPlayerChromeBase,
+    bool allowRoutePop = false,
+  }) async {
+    if (!mounted) {
+      return;
+    }
+    if (allowRoutePop) {
+      context.pop();
+      return;
+    }
+    if (!showMinimalPlayerChromeBase && !_tvPurePlaybackMode) {
+      setState(() {
+        _tvPurePlaybackMode = true;
+      });
+      return;
+    }
+    if (_tvExitDialogVisible) {
+      return;
+    }
+
+    _tvExitDialogVisible = true;
+    final shouldExit = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) {
+            return AlertDialog(
+              title: const Text('退出播放'),
+              content: const Text('确认退出当前播放吗？'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('继续播放'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: const Text('退出'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+    _tvExitDialogVisible = false;
+
+    if (!mounted || !shouldExit) {
+      return;
+    }
+    context.pop();
   }
 
   Future<void> _togglePlayback() async {
@@ -1440,18 +1692,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   Center(
                     child: AspectRatio(
                       aspectRatio: aspectRatio,
-                      child: Video(
-                        controller: videoController,
-                        controls: isTelevision
-                            ? NoVideoControls
-                            : AdaptiveVideoControls,
-                        fill: Colors.black,
-                        fit: BoxFit.contain,
-                        subtitleViewConfiguration:
-                            _buildSubtitleViewConfiguration(
-                          settings,
-                          isTelevision: isTelevision,
-                        ),
+                      child: _buildEmbeddedVideo(
+                        videoController,
+                        isTelevision: isTelevision,
+                        settings: settings,
                       ),
                     ),
                   ),
@@ -1485,6 +1729,98 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           },
         );
       },
+    );
+  }
+
+  Widget _buildEmbeddedVideo(
+    VideoController videoController, {
+    required bool isTelevision,
+    required AppSettings settings,
+  }) {
+    final video = Video(
+      controller: videoController,
+      controls: isTelevision ? NoVideoControls : AdaptiveVideoControls,
+      fill: Colors.black,
+      fit: BoxFit.contain,
+      subtitleViewConfiguration: _buildSubtitleViewConfiguration(
+        settings,
+        isTelevision: isTelevision,
+      ),
+    );
+    if (isTelevision) {
+      return video;
+    }
+
+    return MaterialDesktopVideoControlsTheme(
+      normal: _buildDesktopVideoControlsTheme(
+        settings,
+        fullscreen: false,
+      ),
+      fullscreen: _buildDesktopVideoControlsTheme(
+        settings,
+        fullscreen: true,
+      ),
+      child: MaterialVideoControlsTheme(
+        normal: _buildMaterialVideoControlsTheme(
+          settings,
+          fullscreen: false,
+        ),
+        fullscreen: _buildMaterialVideoControlsTheme(
+          settings,
+          fullscreen: true,
+        ),
+        child: video,
+      ),
+    );
+  }
+
+  MaterialVideoControlsThemeData _buildMaterialVideoControlsTheme(
+    AppSettings settings, {
+    required bool fullscreen,
+  }) {
+    final base = fullscreen
+        ? kDefaultMaterialVideoControlsThemeDataFullscreen
+        : kDefaultMaterialVideoControlsThemeData;
+    return base.copyWith(
+      bottomButtonBar: [
+        const MaterialPositionIndicator(),
+        const Spacer(),
+        MaterialCustomButton(
+          icon: const Icon(Icons.tune_rounded),
+          onPressed: () => _showPlaybackOptions(
+            isTelevision: false,
+            settings: settings,
+          ),
+        ),
+        const MaterialFullscreenButton(),
+      ],
+    );
+  }
+
+  MaterialDesktopVideoControlsThemeData _buildDesktopVideoControlsTheme(
+    AppSettings settings, {
+    required bool fullscreen,
+  }) {
+    final base = fullscreen
+        ? kDefaultMaterialDesktopVideoControlsThemeDataFullscreen
+        : kDefaultMaterialDesktopVideoControlsThemeData;
+    return base.copyWith(
+      bottomButtonBar: [
+        const MaterialDesktopSkipPreviousButton(),
+        const MaterialDesktopPlayOrPauseButton(),
+        const MaterialDesktopSkipNextButton(),
+        const MaterialDesktopVolumeButton(),
+        const MaterialDesktopPositionIndicator(),
+        const Spacer(),
+        MaterialDesktopCustomButton(
+          icon: const Icon(Icons.tune_rounded),
+          onPressed: () => _showPlaybackOptions(
+            isTelevision: false,
+            settings: settings,
+          ),
+        ),
+        const MaterialDesktopFullscreenButton(),
+      ],
     );
   }
 

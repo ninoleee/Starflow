@@ -712,6 +712,10 @@ class TmdbMetadataClient {
         '${item['backdrop_path'] ?? ''}',
         size: 'w1280',
       );
+      final genres = _resolvePersonCreditGenres(
+        item,
+        mediaType: mediaType,
+      );
       credits.add(
         TmdbPersonCredit(
           tmdbId: id,
@@ -730,6 +734,7 @@ class TmdbMetadataClient {
           year: _extractYear(
             '${item[mediaType == 'tv' ? 'first_air_date' : 'release_date'] ?? ''}',
           ),
+          genres: genres,
           ratingLabels: _resolveRatingLabels(
             voteAverage: item['vote_average'],
             voteCount: item['vote_count'],
@@ -782,6 +787,70 @@ class TmdbMetadataClient {
     }
     return job;
   }
+
+  static List<String> _resolvePersonCreditGenres(
+    Map<String, dynamic> item, {
+    required String mediaType,
+  }) {
+    final genreMap =
+        mediaType == 'tv' ? _tmdbTvGenreLabels : _tmdbMovieGenreLabels;
+    final genreIds = (item['genre_ids'] as List<dynamic>? ?? const [])
+        .map((entry) => (entry as num?)?.toInt())
+        .whereType<int>();
+    final resolved = <String>[];
+    final seen = <String>{};
+
+    for (final genreId in genreIds) {
+      final label = genreMap[genreId]?.trim() ?? '';
+      if (label.isEmpty || !seen.add(label)) {
+        continue;
+      }
+      resolved.add(label);
+    }
+
+    return resolved;
+  }
+
+  static const Map<int, String> _tmdbMovieGenreLabels = {
+    12: '冒险',
+    14: '奇幻',
+    16: '动画',
+    18: '剧情',
+    27: '恐怖',
+    28: '动作',
+    35: '喜剧',
+    36: '历史',
+    37: '西部',
+    53: '惊悚',
+    80: '犯罪',
+    99: '纪录',
+    878: '科幻',
+    9648: '悬疑',
+    10402: '音乐',
+    10749: '爱情',
+    10751: '家庭',
+    10752: '战争',
+    10770: '电视电影',
+  };
+
+  static const Map<int, String> _tmdbTvGenreLabels = {
+    16: '动画',
+    18: '剧情',
+    35: '喜剧',
+    37: '西部',
+    80: '犯罪',
+    99: '纪录',
+    9648: '悬疑',
+    10751: '家庭',
+    10759: '动作冒险',
+    10762: '儿童',
+    10763: '新闻',
+    10764: '真人秀',
+    10765: '科幻奇幻',
+    10766: '肥皂剧',
+    10767: '脱口秀',
+    10768: '战争政治',
+  };
 
   static List<TmdbPersonProfile> _resolveDirectorProfiles({
     required List<Map<String, dynamic>> createdBy,
@@ -1093,6 +1162,7 @@ class TmdbPersonCredit {
     required this.bannerUrl,
     required this.overview,
     required this.year,
+    required this.genres,
     required this.ratingLabels,
     required this.subtitle,
     required this.popularity,
@@ -1107,6 +1177,7 @@ class TmdbPersonCredit {
   final String bannerUrl;
   final String overview;
   final int year;
+  final List<String> genres;
   final List<String> ratingLabels;
   final String subtitle;
   final double popularity;

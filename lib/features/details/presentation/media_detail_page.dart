@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/debug_trace_once.dart';
+import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -13,6 +14,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/person_credits_page.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
@@ -29,6 +31,7 @@ import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 final enrichedDetailTargetProvider =
     FutureProvider.autoDispose.family<MediaDetailTarget, MediaDetailTarget>((
@@ -998,6 +1001,7 @@ Future<MetadataMatchResult?> _tryPreferredMetadataMatch({
 
 Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
   required MediaRepository mediaRepository,
+  required NasMediaIndexer nasMediaIndexer,
   required List<MediaSourceConfig> allowedSources,
   required _LibraryMatchTaskController controller,
   required MediaDetailTarget target,
@@ -1035,27 +1039,31 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
   List<_LibraryMatchCandidate> buildCandidates(List<MediaItem> items) {
     controller.throwIfCancelled();
     final matches = <_LibraryMatchCandidate>[];
+    final doubanId = _resolveManualMatchDoubanId(target, metadataMatch);
     final imdbId = _resolveManualMatchImdbId(target, metadataMatch);
     final tmdbId = _resolveManualMatchTmdbId(target, metadataMatch);
     final tvdbId = _resolveManualMatchTvdbId(target);
     final wikidataId = _resolveManualMatchWikidataId(target);
-    final hasExternalIds = imdbId.trim().isNotEmpty ||
+    final hasExternalIds = doubanId.trim().isNotEmpty ||
+        imdbId.trim().isNotEmpty ||
         tmdbId.trim().isNotEmpty ||
         tvdbId.trim().isNotEmpty ||
         wikidataId.trim().isNotEmpty;
-    final exactMatched = matchMediaItemByExternalIds(
+    final exactMatchedItems = listMediaItemsMatchingExternalIds(
       items,
+      doubanId: doubanId,
       imdbId: imdbId,
       tmdbId: tmdbId,
       tvdbId: tvdbId,
       wikidataId: wikidataId,
     );
-    if (exactMatched != null) {
+    for (final exactMatched in exactMatchedItems) {
       matches.add(
         _LibraryMatchCandidate(
           item: exactMatched,
           matchReason: _externalIdMatchReason(
             exactMatched,
+            doubanId: doubanId,
             imdbId: imdbId,
             tmdbId: tmdbId,
             tvdbId: tvdbId,
@@ -1152,10 +1160,13 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
     taskFactories.add(() async {
       controller.throwIfCancelled();
       try {
-        final nasLibrary = await mediaRepository.fetchLibrary(
-          kind: MediaSourceKind.nas,
-          sourceId: source.id,
-          limit: detailLibraryMatchLimit,
+        final nasLibrary = await nasMediaIndexer.loadCachedLibraryMatchItems(
+          source,
+          doubanId: _resolveManualMatchDoubanId(target, metadataMatch),
+          imdbId: _resolveManualMatchImdbId(target, metadataMatch),
+          tmdbId: _resolveManualMatchTmdbId(target, metadataMatch),
+          tvdbId: _resolveManualMatchTvdbId(target),
+          wikidataId: _resolveManualMatchWikidataId(target),
         );
         controller.throwIfCancelled();
         return buildCandidates(nasLibrary);
@@ -1280,6 +1291,36 @@ String _libraryMatchOptionLabel(MediaDetailTarget t) {
   return '$source · $tail';
 }
 
+String _movieVariantOptionSubtitle(MediaDetailTarget target) {
+  final playback = target.playbackTarget;
+  final parts = <String>[];
+  final availability =
+      _availabilityFeedbackLabel(target.availabilityLabel).trim();
+  if (availability.isNotEmpty && availability != '无') {
+    parts.add(availability);
+  }
+  final format = playback?.formatLabel.trim() ?? '';
+  if (format.isNotEmpty) {
+    parts.add(format);
+  }
+  final resolution = playback?.resolutionLabel.trim() ?? '';
+  if (resolution.isNotEmpty) {
+    parts.add(resolution);
+  }
+  final fileSize = playback?.fileSizeLabel.trim() ?? '';
+  if (fileSize.isNotEmpty) {
+    parts.add(fileSize);
+  }
+  if (parts.isNotEmpty) {
+    return parts.join(' · ');
+  }
+  final actualAddress = playback?.actualAddress.trim() ?? '';
+  if (actualAddress.isNotEmpty) {
+    return actualAddress;
+  }
+  return target.resourcePath.trim();
+}
+
 class _LibraryMatchCandidate {
   const _LibraryMatchCandidate({
     required this.item,
@@ -1328,17 +1369,23 @@ int _resolveManualMatchYear(
 
 String _externalIdMatchReason(
   MediaItem item, {
+  required String doubanId,
   required String imdbId,
   required String tmdbId,
   required String tvdbId,
   required String wikidataId,
 }) {
   final reasons = <String>[];
+  final normalizedDoubanId = doubanId.trim();
   final normalizedImdbId = imdbId.trim().toLowerCase();
   final normalizedTmdbId = tmdbId.trim();
   final normalizedTvdbId = tvdbId.trim();
   final normalizedWikidataId = wikidataId.trim().toUpperCase();
 
+  if (normalizedDoubanId.isNotEmpty &&
+      item.doubanId.trim() == normalizedDoubanId) {
+    reasons.add('豆瓣 ID');
+  }
   if (normalizedImdbId.isNotEmpty &&
       item.imdbId.trim().toLowerCase() == normalizedImdbId) {
     reasons.add('IMDb ID');
@@ -1360,11 +1407,22 @@ String _externalIdMatchReason(
   if (reasons.length == 1) {
     return '按 ${reasons.first} 匹配';
   }
-  return '按 ${reasons.join(' + ')} 匹配';
+  return '按 ${reasons.join(' / ')} 匹配';
 }
 
 String _titleMatchReason(int year) {
   return year > 0 ? '按标题 + 年份匹配' : '按标题匹配';
+}
+
+String _resolveManualMatchDoubanId(
+  MediaDetailTarget target,
+  MetadataMatchResult? metadataMatch,
+) {
+  final current = target.doubanId.trim();
+  if (current.isNotEmpty) {
+    return current;
+  }
+  return metadataMatch?.doubanId.trim() ?? '';
 }
 
 String _resolveManualMatchImdbId(
@@ -1985,7 +2043,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   bool _isSearchingSubtitles = false;
   String? _busySubtitleResultId;
   String? _subtitleSearchStatusMessage;
-  String _lastAutoSubtitleSearchKey = '';
   int _detailSessionId = 0;
   _LibraryMatchTaskController? _activeLibraryMatchController;
   final TvFocusMemoryController _tvFocusMemoryController =
@@ -2015,7 +2072,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       _isSearchingSubtitles = false;
       _busySubtitleResultId = null;
       _subtitleSearchStatusMessage = null;
-      _lastAutoSubtitleSearchKey = '';
       _startDetailTasks();
     }
   }
@@ -2155,6 +2211,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
 
       final candidates = await _findAllLibraryMatchCandidates(
         mediaRepository: ref.read(mediaRepositoryProvider),
+        nasMediaIndexer: ref.read(nasMediaIndexerProvider),
         allowedSources: allowedSources,
         controller: controller,
         target: currentTarget,
@@ -2389,6 +2446,32 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     );
   }
 
+  Future<void> _openPlaybackEnginePicker(PlaybackEngine currentEngine) async {
+    final selection = await showSettingsOptionDialog<PlaybackEngine>(
+      context: context,
+      title: '选择播放器',
+      options: PlaybackEngine.values,
+      currentValue: currentEngine,
+      labelBuilder: (engine) => engine.label,
+    );
+    if (selection == null) {
+      return;
+    }
+    await _setPlaybackEngine(selection, currentEngine: currentEngine);
+  }
+
+  Future<void> _setPlaybackEngine(
+    PlaybackEngine selection, {
+    required PlaybackEngine currentEngine,
+  }) async {
+    if (selection == currentEngine) {
+      return;
+    }
+    await ref.read(settingsControllerProvider.notifier).setPlaybackEngine(
+          selection,
+        );
+  }
+
   Future<void> _openTelevisionLibraryMatchPicker() async {
     if (_libraryMatchChoices.length <= 1 || _isMatchingLocalResource) {
       return;
@@ -2536,6 +2619,66 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     }
   }
 
+  bool _shouldShowPlayableVariantSwitcher(MediaDetailTarget target) {
+    final itemType = target.itemType.trim().toLowerCase();
+    return target.isPlayable &&
+        itemType != 'series' &&
+        itemType != 'season' &&
+        _libraryMatchChoices.length > 1 &&
+        _libraryMatchChoices.any((choice) => choice.isPlayable);
+  }
+
+  Widget _buildPlayableVariantSwitcherBlock(MediaDetailTarget target) {
+    final currentIndex = _currentLibraryMatchIndex;
+    return _DetailBlock(
+      title: '播放版本',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '匹配到多个可播放文件或来源，可切换当前播放版本。',
+            style: TextStyle(
+              color: Color(0xFF90A0BD),
+              fontSize: 14,
+              height: 1.6,
+            ),
+          ),
+          const SizedBox(height: 12),
+          for (var index = 0; index < _libraryMatchChoices.length; index++) ...[
+            if (index > 0) const SizedBox(height: 10),
+            Builder(
+              builder: (context) {
+                final candidate = _libraryMatchChoices[index];
+                final isSelected = index == currentIndex;
+                return StarflowSelectionTile(
+                  title: _libraryMatchOptionLabel(candidate),
+                  subtitle: _movieVariantOptionSubtitle(candidate),
+                  onPressed: _isMatchingLocalResource
+                      ? null
+                      : () {
+                          if (index == currentIndex) {
+                            return;
+                          }
+                          _applySelectedLibraryMatchIndex(index);
+                        },
+                  focusId: 'detail:resource:playable-variant:$index',
+                  trailing: Icon(
+                    isSelected
+                        ? Icons.check_circle_rounded
+                        : Icons.chevron_right_rounded,
+                    color: isSelected
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   int _normalizeSubtitleSearchIndex(
     int index, {
     List<CachedSubtitleSearchOption>? choices,
@@ -2579,37 +2722,35 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     return target.copyWith(playbackTarget: decoratedPlayback);
   }
 
-  void _scheduleAutoSubtitleSearchIfNeeded(MediaDetailTarget target) {
-    final playbackTarget = target.playbackTarget;
-    if (playbackTarget == null ||
-        !target.isPlayable ||
-        _isSearchingSubtitles ||
-        _subtitleSearchChoices.isNotEmpty) {
-      return;
-    }
-    final sources = ref.read(appSettingsProvider).onlineSubtitleSources;
-    if (sources.isEmpty) {
-      return;
-    }
-    final query = buildSubtitleSearchQuery(playbackTarget).trim();
-    if (query.isEmpty || _lastAutoSubtitleSearchKey == query) {
-      return;
-    }
-    _lastAutoSubtitleSearchKey = query;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      unawaited(_searchSubtitlesForDetail(target, showFeedback: false));
-    });
-  }
-
   Future<void> _searchSubtitlesForDetail(
     MediaDetailTarget target, {
     bool showFeedback = true,
   }) async {
     final playbackTarget = target.playbackTarget;
+    final query = playbackTarget == null
+        ? ''
+        : buildSubtitleSearchQuery(playbackTarget).trim();
+    subtitleSearchTrace(
+      'detail.search.start',
+      fields: {
+        'title': target.title.trim(),
+        'showFeedback': showFeedback,
+        'isPlayable': target.isPlayable,
+        'query': query,
+        'playbackTitle': playbackTarget?.title.trim() ?? '',
+        'seriesTitle': playbackTarget?.seriesTitle.trim() ?? '',
+        'season': playbackTarget?.seasonNumber,
+        'episode': playbackTarget?.episodeNumber,
+      },
+    );
     if (playbackTarget == null || !target.isPlayable) {
+      subtitleSearchTrace(
+        'detail.search.skip-unplayable',
+        fields: {
+          'hasPlaybackTarget': playbackTarget != null,
+          'isPlayable': target.isPlayable,
+        },
+      );
       if (showFeedback && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('当前资源还不能直接播放，暂时无法搜索字幕')),
@@ -2618,11 +2759,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       return;
     }
     if (_isSearchingSubtitles) {
+      subtitleSearchTrace('detail.search.skip-already-searching');
       return;
     }
 
     final sources = ref.read(appSettingsProvider).onlineSubtitleSources;
     if (sources.isEmpty) {
+      subtitleSearchTrace('detail.search.skip-empty-sources');
       if (mounted) {
         setState(() {
           _subtitleSearchStatusMessage = '请先在设置里启用至少一个在线字幕来源';
@@ -2636,8 +2779,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       return;
     }
 
-    final query = buildSubtitleSearchQuery(playbackTarget).trim();
     if (query.isEmpty) {
+      subtitleSearchTrace(
+        'detail.search.skip-empty-query',
+        fields: {
+          'playbackTitle': playbackTarget.title.trim(),
+          'seriesTitle': playbackTarget.seriesTitle.trim(),
+        },
+      );
       if (mounted) {
         setState(() {
           _subtitleSearchStatusMessage = '缺少片名信息，暂时无法搜索字幕';
@@ -2667,9 +2816,36 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
             sources: sources,
             maxResults: 10,
           );
+      subtitleSearchTrace(
+        'detail.search.repository-finished',
+        fields: {
+          'query': query,
+          'sources': sources.map((item) => item.name).join('/'),
+          'count': results.length,
+          'downloadable': results.where((item) => item.canDownload).length,
+          'autoLoadable': results.where((item) => item.canAutoLoad).length,
+          'sample': _detailSubtitleResultSample(results),
+        },
+      );
       final nextChoices = _mergeSubtitleSearchChoices(
         previousChoices: previousChoices,
         results: results,
+      );
+      final statusMessage = _buildSubtitleSearchStatusMessage(
+        results: results,
+        usableChoices: nextChoices,
+      );
+      subtitleSearchTrace(
+        'detail.search.filtered',
+        fields: {
+          'query': query,
+          'rawCount': results.length,
+          'usableCount': nextChoices.length,
+          'filteredOut': results.length - nextChoices.length,
+          'notDownloadable': results.where((item) => !item.canDownload).length,
+          'notAutoLoadable': results.where((item) => !item.canAutoLoad).length,
+          'sample': _detailSubtitleChoiceSample(nextChoices),
+        },
       );
       final nextSelectedIndex = previousSelectedId == null
           ? -1
@@ -2685,8 +2861,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
           choices: nextChoices,
         );
         _isSearchingSubtitles = false;
-        _subtitleSearchStatusMessage =
-            nextChoices.isEmpty ? '没有找到可直接加载的字幕结果' : null;
+        _subtitleSearchStatusMessage = statusMessage;
       });
       await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
             seedTarget: widget.target,
@@ -2700,13 +2875,20 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            nextChoices.isEmpty
-                ? '没有找到可直接加载的字幕结果'
-                : '已找到 ${nextChoices.length} 条可用字幕',
+            nextChoices.isEmpty ? statusMessage! : '已找到 ${nextChoices.length} 条可用字幕',
           ),
         ),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      subtitleSearchTrace(
+        'detail.search.failed',
+        fields: {
+          'query': query,
+          'sources': sources.map((item) => item.name).join('/'),
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (!mounted) {
         return;
       }
@@ -2730,7 +2912,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       for (final choice in previousChoices) choice.result.id: choice,
     };
     return results
-        .where((item) => item.canAutoLoad)
+        .where((item) => item.canAutoLoad && item.canDownload)
         .take(10)
         .map(
           (result) =>
@@ -2738,6 +2920,34 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
               CachedSubtitleSearchOption(result: result),
         )
         .toList(growable: false);
+  }
+
+  String? _buildSubtitleSearchStatusMessage({
+    required List<SubtitleSearchResult> results,
+    required List<CachedSubtitleSearchOption> usableChoices,
+  }) {
+    if (usableChoices.isNotEmpty) {
+      return null;
+    }
+    if (results.isEmpty) {
+      return '没有找到可直接加载的字幕结果';
+    }
+
+    final autoLoadableOnlyCount = results
+        .where((item) => item.canAutoLoad && !item.canDownload)
+        .length;
+    if (autoLoadableOnlyCount > 0) {
+      return '已搜到 $autoLoadableOnlyCount 条字幕，但当前来源暂不支持应用内直接下载';
+    }
+
+    final downloadOnlyCount = results
+        .where((item) => item.canDownload && !item.canAutoLoad)
+        .length;
+    if (downloadOnlyCount > 0) {
+      return '已搜到 $downloadOnlyCount 条字幕，但当前结果暂不能自动挂载播放';
+    }
+
+    return '没有找到可直接加载的字幕结果';
   }
 
   Future<void> _applySelectedSubtitleSearchIndex(
@@ -2787,6 +2997,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     }
 
     if (_busySubtitleResultId != null) {
+      subtitleSearchTrace(
+        'detail.download.skip-busy',
+        fields: {
+          'busyResultId': _busySubtitleResultId,
+          'requestedResultId': choice.result.id,
+        },
+      );
       return;
     }
 
@@ -2798,6 +3015,15 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     }
 
     try {
+      subtitleSearchTrace(
+        'detail.download.start',
+        fields: {
+          'resultId': choice.result.id,
+          'source': choice.result.source.name,
+          'title': choice.result.title,
+          'packageKind': choice.result.packageKind.name,
+        },
+      );
       final download = await ref
           .read(onlineSubtitleRepositoryProvider)
           .download(choice.result);
@@ -2835,7 +3061,23 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
           const SnackBar(content: Text('字幕已缓存，播放时会自动加载')),
         );
       }
-    } catch (error) {
+      subtitleSearchTrace(
+        'detail.download.finished',
+        fields: {
+          'resultId': choice.result.id,
+          'subtitleFilePath': selection.subtitleFilePath ?? '',
+        },
+      );
+    } catch (error, stackTrace) {
+      subtitleSearchTrace(
+        'detail.download.failed',
+        fields: {
+          'resultId': choice.result.id,
+          'source': choice.result.source.name,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (!mounted) {
         return;
       }
@@ -2857,6 +3099,28 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       if (choice.selection?.canApply == true) '已缓存',
     ];
     return parts.join(' · ');
+  }
+
+  String _detailSubtitleResultSample(List<SubtitleSearchResult> results) {
+    if (results.isEmpty) {
+      return '';
+    }
+    return results
+        .take(3)
+        .map((item) => '${item.providerLabel}:${item.title}')
+        .join(' | ');
+  }
+
+  String _detailSubtitleChoiceSample(
+    List<CachedSubtitleSearchOption> choices,
+  ) {
+    if (choices.isEmpty) {
+      return '';
+    }
+    return choices
+        .take(3)
+        .map((item) => '${item.result.providerLabel}:${item.result.title}')
+        .join(' | ');
   }
 
   Future<void> _openTelevisionSubtitlePicker(MediaDetailTarget target) async {
@@ -3021,9 +3285,11 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     final targetAsync = ref.watch(enrichedDetailTargetProvider(seedTarget));
     final target = targetAsync.valueOrNull ?? seedTarget;
     final playbackTargetDecorated = _decorateTargetWithSelectedSubtitle(target);
-    _scheduleAutoSubtitleSearchIfNeeded(target);
     final seriesAsync = ref.watch(seriesBrowserProvider(target));
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final playbackEngine = ref.watch(
+      appSettingsProvider.select((settings) => settings.playbackEngine),
+    );
 
     return TvFocusMemoryScope(
       controller: _tvFocusMemoryController,
@@ -3187,7 +3453,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                     label: '状态',
                                     value: target.availabilityLabel,
                                   ),
-                                if (_libraryMatchChoices.length > 1) ...[
+                                if (_libraryMatchChoices.length > 1 &&
+                                    !_shouldShowPlayableVariantSwitcher(
+                                      target,
+                                    )) ...[
                                   const SizedBox(height: 12),
                                   const _InfoLabel('本地资源'),
                                   const SizedBox(height: 8),
@@ -3241,6 +3510,61 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                                   i,
                                                 );
                                               },
+                                      ),
+                                    ),
+                                ],
+                                if (target.isPlayable) ...[
+                                  const SizedBox(height: 12),
+                                  const _InfoLabel('播放器'),
+                                  const SizedBox(height: 8),
+                                  if (isTelevision)
+                                    TvSelectionTile(
+                                      title: '播放器',
+                                      value: playbackEngine.label,
+                                      onPressed: () =>
+                                          _openPlaybackEnginePicker(
+                                        playbackEngine,
+                                      ),
+                                      focusId:
+                                          'detail:resource:playback-engine',
+                                    )
+                                  else
+                                    DropdownButtonHideUnderline(
+                                      child: DropdownButton<PlaybackEngine>(
+                                        value: playbackEngine,
+                                        isExpanded: true,
+                                        dropdownColor: const Color(0xFF142235),
+                                        iconEnabledColor: Colors.white70,
+                                        style: const TextStyle(
+                                          color: Color(0xFFDCE6F8),
+                                          fontSize: 14,
+                                          height: 1.35,
+                                        ),
+                                        items: PlaybackEngine.values
+                                            .map(
+                                              (engine) => DropdownMenuItem<
+                                                  PlaybackEngine>(
+                                                value: engine,
+                                                child: Text(
+                                                  engine.label,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            )
+                                            .toList(growable: false),
+                                        onChanged: (selection) {
+                                          if (selection == null) {
+                                            return;
+                                          }
+                                          unawaited(
+                                            _setPlaybackEngine(
+                                              selection,
+                                              currentEngine: playbackEngine,
+                                            ),
+                                          );
+                                        },
                                       ),
                                     ),
                                 ],
@@ -3569,6 +3893,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                               ],
                             ),
                           ),
+                        if (_shouldShowPlayableVariantSwitcher(target))
+                          _buildPlayableVariantSwitcherBlock(target),
                       ],
                     ),
                   ),
@@ -4014,16 +4340,16 @@ class _HeroContent extends ConsumerWidget {
                         focusId: 'detail:hero:search',
                         autofocus: searchAutofocus,
                         onPressed: () {
-                          context.goNamed(
-                            'search',
+                          context.pushNamed(
+                            'detail-search',
                             queryParameters: {'q': target.searchQuery},
                           );
                         },
                       )
                     : FilledButton.icon(
                         onPressed: () {
-                          context.goNamed(
-                            'search',
+                          context.pushNamed(
+                            'detail-search',
                             queryParameters: {'q': target.searchQuery},
                           );
                         },
@@ -4046,8 +4372,8 @@ class _HeroContent extends ConsumerWidget {
                         focusId: 'detail:hero:search',
                         autofocus: searchAutofocus,
                         onPressed: () {
-                          context.goNamed(
-                            'search',
+                          context.pushNamed(
+                            'detail-search',
                             queryParameters: {'q': target.searchQuery},
                           );
                         },
@@ -4055,8 +4381,8 @@ class _HeroContent extends ConsumerWidget {
                       )
                     : OutlinedButton.icon(
                         onPressed: () {
-                          context.goNamed(
-                            'search',
+                          context.pushNamed(
+                            'detail-search',
                             queryParameters: {'q': target.searchQuery},
                           );
                         },
@@ -4444,41 +4770,15 @@ class _EpisodeCard extends ConsumerWidget {
               visualStyle: TvFocusVisualStyle.subtle,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        summary,
-                        maxLines: 6,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xFFD7E0F1),
-                          fontSize: 13,
-                          height: 1.45,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: const [
-                        Icon(
-                          Icons.open_in_new_rounded,
-                          size: 14,
-                          color: Color(0xFF9DB0CF),
-                        ),
-                        SizedBox(width: 6),
-                        Text(
-                          '查看单集详情',
-                          style: TextStyle(
-                            color: Color(0xFF9DB0CF),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                child: Text(
+                  summary,
+                  maxLines: 6,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFD7E0F1),
+                    fontSize: 13,
+                    height: 1.45,
+                  ),
                 ),
               ),
             ),

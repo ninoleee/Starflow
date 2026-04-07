@@ -166,12 +166,14 @@ class _PersonCreditCardData {
   const _PersonCreditCardData({
     required this.title,
     required this.subtitle,
+    required this.typeLabel,
     required this.ratingLabel,
     required this.detailTarget,
   });
 
   final String title;
   final String subtitle;
+  final String typeLabel;
   final String ratingLabel;
   final MediaDetailTarget detailTarget;
 }
@@ -185,12 +187,14 @@ _PersonCreditCardData _toPersonCreditCard(TmdbPersonCredit credit) {
     overview: credit.overview,
     year: credit.year,
     ratingLabels: credit.ratingLabels,
+    genres: credit.genres,
     availabilityLabel: '无',
     searchQuery: credit.title,
     itemType: credit.isSeries ? 'series' : 'movie',
     sourceName: 'TMDB',
   );
   final preferredRating = _preferredRatingLabel(credit.ratingLabels);
+  final preferredType = _preferredTypeLabel(credit);
   final subtitleParts = <String>[
     if (credit.year > 0) '${credit.year}',
     if (credit.subtitle.trim().isNotEmpty) credit.subtitle.trim(),
@@ -198,6 +202,7 @@ _PersonCreditCardData _toPersonCreditCard(TmdbPersonCredit credit) {
   return _PersonCreditCardData(
     title: credit.title,
     subtitle: subtitleParts.join(' · '),
+    typeLabel: preferredType,
     ratingLabel: preferredRating,
     detailTarget: detailTarget,
   );
@@ -219,6 +224,16 @@ String _preferredRatingLabel(Iterable<String> labels) {
     }
   }
   return normalized.first;
+}
+
+String _preferredTypeLabel(TmdbPersonCredit credit) {
+  for (final genre in credit.genres) {
+    final trimmed = genre.trim();
+    if (trimmed.isNotEmpty) {
+      return trimmed;
+    }
+  }
+  return credit.isSeries ? '剧集' : '电影';
 }
 
 List<AppNetworkImageSource> _buildPosterFallbackSources(
@@ -387,6 +402,7 @@ class _PersonCreditsGrid extends StatelessWidget {
               title: item.title,
               subtitle: item.subtitle,
               imageBadgeText: item.ratingLabel,
+              imageTopRightBadgeText: item.typeLabel,
               posterUrl: item.detailTarget.posterUrl,
               posterHeaders: item.detailTarget.posterHeaders,
               posterFallbackSources: _buildPosterFallbackSources(

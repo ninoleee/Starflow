@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
+import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/data/subtitle_search_host_bridge.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
@@ -23,8 +24,10 @@ class SubtitleSearchPage extends ConsumerStatefulWidget {
 
 class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
   late final TextEditingController _controller;
+  late final List<OnlineSubtitleSource> _availableSources;
   final TvFocusMemoryController _focusMemoryController =
       TvFocusMemoryController();
+  late List<OnlineSubtitleSource> _selectedSources;
   List<SubtitleSearchResult> _results = const [];
   bool _isSearching = false;
   String? _errorMessage;
@@ -33,10 +36,42 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.request.query);
+    _controller = TextEditingController(
+      text: _resolveInitialInput(widget.request),
+    );
+    _availableSources = ref.read(appSettingsProvider).onlineSubtitleSources;
+    _selectedSources = _availableSources.toList(growable: false);
+    subtitleSearchTrace(
+      'page.init',
+      fields: {
+        'requestQuery': widget.request.query,
+        'requestTitle': widget.request.title,
+        'initialInput': _controller.text,
+        'availableSources':
+            _availableSources.map((item) => item.name).join('/'),
+        'standalone': widget.request.standalone,
+        'applyMode': widget.request.applyMode.name,
+      },
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_performSearch());
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant SubtitleSearchPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.request == widget.request) {
+      return;
+    }
+    final nextInput = _resolveInitialInput(widget.request);
+    if (_controller.text == nextInput) {
+      return;
+    }
+    _controller.value = TextEditingValue(
+      text: nextInput,
+      selection: TextSelection.collapsed(offset: nextInput.length),
+    );
   }
 
   @override
@@ -54,12 +89,56 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     return !handled;
   }
 
+  String _resolveInitialInput(SubtitleSearchRequest request) {
+    final initialInput = request.initialInput.trim();
+    if (initialInput.isNotEmpty) {
+      subtitleSearchTrace(
+        'page.resolve-initial-input',
+        fields: {
+          'source': 'initialInput',
+          'value': initialInput,
+        },
+      );
+      return initialInput;
+    }
+    final title = request.title.trim();
+    if (title.isNotEmpty) {
+      subtitleSearchTrace(
+        'page.resolve-initial-input',
+        fields: {
+          'source': 'title',
+          'value': title,
+        },
+      );
+      return title;
+    }
+    final query = request.query.trim();
+    subtitleSearchTrace(
+      'page.resolve-initial-input',
+      fields: {
+        'source': 'query',
+        'value': query,
+      },
+    );
+    return query;
+  }
+
   Future<void> _performSearch() async {
     final query = _controller.text.trim();
+    subtitleSearchTrace(
+      'page.search.start',
+      fields: {
+        'query': query,
+        'selectedSources': _selectedSources.map((item) => item.name).join('/'),
+        'availableSources':
+            _availableSources.map((item) => item.name).join('/'),
+      },
+    );
     if (query.isEmpty) {
       if (!mounted) {
         return;
       }
+      subtitleSearchTrace('page.search.skip-empty-query');
       setState(() {
         _results = const [];
         _isSearching = false;
@@ -74,15 +153,24 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     });
 
     try {
-      final sources = ref.read(appSettingsProvider).onlineSubtitleSources;
+      final sources = _selectedSources;
       if (sources.isEmpty) {
         if (!mounted) {
           return;
         }
+        subtitleSearchTrace(
+          'page.search.skip-empty-sources',
+          fields: {
+            'availableSources':
+                _availableSources.map((item) => item.name).join('/'),
+          },
+        );
         setState(() {
           _results = const [];
           _isSearching = false;
-          _errorMessage = '请先在设置里启用至少一个在线字幕来源';
+          _errorMessage = _availableSources.isEmpty
+              ? '请先在设置里启用至少一个在线字幕来源'
+              : '请先在当前页面选择至少一个在线字幕来源';
         });
         return;
       }
@@ -93,15 +181,34 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       if (!mounted) {
         return;
       }
+      subtitleSearchTrace(
+        'page.search.finished',
+        fields: {
+          'query': query,
+          'count': results.length,
+          'downloadable': results.where((item) => item.canDownload).length,
+          'autoLoadable': results.where((item) => item.canAutoLoad).length,
+          'sample': _pageSubtitleResultSample(results),
+        },
+      );
       setState(() {
         _results = results;
         _isSearching = false;
         _errorMessage = results.isEmpty ? '没有找到可用字幕结果' : null;
       });
-    } catch (error) {
+    } catch (error, stackTrace) {
       if (!mounted) {
         return;
       }
+      subtitleSearchTrace(
+        'page.search.failed',
+        fields: {
+          'query': query,
+          'selectedSources': _selectedSources.map((item) => item.name).join('/'),
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       setState(() {
         _results = const [];
         _isSearching = false;
@@ -112,14 +219,38 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
 
   Future<void> _handleDownload(SubtitleSearchResult result) async {
     if (_busyResultId != null) {
+      subtitleSearchTrace(
+        'page.download.skip-busy',
+        fields: {
+          'currentBusyResultId': _busyResultId,
+          'nextResultId': result.id,
+        },
+      );
       return;
     }
     if (widget.request.applyMode == SubtitleSearchApplyMode.downloadAndApply &&
         !result.canAutoLoad) {
+      subtitleSearchTrace(
+        'page.download.skip-not-auto-loadable',
+        fields: {
+          'resultId': result.id,
+          'source': result.source.name,
+          'packageKind': result.packageKind.name,
+        },
+      );
       _showMessage('当前先支持自动加载 ZIP / SRT / ASS / SSA / VTT 字幕');
       return;
     }
 
+    subtitleSearchTrace(
+      'page.download.start',
+      fields: {
+        'resultId': result.id,
+        'source': result.source.name,
+        'title': result.title,
+        'packageKind': result.packageKind.name,
+      },
+    );
     setState(() {
       _busyResultId = result.id;
     });
@@ -144,13 +275,38 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       if (widget.request.standalone) {
         final handled =
             await SubtitleSearchHostBridge.finishSelection(selection);
+        subtitleSearchTrace(
+          'page.download.finished',
+          fields: {
+            'resultId': result.id,
+            'handledByHost': handled,
+            'subtitleFilePath': selection.subtitleFilePath ?? '',
+          },
+        );
         if (!handled && mounted) {
           Navigator.of(context).pop(selection);
         }
         return;
       }
+      subtitleSearchTrace(
+        'page.download.finished',
+        fields: {
+          'resultId': result.id,
+          'handledByHost': false,
+          'subtitleFilePath': selection.subtitleFilePath ?? '',
+        },
+      );
       Navigator.of(context).pop(selection);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      subtitleSearchTrace(
+        'page.download.failed',
+        fields: {
+          'resultId': result.id,
+          'source': result.source.name,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       _showMessage('$error');
     } finally {
       if (mounted) {
@@ -212,6 +368,19 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
                       controller: _controller,
                       title: title,
                       applyMode: applyMode,
+                      availableSources: _availableSources,
+                      selectedSources: _selectedSources,
+                      onSourceChanged: (source, selected) {
+                        setState(() {
+                          final next = _selectedSources.toSet();
+                          if (selected) {
+                            next.add(source);
+                          } else {
+                            next.remove(source);
+                          }
+                          _selectedSources = next.toList(growable: false);
+                        });
+                      },
                       onSearch: _performSearch,
                       isBusy: _isSearching || _busyResultId != null,
                     ),
@@ -253,11 +422,24 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
   }
 }
 
+String _pageSubtitleResultSample(List<SubtitleSearchResult> results) {
+  if (results.isEmpty) {
+    return '';
+  }
+  return results
+      .take(3)
+      .map((item) => '${item.providerLabel}:${item.title}')
+      .join(' | ');
+}
+
 class _SearchHeader extends StatelessWidget {
   const _SearchHeader({
     required this.controller,
     required this.title,
     required this.applyMode,
+    required this.availableSources,
+    required this.selectedSources,
+    required this.onSourceChanged,
     required this.onSearch,
     required this.isBusy,
   });
@@ -265,6 +447,10 @@ class _SearchHeader extends StatelessWidget {
   final TextEditingController controller;
   final String title;
   final SubtitleSearchApplyMode applyMode;
+  final List<OnlineSubtitleSource> availableSources;
+  final List<OnlineSubtitleSource> selectedSources;
+  final void Function(OnlineSubtitleSource source, bool selected)
+      onSourceChanged;
   final Future<void> Function() onSearch;
   final bool isBusy;
 
@@ -315,6 +501,29 @@ class _SearchHeader extends StatelessWidget {
               ),
             ),
           ),
+          if (availableSources.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Text(
+              '字幕来源',
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final source in availableSources)
+                  FilterChip(
+                    label: Text(source.label),
+                    selected: selectedSources.contains(source),
+                    onSelected: (selected) => onSourceChanged(source, selected),
+                    showCheckmark: false,
+                  ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -370,6 +579,16 @@ class _SubtitleResultTile extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        if (result.providerLabel.trim().isNotEmpty) ...[
+                          Text(
+                            result.providerLabel,
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                        ],
                         Text(
                           result.title,
                           style: theme.textTheme.titleMedium?.copyWith(

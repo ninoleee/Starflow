@@ -8,6 +8,7 @@ import UIKit
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private static var didInstallTouchRateCorrectionWorkaround = false
   private var platformChannel: FlutterMethodChannel?
+  private let settingsDocumentExporter = SettingsDocumentExporter()
   private let nativePlaybackStore = NativePlaybackMemoryStore()
 
   override func application(
@@ -92,6 +93,12 @@ import UIKit
           seriesKey: seriesKey,
           result: result
         )
+      case "exportDocument":
+        let arguments = call.arguments as? [String: Any]
+        let sourcePath =
+          (arguments?["sourcePath"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+          ?? ""
+        self?.exportDocument(sourcePath: sourcePath, result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -155,7 +162,43 @@ import UIKit
         try session.setActive(false, options: [.notifyOthersOnDeactivation])
       }
     } catch {
-      NSLog("Starflow background playback configuration failed: \(error)")
+    }
+  }
+
+  private func exportDocument(
+    sourcePath: String,
+    result: @escaping FlutterResult
+  ) {
+    guard !sourcePath.isEmpty else {
+      result(
+        FlutterError(
+          code: "invalid_arguments",
+          message: "Missing sourcePath for document export.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    DispatchQueue.main.async { [weak self] in
+      guard let self,
+        let presenter = self.resolveTopViewController()
+      else {
+        result(
+          FlutterError(
+            code: "no_presenter",
+            message: "Unable to present the document exporter.",
+            details: nil
+          )
+        )
+        return
+      }
+
+      self.settingsDocumentExporter.exportDocument(
+        sourcePath: sourcePath,
+        presenter: presenter,
+        result: result
+      )
     }
   }
 
@@ -220,6 +263,94 @@ import UIKit
   }
 }
 
+private final class SettingsDocumentExporter: NSObject, UIDocumentPickerDelegate {
+  private let fileManager: FileManager
+  private var pendingResult: FlutterResult?
+  private weak var picker: UIDocumentPickerViewController?
+
+  init(fileManager: FileManager = .default) {
+    self.fileManager = fileManager
+  }
+
+  func exportDocument(
+    sourcePath: String,
+    presenter: UIViewController,
+    result: @escaping FlutterResult
+  ) {
+    guard pendingResult == nil else {
+      result(
+        FlutterError(
+          code: "export_in_progress",
+          message: "A document export is already in progress.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    let sourceURL = URL(fileURLWithPath: sourcePath)
+    guard fileManager.fileExists(atPath: sourceURL.path) else {
+      result(
+        FlutterError(
+          code: "source_not_found",
+          message: "The export file could not be found.",
+          details: sourcePath
+        )
+      )
+      return
+    }
+
+    let picker: UIDocumentPickerViewController
+    if #available(iOS 14.0, *) {
+      picker = UIDocumentPickerViewController(forExporting: [sourceURL], asCopy: true)
+    } else {
+      picker = UIDocumentPickerViewController(url: sourceURL, in: .exportToService)
+    }
+
+    picker.delegate = self
+    picker.modalPresentationStyle = .formSheet
+    pendingResult = result
+    self.picker = picker
+    presenter.present(picker, animated: true)
+  }
+
+  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    finish(with: nil)
+  }
+
+  func documentPicker(
+    _ controller: UIDocumentPickerViewController,
+    didPickDocumentsAt urls: [URL]
+  ) {
+    finish(with: urls.first)
+  }
+
+  func documentPicker(
+    _ controller: UIDocumentPickerViewController,
+    didPickDocumentAt url: URL
+  ) {
+    finish(with: url)
+  }
+
+  private func finish(with url: URL?) {
+    let result = pendingResult
+    cleanup()
+    if let url {
+      result?([
+        "path": url.path,
+      ])
+      return
+    }
+    result?(nil)
+  }
+
+  private func cleanup() {
+    picker?.delegate = nil
+    picker = nil
+    pendingResult = nil
+  }
+}
+
 private struct NativePlaybackRequest {
   let url: URL
   let title: String
@@ -229,9 +360,12 @@ private struct NativePlaybackRequest {
   let seriesKey: String
 }
 
-private final class NativePlaybackViewController: AVPlayerViewController {
+private final class NativePlaybackViewController: AVPlayerViewController,
+  UIGestureRecognizerDelegate
+{
   private static let persistThresholdMs: Int64 = 4_000
   private static let subtitleSearchChannelName = "starflow/subtitle_search"
+  private static let subtitleButtonAutoHideDelay: TimeInterval = 2.2
 
   private let playbackStore: NativePlaybackMemoryStore
   private let isoFormatter = ISO8601DateFormatter()
@@ -242,6 +376,9 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   private var subtitleSearchController: FlutterViewController?
   private var timeObserverToken: Any?
   private var endObserver: NSObjectProtocol?
+  private var playbackStateObservation: NSKeyValueObservation?
+  private var overlayTapGestureRecognizer: UITapGestureRecognizer?
+  private var subtitleButtonAutoHideWorkItem: DispatchWorkItem?
   private var appObservers: [NSObjectProtocol] = []
   private var lastSavedPositionMs: Int64 = -1
 
@@ -302,6 +439,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
 
     installEndObserver(for: item)
     installTimeObserver(for: player)
+    installPlaybackStateObserver(for: player)
 
     if resumePositionMs > 5_000 {
       let seekTime = CMTime(value: CMTimeValue(resumePositionMs), timescale: CMTimeScale(1000))
@@ -332,11 +470,27 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     onlineSubtitleButton.addTarget(self, action: #selector(openOnlineSubtitleSearch), for: .touchUpInside)
     overlayView.addSubview(onlineSubtitleButton)
 
+    if let recognizer = overlayTapGestureRecognizer {
+      recognizer.view?.removeGestureRecognizer(recognizer)
+    }
+    let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleOverlayTap))
+    recognizer.cancelsTouchesInView = false
+    recognizer.delegate = self
+    overlayView.addGestureRecognizer(recognizer)
+    overlayTapGestureRecognizer = recognizer
+
     NSLayoutConstraint.activate([
-      onlineSubtitleButton.trailingAnchor.constraint(equalTo: overlayView.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-      onlineSubtitleButton.topAnchor.constraint(equalTo: overlayView.safeAreaLayoutGuide.topAnchor, constant: 16),
+      onlineSubtitleButton.trailingAnchor.constraint(
+        equalTo: overlayView.safeAreaLayoutGuide.trailingAnchor,
+        constant: -18
+      ),
+      onlineSubtitleButton.bottomAnchor.constraint(
+        equalTo: overlayView.safeAreaLayoutGuide.bottomAnchor,
+        constant: -84
+      ),
       onlineSubtitleButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 36),
     ])
+    setOnlineSubtitleButtonHidden(false, animated: false)
   }
 
   @objc
@@ -408,11 +562,13 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   }
 
   private func buildSubtitleSearchRoute(query: String) -> String {
+    let title = buildSubtitleSearchTitle()
     var components = URLComponents()
     components.path = "/subtitle-search"
     components.queryItems = [
       URLQueryItem(name: "q", value: query),
-      URLQueryItem(name: "title", value: buildSubtitleSearchTitle()),
+      URLQueryItem(name: "title", value: title),
+      URLQueryItem(name: "input", value: title.isEmpty ? query : title),
       URLQueryItem(name: "mode", value: "downloadOnly"),
       URLQueryItem(name: "standalone", value: "1"),
     ]
@@ -491,6 +647,80 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     present(alert, animated: true)
   }
 
+  private func installPlaybackStateObserver(for player: AVPlayer) {
+    playbackStateObservation = player.observe(
+      \.timeControlStatus,
+      options: [.initial, .new]
+    ) { [weak self] player, _ in
+      DispatchQueue.main.async {
+        self?.handlePlaybackStateChange(player.timeControlStatus)
+      }
+    }
+  }
+
+  private func handlePlaybackStateChange(_ status: AVPlayer.TimeControlStatus) {
+    switch status {
+    case .paused:
+      subtitleButtonAutoHideWorkItem?.cancel()
+      setOnlineSubtitleButtonHidden(false, animated: true)
+    case .playing, .waitingToPlayAtSpecifiedRate:
+      setOnlineSubtitleButtonHidden(false, animated: false)
+      scheduleOnlineSubtitleButtonAutoHide()
+    @unknown default:
+      subtitleButtonAutoHideWorkItem?.cancel()
+      setOnlineSubtitleButtonHidden(false, animated: true)
+    }
+  }
+
+  private func scheduleOnlineSubtitleButtonAutoHide() {
+    subtitleButtonAutoHideWorkItem?.cancel()
+    let workItem = DispatchWorkItem { [weak self] in
+      self?.setOnlineSubtitleButtonHidden(true, animated: true)
+    }
+    subtitleButtonAutoHideWorkItem = workItem
+    DispatchQueue.main.asyncAfter(
+      deadline: .now() + Self.subtitleButtonAutoHideDelay,
+      execute: workItem
+    )
+  }
+
+  private func setOnlineSubtitleButtonHidden(_ hidden: Bool, animated: Bool) {
+    onlineSubtitleButton.isUserInteractionEnabled = !hidden
+    if !animated {
+      onlineSubtitleButton.alpha = hidden ? 0 : 1
+      onlineSubtitleButton.isHidden = hidden
+      return
+    }
+    if !hidden {
+      onlineSubtitleButton.isHidden = false
+    }
+    UIView.animate(
+      withDuration: 0.18,
+      delay: 0,
+      options: [.beginFromCurrentState, .curveEaseOut]
+    ) {
+      self.onlineSubtitleButton.alpha = hidden ? 0 : 1
+    } completion: { _ in
+      self.onlineSubtitleButton.isHidden = hidden
+    }
+  }
+
+  @objc
+  private func handleOverlayTap() {
+    guard let player, player.timeControlStatus != .paused else {
+      return
+    }
+    setOnlineSubtitleButtonHidden(false, animated: true)
+    scheduleOnlineSubtitleButtonAutoHide()
+  }
+
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+  ) -> Bool {
+    true
+  }
+
   private func registerAppLifecycleObservers() {
     let center = NotificationCenter.default
     appObservers.append(
@@ -546,6 +776,15 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     if !appObservers.isEmpty || player != nil {
       persistPlaybackProgress(force: true)
     }
+
+    subtitleButtonAutoHideWorkItem?.cancel()
+    subtitleButtonAutoHideWorkItem = nil
+    playbackStateObservation = nil
+
+    if let recognizer = overlayTapGestureRecognizer {
+      recognizer.view?.removeGestureRecognizer(recognizer)
+    }
+    overlayTapGestureRecognizer = nil
 
     if let token = timeObserverToken,
       let currentPlayer = player

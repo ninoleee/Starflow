@@ -15,11 +15,18 @@ SettingsTransferService createSettingsTransferService() {
 class LocalFileSettingsTransferService implements SettingsTransferService {
   const LocalFileSettingsTransferService();
 
+  static const MethodChannel _platformChannel = MethodChannel(
+    'starflow/platform',
+  );
+
   @override
   bool get isSupported => true;
 
   @override
   String get unsupportedReason => '';
+
+  @override
+  bool get supportsSystemExport => Platform.isIOS;
 
   @override
   Future<String?> pickExportPath({String? suggestedName}) async {
@@ -104,11 +111,67 @@ class LocalFileSettingsTransferService implements SettingsTransferService {
 
     final file = File(normalizedPath);
     await file.parent.create(recursive: true);
-    const encoder = JsonEncoder.withIndent('  ');
-    final payload = encoder.convert(settings.toJson());
+    final payload = _encodeSettingsPayload(settings);
     await file.writeAsString(payload, flush: true);
     final bytes = await file.length();
     return SettingsExportResult(path: file.path, bytes: bytes);
+  }
+
+  @override
+  Future<SettingsExportResult?> exportSettingsWithSystemPicker({
+    required AppSettings settings,
+    String? suggestedName,
+  }) async {
+    if (!Platform.isIOS) {
+      throw const FileSystemException('当前平台不支持系统文件导出器。');
+    }
+
+    final normalizedSuggestedName = _normalizeSuggestedExportFileName(
+      suggestedName,
+    );
+    final temporaryDirectory = await getTemporaryDirectory();
+    final temporaryFile = File(
+      p.join(
+        temporaryDirectory.path,
+        'exports',
+        'settings',
+        normalizedSuggestedName,
+      ),
+    );
+    final payload = _encodeSettingsPayload(settings);
+    await temporaryFile.parent.create(recursive: true);
+    await temporaryFile.writeAsString(payload, flush: true);
+
+    try {
+      final response = await _platformChannel.invokeMapMethod<String, dynamic>(
+        'exportDocument',
+        {
+          'sourcePath': temporaryFile.path,
+        },
+      );
+      if (response == null) {
+        return null;
+      }
+      final exportedPath = (response['path'] as String?)?.trim();
+      final bytes = await temporaryFile.length();
+      return SettingsExportResult(
+        path: exportedPath == null || exportedPath.isEmpty
+            ? normalizedSuggestedName
+            : exportedPath,
+        bytes: bytes,
+      );
+    } on PlatformException catch (error) {
+      throw FileSystemException(
+        '当前设备无法打开系统文件导出器。',
+        error.message,
+      );
+    } catch (error) {
+      throw FileSystemException('当前设备无法打开系统文件导出器。', '$error');
+    } finally {
+      if (await temporaryFile.exists()) {
+        await temporaryFile.delete();
+      }
+    }
   }
 
   @override
@@ -131,5 +194,18 @@ class LocalFileSettingsTransferService implements SettingsTransferService {
     return AppSettings.fromJson(
       Map<String, dynamic>.from(decoded),
     );
+  }
+
+  String _encodeSettingsPayload(AppSettings settings) {
+    const encoder = JsonEncoder.withIndent('  ');
+    return encoder.convert(settings.toJson());
+  }
+
+  String _normalizeSuggestedExportFileName(String? suggestedName) {
+    final trimmed = (suggestedName ?? '').trim();
+    if (trimmed.isEmpty) {
+      return 'starflow-settings.json';
+    }
+    return trimmed.toLowerCase().endsWith('.json') ? trimmed : '$trimmed.json';
   }
 }

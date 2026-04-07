@@ -16,12 +16,14 @@ class SubtitleSearchRequest {
   const SubtitleSearchRequest({
     required this.query,
     this.title = '',
+    this.initialInput = '',
     this.applyMode = SubtitleSearchApplyMode.downloadAndApply,
     this.standalone = false,
   });
 
   final String query;
   final String title;
+  final String initialInput;
   final SubtitleSearchApplyMode applyMode;
   final bool standalone;
 
@@ -29,6 +31,7 @@ class SubtitleSearchRequest {
     return {
       'q': query,
       if (title.trim().isNotEmpty) 'title': title.trim(),
+      if (initialInput.trim().isNotEmpty) 'input': initialInput.trim(),
       'mode': applyMode.name,
       if (standalone) 'standalone': '1',
     };
@@ -40,6 +43,7 @@ class SubtitleSearchRequest {
     return SubtitleSearchRequest(
       query: queryParameters['q']?.trim() ?? '',
       title: queryParameters['title']?.trim() ?? '',
+      initialInput: queryParameters['input']?.trim() ?? '',
       applyMode: SubtitleSearchApplyMode.fromName(
         queryParameters['mode'] ?? '',
       ),
@@ -56,25 +60,33 @@ class SubtitleSearchRequest {
 }
 
 enum OnlineSubtitleSource {
-  assrt;
+  assrt,
+  subhd,
+  yify;
 }
 
 extension OnlineSubtitleSourceX on OnlineSubtitleSource {
   String get label {
     return switch (this) {
       OnlineSubtitleSource.assrt => 'ASSRT',
+      OnlineSubtitleSource.subhd => 'SubHD',
+      OnlineSubtitleSource.yify => 'YIFY',
     };
   }
 
   String get description {
     return switch (this) {
       OnlineSubtitleSource.assrt => '国内常用字幕站，适合电影和剧集常规搜索。',
+      OnlineSubtitleSource.subhd => '国内常用字幕社区，当前支持应用内搜索结果浏览。',
+      OnlineSubtitleSource.yify => '海外电影字幕站，支持电影搜索与 ZIP 字幕下载。',
     };
   }
 
   static OnlineSubtitleSource fromName(String raw) {
     return switch (raw.trim()) {
       'assrt' => OnlineSubtitleSource.assrt,
+      'subhd' => OnlineSubtitleSource.subhd,
+      'yify' => OnlineSubtitleSource.yify,
       _ => OnlineSubtitleSource.assrt,
     };
   }
@@ -300,4 +312,16 @@ String buildSubtitleSearchQuery(PlaybackTarget target) {
     if (!target.isEpisode && target.year > 0) '${target.year}',
   ];
   return parts.join(' ').trim();
+}
+
+String buildSubtitleSearchInitialInput(PlaybackTarget target) {
+  final seriesTitle = target.resolvedSeriesTitle.trim();
+  if (seriesTitle.isNotEmpty) {
+    return seriesTitle;
+  }
+  final title = target.title.trim();
+  if (title.isNotEmpty) {
+    return title;
+  }
+  return buildSubtitleSearchQuery(target);
 }

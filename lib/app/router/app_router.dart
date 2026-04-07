@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/bootstrap/presentation/bootstrap_page.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -169,6 +170,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
+        path: '/detail-search',
+        name: 'detail-search',
+        pageBuilder: (context, state) {
+          return NoTransitionPage<void>(
+            key: state.pageKey,
+            child: SearchPage(
+              initialQuery: state.uri.queryParameters['q'],
+              showBackButton: true,
+            ),
+          );
+        },
+      ),
+      GoRoute(
         path: '/metadata-index',
         name: 'metadata-index',
         pageBuilder: (context, state) {
@@ -191,8 +205,25 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/subtitle-search',
         name: 'subtitle-search',
         pageBuilder: (context, state) {
+          subtitleSearchTrace(
+            'router.subtitle-search.route',
+            fields: {
+              'uri': state.uri.toString(),
+              'queryParameters': state.uri.queryParameters.toString(),
+            },
+          );
           final request = SubtitleSearchRequest.fromQueryParameters(
             state.uri.queryParameters,
+          );
+          subtitleSearchTrace(
+            'router.subtitle-search.request',
+            fields: {
+              'query': request.query,
+              'title': request.title,
+              'initialInput': request.initialInput,
+              'applyMode': request.applyMode.name,
+              'standalone': request.standalone,
+            },
           );
           return MaterialPage<void>(
             key: state.pageKey,
@@ -236,6 +267,28 @@ class _AppNavigationShell extends ConsumerStatefulWidget {
 
 class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
   bool _isBottomBarVisible = true;
+  ProviderSubscription<bool>? _autoHideNavigationBarSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _autoHideNavigationBarSubscription = ref.listenManual<bool>(
+      appSettingsProvider.select(
+        (settings) => settings.autoHideNavigationBarEnabled,
+      ),
+      (previous, next) {
+        if (!next) {
+          _setBottomBarVisible(true);
+        }
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _autoHideNavigationBarSubscription?.close();
+    super.dispose();
+  }
 
   bool _handleScrollNotification(ScrollNotification notification) {
     if (notification.metrics.axis != Axis.vertical) {
@@ -271,6 +324,11 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
         (settings) => settings.translucentEffectsEnabled,
       ),
     );
+    final autoHideNavigationBarEnabled = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.autoHideNavigationBarEnabled,
+      ),
+    );
     final highPerformanceModeEnabled = ref.watch(
       appSettingsProvider
           .select((settings) => settings.highPerformanceModeEnabled),
@@ -283,6 +341,8 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
     final navigationOpacityDuration = highPerformanceModeEnabled
         ? Duration.zero
         : const Duration(milliseconds: 180);
+    final bottomBarVisible =
+        !autoHideNavigationBarEnabled || _isBottomBarVisible;
     final shellChild = HeroMode(
       enabled: !backgroundWorkSuspended,
       child: TickerMode(
@@ -302,23 +362,26 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
               currentIndex: widget.navigationShell.currentIndex,
               onDestinationSelected: widget.navigationShell.goBranch,
               translucentEffectsEnabled: effectiveTranslucentEffectsEnabled,
+              autoHideNavigationBarEnabled: autoHideNavigationBarEnabled,
+              highPerformanceModeEnabled: highPerformanceModeEnabled,
               child: shellChild,
             )
           : NotificationListener<ScrollNotification>(
-              onNotification: _handleScrollNotification,
+              onNotification: autoHideNavigationBarEnabled
+                  ? _handleScrollNotification
+                  : (_) => false,
               child: shellChild,
             ),
       bottomNavigationBar: isTelevision
           ? null
           : IgnorePointer(
-              ignoring: !_isBottomBarVisible,
+              ignoring: !bottomBarVisible,
               child: AnimatedSlide(
-                offset:
-                    _isBottomBarVisible ? Offset.zero : const Offset(0, 1.2),
+                offset: bottomBarVisible ? Offset.zero : const Offset(0, 1.2),
                 duration: navigationAnimationDuration,
                 curve: Curves.easeOutCubic,
                 child: AnimatedOpacity(
-                  opacity: _isBottomBarVisible ? 1 : 0,
+                  opacity: bottomBarVisible ? 1 : 0,
                   duration: navigationOpacityDuration,
                   curve: Curves.easeOutCubic,
                   child: Padding(
@@ -394,12 +457,16 @@ class _TelevisionNavigationShell extends StatefulWidget {
     required this.onDestinationSelected,
     required this.child,
     required this.translucentEffectsEnabled,
+    required this.autoHideNavigationBarEnabled,
+    required this.highPerformanceModeEnabled,
   });
 
   final int currentIndex;
   final ValueChanged<int> onDestinationSelected;
   final Widget child;
   final bool translucentEffectsEnabled;
+  final bool autoHideNavigationBarEnabled;
+  final bool highPerformanceModeEnabled;
 
   static const _items = [
     _NavigationItemData(
@@ -436,9 +503,34 @@ class _TelevisionNavigationShellState
     (index) => FocusNode(debugLabel: 'tv-nav-$index'),
   );
   bool _isExitDialogVisible = false;
+  bool _isSidebarVisible = true;
+  bool _sidebarVisibilitySyncScheduled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addListener(_scheduleSidebarVisibilitySync);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncSidebarVisibility();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _TelevisionNavigationShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.autoHideNavigationBarEnabled) {
+      _setSidebarVisible(true);
+      return;
+    }
+    if (oldWidget.autoHideNavigationBarEnabled !=
+        widget.autoHideNavigationBarEnabled) {
+      _scheduleSidebarVisibilitySync();
+    }
+  }
 
   @override
   void dispose() {
+    FocusManager.instance.removeListener(_scheduleSidebarVisibilitySync);
     for (final node in _destinationFocusNodes) {
       node.dispose();
     }
@@ -446,19 +538,60 @@ class _TelevisionNavigationShellState
   }
 
   void _focusCurrentDestination() {
-    if (_destinationFocusNodes.isEmpty) {
-      return;
-    }
-    final index = widget.currentIndex.clamp(
-      0,
-      _destinationFocusNodes.length - 1,
-    );
-    _destinationFocusNodes[index].requestFocus();
+    _setSidebarVisible(true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _destinationFocusNodes.isEmpty) {
+        return;
+      }
+      final index = widget.currentIndex.clamp(
+        0,
+        _destinationFocusNodes.length - 1,
+      );
+      final node = _destinationFocusNodes[index];
+      if (!node.canRequestFocus) {
+        return;
+      }
+      node.requestFocus();
+    });
   }
 
   bool get _isSidebarFocused => _destinationFocusNodes.any(
         (node) => node.hasFocus || node.hasPrimaryFocus,
       );
+
+  void _scheduleSidebarVisibilitySync() {
+    if (_sidebarVisibilitySyncScheduled) {
+      return;
+    }
+    _sidebarVisibilitySyncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _sidebarVisibilitySyncScheduled = false;
+      _syncSidebarVisibility();
+    });
+  }
+
+  void _syncSidebarVisibility() {
+    if (!mounted) {
+      return;
+    }
+    if (!widget.autoHideNavigationBarEnabled) {
+      _setSidebarVisible(true);
+      return;
+    }
+    if (FocusManager.instance.primaryFocus == null) {
+      return;
+    }
+    _setSidebarVisible(_isSidebarFocused);
+  }
+
+  void _setSidebarVisible(bool visible) {
+    if (!mounted || _isSidebarVisible == visible) {
+      return;
+    }
+    setState(() {
+      _isSidebarVisible = visible;
+    });
+  }
 
   Future<void> _handleRootBackNavigation() async {
     if (!mounted) {
@@ -507,6 +640,11 @@ class _TelevisionNavigationShellState
 
   @override
   Widget build(BuildContext context) {
+    final sidebarVisible =
+        !widget.autoHideNavigationBarEnabled || _isSidebarVisible;
+    final sidebarAnimationDuration = widget.highPerformanceModeEnabled
+        ? Duration.zero
+        : const Duration(milliseconds: 180);
     final sidebar = ClipRRect(
       borderRadius: BorderRadius.circular(28),
       child: widget.translucentEffectsEnabled
@@ -536,6 +674,12 @@ class _TelevisionNavigationShellState
               ),
             ),
     );
+    final sidebarSlot = SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 8, 10, 8),
+        child: sidebar,
+      ),
+    );
 
     return TvMenuButtonScope(
       onMenuButtonPressed: _focusCurrentDestination,
@@ -549,10 +693,28 @@ class _TelevisionNavigationShellState
         },
         child: Row(
           children: [
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 8, 10, 8),
-                child: sidebar,
+            TweenAnimationBuilder<double>(
+              tween: Tween<double>(
+                begin: sidebarVisible ? 1 : 0,
+                end: sidebarVisible ? 1 : 0,
+              ),
+              duration: sidebarAnimationDuration,
+              curve: Curves.easeOutCubic,
+              builder: (context, value, child) {
+                return ClipRect(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: value,
+                    child: Opacity(
+                      opacity: value <= 0.001 ? 0 : value,
+                      child: child,
+                    ),
+                  ),
+                );
+              },
+              child: IgnorePointer(
+                ignoring: !sidebarVisible,
+                child: sidebarSlot,
               ),
             ),
             Expanded(

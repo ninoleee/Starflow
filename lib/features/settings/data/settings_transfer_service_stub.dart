@@ -15,6 +15,9 @@ class UnsupportedSettingsTransferService implements SettingsTransferService {
   String get unsupportedReason => '当前平台暂不支持本地文件导入导出。';
 
   @override
+  bool get supportsSystemExport => false;
+
+  @override
   Future<String?> pickExportPath({String? suggestedName}) async {
     return null;
   }
@@ -33,6 +36,14 @@ class UnsupportedSettingsTransferService implements SettingsTransferService {
   Future<SettingsExportResult> exportSettings({
     required AppSettings settings,
     required String targetPath,
+  }) async {
+    throw UnsupportedError(unsupportedReason);
+  }
+
+  @override
+  Future<SettingsExportResult?> exportSettingsWithSystemPicker({
+    required AppSettings settings,
+    String? suggestedName,
   }) async {
     throw UnsupportedError(unsupportedReason);
   }

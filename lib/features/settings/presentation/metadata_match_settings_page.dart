@@ -4,13 +4,11 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
-import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
-import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class MetadataMatchSettingsPage extends ConsumerWidget {
@@ -37,16 +35,6 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                       .read(settingsControllerProvider.notifier)
                       .setDetailAutoLibraryMatchEnabled(value);
                 },
-              ),
-              const SizedBox(height: 10),
-              _MetadataSourceTile(
-                title: '匹配来源',
-                subtitle: _libraryMatchSourceSummary(settings),
-                onPressed: () => _openLibraryMatchSourcePicker(
-                  context,
-                  ref,
-                  settings,
-                ),
               ),
               const SizedBox(height: 10),
               Text(
@@ -221,103 +209,6 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
     await ref
         .read(settingsControllerProvider.notifier)
         .setMetadataMatchPriority(selected);
-  }
-
-  Future<void> _openLibraryMatchSourcePicker(
-    BuildContext context,
-    WidgetRef ref,
-    AppSettings settings,
-  ) async {
-    final availableSources = settings.mediaSources
-        .where(
-          (source) =>
-              source.enabled &&
-              (source.kind == MediaSourceKind.emby ||
-                  source.kind == MediaSourceKind.nas),
-        )
-        .toList(growable: false);
-    if (availableSources.isEmpty) {
-      return;
-    }
-
-    final initialSelection = settings.libraryMatchSourceIds.toSet();
-    final selected = await showDialog<Set<String>>(
-      context: context,
-      builder: (dialogContext) {
-        var draft = <String>{...initialSelection};
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('选择匹配来源'),
-              content: SizedBox(
-                width: 420,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      StarflowCheckboxTile(
-                        title: '全部已启用来源',
-                        subtitle: '清空单独选择，匹配时扫描全部已启用媒体源',
-                        value: draft.isEmpty,
-                        onChanged: (_) {
-                          setState(() {
-                            draft = <String>{};
-                          });
-                        },
-                      ),
-                      const Divider(height: 16),
-                      for (final source in availableSources)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: StarflowCheckboxTile(
-                            title: source.name,
-                            subtitle: source.kind.label,
-                            value: draft.contains(source.id),
-                            onChanged: (checked) {
-                              setState(() {
-                                if (checked) {
-                                  draft.add(source.id);
-                                } else {
-                                  draft.remove(source.id);
-                                }
-                              });
-                            },
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-              actions: [
-                StarflowButton(
-                  label: '取消',
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  variant: StarflowButtonVariant.ghost,
-                  compact: true,
-                ),
-                StarflowButton(
-                  label: '全部来源',
-                  onPressed: () => Navigator.of(dialogContext).pop(<String>{}),
-                  variant: StarflowButtonVariant.secondary,
-                  compact: true,
-                ),
-                StarflowButton(
-                  label: '保存',
-                  onPressed: () => Navigator.of(dialogContext).pop(draft),
-                  compact: true,
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-    if (selected == null) {
-      return;
-    }
-    await ref
-        .read(settingsControllerProvider.notifier)
-        .setLibraryMatchSourceIds(selected.toList(growable: false));
   }
 
   Future<void> _openTmdbTokenEditor(
@@ -1040,38 +931,6 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
   }
 }
 
-String _libraryMatchSourceSummary(AppSettings settings) {
-  final availableSources = settings.mediaSources
-      .where(
-        (source) =>
-            source.enabled &&
-            (source.kind == MediaSourceKind.emby ||
-                source.kind == MediaSourceKind.nas),
-      )
-      .toList(growable: false);
-  if (availableSources.isEmpty) {
-    return '暂无可选来源';
-  }
-
-  final selectedIds = settings.libraryMatchSourceIds.toSet();
-  if (selectedIds.isEmpty) {
-    return '全部已启用来源';
-  }
-
-  final selectedNames = availableSources
-      .where((source) => selectedIds.contains(source.id))
-      .map((source) => source.name)
-      .toList(growable: false);
-  if (selectedNames.isEmpty ||
-      selectedNames.length >= availableSources.length) {
-    return '全部已启用来源';
-  }
-  if (selectedNames.length <= 2) {
-    return selectedNames.join('、');
-  }
-  return '${selectedNames.take(2).join('、')} 等 ${selectedNames.length} 个来源';
-}
-
 class _MetadataToggleTile extends StatelessWidget {
   const _MetadataToggleTile({
     required this.title,
@@ -1092,27 +951,6 @@ class _MetadataToggleTile extends StatelessWidget {
       subtitle: subtitle,
       value: value,
       onChanged: onChanged,
-    );
-  }
-}
-
-class _MetadataSourceTile extends StatelessWidget {
-  const _MetadataSourceTile({
-    required this.title,
-    required this.subtitle,
-    required this.onPressed,
-  });
-
-  final String title;
-  final String subtitle;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return StarflowSelectionTile(
-      title: title,
-      subtitle: subtitle,
-      onPressed: onPressed,
     );
   }
 }

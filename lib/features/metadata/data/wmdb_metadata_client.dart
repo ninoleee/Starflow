@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
@@ -284,6 +283,7 @@ class WmdbMetadataClient {
     required MetadataMatchProvider provider,
   }) {
     final data = _resolveLocalizedEntry(json);
+    final mediaType = MetadataMediaTypeX.fromRaw('${json['type'] ?? ''}');
     final title = '${data['name'] ?? json['originalName'] ?? ''}'.trim();
     if (title.isEmpty) {
       return null;
@@ -306,6 +306,7 @@ class WmdbMetadataClient {
 
     return MetadataMatchResult(
       provider: provider,
+      mediaType: mediaType,
       title: title,
       originalTitle: '${json['originalName'] ?? title}'.trim(),
       alternateTitles: _splitAliases('${json['alias'] ?? ''}'),
@@ -453,51 +454,21 @@ class WmdbMetadataClient {
     required String action,
     required Uri uri,
     required String details,
-  }) {
-    debugPrint('[WMDB] request action=$action uri=$uri $details');
-  }
+  }) {}
 
   void _logSuccess({
     required String action,
     required Uri uri,
     required http.Response response,
     required String details,
-  }) {
-    debugPrint(
-      '[WMDB] response action=$action status=${response.statusCode} '
-      'bytes=${response.bodyBytes.length} uri=$uri $details',
-    );
-  }
+  }) {}
 
   void _logFailure({
     required String action,
     required Uri uri,
     required http.Response response,
     required String details,
-  }) {
-    final retryAfter = response.headers['retry-after'] ?? '';
-    final rateLimit = response.headers['x-ratelimit-limit'] ?? '';
-    final rateRemaining = response.headers['x-ratelimit-remaining'] ?? '';
-    final rateReset = response.headers['x-ratelimit-reset'] ?? '';
-    final bodyPreview = utf8
-        .decode(response.bodyBytes, allowMalformed: true)
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    final preview = bodyPreview.length > 300
-        ? '${bodyPreview.substring(0, 300)}...'
-        : bodyPreview;
-    debugPrint(
-      '[WMDB] response action=$action status=${response.statusCode} '
-      'retryAfter=${retryAfter.isEmpty ? '-' : retryAfter} '
-      'rateLimit=${rateLimit.isEmpty ? '-' : rateLimit} '
-      'rateRemaining=${rateRemaining.isEmpty ? '-' : rateRemaining} '
-      'rateReset=${rateReset.isEmpty ? '-' : rateReset} '
-      'bytes=${response.bodyBytes.length} uri=$uri $details',
-    );
-    if (preview.isNotEmpty) {
-      debugPrint('[WMDB] body action=$action $preview');
-    }
-  }
+  }) {}
 }
 
 class WmdbMetadataException implements Exception {

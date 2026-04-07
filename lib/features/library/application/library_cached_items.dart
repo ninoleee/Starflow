@@ -2,8 +2,6 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
-const _posterDebugKeyword = '9号秘事';
-
 Future<List<MediaItem>> resolveLibraryItemsWithCachedDetails({
   required List<MediaItem> items,
   required LocalStorageCacheRepository localStorageCacheRepository,
@@ -35,18 +33,6 @@ MediaItem _mergeCachedLibraryItem(
       : (item.posterHeaders.isNotEmpty
           ? item.posterHeaders
           : cached.posterHeaders);
-  if (item.title.contains(_posterDebugKeyword)) {
-    // Debugging poster selection for portrait slots.
-    // ignore: avoid_print
-    print(
-      '[PosterSource][Library] ${item.title} '
-      'itemPoster=${item.posterUrl} '
-      'cachedPoster=${cached.posterUrl} '
-      'itemBackdrop=${item.backdropUrl} '
-      'cachedBackdrop=${cached.backdropUrl} '
-      'resolvedPoster=$resolvedPosterUrl',
-    );
-  }
   return item.copyWith(
     posterUrl: resolvedPosterUrl,
     posterHeaders: resolvedPosterHeaders,

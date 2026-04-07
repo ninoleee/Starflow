@@ -45,6 +45,15 @@ void main() {
       sectionName: '版本A',
       sourceKind: MediaSourceKind.nas,
       sourceName: 'nas-A',
+      playbackTarget: PlaybackTarget(
+        title: '测试影片',
+        sourceId: 'nas-a',
+        streamUrl: 'https://example.com/movie-a.mkv',
+        sourceName: 'nas-A',
+        sourceKind: MediaSourceKind.nas,
+        itemId: 'movie-a',
+        itemType: 'movie',
+      ),
     );
     const choiceB = MediaDetailTarget(
       title: '测试影片',
@@ -59,6 +68,15 @@ void main() {
       sectionName: '版本B',
       sourceKind: MediaSourceKind.nas,
       sourceName: 'nas-B',
+      playbackTarget: PlaybackTarget(
+        title: '测试影片',
+        sourceId: 'nas-b',
+        streamUrl: 'https://example.com/movie-b.mkv',
+        sourceName: 'nas-B',
+        sourceKind: MediaSourceKind.nas,
+        itemId: 'movie-b',
+        itemType: 'movie',
+      ),
     );
 
     await tester.pumpWidget(
@@ -98,8 +116,199 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('本地资源'), findsOneWidget);
+    expect(find.text('播放版本'), findsOneWidget);
+    expect(find.text('nas-A · 测试影片 · 版本A'), findsOneWidget);
     expect(find.text('nas-B · 测试影片 · 版本B'), findsOneWidget);
+  });
+
+  testWidgets(
+      'detail page restores cached episode file variants as playable versions',
+      (tester) async {
+    const seedTarget = MediaDetailTarget(
+      title: '第 1 集',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '无',
+      searchQuery: '测试剧 第 1 集',
+      sourceName: '豆瓣',
+    );
+    const choiceA = MediaDetailTarget(
+      title: '第 1 集',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：WebDAV · nas-A',
+      searchQuery: '测试剧 第 1 集',
+      sourceId: 'nas-a',
+      itemId: 'episode-a',
+      itemType: 'episode',
+      sectionName: '版本A',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'nas-A',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '第 1 集',
+        sourceId: 'nas-a',
+        streamUrl: 'https://example.com/show-s01e01-a.mkv',
+        sourceName: 'nas-A',
+        sourceKind: MediaSourceKind.nas,
+        itemId: 'episode-a',
+        itemType: 'episode',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+    const choiceB = MediaDetailTarget(
+      title: '第 1 集',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：WebDAV · nas-B',
+      searchQuery: '测试剧 第 1 集',
+      sourceId: 'nas-b',
+      itemId: 'episode-b',
+      itemType: 'episode',
+      sectionName: '版本B',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'nas-B',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '第 1 集',
+        sourceId: 'nas-b',
+        streamUrl: 'https://example.com/show-s01e01-b.mkv',
+        sourceName: 'nas-B',
+        sourceKind: MediaSourceKind.nas,
+        itemId: 'episode-b',
+        itemType: 'episode',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'tmdbMetadataMatchEnabled': false,
+              'wmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+              'detailAutoLibraryMatchEnabled': false,
+            }),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            const _NoopMediaRepository(),
+          ),
+          localStorageCacheRepositoryProvider.overrideWithValue(
+            _FakeRestoreCacheRepository(
+              cachedState: const CachedDetailState(
+                target: choiceB,
+                libraryMatchChoices: [choiceA, choiceB],
+                selectedLibraryMatchIndex: 1,
+              ),
+            ),
+          ),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(target: seedTarget),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('播放版本'), findsOneWidget);
+    expect(find.text('本地资源'), findsNothing);
+    expect(find.text('nas-A · 第 1 集 · 版本A'), findsOneWidget);
+    expect(find.text('nas-B · 第 1 集 · 版本B'), findsOneWidget);
+  });
+
+  testWidgets('detail page shows external-id reason as alternative ids',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': [
+                {
+                  'id': 'emby-main',
+                  'name': 'Home Emby',
+                  'kind': 'emby',
+                  'endpoint': 'https://media.example.com',
+                  'enabled': true,
+                  'username': 'alice',
+                  'accessToken': 'token-789',
+                  'userId': 'user-123',
+                  'deviceId': 'device-456',
+                },
+              ],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'tmdbMetadataMatchEnabled': false,
+              'wmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+              'detailAutoLibraryMatchEnabled': false,
+            }),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            const _SingleMatchMediaRepository(),
+          ),
+          localStorageCacheRepositoryProvider.overrideWithValue(
+            _RecordingRestoreCacheRepository(),
+          ),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(
+            target: MediaDetailTarget(
+              title: '测试影片',
+              posterUrl: '',
+              overview: '',
+              year: 2026,
+              availabilityLabel: '无',
+              searchQuery: '测试影片',
+              sourceName: '豆瓣',
+              imdbId: 'tt1234567',
+              tmdbId: '7654321',
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.scrollUntilVisible(
+      find.text('重新匹配资源'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(
+      find.ancestor(
+        of: find.text('重新匹配资源'),
+        matching: find.byType(TextButton),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('按 IMDb ID / TMDB ID 匹配'), findsWidgets);
+    expect(find.textContaining('按 IMDb ID + TMDB ID 匹配'), findsNothing);
   });
 
   testWidgets('detail page restores cached subtitle choice for playable target',
@@ -424,6 +633,115 @@ class _NoopMediaRepository implements MediaRepository {
   @override
   Future<List<MediaSourceConfig>> fetchSources() async {
     return const [];
+  }
+
+  @override
+  Future<MediaItem?> findById(String id) async {
+    return null;
+  }
+
+  @override
+  Future<MediaItem?> matchTitle(String title) async {
+    return null;
+  }
+
+  @override
+  Future<void> refreshSource({
+    required String sourceId,
+    bool forceFullRescan = false,
+  }) async {}
+}
+
+class _SingleMatchMediaRepository implements MediaRepository {
+  const _SingleMatchMediaRepository();
+
+  @override
+  Future<void> cancelActiveWebDavRefreshes() async {}
+
+  @override
+  Future<void> deleteResource({
+    required String sourceId,
+    required String resourcePath,
+    String sectionId = '',
+  }) async {}
+
+  @override
+  Future<List<MediaCollection>> fetchCollections({
+    MediaSourceKind? kind,
+    String? sourceId,
+  }) async {
+    if (kind != MediaSourceKind.emby || sourceId != 'emby-main') {
+      return const <MediaCollection>[];
+    }
+    return const [
+      MediaCollection(
+        id: 'movies',
+        title: '电影',
+        sourceId: 'emby-main',
+        sourceName: 'Home Emby',
+        sourceKind: MediaSourceKind.emby,
+      ),
+    ];
+  }
+
+  @override
+  Future<List<MediaItem>> fetchChildren({
+    required String sourceId,
+    required String parentId,
+    String sectionId = '',
+    String sectionName = '',
+    int limit = 200,
+  }) async {
+    return const <MediaItem>[];
+  }
+
+  @override
+  Future<List<MediaItem>> fetchLibrary({
+    MediaSourceKind? kind,
+    String? sourceId,
+    String? sectionId,
+    int limit = 200,
+  }) async {
+    if (kind != MediaSourceKind.emby ||
+        sourceId != 'emby-main' ||
+        sectionId != 'movies') {
+      return const <MediaItem>[];
+    }
+    return [
+      MediaItem(
+        id: 'movie-1',
+        title: '测试影片',
+        overview: '',
+        posterUrl: '',
+        year: 2026,
+        durationLabel: '120 分钟',
+        genres: const [],
+        itemType: 'movie',
+        sectionId: 'movies',
+        sectionName: '电影',
+        sourceId: 'emby-main',
+        sourceName: 'Home Emby',
+        sourceKind: MediaSourceKind.emby,
+        streamUrl: 'https://media.example.com/Items/1/stream.mkv',
+        playbackItemId: 'movie-1',
+        imdbId: 'tt1234567',
+        tmdbId: '7654321',
+        addedAt: DateTime.utc(2026, 4, 7),
+      ),
+    ];
+  }
+
+  @override
+  Future<List<MediaItem>> fetchRecentlyAdded({
+    MediaSourceKind? kind,
+    int limit = 10,
+  }) async {
+    return const <MediaItem>[];
+  }
+
+  @override
+  Future<List<MediaSourceConfig>> fetchSources() async {
+    return const <MediaSourceConfig>[];
   }
 
   @override

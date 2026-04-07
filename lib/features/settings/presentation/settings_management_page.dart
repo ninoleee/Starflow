@@ -45,7 +45,7 @@ class _SettingsManagementPageState
 
   Future<void> _prefillSuggestedExportPath() async {
     final service = ref.read(settingsTransferServiceProvider);
-    if (!service.isSupported) {
+    if (!service.isSupported || service.supportsSystemExport) {
       return;
     }
     final suggestedPath = await service.buildSuggestedExportPath();
@@ -61,6 +61,7 @@ class _SettingsManagementPageState
     final service = ref.watch(settingsTransferServiceProvider);
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final isIos = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+    final usesSystemExport = isIos && service.supportsSystemExport;
 
     return SettingsPageScaffold(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -74,24 +75,28 @@ class _SettingsManagementPageState
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          isIos
-                              ? '可以把当前设置导出到本地 JSON 文件，也可以从本地 JSON 文件导入并覆盖当前配置。iOS 上导出会自动使用应用文档目录。'
+                          usesSystemExport
+                              ? '可以把当前设置导出到本地 JSON 文件，也可以从本地 JSON 文件导入并覆盖当前配置。iOS 上导出会直接打开系统文件导出器，可保存到“文件 / iCloud / 本机其他位置”。'
                               : '可以把当前设置导出到本地 JSON 文件，也可以从本地 JSON 文件导入并覆盖当前配置。导出时会先选择目录，再自动生成文件名。',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                         const SizedBox(height: 16),
-                        _PathEditor(
-                          label: '导出路径',
-                          controller: _exportPathController,
-                          hintText: '例如：D:\\Backups\\starflow-settings.json',
-                          icon: Icons.upload_file_rounded,
-                          actionLabel: '选择位置',
-                          onActionPressed: _pickExportPath,
-                        ),
-                        const SizedBox(height: 12),
+                        if (!usesSystemExport) ...[
+                          _PathEditor(
+                            label: '导出路径',
+                            controller: _exportPathController,
+                            hintText: '例如：D:\\Backups\\starflow-settings.json',
+                            icon: Icons.upload_file_rounded,
+                            actionLabel: '选择位置',
+                            onActionPressed: _pickExportPath,
+                          ),
+                          const SizedBox(height: 12),
+                        ],
                         _ActionButton(
                           icon: Icons.save_alt_rounded,
-                          label: _isExporting ? '正在导出…' : '导出当前配置',
+                          label: _isExporting
+                              ? (usesSystemExport ? '正在打开导出器…' : '正在导出…')
+                              : '导出当前配置',
                           onPressed: _isExporting || _isImporting
                               ? null
                               : () => _exportSettings(settings),
@@ -122,24 +127,39 @@ class _SettingsManagementPageState
   }
 
   Future<void> _exportSettings(AppSettings settings) async {
+    final service = ref.read(settingsTransferServiceProvider);
+    final isIos = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+    final usesSystemExport = isIos && service.supportsSystemExport;
     final targetPath = _exportPathController.text.trim();
-    if (targetPath.isEmpty) {
+    if (!usesSystemExport && targetPath.isEmpty) {
       _showMessage('请先填写导出路径');
       return;
     }
 
     setState(() => _isExporting = true);
     try {
-      final result =
-          await ref.read(settingsTransferServiceProvider).exportSettings(
-                settings: settings,
-                targetPath: targetPath,
-              );
+      final result = usesSystemExport
+          ? await service.exportSettingsWithSystemPicker(
+              settings: settings,
+              suggestedName: _defaultExportFileName(),
+            )
+          : await service.exportSettings(
+              settings: settings,
+              targetPath: targetPath,
+            );
       if (!mounted) {
         return;
       }
-      _exportPathController.text = result.path;
-      _showMessage('已导出到 ${result.path}');
+      if (result == null) {
+        _showMessage('已取消导出');
+        return;
+      }
+      if (!usesSystemExport) {
+        _exportPathController.text = result.path;
+        _showMessage('已导出到 ${result.path}');
+        return;
+      }
+      _showMessage('配置已导出，可在“文件”中查看。');
     } catch (error) {
       _showMessage('导出失败：$error');
     } finally {
@@ -242,10 +262,6 @@ class _SettingsManagementPageState
     setState(() {
       _exportPathController.text = pickedPath;
     });
-    final isIos = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
-    if (isIos) {
-      _showMessage('iOS 当前使用应用文档目录作为导出位置');
-    }
   }
 
   Future<void> _pickImportPath() async {

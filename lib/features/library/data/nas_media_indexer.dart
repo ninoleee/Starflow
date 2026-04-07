@@ -66,6 +66,8 @@ class NasMediaIndexer {
       <String, _RefreshTaskHandle>{};
   final Map<String, _RefreshTaskHandle> _backgroundEnrichmentTasks =
       <String, _RefreshTaskHandle>{};
+  final Map<String, _NasLibraryMatchCache> _libraryMatchCaches =
+      <String, _NasLibraryMatchCache>{};
 
   Future<void> cancelAllRefreshTasks() async {
     final handles = <_RefreshTaskHandle>{
@@ -98,6 +100,7 @@ class NasMediaIndexer {
   }
 
   Future<void> clearSource(String sourceId) {
+    _libraryMatchCaches.remove(sourceId.trim());
     return _store.clearSource(sourceId);
   }
 
@@ -115,9 +118,9 @@ class NasMediaIndexer {
       return false;
     }
 
-    final existingRecords = await _store.loadSourceRecords(source.id);
+    final existingRecords = await _loadSourceRecordsCached(source.id);
     final now = DateTime.now();
-    await _store.replaceSourceRecords(
+    await _persistSourceRecords(
       sourceId: source.id,
       records: existingRecords,
       state: NasMediaIndexSourceState(
@@ -156,7 +159,7 @@ class NasMediaIndexer {
       return;
     }
 
-    final records = await _store.loadSourceRecords(normalizedSourceId);
+    final records = await _loadSourceRecordsCached(normalizedSourceId);
     if (records.isEmpty) {
       return;
     }
@@ -177,7 +180,7 @@ class NasMediaIndexer {
     }
     final now = DateTime.now();
     final existingState = await _store.loadSourceState(normalizedSourceId);
-    await _store.replaceSourceRecords(
+    await _persistSourceRecords(
       sourceId: normalizedSourceId,
       records: nextRecords,
       state: NasMediaIndexSourceState(
@@ -202,7 +205,7 @@ class NasMediaIndexer {
     if (normalizedSourceId.isEmpty || normalizedResourceId.isEmpty) {
       return null;
     }
-    final records = await _store.loadSourceRecords(normalizedSourceId);
+    final records = await _loadSourceRecordsCached(normalizedSourceId);
     final writableIndices = _resolveWritableRecordIndices(
       records,
       normalizedResourceId,
@@ -224,7 +227,7 @@ class NasMediaIndexer {
       return const [];
     }
 
-    final records = await _store.loadSourceRecords(normalizedSourceId);
+    final records = await _loadSourceRecordsCached(normalizedSourceId);
     if (records.isEmpty) {
       return const [];
     }
@@ -267,7 +270,7 @@ class NasMediaIndexer {
       return null;
     }
 
-    final records = await _store.loadSourceRecords(sourceId);
+    final records = await _loadSourceRecordsCached(sourceId);
     if (records.isEmpty) {
       return null;
     }
@@ -304,7 +307,7 @@ class NasMediaIndexer {
       );
     }
 
-    final updatedRecords = await _store.loadSourceRecords(sourceId);
+    final updatedRecords = await _loadSourceRecordsCached(sourceId);
     return _buildManualMetadataTarget(
       target: target,
       records: updatedRecords,
@@ -405,6 +408,37 @@ class NasMediaIndexer {
     }
 
     return const [];
+  }
+
+  Future<List<MediaItem>> loadCachedLibraryMatchItems(
+    MediaSourceConfig source, {
+    String doubanId = '',
+    String imdbId = '',
+    String tmdbId = '',
+    String tvdbId = '',
+    String wikidataId = '',
+  }) async {
+    if (source.kind != MediaSourceKind.nas || source.endpoint.trim().isEmpty) {
+      return const [];
+    }
+
+    final cache = await _loadLibraryMatchCache(source.id);
+    final hasExternalIds = doubanId.trim().isNotEmpty ||
+        imdbId.trim().isNotEmpty ||
+        tmdbId.trim().isNotEmpty ||
+        tvdbId.trim().isNotEmpty ||
+        wikidataId.trim().isNotEmpty;
+    if (!hasExternalIds) {
+      return cache.libraryItems;
+    }
+
+    return cache.findByExternalIds(
+      doubanId: doubanId,
+      imdbId: imdbId,
+      tmdbId: tmdbId,
+      tvdbId: tvdbId,
+      wikidataId: wikidataId,
+    );
   }
 
   Future<void> refreshSource(
@@ -539,7 +573,7 @@ class NasMediaIndexer {
       return null;
     }
 
-    final records = await _store.loadSourceRecords(sourceId);
+    final records = await _loadSourceRecordsCached(sourceId);
     if (records.isEmpty) {
       return null;
     }
@@ -559,19 +593,24 @@ class NasMediaIndexer {
         .where((id) => id.trim().isNotEmpty)
         .toList(growable: false);
     final isSyntheticGroupRequest = _isSyntheticGroupId(resourceId);
+    final resolvedMetadataItemType = _resolvedMetadataItemType(metadataMatch);
+    final treatSyntheticGroupAsStandaloneMovie = isSyntheticGroupRequest &&
+        targetIndices.length == 1 &&
+        resolvedMetadataItemType == 'movie';
     for (final targetIndex in targetIndices) {
       final currentRecord = records[targetIndex];
-      final nextItem = isSyntheticGroupRequest
-          ? _applyManualMetadataToGroupedItem(
-              currentRecord.item,
-              metadataMatch: metadataMatch,
-              imdbRatingMatch: imdbRatingMatch,
-            )
-          : _applyManualMetadataToItem(
-              currentRecord.item,
-              metadataMatch: metadataMatch,
-              imdbRatingMatch: imdbRatingMatch,
-            );
+      final nextItem =
+          isSyntheticGroupRequest && !treatSyntheticGroupAsStandaloneMovie
+              ? _applyManualMetadataToGroupedItem(
+                  currentRecord.item,
+                  metadataMatch: metadataMatch,
+                  imdbRatingMatch: imdbRatingMatch,
+                )
+              : _applyManualMetadataToItem(
+                  currentRecord.item,
+                  metadataMatch: metadataMatch,
+                  imdbRatingMatch: imdbRatingMatch,
+                );
       final resolvedTitle = metadataMatch?.title.trim() ?? '';
       nextRecords[targetIndex] = NasMediaIndexRecord(
         id: currentRecord.id,
@@ -596,10 +635,18 @@ class NasMediaIndexer {
             ? resolvedTitle
             : currentRecord.parentTitle,
         recognizedYear: currentRecord.recognizedYear,
-        recognizedItemType: currentRecord.recognizedItemType,
-        preferSeries: currentRecord.preferSeries,
-        recognizedSeasonNumber: currentRecord.recognizedSeasonNumber,
-        recognizedEpisodeNumber: currentRecord.recognizedEpisodeNumber,
+        recognizedItemType: resolvedMetadataItemType == 'movie'
+            ? 'movie'
+            : currentRecord.recognizedItemType,
+        preferSeries: resolvedMetadataItemType == 'movie'
+            ? false
+            : currentRecord.preferSeries,
+        recognizedSeasonNumber: resolvedMetadataItemType == 'movie'
+            ? null
+            : currentRecord.recognizedSeasonNumber,
+        recognizedEpisodeNumber: resolvedMetadataItemType == 'movie'
+            ? null
+            : currentRecord.recognizedEpisodeNumber,
         sidecarStatus: currentRecord.sidecarStatus,
         wmdbStatus: metadataMatch?.provider == MetadataMatchProvider.wmdb
             ? NasMetadataFetchStatus.succeeded
@@ -614,7 +661,7 @@ class NasMediaIndexer {
       );
     }
     final existingState = await _store.loadSourceState(sourceId);
-    await _store.replaceSourceRecords(
+    await _persistSourceRecords(
       sourceId: sourceId,
       records: nextRecords,
       state: NasMediaIndexSourceState(
@@ -637,6 +684,10 @@ class NasMediaIndexer {
       searchQuery:
           searchQuery.trim().isEmpty ? target.searchQuery : searchQuery.trim(),
     );
+  }
+
+  String _resolvedMetadataItemType(MetadataMatchResult? metadataMatch) {
+    return metadataMatch?.mediaType.toItemType ?? '';
   }
 
   Future<List<WebDavScannedItem>> _scanSource(
@@ -796,7 +847,7 @@ class NasMediaIndexer {
       detail: scannedItems.isEmpty ? '没有发现媒体文件' : phaseLabel,
     );
     final existingRecords = {
-      for (final record in await _store.loadSourceRecords(source.id))
+      for (final record in await _loadSourceRecordsCached(source.id))
         record.resourceId: record,
     };
     final nextRecords = <NasMediaIndexRecord>[];
@@ -883,7 +934,7 @@ class NasMediaIndexer {
 
     controller.throwIfCancelled();
     final existingState = await _store.loadSourceState(source.id);
-    await _store.replaceSourceRecords(
+    await _persistSourceRecords(
       sourceId: source.id,
       records: nextRecords,
       state: NasMediaIndexSourceState(
@@ -976,7 +1027,7 @@ class NasMediaIndexer {
     final now = DateTime.now();
     final settings = _readSettings();
     controller.throwIfCancelled();
-    final records = await _store.loadSourceRecords(source.id);
+    final records = await _loadSourceRecordsCached(source.id);
     if (records.isEmpty || scannedItems.isEmpty) {
       _clearProgressSafely(normalizedSourceId);
       return;
@@ -1080,7 +1131,7 @@ class NasMediaIndexer {
     }
     controller.throwIfCancelled();
     final existingState = await _store.loadSourceState(source.id);
-    await _store.replaceSourceRecords(
+    await _persistSourceRecords(
       sourceId: source.id,
       records: nextRecords,
       state: NasMediaIndexSourceState(
@@ -1187,7 +1238,7 @@ class NasMediaIndexer {
     }
 
     final normalizedSectionId = sectionId?.trim() ?? '';
-    final records = await _store.loadSourceRecords(source.id);
+    final records = await _loadSourceRecordsCached(source.id);
     return records
         .where(
           (record) =>
@@ -1596,6 +1647,15 @@ class NasMediaIndexer {
     final doubanId = records
         .map((record) => record.item.doubanId.trim())
         .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+    final tvdbId = records
+        .map((record) => _resolveLibraryMatchTvdbId(record.item))
+        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+    final wikidataId = records
+        .map((record) => _resolveLibraryMatchWikidataId(record.item))
+        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+    final providerIds = _mergeProviderIdMaps(
+      records.map((record) => record.item.providerIds),
+    );
     final lastAddedAt = records
         .map((record) => record.item.addedAt)
         .reduce((left, right) => left.isAfter(right) ? left : right);
@@ -1632,7 +1692,10 @@ class NasMediaIndexer {
       streamHeaders: const {},
       imdbId: imdbId,
       tmdbId: tmdbId,
+      tvdbId: tvdbId,
+      wikidataId: wikidataId,
       doubanId: doubanId,
+      providerIds: providerIds,
       ratingLabels: ratingLabels,
       addedAt: lastAddedAt,
     );
@@ -1695,7 +1758,10 @@ class NasMediaIndexer {
       seasonNumber: seasonNumber,
       imdbId: base.item.imdbId,
       tmdbId: base.item.tmdbId,
+      tvdbId: _resolveLibraryMatchTvdbId(base.item),
+      wikidataId: _resolveLibraryMatchWikidataId(base.item),
       doubanId: base.item.doubanId,
+      providerIds: base.item.providerIds,
       ratingLabels: _mergeLabels(
           const [], records.expand((e) => e.item.ratingLabels).toList()),
       addedAt: sorted.first.item.addedAt,
@@ -2006,7 +2072,17 @@ class NasMediaIndexer {
       ),
     );
     if (group.isEmpty) {
-      return null;
+      if (selectedRecords.length != 1) {
+        return null;
+      }
+      final nextTarget = MediaDetailTarget.fromMediaItem(
+        selectedRecords.single.item,
+        availabilityLabel: target.availabilityLabel,
+        searchQuery: searchQuery,
+      );
+      return resourcePath.trim().isEmpty
+          ? nextTarget
+          : nextTarget.copyWith(resourcePath: resourcePath);
     }
     final resolvedGroup = group.first;
     final scopedGroup = _SeriesRecordGroup(
@@ -2326,9 +2402,16 @@ class NasMediaIndexer {
     final height = seed.height;
     final bitrate = seed.bitrate;
 
+    final structureInferredSeedHints =
+        structureInferredEpisodeLike && !seed.hasSidecarMatch;
+    final structureInferredMovieLikeHints = structureInferredSeedHints &&
+        seed.episodeNumber == null &&
+        (seed.seasonNumber == null || seed.seasonNumber == 0);
+    final structureEpisodeTitleLock =
+        structureInferredSeedHints && seed.episodeNumber != null;
     final titleLocked =
         (seed.hasSidecarMatch && seed.title.trim().isNotEmpty) ||
-            (structureInferredEpisodeLike && seed.title.trim().isNotEmpty);
+            (structureEpisodeTitleLock && seed.title.trim().isNotEmpty);
     final overviewLocked = seed.overview.trim().isNotEmpty;
     final posterLocked = seed.posterUrl.trim().isNotEmpty;
     final backdropLocked = seed.backdropUrl.trim().isNotEmpty;
@@ -2337,10 +2420,14 @@ class NasMediaIndexer {
     final extraBackdropsLocked = seed.extraBackdropUrls.isNotEmpty;
     final yearLocked = seed.year > 0;
     final durationLocked = seed.durationLabel.trim().isNotEmpty &&
-        seed.durationLabel.trim() != '文件';
+        seed.durationLabel.trim() != '文件' &&
+        !(structureInferredMovieLikeHints &&
+            seed.durationLabel.trim() == '剧集' &&
+            seed.episodeNumber == null);
     final genresLocked = seed.genres.isNotEmpty;
     final peopleLocked = seed.directors.isNotEmpty || seed.actors.isNotEmpty;
-    final typeLocked = seed.itemType.trim().isNotEmpty;
+    final typeLocked =
+        seed.itemType.trim().isNotEmpty && !structureInferredMovieLikeHints;
     final seasonLocked = seed.seasonNumber != null;
     final episodeLocked = seed.episodeNumber != null;
 
@@ -2367,9 +2454,10 @@ class NasMediaIndexer {
       imdbId.trim().isNotEmpty ? imdbId : baseQuery,
     );
     var imdbIdMetadataMatched = false;
-    final preferSeries = recognition.preferSeries ||
+    var preferSeries = recognition.preferSeries ||
         itemType.trim().toLowerCase() == 'episode' ||
         itemType.trim().toLowerCase() == 'series';
+    var resolvedOnlineMovieType = false;
 
     if (applyOnlineMetadata &&
         tmdbStatus == NasMetadataFetchStatus.never &&
@@ -2391,6 +2479,17 @@ class NasMediaIndexer {
             preferSeries: preferSeries,
           );
           if (tmdbMatch != null) {
+            if (!typeLocked && !tmdbMatch.isSeries) {
+              resolvedOnlineMovieType = true;
+              itemType = 'movie';
+              if (!seasonLocked) {
+                seasonNumber = null;
+              }
+              if (!episodeLocked) {
+                episodeNumber = null;
+              }
+              preferSeries = false;
+            }
             var episodeStillUrl = '';
             if (itemType.trim().toLowerCase() == 'episode' &&
                 tmdbMatch.isSeries &&
@@ -2412,7 +2511,12 @@ class NasMediaIndexer {
             }
             tmdbStatus = NasMetadataFetchStatus.succeeded;
             imdbIdMetadataMatched = true;
-            if (!titleLocked && tmdbMatch.title.trim().isNotEmpty) {
+            final canOverrideStructureInferredTitle =
+                structureInferredMovieLikeHints &&
+                    seed.episodeNumber == null &&
+                    !tmdbMatch.isSeries;
+            if ((!titleLocked || canOverrideStructureInferredTitle) &&
+                tmdbMatch.title.trim().isNotEmpty) {
               title = tmdbMatch.title.trim();
             }
             if (originalTitle.trim().isEmpty &&
@@ -2515,8 +2619,24 @@ class NasMediaIndexer {
           actors: actors,
         );
         if (wmdbMatch != null) {
+          if (!typeLocked && wmdbMatch.isMovie) {
+            resolvedOnlineMovieType = true;
+            itemType = 'movie';
+            if (!seasonLocked) {
+              seasonNumber = null;
+            }
+            if (!episodeLocked) {
+              episodeNumber = null;
+            }
+            preferSeries = false;
+          }
           wmdbStatus = NasMetadataFetchStatus.succeeded;
-          if (!titleLocked && wmdbMatch.title.trim().isNotEmpty) {
+          final canOverrideStructureInferredTitle =
+              structureInferredMovieLikeHints &&
+                  seed.episodeNumber == null &&
+                  wmdbMatch.isMovie;
+          if ((!titleLocked || canOverrideStructureInferredTitle) &&
+              wmdbMatch.title.trim().isNotEmpty) {
             title = wmdbMatch.title.trim();
           }
           if (originalTitle.trim().isEmpty &&
@@ -2595,6 +2715,17 @@ class NasMediaIndexer {
             preferSeries: preferSeries,
           );
           if (tmdbMatch != null) {
+            if (!typeLocked && !tmdbMatch.isSeries) {
+              resolvedOnlineMovieType = true;
+              itemType = 'movie';
+              if (!seasonLocked) {
+                seasonNumber = null;
+              }
+              if (!episodeLocked) {
+                episodeNumber = null;
+              }
+              preferSeries = false;
+            }
             var episodeStillUrl = '';
             if (itemType.trim().toLowerCase() == 'episode' &&
                 tmdbMatch.isSeries &&
@@ -2615,7 +2746,11 @@ class NasMediaIndexer {
               }
             }
             tmdbStatus = NasMetadataFetchStatus.succeeded;
-            if (!titleLocked &&
+            final canOverrideStructureInferredTitle =
+                structureInferredMovieLikeHints &&
+                    seed.episodeNumber == null &&
+                    !tmdbMatch.isSeries;
+            if ((!titleLocked || canOverrideStructureInferredTitle) &&
                 wmdbStatus != NasMetadataFetchStatus.succeeded &&
                 tmdbMatch.title.trim().isNotEmpty) {
               title = tmdbMatch.title.trim();
@@ -2745,6 +2880,34 @@ class NasMediaIndexer {
     if (!episodeLocked) {
       episodeNumber = recognition.episodeNumber;
     }
+    if (resolvedOnlineMovieType) {
+      itemType = 'movie';
+      if (!seasonLocked) {
+        seasonNumber = null;
+      }
+      if (!episodeLocked) {
+        episodeNumber = null;
+      }
+      preferSeries = false;
+    }
+    final normalizedItemType = itemType.trim().toLowerCase();
+    final resolvedRecognizedItemType = switch (normalizedItemType) {
+      'movie' => 'movie',
+      'series' => 'series',
+      'season' => 'season',
+      'episode' => 'episode',
+      _ => recognition.itemType,
+    };
+    final resolvedPreferSeries = normalizedItemType == 'movie'
+        ? false
+        : (normalizedItemType == 'episode' ||
+            normalizedItemType == 'series' ||
+            normalizedItemType == 'season' ||
+            preferSeries);
+    final resolvedRecognizedSeasonNumber =
+        normalizedItemType == 'movie' ? null : recognition.seasonNumber;
+    final resolvedRecognizedEpisodeNumber =
+        normalizedItemType == 'movie' ? null : recognition.episodeNumber;
 
     if (durationLabel.trim().isEmpty) {
       durationLabel = itemType.trim().toLowerCase() == 'episode' ? '剧集' : '文件';
@@ -2821,10 +2984,10 @@ class NasMediaIndexer {
       originalFileName: recognition.originalFileName,
       parentTitle: recognition.parentTitle,
       recognizedYear: recognition.year,
-      recognizedItemType: recognition.itemType,
-      preferSeries: recognition.preferSeries,
-      recognizedSeasonNumber: recognition.seasonNumber,
-      recognizedEpisodeNumber: recognition.episodeNumber,
+      recognizedItemType: resolvedRecognizedItemType,
+      preferSeries: resolvedPreferSeries,
+      recognizedSeasonNumber: resolvedRecognizedSeasonNumber,
+      recognizedEpisodeNumber: resolvedRecognizedEpisodeNumber,
       sidecarStatus: sidecarStatus,
       wmdbStatus: wmdbStatus,
       tmdbStatus: tmdbStatus,
@@ -3064,6 +3227,7 @@ class NasMediaIndexer {
   }) {
     var nextItem = item;
     if (metadataMatch != null) {
+      final resolvedItemType = _resolvedMetadataItemType(metadataMatch);
       final filteredRatingLabels = _filterSupplementalRatingLabels(
         existing: nextItem.ratingLabels,
         supplemental: metadataMatch.ratingLabels,
@@ -3134,6 +3298,8 @@ class NasMediaIndexer {
         tmdbId: metadataMatch.tmdbId.trim().isNotEmpty
             ? metadataMatch.tmdbId.trim()
             : nextItem.tmdbId,
+        itemType:
+            resolvedItemType.isNotEmpty ? resolvedItemType : nextItem.itemType,
         ratingLabels: _mergeLabels(nextItem.ratingLabels, filteredRatingLabels),
       );
     }
@@ -3250,6 +3416,173 @@ class NasMediaIndexer {
     return supplemental
         .where((label) => !label.trim().toLowerCase().contains('豆瓣'))
         .toList(growable: false);
+  }
+
+  Future<void> _persistSourceRecords({
+    required String sourceId,
+    required List<NasMediaIndexRecord> records,
+    required NasMediaIndexSourceState state,
+  }) async {
+    final normalizedSourceId = sourceId.trim();
+    final normalizedRecords = List<NasMediaIndexRecord>.unmodifiable(records);
+    await _store.replaceSourceRecords(
+      sourceId: normalizedSourceId,
+      records: normalizedRecords,
+      state: state,
+    );
+    _libraryMatchCaches[normalizedSourceId] =
+        _buildLibraryMatchCache(normalizedRecords);
+  }
+
+  Future<List<NasMediaIndexRecord>> _loadSourceRecordsCached(
+    String sourceId,
+  ) async {
+    final normalizedSourceId = sourceId.trim();
+    if (normalizedSourceId.isEmpty) {
+      return const [];
+    }
+    final cached = _libraryMatchCaches[normalizedSourceId];
+    if (cached != null) {
+      return cached.records;
+    }
+    final records = await _store.loadSourceRecords(normalizedSourceId);
+    _libraryMatchCaches[normalizedSourceId] = _buildLibraryMatchCache(records);
+    return _libraryMatchCaches[normalizedSourceId]?.records ?? records;
+  }
+
+  Future<_NasLibraryMatchCache> _loadLibraryMatchCache(String sourceId) async {
+    final normalizedSourceId = sourceId.trim();
+    final cached = _libraryMatchCaches[normalizedSourceId];
+    if (cached != null) {
+      return cached;
+    }
+    final records = await _store.loadSourceRecords(normalizedSourceId);
+    final nextCache = _buildLibraryMatchCache(records);
+    _libraryMatchCaches[normalizedSourceId] = nextCache;
+    return nextCache;
+  }
+
+  _NasLibraryMatchCache _buildLibraryMatchCache(
+    List<NasMediaIndexRecord> records,
+  ) {
+    final normalizedRecords = List<NasMediaIndexRecord>.unmodifiable(records);
+    final libraryItems = List<MediaItem>.unmodifiable(
+      _materializeLibraryItems(normalizedRecords),
+    );
+    final itemsByLookupKey = <String, List<MediaItem>>{};
+    for (final item in libraryItems) {
+      for (final lookupKey in _buildLibraryMatchLookupKeys(item)) {
+        itemsByLookupKey.putIfAbsent(lookupKey, () => <MediaItem>[]).add(item);
+      }
+    }
+    return _NasLibraryMatchCache(
+      records: normalizedRecords,
+      libraryItems: libraryItems,
+      itemsByLookupKey: itemsByLookupKey,
+    );
+  }
+
+  List<String> _buildLibraryMatchLookupKeys(MediaItem item) {
+    final keys = <String>{};
+
+    void addKey(String prefix, String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) {
+        return;
+      }
+      keys.add('$prefix|$trimmed');
+    }
+
+    addKey('douban', item.doubanId);
+    addKey('imdb', item.imdbId.toLowerCase());
+    addKey('tmdb', item.tmdbId);
+    addKey('tvdb', _resolveLibraryMatchTvdbId(item));
+    addKey('wikidata', _resolveLibraryMatchWikidataId(item).toUpperCase());
+    return keys.toList(growable: false);
+  }
+
+  String _resolveLibraryMatchTvdbId(MediaItem item) {
+    final current = item.tvdbId.trim();
+    if (current.isNotEmpty) {
+      return current;
+    }
+    return item.providerIds['Tvdb']?.trim() ??
+        item.providerIds['TVDb']?.trim() ??
+        item.providerIds['tvdb']?.trim() ??
+        '';
+  }
+
+  String _resolveLibraryMatchWikidataId(MediaItem item) {
+    final current = item.wikidataId.trim();
+    if (current.isNotEmpty) {
+      return current;
+    }
+    return item.providerIds['Wikidata']?.trim() ??
+        item.providerIds['WikiData']?.trim() ??
+        item.providerIds['wikidata']?.trim() ??
+        '';
+  }
+
+  Map<String, String> _mergeProviderIdMaps(
+    Iterable<Map<String, String>> providerIdMaps,
+  ) {
+    final merged = <String, String>{};
+    for (final entry in providerIdMaps) {
+      entry.forEach((key, value) {
+        final normalizedKey = key.trim();
+        final normalizedValue = value.trim();
+        if (normalizedKey.isEmpty ||
+            normalizedValue.isEmpty ||
+            merged.containsKey(normalizedKey)) {
+          return;
+        }
+        merged[normalizedKey] = normalizedValue;
+      });
+    }
+    return merged;
+  }
+}
+
+class _NasLibraryMatchCache {
+  const _NasLibraryMatchCache({
+    required this.records,
+    required this.libraryItems,
+    required this.itemsByLookupKey,
+  });
+
+  final List<NasMediaIndexRecord> records;
+  final List<MediaItem> libraryItems;
+  final Map<String, List<MediaItem>> itemsByLookupKey;
+
+  List<MediaItem> findByExternalIds({
+    String doubanId = '',
+    String imdbId = '',
+    String tmdbId = '',
+    String tvdbId = '',
+    String wikidataId = '',
+  }) {
+    final matchesById = <String, MediaItem>{};
+
+    void collect(String prefix, String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) {
+        return;
+      }
+      final items = itemsByLookupKey['$prefix|$trimmed'];
+      if (items == null) {
+        return;
+      }
+      for (final item in items) {
+        matchesById[item.id] = item;
+      }
+    }
+
+    collect('douban', doubanId);
+    collect('imdb', imdbId.toLowerCase());
+    collect('tmdb', tmdbId);
+    collect('tvdb', tvdbId);
+    collect('wikidata', wikidataId.toUpperCase());
+    return matchesById.values.toList(growable: false);
   }
 }
 

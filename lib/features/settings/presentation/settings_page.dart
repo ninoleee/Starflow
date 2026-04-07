@@ -126,12 +126,23 @@ class SettingsPage extends ConsumerWidget {
               const SizedBox(height: 18),
               SectionPanel(
                 title: '元数据与评分',
-                child: _SettingsNavigationTile(
-                  title: '打开匹配与评分设置',
-                  subtitle: settings.detailAutoLibraryMatchEnabled
-                      ? '详情页自动匹配资源：已开启'
-                      : '详情页自动匹配资源：已关闭',
-                  onTap: () => _openMetadataMatchSettings(context),
+                child: Column(
+                  children: [
+                    _SettingsNavigationTile(
+                      title: '打开匹配与评分设置',
+                      subtitle: settings.detailAutoLibraryMatchEnabled
+                          ? '详情页自动匹配资源：已开启'
+                          : '详情页自动匹配资源：已关闭',
+                      onTap: () => _openMetadataMatchSettings(context),
+                    ),
+                    const SizedBox(height: 10),
+                    _SettingsNavigationTile(
+                      title: '匹配来源',
+                      subtitle: _libraryMatchSourceSummary(settings),
+                      onTap: () =>
+                          _openLibraryMatchSourcePicker(context, ref, settings),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 18),
@@ -174,6 +185,21 @@ class SettingsPage extends ConsumerWidget {
                         settings,
                       ),
                     ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              SectionPanel(
+                title: '外观',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '应用界面',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
                     const SizedBox(height: 10),
                     StarflowToggleTile(
                       title: '高性能模式',
@@ -198,32 +224,52 @@ class SettingsPage extends ConsumerWidget {
                                   .setTranslucentEffectsEnabled(value);
                             },
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 18),
-              SectionPanel(
-                title: '首页模块',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+                    const SizedBox(height: 10),
+                    StarflowToggleTile(
+                      title: '自动隐藏菜单栏',
+                      subtitle: _autoHideNavigationBarSummary(settings),
+                      value: settings.autoHideNavigationBarEnabled,
+                      onChanged: (value) {
+                        ref
+                            .read(settingsControllerProvider.notifier)
+                            .setAutoHideNavigationBarEnabled(value);
+                      },
+                    ),
+                    const SizedBox(height: 18),
                     Text(
-                      'Hero 模块',
+                      '首页 Hero',
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.w700,
                           ),
                     ),
                     const SizedBox(height: 10),
-                    StarflowToggleTile(
-                      title: '启用 Hero',
-                      value: heroEnabled,
-                      onChanged: (value) {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .setHomeHeroEnabled(value);
-                      },
+                    Text(
+                      'Hero 展示方式',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
                     ),
                     const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        for (final mode in HomeHeroDisplayMode.values)
+                          StarflowChipButton(
+                            label: mode.label,
+                            selected: mode == settings.homeHeroDisplayMode,
+                            onPressed: heroEnabled
+                                ? () {
+                                    ref
+                                        .read(
+                                            settingsControllerProvider.notifier)
+                                        .setHomeHeroDisplayMode(mode);
+                                  }
+                                : null,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
                     Text(
                       'Hero 样式',
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -270,6 +316,31 @@ class SettingsPage extends ConsumerWidget {
                         ref
                             .read(settingsControllerProvider.notifier)
                             .setHomeHeroBackgroundEnabled(value);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              SectionPanel(
+                title: '首页模块',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Hero 模块',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 10),
+                    StarflowToggleTile(
+                      title: '启用 Hero',
+                      value: heroEnabled,
+                      onChanged: (value) {
+                        ref
+                            .read(settingsControllerProvider.notifier)
+                            .setHomeHeroEnabled(value);
                       },
                     ),
                     const SizedBox(height: 10),
@@ -479,6 +550,103 @@ class SettingsPage extends ConsumerWidget {
         .setSearchSourceIds(selected.toList(growable: false));
   }
 
+  Future<void> _openLibraryMatchSourcePicker(
+    BuildContext context,
+    WidgetRef ref,
+    AppSettings settings,
+  ) async {
+    final availableSources = settings.mediaSources
+        .where(
+          (source) =>
+              source.enabled &&
+              (source.kind == MediaSourceKind.emby ||
+                  source.kind == MediaSourceKind.nas),
+        )
+        .toList(growable: false);
+    if (availableSources.isEmpty) {
+      return;
+    }
+
+    final initialSelection = settings.libraryMatchSourceIds.toSet();
+    final selected = await showDialog<Set<String>>(
+      context: context,
+      builder: (dialogContext) {
+        var draft = <String>{...initialSelection};
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('选择匹配来源'),
+              content: SizedBox(
+                width: 420,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      StarflowCheckboxTile(
+                        title: '全部已启用来源',
+                        subtitle: '清空单独选择，匹配时扫描全部已启用媒体源',
+                        value: draft.isEmpty,
+                        onChanged: (_) {
+                          setState(() {
+                            draft = <String>{};
+                          });
+                        },
+                      ),
+                      const Divider(height: 16),
+                      for (final source in availableSources)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: StarflowCheckboxTile(
+                            title: source.name,
+                            subtitle: source.kind.label,
+                            value: draft.contains(source.id),
+                            onChanged: (checked) {
+                              setState(() {
+                                if (checked) {
+                                  draft.add(source.id);
+                                } else {
+                                  draft.remove(source.id);
+                                }
+                              });
+                            },
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                StarflowButton(
+                  label: '取消',
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  variant: StarflowButtonVariant.ghost,
+                  compact: true,
+                ),
+                StarflowButton(
+                  label: '全部来源',
+                  onPressed: () => Navigator.of(dialogContext).pop(<String>{}),
+                  variant: StarflowButtonVariant.secondary,
+                  compact: true,
+                ),
+                StarflowButton(
+                  label: '保存',
+                  onPressed: () => Navigator.of(dialogContext).pop(draft),
+                  compact: true,
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (selected == null) {
+      return;
+    }
+    await ref
+        .read(settingsControllerProvider.notifier)
+        .setLibraryMatchSourceIds(selected.toList(growable: false));
+  }
+
   Future<void> _openNetworkStorageSettings(
     BuildContext context,
     NetworkStorageConfig initial,
@@ -632,6 +800,13 @@ String _translucentEffectsSummary(AppSettings settings) {
   return '关闭后可减少模糊和毛玻璃效果，提高性能。';
 }
 
+String _autoHideNavigationBarSummary(AppSettings settings) {
+  if (!settings.autoHideNavigationBarEnabled) {
+    return '关闭后菜单栏会保持常驻显示，不再自动隐藏。';
+  }
+  return '普通端会按页面交互自动隐藏；TV 端在焦点离开左侧菜单栏后自动收起。';
+}
+
 String _searchSourceSummary(AppSettings settings) {
   final availableLocalSources = settings.mediaSources
       .where(
@@ -677,6 +852,38 @@ String _searchSourceSummary(AppSettings settings) {
     return selectedLabels.join('、');
   }
   return '${selectedLabels.take(2).join('、')} 等 ${selectedLabels.length} 个来源';
+}
+
+String _libraryMatchSourceSummary(AppSettings settings) {
+  final availableSources = settings.mediaSources
+      .where(
+        (source) =>
+            source.enabled &&
+            (source.kind == MediaSourceKind.emby ||
+                source.kind == MediaSourceKind.nas),
+      )
+      .toList(growable: false);
+  if (availableSources.isEmpty) {
+    return '暂无可选来源';
+  }
+
+  final selectedIds = settings.libraryMatchSourceIds.toSet();
+  if (selectedIds.isEmpty) {
+    return '全部已启用来源';
+  }
+
+  final selectedNames = availableSources
+      .where((source) => selectedIds.contains(source.id))
+      .map((source) => source.name)
+      .toList(growable: false);
+  if (selectedNames.isEmpty ||
+      selectedNames.length >= availableSources.length) {
+    return '全部已启用来源';
+  }
+  if (selectedNames.length <= 2) {
+    return selectedNames.join('、');
+  }
+  return '${selectedNames.take(2).join('、')} 等 ${selectedNames.length} 个来源';
 }
 
 String _formatPlaybackSpeedLabel(double speed) {

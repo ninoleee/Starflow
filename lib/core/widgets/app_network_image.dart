@@ -1,6 +1,3 @@
-import 'dart:async';
-import 'dart:ui' as ui;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -61,7 +58,6 @@ class AppNetworkImage extends ConsumerStatefulWidget {
 
 class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   Future<_ResolvedImageContent>? _resolvedImageFuture;
-  bool _hasLoggedImageInfo = false;
 
   @override
   void initState() {
@@ -79,7 +75,6 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
           widget.fallbackSources,
         )) {
       _refreshResolvedImageFuture(force: true);
-      _hasLoggedImageInfo = false;
     }
   }
 
@@ -159,7 +154,6 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
         }
 
         final bytes = resolved.bytes;
-        _logImageInfoIfNeeded(bytes);
         if (resolved.isSvg) {
           return SvgPicture.memory(
             bytes,
@@ -234,37 +228,6 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   ]) {
     return widget.errorBuilder?.call(context, error, stackTrace) ??
         const SizedBox.shrink();
-  }
-
-  void _logImageInfoIfNeeded(Uint8List bytes) {
-    if (!kDebugMode ||
-        _hasLoggedImageInfo ||
-        widget.debugLabel.trim().isEmpty ||
-        _looksLikeSvg(widget.url, bytes)) {
-      return;
-    }
-    _hasLoggedImageInfo = true;
-    unawaited(_decodeAndLogImageInfo(bytes));
-  }
-
-  Future<void> _decodeAndLogImageInfo(Uint8List bytes) async {
-    try {
-      final codec = await ui.instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      debugPrint(
-        '[ImageInfo] ${widget.debugLabel} '
-        'source=${frame.image.width}x${frame.image.height} '
-        'target=${widget.width?.toStringAsFixed(1) ?? 'auto'}x'
-        '${widget.height?.toStringAsFixed(1) ?? 'auto'} '
-        'fit=${widget.fit}',
-      );
-      frame.image.dispose();
-      codec.dispose();
-    } catch (error, stackTrace) {
-      debugPrint(
-        '[ImageInfo] ${widget.debugLabel} decode_failed=$error\n$stackTrace',
-      );
-    }
   }
 }
 

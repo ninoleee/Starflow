@@ -14,6 +14,8 @@ abstract class SettingsTransferService {
 
   String get unsupportedReason;
 
+  bool get supportsSystemExport;
+
   Future<String?> pickExportPath({String? suggestedName});
 
   Future<String?> pickImportPath();
@@ -23,6 +25,11 @@ abstract class SettingsTransferService {
   Future<SettingsExportResult> exportSettings({
     required AppSettings settings,
     required String targetPath,
+  });
+
+  Future<SettingsExportResult?> exportSettingsWithSystemPicker({
+    required AppSettings settings,
+    String? suggestedName,
   });
 
   Future<AppSettings> importSettings(String sourcePath);

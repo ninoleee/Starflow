@@ -69,6 +69,7 @@ TV_BANNER_TARGETS: dict[Path, tuple[int, int]] = {
 
 LAUNCH_LOGO_TARGETS: dict[Path, tuple[int, int]] = {
     ROOT / "assets/branding/starflow_launch_logo.png": (512, 512),
+    ROOT / "android/app/src/main/res/drawable-nodpi/launch_logo.png": (512, 512),
 }
 
 LAUNCH_IMAGE_TARGETS: dict[Path, tuple[int, int]] = {
@@ -337,6 +338,17 @@ def create_app_icon_master(output_path: Path) -> None:
     )
     draw_logo_glyph(image, glyph_rect)
 
+    image.save(output_path)
+    print(f"Generated {output_path.relative_to(ROOT)}")
+
+
+def create_launch_logo(output_path: Path, size: tuple[int, int]) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    image = Image.new("RGBA", size, (0, 0, 0, 0))
+    draw_logo_glyph(
+        image,
+        (0.0, 0.0, float(size[0]), float(size[1])),
+    )
     image.save(output_path)
     print(f"Generated {output_path.relative_to(ROOT)}")
 
@@ -910,8 +922,11 @@ def main() -> int:
     for path, size in TV_BANNER_TARGETS.items():
         resize_image(tv_banner_master, path, size)
 
+    for path, size in LAUNCH_LOGO_TARGETS.items():
+        create_launch_logo(path, size)
+
     for path, size in LAUNCH_IMAGE_TARGETS.items():
-        resize_image(app_icon_master, path, size)
+        create_launch_logo(path, size)
 
     save_windows_icon(app_icon_master, WINDOWS_ICON_PATH)
     return 0

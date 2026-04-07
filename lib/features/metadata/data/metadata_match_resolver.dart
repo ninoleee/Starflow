@@ -37,6 +37,9 @@ class MetadataMatchResolver {
       if (match != null) {
         return MetadataMatchResult(
           provider: MetadataMatchProvider.tmdb,
+          mediaType: match.isSeries
+              ? MetadataMediaType.series
+              : MetadataMediaType.movie,
           title: match.title,
           originalTitle: match.originalTitle,
           posterUrl: match.posterUrl,
@@ -97,6 +100,9 @@ class MetadataMatchResolver {
           if (match != null) {
             return MetadataMatchResult(
               provider: MetadataMatchProvider.tmdb,
+              mediaType: match.isSeries
+                  ? MetadataMediaType.series
+                  : MetadataMediaType.movie,
               title: match.title,
               originalTitle: match.originalTitle,
               posterUrl: match.posterUrl,

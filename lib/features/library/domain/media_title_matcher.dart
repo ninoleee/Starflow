@@ -60,47 +60,75 @@ MediaItem? matchMediaItemByTitles(
   return list.isEmpty ? null : list.first.item;
 }
 
-MediaItem? matchMediaItemByExternalIds(
+List<MediaItem> listMediaItemsMatchingExternalIds(
   List<MediaItem> library, {
+  String doubanId = '',
   String imdbId = '',
   String tmdbId = '',
   String tvdbId = '',
   String wikidataId = '',
 }) {
+  final normalizedDoubanId = doubanId.trim();
   final normalizedImdbId = imdbId.trim().toLowerCase();
   final normalizedTmdbId = tmdbId.trim();
   final normalizedTvdbId = tvdbId.trim();
   final normalizedWikidataId = wikidataId.trim().toUpperCase();
-  if (normalizedImdbId.isEmpty &&
+  if (normalizedDoubanId.isEmpty &&
+      normalizedImdbId.isEmpty &&
       normalizedTmdbId.isEmpty &&
       normalizedTvdbId.isEmpty &&
       normalizedWikidataId.isEmpty) {
-    return null;
+    return const [];
   }
 
-  for (final item in library) {
-    if (normalizedImdbId.isNotEmpty &&
-        item.imdbId.trim().toLowerCase() == normalizedImdbId) {
-      return item;
+  final matches = <String, MediaItem>{};
+
+  void collect(bool Function(MediaItem item) matcher) {
+    for (final item in library) {
+      if (matcher(item)) {
+        matches[item.id] = item;
+      }
     }
   }
-  for (final item in library) {
-    if (normalizedTmdbId.isNotEmpty && item.tmdbId.trim() == normalizedTmdbId) {
-      return item;
-    }
+
+  if (normalizedDoubanId.isNotEmpty) {
+    collect((item) => item.doubanId.trim() == normalizedDoubanId);
   }
-  for (final item in library) {
-    if (normalizedTvdbId.isNotEmpty && item.tvdbId.trim() == normalizedTvdbId) {
-      return item;
-    }
+  if (normalizedImdbId.isNotEmpty) {
+    collect((item) => item.imdbId.trim().toLowerCase() == normalizedImdbId);
   }
-  for (final item in library) {
-    if (normalizedWikidataId.isNotEmpty &&
-        item.wikidataId.trim().toUpperCase() == normalizedWikidataId) {
-      return item;
-    }
+  if (normalizedTmdbId.isNotEmpty) {
+    collect((item) => item.tmdbId.trim() == normalizedTmdbId);
   }
-  return null;
+  if (normalizedTvdbId.isNotEmpty) {
+    collect((item) => item.tvdbId.trim() == normalizedTvdbId);
+  }
+  if (normalizedWikidataId.isNotEmpty) {
+    collect(
+      (item) => item.wikidataId.trim().toUpperCase() == normalizedWikidataId,
+    );
+  }
+
+  return matches.values.toList(growable: false);
+}
+
+MediaItem? matchMediaItemByExternalIds(
+  List<MediaItem> library, {
+  String doubanId = '',
+  String imdbId = '',
+  String tmdbId = '',
+  String tvdbId = '',
+  String wikidataId = '',
+}) {
+  final matches = listMediaItemsMatchingExternalIds(
+    library,
+    doubanId: doubanId,
+    imdbId: imdbId,
+    tmdbId: tmdbId,
+    tvdbId: tvdbId,
+    wikidataId: wikidataId,
+  );
+  return matches.isEmpty ? null : matches.first;
 }
 
 double _scoreMediaItem(

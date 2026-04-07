@@ -98,6 +98,77 @@ void main() {
 
       expect(matched?.id, 'imdb-match-second');
     });
+
+    test('matches douban id exactly when it is available', () {
+      final library = [
+        MediaItem(
+          id: 'movie-1',
+          title: '霸王别姬',
+          overview: '',
+          posterUrl: '',
+          year: 1993,
+          durationLabel: '',
+          genres: const [],
+          sourceId: 'nas-main',
+          sourceName: 'Home NAS',
+          sourceKind: MediaSourceKind.nas,
+          streamUrl: '',
+          doubanId: '1291546',
+          addedAt: DateTime.utc(2026, 4, 4),
+        ),
+      ];
+
+      final matched = matchMediaItemByExternalIds(
+        library,
+        doubanId: '1291546',
+      );
+
+      expect(matched?.id, 'movie-1');
+    });
+  });
+
+  group('listMediaItemsMatchingExternalIds', () {
+    test('returns every item that shares the same external id', () {
+      final library = [
+        MediaItem(
+          id: 'movie-1',
+          title: 'Dune: Part Two',
+          overview: '',
+          posterUrl: '',
+          year: 2024,
+          durationLabel: '',
+          genres: const [],
+          sourceId: 'nas-main',
+          sourceName: 'Home NAS',
+          sourceKind: MediaSourceKind.nas,
+          streamUrl: '',
+          imdbId: 'tt15239678',
+          addedAt: DateTime.utc(2026, 4, 4),
+        ),
+        MediaItem(
+          id: 'movie-2',
+          title: 'Dune: Part Two REMUX',
+          overview: '',
+          posterUrl: '',
+          year: 2024,
+          durationLabel: '',
+          genres: const [],
+          sourceId: 'nas-main',
+          sourceName: 'Home NAS',
+          sourceKind: MediaSourceKind.nas,
+          streamUrl: '',
+          imdbId: 'tt15239678',
+          addedAt: DateTime.utc(2026, 4, 5),
+        ),
+      ];
+
+      final matches = listMediaItemsMatchingExternalIds(
+        library,
+        imdbId: 'tt15239678',
+      );
+
+      expect(matches.map((item) => item.id).toList(), ['movie-1', 'movie-2']);
+    });
   });
 
   group('listScoredMediaItemsMatchingTitles', () {

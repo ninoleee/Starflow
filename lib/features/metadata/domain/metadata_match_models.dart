@@ -21,6 +21,39 @@ extension MetadataMatchProviderX on MetadataMatchProvider {
   }
 }
 
+enum MetadataMediaType {
+  unknown,
+  movie,
+  series,
+}
+
+extension MetadataMediaTypeX on MetadataMediaType {
+  String get toItemType {
+    switch (this) {
+      case MetadataMediaType.movie:
+        return 'movie';
+      case MetadataMediaType.series:
+        return 'series';
+      case MetadataMediaType.unknown:
+        return '';
+    }
+  }
+
+  static MetadataMediaType fromRaw(String raw) {
+    switch (raw.trim().toLowerCase()) {
+      case 'movie':
+      case 'film':
+        return MetadataMediaType.movie;
+      case 'series':
+      case 'tv':
+      case 'show':
+        return MetadataMediaType.series;
+      default:
+        return MetadataMediaType.unknown;
+    }
+  }
+}
+
 class MetadataMatchRequest {
   const MetadataMatchRequest({
     required this.query,
@@ -52,6 +85,7 @@ class MetadataPersonProfile {
 class MetadataMatchResult {
   const MetadataMatchResult({
     required this.provider,
+    this.mediaType = MetadataMediaType.unknown,
     required this.title,
     this.originalTitle = '',
     this.alternateTitles = const [],
@@ -77,6 +111,7 @@ class MetadataMatchResult {
   });
 
   final MetadataMatchProvider provider;
+  final MetadataMediaType mediaType;
   final String title;
   final String originalTitle;
   final List<String> alternateTitles;
@@ -99,6 +134,10 @@ class MetadataMatchResult {
   final String imdbId;
   final String tmdbId;
   final String doubanId;
+
+  bool get isMovie => mediaType == MetadataMediaType.movie;
+
+  bool get isSeries => mediaType == MetadataMediaType.series;
 
   List<String> get titlesForMatching {
     final seen = <String>{};

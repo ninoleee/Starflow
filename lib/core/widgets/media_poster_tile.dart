@@ -4,9 +4,6 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 
-final Set<String> _loggedPosterLayoutKeys = <String>{};
-const _posterDebugKeyword = '9号秘事';
-
 class MediaPosterTile extends ConsumerWidget {
   const MediaPosterTile({
     super.key,
@@ -21,7 +18,9 @@ class MediaPosterTile extends ConsumerWidget {
     this.titleColor,
     this.subtitleColor,
     this.imageBadgeText = '',
+    this.imageTopRightBadgeText = '',
     this.focusId,
+    this.focusNode,
     this.autofocus = false,
   });
 
@@ -36,7 +35,9 @@ class MediaPosterTile extends ConsumerWidget {
   final Color? titleColor;
   final Color? subtitleColor;
   final String imageBadgeText;
+  final String imageTopRightBadgeText;
   final String? focusId;
+  final FocusNode? focusNode;
   final bool autofocus;
 
   @override
@@ -70,7 +71,6 @@ class MediaPosterTile extends ConsumerWidget {
         headers: posterHeaders,
         fallbackSources: posterFallbackSources,
         fit: BoxFit.cover,
-        debugLabel: title.contains(_posterDebugKeyword) ? 'poster:$title' : '',
         cacheWidth: skipResizeForDecode ? null : cacheWidth,
         cacheHeight: skipResizeForDecode ? null : cacheHeight,
         filterQuality: FilterQuality.low,
@@ -113,30 +113,27 @@ class MediaPosterTile extends ConsumerWidget {
               Positioned(
                 left: 10,
                 bottom: 10,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.68),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.12),
-                    ),
+                child: _PosterImageBadge(
+                  text: imageBadgeText,
+                  textStyle: theme.textTheme.labelSmall?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0,
+                    fontSize: 10,
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    child: Text(
-                      imageBadgeText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0,
-                        fontSize: 10,
-                      ),
-                    ),
+                ),
+              ),
+            if (imageTopRightBadgeText.trim().isNotEmpty)
+              Positioned(
+                top: 10,
+                right: 10,
+                child: _PosterImageBadge(
+                  text: imageTopRightBadgeText,
+                  textStyle: theme.textTheme.labelSmall?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0,
+                    fontSize: 10,
                   ),
                 ),
               ),
@@ -199,22 +196,6 @@ class MediaPosterTile extends ConsumerWidget {
           final posterHeight = naturalPosterHeight < availablePosterHeight
               ? naturalPosterHeight
               : availablePosterHeight;
-          final layoutLogKey =
-              '$title|${constraints.maxWidth.toStringAsFixed(1)}x'
-              '${constraints.maxHeight.toStringAsFixed(1)}|'
-              '${posterHeight.toStringAsFixed(1)}';
-          if (title.contains(_posterDebugKeyword) &&
-              _loggedPosterLayoutKeys.add(layoutLogKey)) {
-            debugPrint(
-              '[PosterLayout] $title '
-              'constraints=${constraints.maxWidth.toStringAsFixed(1)}x'
-              '${constraints.maxHeight.toStringAsFixed(1)} '
-              'naturalPoster=${naturalPosterHeight.toStringAsFixed(1)} '
-              'availablePoster=${availablePosterHeight.toStringAsFixed(1)} '
-              'poster=${posterHeight.toStringAsFixed(1)} '
-              'subtitle=${subtitle.trim().isNotEmpty}',
-            );
-          }
 
           return ClipRect(
             child: Column(
@@ -274,6 +255,7 @@ class MediaPosterTile extends ConsumerWidget {
         onPressed: onTap,
         onContextAction: onContextAction,
         focusId: focusId,
+        focusNode: focusNode,
         autofocus: autofocus,
         borderRadius: BorderRadius.circular(16),
         visualStyle: TvFocusVisualStyle.subtle,
@@ -287,6 +269,41 @@ class MediaPosterTile extends ConsumerWidget {
       onLongPress: onContextAction,
       onSecondaryTap: onContextAction,
       child: content,
+    );
+  }
+}
+
+class _PosterImageBadge extends StatelessWidget {
+  const _PosterImageBadge({
+    required this.text,
+    this.textStyle,
+  });
+
+  final String text;
+  final TextStyle? textStyle;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.68),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.12),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 8,
+          vertical: 4,
+        ),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: textStyle,
+        ),
+      ),
     );
   }
 }

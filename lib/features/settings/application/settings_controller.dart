@@ -191,6 +191,11 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     );
   }
 
+  Future<void> setPlaybackEngine(PlaybackEngine playbackEngine) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(playbackEngine: playbackEngine));
+  }
+
   Future<void> savePlaybackPreferences({
     required int openTimeoutSeconds,
     required double defaultSpeed,
@@ -219,6 +224,11 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   Future<void> replaceAllSettings(AppSettings settings) async {
     await _persist(settings);
+  }
+
+  Future<void> setHomeHeroDisplayMode(HomeHeroDisplayMode mode) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(homeHeroDisplayMode: mode));
   }
 
   Future<void> setHomeHeroStyle(HomeHeroStyle style) async {
@@ -251,6 +261,11 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   Future<void> setTranslucentEffectsEnabled(bool enabled) async {
     final current = state.valueOrNull ?? await _repository.load();
     await _persist(current.copyWith(translucentEffectsEnabled: enabled));
+  }
+
+  Future<void> setAutoHideNavigationBarEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(autoHideNavigationBarEnabled: enabled));
   }
 
   Future<void> setHighPerformanceModeEnabled(bool enabled) async {

@@ -14,8 +14,6 @@ import 'package:starflow/features/storage/data/local_storage_cache_repository.da
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
-const _posterDebugKeyword = '9号秘事';
-
 enum HomeSectionLayout {
   posterRail,
   carousel,
@@ -387,18 +385,6 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
       : (seed.posterHeaders.isNotEmpty
           ? seed.posterHeaders
           : cached.posterHeaders);
-  if (seed.title.contains(_posterDebugKeyword)) {
-    // Debugging poster selection for portrait slots.
-    // ignore: avoid_print
-    print(
-      '[PosterSource][Home] ${seed.title} '
-      'seedPoster=${seed.posterUrl} '
-      'cachedPoster=${cached.posterUrl} '
-      'seedBackdrop=${seed.backdropUrl} '
-      'cachedBackdrop=${cached.backdropUrl} '
-      'resolvedPoster=$resolvedPosterUrl',
-    );
-  }
   return seed.copyWith(
     posterUrl: resolvedPosterUrl,
     posterHeaders: resolvedPosterHeaders,
