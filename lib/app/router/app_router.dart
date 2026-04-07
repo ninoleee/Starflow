@@ -387,8 +387,7 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
                 )
               : DecoratedBox(
                   decoration: BoxDecoration(
-                    borderRadius:
-                        BorderRadius.circular(_kBottomNavShellRadius),
+                    borderRadius: BorderRadius.circular(_kBottomNavShellRadius),
                     border: Border.all(
                       color: Colors.white.withValues(alpha: 0.12),
                     ),
@@ -431,19 +430,20 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
           : highPerformanceModeEnabled
               ? bottomNavigationBarChild
               : IgnorePointer(
-              ignoring: !bottomBarVisible,
-              child: AnimatedSlide(
-                offset: bottomBarVisible ? Offset.zero : const Offset(0, 1.2),
-                duration: navigationAnimationDuration,
-                curve: Curves.easeOutCubic,
-                child: AnimatedOpacity(
-                  opacity: bottomBarVisible ? 1 : 0,
-                  duration: navigationOpacityDuration,
-                  curve: Curves.easeOutCubic,
-                  child: bottomNavigationBarChild,
+                  ignoring: !bottomBarVisible,
+                  child: AnimatedSlide(
+                    offset:
+                        bottomBarVisible ? Offset.zero : const Offset(0, 1.2),
+                    duration: navigationAnimationDuration,
+                    curve: Curves.easeOutCubic,
+                    child: AnimatedOpacity(
+                      opacity: bottomBarVisible ? 1 : 0,
+                      duration: navigationOpacityDuration,
+                      curve: Curves.easeOutCubic,
+                      child: bottomNavigationBarChild,
+                    ),
+                  ),
                 ),
-              ),
-            ),
     );
   }
 }
@@ -639,9 +639,6 @@ class _TelevisionNavigationShellState
   Widget build(BuildContext context) {
     final sidebarVisible =
         !widget.autoHideNavigationBarEnabled || _isSidebarVisible;
-    final sidebarAnimationDuration = widget.highPerformanceModeEnabled
-        ? Duration.zero
-        : const Duration(milliseconds: 180);
     final sidebar = ClipRRect(
       borderRadius: BorderRadius.circular(28),
       child: widget.translucentEffectsEnabled
@@ -690,30 +687,32 @@ class _TelevisionNavigationShellState
         },
         child: Row(
           children: [
-            TweenAnimationBuilder<double>(
-              tween: Tween<double>(
-                begin: sidebarVisible ? 1 : 0,
-                end: sidebarVisible ? 1 : 0,
-              ),
-              duration: sidebarAnimationDuration,
-              curve: Curves.easeOutCubic,
-              builder: (context, value, child) {
-                return ClipRect(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    widthFactor: value,
-                    child: Opacity(
-                      opacity: value <= 0.001 ? 0 : value,
-                      child: child,
+            widget.highPerformanceModeEnabled
+                ? sidebarSlot
+                : TweenAnimationBuilder<double>(
+                    tween: Tween<double>(
+                      begin: sidebarVisible ? 1 : 0,
+                      end: sidebarVisible ? 1 : 0,
+                    ),
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, value, child) {
+                      return ClipRect(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          widthFactor: value,
+                          child: Opacity(
+                            opacity: value <= 0.001 ? 0 : value,
+                            child: child,
+                          ),
+                        ),
+                      );
+                    },
+                    child: IgnorePointer(
+                      ignoring: !sidebarVisible,
+                      child: sidebarSlot,
                     ),
                   ),
-                );
-              },
-              child: IgnorePointer(
-                ignoring: !sidebarVisible,
-                child: sidebarSlot,
-              ),
-            ),
             Expanded(
               child: _TelevisionContentFocusBoundary(
                 focusSidebar: _focusCurrentDestination,
@@ -922,6 +921,74 @@ class _FloatingNavigationButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final foregroundColor = selected ? Colors.white : const Color(0xA8FFFFFF);
+    final buttonChild = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+      child: highPerformanceModeEnabled
+          ? Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                color: selected
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(_kBottomNavItemRadius),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    selected ? item.selectedIcon : item.icon,
+                    color: foregroundColor,
+                    size: 20,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    item.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: foregroundColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                color: selected
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(_kBottomNavItemRadius),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    selected ? item.selectedIcon : item.icon,
+                    color: foregroundColor,
+                    size: 20,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    item.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: foregroundColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+    );
 
     return Material(
       color: Colors.transparent,
@@ -934,44 +1001,7 @@ class _FloatingNavigationButton extends StatelessWidget {
         highlightColor: highPerformanceModeEnabled
             ? Colors.transparent
             : Colors.white.withValues(alpha: 0.02),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
-          child: AnimatedContainer(
-            duration: highPerformanceModeEnabled
-                ? Duration.zero
-                : const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: BoxDecoration(
-              color: selected
-                  ? Colors.white.withValues(alpha: 0.05)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(_kBottomNavItemRadius),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  selected ? item.selectedIcon : item.icon,
-                  color: foregroundColor,
-                  size: 20,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  item.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: foregroundColor,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.1,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        child: buttonChild,
       ),
     );
   }

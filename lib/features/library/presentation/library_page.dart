@@ -190,6 +190,14 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                                       ? null
                                       : () => _runIncrementalRefresh(
                                           rebuildableSourceIds),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
+                                ),
+                                minimumSize: const Size(0, 40),
+                                visualDensity: VisualDensity.compact,
+                              ),
                               icon: _isIncrementalRefreshing
                                   ? const SizedBox(
                                       width: 16,
@@ -223,6 +231,14 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                                   ? null
                                   : () =>
                                       _confirmForceRescan(rebuildableSourceIds),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
+                                ),
+                                minimumSize: const Size(0, 40),
+                                visualDensity: VisualDensity.compact,
+                              ),
                               icon: _isForceRescanning
                                   ? const SizedBox(
                                       width: 16,

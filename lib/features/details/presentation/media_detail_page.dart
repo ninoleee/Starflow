@@ -45,12 +45,14 @@ final enrichedDetailTargetProvider =
         ref.read(localStorageCacheRepositoryProvider);
     final cachedTarget =
         await localStorageCacheRepository.loadDetailTarget(target);
-    return cachedTarget == null
-        ? target
-        : _mergeCachedDetailTarget(
-            current: target,
-            cached: cachedTarget,
-          );
+    return _normalizeRatingLabelsInTarget(
+      cachedTarget == null
+          ? target
+          : _mergeCachedDetailTarget(
+              current: target,
+              cached: cachedTarget,
+            ),
+    );
   }
   return _resolveDetailTargetIfNeeded(
     ref: ref,
@@ -89,12 +91,14 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
             'logo=${cachedTarget.logoUrl.trim().isNotEmpty} '
             'ratings=${cachedTarget.ratingLabels.join(' | ')}',
   );
-  var nextTarget = cachedTarget == null
-      ? target
-      : _mergeCachedDetailTarget(
-          current: target,
-          cached: cachedTarget,
-        );
+  var nextTarget = _normalizeRatingLabelsInTarget(
+    cachedTarget == null
+        ? target
+        : _mergeCachedDetailTarget(
+            current: target,
+            cached: cachedTarget,
+          ),
+  );
   if (_shouldAutoEnrichMetadataTarget(
     settings: settings,
     target: nextTarget,
@@ -608,16 +612,12 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
           'imdb',
           'matched rating=${ratingMatch.ratingLabel} imdbId=${ratingMatch.imdbId}',
         );
-        final nextRatings = [...nextTarget.ratingLabels];
         final nextRatingLabel = ratingMatch.ratingLabel.trim();
-        final hasSameRating = nextRatings.any(
-          (label) => label.toLowerCase() == nextRatingLabel.toLowerCase(),
-        );
-        if (nextRatingLabel.isNotEmpty && !hasSameRating) {
-          nextRatings.add(nextRatingLabel);
-        }
         nextTarget = nextTarget.copyWith(
-          ratingLabels: nextRatings,
+          ratingLabels: _mergeLabels(
+            nextTarget.ratingLabels,
+            nextRatingLabel.isEmpty ? const [] : [nextRatingLabel],
+          ),
           imdbId: forceReplace
               ? _firstNonEmpty(ratingMatch.imdbId, nextTarget.imdbId)
               : (nextTarget.imdbId.trim().isEmpty
@@ -633,7 +633,7 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
     }
   }
 
-  return nextTarget;
+  return _normalizeRatingLabelsInTarget(nextTarget);
 }
 
 String _resolvePreferredImdbId(String currentImdbId, String query) {
@@ -2021,6 +2021,12 @@ String _firstNonEmpty(String primary, String fallback) {
   return fallback.trim();
 }
 
+MediaDetailTarget _normalizeRatingLabelsInTarget(MediaDetailTarget target) {
+  return target.copyWith(
+    ratingLabels: _mergeLabels(const [], target.ratingLabels),
+  );
+}
+
 List<String> _mergeLabels(List<String> primary, List<String> secondary) {
   final seen = <String>{};
   final merged = <String>[];
@@ -2029,12 +2035,26 @@ List<String> _mergeLabels(List<String> primary, List<String> secondary) {
     if (trimmed.isEmpty) {
       continue;
     }
-    final key = trimmed.toLowerCase();
+    final key = _labelMergeKey(trimmed);
     if (seen.add(key)) {
       merged.add(trimmed);
     }
   }
   return merged;
+}
+
+String _labelMergeKey(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized.contains('豆瓣') || normalized.contains('douban')) {
+    return 'rating:douban';
+  }
+  if (normalized.contains('imdb')) {
+    return 'rating:imdb';
+  }
+  if (normalized.contains('tmdb')) {
+    return 'rating:tmdb';
+  }
+  return normalized;
 }
 
 List<String> _mergeUniqueImageUrls(Iterable<String> values) {
@@ -3483,6 +3503,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     final playbackTargetDecorated = _decorateTargetWithSelectedSubtitle(target);
     final seriesAsync = ref.watch(seriesBrowserProvider(target));
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final highPerformanceModeEnabled = ref.watch(
+      appSettingsProvider
+          .select((settings) => settings.highPerformanceModeEnabled),
+    );
     final playbackEngine = ref.watch(
       appSettingsProvider.select((settings) => settings.playbackEngine),
     );
@@ -3517,6 +3541,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                     children: [
                       _HeroSection(
                         target: playbackTargetDecorated,
+                        simplifyVisualEffects: highPerformanceModeEnabled,
                         playFocusNode: _heroPlayFocusNode,
                         searchFocusNode: _heroSearchFocusNode,
                       ),
@@ -4236,11 +4261,13 @@ bool _isUnavailableAvailabilityLabel(String label) {
 class _HeroSection extends StatelessWidget {
   const _HeroSection({
     required this.target,
+    required this.simplifyVisualEffects,
     this.playFocusNode,
     this.searchFocusNode,
   });
 
   final MediaDetailTarget target;
+  final bool simplifyVisualEffects;
   final FocusNode? playFocusNode;
   final FocusNode? searchFocusNode;
 
@@ -4249,7 +4276,9 @@ class _HeroSection extends StatelessWidget {
     final screenWidth = MediaQuery.sizeOf(context).width;
     final screenHeight = MediaQuery.sizeOf(context).height;
     final isCompact = screenWidth < 760;
-    final heroHeight = math.max(560.0, math.min(screenHeight * 0.76, 760.0));
+    final heroHeight = simplifyVisualEffects
+        ? math.max(440.0, math.min(screenHeight * 0.62, 620.0))
+        : math.max(560.0, math.min(screenHeight * 0.76, 760.0));
     final hasHeroLogo = target.logoUrl.trim().isNotEmpty;
     final metadata = <String>[
       ...target.ratingLabels.where((item) => item.trim().isNotEmpty),
@@ -4262,6 +4291,43 @@ class _HeroSection extends StatelessWidget {
         '导演 ${target.directors.take(2).join(' / ')}',
       if (target.actors.isNotEmpty) '演员 ${target.actors.take(3).join(' / ')}',
     ].join('  ·  ');
+    final overlayWidthFactor = isCompact
+        ? 1.0
+        : simplifyVisualEffects
+            ? (hasHeroLogo ? 0.62 : 0.54)
+            : (hasHeroLogo ? 0.76 : 0.64);
+    final overlayHeightFactor = isCompact
+        ? (simplifyVisualEffects ? 0.64 : 0.74)
+        : (simplifyVisualEffects ? 0.74 : 0.84);
+    final Gradient overlayGradient = simplifyVisualEffects
+        ? RadialGradient(
+            center: isCompact
+                ? const Alignment(-0.72, 0.96)
+                : const Alignment(-0.94, 0.96),
+            radius: isCompact ? 1.06 : 0.98,
+            colors: [
+              Colors.black.withValues(alpha: hasHeroLogo ? 0.76 : 0.68),
+              Colors.black.withValues(alpha: hasHeroLogo ? 0.28 : 0.22),
+              Colors.transparent,
+            ],
+            stops: const [0, 0.46, 1],
+          )
+        : RadialGradient(
+            center: isCompact
+                ? const Alignment(-0.72, 0.96)
+                : const Alignment(-0.96, 0.96),
+            radius: isCompact ? 1.22 : 1.08,
+            colors: [
+              Colors.black.withValues(
+                alpha: hasHeroLogo ? 0.82 : 0.74,
+              ),
+              Colors.black.withValues(
+                alpha: hasHeroLogo ? 0.44 : 0.32,
+              ),
+              Colors.transparent,
+            ],
+            stops: const [0, 0.5, 1],
+          );
 
     return SizedBox(
       height: heroHeight,
@@ -4278,27 +4344,12 @@ class _HeroSection extends StatelessWidget {
             child: Align(
               alignment: Alignment.bottomLeft,
               child: FractionallySizedBox(
-                widthFactor: isCompact ? 1 : (hasHeroLogo ? 0.76 : 0.64),
-                heightFactor: isCompact ? 0.74 : 0.84,
+                widthFactor: overlayWidthFactor,
+                heightFactor: overlayHeightFactor,
                 alignment: Alignment.bottomLeft,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    gradient: RadialGradient(
-                      center: isCompact
-                          ? const Alignment(-0.72, 0.96)
-                          : const Alignment(-0.96, 0.96),
-                      radius: isCompact ? 1.22 : 1.08,
-                      colors: [
-                        Colors.black.withValues(
-                          alpha: hasHeroLogo ? 0.82 : 0.74,
-                        ),
-                        Colors.black.withValues(
-                          alpha: hasHeroLogo ? 0.44 : 0.32,
-                        ),
-                        Colors.transparent,
-                      ],
-                      stops: const [0, 0.5, 1],
-                    ),
+                    gradient: overlayGradient,
                   ),
                 ),
               ),
@@ -4307,7 +4358,7 @@ class _HeroSection extends StatelessWidget {
           Positioned(
             left: 16,
             right: 16,
-            bottom: 24,
+            bottom: simplifyVisualEffects ? 18 : 24,
             child: Padding(
               padding: EdgeInsets.only(top: kToolbarHeight),
               child: LayoutBuilder(
@@ -4316,6 +4367,7 @@ class _HeroSection extends StatelessWidget {
                     target: target,
                     metadata: metadata,
                     peopleLine: peopleLine,
+                    simplifyVisualEffects: simplifyVisualEffects,
                     playFocusNode: playFocusNode,
                     searchFocusNode: searchFocusNode,
                   );
@@ -4347,6 +4399,7 @@ class _HeroContent extends ConsumerWidget {
     required this.target,
     required this.metadata,
     required this.peopleLine,
+    required this.simplifyVisualEffects,
     this.playFocusNode,
     this.searchFocusNode,
   });
@@ -4354,6 +4407,7 @@ class _HeroContent extends ConsumerWidget {
   final MediaDetailTarget target;
   final List<String> metadata;
   final String peopleLine;
+  final bool simplifyVisualEffects;
   final FocusNode? playFocusNode;
   final FocusNode? searchFocusNode;
 
@@ -4371,8 +4425,22 @@ class _HeroContent extends ConsumerWidget {
     final primaryPlaybackLabel = showResumeAction ? '继续播放' : '立即播放';
     final canSearchResource = target.searchQuery.trim().isNotEmpty;
     final searchAutofocus = primaryPlaybackTarget == null && canSearchResource;
+    final metadataChipPadding = EdgeInsets.symmetric(
+      horizontal: simplifyVisualEffects ? 10 : 11,
+      vertical: simplifyVisualEffects ? 5 : 6,
+    );
+    final titleStyle = Theme.of(context).textTheme.headlineSmall?.copyWith(
+          color: Colors.white,
+          fontWeight: FontWeight.w800,
+          fontSize: simplifyVisualEffects ? 32 : 38,
+          height: 1.04,
+        );
     return ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: hasLogo ? 760 : 560),
+      constraints: BoxConstraints(
+        maxWidth: hasLogo
+            ? (simplifyVisualEffects ? 680 : 760)
+            : (simplifyVisualEffects ? 520 : 560),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -4384,22 +4452,23 @@ class _HeroContent extends ConsumerWidget {
               children: metadata
                   .map(
                     (item) => Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 11,
-                        vertical: 6,
-                      ),
+                      padding: metadataChipPadding,
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.12),
+                        color: Colors.white.withValues(
+                          alpha: simplifyVisualEffects ? 0.08 : 0.12,
+                        ),
                         borderRadius: BorderRadius.circular(999),
                         border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.08),
+                          color: Colors.white.withValues(
+                            alpha: simplifyVisualEffects ? 0.05 : 0.08,
+                          ),
                         ),
                       ),
                       child: Text(
                         item,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: Colors.white,
-                          fontSize: 12,
+                          fontSize: simplifyVisualEffects ? 11.5 : 12,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -4407,12 +4476,13 @@ class _HeroContent extends ConsumerWidget {
                   )
                   .toList(),
             ),
-          if (!hasLogo && metadata.isNotEmpty) const SizedBox(height: 14),
+          if (!hasLogo && metadata.isNotEmpty)
+            SizedBox(height: simplifyVisualEffects ? 12 : 14),
           if (hasLogo)
             ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxWidth: 520,
-                maxHeight: 148,
+              constraints: BoxConstraints(
+                maxWidth: simplifyVisualEffects ? 460 : 520,
+                maxHeight: simplifyVisualEffects ? 112 : 148,
               ),
               child: AppNetworkImage(
                 target.logoUrl,
@@ -4424,12 +4494,7 @@ class _HeroContent extends ConsumerWidget {
                     target.title,
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 38,
-                          height: 1.04,
-                        ),
+                    style: titleStyle,
                   );
                 },
               ),
@@ -4439,37 +4504,33 @@ class _HeroContent extends ConsumerWidget {
               target.title,
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 38,
-                    height: 1.04,
-                  ),
+              style: titleStyle,
             ),
           if (hasLogo && metadata.isNotEmpty) ...[
-            const SizedBox(height: 18),
+            SizedBox(height: simplifyVisualEffects ? 14 : 18),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: metadata
                   .map(
                     (item) => Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 11,
-                        vertical: 6,
-                      ),
+                      padding: metadataChipPadding,
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.12),
+                        color: Colors.white.withValues(
+                          alpha: simplifyVisualEffects ? 0.08 : 0.12,
+                        ),
                         borderRadius: BorderRadius.circular(999),
                         border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.08),
+                          color: Colors.white.withValues(
+                            alpha: simplifyVisualEffects ? 0.05 : 0.08,
+                          ),
                         ),
                       ),
                       child: Text(
                         item,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: Colors.white,
-                          fontSize: 12,
+                          fontSize: simplifyVisualEffects ? 11.5 : 12,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -4479,19 +4540,27 @@ class _HeroContent extends ConsumerWidget {
             ),
           ],
           if (peopleLine.trim().isNotEmpty) ...[
-            SizedBox(height: hasLogo ? 14 : 12),
+            SizedBox(
+              height: hasLogo
+                  ? (simplifyVisualEffects ? 12 : 14)
+                  : (simplifyVisualEffects ? 10 : 12),
+            ),
             Text(
               peopleLine,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 color: Color(0xFFD7E2F8),
-                fontSize: 14,
+                fontSize: simplifyVisualEffects ? 13 : 14,
                 height: 1.45,
               ),
             ),
           ],
-          SizedBox(height: hasLogo ? 24 : 20),
+          SizedBox(
+            height: hasLogo
+                ? (simplifyVisualEffects ? 18 : 24)
+                : (simplifyVisualEffects ? 16 : 20),
+          ),
           Wrap(
             spacing: 10,
             runSpacing: 10,

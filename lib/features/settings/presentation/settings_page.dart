@@ -253,12 +253,15 @@ class SettingsPage extends ConsumerStatefulWidget {
                         StarflowToggleTile(
                           title: '自动隐藏菜单栏',
                           subtitle: _autoHideNavigationBarSummary(settings),
-                          value: settings.autoHideNavigationBarEnabled,
-                          onChanged: (value) {
-                            ref
-                                .read(settingsControllerProvider.notifier)
-                                .setAutoHideNavigationBarEnabled(value);
-                          },
+                          value:
+                              _effectiveAutoHideNavigationBarEnabled(settings),
+                          onChanged: settings.highPerformanceModeEnabled
+                              ? null
+                              : (value) {
+                                  ref
+                                      .read(settingsControllerProvider.notifier)
+                                      .setAutoHideNavigationBarEnabled(value);
+                                },
                         ),
                         const SizedBox(height: 18),
                         Text(
@@ -305,6 +308,18 @@ class SettingsPage extends ConsumerStatefulWidget {
                                   ),
                         ),
                         const SizedBox(height: 10),
+                        if (settings.highPerformanceModeEnabled) ...[
+                          Text(
+                            '高性能模式开启时，Hero 会固定使用静态海报样式。',
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                    ),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
                         Wrap(
                           spacing: 10,
                           runSpacing: 10,
@@ -312,8 +327,10 @@ class SettingsPage extends ConsumerStatefulWidget {
                             for (final style in HomeHeroStyle.values)
                               StarflowChipButton(
                                 label: style.label,
-                                selected: style == settings.homeHeroStyle,
-                                onPressed: heroEnabled
+                                selected:
+                                    style == _effectiveHomeHeroStyle(settings),
+                                onPressed: heroEnabled &&
+                                        !settings.highPerformanceModeEnabled
                                     ? () {
                                         ref
                                             .read(settingsControllerProvider
@@ -339,12 +356,15 @@ class SettingsPage extends ConsumerStatefulWidget {
                         const SizedBox(height: 14),
                         StarflowToggleTile(
                           title: '启用 Hero 全屏背景图',
-                          value: settings.homeHeroBackgroundEnabled,
-                          onChanged: (value) {
-                            ref
-                                .read(settingsControllerProvider.notifier)
-                                .setHomeHeroBackgroundEnabled(value);
-                          },
+                          subtitle: _homeHeroBackgroundSummary(settings),
+                          value: _effectiveHomeHeroBackgroundEnabled(settings),
+                          onChanged: settings.highPerformanceModeEnabled
+                              ? null
+                              : (value) {
+                                  ref
+                                      .read(settingsControllerProvider.notifier)
+                                      .setHomeHeroBackgroundEnabled(value);
+                                },
                         ),
                       ],
                     ),
@@ -838,12 +858,29 @@ String _playbackSettingsSummary(AppSettings settings) {
 }
 
 String _highPerformanceModeSummary() {
-  return '所有客户端都会关闭磨砂/模糊背景和通用面板阴影，并压低启动页、导航切换、首页 Hero 与 TV 焦点动画；进入播放器时，还会简化叠层，暂停首页 Hero 补数、详情自动补元数据/本地资源匹配、后台图片加载，并取消或跳过索引刷新。';
+  return '所有客户端都会关闭磨砂/模糊背景、菜单栏自动隐藏、Hero 全屏背景图与通用面板阴影，并把首页 Hero 固定为静态海报卡片；同时压低启动页、导航切换、首页 Hero 与 TV 焦点动画。进入播放器时，还会简化叠层，暂停首页 Hero 补数、详情自动补元数据/本地资源匹配、后台图片加载，并取消或跳过索引刷新。';
 }
 
 bool _effectiveTranslucentEffectsEnabled(AppSettings settings) {
   return !settings.highPerformanceModeEnabled &&
       settings.translucentEffectsEnabled;
+}
+
+bool _effectiveAutoHideNavigationBarEnabled(AppSettings settings) {
+  return !settings.highPerformanceModeEnabled &&
+      settings.autoHideNavigationBarEnabled;
+}
+
+HomeHeroStyle _effectiveHomeHeroStyle(AppSettings settings) {
+  if (settings.highPerformanceModeEnabled) {
+    return HomeHeroStyle.poster;
+  }
+  return settings.homeHeroStyle;
+}
+
+bool _effectiveHomeHeroBackgroundEnabled(AppSettings settings) {
+  return !settings.highPerformanceModeEnabled &&
+      settings.homeHeroBackgroundEnabled;
 }
 
 String _translucentEffectsSummary(AppSettings settings) {
@@ -854,10 +891,20 @@ String _translucentEffectsSummary(AppSettings settings) {
 }
 
 String _autoHideNavigationBarSummary(AppSettings settings) {
+  if (settings.highPerformanceModeEnabled) {
+    return '高性能模式开启时，此项会被强制关闭，菜单栏会保持常驻显示。';
+  }
   if (!settings.autoHideNavigationBarEnabled) {
     return '关闭后菜单栏会保持常驻显示，不再自动隐藏。';
   }
   return '普通端会按页面交互自动隐藏；TV 端在焦点离开左侧菜单栏后自动收起。';
+}
+
+String _homeHeroBackgroundSummary(AppSettings settings) {
+  if (settings.highPerformanceModeEnabled) {
+    return '高性能模式开启时，此项会被强制关闭。';
+  }
+  return '关闭后首页 Hero 只保留纯色/渐变底，不再加载全屏背景图。';
 }
 
 String _searchSourceSummary(AppSettings settings) {

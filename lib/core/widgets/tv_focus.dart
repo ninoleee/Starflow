@@ -1146,6 +1146,7 @@ class TvAdaptiveButton extends StatelessWidget {
     required this.icon,
     required this.onPressed,
     this.variant = TvButtonVariant.filled,
+    this.compact = false,
     this.autofocus = false,
     this.focusNode,
     this.focusId,
@@ -1155,6 +1156,7 @@ class TvAdaptiveButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onPressed;
   final TvButtonVariant variant;
+  final bool compact;
   final bool autofocus;
   final FocusNode? focusNode;
   final String? focusId;
@@ -1171,6 +1173,7 @@ class TvAdaptiveButton extends StatelessWidget {
       icon: icon,
       onPressed: onPressed,
       variant: mappedVariant,
+      compact: compact,
       autofocus: autofocus,
       focusNode: focusNode,
       focusId: focusId,

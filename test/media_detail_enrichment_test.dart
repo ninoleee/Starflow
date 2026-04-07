@@ -94,6 +94,90 @@ void main() {
       expect(resolved.ratingLabels, ['豆瓣 9.6']);
     });
 
+    test('normalizes duplicate rating labels already present on detail target',
+        () async {
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'wmdbMetadataMatchEnabled': false,
+              'tmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+            }),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const target = MediaDetailTarget(
+        title: '美丽人生',
+        posterUrl: '',
+        overview: '',
+        year: 1997,
+        ratingLabels: ['豆瓣 9.6', '豆瓣9.6', 'IMDb 8.6'],
+        availabilityLabel: '无',
+        searchQuery: '美丽人生',
+        sourceName: '豆瓣',
+      );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(target).future,
+      );
+
+      expect(resolved.ratingLabels, ['豆瓣 9.6', 'IMDb 8.6']);
+    });
+
+    test('dedupes provider ratings when current target merges with cache',
+        () async {
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'wmdbMetadataMatchEnabled': false,
+              'tmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+            }),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const seedTarget = MediaDetailTarget(
+        title: '美丽人生',
+        posterUrl: '',
+        overview: '',
+        year: 1997,
+        ratingLabels: ['豆瓣 9.6'],
+        availabilityLabel: '无',
+        searchQuery: '美丽人生',
+        sourceName: '豆瓣',
+      );
+      final cachedTarget = seedTarget.copyWith(
+        ratingLabels: const ['豆瓣9.6', 'TMDB 8.3'],
+      );
+
+      await container
+          .read(localStorageCacheRepositoryProvider)
+          .saveDetailTarget(
+            seedTarget: seedTarget,
+            resolvedTarget: cachedTarget,
+          );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(seedTarget).future,
+      );
+
+      expect(resolved.ratingLabels, ['豆瓣 9.6', 'TMDB 8.3']);
+    });
+
     test('resolves Emby playback details for existing matched target',
         () async {
       final container = ProviderContainer(
@@ -243,7 +327,9 @@ void main() {
         ),
       );
 
-      await container.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+      await container
+          .read(localStorageCacheRepositoryProvider)
+          .saveDetailTarget(
             seedTarget: seedTarget,
             resolvedTarget: cachedTarget,
           );
@@ -304,7 +390,9 @@ void main() {
         sectionName: '剧集',
       );
 
-      await container.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+      await container
+          .read(localStorageCacheRepositoryProvider)
+          .saveDetailTarget(
             seedTarget: seedTarget,
             resolvedTarget: cachedTarget,
           );
@@ -368,7 +456,9 @@ void main() {
         resourcePath: '/movies/天书奇谭 (1983).strm',
       );
 
-      await container.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+      await container
+          .read(localStorageCacheRepositoryProvider)
+          .saveDetailTarget(
             seedTarget: seedTarget,
             resolvedTarget: cachedTarget,
           );

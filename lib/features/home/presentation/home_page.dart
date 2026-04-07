@@ -1951,8 +1951,7 @@ class _FeaturedHeroCard extends StatelessWidget {
             item: item,
           );
     final usesPosterHeroStyle = effectiveArtworkStyle.usesPosterArtwork;
-    final usesCompositeBackdrop =
-        !simplifyVisualEffects &&
+    final usesCompositeBackdrop = !simplifyVisualEffects &&
         displayMode.usesFrostedBackdrop &&
         !usesPosterHeroStyle;
     final borderRadius = BorderRadius.circular(displayMode.cardBorderRadius);
@@ -2341,23 +2340,23 @@ class _HeroTitleText extends StatelessWidget {
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
       style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-        color: Colors.white,
-        fontWeight: FontWeight.w800,
-        fontSize: _resolveHeroTitleFontSize(
-          displayMode: displayMode,
-          style: style,
-        ),
-        height: 1.05,
-        shadows: simplifyVisualEffects
-            ? null
-            : [
-                Shadow(
-                  color: Colors.black.withValues(alpha: 0.45),
-                  blurRadius: 20,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-      ),
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+            fontSize: _resolveHeroTitleFontSize(
+              displayMode: displayMode,
+              style: style,
+            ),
+            height: 1.05,
+            shadows: simplifyVisualEffects
+                ? null
+                : [
+                    Shadow(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      blurRadius: 20,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+          ),
     );
   }
 }

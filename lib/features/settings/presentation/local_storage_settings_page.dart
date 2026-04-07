@@ -55,6 +55,7 @@ class _LocalStorageSettingsPageState
     _LocalStorageGroup(
       title: '使用记录',
       subtitle: '和播放、搜索习惯相关的历史记录与记忆。',
+      showItems: false,
       types: [
         LocalStorageCacheType.playbackMemory,
         LocalStorageCacheType.televisionSearchPreferences,
@@ -337,15 +338,17 @@ class _LocalStorageGroupCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          for (var index = 0; index < summaries.length; index++) ...[
-            _LocalStorageTile(
-              summary: summaries[index],
-              onClear: _hasSummaryData(summaries[index])
-                  ? () => onClearItem(summaries[index].type)
-                  : null,
-            ),
-            if (index != summaries.length - 1) const SizedBox(height: 10),
+          if (group.showItems) ...[
+            const SizedBox(height: 14),
+            for (var index = 0; index < summaries.length; index++) ...[
+              _LocalStorageTile(
+                summary: summaries[index],
+                onClear: _hasSummaryData(summaries[index])
+                    ? () => onClearItem(summaries[index].type)
+                    : null,
+              ),
+              if (index != summaries.length - 1) const SizedBox(height: 10),
+            ],
           ],
         ],
       ),
@@ -383,11 +386,13 @@ class _LocalStorageGroup {
   const _LocalStorageGroup({
     required this.title,
     required this.subtitle,
+    this.showItems = true,
     required this.types,
   });
 
   final String title;
   final String subtitle;
+  final bool showItems;
   final List<LocalStorageCacheType> types;
 }
 
