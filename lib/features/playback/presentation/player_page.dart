@@ -1491,6 +1491,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (!mounted) {
       return;
     }
+    if (_error != null) {
+      context.pop();
+      return;
+    }
     if (_tvPlaybackChromeVisible) {
       _hideTvPlaybackChrome();
       return;
@@ -1501,21 +1505,25 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     _tvExitDialogVisible = true;
     final shouldExit = await showDialog<bool>(
+          barrierDismissible: false,
           context: context,
           builder: (dialogContext) {
-            return AlertDialog(
-              title: const Text('退出播放'),
-              content: const Text('确认退出当前播放吗？'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(false),
-                  child: const Text('继续播放'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(true),
-                  child: const Text('退出'),
-                ),
-              ],
+            return PopScope(
+              canPop: false,
+              child: AlertDialog(
+                title: const Text('退出播放'),
+                content: const Text('确认退出当前播放吗？'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                    child: const Text('继续播放'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    child: const Text('退出'),
+                  ),
+                ],
+              ),
             );
           },
         ) ??
@@ -1591,6 +1599,30 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 child: Row(
                   children: [
                     const Spacer(),
+                    StarflowIconButton(
+                      icon: Icons.closed_caption_rounded,
+                      tooltip: '字幕',
+                      variant: StarflowButtonVariant.ghost,
+                      onPressed: player == null
+                          ? null
+                          : () {
+                              _showTvPlaybackChrome(autoHide: false);
+                              unawaited(_openCurrentSubtitleSelector());
+                            },
+                    ),
+                    const SizedBox(width: 10),
+                    StarflowIconButton(
+                      icon: Icons.audiotrack_rounded,
+                      tooltip: '音轨',
+                      variant: StarflowButtonVariant.ghost,
+                      onPressed: player == null
+                          ? null
+                          : () {
+                              _showTvPlaybackChrome(autoHide: false);
+                              unawaited(_openCurrentAudioSelector());
+                            },
+                    ),
+                    const SizedBox(width: 10),
                     StarflowIconButton(
                       icon: Icons.tune_rounded,
                       tooltip: '播放设置',
@@ -1865,12 +1897,38 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }) {
     if (_error != null) {
       return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            '播放失败：$_error',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyLarge?.copyWith(color: Colors.white),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '播放失败',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '$_error',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: Colors.white.withValues(alpha: 0.92),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                StarflowButton(
+                  label: '返回',
+                  icon: Icons.arrow_back_rounded,
+                  onPressed: () => context.pop(),
+                  variant: StarflowButtonVariant.secondary,
+                ),
+              ],
+            ),
           ),
         ),
       );

@@ -17,6 +17,13 @@ void main() {
         ['Dune Part Two 2024', 'Dune Part Two'],
       );
     });
+
+    test('falls back from episode query with year to pure title', () {
+      expect(
+        buildSubtitleSearchQueryVariants('Dune Part Two 2024 S01E01'),
+        ['Dune Part Two 2024 S01E01', 'Dune Part Two 2024', 'Dune Part Two'],
+      );
+    });
   });
 
   group('isAssrtErrorResponse', () {

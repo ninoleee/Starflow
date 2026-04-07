@@ -160,7 +160,7 @@ class SettingsPage extends ConsumerWidget {
               SectionPanel(
                 title: '本地存储',
                 child: _SettingsNavigationTile(
-                  title: '查看与清理缓存',
+                  title: '查看分类与清理',
                   onTap: () => _openLocalStorageSettings(context),
                 ),
               ),

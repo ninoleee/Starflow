@@ -2690,12 +2690,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
         _libraryMatchChoices.any((choice) => choice.isPlayable);
   }
 
-  Widget _buildPlayableVariantSwitcherBlock(MediaDetailTarget target) {
+  Widget _buildPlayableVariantSwitcherBlock() {
     final currentIndex = _currentLibraryMatchIndex;
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final currentChoice = _libraryMatchChoices[currentIndex];
-    final currentChoiceSubtitle = _movieVariantOptionSubtitle(currentChoice)
-        .trim();
+    final currentChoiceSubtitle =
+        _movieVariantOptionSubtitle(currentChoice).trim();
     return _DetailBlock(
       title: '播放版本',
       child: Column(
@@ -2930,7 +2930,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            nextChoices.isEmpty ? statusMessage! : '已找到 ${nextChoices.length} 条可用字幕',
+            nextChoices.isEmpty
+                ? statusMessage!
+                : '已找到 ${nextChoices.length} 条可用字幕',
           ),
         ),
       );
@@ -2988,16 +2990,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       return '没有找到可直接加载的字幕结果';
     }
 
-    final autoLoadableOnlyCount = results
-        .where((item) => item.canAutoLoad && !item.canDownload)
-        .length;
+    final autoLoadableOnlyCount =
+        results.where((item) => item.canAutoLoad && !item.canDownload).length;
     if (autoLoadableOnlyCount > 0) {
       return '已搜到 $autoLoadableOnlyCount 条字幕，但当前来源暂不支持应用内直接下载';
     }
 
-    final downloadOnlyCount = results
-        .where((item) => item.canDownload && !item.canAutoLoad)
-        .length;
+    final downloadOnlyCount =
+        results.where((item) => item.canDownload && !item.canAutoLoad).length;
     if (downloadOnlyCount > 0) {
       return '已搜到 $downloadOnlyCount 条字幕，但当前结果暂不能自动挂载播放';
     }
@@ -3515,58 +3515,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                   const SizedBox(height: 12),
                                   const _InfoLabel('本地资源'),
                                   const SizedBox(height: 8),
-                                  if (isTelevision)
-                                    TvSelectionTile(
-                                      title: '本地资源',
-                                      value: _libraryMatchOptionLabel(
-                                        _libraryMatchChoices[
-                                            _currentLibraryMatchIndex],
-                                      ),
-                                      onPressed: _isMatchingLocalResource
-                                          ? null
-                                          : _openTelevisionLibraryMatchPicker,
-                                      focusId:
-                                          'detail:resource:library-selector',
-                                    )
-                                  else
-                                    DropdownButtonHideUnderline(
-                                      child: DropdownButton<int>(
-                                        value: _currentLibraryMatchIndex,
-                                        isExpanded: true,
-                                        dropdownColor: const Color(0xFF142235),
-                                        iconEnabledColor: Colors.white70,
-                                        style: const TextStyle(
-                                          color: Color(0xFFDCE6F8),
-                                          fontSize: 14,
-                                          height: 1.35,
-                                        ),
-                                        items: List.generate(
-                                          _libraryMatchChoices.length,
-                                          (i) {
-                                            return DropdownMenuItem<int>(
-                                              value: i,
-                                              child: Text(
-                                                _libraryMatchOptionLabel(
-                                                  _libraryMatchChoices[i],
-                                                ),
-                                                maxLines: 2,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            );
-                                          },
-                                        ),
-                                        onChanged: _isMatchingLocalResource
-                                            ? null
-                                            : (i) {
-                                                if (i == null) {
-                                                  return;
-                                                }
-                                                _applySelectedLibraryMatchIndex(
-                                                  i,
-                                                );
-                                              },
-                                      ),
-                                    ),
+                                  _buildLibraryMatchSelectionControl(
+                                    isTelevision: isTelevision,
+                                    title: '本地资源',
+                                    focusId: 'detail:resource:library-selector',
+                                    televisionOnPressed:
+                                        _openTelevisionLibraryMatchPicker,
+                                  ),
                                 ],
                                 if (target.isPlayable) ...[
                                   const SizedBox(height: 12),
@@ -3949,7 +3904,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                             ),
                           ),
                         if (_shouldShowPlayableVariantSwitcher(target))
-                          _buildPlayableVariantSwitcherBlock(target),
+                          _buildPlayableVariantSwitcherBlock(),
                       ],
                     ),
                   ),
