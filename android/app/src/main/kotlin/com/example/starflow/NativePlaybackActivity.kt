@@ -60,6 +60,7 @@ class NativePlaybackActivity : Activity() {
     private var nextInitializePlayWhenReady: Boolean? = null
     private var pendingControllerFocusTarget = ControllerFocusTarget.NONE
     private var exitConfirmationDialog: AlertDialog? = null
+    private var tvSecondaryActionsDialog: AlertDialog? = null
     private val playbackSystemSessionManager by lazy {
         PlaybackSystemSessionManager(
             context = applicationContext,
@@ -72,8 +73,14 @@ class NativePlaybackActivity : Activity() {
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             syncPlaybackSystemSession()
-            if (isTelevisionDevice) {
+            if (isTelevisionDevice &&
+                !subtitleSearchActive &&
+                tvSecondaryActionsDialog?.isShowing != true
+            ) {
                 if (isPlaying) {
+                    playerView.hideController()
+                    playerView.requestFocus()
+                } else {
                     showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
                 }
             }
@@ -117,14 +124,15 @@ class NativePlaybackActivity : Activity() {
             setBackgroundColor(Color.BLACK)
             keepScreenOn = true
             setShowSubtitleButton(true)
-            setShowFastForwardButton(true)
-            setShowRewindButton(true)
+            setShowFastForwardButton(!isTelevisionDevice)
+            setShowRewindButton(!isTelevisionDevice)
             setShowPreviousButton(false)
             setShowNextButton(false)
-            setControllerAutoShow(true)
+            setControllerAutoShow(!isTelevisionDevice)
             setControllerHideOnTouch(!isTelevisionDevice)
-            setControllerShowTimeoutMs(if (isTelevisionDevice) 8_000 else 4_000)
+            setControllerShowTimeoutMs(if (isTelevisionDevice) 6_000 else 4_000)
         }
+        applyTelevisionMinimalControllerUi()
         configureRemoteControls()
         findViewById<View>(R.id.native_external_subtitle)?.setOnClickListener {
             openExternalSubtitlePicker()
@@ -152,6 +160,10 @@ class NativePlaybackActivity : Activity() {
         restoreVideoSurfaceIfNeeded()
         playerView.onResume()
         syncPlaybackSystemSession()
+        if (isTelevisionDevice && player?.isPlaying == true && !subtitleSearchActive) {
+            playerView.hideController()
+            playerView.requestFocus()
+        }
         if (!subtitleSearchActive && resumePlaybackAfterSubtitleSearch) {
             player?.playWhenReady = true
             resumePlaybackAfterSubtitleSearch = false
@@ -170,6 +182,8 @@ class NativePlaybackActivity : Activity() {
     override fun onStop() {
         exitConfirmationDialog?.dismiss()
         exitConfirmationDialog = null
+        tvSecondaryActionsDialog?.dismiss()
+        tvSecondaryActionsDialog = null
         persistPlaybackProgress(force = true)
         if (isFinishing) {
             releasePlayer()
@@ -203,7 +217,12 @@ class NativePlaybackActivity : Activity() {
         if (isInPictureInPictureMode) {
             playerView.hideController()
         } else if (!subtitleSearchActive) {
-            showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
+            if (isTelevisionDevice && player?.isPlaying == true) {
+                playerView.hideController()
+                playerView.requestFocus()
+            } else {
+                showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
+            }
         }
     }
 
@@ -246,7 +265,7 @@ class NativePlaybackActivity : Activity() {
 
             KeyEvent.KEYCODE_DPAD_DOWN -> {
                 if (isTelevisionDevice && !playerView.isControllerFullyVisible) {
-                    showControllerForRemoteFocus(ControllerFocusTarget.SETTINGS)
+                    openTelevisionSecondaryOptions()
                     return true
                 }
             }
@@ -307,12 +326,23 @@ class NativePlaybackActivity : Activity() {
             KeyEvent.KEYCODE_MENU,
             KeyEvent.KEYCODE_INFO,
             KeyEvent.KEYCODE_SETTINGS -> {
-                showControllerForRemoteFocus(ControllerFocusTarget.SETTINGS)
+                if (isTelevisionDevice) {
+                    openTelevisionSecondaryOptions()
+                } else {
+                    showControllerForRemoteFocus(ControllerFocusTarget.SETTINGS)
+                }
                 return true
             }
 
             KeyEvent.KEYCODE_CAPTIONS -> {
-                showControllerForRemoteFocus(ControllerFocusTarget.SUBTITLE)
+                if (isTelevisionDevice) {
+                    queueControllerButtonAction(
+                        Media3UiR.id.exo_subtitle,
+                        ControllerFocusTarget.SUBTITLE,
+                    )
+                } else {
+                    showControllerForRemoteFocus(ControllerFocusTarget.SUBTITLE)
+                }
                 return true
             }
 
@@ -450,7 +480,12 @@ class NativePlaybackActivity : Activity() {
             applyExternalSubtitleConfiguration(showFeedback = false)
         }
         syncPlaybackSystemSession()
-        showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
+        if (isTelevisionDevice && exoPlayer.playWhenReady) {
+            playerView.hideController()
+            playerView.requestFocus()
+        } else {
+            showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
+        }
         if (restoredResumePositionMs > 5_000L) {
             showToast("已从 ${formatClockDuration(restoredResumePositionMs)} 继续播放")
         }
@@ -791,7 +826,12 @@ class NativePlaybackActivity : Activity() {
     private fun restoreVideoSurfaceIfNeeded() {
         playerView.visibility = View.VISIBLE
         playerView.videoSurfaceView?.visibility = View.VISIBLE
-        showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
+        if (isTelevisionDevice && player?.playWhenReady == true) {
+            playerView.hideController()
+            playerView.requestFocus()
+        } else {
+            showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
+        }
     }
 
     private fun loadExternalSubtitle(uri: Uri, intentFlags: Int) {
@@ -892,6 +932,31 @@ class NativePlaybackActivity : Activity() {
         showControllerForRemoteFocus(ControllerFocusTarget.SETTINGS)
     }
 
+    private fun applyTelevisionMinimalControllerUi() {
+        if (!isTelevisionDevice) {
+            return
+        }
+        setControllerViewVisible(R.id.native_subtitle_delay, false)
+        setControllerViewVisible(R.id.native_external_subtitle, false)
+        setControllerViewVisible(R.id.native_online_subtitle_search, false)
+        setControllerViewVisible(Media3UiR.id.exo_fullscreen, false)
+        setControllerViewVisible(Media3UiR.id.exo_minimal_fullscreen, false)
+        setControllerViewVisible(Media3UiR.id.exo_overflow_show, false)
+        setControllerViewVisible(Media3UiR.id.exo_overflow_hide, false)
+        setControllerViewVisible(Media3UiR.id.exo_shuffle, false)
+        setControllerViewVisible(Media3UiR.id.exo_repeat_toggle, false)
+        setControllerViewVisible(Media3UiR.id.exo_vr, false)
+    }
+
+    private fun setControllerViewVisible(viewId: Int, visible: Boolean) {
+        findViewById<View?>(viewId)?.apply {
+            visibility = if (visible) View.VISIBLE else View.GONE
+            isEnabled = visible
+            isFocusable = visible
+            isFocusableInTouchMode = visible
+        }
+    }
+
     private fun configureRemoteControls() {
         playerView.isFocusable = true
         playerView.isFocusableInTouchMode = true
@@ -909,34 +974,119 @@ class NativePlaybackActivity : Activity() {
             },
         )
         configureFocusability(
-            intArrayOf(
-                Media3UiR.id.exo_rew,
-                Media3UiR.id.exo_play_pause,
-                Media3UiR.id.exo_ffwd,
-                Media3UiR.id.exo_subtitle,
-                R.id.native_subtitle_delay,
-                R.id.native_external_subtitle,
-                R.id.native_online_subtitle_search,
-                Media3UiR.id.exo_settings,
-                Media3UiR.id.exo_fullscreen,
-                Media3UiR.id.exo_overflow_show,
-                Media3UiR.id.exo_overflow_hide,
-            ),
+            if (isTelevisionDevice) {
+                intArrayOf(
+                    Media3UiR.id.exo_play_pause,
+                    Media3UiR.id.exo_subtitle,
+                    Media3UiR.id.exo_settings,
+                )
+            } else {
+                intArrayOf(
+                    Media3UiR.id.exo_rew,
+                    Media3UiR.id.exo_play_pause,
+                    Media3UiR.id.exo_ffwd,
+                    Media3UiR.id.exo_subtitle,
+                    R.id.native_subtitle_delay,
+                    R.id.native_external_subtitle,
+                    R.id.native_online_subtitle_search,
+                    Media3UiR.id.exo_settings,
+                    Media3UiR.id.exo_fullscreen,
+                    Media3UiR.id.exo_overflow_show,
+                    Media3UiR.id.exo_overflow_hide,
+                )
+            },
         )
         configureHorizontalFocusChain(
-            intArrayOf(
-                Media3UiR.id.exo_subtitle,
-                R.id.native_subtitle_delay,
-                R.id.native_external_subtitle,
-                R.id.native_online_subtitle_search,
-                Media3UiR.id.exo_settings,
-                Media3UiR.id.exo_fullscreen,
-                Media3UiR.id.exo_overflow_show,
-            ),
+            if (isTelevisionDevice) {
+                intArrayOf(
+                    Media3UiR.id.exo_subtitle,
+                    Media3UiR.id.exo_settings,
+                )
+            } else {
+                intArrayOf(
+                    Media3UiR.id.exo_subtitle,
+                    R.id.native_subtitle_delay,
+                    R.id.native_external_subtitle,
+                    R.id.native_online_subtitle_search,
+                    Media3UiR.id.exo_settings,
+                    Media3UiR.id.exo_fullscreen,
+                    Media3UiR.id.exo_overflow_show,
+                )
+            },
         )
         if (isTelevisionDevice) {
             playerView.requestFocus()
         }
+    }
+
+    private fun openTelevisionSecondaryOptions() {
+        if (!isTelevisionDevice || subtitleSearchActive) {
+            return
+        }
+        if (tvSecondaryActionsDialog?.isShowing == true) {
+            return
+        }
+
+        playerView.hideController()
+        val labels = arrayOf(
+            "字幕轨道",
+            "音轨与播放器设置",
+            "在线查找字幕",
+            "加载外部字幕",
+            "字幕偏移",
+        )
+        val actions = listOf<() -> Unit>(
+            {
+                queueControllerButtonAction(
+                    Media3UiR.id.exo_subtitle,
+                    ControllerFocusTarget.SUBTITLE,
+                )
+            },
+            {
+                queueControllerButtonAction(
+                    Media3UiR.id.exo_settings,
+                    ControllerFocusTarget.SETTINGS,
+                )
+            },
+            { openOnlineSubtitleSearch() },
+            { openExternalSubtitlePicker() },
+            { openSubtitleDelayPicker() },
+        )
+
+        tvSecondaryActionsDialog = AlertDialog.Builder(this)
+            .setTitle("更多操作")
+            .setItems(labels) { dialog, which ->
+                dialog.dismiss()
+                playerView.post { actions[which].invoke() }
+            }
+            .setNegativeButton("关闭", null)
+            .create()
+            .apply {
+                setOnDismissListener {
+                    tvSecondaryActionsDialog = null
+                    if (!isFinishing && !subtitleSearchActive) {
+                        playerView.post {
+                            enterImmersiveMode()
+                            playerView.requestFocus()
+                        }
+                    }
+                }
+                show()
+            }
+    }
+
+    private fun queueControllerButtonAction(viewId: Int, fallback: ControllerFocusTarget) {
+        showControllerForRemoteFocus(fallback)
+        playerView.postDelayed(
+            {
+                val button = findViewById<View?>(viewId)
+                if (button != null && button.isShown && button.isEnabled) {
+                    button.requestFocus()
+                    button.performClick()
+                }
+            },
+            60L,
+        )
     }
 
     private fun configureFocusability(ids: IntArray) {
@@ -988,32 +1138,56 @@ class NativePlaybackActivity : Activity() {
             ControllerFocusTarget.NONE -> false
             ControllerFocusTarget.PLAYER -> playerView.requestFocus()
             ControllerFocusTarget.PRIMARY -> requestFocusForAny(
-                intArrayOf(
-                    Media3UiR.id.exo_play_pause,
-                    Media3UiR.id.exo_ffwd,
-                    Media3UiR.id.exo_rew,
-                    Media3UiR.id.exo_settings,
-                ),
+                if (isTelevisionDevice) {
+                    intArrayOf(
+                        Media3UiR.id.exo_play_pause,
+                        Media3UiR.id.exo_subtitle,
+                        Media3UiR.id.exo_settings,
+                    )
+                } else {
+                    intArrayOf(
+                        Media3UiR.id.exo_play_pause,
+                        Media3UiR.id.exo_ffwd,
+                        Media3UiR.id.exo_rew,
+                        Media3UiR.id.exo_settings,
+                    )
+                },
             )
 
             ControllerFocusTarget.SETTINGS -> requestFocusForAny(
-                intArrayOf(
-                    Media3UiR.id.exo_settings,
-                    R.id.native_online_subtitle_search,
-                    R.id.native_external_subtitle,
-                    Media3UiR.id.exo_subtitle,
-                    Media3UiR.id.exo_play_pause,
-                ),
+                if (isTelevisionDevice) {
+                    intArrayOf(
+                        Media3UiR.id.exo_settings,
+                        Media3UiR.id.exo_subtitle,
+                        Media3UiR.id.exo_play_pause,
+                    )
+                } else {
+                    intArrayOf(
+                        Media3UiR.id.exo_settings,
+                        R.id.native_online_subtitle_search,
+                        R.id.native_external_subtitle,
+                        Media3UiR.id.exo_subtitle,
+                        Media3UiR.id.exo_play_pause,
+                    )
+                },
             )
 
             ControllerFocusTarget.SUBTITLE -> requestFocusForAny(
-                intArrayOf(
-                    Media3UiR.id.exo_subtitle,
-                    R.id.native_online_subtitle_search,
-                    R.id.native_external_subtitle,
-                    R.id.native_subtitle_delay,
-                    Media3UiR.id.exo_settings,
-                ),
+                if (isTelevisionDevice) {
+                    intArrayOf(
+                        Media3UiR.id.exo_subtitle,
+                        Media3UiR.id.exo_settings,
+                        Media3UiR.id.exo_play_pause,
+                    )
+                } else {
+                    intArrayOf(
+                        Media3UiR.id.exo_subtitle,
+                        R.id.native_online_subtitle_search,
+                        R.id.native_external_subtitle,
+                        R.id.native_subtitle_delay,
+                        Media3UiR.id.exo_settings,
+                    )
+                },
             )
         }
         if (!handled) {

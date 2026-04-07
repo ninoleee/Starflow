@@ -471,6 +471,97 @@ void main() {
       expect(mideast.seasonNumber, 2);
     });
 
+    test(
+        'keeps multi-file numeric season folders under parent series root seasons',
+        () async {
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/FoodDaoMulti/') {
+            return http.Response.bytes(
+              utf8.encode(_foodDaoMultiRootPropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/FoodDaoMulti/2.%E5%B7%B4%E4%BB%A5/') {
+            return http.Response.bytes(
+              utf8.encode(_foodDaoMultiSeasonTwoPropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/FoodDaoMulti/5.%E7%BE%8E%E5%9B%BD/') {
+            return http.Response.bytes(
+              utf8.encode(_foodDaoMultiSeasonFivePropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/FoodDaoMulti/9.%E9%9F%A9%E5%9B%BD/') {
+            return http.Response.bytes(
+              utf8.encode(_foodDaoMultiSeasonNinePropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'GET' && request.url.path.endsWith('.strm')) {
+            return http.Response(
+              'https://media.example.com/fooddao/multi.m3u8\n',
+              200,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'nas-fooddao-multi',
+          name: 'FoodDao Multi NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/Shows/FoodDaoMulti/',
+          enabled: true,
+          webDavStructureInferenceEnabled: true,
+        ),
+        limit: 20,
+      );
+
+      expect(items, hasLength(7));
+
+      final special = items.firstWhere(
+        (item) => item.actualAddress == '/dav/Shows/FoodDaoMulti/吴哥窟.strm',
+      );
+      expect(special.itemType, 'episode');
+      expect(special.seasonNumber, 0);
+
+      for (final item in items.where(
+        (item) => item.actualAddress.contains('/2.巴以/'),
+      )) {
+        expect(item.itemType, 'episode');
+        expect(item.seasonNumber, 2);
+      }
+      for (final item in items.where(
+        (item) => item.actualAddress.contains('/5.美国/'),
+      )) {
+        expect(item.itemType, 'episode');
+        expect(item.seasonNumber, 5);
+      }
+      for (final item in items.where(
+        (item) => item.actualAddress.contains('/9.韩国/'),
+      )) {
+        expect(item.itemType, 'episode');
+        expect(item.seasonNumber, 9);
+      }
+    });
+
     test('treats a single explicit season folder as series structure',
         () async {
       final client = WebDavNasClient(
@@ -1444,6 +1535,159 @@ const _foodDaoMideastPropfindResponse =
     <d:propstat>
       <d:prop>
         <d:displayname>巴以观察.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _foodDaoMultiRootPropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/FoodDaoMulti/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>FoodDaoMulti</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDaoMulti/%E5%90%B4%E5%93%A5%E7%AA%9F.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>吴哥窟.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDaoMulti/2.%E5%B7%B4%E4%BB%A5/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>2.巴以</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDaoMulti/5.%E7%BE%8E%E5%9B%BD/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>5.美国</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDaoMulti/9.%E9%9F%A9%E5%9B%BD/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>9.韩国</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _foodDaoMultiSeasonTwoPropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/FoodDaoMulti/2.%E5%B7%B4%E4%BB%A5/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>2.巴以</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDaoMulti/2.%E5%B7%B4%E4%BB%A5/mideast-a.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>mideast-a.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDaoMulti/2.%E5%B7%B4%E4%BB%A5/mideast-b.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>mideast-b.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _foodDaoMultiSeasonFivePropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/FoodDaoMulti/5.%E7%BE%8E%E5%9B%BD/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>5.美国</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDaoMulti/5.%E7%BE%8E%E5%9B%BD/america-a.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>america-a.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDaoMulti/5.%E7%BE%8E%E5%9B%BD/america-b.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>america-b.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _foodDaoMultiSeasonNinePropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/FoodDaoMulti/9.%E9%9F%A9%E5%9B%BD/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>9.韩国</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDaoMulti/9.%E9%9F%A9%E5%9B%BD/korea-a.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>korea-a.strm</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>text/plain</d:getcontenttype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/FoodDaoMulti/9.%E9%9F%A9%E5%9B%BD/korea-b.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>korea-b.strm</d:displayname>
         <d:resourcetype />
         <d:getcontenttype>text/plain</d:getcontenttype>
       </d:prop>

@@ -1336,12 +1336,13 @@ class NasMediaIndexer {
   }
 
   String _seriesTitleForRecord(NasMediaIndexRecord record) {
-    final itemTitle = record.item.title.trim();
-    final parentTitle = record.parentTitle.trim();
-    final recognizedTitle = record.recognizedTitle.trim();
+    final itemTitle = _cleanIndexedTitleLabel(record.item.title);
+    final parentTitle = _cleanIndexedTitleLabel(record.parentTitle);
+    final recognizedTitle = _cleanIndexedTitleLabel(record.recognizedTitle);
     final itemType = record.item.itemType.trim().toLowerCase();
     final structureSeriesTitle = _seriesTitleFromStructurePath(record);
-    final parentLooksLikeSeason = _looksLikeSeasonFolderLabel(parentTitle);
+    final parentLooksLikeSeason =
+        _looksLikeSeasonFolderLabel(record.parentTitle.trim());
     final prefersStructureGrouping =
         _prefersStructureRootSeriesGrouping(record, structureSeriesTitle);
     final hasCanonicalIds = record.item.imdbId.trim().isNotEmpty ||
@@ -1439,7 +1440,7 @@ class NasMediaIndexer {
         : resourceSegments.sublist(commonLength, resourceSegments.length - 1);
     if (relativeDirectories.isEmpty) {
       if (hasSeasonHint && sectionSegments.isNotEmpty) {
-        return sectionSegments.last.trim();
+        return _cleanIndexedTitleLabel(sectionSegments.last);
       }
       return '';
     }
@@ -1447,7 +1448,9 @@ class NasMediaIndexer {
     final seasonDirectoryIndex =
         relativeDirectories.indexWhere(_looksLikeSeasonFolderLabel);
     if (seasonDirectoryIndex > 0) {
-      return relativeDirectories[seasonDirectoryIndex - 1].trim();
+      return _cleanIndexedTitleLabel(
+        relativeDirectories[seasonDirectoryIndex - 1],
+      );
     }
 
     final trailingStructureRoot =
@@ -1456,15 +1459,15 @@ class NasMediaIndexer {
         (hasSeasonHint ||
             record.preferSeries ||
             record.item.itemType.trim().toLowerCase() == 'episode')) {
-      return trailingStructureRoot;
+      return _cleanIndexedTitleLabel(trailingStructureRoot);
     }
 
     if (relativeDirectories.isNotEmpty) {
-      return relativeDirectories.first.trim();
+      return _cleanIndexedTitleLabel(relativeDirectories.first);
     }
 
     if (hasSeasonHint && sectionSegments.isNotEmpty) {
-      return sectionSegments.last.trim();
+      return _cleanIndexedTitleLabel(sectionSegments.last);
     }
     return '';
   }
@@ -2247,13 +2250,21 @@ class NasMediaIndexer {
         record.item.title,
       ];
       for (final candidate in candidates) {
-        final normalized = candidate.trim();
+        final normalized = _cleanIndexedTitleLabel(candidate);
         if (normalized.isNotEmpty) {
           return normalized;
         }
       }
     }
-    return fallback;
+    return _cleanIndexedTitleLabel(fallback);
+  }
+
+  String _cleanIndexedTitleLabel(String value) {
+    return stripEmbeddedExternalIdTags(value)
+        .replaceAll(RegExp(r'[_\.]+'), ' ')
+        .replaceAll(RegExp(r'[【\[\(].*?[】\]\)]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
   }
 
   NasMediaIndexRecord _reuseRecord(
@@ -3002,15 +3013,19 @@ class NasMediaIndexer {
     required NasMediaRecognition recognition,
     required String fallbackTitle,
   }) {
-    final baseTitle = fallbackTitle.trim();
+    final baseTitle = _cleanIndexedTitleLabel(fallbackTitle);
     if (!_isStructureInferredEpisodeLike(source, scannedItem)) {
       return baseTitle;
     }
 
-    final seriesTitle = _seriesTitleFromScannedItem(scannedItem).trim();
-    final fileTitle = scannedItem.metadataSeed.title.trim().isNotEmpty
-        ? scannedItem.metadataSeed.title.trim()
-        : _stripExtension(scannedItem.fileName).trim();
+    final seriesTitle = _cleanIndexedTitleLabel(
+      _seriesTitleFromScannedItem(scannedItem),
+    );
+    final fileTitle = _cleanIndexedTitleLabel(
+      scannedItem.metadataSeed.title.trim().isNotEmpty
+          ? scannedItem.metadataSeed.title.trim()
+          : _stripExtension(scannedItem.fileName).trim(),
+    );
     final normalizedSeries = _normalizeMetadataQueryToken(seriesTitle);
     final normalizedFile = _normalizeMetadataQueryToken(fileTitle);
 
@@ -3030,7 +3045,7 @@ class NasMediaIndexer {
   }
 
   String _normalizeMetadataQueryToken(String value) {
-    return value.trim().toLowerCase().replaceAll(
+    return _cleanIndexedTitleLabel(value).toLowerCase().replaceAll(
           RegExp(r'[\s\-_.,:;!?/\\|()\[\]{}<>《》【】"“”·]+'),
           '',
         );
@@ -3074,17 +3089,19 @@ class NasMediaIndexer {
     final seasonDirectoryIndex =
         relativeDirectories.indexWhere(_looksLikeSeasonFolderLabel);
     if (seasonDirectoryIndex > 0) {
-      return relativeDirectories[seasonDirectoryIndex - 1].trim();
+      return _cleanIndexedTitleLabel(
+        relativeDirectories[seasonDirectoryIndex - 1],
+      );
     }
 
     final trailingStructureRoot =
         _nearestNonSeasonDirectory(relativeDirectories);
     if (trailingStructureRoot.isNotEmpty &&
         (hasSeasonHint || itemType == 'episode')) {
-      return trailingStructureRoot;
+      return _cleanIndexedTitleLabel(trailingStructureRoot);
     }
 
-    return relativeDirectories.first.trim();
+    return _cleanIndexedTitleLabel(relativeDirectories.first);
   }
 
   String _stripExtension(String value) {

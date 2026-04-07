@@ -1058,31 +1058,25 @@ class _SettingsPageHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final content = DecoratedBox(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(28),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '设置',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '集中管理媒体源、搜索服务、元数据、网络存储、播放与首页展示。',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ],
-        ),
+    final content = Padding(
+      padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '设置',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '集中管理媒体源、搜索服务、元数据、网络存储、播放与首页展示。',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+        ],
       ),
     );
     if (!isTelevision) {

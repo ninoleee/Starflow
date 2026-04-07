@@ -59,6 +59,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   static const int _kNetworkMpvBufferSizeBytes = 64 * 1024 * 1024;
   static const int _kHeavyMpvBufferSizeBytes = 96 * 1024 * 1024;
   static const int _kAggressiveMpvBufferSizeBytes = 128 * 1024 * 1024;
+  static const int _kMinMpvBackBufferSizeBytes = 8 * 1024 * 1024;
+  static const int _kMaxMpvBackBufferSizeBytes = 32 * 1024 * 1024;
 
   Player? _player;
   VideoController? _videoController;
@@ -104,8 +106,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       if (!mounted) {
         return;
       }
-      _playbackPerformanceModeController.state =
-          ref.read(appSettingsProvider).highPerformanceModeEnabled;
+      _playbackPerformanceModeController.state = true;
     });
     unawaited(_bindPictureInPictureSupport());
     unawaited(_bindPlaybackSystemSession());
@@ -174,6 +175,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _highPerformanceModeEnabled && !_isInPictureInPictureMode;
 
   bool get _prefersAggressiveHardwareDecoding => _highPerformanceModeEnabled;
+
+  bool get _preferLeanPlaybackRendering =>
+      _highPerformanceModeEnabled || _isTelevisionPlaybackDevice;
 
   PlaybackDecodeMode get _playbackDecodeMode =>
       ref.read(appSettingsProvider).playbackDecodeMode;
@@ -394,9 +398,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     try {
       final settings = ref.read(appSettingsProvider);
-      if (settings.highPerformanceModeEnabled) {
-        await ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes();
-      }
+      await ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes();
       final resolvedTarget = await _resolveTarget(widget.target);
       final playbackMemoryRepository =
           ref.read(playbackMemoryRepositoryProvider);
@@ -673,6 +675,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (_shouldUseAggressiveMpvTuning(target)) {
       return _kAggressiveMpvBufferSizeBytes;
     }
+    if (_isTelevisionPlaybackDevice && _isLikelyRemotePlaybackTarget(target)) {
+      return _kHeavyMpvBufferSizeBytes;
+    }
     if (_isHeavyPlaybackTarget(target)) {
       return _kHeavyMpvBufferSizeBytes;
     }
@@ -732,6 +737,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final remotePlayback = _isLikelyRemotePlaybackTarget(target);
     final heavyPlayback = _isHeavyPlaybackTarget(target);
     final aggressiveTuning = _shouldUseAggressiveMpvTuning(target);
+    final leanPlayback = _preferLeanPlaybackRendering;
+    final bufferSizeBytes = _resolveMpvBufferSizeBytes(target);
+    var backBufferBytes = bufferSizeBytes ~/ 4;
+    if (backBufferBytes < _kMinMpvBackBufferSizeBytes) {
+      backBufferBytes = _kMinMpvBackBufferSizeBytes;
+    } else if (backBufferBytes > _kMaxMpvBackBufferSizeBytes) {
+      backBufferBytes = _kMaxMpvBackBufferSizeBytes;
+    }
 
     Future<void> setOption(String name, String value) async {
       try {
@@ -749,7 +762,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       }
     }
 
-    if (aggressiveTuning) {
+    await setOption('demuxer-thread', 'yes');
+    await setOption('demuxer-max-bytes', bufferSizeBytes.toString());
+    await setOption('demuxer-max-back-bytes', backBufferBytes.toString());
+    await setOption('interpolation', 'no');
+    await setOption('deband', 'no');
+    await setOption('audio-display', 'no');
+
+    if (_isTelevisionPlaybackDevice) {
+      await setOption('osd-bar', 'no');
+    }
+
+    if (aggressiveTuning || _isTelevisionPlaybackDevice) {
       await runCommand(const ['apply-profile', 'fast']);
     }
 
@@ -779,7 +803,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       }
     }
 
-    if (aggressiveTuning || heavyPlayback) {
+    if (leanPlayback || aggressiveTuning || heavyPlayback) {
       await setOption('vd-lavc-dr', 'yes');
     }
 
@@ -1516,7 +1540,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final activeTarget = _resolvedTarget ?? widget.target;
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final playbackSettings = ref.watch(appSettingsProvider);
     final showMinimalPlayerChrome = _isInPictureInPictureMode ||
@@ -1638,7 +1661,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                         )
                       : _buildTvPlaybackSurface(
                           theme,
-                          activeTarget: activeTarget,
                           playbackSettings: playbackSettings,
                         ),
             ),
@@ -1699,7 +1721,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   Widget _buildTvPlaybackSurface(
     ThemeData theme, {
-    required PlaybackTarget activeTarget,
     required AppSettings playbackSettings,
   }) {
     return Stack(
@@ -1718,245 +1739,129 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             ),
           ),
         ),
-        if (_tvPlaybackChromeVisible)
-          _buildTvPlaybackChrome(
-            theme,
-            activeTarget: activeTarget,
-            playbackSettings: playbackSettings,
-          ),
+        if (_tvPlaybackChromeVisible) _buildTvPlaybackChrome(theme),
       ],
     );
   }
 
-  Widget _buildTvPlaybackChrome(
-    ThemeData theme, {
-    required PlaybackTarget activeTarget,
-    required AppSettings playbackSettings,
-  }) {
+  Widget _buildTvPlaybackChrome(ThemeData theme) {
     final player = _player;
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Colors.black.withValues(alpha: 0.68),
-                  Colors.black.withValues(alpha: 0.26),
-                  Colors.transparent,
-                ],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ),
+              color: const Color(0xB8000000),
+              borderRadius: BorderRadius.circular(18),
             ),
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                child: Row(
-                  children: [
-                    const Spacer(),
-                    StarflowIconButton(
-                      icon: Icons.closed_caption_rounded,
-                      tooltip: '字幕',
-                      variant: StarflowButtonVariant.ghost,
-                      onPressed: player == null
-                          ? null
-                          : () {
-                              _showTvPlaybackChrome(autoHide: false);
-                              unawaited(_openCurrentSubtitleSelector());
-                            },
-                    ),
-                    const SizedBox(width: 10),
-                    StarflowIconButton(
-                      icon: Icons.audiotrack_rounded,
-                      tooltip: '音轨',
-                      variant: StarflowButtonVariant.ghost,
-                      onPressed: player == null
-                          ? null
-                          : () {
-                              _showTvPlaybackChrome(autoHide: false);
-                              unawaited(_openCurrentAudioSelector());
-                            },
-                    ),
-                    const SizedBox(width: 10),
-                    StarflowIconButton(
-                      icon: Icons.tune_rounded,
-                      tooltip: '播放设置',
-                      variant: StarflowButtonVariant.ghost,
-                      onPressed: player == null
-                          ? null
-                          : () {
-                              _showTvPlaybackChrome(autoHide: false);
-                              _showPlaybackOptions(
-                                isTelevision: true,
-                                settings: playbackSettings,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+              child: StreamBuilder<Duration>(
+                stream: player?.stream.position,
+                initialData: player?.state.position ?? _latestPosition,
+                builder: (context, positionSnapshot) {
+                  final position = positionSnapshot.data ?? _latestPosition;
+                  return StreamBuilder<Duration>(
+                    stream: player?.stream.duration,
+                    initialData: player?.state.duration ?? _latestDuration,
+                    builder: (context, durationSnapshot) {
+                      final duration = durationSnapshot.data ?? _latestDuration;
+                      return StreamBuilder<bool>(
+                        stream: player?.stream.playing,
+                        initialData: player?.state.playing ?? false,
+                        builder: (context, playingSnapshot) {
+                          final playing = playingSnapshot.data ?? false;
+                          return StreamBuilder<double>(
+                            stream: player?.stream.bufferingPercentage,
+                            initialData: player?.state.bufferingPercentage ?? 0,
+                            builder: (context, bufferingSnapshot) {
+                              final durationMs = duration.inMilliseconds;
+                              final playedProgress = durationMs <= 0
+                                  ? 0.0
+                                  : (position.inMilliseconds / durationMs)
+                                      .clamp(0.0, 1.0);
+                              final rawBuffered =
+                                  (bufferingSnapshot.data ?? 0) / 100;
+                              final bufferedProgress =
+                                  rawBuffered.clamp(playedProgress, 1.0);
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _TvPlaybackProgressBar(
+                                    playedProgress: playedProgress,
+                                    bufferedProgress: bufferedProgress,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        playing
+                                            ? Icons.pause_circle_filled_rounded
+                                            : Icons.play_circle_fill_rounded,
+                                        color: Colors.white,
+                                        size: 22,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        '${_formatClockDuration(position)} / ${_formatClockDuration(duration)}',
+                                        style: theme.textTheme.titleSmall
+                                            ?.copyWith(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      StarflowIconButton(
+                                        icon: Icons.closed_caption_rounded,
+                                        tooltip: '字幕',
+                                        variant: StarflowButtonVariant.ghost,
+                                        onPressed: player == null
+                                            ? null
+                                            : () {
+                                                _showTvPlaybackChrome(
+                                                  autoHide: false,
+                                                );
+                                                unawaited(
+                                                  _openCurrentSubtitleSelector(),
+                                                );
+                                              },
+                                      ),
+                                      const SizedBox(width: 10),
+                                      StarflowIconButton(
+                                        icon: Icons.audiotrack_rounded,
+                                        tooltip: '音轨',
+                                        variant: StarflowButtonVariant.ghost,
+                                        onPressed: player == null
+                                            ? null
+                                            : () {
+                                                _showTvPlaybackChrome(
+                                                  autoHide: false,
+                                                );
+                                                unawaited(
+                                                  _openCurrentAudioSelector(),
+                                                );
+                                              },
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               );
                             },
-                    ),
-                  ],
-                ),
+                          );
+                        },
+                      );
+                    },
+                  );
+                },
               ),
             ),
           ),
         ),
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Colors.transparent,
-                  Colors.black.withValues(alpha: 0.18),
-                  Colors.black.withValues(alpha: 0.78),
-                ],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(18, 52, 18, 18),
-                child: StreamBuilder<Duration>(
-                  stream: player?.stream.position,
-                  initialData: player?.state.position ?? _latestPosition,
-                  builder: (context, positionSnapshot) {
-                    final position = positionSnapshot.data ?? _latestPosition;
-                    return StreamBuilder<Duration>(
-                      stream: player?.stream.duration,
-                      initialData: player?.state.duration ?? _latestDuration,
-                      builder: (context, durationSnapshot) {
-                        final duration =
-                            durationSnapshot.data ?? _latestDuration;
-                        return StreamBuilder<bool>(
-                          stream: player?.stream.playing,
-                          initialData: player?.state.playing ?? false,
-                          builder: (context, playingSnapshot) {
-                            final playing = playingSnapshot.data ?? false;
-                            return StreamBuilder<double>(
-                              stream: player?.stream.bufferingPercentage,
-                              initialData:
-                                  player?.state.bufferingPercentage ?? 0,
-                              builder: (context, bufferingSnapshot) {
-                                final durationMs = duration.inMilliseconds;
-                                final playedProgress = durationMs <= 0
-                                    ? 0.0
-                                    : (position.inMilliseconds / durationMs)
-                                        .clamp(0.0, 1.0);
-                                final rawBuffered =
-                                    (bufferingSnapshot.data ?? 0) / 100;
-                                final bufferedProgress =
-                                    rawBuffered.clamp(playedProgress, 1.0);
-                                return Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      activeTarget.title,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.headlineSmall
-                                          ?.copyWith(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      '${activeTarget.sourceKind.label} · ${activeTarget.sourceName}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style:
-                                          theme.textTheme.bodyMedium?.copyWith(
-                                        color: const Color(0xCCFFFFFF),
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 18),
-                                    _TvPlaybackProgressBar(
-                                      playedProgress: playedProgress,
-                                      bufferedProgress: bufferedProgress,
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Row(
-                                      children: [
-                                        Icon(
-                                          playing
-                                              ? Icons
-                                                  .pause_circle_filled_rounded
-                                              : Icons.play_circle_fill_rounded,
-                                          color: Colors.white,
-                                          size: 22,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          '${_formatClockDuration(position)} / ${_formatClockDuration(duration)}',
-                                          style: theme.textTheme.titleSmall
-                                              ?.copyWith(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                        const Spacer(),
-                                        Text(
-                                          'OK ${playing ? '暂停' : '播放'}',
-                                          style: theme.textTheme.bodyMedium
-                                              ?.copyWith(
-                                            color: const Color(0xE6FFFFFF),
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 14),
-                                        Text(
-                                          '左右 10 秒',
-                                          style: theme.textTheme.bodyMedium
-                                              ?.copyWith(
-                                            color: const Color(0xCCFFFFFF),
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 14),
-                                        Text(
-                                          '下 更多',
-                                          style: theme.textTheme.bodyMedium
-                                              ?.copyWith(
-                                            color: const Color(0xCCFFFFFF),
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 14),
-                                        Text(
-                                          '返回 退出',
-                                          style: theme.textTheme.bodyMedium
-                                              ?.copyWith(
-                                            color: const Color(0xCCFFFFFF),
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                );
-                              },
-                            );
-                          },
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -2354,11 +2259,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     AppSettings settings, {
     required bool isTelevision,
   }) {
-    final simplifyForPerformance = settings.highPerformanceModeEnabled;
+    final simplifyForPerformance =
+        settings.highPerformanceModeEnabled || isTelevision;
     return SubtitleViewConfiguration(
       style: TextStyle(
         height: 1.35,
-        fontSize: (simplifyForPerformance ? 28 : 32) *
+        fontSize: (simplifyForPerformance
+                ? isTelevision
+                    ? 26
+                    : 28
+                : 32) *
             settings.playbackSubtitleScale.textScale,
         color: Colors.white,
         fontWeight: FontWeight.w600,
@@ -2370,7 +2280,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         20,
         0,
         20,
-        simplifyForPerformance ? 18 : 28,
+        simplifyForPerformance
+            ? isTelevision
+                ? 14
+                : 18
+            : 28,
       ),
     );
   }

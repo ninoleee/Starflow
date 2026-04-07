@@ -390,7 +390,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                                           ],
                                         )
                                       : SizedBox(
-                                          height: 40,
+                                          height: 52,
                                           child: ListView.separated(
                                             scrollDirection: Axis.horizontal,
                                             itemCount: targets.length,

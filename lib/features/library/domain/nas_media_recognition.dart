@@ -1,5 +1,19 @@
 import 'package:starflow/core/utils/webdav_trace.dart';
 
+String stripEmbeddedExternalIdTags(String input) {
+  final trimmed = input.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  return trimmed.replaceAll(
+    RegExp(
+      r'\{\s*(?:tmdb(?:id)?|tmbid|tvdb(?:id)?|imdb(?:id)?|douban(?:id)?)\s*[-:=]?\s*[\w.-]+\s*\}',
+      caseSensitive: false,
+    ),
+    ' ',
+  );
+}
+
 class NasMediaRecognition {
   const NasMediaRecognition({
     required this.title,
@@ -130,6 +144,9 @@ class NasMediaRecognizer {
       title = parentTitle.trim().isNotEmpty
           ? parentTitle.trim()
           : _cleanTitle(fileBaseName);
+    }
+    if (title.trim().isEmpty) {
+      title = stripEmbeddedExternalIdTags(fileBaseName).trim();
     }
     if (title.trim().isEmpty) {
       title = fileBaseName.trim();
@@ -296,7 +313,7 @@ class NasMediaRecognizer {
     bool removeEpisodeTokens = false,
     bool removeYear = false,
   }) {
-    var value = input.trim();
+    var value = stripEmbeddedExternalIdTags(input).trim();
     if (value.isEmpty) {
       return '';
     }
@@ -357,7 +374,7 @@ class NasMediaRecognizer {
   }
 
   static String _cleanLeadingEpisodeRemainder(String input) {
-    var value = input.trim();
+    var value = stripEmbeddedExternalIdTags(input).trim();
     if (value.isEmpty) {
       return '';
     }

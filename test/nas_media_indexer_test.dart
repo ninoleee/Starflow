@@ -1733,6 +1733,80 @@ void main() {
     );
   });
 
+  test(
+      'NasMediaIndexer strips embedded external id tags from grouped series titles',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-round-table-tags',
+      name: 'WebDAV Round Table',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/movies/strm/115/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+      webDavSidecarScrapingEnabled: true,
+    );
+    final collection = const MediaCollection(
+      id: 'https://nas.example.com/movies/strm/115/',
+      title: 'Round Table',
+      sourceId: 'webdav-round-table-tags',
+      sourceName: 'WebDAV Round Table',
+      sourceKind: MediaSourceKind.nas,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'round-table-1',
+          path:
+              '圆桌派.Round Table (2016) {tmdbid-95903}/Season 1/圆桌派.Round Table (2016) S01E01.师徒.{tmdbid-95903}.strm',
+          title: '师徒',
+          itemType: 'episode',
+          seasonNumber: 1,
+          episodeNumber: 1,
+          hasSidecarMatch: true,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(
+      source,
+      scopedCollections: [collection],
+    );
+    final library = await indexer.loadLibrary(
+      source,
+      scopedCollections: [collection],
+      limit: 20,
+    );
+    expect(library, hasLength(1));
+    expect(library.single.title, '圆桌派 Round Table');
+
+    final records = await store.loadSourceRecords(source.id);
+    expect(records, hasLength(1));
+    expect(records.single.recognizedTitle, '圆桌派 Round Table');
+    expect(records.single.parentTitle, '圆桌派 Round Table');
+    expect(records.single.searchQuery, '圆桌派 Round Table 师徒');
+  });
+
   test('NasMediaIndexer skips repeat WMDB matching after an automatic failure',
       () async {
     final store = _MemoryNasMediaIndexStore();

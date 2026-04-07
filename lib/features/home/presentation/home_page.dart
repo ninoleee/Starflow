@@ -1674,6 +1674,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
 
   @override
   Widget build(BuildContext context) {
+    final staticHeroMode = widget.highPerformanceModeEnabled;
     final currentIndex = _currentPageIndex;
 
     return Column(
@@ -1682,46 +1683,65 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
           height: widget.displayMode.heroHeight,
           child: Stack(
             children: [
-              Focus(
-                canRequestFocus: false,
-                skipTraversal: true,
-                descendantsAreFocusable: true,
-                child: PageView.builder(
-                  controller: _controller,
-                  physics: widget.isTelevision
-                      ? const NeverScrollableScrollPhysics()
-                      : const PageScrollPhysics(),
-                  itemCount: widget.items.length,
-                  itemBuilder: (context, index) {
-                    final item = widget.items[index];
-                    return Padding(
-                      padding: EdgeInsets.only(
-                        right: index == widget.items.length - 1
-                            ? 0
-                            : widget.displayMode.cardGap,
-                      ),
-                      child: _FeaturedHeroCard(
-                        item: item,
-                        displayMode: widget.displayMode,
-                        style: widget.style,
-                        isTelevision: widget.isTelevision,
-                        logoTitleEnabled: widget.logoTitleEnabled,
-                        translucentEffectsEnabled:
-                            widget.translucentEffectsEnabled,
-                        focusNode: _focusNodeForItem(item.id),
-                        focusId: '${widget.focusScopePrefix}:${item.id}',
-                        autofocus: index == currentIndex,
-                        onFocusPreviousControl: () =>
-                            _focusPagerButton(_previousPagerButtonFocusNode),
-                        onFocusNextControl: () =>
-                            _focusPagerButton(_nextPagerButtonFocusNode),
-                        onFocusBelowControl: widget.onFocusBelowControl,
-                      ),
-                    );
-                  },
+              if (staticHeroMode)
+                _FeaturedHeroCard(
+                  item: widget.items[currentIndex],
+                  displayMode: widget.displayMode,
+                  style: widget.style,
+                  isTelevision: widget.isTelevision,
+                  logoTitleEnabled: widget.logoTitleEnabled,
+                  translucentEffectsEnabled: widget.translucentEffectsEnabled,
+                  simplifyVisualEffects: true,
+                  focusNode: _focusNodeForItem(widget.items[currentIndex].id),
+                  focusId:
+                      '${widget.focusScopePrefix}:${widget.items[currentIndex].id}',
+                  autofocus: true,
+                  onFocusBelowControl: widget.onFocusBelowControl,
+                )
+              else
+                Focus(
+                  canRequestFocus: false,
+                  skipTraversal: true,
+                  descendantsAreFocusable: true,
+                  child: PageView.builder(
+                    controller: _controller,
+                    physics: widget.isTelevision
+                        ? const NeverScrollableScrollPhysics()
+                        : const PageScrollPhysics(),
+                    itemCount: widget.items.length,
+                    itemBuilder: (context, index) {
+                      final item = widget.items[index];
+                      return Padding(
+                        padding: EdgeInsets.only(
+                          right: index == widget.items.length - 1
+                              ? 0
+                              : widget.displayMode.cardGap,
+                        ),
+                        child: _FeaturedHeroCard(
+                          item: item,
+                          displayMode: widget.displayMode,
+                          style: widget.style,
+                          isTelevision: widget.isTelevision,
+                          logoTitleEnabled: widget.logoTitleEnabled,
+                          translucentEffectsEnabled:
+                              widget.translucentEffectsEnabled,
+                          simplifyVisualEffects: false,
+                          focusNode: _focusNodeForItem(item.id),
+                          focusId: '${widget.focusScopePrefix}:${item.id}',
+                          autofocus: index == currentIndex,
+                          onFocusPreviousControl: () =>
+                              _focusPagerButton(_previousPagerButtonFocusNode),
+                          onFocusNextControl: () =>
+                              _focusPagerButton(_nextPagerButtonFocusNode),
+                          onFocusBelowControl: widget.onFocusBelowControl,
+                        ),
+                      );
+                    },
+                  ),
                 ),
-              ),
-              if (widget.showPagerButtons && widget.items.length > 1) ...[
+              if (!staticHeroMode &&
+                  widget.showPagerButtons &&
+                  widget.items.length > 1) ...[
                 Positioned(
                   left: 16,
                   top: 0,
@@ -1766,7 +1786,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
             ],
           ),
         ),
-        if (widget.items.length > 1) ...[
+        if (!staticHeroMode && widget.items.length > 1) ...[
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -1899,6 +1919,7 @@ class _FeaturedHeroCard extends StatelessWidget {
     required this.isTelevision,
     required this.logoTitleEnabled,
     required this.translucentEffectsEnabled,
+    required this.simplifyVisualEffects,
     this.focusNode,
     required this.focusId,
     required this.autofocus,
@@ -1913,6 +1934,7 @@ class _FeaturedHeroCard extends StatelessWidget {
   final bool isTelevision;
   final bool logoTitleEnabled;
   final bool translucentEffectsEnabled;
+  final bool simplifyVisualEffects;
   final FocusNode? focusNode;
   final String focusId;
   final bool autofocus;
@@ -1922,14 +1944,40 @@ class _FeaturedHeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final effectiveArtworkStyle = _resolveFeaturedHeroArtworkStyle(
-      configuredStyle: style,
-      item: item,
-    );
+    final effectiveArtworkStyle = simplifyVisualEffects
+        ? HomeHeroStyle.poster
+        : _resolveFeaturedHeroArtworkStyle(
+            configuredStyle: style,
+            item: item,
+          );
     final usesPosterHeroStyle = effectiveArtworkStyle.usesPosterArtwork;
     final usesCompositeBackdrop =
-        displayMode.usesFrostedBackdrop && !usesPosterHeroStyle;
+        !simplifyVisualEffects &&
+        displayMode.usesFrostedBackdrop &&
+        !usesPosterHeroStyle;
     final borderRadius = BorderRadius.circular(displayMode.cardBorderRadius);
+    final Gradient contentGradient = simplifyVisualEffects
+        ? LinearGradient(
+            colors: [
+              Colors.transparent,
+              Colors.black.withValues(alpha: 0.16),
+              Colors.black.withValues(alpha: 0.62),
+            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            stops: const [0, 0.56, 1],
+          )
+        : RadialGradient(
+            center: const Alignment(-0.92, 0.96),
+            radius: 1.1,
+            colors: [
+              Colors.black.withValues(alpha: 0.82),
+              Colors.black.withValues(alpha: 0.52),
+              Colors.black.withValues(alpha: 0.18),
+              Colors.transparent,
+            ],
+            stops: const [0, 0.36, 0.72, 1],
+          );
 
     final card = Ink(
       decoration: BoxDecoration(
@@ -1939,7 +1987,7 @@ class _FeaturedHeroCard extends StatelessWidget {
                 alpha: translucentEffectsEnabled ? 0.04 : 0.02,
               )
             : const Color(0xFF0B1628),
-        boxShadow: displayMode.showShadow
+        boxShadow: !simplifyVisualEffects && displayMode.showShadow
             ? [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.22),
@@ -2004,17 +2052,7 @@ class _FeaturedHeroCard extends StatelessWidget {
                   alignment: Alignment.bottomLeft,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      gradient: RadialGradient(
-                        center: const Alignment(-0.92, 0.96),
-                        radius: 1.1,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.82),
-                          Colors.black.withValues(alpha: 0.52),
-                          Colors.black.withValues(alpha: 0.18),
-                          Colors.transparent,
-                        ],
-                        stops: const [0, 0.36, 0.72, 1],
-                      ),
+                      gradient: contentGradient,
                     ),
                   ),
                 ),
@@ -2042,6 +2080,7 @@ class _FeaturedHeroCard extends StatelessWidget {
                     displayMode: displayMode,
                     style: effectiveArtworkStyle,
                     logoTitleEnabled: logoTitleEnabled,
+                    simplifyVisualEffects: simplifyVisualEffects,
                   ),
                   const SizedBox(height: 10),
                   if (item.overview.trim().isNotEmpty)
@@ -2051,17 +2090,19 @@ class _FeaturedHeroCard extends StatelessWidget {
                         item.overview,
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: Color(0xFFE4ECFF),
                           fontSize: 15,
                           height: 1.45,
-                          shadows: [
-                            Shadow(
-                              color: Color(0x9A000000),
-                              blurRadius: 16,
-                              offset: Offset(0, 3),
-                            ),
-                          ],
+                          shadows: simplifyVisualEffects
+                              ? null
+                              : const [
+                                  Shadow(
+                                    color: Color(0x9A000000),
+                                    blurRadius: 16,
+                                    offset: Offset(0, 3),
+                                  ),
+                                ],
                         ),
                       ),
                     ),
@@ -2236,12 +2277,14 @@ class _HeroTitle extends StatelessWidget {
     required this.displayMode,
     required this.style,
     required this.logoTitleEnabled,
+    required this.simplifyVisualEffects,
   });
 
   final _FeaturedHeroItem item;
   final HomeHeroDisplayMode displayMode;
   final HomeHeroStyle style;
   final bool logoTitleEnabled;
+  final bool simplifyVisualEffects;
 
   @override
   Widget build(BuildContext context) {
@@ -2263,6 +2306,7 @@ class _HeroTitle extends StatelessWidget {
               item: item,
               displayMode: displayMode,
               style: style,
+              simplifyVisualEffects: simplifyVisualEffects,
             );
           },
         ),
@@ -2272,6 +2316,7 @@ class _HeroTitle extends StatelessWidget {
       item: item,
       displayMode: displayMode,
       style: style,
+      simplifyVisualEffects: simplifyVisualEffects,
     );
   }
 }
@@ -2281,11 +2326,13 @@ class _HeroTitleText extends StatelessWidget {
     required this.item,
     required this.displayMode,
     required this.style,
+    required this.simplifyVisualEffects,
   });
 
   final _FeaturedHeroItem item;
   final HomeHeroDisplayMode displayMode;
   final HomeHeroStyle style;
+  final bool simplifyVisualEffects;
 
   @override
   Widget build(BuildContext context) {
@@ -2301,13 +2348,15 @@ class _HeroTitleText extends StatelessWidget {
           style: style,
         ),
         height: 1.05,
-        shadows: [
-          Shadow(
-            color: Colors.black.withValues(alpha: 0.45),
-            blurRadius: 20,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        shadows: simplifyVisualEffects
+            ? null
+            : [
+                Shadow(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  blurRadius: 20,
+                  offset: const Offset(0, 4),
+                ),
+              ],
       ),
     );
   }

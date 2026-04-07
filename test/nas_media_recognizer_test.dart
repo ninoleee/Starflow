@@ -38,6 +38,20 @@ void main() {
       expect(result.imdbId, 'tt1160419');
     });
 
+    test('strips embedded external id tags from dotted series folders', () {
+      final result = NasMediaRecognizer.recognize(
+        'Shows/圆桌派.Round Table (2016) {tmdbid-95903}/Season 1/圆桌派.Round Table (2016) S01E01.师徒.{tmdbid-95903}.strm',
+      );
+
+      expect(result.title, '圆桌派 Round Table');
+      expect(result.parentTitle, '圆桌派 Round Table');
+      expect(result.searchQuery, '圆桌派 Round Table');
+      expect(result.itemType, 'episode');
+      expect(result.preferSeries, isTrue);
+      expect(result.seasonNumber, 1);
+      expect(result.episodeNumber, 1);
+    });
+
     test('prioritizes explicit SxxEyy naming for series title inference', () {
       final result = NasMediaRecognizer.recognize(
         'Shows/怪奇物语/Stranger.Things.S01.2160p.BluRay.REMUX/Stranger.Things.S01E02.Chapter.Two.strm',

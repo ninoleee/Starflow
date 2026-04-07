@@ -163,8 +163,13 @@ extension _WebDavNasClientStructure on WebDavNasClient {
         if (!seriesRootPlans.containsKey(candidateKey)) {
           continue;
         }
-        matchedRootKey = candidateKey;
-        seriesRootForResource[item.resourceId] = candidateKey;
+        final preferredAncestorKey = _resolvePreferredAncestorSeriesRoot(
+          relativeDirectories: item.relativeDirectories,
+          candidateKey: candidateKey,
+          seriesRootPlans: seriesRootPlans,
+        );
+        matchedRootKey = preferredAncestorKey ?? candidateKey;
+        seriesRootForResource[item.resourceId] = matchedRootKey;
         break;
       }
       webDavTrace(
@@ -180,6 +185,38 @@ extension _WebDavNasClientStructure on WebDavNasClient {
       );
     }
     return seriesRootForResource;
+  }
+
+  String? _resolvePreferredAncestorSeriesRoot({
+    required List<String> relativeDirectories,
+    required String candidateKey,
+    required Map<String, _SeriesRootInferencePlan> seriesRootPlans,
+  }) {
+    final candidateSegments = _segmentsFromKey(candidateKey);
+    if (candidateSegments.isEmpty) {
+      return null;
+    }
+
+    for (var ancestorLength = candidateSegments.length - 1;
+        ancestorLength >= 0;
+        ancestorLength--) {
+      if (ancestorLength >= relativeDirectories.length) {
+        continue;
+      }
+      final ancestorKey =
+          _segmentsKey(relativeDirectories.take(ancestorLength));
+      final ancestorPlan = seriesRootPlans[ancestorKey];
+      if (ancestorPlan == null) {
+        continue;
+      }
+      final childDirectoryName = relativeDirectories[ancestorLength];
+      final hintedSeasonNumber =
+          ancestorPlan.seasonNumberByChildDirectory[childDirectoryName];
+      if (hintedSeasonNumber != null) {
+        return ancestorKey;
+      }
+    }
+    return null;
   }
 
   _StructureAssignment _assignItemsToStructure({
@@ -228,8 +265,7 @@ extension _WebDavNasClientStructure on WebDavNasClient {
     required Map<String, List<String>> seasonOrderByRoot,
   }) {
     final seed = item.metadataSeed;
-    final explicitSeasonNumber =
-        seed.seasonNumber ?? recognition?.seasonNumber;
+    final explicitSeasonNumber = seed.seasonNumber ?? recognition?.seasonNumber;
     final explicitEpisodeNumber =
         seed.episodeNumber ?? recognition?.episodeNumber;
     final rootDepth = _segmentsFromKey(seriesRootKey).length;

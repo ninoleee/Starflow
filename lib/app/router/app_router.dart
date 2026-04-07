@@ -335,6 +335,8 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
     );
     final effectiveTranslucentEffectsEnabled =
         translucentEffectsEnabled && !highPerformanceModeEnabled;
+    final effectiveAutoHideNavigationBarEnabled =
+        autoHideNavigationBarEnabled && !highPerformanceModeEnabled;
     final navigationAnimationDuration = highPerformanceModeEnabled
         ? Duration.zero
         : const Duration(milliseconds: 220);
@@ -342,7 +344,7 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
         ? Duration.zero
         : const Duration(milliseconds: 180);
     final bottomBarVisible =
-        !autoHideNavigationBarEnabled || _isBottomBarVisible;
+        !effectiveAutoHideNavigationBarEnabled || _isBottomBarVisible;
     final shellChild = HeroMode(
       enabled: !backgroundWorkSuspended,
       child: TickerMode(
@@ -350,6 +352,57 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
         child: IgnorePointer(
           ignoring: backgroundWorkSuspended,
           child: widget.navigationShell,
+        ),
+      ),
+    );
+    final bottomNavigationBarChild = Padding(
+      padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+      child: Material(
+        color: Colors.transparent,
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(_kBottomNavShellRadius),
+          child: effectiveTranslucentEffectsEnabled
+              ? BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius:
+                          BorderRadius.circular(_kBottomNavShellRadius),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.2),
+                      ),
+                      color: const Color(0x1A0F1622),
+                    ),
+                    child: _FloatingNavigationBar(
+                      currentIndex: widget.navigationShell.currentIndex,
+                      highPerformanceModeEnabled: highPerformanceModeEnabled,
+                      onDestinationSelected: (index) {
+                        _setBottomBarVisible(true);
+                        widget.navigationShell.goBranch(index);
+                      },
+                    ),
+                  ),
+                )
+              : DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius:
+                        BorderRadius.circular(_kBottomNavShellRadius),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.12),
+                    ),
+                    color: const Color(0xE1141F30),
+                  ),
+                  child: _FloatingNavigationBar(
+                    currentIndex: widget.navigationShell.currentIndex,
+                    highPerformanceModeEnabled: highPerformanceModeEnabled,
+                    onDestinationSelected: (index) {
+                      _setBottomBarVisible(true);
+                      widget.navigationShell.goBranch(index);
+                    },
+                  ),
+                ),
         ),
       ),
     );
@@ -362,19 +415,22 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
               currentIndex: widget.navigationShell.currentIndex,
               onDestinationSelected: widget.navigationShell.goBranch,
               translucentEffectsEnabled: effectiveTranslucentEffectsEnabled,
-              autoHideNavigationBarEnabled: autoHideNavigationBarEnabled,
+              autoHideNavigationBarEnabled:
+                  effectiveAutoHideNavigationBarEnabled,
               highPerformanceModeEnabled: highPerformanceModeEnabled,
               child: shellChild,
             )
           : NotificationListener<ScrollNotification>(
-              onNotification: autoHideNavigationBarEnabled
+              onNotification: effectiveAutoHideNavigationBarEnabled
                   ? _handleScrollNotification
                   : (_) => false,
               child: shellChild,
             ),
       bottomNavigationBar: isTelevision
           ? null
-          : IgnorePointer(
+          : highPerformanceModeEnabled
+              ? bottomNavigationBarChild
+              : IgnorePointer(
               ignoring: !bottomBarVisible,
               child: AnimatedSlide(
                 offset: bottomBarVisible ? Offset.zero : const Offset(0, 1.2),
@@ -384,66 +440,7 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
                   opacity: bottomBarVisible ? 1 : 0,
                   duration: navigationOpacityDuration,
                   curve: Curves.easeOutCubic,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
-                    child: Material(
-                      color: Colors.transparent,
-                      elevation: 0,
-                      shadowColor: Colors.transparent,
-                      child: ClipRRect(
-                        borderRadius:
-                            BorderRadius.circular(_kBottomNavShellRadius),
-                        child: effectiveTranslucentEffectsEnabled
-                            ? BackdropFilter(
-                                filter:
-                                    ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(
-                                      _kBottomNavShellRadius,
-                                    ),
-                                    border: Border.all(
-                                      color:
-                                          Colors.white.withValues(alpha: 0.2),
-                                    ),
-                                    color: const Color(0x1A0F1622),
-                                  ),
-                                  child: _FloatingNavigationBar(
-                                    currentIndex:
-                                        widget.navigationShell.currentIndex,
-                                    highPerformanceModeEnabled:
-                                        highPerformanceModeEnabled,
-                                    onDestinationSelected: (index) {
-                                      _setBottomBarVisible(true);
-                                      widget.navigationShell.goBranch(index);
-                                    },
-                                  ),
-                                ),
-                              )
-                            : DecoratedBox(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(
-                                    _kBottomNavShellRadius,
-                                  ),
-                                  border: Border.all(
-                                    color: Colors.white.withValues(alpha: 0.12),
-                                  ),
-                                  color: const Color(0xE1141F30),
-                                ),
-                                child: _FloatingNavigationBar(
-                                  currentIndex:
-                                      widget.navigationShell.currentIndex,
-                                  highPerformanceModeEnabled:
-                                      highPerformanceModeEnabled,
-                                  onDestinationSelected: (index) {
-                                    _setBottomBarVisible(true);
-                                    widget.navigationShell.goBranch(index);
-                                  },
-                                ),
-                              ),
-                      ),
-                    ),
-                  ),
+                  child: bottomNavigationBarChild,
                 ),
               ),
             ),
