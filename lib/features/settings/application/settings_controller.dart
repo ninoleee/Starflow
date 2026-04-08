@@ -287,7 +287,17 @@ class SettingsController extends AsyncNotifier<AppSettings> {
             performanceAggressivePlaybackTuningEnabled: true,
             performanceAutoDowngradeHeavyPlaybackEnabled: true,
           )
-        : current.copyWith(highPerformanceModeEnabled: enabled);
+        : enabled
+            ? current.copyWith(highPerformanceModeEnabled: true)
+            : current.copyWith(
+                highPerformanceModeEnabled: false,
+                performanceReduceDecorationsEnabled: false,
+                performanceReduceMotionEnabled: false,
+                performanceLightweightTvFocusEnabled: false,
+                performanceLeanPlaybackUiEnabled: false,
+                performanceAggressivePlaybackTuningEnabled: false,
+                performanceAutoDowngradeHeavyPlaybackEnabled: false,
+              );
     await _persist(next);
   }
 

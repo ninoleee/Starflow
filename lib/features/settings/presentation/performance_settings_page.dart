@@ -7,24 +7,18 @@ import 'package:starflow/features/settings/presentation/widgets/settings_page_sc
 String performanceSettingsSummary(AppSettings settings) {
   final enabledItems = <String>[
     if (!settings.translucentEffectsEnabled) '磨砂关闭',
-    if (settings.performanceReduceDecorationsEnabled) '装饰简化',
-    if (settings.performanceReduceMotionEnabled) '动画简化',
     if (settings.performanceStaticNavigationEnabled) '导航静态',
     if (!settings.autoHideNavigationBarEnabled) '菜单常驻',
-    if (settings.performanceLightweightTvFocusEnabled) 'TV 焦点轻量',
     if (!settings.homeHeroBackgroundEnabled) 'Hero 背景关闭',
     if (settings.performanceStaticHomeHeroEnabled) 'Hero 静态',
     if (settings.performanceLightweightHomeHeroEnabled) 'Hero 轻量卡面',
     if (settings.performanceSlimDetailHeroEnabled) '详情轻量',
-    if (settings.performanceLeanPlaybackUiEnabled) '播放轻量',
-    if (settings.performanceAggressivePlaybackTuningEnabled) '解码调优',
-    if (settings.performanceAutoDowngradeHeavyPlaybackEnabled) '片源自动降级',
   ];
 
   if (enabledItems.isEmpty) {
     return settings.highPerformanceModeEnabled
         ? '预设已开，当前轻量项已手动调回'
-        : '按需管理界面、Hero 和播放轻量模式';
+        : '按需管理界面、导航与 Hero 轻量模式';
   }
 
   final itemsLabel = enabledItems.length <= 2
@@ -49,7 +43,7 @@ class PerformanceSettingsPage extends ConsumerWidget {
       onBack: () => Navigator.of(context).pop(),
       children: [
         Text(
-          '这里集中放置高性能与轻量模式相关选项。高性能模式本身只是一次性套用推荐值，下面每一项之后仍可单独改回。',
+          '这里集中放置你之前已经确认过的高性能与轻量模式选项。高性能模式本身只是一次性套用推荐值，下面这些项之后仍可单独改回；未单独列出的其他轻量化处理会继续跟随高性能模式预设。',
           style: theme.textTheme.bodyMedium?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
@@ -58,7 +52,7 @@ class PerformanceSettingsPage extends ConsumerWidget {
         SettingsToggleTile(
           title: '高性能模式',
           subtitle:
-              '打开时会默认关闭透明磨砂、关闭菜单栏自动隐藏、关闭 Hero 背景图，并开启界面、导航、Hero、详情和播放的轻量开关；之后你仍可逐项改回。',
+              '打开时会默认关闭透明磨砂、关闭菜单栏自动隐藏、关闭 Hero 背景图，并套用这页中的推荐值；未单独列出的其他轻量化处理也会一起生效。',
           value: settings.highPerformanceModeEnabled,
           onChanged: (value) {
             controller.setHighPerformanceModeEnabled(value);
@@ -73,25 +67,6 @@ class PerformanceSettingsPage extends ConsumerWidget {
             controller.setTranslucentEffectsEnabled(value);
           },
         ),
-        const SizedBox(height: 18),
-        SettingsToggleTile(
-          title: '界面装饰简化',
-          subtitle: '减少背景光效、面板阴影和部分额外装饰。',
-          value: settings.performanceReduceDecorationsEnabled,
-          onChanged: (value) {
-            controller.setPerformanceReduceDecorationsEnabled(value);
-          },
-        ),
-        const SizedBox(height: 18),
-        SettingsToggleTile(
-          title: '页面过渡动画简化',
-          subtitle: '让启动页和页面切换尽量少动效。',
-          value: settings.performanceReduceMotionEnabled,
-          onChanged: (value) {
-            controller.setPerformanceReduceMotionEnabled(value);
-          },
-        ),
-        const SizedBox(height: 18),
         SettingsToggleTile(
           title: '导航静态化',
           subtitle: '导航栏显隐、按钮反馈和 TV 侧栏切换尽量使用静态表现。',
@@ -107,15 +82,6 @@ class PerformanceSettingsPage extends ConsumerWidget {
           value: settings.autoHideNavigationBarEnabled,
           onChanged: (value) {
             controller.setAutoHideNavigationBarEnabled(value);
-          },
-        ),
-        const SizedBox(height: 18),
-        SettingsToggleTile(
-          title: 'TV 焦点轻量高亮',
-          subtitle: 'TV 端使用更轻的焦点描边和发光效果。',
-          value: settings.performanceLightweightTvFocusEnabled,
-          onChanged: (value) {
-            controller.setPerformanceLightweightTvFocusEnabled(value);
           },
         ),
         const SettingsSectionTitle(label: '首页 Hero'),
@@ -152,33 +118,6 @@ class PerformanceSettingsPage extends ConsumerWidget {
           value: settings.performanceSlimDetailHeroEnabled,
           onChanged: (value) {
             controller.setPerformanceSlimDetailHeroEnabled(value);
-          },
-        ),
-        const SettingsSectionTitle(label: '播放'),
-        SettingsToggleTile(
-          title: '播放页轻量叠层与字幕',
-          subtitle: '简化启动叠层、缓冲遮罩与字幕样式。',
-          value: settings.performanceLeanPlaybackUiEnabled,
-          onChanged: (value) {
-            controller.setPerformanceLeanPlaybackUiEnabled(value);
-          },
-        ),
-        const SizedBox(height: 18),
-        SettingsToggleTile(
-          title: '更积极的解码与 MPV 调优',
-          subtitle: '自动模式下会更积极优先硬解，并应用更激进的 MPV 缓冲调优。',
-          value: settings.performanceAggressivePlaybackTuningEnabled,
-          onChanged: (value) {
-            controller.setPerformanceAggressivePlaybackTuningEnabled(value);
-          },
-        ),
-        const SizedBox(height: 18),
-        SettingsToggleTile(
-          title: '高压力片源自动切换原生/系统播放器',
-          subtitle: 'TV 端遇到高码率 4K / HEVC 等重负载片源时，优先切到更稳的播放器。',
-          value: settings.performanceAutoDowngradeHeavyPlaybackEnabled,
-          onChanged: (value) {
-            controller.setPerformanceAutoDowngradeHeavyPlaybackEnabled(value);
           },
         ),
       ],
