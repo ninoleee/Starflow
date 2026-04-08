@@ -251,18 +251,22 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                   }
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 18),
-                    child: Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        for (var index = 0; index < collections.length; index++)
-                          _LibraryCollectionChip(
-                            label: collections[index].title,
-                            focusId:
-                                'library:collection:${collections[index].id}',
+                    child: SizedBox(
+                      height: 56,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        clipBehavior: Clip.none,
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        itemCount: collections.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(width: 10),
+                        itemBuilder: (context, index) {
+                          final collection = collections[index];
+                          return _LibraryCollectionChip(
+                            label: collection.title,
+                            focusId: 'library:collection:${collection.id}',
                             autofocus: index == 0 && isTelevision,
                             onPressed: () {
-                              final collection = collections[index];
                               context.pushNamed(
                                 'collection',
                                 extra: LibraryCollectionTarget(
@@ -275,8 +279,9 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                                 ),
                               );
                             },
-                          ),
-                      ],
+                          );
+                        },
+                      ),
                     ),
                   );
                 },

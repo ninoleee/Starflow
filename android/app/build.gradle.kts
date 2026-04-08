@@ -6,17 +6,6 @@ plugins {
 }
 
 val starflowMinSdk = 23
-val starflowDefaultApplicationId = "com.example.starflow"
-val starflowApplicationIdOverride = providers
-    .gradleProperty("starflowApplicationIdOverride")
-    .orNull
-    ?.trim()
-    .orEmpty()
-val starflowApplicationId = if (starflowApplicationIdOverride.isNotEmpty()) {
-    starflowApplicationIdOverride
-} else {
-    starflowDefaultApplicationId
-}
 
 android {
     namespace = "com.example.starflow"
@@ -41,7 +30,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = starflowApplicationId
+        applicationId = "com.example.starflow"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = starflowMinSdk
