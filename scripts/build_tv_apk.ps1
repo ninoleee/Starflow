@@ -1,7 +1,6 @@
 param(
   [string]$SettingsJsonPath = "",
   [string]$OutputDir = "",
-  [string]$TargetPlatforms = "android-arm,android-arm64",
   [switch]$SkipBuild
 )
 
@@ -79,153 +78,10 @@ function Remove-EmbeddedSettings([string]$embeddedPath) {
   }
 }
 
-function Get-AllowedApkAbis([string]$targetPlatforms) {
-  $map = @{
-    "android-arm" = "armeabi-v7a"
-    "android-arm64" = "arm64-v8a"
-    "android-x64" = "x86_64"
-  }
-  $abis = New-Object System.Collections.Generic.List[string]
-  foreach ($platform in ($targetPlatforms -split ",")) {
-    $normalized = $platform.Trim()
-    if ([string]::IsNullOrWhiteSpace($normalized)) {
-      continue
-    }
-    if ($map.ContainsKey($normalized) -and -not $abis.Contains($map[$normalized])) {
-      $abis.Add($map[$normalized])
-    }
-  }
-  return $abis.ToArray()
-}
-
-function Test-IsApkSignatureEntry([string]$entryName) {
-  $normalized = $entryName.Replace("\", "/")
-  return $normalized -match '^META-INF/(MANIFEST\.MF|[^/]+\.(SF|RSA|DSA))$'
-}
-
-function Optimize-ApkForTargetAbis(
-  [string]$apkPath,
-  [string[]]$allowedAbis
-) {
-  if (-not (Test-Path -LiteralPath $apkPath)) {
-    throw "APK not found for ABI optimization: $apkPath"
-  }
-  if ($allowedAbis.Count -eq 0 -or $allowedAbis -contains "x86_64") {
-    return
-  }
-
-  Add-Type -AssemblyName System.IO.Compression
-  Add-Type -AssemblyName System.IO.Compression.FileSystem
-
-  $buildToolsDir = Join-Path $env:ANDROID_SDK_ROOT "build-tools\\35.0.0"
-  $zipalignPath = Join-Path $buildToolsDir "zipalign.exe"
-  $apksignerPath = Join-Path $buildToolsDir "apksigner.bat"
-  $debugKeystorePath = Join-Path $env:USERPROFILE ".android\\debug.keystore"
-  if (-not (Test-Path -LiteralPath $zipalignPath)) {
-    throw "zipalign not found: $zipalignPath"
-  }
-  if (-not (Test-Path -LiteralPath $apksignerPath)) {
-    throw "apksigner not found: $apksignerPath"
-  }
-  if (-not (Test-Path -LiteralPath $debugKeystorePath)) {
-    throw "debug keystore not found: $debugKeystorePath"
-  }
-
-  $tempDir = Join-Path $env:TEMP ("starflow-apk-opt-" + [Guid]::NewGuid().ToString("N"))
-  $unsignedApk = Join-Path $tempDir "unsigned.apk"
-  $alignedApk = Join-Path $tempDir "aligned.apk"
-  $abiSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-  foreach ($abi in $allowedAbis) {
-    if (-not [string]::IsNullOrWhiteSpace($abi)) {
-      $abiSet.Add($abi) | Out-Null
-    }
-  }
-
-  New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
-  try {
-    $sourceArchive = [System.IO.Compression.ZipFile]::OpenRead($apkPath)
-    try {
-      $destinationStream = [System.IO.File]::Open($unsignedApk, [System.IO.FileMode]::Create)
-      try {
-        $destinationArchive = [System.IO.Compression.ZipArchive]::new(
-          $destinationStream,
-          [System.IO.Compression.ZipArchiveMode]::Create,
-          $false
-        )
-        try {
-          foreach ($entry in $sourceArchive.Entries) {
-            $entryName = $entry.FullName
-            if (Test-IsApkSignatureEntry $entryName) {
-              continue
-            }
-            if ($entryName -match '^lib/([^/]+)/') {
-              $abi = $Matches[1]
-              if (-not $abiSet.Contains($abi)) {
-                continue
-              }
-            }
-
-            $newEntry = $destinationArchive.CreateEntry(
-              $entryName,
-              [System.IO.Compression.CompressionLevel]::Optimal
-            )
-            $newEntry.LastWriteTime = $entry.LastWriteTime
-            if ($entryName.EndsWith("/")) {
-              continue
-            }
-            $sourceStream = $entry.Open()
-            $targetStream = $newEntry.Open()
-            try {
-              $sourceStream.CopyTo($targetStream)
-            }
-            finally {
-              $targetStream.Dispose()
-              $sourceStream.Dispose()
-            }
-          }
-        }
-        finally {
-          $destinationArchive.Dispose()
-        }
-      }
-      finally {
-        $destinationStream.Dispose()
-      }
-    }
-    finally {
-      $sourceArchive.Dispose()
-    }
-
-    & $zipalignPath -f -p 4 $unsignedApk $alignedApk
-    if ($LASTEXITCODE -ne 0) {
-      throw "zipalign failed with exit code $LASTEXITCODE"
-    }
-
-    & $apksignerPath sign `
-      --ks $debugKeystorePath `
-      --ks-key-alias androiddebugkey `
-      --ks-pass pass:android `
-      --key-pass pass:android `
-      --v1-signing-enabled true `
-      --v2-signing-enabled true `
-      --out $apkPath `
-      $alignedApk
-    if ($LASTEXITCODE -ne 0) {
-      throw "apksigner failed with exit code $LASTEXITCODE"
-    }
-  }
-  finally {
-    if (Test-Path -LiteralPath $tempDir) {
-      Remove-Item -LiteralPath $tempDir -Recurse -Force
-    }
-  }
-}
-
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $pubspecPath = Join-Path $repoRoot "pubspec.yaml"
 $resolvedOutputDir = Get-ResolvedOutputDir $OutputDir
 $embeddedPath = $null
-$allowedAbis = Get-AllowedApkAbis $TargetPlatforms
 
 Push-Location $repoRoot
 try {
@@ -233,10 +89,7 @@ try {
   $embeddedPath = Set-EmbeddedSettings $repoRoot $SettingsJsonPath
 
   if (-not $SkipBuild) {
-    flutter build apk `
-      --release `
-      --target-platform $TargetPlatforms `
-      --android-skip-build-dependency-validation
+    flutter build apk --release --android-skip-build-dependency-validation
     if ($LASTEXITCODE -ne 0) {
       throw "flutter build apk failed with exit code $LASTEXITCODE"
     }
@@ -256,10 +109,8 @@ try {
     throw "Build output not found: $sourceApk"
   }
 
-  Optimize-ApkForTargetAbis -apkPath $sourceApk -allowedAbis $allowedAbis
   Copy-Item -LiteralPath $sourceApk -Destination $targetApk -Force
   Write-Output "Version=$version"
-  Write-Output "TargetPlatforms=$TargetPlatforms"
   Write-Output "APK=$targetApk"
 }
 finally {
