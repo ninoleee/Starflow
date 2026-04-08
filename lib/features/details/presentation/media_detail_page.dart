@@ -8,6 +8,7 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
+import 'package:starflow/core/widgets/desktop_horizontal_pager.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -2214,26 +2215,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     super.dispose();
   }
 
-  void _returnToTop() {
-    if (_scrollController.hasClients) {
-      _scrollController.jumpTo(0);
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      if (_heroSearchFocusNode.context != null &&
-          _heroSearchFocusNode.canRequestFocus) {
-        _heroSearchFocusNode.requestFocus();
-        return;
-      }
-      if (_heroPlayFocusNode.context != null &&
-          _heroPlayFocusNode.canRequestFocus) {
-        _heroPlayFocusNode.requestFocus();
-      }
-    });
-  }
-
   void _cancelActiveLibraryMatch() {
     _activeLibraryMatchController?.cancel();
     _activeLibraryMatchController = null;
@@ -3503,619 +3484,596 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     final playbackTargetDecorated = _decorateTargetWithSelectedSubtitle(target);
     final seriesAsync = ref.watch(seriesBrowserProvider(target));
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
-    final highPerformanceModeEnabled = ref.watch(
-      appSettingsProvider
-          .select((settings) => settings.highPerformanceModeEnabled),
+    final performanceSlimDetailHeroEnabled = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.performanceSlimDetailHeroEnabled,
+      ),
     );
     final playbackEngine = ref.watch(
       appSettingsProvider.select((settings) => settings.playbackEngine),
     );
 
-    return TvFocusMemoryScope(
+    return TvPageFocusScope(
       controller: _tvFocusMemoryController,
-      scopeId: 'detail',
-      enabled: isTelevision,
-      child: TvReturnToTopScope(
-        onReturnToTop: _returnToTop,
-        child: Scaffold(
-          backgroundColor: const Color(0xFF030914),
-          body: TvDirectionalFocusBoundary(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                DecoratedBox(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Color(0xFF07121F),
-                        Color(0xFF08101A),
-                        Color(0xFF030914),
-                      ],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                    ),
+      scopeId: _detailFocusScopeId(widget.target),
+      isTelevision: isTelevision,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF030914),
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            DecoratedBox(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Color(0xFF07121F),
+                    Color(0xFF08101A),
+                    Color(0xFF030914),
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+              child: ListView(
+                controller: _scrollController,
+                padding: EdgeInsets.zero,
+                children: [
+                  _HeroSection(
+                    target: playbackTargetDecorated,
+                    simplifyVisualEffects: performanceSlimDetailHeroEnabled,
+                    playFocusNode: _heroPlayFocusNode,
+                    searchFocusNode: _heroSearchFocusNode,
                   ),
-                  child: ListView(
-                    controller: _scrollController,
+                  Padding(
                     padding: EdgeInsets.zero,
-                    children: [
-                      _HeroSection(
-                        target: playbackTargetDecorated,
-                        simplifyVisualEffects: highPerformanceModeEnabled,
-                        playFocusNode: _heroPlayFocusNode,
-                        searchFocusNode: _heroSearchFocusNode,
-                      ),
-                      Padding(
-                        padding: EdgeInsets.zero,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (target.isSeries)
-                              seriesAsync.when(
-                                data: (browser) {
-                                  if (browser == null ||
-                                      browser.groups.isEmpty) {
-                                    return const SizedBox.shrink();
-                                  }
-                                  final selectedGroup =
-                                      _resolveSelectedGroup(browser.groups);
-                                  return _DetailBlock(
-                                    title: '剧集',
-                                    child: _EpisodeBrowser(
-                                      seriesTarget: target,
-                                      groups: browser.groups,
-                                      selectedGroupId: selectedGroup.id,
-                                      onSeasonSelected: (groupId) {
-                                        setState(() {
-                                          _selectedSeasonId = groupId;
-                                        });
-                                      },
-                                    ),
-                                  );
-                                },
-                                loading: () => const _DetailBlock(
-                                  title: '剧集',
-                                  child: Padding(
-                                    padding: EdgeInsets.symmetric(vertical: 12),
-                                    child: Center(
-                                      child: CircularProgressIndicator(
-                                          color: Colors.white),
-                                    ),
-                                  ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (target.isSeries)
+                          seriesAsync.when(
+                            data: (browser) {
+                              if (browser == null || browser.groups.isEmpty) {
+                                return const SizedBox.shrink();
+                              }
+                              final selectedGroup =
+                                  _resolveSelectedGroup(browser.groups);
+                              return _DetailBlock(
+                                title: '剧集',
+                                child: _EpisodeBrowser(
+                                  seriesTarget: target,
+                                  groups: browser.groups,
+                                  selectedGroupId: selectedGroup.id,
+                                  onSeasonSelected: (groupId) {
+                                    setState(() {
+                                      _selectedSeasonId = groupId;
+                                    });
+                                  },
                                 ),
-                                error: (error, stackTrace) => _DetailBlock(
-                                  title: '剧集',
-                                  child: Text(
-                                    '加载剧集失败：$error',
-                                    style: const TextStyle(
-                                      color: Color(0xFF90A0BD),
-                                      fontSize: 14,
-                                    ),
-                                  ),
+                              );
+                            },
+                            loading: () => const _DetailBlock(
+                              title: '剧集',
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(vertical: 12),
+                                child: Center(
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white),
                                 ),
                               ),
-                            if (target.overview.trim().isNotEmpty)
-                              _DetailBlock(
-                                title: _overviewSectionTitle(target),
-                                child: Text(
-                                  target.overview,
-                                  style: const TextStyle(
-                                    color: Color(0xFFDCE6F8),
-                                    fontSize: 15,
-                                    height: 1.7,
-                                  ),
+                            ),
+                            error: (error, stackTrace) => _DetailBlock(
+                              title: '剧集',
+                              child: Text(
+                                '加载剧集失败：$error',
+                                style: const TextStyle(
+                                  color: Color(0xFF90A0BD),
+                                  fontSize: 14,
                                 ),
                               ),
-                            if (_buildDetailGalleryImages(target).isNotEmpty)
-                              _DetailBlock(
-                                title: '剧照',
-                                child: _DetailImageGallery(
-                                  images: _buildDetailGalleryImages(target),
-                                ),
+                            ),
+                          ),
+                        if (target.overview.trim().isNotEmpty)
+                          _DetailBlock(
+                            title: _overviewSectionTitle(target),
+                            child: Text(
+                              target.overview,
+                              style: const TextStyle(
+                                color: Color(0xFFDCE6F8),
+                                fontSize: 15,
+                                height: 1.7,
                               ),
-                            if (target.resolvedDirectorProfiles.isNotEmpty ||
-                                target.resolvedActorProfiles.isNotEmpty)
-                              _DetailBlock(
-                                title: '演职员',
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (target.resolvedDirectorProfiles
-                                        .isNotEmpty) ...[
-                                      const _InfoLabel('导演'),
-                                      const SizedBox(height: 10),
-                                      _PersonRail(
-                                        people: target.resolvedDirectorProfiles,
-                                        focusScopePrefix: 'detail:director',
-                                        onPersonTap: (person) {
-                                          context.pushNamed(
-                                            'person-credits',
-                                            extra: PersonCreditsPageTarget(
-                                              person: person,
-                                              role: PersonCreditsRole.director,
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ],
-                                    if (target.resolvedDirectorProfiles
-                                            .isNotEmpty &&
-                                        target.resolvedActorProfiles.isNotEmpty)
-                                      const SizedBox(height: 18),
-                                    if (target
-                                        .resolvedActorProfiles.isNotEmpty) ...[
-                                      const _InfoLabel('演员'),
-                                      const SizedBox(height: 10),
-                                      _PersonRail(
-                                        people: target.resolvedActorProfiles,
-                                        focusScopePrefix: 'detail:actor',
-                                        onPersonTap: (person) {
-                                          context.pushNamed(
-                                            'person-credits',
-                                            extra: PersonCreditsPageTarget(
-                                              person: person,
-                                              role: PersonCreditsRole.actor,
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            if (target.resolvedPlatformProfiles.isNotEmpty)
-                              _DetailBlock(
-                                title: '公司',
-                                child: _PlatformRail(
-                                  platforms: target.resolvedPlatformProfiles,
-                                ),
-                              ),
-                            if (target.sourceName.trim().isNotEmpty ||
-                                target.availabilityLabel.trim().isNotEmpty ||
-                                _buildResourceFacts(target).isNotEmpty)
-                              _DetailBlock(
-                                title: '资源信息',
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (target.availabilityLabel
-                                        .trim()
-                                        .isNotEmpty)
-                                      _FactRow(
-                                        label: '状态',
-                                        value: target.availabilityLabel,
-                                      ),
-                                    if (_libraryMatchChoices.length > 1 &&
-                                        !_shouldShowPlayableVariantSwitcher(
-                                          target,
-                                        )) ...[
-                                      const SizedBox(height: 12),
-                                      const _InfoLabel('本地资源'),
-                                      const SizedBox(height: 8),
-                                      _buildLibraryMatchSelectionControl(
-                                        isTelevision: isTelevision,
-                                        title: '本地资源',
-                                        focusId:
-                                            'detail:resource:library-selector',
-                                        televisionOnPressed:
-                                            _openTelevisionLibraryMatchPicker,
-                                      ),
-                                    ],
-                                    if (target.isPlayable) ...[
-                                      const SizedBox(height: 12),
-                                      const _InfoLabel('播放器'),
-                                      const SizedBox(height: 8),
-                                      if (isTelevision)
-                                        TvSelectionTile(
-                                          title: '播放器',
-                                          value: playbackEngine.label,
-                                          onPressed: () =>
-                                              _openPlaybackEnginePicker(
-                                            playbackEngine,
-                                          ),
-                                          focusId:
-                                              'detail:resource:playback-engine',
-                                        )
-                                      else
-                                        DropdownButtonHideUnderline(
-                                          child: DropdownButton<PlaybackEngine>(
-                                            value: playbackEngine,
-                                            isExpanded: true,
-                                            dropdownColor:
-                                                const Color(0xFF142235),
-                                            iconEnabledColor: Colors.white70,
-                                            style: const TextStyle(
-                                              color: Color(0xFFDCE6F8),
-                                              fontSize: 14,
-                                              height: 1.35,
-                                            ),
-                                            items: PlaybackEngine.values
-                                                .map(
-                                                  (engine) => DropdownMenuItem<
-                                                      PlaybackEngine>(
-                                                    value: engine,
-                                                    child: Text(
-                                                      engine.label,
-                                                      maxLines: 1,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                    ),
-                                                  ),
-                                                )
-                                                .toList(growable: false),
-                                            onChanged: (selection) {
-                                              if (selection == null) {
-                                                return;
-                                              }
-                                              unawaited(
-                                                _setPlaybackEngine(
-                                                  selection,
-                                                  currentEngine: playbackEngine,
-                                                ),
-                                              );
-                                            },
-                                          ),
+                            ),
+                          ),
+                        if (_buildDetailGalleryImages(target).isNotEmpty)
+                          _DetailBlock(
+                            title: '剧照',
+                            child: _DetailImageGallery(
+                              images: _buildDetailGalleryImages(target),
+                            ),
+                          ),
+                        if (target.resolvedDirectorProfiles.isNotEmpty ||
+                            target.resolvedActorProfiles.isNotEmpty)
+                          _DetailBlock(
+                            title: '演职员',
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (target
+                                    .resolvedDirectorProfiles.isNotEmpty) ...[
+                                  const _InfoLabel('导演'),
+                                  const SizedBox(height: 10),
+                                  _PersonRail(
+                                    people: target.resolvedDirectorProfiles,
+                                    focusScopePrefix: 'detail:director',
+                                    onPersonTap: (person) {
+                                      context.pushNamed(
+                                        'person-credits',
+                                        extra: PersonCreditsPageTarget(
+                                          person: person,
+                                          role: PersonCreditsRole.director,
                                         ),
-                                    ],
-                                    if (target.isPlayable) ...[
-                                      const SizedBox(height: 12),
-                                      Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: isTelevision
-                                            ? TvAdaptiveButton(
-                                                label: _isSearchingSubtitles
-                                                    ? '搜索字幕中...'
-                                                    : (_subtitleSearchChoices
-                                                            .isEmpty
-                                                        ? '搜索字幕'
-                                                        : '刷新字幕'),
-                                                icon: Icons.subtitles_rounded,
-                                                focusId:
-                                                    'detail:resource:search-subtitle',
-                                                onPressed: _isSearchingSubtitles
-                                                    ? null
-                                                    : () =>
-                                                        _searchSubtitlesForDetail(
-                                                          target,
-                                                        ),
-                                                variant: TvButtonVariant.text,
-                                              )
-                                            : TextButton.icon(
-                                                onPressed: _isSearchingSubtitles
-                                                    ? null
-                                                    : () =>
-                                                        _searchSubtitlesForDetail(
-                                                          target,
-                                                        ),
-                                                icon: _isSearchingSubtitles
-                                                    ? const SizedBox(
-                                                        width: 14,
-                                                        height: 14,
-                                                        child:
-                                                            CircularProgressIndicator(
-                                                          strokeWidth: 2,
-                                                        ),
-                                                      )
-                                                    : const Icon(
-                                                        Icons.subtitles_rounded,
-                                                        size: 16,
-                                                      ),
-                                                label: Text(
-                                                  _isSearchingSubtitles
-                                                      ? '搜索字幕中...'
-                                                      : (_subtitleSearchChoices
-                                                              .isEmpty
-                                                          ? '搜索字幕'
-                                                          : '刷新字幕'),
-                                                ),
-                                                style: TextButton.styleFrom(
-                                                  foregroundColor: Colors.white,
-                                                  padding: const EdgeInsets
-                                                      .symmetric(
-                                                    horizontal: 0,
-                                                    vertical: 0,
-                                                  ),
-                                                  tapTargetSize:
-                                                      MaterialTapTargetSize
-                                                          .shrinkWrap,
+                                      );
+                                    },
+                                  ),
+                                ],
+                                if (target
+                                        .resolvedDirectorProfiles.isNotEmpty &&
+                                    target.resolvedActorProfiles.isNotEmpty)
+                                  const SizedBox(height: 18),
+                                if (target
+                                    .resolvedActorProfiles.isNotEmpty) ...[
+                                  const _InfoLabel('演员'),
+                                  const SizedBox(height: 10),
+                                  _PersonRail(
+                                    people: target.resolvedActorProfiles,
+                                    focusScopePrefix: 'detail:actor',
+                                    onPersonTap: (person) {
+                                      context.pushNamed(
+                                        'person-credits',
+                                        extra: PersonCreditsPageTarget(
+                                          person: person,
+                                          role: PersonCreditsRole.actor,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        if (target.resolvedPlatformProfiles.isNotEmpty)
+                          _DetailBlock(
+                            title: '公司',
+                            child: _PlatformRail(
+                              platforms: target.resolvedPlatformProfiles,
+                            ),
+                          ),
+                        if (target.sourceName.trim().isNotEmpty ||
+                            target.availabilityLabel.trim().isNotEmpty ||
+                            _buildResourceFacts(target).isNotEmpty)
+                          _DetailBlock(
+                            title: '资源信息',
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (target.availabilityLabel.trim().isNotEmpty)
+                                  _FactRow(
+                                    label: '状态',
+                                    value: target.availabilityLabel,
+                                  ),
+                                if (_libraryMatchChoices.length > 1 &&
+                                    !_shouldShowPlayableVariantSwitcher(
+                                      target,
+                                    )) ...[
+                                  const SizedBox(height: 12),
+                                  const _InfoLabel('本地资源'),
+                                  const SizedBox(height: 8),
+                                  _buildLibraryMatchSelectionControl(
+                                    isTelevision: isTelevision,
+                                    title: '本地资源',
+                                    focusId: 'detail:resource:library-selector',
+                                    televisionOnPressed:
+                                        _openTelevisionLibraryMatchPicker,
+                                  ),
+                                ],
+                                if (target.isPlayable) ...[
+                                  const SizedBox(height: 12),
+                                  const _InfoLabel('播放器'),
+                                  const SizedBox(height: 8),
+                                  if (isTelevision)
+                                    TvSelectionTile(
+                                      title: '播放器',
+                                      value: playbackEngine.label,
+                                      onPressed: () =>
+                                          _openPlaybackEnginePicker(
+                                        playbackEngine,
+                                      ),
+                                      focusId:
+                                          'detail:resource:playback-engine',
+                                    )
+                                  else
+                                    DropdownButtonHideUnderline(
+                                      child: DropdownButton<PlaybackEngine>(
+                                        value: playbackEngine,
+                                        isExpanded: true,
+                                        dropdownColor: const Color(0xFF142235),
+                                        iconEnabledColor: Colors.white70,
+                                        style: const TextStyle(
+                                          color: Color(0xFFDCE6F8),
+                                          fontSize: 14,
+                                          height: 1.35,
+                                        ),
+                                        items: PlaybackEngine.values
+                                            .map(
+                                              (engine) => DropdownMenuItem<
+                                                  PlaybackEngine>(
+                                                value: engine,
+                                                child: Text(
+                                                  engine.label,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
                                                 ),
                                               ),
+                                            )
+                                            .toList(growable: false),
+                                        onChanged: (selection) {
+                                          if (selection == null) {
+                                            return;
+                                          }
+                                          unawaited(
+                                            _setPlaybackEngine(
+                                              selection,
+                                              currentEngine: playbackEngine,
+                                            ),
+                                          );
+                                        },
                                       ),
-                                      if (_subtitleSearchChoices
-                                          .isNotEmpty) ...[
-                                        const SizedBox(height: 8),
-                                        const _InfoLabel('外挂字幕'),
-                                        const SizedBox(height: 8),
-                                        if (isTelevision)
-                                          TvSelectionTile(
-                                            title: '外挂字幕',
-                                            value: _currentSubtitleSearchIndex <
-                                                    0
-                                                ? '不加载外挂字幕'
-                                                : _subtitleSearchChoiceLabel(
-                                                    _subtitleSearchChoices[
-                                                        _currentSubtitleSearchIndex],
-                                                  ),
-                                            onPressed: _busySubtitleResultId !=
-                                                    null
+                                    ),
+                                ],
+                                if (target.isPlayable) ...[
+                                  const SizedBox(height: 12),
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: isTelevision
+                                        ? TvAdaptiveButton(
+                                            label: _isSearchingSubtitles
+                                                ? '搜索字幕中...'
+                                                : (_subtitleSearchChoices
+                                                        .isEmpty
+                                                    ? '搜索字幕'
+                                                    : '刷新字幕'),
+                                            icon: Icons.subtitles_rounded,
+                                            focusId:
+                                                'detail:resource:search-subtitle',
+                                            onPressed: _isSearchingSubtitles
                                                 ? null
                                                 : () =>
-                                                    _openTelevisionSubtitlePicker(
+                                                    _searchSubtitlesForDetail(
                                                       target,
                                                     ),
-                                            focusId:
-                                                'detail:resource:subtitle-selector',
+                                            variant: TvButtonVariant.text,
                                           )
-                                        else
-                                          DropdownButtonHideUnderline(
-                                            child: DropdownButton<int>(
-                                              value:
-                                                  _currentSubtitleSearchIndex,
-                                              isExpanded: true,
-                                              dropdownColor:
-                                                  const Color(0xFF142235),
-                                              iconEnabledColor: Colors.white70,
-                                              style: const TextStyle(
-                                                color: Color(0xFFDCE6F8),
-                                                fontSize: 14,
-                                                height: 1.35,
-                                              ),
-                                              items: [
-                                                const DropdownMenuItem<int>(
-                                                  value: -1,
-                                                  child: Text('不加载外挂字幕'),
-                                                ),
-                                                ...List.generate(
-                                                  _subtitleSearchChoices.length,
-                                                  (i) => DropdownMenuItem<int>(
-                                                    value: i,
-                                                    child: Text(
-                                                      _subtitleSearchChoiceLabel(
-                                                        _subtitleSearchChoices[
-                                                            i],
-                                                      ),
-                                                      maxLines: 2,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
+                                        : TextButton.icon(
+                                            onPressed: _isSearchingSubtitles
+                                                ? null
+                                                : () =>
+                                                    _searchSubtitlesForDetail(
+                                                      target,
                                                     ),
+                                            icon: _isSearchingSubtitles
+                                                ? const SizedBox(
+                                                    width: 14,
+                                                    height: 14,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                                  )
+                                                : const Icon(
+                                                    Icons.subtitles_rounded,
+                                                    size: 16,
                                                   ),
-                                                ),
-                                              ],
-                                              onChanged:
-                                                  (_busySubtitleResultId !=
-                                                              null ||
-                                                          _isSearchingSubtitles)
-                                                      ? null
-                                                      : (i) {
-                                                          if (i == null) {
-                                                            return;
-                                                          }
-                                                          unawaited(
-                                                            _applySelectedSubtitleSearchIndex(
-                                                              target,
-                                                              i,
-                                                            ),
-                                                          );
-                                                        },
+                                            label: Text(
+                                              _isSearchingSubtitles
+                                                  ? '搜索字幕中...'
+                                                  : (_subtitleSearchChoices
+                                                          .isEmpty
+                                                      ? '搜索字幕'
+                                                      : '刷新字幕'),
+                                            ),
+                                            style: TextButton.styleFrom(
+                                              foregroundColor: Colors.white,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 0,
+                                                vertical: 0,
+                                              ),
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
                                             ),
                                           ),
-                                      ],
-                                      if (_subtitleSearchStatusMessage
-                                              ?.trim()
-                                              .isNotEmpty ==
-                                          true) ...[
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          _subtitleSearchStatusMessage!,
+                                  ),
+                                  if (_subtitleSearchChoices.isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    const _InfoLabel('外挂字幕'),
+                                    const SizedBox(height: 8),
+                                    if (isTelevision)
+                                      TvSelectionTile(
+                                        title: '外挂字幕',
+                                        value: _currentSubtitleSearchIndex < 0
+                                            ? '不加载外挂字幕'
+                                            : _subtitleSearchChoiceLabel(
+                                                _subtitleSearchChoices[
+                                                    _currentSubtitleSearchIndex],
+                                              ),
+                                        onPressed: _busySubtitleResultId != null
+                                            ? null
+                                            : () =>
+                                                _openTelevisionSubtitlePicker(
+                                                  target,
+                                                ),
+                                        focusId:
+                                            'detail:resource:subtitle-selector',
+                                      )
+                                    else
+                                      DropdownButtonHideUnderline(
+                                        child: DropdownButton<int>(
+                                          value: _currentSubtitleSearchIndex,
+                                          isExpanded: true,
+                                          dropdownColor:
+                                              const Color(0xFF142235),
+                                          iconEnabledColor: Colors.white70,
                                           style: const TextStyle(
-                                            color: Color(0xFF9DB0CF),
-                                            fontSize: 13,
-                                            height: 1.45,
+                                            color: Color(0xFFDCE6F8),
+                                            fontSize: 14,
+                                            height: 1.35,
                                           ),
+                                          items: [
+                                            const DropdownMenuItem<int>(
+                                              value: -1,
+                                              child: Text('不加载外挂字幕'),
+                                            ),
+                                            ...List.generate(
+                                              _subtitleSearchChoices.length,
+                                              (i) => DropdownMenuItem<int>(
+                                                value: i,
+                                                child: Text(
+                                                  _subtitleSearchChoiceLabel(
+                                                    _subtitleSearchChoices[i],
+                                                  ),
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                          onChanged:
+                                              (_busySubtitleResultId != null ||
+                                                      _isSearchingSubtitles)
+                                                  ? null
+                                                  : (i) {
+                                                      if (i == null) {
+                                                        return;
+                                                      }
+                                                      unawaited(
+                                                        _applySelectedSubtitleSearchIndex(
+                                                          target,
+                                                          i,
+                                                        ),
+                                                      );
+                                                    },
                                         ),
-                                      ],
-                                    ],
-                                    if (_canShowManualResourceMatchButton(
-                                        target)) ...[
-                                      const SizedBox(height: 12),
-                                      Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: isTelevision
-                                            ? TvAdaptiveButton(
-                                                label: _isMatchingLocalResource
-                                                    ? '匹配中...'
-                                                    : '重新匹配资源',
-                                                icon: Icons.link_rounded,
-                                                focusId:
-                                                    'detail:resource:match-library',
-                                                onPressed:
-                                                    _isMatchingLocalResource
-                                                        ? null
-                                                        : () =>
-                                                            _matchLocalResource(
-                                                                target),
-                                                variant: TvButtonVariant.text,
-                                              )
-                                            : TextButton.icon(
-                                                onPressed:
-                                                    _isMatchingLocalResource
-                                                        ? null
-                                                        : () =>
-                                                            _matchLocalResource(
-                                                                target),
-                                                icon: _isMatchingLocalResource
-                                                    ? const SizedBox(
-                                                        width: 14,
-                                                        height: 14,
-                                                        child:
-                                                            CircularProgressIndicator(
-                                                          strokeWidth: 2,
-                                                        ),
-                                                      )
-                                                    : const Icon(
-                                                        Icons.link_rounded,
-                                                        size: 16,
-                                                      ),
-                                                label: Text(
-                                                  _isMatchingLocalResource
-                                                      ? '匹配中...'
-                                                      : '重新匹配资源',
-                                                ),
-                                                style: TextButton.styleFrom(
-                                                  foregroundColor: Colors.white,
-                                                  padding: const EdgeInsets
-                                                      .symmetric(
-                                                    horizontal: 0,
-                                                    vertical: 0,
-                                                  ),
-                                                  tapTargetSize:
-                                                      MaterialTapTargetSize
-                                                          .shrinkWrap,
-                                                ),
-                                              ),
                                       ),
-                                    ],
-                                    if (_canManageMetadataIndex(target)) ...[
-                                      const SizedBox(height: 12),
-                                      Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: isTelevision
-                                            ? TvAdaptiveButton(
-                                                label: '建立/管理索引',
-                                                icon:
-                                                    Icons.manage_search_rounded,
-                                                focusId:
-                                                    'detail:resource:metadata-index',
-                                                onPressed: () =>
-                                                    _openMetadataIndexManager(
-                                                        target),
-                                                variant: TvButtonVariant.text,
-                                              )
-                                            : TextButton.icon(
-                                                onPressed: () =>
-                                                    _openMetadataIndexManager(
-                                                        target),
-                                                icon: const Icon(
-                                                  Icons.manage_search_rounded,
-                                                  size: 16,
-                                                ),
-                                                label: const Text('建立/管理索引'),
-                                                style: TextButton.styleFrom(
-                                                  foregroundColor: Colors.white,
-                                                  padding: const EdgeInsets
-                                                      .symmetric(
-                                                    horizontal: 0,
-                                                    vertical: 0,
-                                                  ),
-                                                  tapTargetSize:
-                                                      MaterialTapTargetSize
-                                                          .shrinkWrap,
-                                                ),
-                                              ),
-                                      ),
-                                    ],
-                                    if (_canManuallyRefreshMetadata(
-                                        target)) ...[
-                                      const SizedBox(height: 12),
-                                      Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: isTelevision
-                                            ? TvAdaptiveButton(
-                                                label: _isRefreshingMetadata
-                                                    ? '更新中...'
-                                                    : '手动更新信息',
-                                                icon: Icons.refresh_rounded,
-                                                focusId:
-                                                    'detail:resource:refresh-metadata',
-                                                onPressed: _isRefreshingMetadata
-                                                    ? null
-                                                    : () => _refreshMetadata(
-                                                        target),
-                                                variant: TvButtonVariant.text,
-                                              )
-                                            : TextButton.icon(
-                                                onPressed: _isRefreshingMetadata
-                                                    ? null
-                                                    : () => _refreshMetadata(
-                                                        target),
-                                                icon: _isRefreshingMetadata
-                                                    ? const SizedBox(
-                                                        width: 14,
-                                                        height: 14,
-                                                        child:
-                                                            CircularProgressIndicator(
-                                                          strokeWidth: 2,
-                                                        ),
-                                                      )
-                                                    : const Icon(
-                                                        Icons.refresh_rounded,
-                                                        size: 16,
-                                                      ),
-                                                label: Text(
-                                                  _isRefreshingMetadata
-                                                      ? '更新中...'
-                                                      : '手动更新信息',
-                                                ),
-                                                style: TextButton.styleFrom(
-                                                  foregroundColor: Colors.white,
-                                                  padding: const EdgeInsets
-                                                      .symmetric(
-                                                    horizontal: 0,
-                                                    vertical: 0,
-                                                  ),
-                                                  tapTargetSize:
-                                                      MaterialTapTargetSize
-                                                          .shrinkWrap,
-                                                ),
-                                              ),
-                                      ),
-                                    ],
-                                    if (target.sourceName
-                                        .trim()
-                                        .isNotEmpty) ...[
-                                      if (target.availabilityLabel
-                                          .trim()
-                                          .isNotEmpty)
-                                        const SizedBox(height: 12),
-                                      _FactRow(
-                                        label: '来源',
-                                        value: target.sourceKind == null
-                                            ? target.sourceName
-                                            : '${target.sourceKind!.label} · ${target.sourceName}',
-                                      ),
-                                    ],
-                                    for (final fact
-                                        in _buildResourceFacts(target)) ...[
-                                      const SizedBox(height: 12),
-                                      _FactRow(
-                                        label: fact.label,
-                                        value: fact.value,
-                                        selectable: fact.selectable,
-                                      ),
-                                    ],
                                   ],
-                                ),
-                              ),
-                            if (_shouldShowPlayableVariantSwitcher(target))
-                              _buildPlayableVariantSwitcherBlock(),
-                          ],
-                        ),
-                      ),
-                    ],
+                                  if (_subtitleSearchStatusMessage
+                                          ?.trim()
+                                          .isNotEmpty ==
+                                      true) ...[
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      _subtitleSearchStatusMessage!,
+                                      style: const TextStyle(
+                                        color: Color(0xFF9DB0CF),
+                                        fontSize: 13,
+                                        height: 1.45,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                                if (_canShowManualResourceMatchButton(
+                                    target)) ...[
+                                  const SizedBox(height: 12),
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: isTelevision
+                                        ? TvAdaptiveButton(
+                                            label: _isMatchingLocalResource
+                                                ? '匹配中...'
+                                                : '重新匹配资源',
+                                            icon: Icons.link_rounded,
+                                            focusId:
+                                                'detail:resource:match-library',
+                                            onPressed: _isMatchingLocalResource
+                                                ? null
+                                                : () =>
+                                                    _matchLocalResource(target),
+                                            variant: TvButtonVariant.text,
+                                          )
+                                        : TextButton.icon(
+                                            onPressed: _isMatchingLocalResource
+                                                ? null
+                                                : () =>
+                                                    _matchLocalResource(target),
+                                            icon: _isMatchingLocalResource
+                                                ? const SizedBox(
+                                                    width: 14,
+                                                    height: 14,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                                  )
+                                                : const Icon(
+                                                    Icons.link_rounded,
+                                                    size: 16,
+                                                  ),
+                                            label: Text(
+                                              _isMatchingLocalResource
+                                                  ? '匹配中...'
+                                                  : '重新匹配资源',
+                                            ),
+                                            style: TextButton.styleFrom(
+                                              foregroundColor: Colors.white,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 0,
+                                                vertical: 0,
+                                              ),
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                            ),
+                                          ),
+                                  ),
+                                ],
+                                if (_canManageMetadataIndex(target)) ...[
+                                  const SizedBox(height: 12),
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: isTelevision
+                                        ? TvAdaptiveButton(
+                                            label: '建立/管理索引',
+                                            icon: Icons.manage_search_rounded,
+                                            focusId:
+                                                'detail:resource:metadata-index',
+                                            onPressed: () =>
+                                                _openMetadataIndexManager(
+                                                    target),
+                                            variant: TvButtonVariant.text,
+                                          )
+                                        : TextButton.icon(
+                                            onPressed: () =>
+                                                _openMetadataIndexManager(
+                                                    target),
+                                            icon: const Icon(
+                                              Icons.manage_search_rounded,
+                                              size: 16,
+                                            ),
+                                            label: const Text('建立/管理索引'),
+                                            style: TextButton.styleFrom(
+                                              foregroundColor: Colors.white,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 0,
+                                                vertical: 0,
+                                              ),
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                            ),
+                                          ),
+                                  ),
+                                ],
+                                if (_canManuallyRefreshMetadata(target)) ...[
+                                  const SizedBox(height: 12),
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: isTelevision
+                                        ? TvAdaptiveButton(
+                                            label: _isRefreshingMetadata
+                                                ? '更新中...'
+                                                : '手动更新信息',
+                                            icon: Icons.refresh_rounded,
+                                            focusId:
+                                                'detail:resource:refresh-metadata',
+                                            onPressed: _isRefreshingMetadata
+                                                ? null
+                                                : () =>
+                                                    _refreshMetadata(target),
+                                            variant: TvButtonVariant.text,
+                                          )
+                                        : TextButton.icon(
+                                            onPressed: _isRefreshingMetadata
+                                                ? null
+                                                : () =>
+                                                    _refreshMetadata(target),
+                                            icon: _isRefreshingMetadata
+                                                ? const SizedBox(
+                                                    width: 14,
+                                                    height: 14,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                                  )
+                                                : const Icon(
+                                                    Icons.refresh_rounded,
+                                                    size: 16,
+                                                  ),
+                                            label: Text(
+                                              _isRefreshingMetadata
+                                                  ? '更新中...'
+                                                  : '手动更新信息',
+                                            ),
+                                            style: TextButton.styleFrom(
+                                              foregroundColor: Colors.white,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 0,
+                                                vertical: 0,
+                                              ),
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                            ),
+                                          ),
+                                  ),
+                                ],
+                                if (target.sourceName.trim().isNotEmpty) ...[
+                                  if (target.availabilityLabel
+                                      .trim()
+                                      .isNotEmpty)
+                                    const SizedBox(height: 12),
+                                  _FactRow(
+                                    label: '来源',
+                                    value: target.sourceKind == null
+                                        ? target.sourceName
+                                        : '${target.sourceKind!.label} · ${target.sourceName}',
+                                  ),
+                                ],
+                                for (final fact
+                                    in _buildResourceFacts(target)) ...[
+                                  const SizedBox(height: 12),
+                                  _FactRow(
+                                    label: fact.label,
+                                    value: fact.value,
+                                    selectable: fact.selectable,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        if (_shouldShowPlayableVariantSwitcher(target))
+                          _buildPlayableVariantSwitcherBlock(),
+                      ],
+                    ),
                   ),
-                ),
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: OverlayToolbar(
-                    leadingColor: Colors.white,
-                    onBack: () => context.pop(),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: OverlayToolbar(
+                leadingColor: Colors.white,
+                onBack: () => context.pop(),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -4131,6 +4089,30 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     }
     return groups.first;
   }
+}
+
+String _detailFocusScopeId(MediaDetailTarget target) {
+  return buildTvFocusScopeId(
+    prefix: 'detail',
+    segments: [
+      target.sourceKind?.name,
+      target.sourceId,
+      target.sectionId,
+      target.itemId,
+      target.tmdbId,
+      target.imdbId,
+      target.doubanId,
+      target.tvdbId,
+      target.wikidataId,
+      target.tmdbSetId,
+      target.itemType,
+      if (target.seasonNumber != null) 'season-${target.seasonNumber}',
+      if (target.episodeNumber != null) 'episode-${target.episodeNumber}',
+      if (target.year > 0) target.year,
+      target.searchQuery,
+      target.title,
+    ],
+  );
 }
 
 bool _shouldShowLocalResourceMatcher(MediaDetailTarget target) {
@@ -4425,10 +4407,23 @@ class _HeroContent extends ConsumerWidget {
     final primaryPlaybackLabel = showResumeAction ? '继续播放' : '立即播放';
     final canSearchResource = target.searchQuery.trim().isNotEmpty;
     final searchAutofocus = primaryPlaybackTarget == null && canSearchResource;
+    final hasPlayAction = primaryPlaybackTarget != null;
+    final hasSearchAction = canSearchResource;
     final metadataChipPadding = EdgeInsets.symmetric(
       horizontal: simplifyVisualEffects ? 10 : 11,
       vertical: simplifyVisualEffects ? 5 : 6,
     );
+    Widget wrapTelevisionDirectionalHandling({
+      required Widget child,
+      required bool Function(TraversalDirection direction) onDirection,
+    }) {
+      return TvDirectionalActionPanel(
+        enabled: isTelevision,
+        onDirection: onDirection,
+        child: child,
+      );
+    }
+
     final titleStyle = Theme.of(context).textTheme.headlineSmall?.copyWith(
           color: Colors.white,
           fontWeight: FontWeight.w800,
@@ -4567,16 +4562,34 @@ class _HeroContent extends ConsumerWidget {
             children: [
               if (primaryPlaybackTarget != null)
                 isTelevision
-                    ? TvAdaptiveButton(
-                        label: primaryPlaybackLabel,
-                        icon: Icons.play_arrow_rounded,
-                        focusNode: playFocusNode,
-                        focusId: 'detail:hero:play',
-                        autofocus: true,
-                        onPressed: () {
-                          context.pushNamed('player',
-                              extra: primaryPlaybackTarget);
+                    ? wrapTelevisionDirectionalHandling(
+                        onDirection: (direction) {
+                          switch (direction) {
+                            case TraversalDirection.right:
+                              if (!hasSearchAction) {
+                                return true;
+                              }
+                              return _requestDetailFocus([
+                                    searchFocusNode,
+                                  ]) ||
+                                  true;
+                            case TraversalDirection.left:
+                            case TraversalDirection.up:
+                            case TraversalDirection.down:
+                              return false;
+                          }
                         },
+                        child: TvAdaptiveButton(
+                          label: primaryPlaybackLabel,
+                          icon: Icons.play_arrow_rounded,
+                          focusNode: playFocusNode,
+                          focusId: 'detail:hero:play',
+                          autofocus: true,
+                          onPressed: () {
+                            context.pushNamed('player',
+                                extra: primaryPlaybackTarget);
+                          },
+                        ),
                       )
                     : FilledButton.icon(
                         onPressed: () {
@@ -4596,18 +4609,35 @@ class _HeroContent extends ConsumerWidget {
                       ),
               if (!target.isPlayable && target.searchQuery.trim().isNotEmpty)
                 isTelevision
-                    ? TvAdaptiveButton(
-                        label: '搜索资源',
-                        icon: Icons.search_rounded,
-                        focusNode: searchFocusNode,
-                        focusId: 'detail:hero:search',
-                        autofocus: searchAutofocus,
-                        onPressed: () {
-                          context.pushNamed(
-                            'detail-search',
-                            queryParameters: {'q': target.searchQuery},
-                          );
+                    ? wrapTelevisionDirectionalHandling(
+                        onDirection: (direction) {
+                          switch (direction) {
+                            case TraversalDirection.left:
+                              if (!hasPlayAction) {
+                                return false;
+                              }
+                              return _requestDetailFocus([playFocusNode]) ||
+                                  true;
+                            case TraversalDirection.right:
+                              return true;
+                            case TraversalDirection.up:
+                            case TraversalDirection.down:
+                              return false;
+                          }
                         },
+                        child: TvAdaptiveButton(
+                          label: '搜索资源',
+                          icon: Icons.search_rounded,
+                          focusNode: searchFocusNode,
+                          focusId: 'detail:hero:search',
+                          autofocus: searchAutofocus,
+                          onPressed: () {
+                            context.pushNamed(
+                              'detail-search',
+                              queryParameters: {'q': target.searchQuery},
+                            );
+                          },
+                        ),
                       )
                     : FilledButton.icon(
                         onPressed: () {
@@ -4629,19 +4659,36 @@ class _HeroContent extends ConsumerWidget {
                       ),
               if (target.isPlayable && target.searchQuery.trim().isNotEmpty)
                 isTelevision
-                    ? TvAdaptiveButton(
-                        label: '搜索资源',
-                        icon: Icons.search_rounded,
-                        focusNode: searchFocusNode,
-                        focusId: 'detail:hero:search',
-                        autofocus: searchAutofocus,
-                        onPressed: () {
-                          context.pushNamed(
-                            'detail-search',
-                            queryParameters: {'q': target.searchQuery},
-                          );
+                    ? wrapTelevisionDirectionalHandling(
+                        onDirection: (direction) {
+                          switch (direction) {
+                            case TraversalDirection.left:
+                              if (!hasPlayAction) {
+                                return false;
+                              }
+                              return _requestDetailFocus([playFocusNode]) ||
+                                  true;
+                            case TraversalDirection.right:
+                              return true;
+                            case TraversalDirection.up:
+                            case TraversalDirection.down:
+                              return false;
+                          }
                         },
-                        variant: TvButtonVariant.outlined,
+                        child: TvAdaptiveButton(
+                          label: '搜索资源',
+                          icon: Icons.search_rounded,
+                          focusNode: searchFocusNode,
+                          focusId: 'detail:hero:search',
+                          autofocus: searchAutofocus,
+                          onPressed: () {
+                            context.pushNamed(
+                              'detail-search',
+                              queryParameters: {'q': target.searchQuery},
+                            );
+                          },
+                          variant: TvButtonVariant.outlined,
+                        ),
                       )
                     : OutlinedButton.icon(
                         onPressed: () {
@@ -4670,6 +4717,17 @@ class _HeroContent extends ConsumerWidget {
       ),
     );
   }
+}
+
+bool _requestDetailFocus(Iterable<FocusNode?> nodes) {
+  for (final node in nodes) {
+    if (node == null || !node.canRequestFocus || node.context == null) {
+      continue;
+    }
+    node.requestFocus();
+    return true;
+  }
+  return false;
 }
 
 class _BackdropImage extends StatelessWidget {
@@ -4748,7 +4806,7 @@ List<MediaItem> _sortEpisodes(List<MediaItem> items) {
   return sorted;
 }
 
-class _EpisodeBrowser extends StatelessWidget {
+class _EpisodeBrowser extends StatefulWidget {
   const _EpisodeBrowser({
     required this.seriesTarget,
     required this.groups,
@@ -4762,34 +4820,203 @@ class _EpisodeBrowser extends StatelessWidget {
   final ValueChanged<String> onSeasonSelected;
 
   @override
-  Widget build(BuildContext context) {
-    _EpisodeGroup selectedGroup = groups.first;
-    for (final group in groups) {
-      if (group.id == selectedGroupId) {
+  State<_EpisodeBrowser> createState() => _EpisodeBrowserState();
+}
+
+class _EpisodeBrowserState extends State<_EpisodeBrowser> {
+  static const double _episodeCardWidth = 292;
+  static const double _episodeCardSpacing = 14;
+
+  final Map<String, FocusNode> _seasonFocusNodes = <String, FocusNode>{};
+  final Map<String, FocusNode> _episodePlayFocusNodes = <String, FocusNode>{};
+  final Map<String, FocusNode> _episodeDetailFocusNodes = <String, FocusNode>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _syncFocusNodes();
+  }
+
+  @override
+  void didUpdateWidget(covariant _EpisodeBrowser oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncFocusNodes();
+  }
+
+  @override
+  void dispose() {
+    for (final node in _seasonFocusNodes.values) {
+      node.dispose();
+    }
+    for (final node in _episodePlayFocusNodes.values) {
+      node.dispose();
+    }
+    for (final node in _episodeDetailFocusNodes.values) {
+      node.dispose();
+    }
+    super.dispose();
+  }
+
+  void _syncFocusNodes() {
+    final seasonIds = widget.groups.map((group) => group.id).toSet();
+    _disposeRemovedFocusNodes(_seasonFocusNodes, activeKeys: seasonIds);
+    for (final group in widget.groups) {
+      _seasonFocusNodes.putIfAbsent(
+        group.id,
+        () => FocusNode(debugLabel: 'detail-season-${group.id}'),
+      );
+    }
+
+    final episodeKeys = <String>{};
+    for (final group in widget.groups) {
+      for (var index = 0; index < group.episodes.length; index++) {
+        final key = _episodeNodeKey(group, group.episodes[index], index);
+        episodeKeys.add(key);
+        _episodePlayFocusNodes.putIfAbsent(
+          key,
+          () => FocusNode(debugLabel: 'detail-episode-play-$key'),
+        );
+        _episodeDetailFocusNodes.putIfAbsent(
+          key,
+          () => FocusNode(debugLabel: 'detail-episode-detail-$key'),
+        );
+      }
+    }
+    _disposeRemovedFocusNodes(
+      _episodePlayFocusNodes,
+      activeKeys: episodeKeys,
+    );
+    _disposeRemovedFocusNodes(
+      _episodeDetailFocusNodes,
+      activeKeys: episodeKeys,
+    );
+  }
+
+  void _disposeRemovedFocusNodes(
+    Map<String, FocusNode> nodes, {
+    required Set<String> activeKeys,
+  }) {
+    final removedKeys = nodes.keys
+        .where((key) => !activeKeys.contains(key))
+        .toList(growable: false);
+    for (final key in removedKeys) {
+      nodes.remove(key)?.dispose();
+    }
+  }
+
+  _EpisodeGroup _resolveSelectedGroup() {
+    _EpisodeGroup selectedGroup = widget.groups.first;
+    for (final group in widget.groups) {
+      if (group.id == widget.selectedGroupId) {
         selectedGroup = group;
         break;
       }
     }
+    return selectedGroup;
+  }
+
+  String _episodeNodeKey(_EpisodeGroup group, MediaItem episode, int index) {
+    final episodeSeed = episode.id.isNotEmpty
+        ? episode.id
+        : '${episode.seasonNumber ?? 0}-${episode.episodeNumber ?? index}';
+    return '${group.id}::$episodeSeed';
+  }
+
+  String _episodeFocusId(MediaItem episode, int index) {
+    final episodeSeed = episode.id.isNotEmpty
+        ? episode.id
+        : '${episode.seasonNumber ?? 0}-${episode.episodeNumber ?? index}';
+    return 'detail:episode:$episodeSeed';
+  }
+
+  List<String> _episodeNodeKeysForGroup(_EpisodeGroup group) {
+    return List<String>.generate(
+      group.episodes.length,
+      (index) => _episodeNodeKey(group, group.episodes[index], index),
+      growable: false,
+    );
+  }
+
+  bool _focusFirstEpisodeSlot(_EpisodeGroup selectedGroup) {
+    final keys = _episodeNodeKeysForGroup(selectedGroup);
+    for (final key in keys) {
+      if (_requestDetailFocus([_episodePlayFocusNodes[key]])) {
+        return true;
+      }
+    }
+    for (final key in keys) {
+      if (_requestDetailFocus([_episodeDetailFocusNodes[key]])) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _moveEpisodeRow({
+    required List<String> keys,
+    required int currentIndex,
+    required int step,
+    required Map<String, FocusNode> nodes,
+  }) {
+    final targetIndex = currentIndex + step;
+    if (targetIndex < 0 || targetIndex >= keys.length) {
+      return true;
+    }
+    _requestDetailFocus([nodes[keys[targetIndex]]]);
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedGroup = _resolveSelectedGroup();
+    final selectedSeasonFocusNode =
+        widget.groups.length > 1 ? _seasonFocusNodes[selectedGroup.id] : null;
+    final episodeNodeKeys = _episodeNodeKeysForGroup(selectedGroup);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (groups.length > 1) ...[
+        if (widget.groups.length > 1) ...[
           SizedBox(
-            height: 38,
+            height: 52,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: groups.length,
+              itemCount: widget.groups.length,
               separatorBuilder: (context, index) => const SizedBox(width: 8),
               itemBuilder: (context, index) {
-                final group = groups[index];
+                final group = widget.groups[index];
                 final selected = group.id == selectedGroup.id;
-                return _SeasonChip(
-                  label: group.label,
-                  selected: selected,
-                  focusId: 'detail:season:${group.id}',
-                  autofocus: index == 0,
-                  onTap: () => onSeasonSelected(group.id),
+                return TvDirectionalActionPanel(
+                  onDirection: (direction) {
+                    switch (direction) {
+                      case TraversalDirection.left:
+                        if (index <= 0) {
+                          return true;
+                        }
+                        return _requestDetailFocus([
+                          _seasonFocusNodes[widget.groups[index - 1].id],
+                        ]);
+                      case TraversalDirection.right:
+                        if (index >= widget.groups.length - 1) {
+                          return true;
+                        }
+                        return _requestDetailFocus([
+                          _seasonFocusNodes[widget.groups[index + 1].id],
+                        ]);
+                      case TraversalDirection.down:
+                        return _focusFirstEpisodeSlot(selectedGroup);
+                      case TraversalDirection.up:
+                        return false;
+                    }
+                  },
+                  child: _SeasonChip(
+                    label: group.label,
+                    selected: selected,
+                    focusNode: _seasonFocusNodes[group.id],
+                    focusId: 'detail:season:${group.id}',
+                    autofocus: index == 0,
+                    onTap: () => widget.onSeasonSelected(group.id),
+                  ),
                 );
               },
             ),
@@ -4798,24 +5025,80 @@ class _EpisodeBrowser extends StatelessWidget {
         ],
         SizedBox(
           height: 272,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            clipBehavior: Clip.none,
-            itemCount: selectedGroup.episodes.length,
-            separatorBuilder: (context, index) => const SizedBox(width: 14),
-            itemBuilder: (context, index) {
-              final episode = selectedGroup.episodes[index];
-              return SizedBox(
-                width: 292,
-                child: _EpisodeCard(
-                  item: episode,
-                  seriesTarget: seriesTarget,
-                  focusId:
-                      'detail:episode:${episode.id.isNotEmpty ? episode.id : '${episode.seasonNumber ?? 0}-${episode.episodeNumber ?? index}'}',
-                  autofocus: index == 0,
-                ),
-              );
-            },
+          child: DesktopHorizontalPager(
+            builder: (context, controller) => ListView.separated(
+              controller: controller,
+              scrollDirection: Axis.horizontal,
+              clipBehavior: Clip.none,
+              itemCount: selectedGroup.episodes.length,
+              separatorBuilder: (context, index) =>
+                  const SizedBox(width: _episodeCardSpacing),
+              itemBuilder: (context, index) {
+                final episode = selectedGroup.episodes[index];
+                final nodeKey = episodeNodeKeys[index];
+                final playFocusNode = _episodePlayFocusNodes[nodeKey];
+                final detailFocusNode = _episodeDetailFocusNodes[nodeKey];
+                return SizedBox(
+                  width: _episodeCardWidth,
+                  child: _EpisodeCard(
+                    item: episode,
+                    seriesTarget: widget.seriesTarget,
+                    autoplayFocusNode: playFocusNode,
+                    detailFocusNode: detailFocusNode,
+                    autoplayDirectionalHandler: (direction) {
+                      switch (direction) {
+                        case TraversalDirection.left:
+                          return _moveEpisodeRow(
+                            keys: episodeNodeKeys,
+                            currentIndex: index,
+                            step: -1,
+                            nodes: _episodePlayFocusNodes,
+                          );
+                        case TraversalDirection.right:
+                          return _moveEpisodeRow(
+                            keys: episodeNodeKeys,
+                            currentIndex: index,
+                            step: 1,
+                            nodes: _episodePlayFocusNodes,
+                          );
+                        case TraversalDirection.down:
+                          return _requestDetailFocus([detailFocusNode]);
+                        case TraversalDirection.up:
+                          return selectedSeasonFocusNode != null &&
+                              _requestDetailFocus([selectedSeasonFocusNode]);
+                      }
+                    },
+                    detailDirectionalHandler: (direction) {
+                      switch (direction) {
+                        case TraversalDirection.left:
+                          return _moveEpisodeRow(
+                            keys: episodeNodeKeys,
+                            currentIndex: index,
+                            step: -1,
+                            nodes: _episodeDetailFocusNodes,
+                          );
+                        case TraversalDirection.right:
+                          return _moveEpisodeRow(
+                            keys: episodeNodeKeys,
+                            currentIndex: index,
+                            step: 1,
+                            nodes: _episodeDetailFocusNodes,
+                          );
+                        case TraversalDirection.up:
+                          return _requestDetailFocus([
+                            playFocusNode,
+                            selectedSeasonFocusNode,
+                          ]);
+                        case TraversalDirection.down:
+                          return false;
+                      }
+                    },
+                    focusId: _episodeFocusId(episode, index),
+                    autofocus: index == 0,
+                  ),
+                );
+              },
+            ),
           ),
         ),
       ],
@@ -4828,6 +5111,7 @@ class _SeasonChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.focusNode,
     this.focusId,
     this.autofocus = false,
   });
@@ -4835,37 +5119,19 @@ class _SeasonChip extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final FocusNode? focusNode;
   final String? focusId;
   final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
-    return TvFocusableAction(
+    return StarflowChipButton(
+      label: label,
+      selected: selected,
       onPressed: onTap,
+      focusNode: focusNode,
       focusId: focusId,
       autofocus: autofocus,
-      borderRadius: BorderRadius.circular(999),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: selected ? Colors.white : Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color:
-                selected ? Colors.white : Colors.white.withValues(alpha: 0.08),
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: selected ? const Color(0xFF081120) : Colors.white,
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -4874,12 +5140,20 @@ class _EpisodeCard extends ConsumerWidget {
   const _EpisodeCard({
     required this.item,
     required this.seriesTarget,
+    this.autoplayFocusNode,
+    this.detailFocusNode,
+    this.autoplayDirectionalHandler,
+    this.detailDirectionalHandler,
     this.focusId,
     this.autofocus = false,
   });
 
   final MediaItem item;
   final MediaDetailTarget seriesTarget;
+  final FocusNode? autoplayFocusNode;
+  final FocusNode? detailFocusNode;
+  final bool Function(TraversalDirection direction)? autoplayDirectionalHandler;
+  final bool Function(TraversalDirection direction)? detailDirectionalHandler;
   final String? focusId;
   final bool autofocus;
 
@@ -4924,124 +5198,135 @@ class _EpisodeCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TvFocusableAction(
-            onPressed: onPlay,
-            focusId: effectiveFocusId.isEmpty ? null : '$effectiveFocusId:play',
-            autofocus: autofocus && onPlay != null,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            child: ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(24),
-              ),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _EpisodeArtwork(item: item),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.black.withValues(alpha: 0.18),
-                            Colors.transparent,
-                            Colors.black.withValues(alpha: 0.12),
-                            Colors.black.withValues(alpha: 0.58),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomCenter,
-                          stops: const [0, 0.34, 0.62, 1],
+          TvDirectionalActionPanel(
+            onDirection: autoplayDirectionalHandler ?? (direction) => false,
+            child: TvFocusableAction(
+              onPressed: onPlay,
+              focusNode: autoplayFocusNode,
+              focusId:
+                  effectiveFocusId.isEmpty ? null : '$effectiveFocusId:play',
+              autofocus: autofocus && onPlay != null,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
+                ),
+                child: AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _EpisodeArtwork(item: item),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.black.withValues(alpha: 0.18),
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.12),
+                              Colors.black.withValues(alpha: 0.58),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomCenter,
+                            stops: const [0, 0.34, 0.62, 1],
+                          ),
                         ),
                       ),
-                    ),
-                    Positioned(
-                      left: 14,
-                      right: 46,
-                      top: 14,
-                      child: Text(
-                        item.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          height: 1.25,
-                          shadows: [
-                            Shadow(
-                              color: Color(0xAA000000),
-                              blurRadius: 16,
-                              offset: Offset(0, 3),
+                      Positioned(
+                        left: 14,
+                        right: 46,
+                        top: 14,
+                        child: Text(
+                          item.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            height: 1.25,
+                            shadows: [
+                              Shadow(
+                                color: Color(0xAA000000),
+                                blurRadius: 16,
+                                offset: Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: 12,
+                        bottom: 12,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 214),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
                             ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      left: 12,
-                      bottom: 12,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 214),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.46),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            badgeText,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.46),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              badgeText,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                    Positioned(
-                      right: 12,
-                      bottom: 12,
-                      child: Icon(
-                        item.isPlayable
-                            ? Icons.play_circle_fill_rounded
-                            : Icons.lock_outline_rounded,
-                        color: item.isPlayable
-                            ? Colors.white
-                            : Colors.white.withValues(alpha: 0.42),
-                        size: 28,
+                      Positioned(
+                        right: 12,
+                        bottom: 12,
+                        child: Icon(
+                          item.isPlayable
+                              ? Icons.play_circle_fill_rounded
+                              : Icons.lock_outline_rounded,
+                          color: item.isPlayable
+                              ? Colors.white
+                              : Colors.white.withValues(alpha: 0.42),
+                          size: 28,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
           Expanded(
-            child: TvFocusableAction(
-              onPressed: onOpenDetail,
-              focusId:
-                  effectiveFocusId.isEmpty ? null : '$effectiveFocusId:detail',
-              autofocus: autofocus && onPlay == null,
-              borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(24),
-              ),
-              visualStyle: TvFocusVisualStyle.subtle,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                child: Text(
-                  summary,
-                  maxLines: 6,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFFD7E0F1),
-                    fontSize: 13,
-                    height: 1.45,
+            child: TvDirectionalActionPanel(
+              onDirection: detailDirectionalHandler ?? (direction) => false,
+              child: TvFocusableAction(
+                onPressed: onOpenDetail,
+                focusNode: detailFocusNode,
+                focusId: effectiveFocusId.isEmpty
+                    ? null
+                    : '$effectiveFocusId:detail',
+                autofocus: autofocus && onPlay == null,
+                borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(24),
+                ),
+                visualStyle: TvFocusVisualStyle.subtle,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                  child: Text(
+                    summary,
+                    maxLines: 6,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFFD7E0F1),
+                      fontSize: 13,
+                      height: 1.45,
+                    ),
                   ),
                 ),
               ),
@@ -5589,37 +5874,40 @@ class _DetailImageGallery extends StatelessWidget {
 
     return SizedBox(
       height: 164,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        itemCount: images.length,
-        separatorBuilder: (context, index) => const SizedBox(width: 14),
-        itemBuilder: (context, index) {
-          final image = images[index];
-          return TvFocusableAction(
-            onPressed: () => openPreview(image),
-            focusId: 'detail:gallery:$index',
-            borderRadius: BorderRadius.circular(22),
-            visualStyle: TvFocusVisualStyle.subtle,
-            child: ClipRRect(
+      child: DesktopHorizontalPager(
+        builder: (context, controller) => ListView.separated(
+          controller: controller,
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          itemCount: images.length,
+          separatorBuilder: (context, index) => const SizedBox(width: 14),
+          itemBuilder: (context, index) {
+            final image = images[index];
+            return TvFocusableAction(
+              onPressed: () => openPreview(image),
+              focusId: 'detail:gallery:$index',
               borderRadius: BorderRadius.circular(22),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: SizedBox(
-                  width: 268,
-                  child: AppNetworkImage(
-                    image.url,
-                    headers: image.headers,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return const ColoredBox(color: Color(0xFF0D192A));
-                    },
+              visualStyle: TvFocusVisualStyle.subtle,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(22),
+                child: AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: SizedBox(
+                    width: 268,
+                    child: AppNetworkImage(
+                      image.url,
+                      headers: image.headers,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return const ColoredBox(color: Color(0xFF0D192A));
+                      },
+                    ),
                   ),
                 ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }

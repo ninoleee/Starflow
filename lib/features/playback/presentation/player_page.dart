@@ -168,16 +168,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool get _backgroundPlaybackEnabled =>
       ref.read(appSettingsProvider).playbackBackgroundPlaybackEnabled;
 
-  bool get _highPerformanceModeEnabled =>
-      ref.read(appSettingsProvider).highPerformanceModeEnabled;
+  bool get _leanPlaybackUiEnabled =>
+      ref.read(appSettingsProvider).performanceLeanPlaybackUiEnabled;
 
-  bool get _isHighPerformancePlaybackMode =>
-      _highPerformanceModeEnabled && !_isInPictureInPictureMode;
+  bool get _isLeanPlaybackMode =>
+      _leanPlaybackUiEnabled && !_isInPictureInPictureMode;
 
-  bool get _prefersAggressiveHardwareDecoding => _highPerformanceModeEnabled;
+  bool get _aggressivePlaybackTuningEnabled =>
+      ref.read(appSettingsProvider).performanceAggressivePlaybackTuningEnabled;
 
-  bool get _preferLeanPlaybackRendering =>
-      _highPerformanceModeEnabled || _isTelevisionPlaybackDevice;
+  bool get _prefersAggressiveHardwareDecoding =>
+      _aggressivePlaybackTuningEnabled;
+
+  bool get _preferLeanPlaybackRendering => _leanPlaybackUiEnabled;
 
   PlaybackDecodeMode get _playbackDecodeMode =>
       ref.read(appSettingsProvider).playbackDecodeMode;
@@ -711,7 +714,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 
   bool _shouldUseAggressiveMpvTuning(PlaybackTarget target) {
-    if (_highPerformanceModeEnabled) {
+    if (_aggressivePlaybackTuningEnabled) {
       return true;
     }
     if (!_isHeavyPlaybackTarget(target)) {
@@ -1543,7 +1546,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final playbackSettings = ref.watch(appSettingsProvider);
     final showMinimalPlayerChrome = _isInPictureInPictureMode ||
-        (!isTelevision && playbackSettings.highPerformanceModeEnabled);
+        (!isTelevision && playbackSettings.performanceLeanPlaybackUiEnabled);
 
     return PopScope<Object?>(
       canPop: !isTelevision,
@@ -2066,7 +2069,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                       ),
                     ),
                   ),
-                  if (!_isHighPerformancePlaybackMode)
+                  if (!_isLeanPlaybackMode)
                     StreamBuilder<bool>(
                       stream: player.stream.buffering,
                       initialData: player.state.buffering,
@@ -2166,6 +2169,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             onPressed: _enterPictureInPictureManually,
           ),
       ],
+      topButtonBarMargin: const EdgeInsets.only(left: 0, right: 16),
       bottomButtonBar: [
         const MaterialPositionIndicator(),
         const Spacer(),
@@ -2214,6 +2218,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             onPressed: _enterPictureInPictureManually,
           ),
       ],
+      topButtonBarMargin: const EdgeInsets.only(left: 0, right: 16),
       bottomButtonBar: [
         const MaterialDesktopSkipPreviousButton(),
         const MaterialDesktopPlayOrPauseButton(),
@@ -2259,8 +2264,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     AppSettings settings, {
     required bool isTelevision,
   }) {
-    final simplifyForPerformance =
-        settings.highPerformanceModeEnabled || isTelevision;
+    final simplifyForPerformance = settings.performanceLeanPlaybackUiEnabled;
     return SubtitleViewConfiguration(
       style: TextStyle(
         height: 1.35,
@@ -2290,7 +2294,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 
   bool _shouldAutoDowngradeToSystemPlayer(PlaybackTarget target) {
-    if (!_highPerformanceModeEnabled) {
+    if (!ref
+        .read(appSettingsProvider)
+        .performanceAutoDowngradeHeavyPlaybackEnabled) {
       return false;
     }
     final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
@@ -107,23 +106,43 @@ class TvMenuButtonScope extends InheritedWidget {
   }
 }
 
-class TvReturnToTopScope extends InheritedWidget {
-  const TvReturnToTopScope({
-    super.key,
-    required this.onReturnToTop,
-    required super.child,
-  });
+String buildTvFocusId({
+  required String prefix,
+  Iterable<Object?> segments = const [],
+}) {
+  return _buildTvFocusKey(
+    prefix: prefix,
+    segments: segments,
+  );
+}
 
-  final VoidCallback onReturnToTop;
+String buildTvFocusScopeId({
+  required String prefix,
+  Iterable<Object?> segments = const [],
+}) {
+  return _buildTvFocusKey(
+    prefix: prefix,
+    segments: segments,
+  );
+}
 
-  static TvReturnToTopScope? maybeOf(BuildContext context) {
-    return context.dependOnInheritedWidgetOfExactType<TvReturnToTopScope>();
+String _buildTvFocusKey({
+  required String prefix,
+  required Iterable<Object?> segments,
+}) {
+  final normalizedPrefix = prefix.trim();
+  final normalizedSegments = segments
+      .map((segment) => segment?.toString() ?? '')
+      .map((segment) => segment.replaceAll(RegExp(r'\s+'), ' ').trim())
+      .where((segment) => segment.isNotEmpty)
+      .toList(growable: false);
+  if (normalizedSegments.isEmpty) {
+    return normalizedPrefix;
   }
-
-  @override
-  bool updateShouldNotify(TvReturnToTopScope oldWidget) {
-    return onReturnToTop != oldWidget.onReturnToTop;
+  if (normalizedPrefix.isEmpty) {
+    return normalizedSegments.join(':');
   }
+  return '$normalizedPrefix:${normalizedSegments.join(':')}';
 }
 
 bool handleTvDirectionalFocusBoundary(
@@ -147,14 +166,6 @@ bool handleTvDirectionalFocusBoundary(
             ?.onMenuButtonPressed;
     fallback?.call();
     return fallback != null;
-  }
-
-  if (direction == TraversalDirection.up) {
-    final callback = TvReturnToTopScope.maybeOf(
-      primaryFocus.context ?? context,
-    )?.onReturnToTop;
-    callback?.call();
-    return callback != null;
   }
 
   return false;
@@ -186,6 +197,108 @@ class TvDirectionalFocusBoundary extends StatelessWidget {
         ),
       },
       child: child,
+    );
+  }
+}
+
+class TvPageFocusScope extends StatelessWidget {
+  const TvPageFocusScope({
+    super.key,
+    required this.controller,
+    required this.scopeId,
+    required this.isTelevision,
+    required this.child,
+    this.onMoveLeftOut,
+  });
+
+  final TvFocusMemoryController controller;
+  final String scopeId;
+  final bool isTelevision;
+  final Widget child;
+  final VoidCallback? onMoveLeftOut;
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocusMemoryScope(
+      controller: controller,
+      scopeId: scopeId,
+      enabled: isTelevision,
+      child: TvDirectionalFocusBoundary(
+        onMoveLeftOut: onMoveLeftOut,
+        child: child,
+      ),
+    );
+  }
+}
+
+class TvDirectionalActionPanel extends StatelessWidget {
+  const TvDirectionalActionPanel({
+    super.key,
+    required this.child,
+    this.enabled = true,
+    this.onDirection,
+    this.onMoveLeft,
+    this.onMoveRight,
+    this.onMoveUp,
+    this.onMoveDown,
+    this.onMoveLeftOut,
+  });
+
+  final Widget child;
+  final bool enabled;
+  final bool Function(TraversalDirection direction)? onDirection;
+  final VoidCallback? onMoveLeft;
+  final VoidCallback? onMoveRight;
+  final VoidCallback? onMoveUp;
+  final VoidCallback? onMoveDown;
+  final VoidCallback? onMoveLeftOut;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!enabled) {
+      return child;
+    }
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.arrowLeft):
+            DirectionalFocusIntent(TraversalDirection.left),
+        SingleActivator(LogicalKeyboardKey.arrowRight):
+            DirectionalFocusIntent(TraversalDirection.right),
+        SingleActivator(LogicalKeyboardKey.arrowUp):
+            DirectionalFocusIntent(TraversalDirection.up),
+        SingleActivator(LogicalKeyboardKey.arrowDown):
+            DirectionalFocusIntent(TraversalDirection.down),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          DirectionalFocusIntent: CallbackAction<DirectionalFocusIntent>(
+            onInvoke: (intent) {
+              final directionalHandler = onDirection;
+              if (directionalHandler != null &&
+                  directionalHandler(intent.direction)) {
+                return null;
+              }
+              final callback = switch (intent.direction) {
+                TraversalDirection.left => onMoveLeft,
+                TraversalDirection.right => onMoveRight,
+                TraversalDirection.up => onMoveUp,
+                TraversalDirection.down => onMoveDown,
+              };
+              if (callback != null) {
+                callback();
+                return null;
+              }
+              handleTvDirectionalFocusBoundary(
+                context,
+                intent.direction,
+                onMoveLeftOut: onMoveLeftOut,
+              );
+              return null;
+            },
+          ),
+        },
+        child: child,
+      ),
     );
   }
 }
@@ -226,7 +339,6 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
   String? _queuedRestoreFocusId;
   bool _didAttemptFocusRestore = false;
   String _lastRestoreKey = '';
-  int _centeringRequestVersion = 0;
 
   FocusNode get _effectiveFocusNode =>
       widget.focusNode ??
@@ -290,9 +402,6 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
     if (value && memoryEnabled && memoryScope != null && focusId.isNotEmpty) {
       memoryScope.controller.remember(memoryScope.scopeId, focusId);
     }
-    if (value) {
-      _scheduleViewportCentering();
-    }
     if (_isFocused == value) {
       return;
     }
@@ -301,79 +410,13 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
     });
   }
 
-  void _scheduleViewportCentering() {
-    final requestVersion = ++_centeringRequestVersion;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || requestVersion != _centeringRequestVersion) {
-        return;
-      }
-
-      final scrollable = _findVerticalScrollable();
-      if (scrollable == null) {
-        return;
-      }
-
-      final position = scrollable.position;
-      if (!position.hasPixels ||
-          !position.hasViewportDimension ||
-          position.axis != Axis.vertical) {
-        return;
-      }
-
-      final renderObject = context.findRenderObject();
-      if (renderObject is! RenderBox || !renderObject.attached) {
-        return;
-      }
-
-      final viewport = RenderAbstractViewport.maybeOf(renderObject);
-      if (viewport == null) {
-        return;
-      }
-
-      final revealedOffset =
-          viewport.getOffsetToReveal(renderObject, 0.5).offset;
-      final targetOffset = revealedOffset.clamp(
-        position.minScrollExtent,
-        position.maxScrollExtent,
-      );
-      final delta = (targetOffset - position.pixels).abs();
-      final threshold = (position.viewportDimension * 0.08).clamp(24.0, 72.0);
-      if (delta <= threshold) {
-        return;
-      }
-
-      final duration = Duration(
-        milliseconds: delta > position.viewportDimension * 0.45 ? 220 : 140,
-      );
-      position.animateTo(
-        targetOffset,
-        duration: duration,
-        curve: Curves.easeOutCubic,
-      );
-    });
-  }
-
-  ScrollableState? _findVerticalScrollable() {
-    ScrollableState? verticalScrollable;
-    context.visitAncestorElements((element) {
-      if (element is StatefulElement && element.state is ScrollableState) {
-        final scrollable = element.state as ScrollableState;
-        if (scrollable.position.axis == Axis.vertical) {
-          verticalScrollable = scrollable;
-          return false;
-        }
-      }
-      return true;
-    });
-    return verticalScrollable;
-  }
-
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
-    final highPerformanceModeEnabled = ref.watch(
-      appSettingsProvider
-          .select((settings) => settings.highPerformanceModeEnabled),
+    final lightweightTvFocusEnabled = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.performanceLightweightTvFocusEnabled,
+      ),
     );
     final enabled = widget.onPressed != null;
     final hasContextAction = widget.onContextAction != null;
@@ -416,7 +459,7 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
     }
 
     final useHighPerformanceFocusStyle =
-        isTelevision && highPerformanceModeEnabled;
+        isTelevision && lightweightTvFocusEnabled;
     final useSubtleVisualStyle =
         widget.visualStyle == TvFocusVisualStyle.subtle;
     final useFloatingVisualStyle =

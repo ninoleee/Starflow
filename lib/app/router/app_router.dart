@@ -47,11 +47,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       StatefulShellRoute.indexedStack(
         pageBuilder: (context, state, navigationShell) {
-          final highPerformanceModeEnabled =
+          final performanceReduceMotionEnabled =
               ProviderScope.containerOf(context, listen: false)
                   .read(appSettingsProvider)
-                  .highPerformanceModeEnabled;
-          if (highPerformanceModeEnabled) {
+                  .performanceReduceMotionEnabled;
+          if (performanceReduceMotionEnabled) {
             return NoTransitionPage<void>(
               key: state.pageKey,
               child: _AppNavigationShell(navigationShell: navigationShell),
@@ -329,18 +329,17 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
         (settings) => settings.autoHideNavigationBarEnabled,
       ),
     );
-    final highPerformanceModeEnabled = ref.watch(
-      appSettingsProvider
-          .select((settings) => settings.highPerformanceModeEnabled),
+    final performanceStaticNavigationEnabled = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.performanceStaticNavigationEnabled,
+      ),
     );
-    final effectiveTranslucentEffectsEnabled =
-        translucentEffectsEnabled && !highPerformanceModeEnabled;
-    final effectiveAutoHideNavigationBarEnabled =
-        autoHideNavigationBarEnabled && !highPerformanceModeEnabled;
-    final navigationAnimationDuration = highPerformanceModeEnabled
+    final effectiveTranslucentEffectsEnabled = translucentEffectsEnabled;
+    final effectiveAutoHideNavigationBarEnabled = autoHideNavigationBarEnabled;
+    final navigationAnimationDuration = performanceStaticNavigationEnabled
         ? Duration.zero
         : const Duration(milliseconds: 220);
-    final navigationOpacityDuration = highPerformanceModeEnabled
+    final navigationOpacityDuration = performanceStaticNavigationEnabled
         ? Duration.zero
         : const Duration(milliseconds: 180);
     final bottomBarVisible =
@@ -377,7 +376,8 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
                     ),
                     child: _FloatingNavigationBar(
                       currentIndex: widget.navigationShell.currentIndex,
-                      highPerformanceModeEnabled: highPerformanceModeEnabled,
+                      staticNavigationEnabled:
+                          performanceStaticNavigationEnabled,
                       onDestinationSelected: (index) {
                         _setBottomBarVisible(true);
                         widget.navigationShell.goBranch(index);
@@ -395,7 +395,7 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
                   ),
                   child: _FloatingNavigationBar(
                     currentIndex: widget.navigationShell.currentIndex,
-                    highPerformanceModeEnabled: highPerformanceModeEnabled,
+                    staticNavigationEnabled: performanceStaticNavigationEnabled,
                     onDestinationSelected: (index) {
                       _setBottomBarVisible(true);
                       widget.navigationShell.goBranch(index);
@@ -416,7 +416,7 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
               translucentEffectsEnabled: effectiveTranslucentEffectsEnabled,
               autoHideNavigationBarEnabled:
                   effectiveAutoHideNavigationBarEnabled,
-              highPerformanceModeEnabled: highPerformanceModeEnabled,
+              staticNavigationEnabled: performanceStaticNavigationEnabled,
               child: shellChild,
             )
           : NotificationListener<ScrollNotification>(
@@ -427,23 +427,20 @@ class _AppNavigationShellState extends ConsumerState<_AppNavigationShell> {
             ),
       bottomNavigationBar: isTelevision
           ? null
-          : highPerformanceModeEnabled
-              ? bottomNavigationBarChild
-              : IgnorePointer(
-                  ignoring: !bottomBarVisible,
-                  child: AnimatedSlide(
-                    offset:
-                        bottomBarVisible ? Offset.zero : const Offset(0, 1.2),
-                    duration: navigationAnimationDuration,
-                    curve: Curves.easeOutCubic,
-                    child: AnimatedOpacity(
-                      opacity: bottomBarVisible ? 1 : 0,
-                      duration: navigationOpacityDuration,
-                      curve: Curves.easeOutCubic,
-                      child: bottomNavigationBarChild,
-                    ),
-                  ),
+          : IgnorePointer(
+              ignoring: !bottomBarVisible,
+              child: AnimatedSlide(
+                offset: bottomBarVisible ? Offset.zero : const Offset(0, 1.2),
+                duration: navigationAnimationDuration,
+                curve: Curves.easeOutCubic,
+                child: AnimatedOpacity(
+                  opacity: bottomBarVisible ? 1 : 0,
+                  duration: navigationOpacityDuration,
+                  curve: Curves.easeOutCubic,
+                  child: bottomNavigationBarChild,
                 ),
+              ),
+            ),
     );
   }
 }
@@ -455,7 +452,7 @@ class _TelevisionNavigationShell extends StatefulWidget {
     required this.child,
     required this.translucentEffectsEnabled,
     required this.autoHideNavigationBarEnabled,
-    required this.highPerformanceModeEnabled,
+    required this.staticNavigationEnabled,
   });
 
   final int currentIndex;
@@ -463,7 +460,7 @@ class _TelevisionNavigationShell extends StatefulWidget {
   final Widget child;
   final bool translucentEffectsEnabled;
   final bool autoHideNavigationBarEnabled;
-  final bool highPerformanceModeEnabled;
+  final bool staticNavigationEnabled;
 
   static const _items = [
     _NavigationItemData(
@@ -639,6 +636,9 @@ class _TelevisionNavigationShellState
   Widget build(BuildContext context) {
     final sidebarVisible =
         !widget.autoHideNavigationBarEnabled || _isSidebarVisible;
+    final sidebarAnimationDuration = widget.staticNavigationEnabled
+        ? Duration.zero
+        : const Duration(milliseconds: 180);
     final sidebar = ClipRRect(
       borderRadius: BorderRadius.circular(28),
       child: widget.translucentEffectsEnabled
@@ -687,32 +687,30 @@ class _TelevisionNavigationShellState
         },
         child: Row(
           children: [
-            widget.highPerformanceModeEnabled
-                ? sidebarSlot
-                : TweenAnimationBuilder<double>(
-                    tween: Tween<double>(
-                      begin: sidebarVisible ? 1 : 0,
-                      end: sidebarVisible ? 1 : 0,
-                    ),
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOutCubic,
-                    builder: (context, value, child) {
-                      return ClipRect(
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          widthFactor: value,
-                          child: Opacity(
-                            opacity: value <= 0.001 ? 0 : value,
-                            child: child,
-                          ),
-                        ),
-                      );
-                    },
-                    child: IgnorePointer(
-                      ignoring: !sidebarVisible,
-                      child: sidebarSlot,
+            TweenAnimationBuilder<double>(
+              tween: Tween<double>(
+                begin: sidebarVisible ? 1 : 0,
+                end: sidebarVisible ? 1 : 0,
+              ),
+              duration: sidebarAnimationDuration,
+              curve: Curves.easeOutCubic,
+              builder: (context, value, child) {
+                return ClipRect(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: value,
+                    child: Opacity(
+                      opacity: value <= 0.001 ? 0 : value,
+                      child: child,
                     ),
                   ),
+                );
+              },
+              child: IgnorePointer(
+                ignoring: !sidebarVisible,
+                child: sidebarSlot,
+              ),
+            ),
             Expanded(
               child: _TelevisionContentFocusBoundary(
                 focusSidebar: _focusCurrentDestination,
@@ -852,12 +850,12 @@ class _TelevisionNavigationDestination extends StatelessWidget {
 class _FloatingNavigationBar extends StatelessWidget {
   const _FloatingNavigationBar({
     required this.currentIndex,
-    required this.highPerformanceModeEnabled,
+    required this.staticNavigationEnabled,
     required this.onDestinationSelected,
   });
 
   final int currentIndex;
-  final bool highPerformanceModeEnabled;
+  final bool staticNavigationEnabled;
   final ValueChanged<int> onDestinationSelected;
 
   static const _items = [
@@ -895,7 +893,7 @@ class _FloatingNavigationBar extends StatelessWidget {
             child: _FloatingNavigationButton(
               item: item,
               selected: selected,
-              highPerformanceModeEnabled: highPerformanceModeEnabled,
+              staticNavigationEnabled: staticNavigationEnabled,
               onTap: () => onDestinationSelected(index),
             ),
           );
@@ -909,13 +907,13 @@ class _FloatingNavigationButton extends StatelessWidget {
   const _FloatingNavigationButton({
     required this.item,
     required this.selected,
-    required this.highPerformanceModeEnabled,
+    required this.staticNavigationEnabled,
     required this.onTap,
   });
 
   final _NavigationItemData item;
   final bool selected;
-  final bool highPerformanceModeEnabled;
+  final bool staticNavigationEnabled;
   final VoidCallback onTap;
 
   @override
@@ -923,7 +921,7 @@ class _FloatingNavigationButton extends StatelessWidget {
     final foregroundColor = selected ? Colors.white : const Color(0xA8FFFFFF);
     final buttonChild = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
-      child: highPerformanceModeEnabled
+      child: staticNavigationEnabled
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
@@ -995,10 +993,10 @@ class _FloatingNavigationButton extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(_kBottomNavItemRadius),
-        splashColor: highPerformanceModeEnabled
+        splashColor: staticNavigationEnabled
             ? Colors.transparent
             : Colors.white.withValues(alpha: 0.06),
-        highlightColor: highPerformanceModeEnabled
+        highlightColor: staticNavigationEnabled
             ? Colors.transparent
             : Colors.white.withValues(alpha: 0.02),
         child: buttonChild,

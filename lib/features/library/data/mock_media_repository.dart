@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
+import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
@@ -1130,29 +1131,7 @@ class AppMediaRepository implements MediaRepository {
   }
 
   bool _looksLikeSeasonFolderLabel(String value) {
-    return _parseSeasonNumberFromLabel(value) != null ||
-        _looksLikeNumericTopicSeason(value);
-  }
-
-  int? _parseSeasonNumberFromLabel(String value) {
-    final normalized = value.trim();
-    for (final pattern in const [
-      r'(?:^|[ ._\-])s(\d{1,2})(?:$|[ ._\-])',
-      r'season[ ._\-]?(\d{1,2})',
-      r'第(\d{1,2})季',
-    ]) {
-      final match =
-          RegExp(pattern, caseSensitive: false).firstMatch(normalized);
-      final parsed = int.tryParse(match?.group(1) ?? '');
-      if (parsed != null && parsed > 0) {
-        return parsed;
-      }
-    }
-    return null;
-  }
-
-  bool _looksLikeNumericTopicSeason(String value) {
-    return RegExp(r'^\s*\d{1,2}(?:[ ._\-]|$)').hasMatch(value);
+    return looksLikeSeasonFolderLabel(value);
   }
 
   List<String> _buildQuarkDirectoryCandidateVariations(String rawValue) {

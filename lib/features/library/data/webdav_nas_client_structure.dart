@@ -373,10 +373,10 @@ extension _WebDavNasClientStructure on WebDavNasClient {
 
     for (final entry in episodeItemsByGroup.entries) {
       final seasonNumber = seasonNumberByGroup[entry.key];
-      final orderedEpisodes = [...entry.value]
-        ..sort((left, right) => left.actualAddress.toLowerCase().compareTo(
-              right.actualAddress.toLowerCase(),
-            ));
+      final orderedEpisodes = _orderEpisodeItemsForGroup(
+        items: entry.value,
+        recognitionByResource: context.recognitionByResource,
+      );
       for (var index = 0; index < orderedEpisodes.length; index++) {
         final item = orderedEpisodes[index];
         final recognition = context.recognitionByResource[item.resourceId];
@@ -402,6 +402,68 @@ extension _WebDavNasClientStructure on WebDavNasClient {
       }
     }
     return episodeOverrides;
+  }
+
+  List<_PendingWebDavScannedItem> _orderEpisodeItemsForGroup({
+    required List<_PendingWebDavScannedItem> items,
+    required Map<String, NasMediaRecognition> recognitionByResource,
+  }) {
+    final hasExplicitEpisodeNumber = items.any((item) {
+      final recognition = recognitionByResource[item.resourceId];
+      return (item.metadataSeed.episodeNumber ?? recognition?.episodeNumber) !=
+          null;
+    });
+    if (!hasExplicitEpisodeNumber) {
+      final datedItems = <_EpisodeDateOrderEntry>[];
+      for (final item in items) {
+        final parsedDate = _parseEpisodeDateFromFileName(item.fileName);
+        if (parsedDate == null) {
+          datedItems.clear();
+          break;
+        }
+        datedItems.add(
+          _EpisodeDateOrderEntry(
+            item: item,
+            date: parsedDate,
+          ),
+        );
+      }
+      if (datedItems.length == items.length && datedItems.length >= 2) {
+        datedItems.sort((left, right) {
+          final dateCompare = left.date.compareTo(right.date);
+          if (dateCompare != 0) {
+            return dateCompare;
+          }
+          final nameCompare = left.item.fileName.toLowerCase().compareTo(
+                right.item.fileName.toLowerCase(),
+              );
+          if (nameCompare != 0) {
+            return nameCompare;
+          }
+          return left.item.actualAddress.toLowerCase().compareTo(
+                right.item.actualAddress.toLowerCase(),
+              );
+        });
+        webDavTrace(
+          'structure.episodeOrder.date',
+          fields: {
+            'items': datedItems
+                .map(
+                  (entry) =>
+                      '${entry.item.fileName}@${entry.date.toIso8601String()}',
+                )
+                .toList(growable: false),
+          },
+        );
+        return datedItems.map((entry) => entry.item).toList(growable: false);
+      }
+    }
+
+    final orderedEpisodes = [...items]
+      ..sort((left, right) => left.actualAddress.toLowerCase().compareTo(
+            right.actualAddress.toLowerCase(),
+          ));
+    return orderedEpisodes;
   }
 
   Map<String, int> _resolveSeasonNumberByGroup(
@@ -613,32 +675,56 @@ extension _WebDavNasClientStructure on WebDavNasClient {
   }
 
   int? _parseSeasonNumberFromDirectoryName(String value) {
+    return parseSeasonNumberFromFolderLabel(value);
+  }
+
+  int? _parseLeadingNumericSeasonNumber(String value) {
+    return parseLeadingNumericSeasonNumber(value);
+  }
+
+  DateTime? _parseEpisodeDateFromFileName(String value) {
     final normalized = value.trim();
     if (normalized.isEmpty) {
       return null;
     }
+
     for (final pattern in const [
-      r'(?:^|[ ._\-])s(\d{1,2})(?:$|[ ._\-])',
-      r'season[ ._\-]?(\d{1,2})',
-      r'第(\d{1,2})季',
+      r'(?<!\d)(\d{4})[ ._\-](0?[1-9]|1[0-2])[ ._\-](0?[1-9]|[12]\d|3[01])(?!\d)',
+      r'(?<!\d)(\d{4})年\s*(0?[1-9]|1[0-2])月\s*(0?[1-9]|[12]\d|3[01])日?(?!\d)',
+      r'(?<!\d)(\d{4})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)',
     ]) {
       final match =
           RegExp(pattern, caseSensitive: false).firstMatch(normalized);
-      final seasonNumber = int.tryParse(match?.group(1) ?? '');
-      if (seasonNumber != null && seasonNumber > 0) {
-        return seasonNumber;
+      final parsedDate = _tryBuildEpisodeDate(
+        yearText: match?.group(1),
+        monthText: match?.group(2),
+        dayText: match?.group(3),
+      );
+      if (parsedDate != null) {
+        return parsedDate;
       }
     }
     return null;
   }
 
-  int? _parseLeadingNumericSeasonNumber(String value) {
-    final match = RegExp(r'^\s*(\d{1,2})(?:[ ._\-]|$)').firstMatch(value);
-    final seasonNumber = int.tryParse(match?.group(1) ?? '');
-    if (seasonNumber == null || seasonNumber <= 0) {
+  DateTime? _tryBuildEpisodeDate({
+    required String? yearText,
+    required String? monthText,
+    required String? dayText,
+  }) {
+    final year = int.tryParse(yearText ?? '');
+    final month = int.tryParse(monthText ?? '');
+    final day = int.tryParse(dayText ?? '');
+    if (year == null || month == null || day == null) {
       return null;
     }
-    return seasonNumber;
+    final parsedDate = DateTime.utc(year, month, day);
+    if (parsedDate.year != year ||
+        parsedDate.month != month ||
+        parsedDate.day != day) {
+      return null;
+    }
+    return parsedDate;
   }
 
   bool _looksLikeNumericSeasonDirectory(
@@ -772,4 +858,14 @@ class _AssignedSeriesEpisode {
 
   final _PendingWebDavScannedItem item;
   final String groupKey;
+}
+
+class _EpisodeDateOrderEntry {
+  const _EpisodeDateOrderEntry({
+    required this.item,
+    required this.date,
+  });
+
+  final _PendingWebDavScannedItem item;
+  final DateTime date;
 }

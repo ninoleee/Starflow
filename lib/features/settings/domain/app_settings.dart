@@ -198,7 +198,7 @@ extension PlaybackDecodeModeX on PlaybackDecodeMode {
   String get description {
     switch (this) {
       case PlaybackDecodeMode.auto:
-        return '按设备能力自动选择；高性能模式下会更积极地优先硬解。';
+        return '按设备能力自动选择；开启“更积极的解码与 MPV 调优”后会更积极地优先硬解。';
       case PlaybackDecodeMode.hardwarePreferred:
         return '尽量优先使用硬件解码，适合高码率和 4K 片源。';
       case PlaybackDecodeMode.softwarePreferred:
@@ -693,6 +693,16 @@ class AppSettings {
     this.translucentEffectsEnabled = true,
     this.autoHideNavigationBarEnabled = true,
     this.highPerformanceModeEnabled = false,
+    this.performanceReduceDecorationsEnabled = false,
+    this.performanceReduceMotionEnabled = false,
+    this.performanceStaticNavigationEnabled = false,
+    this.performanceLightweightTvFocusEnabled = false,
+    this.performanceStaticHomeHeroEnabled = false,
+    this.performanceLightweightHomeHeroEnabled = false,
+    this.performanceSlimDetailHeroEnabled = false,
+    this.performanceLeanPlaybackUiEnabled = false,
+    this.performanceAggressivePlaybackTuningEnabled = false,
+    this.performanceAutoDowngradeHeavyPlaybackEnabled = false,
     this.tmdbMetadataMatchEnabled = false,
     this.wmdbMetadataMatchEnabled = false,
     this.metadataMatchPriority = MetadataMatchProvider.tmdb,
@@ -724,6 +734,16 @@ class AppSettings {
   final bool translucentEffectsEnabled;
   final bool autoHideNavigationBarEnabled;
   final bool highPerformanceModeEnabled;
+  final bool performanceReduceDecorationsEnabled;
+  final bool performanceReduceMotionEnabled;
+  final bool performanceStaticNavigationEnabled;
+  final bool performanceLightweightTvFocusEnabled;
+  final bool performanceStaticHomeHeroEnabled;
+  final bool performanceLightweightHomeHeroEnabled;
+  final bool performanceSlimDetailHeroEnabled;
+  final bool performanceLeanPlaybackUiEnabled;
+  final bool performanceAggressivePlaybackTuningEnabled;
+  final bool performanceAutoDowngradeHeavyPlaybackEnabled;
   final bool tmdbMetadataMatchEnabled;
   final bool wmdbMetadataMatchEnabled;
   final MetadataMatchProvider metadataMatchPriority;
@@ -755,6 +775,16 @@ class AppSettings {
     bool? translucentEffectsEnabled,
     bool? autoHideNavigationBarEnabled,
     bool? highPerformanceModeEnabled,
+    bool? performanceReduceDecorationsEnabled,
+    bool? performanceReduceMotionEnabled,
+    bool? performanceStaticNavigationEnabled,
+    bool? performanceLightweightTvFocusEnabled,
+    bool? performanceStaticHomeHeroEnabled,
+    bool? performanceLightweightHomeHeroEnabled,
+    bool? performanceSlimDetailHeroEnabled,
+    bool? performanceLeanPlaybackUiEnabled,
+    bool? performanceAggressivePlaybackTuningEnabled,
+    bool? performanceAutoDowngradeHeavyPlaybackEnabled,
     bool? tmdbMetadataMatchEnabled,
     bool? wmdbMetadataMatchEnabled,
     MetadataMatchProvider? metadataMatchPriority,
@@ -792,6 +822,31 @@ class AppSettings {
           autoHideNavigationBarEnabled ?? this.autoHideNavigationBarEnabled,
       highPerformanceModeEnabled:
           highPerformanceModeEnabled ?? this.highPerformanceModeEnabled,
+      performanceReduceDecorationsEnabled:
+          performanceReduceDecorationsEnabled ??
+              this.performanceReduceDecorationsEnabled,
+      performanceReduceMotionEnabled:
+          performanceReduceMotionEnabled ?? this.performanceReduceMotionEnabled,
+      performanceStaticNavigationEnabled: performanceStaticNavigationEnabled ??
+          this.performanceStaticNavigationEnabled,
+      performanceLightweightTvFocusEnabled:
+          performanceLightweightTvFocusEnabled ??
+              this.performanceLightweightTvFocusEnabled,
+      performanceStaticHomeHeroEnabled: performanceStaticHomeHeroEnabled ??
+          this.performanceStaticHomeHeroEnabled,
+      performanceLightweightHomeHeroEnabled:
+          performanceLightweightHomeHeroEnabled ??
+              this.performanceLightweightHomeHeroEnabled,
+      performanceSlimDetailHeroEnabled: performanceSlimDetailHeroEnabled ??
+          this.performanceSlimDetailHeroEnabled,
+      performanceLeanPlaybackUiEnabled: performanceLeanPlaybackUiEnabled ??
+          this.performanceLeanPlaybackUiEnabled,
+      performanceAggressivePlaybackTuningEnabled:
+          performanceAggressivePlaybackTuningEnabled ??
+              this.performanceAggressivePlaybackTuningEnabled,
+      performanceAutoDowngradeHeavyPlaybackEnabled:
+          performanceAutoDowngradeHeavyPlaybackEnabled ??
+              this.performanceAutoDowngradeHeavyPlaybackEnabled,
       tmdbMetadataMatchEnabled:
           tmdbMetadataMatchEnabled ?? this.tmdbMetadataMatchEnabled,
       wmdbMetadataMatchEnabled:
@@ -839,6 +894,21 @@ class AppSettings {
       'translucentEffectsEnabled': translucentEffectsEnabled,
       'autoHideNavigationBarEnabled': autoHideNavigationBarEnabled,
       'highPerformanceModeEnabled': highPerformanceModeEnabled,
+      'performanceReduceDecorationsEnabled':
+          performanceReduceDecorationsEnabled,
+      'performanceReduceMotionEnabled': performanceReduceMotionEnabled,
+      'performanceStaticNavigationEnabled': performanceStaticNavigationEnabled,
+      'performanceLightweightTvFocusEnabled':
+          performanceLightweightTvFocusEnabled,
+      'performanceStaticHomeHeroEnabled': performanceStaticHomeHeroEnabled,
+      'performanceLightweightHomeHeroEnabled':
+          performanceLightweightHomeHeroEnabled,
+      'performanceSlimDetailHeroEnabled': performanceSlimDetailHeroEnabled,
+      'performanceLeanPlaybackUiEnabled': performanceLeanPlaybackUiEnabled,
+      'performanceAggressivePlaybackTuningEnabled':
+          performanceAggressivePlaybackTuningEnabled,
+      'performanceAutoDowngradeHeavyPlaybackEnabled':
+          performanceAutoDowngradeHeavyPlaybackEnabled,
       'tmdbMetadataMatchEnabled': tmdbMetadataMatchEnabled,
       'wmdbMetadataMatchEnabled': wmdbMetadataMatchEnabled,
       'metadataMatchPriority': metadataMatchPriority.name,
@@ -919,6 +989,27 @@ class AppSettings {
           json['autoHideNavigationBarEnabled'] as bool? ?? true,
       highPerformanceModeEnabled:
           json['highPerformanceModeEnabled'] as bool? ?? false,
+      performanceReduceDecorationsEnabled:
+          json['performanceReduceDecorationsEnabled'] as bool? ?? false,
+      performanceReduceMotionEnabled:
+          json['performanceReduceMotionEnabled'] as bool? ?? false,
+      performanceStaticNavigationEnabled:
+          json['performanceStaticNavigationEnabled'] as bool? ?? false,
+      performanceLightweightTvFocusEnabled:
+          json['performanceLightweightTvFocusEnabled'] as bool? ?? false,
+      performanceStaticHomeHeroEnabled:
+          json['performanceStaticHomeHeroEnabled'] as bool? ?? false,
+      performanceLightweightHomeHeroEnabled:
+          json['performanceLightweightHomeHeroEnabled'] as bool? ?? false,
+      performanceSlimDetailHeroEnabled:
+          json['performanceSlimDetailHeroEnabled'] as bool? ?? false,
+      performanceLeanPlaybackUiEnabled:
+          json['performanceLeanPlaybackUiEnabled'] as bool? ?? false,
+      performanceAggressivePlaybackTuningEnabled:
+          json['performanceAggressivePlaybackTuningEnabled'] as bool? ?? false,
+      performanceAutoDowngradeHeavyPlaybackEnabled:
+          json['performanceAutoDowngradeHeavyPlaybackEnabled'] as bool? ??
+              false,
       tmdbMetadataMatchEnabled: json['tmdbMetadataMatchEnabled'] as bool? ??
           legacyImdbAutoMatchEnabled,
       wmdbMetadataMatchEnabled:

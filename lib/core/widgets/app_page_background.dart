@@ -15,9 +15,10 @@ class AppPageBackground extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final highPerformanceModeEnabled = ref.watch(
-      appSettingsProvider
-          .select((settings) => settings.highPerformanceModeEnabled),
+    final reduceDecorationsEnabled = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.performanceReduceDecorationsEnabled,
+      ),
     );
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -34,7 +35,7 @@ class AppPageBackground extends ConsumerWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (!highPerformanceModeEnabled)
+          if (!reduceDecorationsEnabled)
             const IgnorePointer(
               child: Stack(
                 children: [

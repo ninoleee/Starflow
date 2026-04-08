@@ -1114,6 +1114,76 @@ void main() {
     );
   });
 
+  test(
+      'NasMediaIndexer ignores wrapper folders nested under a season when deriving series title',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-show-root-wrapper-season',
+      name: 'WebDAV Show Root Wrapper Season',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://webdav.example.com/shows/繁城之下/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'show-root-wrapper-1',
+          path: 'Season 1/分段版 特效中字/Episode 01.strm',
+          title: 'Episode 01',
+          itemType: 'episode',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+        _PendingTestItem(
+          id: 'show-root-wrapper-2',
+          path: 'Season 1/分段版 特效中字/Episode 02.strm',
+          title: 'Episode 02',
+          itemType: 'episode',
+          seasonNumber: 1,
+          episodeNumber: 2,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    final library = await indexer.loadLibrary(source, limit: 20);
+    expect(library, hasLength(1));
+    final series = library.single;
+    expect(series.itemType, 'series');
+    expect(series.title, '繁城之下');
+
+    final seasons = await indexer.loadChildren(
+      source,
+      parentId: series.id,
+      limit: 20,
+    );
+    expect(seasons, hasLength(1));
+    expect(seasons.single.title, '第 1 季');
+    expect(seasons.single.seasonNumber, 1);
+  });
+
   test('NasMediaIndexer keeps single-file movie folders as playable movies',
       () async {
     final store = _MemoryNasMediaIndexStore();

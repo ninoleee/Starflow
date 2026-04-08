@@ -106,8 +106,10 @@ class LibraryPagedGrid extends StatelessWidget {
                     ? posterAssets.first
                     : const _LibraryImageAsset(url: '');
                 return MediaPosterTile(
-                  focusId:
-                      '$focusScopePrefix:item:${item.id.isNotEmpty ? item.id : item.title}:page:$safePage:index:$index',
+                  focusId: _libraryItemFocusId(
+                    focusScopePrefix: focusScopePrefix,
+                    item: item,
+                  ),
                   autofocus: index == 0,
                   title: item.title,
                   subtitle: item.year > 0 ? '${item.year}' : '',
@@ -160,8 +162,7 @@ class LibraryPagedGrid extends StatelessWidget {
       shortcuts: const <ShortcutActivator, Intent>{
         SingleActivator(LogicalKeyboardKey.pageUp):
             _PreviousLibraryPageIntent(),
-        SingleActivator(LogicalKeyboardKey.pageDown):
-            _NextLibraryPageIntent(),
+        SingleActivator(LogicalKeyboardKey.pageDown): _NextLibraryPageIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -223,6 +224,33 @@ List<_LibraryImageAsset> _resolveLibraryPosterAssets(MediaItem item) {
     add(url, item.extraBackdropHeaders);
   }
   return assets;
+}
+
+String _libraryItemFocusId({
+  required String focusScopePrefix,
+  required MediaItem item,
+}) {
+  return buildTvFocusId(
+    prefix: '$focusScopePrefix:item',
+    segments: [
+      item.sourceKind.name,
+      item.sourceId,
+      item.sectionId,
+      item.id,
+      item.playbackItemId,
+      item.tmdbId,
+      item.imdbId,
+      item.doubanId,
+      item.tvdbId,
+      item.wikidataId,
+      item.tmdbSetId,
+      item.actualAddress,
+      item.itemType,
+      if (item.seasonNumber != null) 'season-${item.seasonNumber}',
+      if (item.episodeNumber != null) 'episode-${item.episodeNumber}',
+      item.title,
+    ],
+  );
 }
 
 class _LibraryPagerSummary extends StatelessWidget {

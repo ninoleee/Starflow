@@ -46,6 +46,15 @@ function Update-PubspecVersion([string]$pubspecPath) {
   return $nextVersion
 }
 
+function Get-TvApplicationId([string]$version) {
+  $match = [regex]::Match($version, '^\d+\.\d+\.\d+\+(\d+)$')
+  if (-not $match.Success) {
+    throw "Unable to derive TV applicationId from version $version"
+  }
+  $buildNumber = [int]$match.Groups[1].Value
+  return "com.example.starflow.v$buildNumber"
+}
+
 function Set-EmbeddedSettings(
   [string]$repoRoot,
   [string]$settingsPath
@@ -82,10 +91,21 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $pubspecPath = Join-Path $repoRoot "pubspec.yaml"
 $resolvedOutputDir = Get-ResolvedOutputDir $OutputDir
 $embeddedPath = $null
+$originalApplicationIdOverride =
+  [Environment]::GetEnvironmentVariable(
+    "ORG_GRADLE_PROJECT_starflowApplicationIdOverride",
+    "Process"
+  )
 
 Push-Location $repoRoot
 try {
   $version = Update-PubspecVersion $pubspecPath
+  $applicationId = Get-TvApplicationId $version
+  [Environment]::SetEnvironmentVariable(
+    "ORG_GRADLE_PROJECT_starflowApplicationIdOverride",
+    $applicationId,
+    "Process"
+  )
   $embeddedPath = Set-EmbeddedSettings $repoRoot $SettingsJsonPath
 
   if (-not $SkipBuild) {
@@ -111,9 +131,15 @@ try {
 
   Copy-Item -LiteralPath $sourceApk -Destination $targetApk -Force
   Write-Output "Version=$version"
+  Write-Output "ApplicationId=$applicationId"
   Write-Output "APK=$targetApk"
 }
 finally {
+  [Environment]::SetEnvironmentVariable(
+    "ORG_GRADLE_PROJECT_starflowApplicationIdOverride",
+    $originalApplicationIdOverride,
+    "Process"
+  )
   Remove-EmbeddedSettings $embeddedPath
   Pop-Location
 }

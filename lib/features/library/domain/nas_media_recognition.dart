@@ -67,6 +67,21 @@ class NasMediaRecognizer {
     '动漫',
   };
 
+  static final RegExp _wrapperDescriptorPattern = RegExp(
+    r'^(?:'
+    r'分段版|特效中字|特效字幕|字幕版|中字|中文字幕|中英字幕|双语字幕|双语|简繁字幕|内封中字|外挂字幕|'
+    r'国语版|粤语版|国粤版|国粤双语|国语|粤语|原声|'
+    r'会员版|纯享版|导演剪辑版|导演版|加长版|未删减版|完整版|删减版|重剪版|重制版|珍藏版|纪念版|'
+    r'特典|花絮|幕后|加更|彩蛋|番外|特别篇|剧场版|'
+    r'杜比视界|杜比全景声|高码率|原画|蓝光原盘|原盘|'
+    r'remux|bluray|bdrip|brrip|webrip|webdl|web|'
+    r'2160p|1080p|720p|480p|4k|8k|uhd|hdr10\+|hdr10|hdr|dovi|dv|dolbyvision|'
+    r'x264|x265|h264|h265|hevc|avc|aac|ac3|eac3|ddp(?:51|71)?|dts|truehd|atmos|'
+    r'10bit|8bit|nf|amzn|dsnp|max|hmax|complete|proper|repack|multi'
+    r')+$',
+    caseSensitive: false,
+  );
+
   static NasMediaRecognition recognize(String actualAddress) {
     final normalizedPath = actualAddress
         .split('/')
@@ -98,9 +113,14 @@ class NasMediaRecognizer {
     final cleanedGrandParentTitle = _cleanTitle(grandParentRaw);
 
     final parentLooksLikeSeasonFolder = _looksLikeSeasonFolder(parentRaw);
+    final parentLooksLikeWrapperFolder = _looksLikeWrapperFolder(parentRaw);
+    final grandParentLooksLikeSeasonFolder =
+        _looksLikeSeasonFolder(grandParentRaw);
     final parentTitle = parentLooksLikeSeasonFolder
         ? cleanedGrandParentTitle
-        : cleanedParentTitle;
+        : parentLooksLikeWrapperFolder
+            ? (grandParentLooksLikeSeasonFolder ? '' : cleanedGrandParentTitle)
+            : cleanedParentTitle;
 
     String title = cleanedFileTitle;
     String itemType = '';
@@ -221,7 +241,7 @@ class NasMediaRecognizer {
       r'(?:^|[ ._\-])season[ ._\-]?(\d{1,2})[ ._\-]*(?:episode|ep)[ ._\-]?(\d{1,3})(?:$|[ ._\-])',
       r'(?<!\d)e(\d{1,3})(?!\d)',
       r'(?:^|[ ._\-])ep(?:isode)?[ ._\-]?(\d{1,3})(?:$|[ ._\-])',
-      r'第(\d{1,3})[集话]',
+      r'第(\d{1,4})[集话期]',
     ]) {
       final match =
           RegExp(pattern, caseSensitive: false).firstMatch(normalized);
@@ -305,7 +325,9 @@ class NasMediaRecognizer {
     if (_genericLibraryFolders.contains(normalized.toLowerCase())) {
       return false;
     }
-    return !_looksLikeReleaseToken(input) && normalized.length >= 2;
+    return !_looksLikeReleaseToken(input) &&
+        !_looksLikeWrapperFolder(input) &&
+        normalized.length >= 2;
   }
 
   static String _cleanTitle(
@@ -347,7 +369,7 @@ class NasMediaRecognizer {
         r'\b('
         r'2160p|1080p|720p|480p|4k|8k|uhd|hdr10\+|hdr|dovi|dv|dolby[ ._\-]?vision|'
         r'web[ ._\-]?dl|webrip|web[ ._\-]?rip|blu[ ._\-]?ray|bdrip|brrip|remux|'
-        r'x264|x265|h264|h265|hevc|avc|aac|ac3|eac3|dts|truehd|atmos|'
+        r'x264|x265|h264|h265|hevc|avc|aac|ac3|eac3|ddp|dts|truehd|atmos|10bit|8bit|'
         r'proper|repack|complete|multi|nf|amzn|dsnp|max|hmax|'
         r'中字|双语|国粤|简繁|内封|外挂|中英字幕'
         r')\b',
@@ -355,6 +377,30 @@ class NasMediaRecognizer {
       ),
       ' ',
     );
+    for (final token in const [
+      '分段版',
+      '特效中字',
+      '特效字幕',
+      '会员版',
+      '纯享版',
+      '导演剪辑版',
+      '导演版',
+      '加长版',
+      '未删减版',
+      '完整版',
+      '删减版',
+      '花絮',
+      '幕后',
+      '加更',
+      '彩蛋',
+      '番外',
+      '特别篇',
+      '剧场版',
+      '高码率',
+      '原画',
+    ]) {
+      value = value.replaceAll(token, ' ');
+    }
     value = value.replaceAll(RegExp(r'\s+'), ' ').trim();
     value = value.replaceAll(RegExp(r'^[\-\._\s]+|[\-\._\s]+$'), '').trim();
     if (_looksLikeReleaseToken(value)) {
@@ -369,8 +415,29 @@ class NasMediaRecognizer {
       return false;
     }
     return RegExp(
-      r'^(s\d{1,2}|season ?\d{1,2}|2160p|1080p|720p|4k|hdr|web ?dl|webrip|bluray|remux|x264|x265|h264|h265|hevc|aac|ac3|eac3|dts|truehd|atmos)$',
+      r'^(s\d{1,2}|season ?\d{1,2}|2160p|1080p|720p|480p|4k|8k|uhd|hdr10\+?|hdr|dovi|dv|web ?dl|webrip|bluray|remux|x264|x265|h264|h265|hevc|avc|aac|ac3|eac3|ddp(?: ?(?:5[ .]?1|7[ .]?1))?|dts|truehd|atmos|10bit|8bit|nf|amzn|dsnp|max|hmax|中字|中文字幕|中英字幕|双语|简繁|内封|外挂|特效中字|特效字幕|分段版|会员版|纯享版|导演剪辑版|导演版|加长版|未删减版|完整版|删减版|花絮|幕后|加更|彩蛋|番外|特别篇|剧场版|高码率|原画)$',
     ).hasMatch(normalized);
+  }
+
+  static bool _looksLikeWrapperFolder(String input) {
+    final compact = _compactDescriptor(input);
+    if (compact.isEmpty) {
+      return false;
+    }
+    if (_looksLikeSeasonFolder(input)) {
+      return false;
+    }
+    return _wrapperDescriptorPattern.hasMatch(compact);
+  }
+
+  static String _compactDescriptor(String input) {
+    return stripEmbeddedExternalIdTags(input)
+        .trim()
+        .toLowerCase()
+        .replaceAll(
+          RegExp(r'[【】\[\]\(\)（）{}<>《》"“”‘’·_.\-\s+&/\\|,:;]+'),
+          '',
+        );
   }
 
   static String _cleanLeadingEpisodeRemainder(String input) {
@@ -391,59 +458,7 @@ class NasMediaRecognizer {
       return '';
     }
 
-    const allowedTokens = <String>{
-      '2160p',
-      '1080p',
-      '720p',
-      '480p',
-      '4k',
-      '8k',
-      'uhd',
-      'hdr10+',
-      'hdr',
-      'dovi',
-      'dv',
-      'dolby',
-      'vision',
-      'web',
-      'dl',
-      'webrip',
-      'bluray',
-      'bdrip',
-      'brrip',
-      'remux',
-      'x264',
-      'x265',
-      'h264',
-      'h265',
-      'hevc',
-      'avc',
-      'aac',
-      'ac3',
-      'eac3',
-      'dts',
-      'truehd',
-      'atmos',
-      'proper',
-      'repack',
-      'complete',
-      'multi',
-      'nf',
-      'amzn',
-      'dsnp',
-      'max',
-      'hmax',
-      '国语',
-      '粤语',
-      '国粤',
-      '国',
-      '粤',
-      '中字',
-      '双语',
-      '简繁',
-      '内封',
-      '外挂',
-      '中英字幕',
+    const allowedFileTokens = <String>{
       'mp4',
       'mkv',
       'avi',
@@ -454,7 +469,9 @@ class NasMediaRecognizer {
 
     for (final token in tokens) {
       final normalizedToken = token.toLowerCase();
-      if (allowedTokens.contains(normalizedToken)) {
+      if (allowedFileTokens.contains(normalizedToken) ||
+          _looksLikeReleaseToken(normalizedToken) ||
+          _looksLikeWrapperFolder(token)) {
         continue;
       }
       if (RegExp(r'^\d{3,4}p$', caseSensitive: false).hasMatch(token)) {

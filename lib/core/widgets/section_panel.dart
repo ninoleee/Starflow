@@ -25,9 +25,10 @@ class SectionPanel extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final hasSubtitle = subtitle.trim().isNotEmpty;
-    final highPerformanceModeEnabled = ref.watch(
-      appSettingsProvider
-          .select((settings) => settings.highPerformanceModeEnabled),
+    final reduceDecorationsEnabled = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.performanceReduceDecorationsEnabled,
+      ),
     );
     return Container(
       width: double.infinity,
@@ -45,7 +46,7 @@ class SectionPanel extends ConsumerWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        boxShadow: highPerformanceModeEnabled
+        boxShadow: reduceDecorationsEnabled
             ? null
             : [
                 BoxShadow(

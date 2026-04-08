@@ -386,6 +386,60 @@ void main() {
       expect(items.map((item) => item.episodeNumber), containsAll([1, 2]));
     });
 
+    test('orders date-named implicit episodes by file date', () async {
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/RoundTableDate/') {
+            return http.Response.bytes(
+              utf8.encode(_roundTableDateRootPropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'nas-round-table-date',
+          name: 'Round Table Date NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/Shows/RoundTableDate/',
+          enabled: true,
+          webDavStructureInferenceEnabled: true,
+        ),
+        limit: 20,
+      );
+
+      expect(items, hasLength(3));
+      expect(items.every((item) => item.itemType == 'episode'), isTrue);
+      expect(items.every((item) => item.seasonNumber == 1), isTrue);
+
+      final june = items.firstWhere(
+        (item) =>
+            item.actualAddress ==
+            '/dav/Shows/RoundTableDate/Round Table 2024.6.01.mkv',
+      );
+      expect(june.episodeNumber, 1);
+
+      final august = items.firstWhere(
+        (item) =>
+            item.actualAddress ==
+            '/dav/Shows/RoundTableDate/Round Table 2024.8.15.mkv',
+      );
+      expect(august.episodeNumber, 2);
+
+      final october = items.firstWhere(
+        (item) =>
+            item.actualAddress ==
+            '/dav/Shows/RoundTableDate/Round Table 2024.10.01.mkv',
+      );
+      expect(october.episodeNumber, 3);
+    });
+
     test('treats root files as specials when sibling folders are seasons',
         () async {
       final client = WebDavNasClient(
@@ -1449,6 +1503,53 @@ const _familyCourtRootPropfindResponse =
         <d:getcontenttype>text/plain</d:getcontenttype>
         <d:getcontentlength>128</d:getcontentlength>
         <d:getlastmodified>Sun, 05 Apr 2026 10:02:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _roundTableDateRootPropfindResponse =
+    '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/RoundTableDate/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>RoundTableDate</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/RoundTableDate/Round%20Table%202024.10.01.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Round Table 2024.10.01.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
+        <d:getlastmodified>Tue, 01 Oct 2024 08:00:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/RoundTableDate/Round%20Table%202024.6.01.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Round Table 2024.6.01.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
+        <d:getlastmodified>Sat, 01 Jun 2024 08:00:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/RoundTableDate/Round%20Table%202024.8.15.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Round Table 2024.8.15.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
+        <d:getlastmodified>Thu, 15 Aug 2024 08:00:00 GMT</d:getlastmodified>
       </d:prop>
     </d:propstat>
   </d:response>

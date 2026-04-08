@@ -5,6 +5,7 @@ import 'package:starflow/features/library/application/nas_media_index_revision.d
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
+import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/nas_media_recognition.dart';
@@ -371,7 +372,7 @@ class NasMediaIndexer {
       }
       final group = targetGroup.first;
       final seasonGroups = group.seasonGroups;
-      if (seasonGroups.length <= 1) {
+      if (_shouldFlattenSingleSeasonGroup(group, seasonGroups)) {
         return _materializeEpisodeItems(seasonGroups.values.expand((e) => e))
             .take(limit)
             .toList(growable: false);
@@ -1426,6 +1427,7 @@ class NasMediaIndexer {
 
     final hasSeasonHint = record.item.seasonNumber != null ||
         record.recognizedSeasonNumber != null;
+    final itemType = record.item.itemType.trim().toLowerCase();
     final sectionSegments = _pathSegments(_uriPath(record.sectionId));
 
     var commonLength = 0;
@@ -1452,13 +1454,14 @@ class NasMediaIndexer {
         relativeDirectories[seasonDirectoryIndex - 1],
       );
     }
+    if (seasonDirectoryIndex == 0 && sectionSegments.isNotEmpty) {
+      return _cleanIndexedTitleLabel(sectionSegments.last);
+    }
 
     final trailingStructureRoot =
         _nearestNonSeasonDirectory(relativeDirectories);
     if (trailingStructureRoot.isNotEmpty &&
-        (hasSeasonHint ||
-            record.preferSeries ||
-            record.item.itemType.trim().toLowerCase() == 'episode')) {
+        (hasSeasonHint || record.preferSeries || itemType == 'episode')) {
       return _cleanIndexedTitleLabel(trailingStructureRoot);
     }
 
@@ -1502,6 +1505,9 @@ class NasMediaIndexer {
     if (seasonDirectoryIndex > 0) {
       return relativeDirectories.sublist(0, seasonDirectoryIndex);
     }
+    if (seasonDirectoryIndex == 0) {
+      return const [];
+    }
 
     final trailingRootIndex = _lastNonSeasonDirectoryIndex(relativeDirectories);
     if (trailingRootIndex >= 0 &&
@@ -1509,6 +1515,46 @@ class NasMediaIndexer {
       return relativeDirectories.sublist(0, trailingRootIndex + 1);
     }
     return const [];
+  }
+
+  bool _shouldFlattenSingleSeasonGroup(
+    _SeriesRecordGroup group,
+    Map<int, List<NasMediaIndexRecord>> seasonGroups,
+  ) {
+    if (seasonGroups.length != 1) {
+      return false;
+    }
+    final onlySeasonRecords = seasonGroups.values.first;
+    return !_hasExplicitSeasonDirectory(onlySeasonRecords);
+  }
+
+  bool _hasExplicitSeasonDirectory(Iterable<NasMediaIndexRecord> records) {
+    for (final record in records) {
+      if (_recordHasExplicitSeasonDirectory(record)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _recordHasExplicitSeasonDirectory(NasMediaIndexRecord record) {
+    final resourceSegments = _pathSegments(record.resourcePath);
+    if (resourceSegments.isEmpty) {
+      return false;
+    }
+
+    final sectionSegments = _pathSegments(_uriPath(record.sectionId));
+    var commonLength = 0;
+    while (commonLength < sectionSegments.length &&
+        commonLength < resourceSegments.length &&
+        sectionSegments[commonLength] == resourceSegments[commonLength]) {
+      commonLength += 1;
+    }
+
+    final relativeDirectories = resourceSegments.length <= commonLength + 1
+        ? const <String>[]
+        : resourceSegments.sublist(commonLength, resourceSegments.length - 1);
+    return relativeDirectories.any(_looksLikeSeasonFolderLabel);
   }
 
   String _nearestNonSeasonDirectory(Iterable<String> directories) {
@@ -1915,29 +1961,15 @@ class NasMediaIndexer {
   }
 
   bool _looksLikeSeasonFolderLabel(String value) {
-    return _parseSeasonNumberFromLabel(value) != null ||
-        _looksLikeNumericTopicSeason(value);
+    return looksLikeSeasonFolderLabel(value);
   }
 
   int? _parseSeasonNumberFromLabel(String value) {
-    final normalized = value.trim();
-    for (final pattern in const [
-      r'(?:^|[ ._\-])s(\d{1,2})(?:$|[ ._\-])',
-      r'season[ ._\-]?(\d{1,2})',
-      r'第(\d{1,2})季',
-    ]) {
-      final match =
-          RegExp(pattern, caseSensitive: false).firstMatch(normalized);
-      final parsed = int.tryParse(match?.group(1) ?? '');
-      if (parsed != null && parsed > 0) {
-        return parsed;
-      }
-    }
-    return null;
+    return parseSeasonNumberFromFolderLabel(value);
   }
 
   bool _looksLikeNumericTopicSeason(String value) {
-    return RegExp(r'^\s*\d{1,2}(?:[ ._\-]|$)').hasMatch(value);
+    return looksLikeNumericTopicSeason(value);
   }
 
   String _buildSeasonItemId(String seriesKey, int seasonNumber) {
@@ -3083,6 +3115,9 @@ class NasMediaIndexer {
         ? <String>[]
         : resourceSegments.sublist(commonLength, resourceSegments.length - 1);
     if (relativeDirectories.isEmpty) {
+      if (hasSeasonHint && sectionSegments.isNotEmpty) {
+        return _cleanIndexedTitleLabel(sectionSegments.last);
+      }
       return '';
     }
 
@@ -3092,6 +3127,9 @@ class NasMediaIndexer {
       return _cleanIndexedTitleLabel(
         relativeDirectories[seasonDirectoryIndex - 1],
       );
+    }
+    if (seasonDirectoryIndex == 0 && sectionSegments.isNotEmpty) {
+      return _cleanIndexedTitleLabel(sectionSegments.last);
     }
 
     final trailingStructureRoot =

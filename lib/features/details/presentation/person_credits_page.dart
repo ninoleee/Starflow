@@ -73,75 +73,58 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage> {
     super.dispose();
   }
 
-  void _returnToTop() {
-    if (_scrollController.hasClients) {
-      _scrollController.jumpTo(0);
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_headerFocusNode.canRequestFocus) {
-        return;
-      }
-      _headerFocusNode.requestFocus();
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final target = widget.target;
     final resultAsync = ref.watch(_personCreditsPageProvider(target));
 
-    return TvFocusMemoryScope(
+    return TvPageFocusScope(
       controller: _tvFocusMemoryController,
-      scopeId: 'person-credits',
-      enabled: isTelevision,
-      child: TvReturnToTopScope(
-        onReturnToTop: _returnToTop,
-        child: Scaffold(
-          body: TvDirectionalFocusBoundary(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                AppPageBackground(
-                  child: ListView(
-                    controller: _scrollController,
-                    padding: overlayToolbarPagePadding(context),
-                    children: [
-                      _PersonCreditsHeader(
-                        target: target,
-                        isTelevision: isTelevision,
-                        focusNode: _headerFocusNode,
-                      ),
-                      const SizedBox(height: 22),
-                      resultAsync.when(
-                        data: (result) {
-                          if (result.items.isEmpty) {
-                            return _EmptyState(message: result.message);
-                          }
-                          return _PersonCreditsGrid(items: result.items);
-                        },
-                        loading: () => const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 48),
-                          child: Center(child: CircularProgressIndicator()),
-                        ),
-                        error: (error, stackTrace) => _EmptyState(
-                          message: '加载关联影片失败：$error',
-                        ),
-                      ),
-                    ],
+      scopeId: _personCreditsFocusScopeId(target),
+      isTelevision: isTelevision,
+      child: Scaffold(
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            AppPageBackground(
+              child: ListView(
+                controller: _scrollController,
+                padding: overlayToolbarPagePadding(context),
+                children: [
+                  _PersonCreditsHeader(
+                    target: target,
+                    isTelevision: isTelevision,
+                    focusNode: _headerFocusNode,
                   ),
-                ),
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: OverlayToolbar(
-                    onBack: () => context.pop(),
+                  const SizedBox(height: 22),
+                  resultAsync.when(
+                    data: (result) {
+                      if (result.items.isEmpty) {
+                        return _EmptyState(message: result.message);
+                      }
+                      return _PersonCreditsGrid(items: result.items);
+                    },
+                    loading: () => const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 48),
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+                    error: (error, stackTrace) => _EmptyState(
+                      message: '加载关联影片失败：$error',
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: OverlayToolbar(
+                onBack: () => context.pop(),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -261,6 +244,17 @@ String _preferredTypeLabel(TmdbPersonCredit credit) {
     }
   }
   return credit.isSeries ? '剧集' : '电影';
+}
+
+String _personCreditsFocusScopeId(PersonCreditsPageTarget target) {
+  return buildTvFocusScopeId(
+    prefix: 'person-credits',
+    segments: [
+      target.role.name,
+      target.person.name,
+      target.person.avatarUrl,
+    ],
+  );
 }
 
 List<AppNetworkImageSource> _buildPosterFallbackSources(

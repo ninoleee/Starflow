@@ -44,9 +44,10 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
   Widget build(BuildContext context) {
     final state = ref.watch(bootstrapControllerProvider);
     final progress = state.progress.clamp(0.0, 1.0).toDouble();
-    final highPerformanceModeEnabled = ref.watch(
-      appSettingsProvider
-          .select((settings) => settings.highPerformanceModeEnabled),
+    final reduceMotionEnabled = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.performanceReduceMotionEnabled,
+      ),
     );
 
     return Scaffold(
@@ -71,7 +72,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                 child: Center(
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 320),
-                    child: highPerformanceModeEnabled
+                    child: reduceMotionEnabled
                         ? Stack(
                             alignment: Alignment.center,
                             clipBehavior: Clip.none,

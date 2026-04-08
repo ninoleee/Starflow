@@ -270,7 +270,93 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   Future<void> setHighPerformanceModeEnabled(bool enabled) async {
     final current = state.valueOrNull ?? await _repository.load();
-    await _persist(current.copyWith(highPerformanceModeEnabled: enabled));
+    final next = enabled && !current.highPerformanceModeEnabled
+        ? current.copyWith(
+            highPerformanceModeEnabled: true,
+            translucentEffectsEnabled: false,
+            autoHideNavigationBarEnabled: false,
+            homeHeroBackgroundEnabled: false,
+            performanceReduceDecorationsEnabled: true,
+            performanceReduceMotionEnabled: true,
+            performanceStaticNavigationEnabled: true,
+            performanceLightweightTvFocusEnabled: true,
+            performanceStaticHomeHeroEnabled: true,
+            performanceLightweightHomeHeroEnabled: true,
+            performanceSlimDetailHeroEnabled: true,
+            performanceLeanPlaybackUiEnabled: true,
+            performanceAggressivePlaybackTuningEnabled: true,
+            performanceAutoDowngradeHeavyPlaybackEnabled: true,
+          )
+        : current.copyWith(highPerformanceModeEnabled: enabled);
+    await _persist(next);
+  }
+
+  Future<void> setPerformanceReduceDecorationsEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(
+      current.copyWith(performanceReduceDecorationsEnabled: enabled),
+    );
+  }
+
+  Future<void> setPerformanceReduceMotionEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(performanceReduceMotionEnabled: enabled));
+  }
+
+  Future<void> setPerformanceStaticNavigationEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(
+      current.copyWith(performanceStaticNavigationEnabled: enabled),
+    );
+  }
+
+  Future<void> setPerformanceLightweightTvFocusEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(
+      current.copyWith(performanceLightweightTvFocusEnabled: enabled),
+    );
+  }
+
+  Future<void> setPerformanceStaticHomeHeroEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(performanceStaticHomeHeroEnabled: enabled));
+  }
+
+  Future<void> setPerformanceLightweightHomeHeroEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(
+      current.copyWith(performanceLightweightHomeHeroEnabled: enabled),
+    );
+  }
+
+  Future<void> setPerformanceSlimDetailHeroEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(performanceSlimDetailHeroEnabled: enabled));
+  }
+
+  Future<void> setPerformanceLeanPlaybackUiEnabled(bool enabled) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(current.copyWith(performanceLeanPlaybackUiEnabled: enabled));
+  }
+
+  Future<void> setPerformanceAggressivePlaybackTuningEnabled(
+    bool enabled,
+  ) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(
+      current.copyWith(performanceAggressivePlaybackTuningEnabled: enabled),
+    );
+  }
+
+  Future<void> setPerformanceAutoDowngradeHeavyPlaybackEnabled(
+    bool enabled,
+  ) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(
+      current.copyWith(
+        performanceAutoDowngradeHeavyPlaybackEnabled: enabled,
+      ),
+    );
   }
 
   Future<void> toggleHomeModule(String id, bool enabled) async {

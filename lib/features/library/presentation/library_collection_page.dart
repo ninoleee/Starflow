@@ -49,24 +49,15 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage> {
   final ScrollController _scrollController = ScrollController();
   final FocusNode _headerFocusNode =
       FocusNode(debugLabel: 'library-collection-header');
+  final TvFocusMemoryController _tvFocusMemoryController =
+      TvFocusMemoryController();
 
   @override
   void dispose() {
     _headerFocusNode.dispose();
     _scrollController.dispose();
+    _tvFocusMemoryController.dispose();
     super.dispose();
-  }
-
-  void _returnToTop() {
-    if (_scrollController.hasClients) {
-      _scrollController.jumpTo(0);
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_headerFocusNode.canRequestFocus) {
-        return;
-      }
-      _headerFocusNode.requestFocus();
-    });
   }
 
   @override
@@ -98,62 +89,64 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage> {
       ],
     );
 
-    return TvReturnToTopScope(
-      onReturnToTop: _returnToTop,
+    return TvPageFocusScope(
+      controller: _tvFocusMemoryController,
+      scopeId: _libraryCollectionFocusScopeId(target),
+      isTelevision: isTelevision,
       child: Scaffold(
-        body: TvDirectionalFocusBoundary(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              AppPageBackground(
-                child: ListView(
-                  controller: _scrollController,
-                  padding: overlayToolbarPagePadding(context),
-                  children: [
-                    if (isTelevision)
-                      TvFocusableAction(
-                        onPressed: () => FocusScope.of(context).nextFocus(),
-                        focusNode: _headerFocusNode,
-                        focusId: 'library-collection:header',
-                        borderRadius: BorderRadius.circular(20),
-                        child: headerContent,
-                      )
-                    else
-                      headerContent,
-                    const SizedBox(height: 20),
-                    itemsAsync.when(
-                      data: (items) {
-                        return LibraryPagedGrid(
-                          items: items,
-                          currentPage: _currentPage,
-                          isTelevision: isTelevision,
-                          onPageChanged: (page) {
-                            setState(() {
-                              _currentPage = page;
-                            });
-                          },
-                          onItemContextAction: (item) =>
-                              _handleItemContextAction(item),
-                          emptyMessage: '无',
-                        );
-                      },
-                      loading: () =>
-                          const Center(child: CircularProgressIndicator()),
-                      error: (error, stackTrace) => Text('加载失败：$error'),
-                    ),
-                  ],
-                ),
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            AppPageBackground(
+              child: ListView(
+                controller: _scrollController,
+                padding: overlayToolbarPagePadding(context),
+                children: [
+                  if (isTelevision)
+                    TvFocusableAction(
+                      onPressed: () => FocusScope.of(context).nextFocus(),
+                      focusNode: _headerFocusNode,
+                      focusId: 'library-collection:header',
+                      borderRadius: BorderRadius.circular(20),
+                      child: headerContent,
+                    )
+                  else
+                    headerContent,
+                  const SizedBox(height: 20),
+                  itemsAsync.when(
+                    data: (items) {
+                      return LibraryPagedGrid(
+                        items: items,
+                        currentPage: _currentPage,
+                        isTelevision: isTelevision,
+                        focusScopePrefix:
+                            _libraryCollectionGridFocusScopePrefix(target),
+                        onPageChanged: (page) {
+                          setState(() {
+                            _currentPage = page;
+                          });
+                        },
+                        onItemContextAction: (item) =>
+                            _handleItemContextAction(item),
+                        emptyMessage: '无',
+                      );
+                    },
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (error, stackTrace) => Text('加载失败：$error'),
+                  ),
+                ],
               ),
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: OverlayToolbar(
-                  onBack: () => context.pop(),
-                ),
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: OverlayToolbar(
+                onBack: () => context.pop(),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -304,4 +297,29 @@ enum _LibraryCollectionItemAction {
   rebuildSourceIndex,
   manualIndex,
   deleteResource,
+}
+
+String _libraryCollectionFocusScopeId(LibraryCollectionTarget target) {
+  return buildTvFocusScopeId(
+    prefix: 'library-collection',
+    segments: [
+      target.sourceKind.name,
+      target.sourceId,
+      target.sectionId,
+      target.title,
+      target.subtitle,
+    ],
+  );
+}
+
+String _libraryCollectionGridFocusScopePrefix(LibraryCollectionTarget target) {
+  return buildTvFocusId(
+    prefix: 'library-collection:grid',
+    segments: [
+      target.sourceKind.name,
+      target.sourceId,
+      target.sectionId,
+      target.title,
+    ],
+  );
 }
