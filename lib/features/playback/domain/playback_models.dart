@@ -118,6 +118,9 @@ class PlaybackTarget {
       (streamUrl.trim().isEmpty &&
           sourceKind == MediaSourceKind.emby &&
           itemId.trim().isNotEmpty) ||
+      (streamUrl.trim().isEmpty &&
+          sourceKind == MediaSourceKind.quark &&
+          itemId.trim().isNotEmpty) ||
       (sourceKind == MediaSourceKind.nas &&
           (_looksLikeStrmReference(streamUrl) ||
               (streamUrl.trim().isEmpty &&

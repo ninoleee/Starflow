@@ -12,6 +12,7 @@ import 'package:path/path.dart' as p;
 import 'package:starflow/core/platform/android_picture_in_picture.dart';
 import 'package:starflow/core/platform/background_playback.dart';
 import 'package:starflow/core/platform/playback_system_session.dart';
+import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
@@ -61,6 +62,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   static const int _kAggressiveMpvBufferSizeBytes = 128 * 1024 * 1024;
   static const int _kMinMpvBackBufferSizeBytes = 8 * 1024 * 1024;
   static const int _kMaxMpvBackBufferSizeBytes = 32 * 1024 * 1024;
+  static Future<void> _playerShutdownQueue = Future<void>.value();
 
   Player? _player;
   VideoController? _videoController;
@@ -68,6 +70,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   StreamSubscription<bool>? _playerPlayingSubscription;
   StreamSubscription<Duration>? _playerPositionSubscription;
   StreamSubscription<Duration>? _playerDurationSubscription;
+  StreamSubscription<int?>? _playerWidthSubscription;
+  StreamSubscription<int?>? _playerHeightSubscription;
+  StreamSubscription<bool>? _playerBufferingSubscription;
+  StreamSubscription<double>? _playerBufferingPercentageSubscription;
   PlaybackTarget? _resolvedTarget;
   _StartupProbeResult _startupProbe = const _StartupProbeResult();
   SeriesSkipPreference? _seriesSkipPreference;
@@ -92,6 +98,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _lastPlaybackSystemSessionBuffering = false;
   String _lastPlaybackSystemSessionTitle = '';
   String _lastPlaybackSystemSessionSubtitle = '';
+  int? _lastTracedVideoWidth;
+  int? _lastTracedVideoHeight;
+  bool? _lastTracedBufferingState;
+  int? _lastTracedBufferingBucket;
   late final StateController<bool> _playbackPerformanceModeController;
   Timer? _tvPlaybackChromeHideTimer;
 
@@ -127,9 +137,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     unawaited(_playerPlayingSubscription?.cancel());
     unawaited(_playerPositionSubscription?.cancel());
     unawaited(_playerDurationSubscription?.cancel());
+    unawaited(_playerWidthSubscription?.cancel());
+    unawaited(_playerHeightSubscription?.cancel());
+    unawaited(_playerBufferingSubscription?.cancel());
+    unawaited(_playerBufferingPercentageSubscription?.cancel());
     final player = _player;
     _player = null;
-    unawaited(player?.dispose());
+    _videoController = null;
+    _isReady = false;
+    if (player != null) {
+      unawaited(
+        _enqueuePlayerShutdown(
+          player,
+          reason: 'player-page-dispose',
+        ),
+      );
+    }
     super.dispose();
   }
 
@@ -187,6 +210,110 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   PlaybackMpvQualityPreset get _playbackMpvQualityPreset =>
       ref.read(appSettingsProvider).playbackMpvQualityPreset;
+
+  bool get _shouldTraceWindowsMpv {
+    if (kIsWeb) {
+      return false;
+    }
+    if (defaultTargetPlatform != TargetPlatform.windows) {
+      return false;
+    }
+    return ref.read(appSettingsProvider).playbackEngine ==
+        PlaybackEngine.embeddedMpv;
+  }
+
+  void _traceWindowsMpv(
+    String stage, {
+    Map<String, Object?> fields = const <String, Object?>{},
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    if (!_shouldTraceWindowsMpv) {
+      return;
+    }
+    final target = _resolvedTarget ?? widget.target;
+    playbackTrace(
+      stage,
+      fields: <String, Object?>{
+        'title': target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
+        'engine': 'embeddedMpv',
+        ...fields,
+      },
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
+
+  Future<void> _waitForPendingPlayerShutdowns({
+    required String reason,
+  }) async {
+    try {
+      _traceWindowsMpv(
+        'windows-mpv.shutdown.wait-begin',
+        fields: {'reason': reason},
+      );
+      await _playerShutdownQueue;
+      _traceWindowsMpv(
+        'windows-mpv.shutdown.wait-end',
+        fields: {'reason': reason},
+      );
+    } catch (error, stackTrace) {
+      _traceWindowsMpv(
+        'windows-mpv.shutdown.wait-error',
+        fields: {'reason': reason},
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  Future<void> _enqueuePlayerShutdown(
+    Player player, {
+    required String reason,
+  }) async {
+    final shutdown = _playerShutdownQueue.then((_) async {
+      _traceWindowsMpv(
+        'windows-mpv.shutdown.begin',
+        fields: {'reason': reason},
+      );
+      try {
+        await player.pause();
+      } catch (error, stackTrace) {
+        _traceWindowsMpv(
+          'windows-mpv.shutdown.pause-error',
+          fields: {'reason': reason},
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+      try {
+        await player.stop();
+      } catch (error, stackTrace) {
+        _traceWindowsMpv(
+          'windows-mpv.shutdown.stop-error',
+          fields: {'reason': reason},
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+      try {
+        await player.dispose();
+      } catch (error, stackTrace) {
+        _traceWindowsMpv(
+          'windows-mpv.shutdown.dispose-error',
+          fields: {'reason': reason},
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+      _traceWindowsMpv(
+        'windows-mpv.shutdown.end',
+        fields: {'reason': reason},
+      );
+    });
+    _playerShutdownQueue = shutdown.catchError((_) {});
+    await shutdown;
+  }
 
   Future<void> _bindPictureInPictureSupport() async {
     if (!AndroidPictureInPictureController.isSupportedPlatform) {
@@ -395,7 +522,20 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 
   Future<void> _initialize() async {
+    await _waitForPendingPlayerShutdowns(reason: 'player-page-initialize');
+    _traceWindowsMpv(
+      'windows-mpv.initialize.begin',
+      fields: {
+        'canPlay': widget.target.canPlay,
+        'needsResolution': widget.target.needsResolution,
+        'decodeMode': _playbackDecodeMode.name,
+        'qualityPreset': _playbackMpvQualityPreset.name,
+        'leanUi': _leanPlaybackUiEnabled,
+        'aggressiveTuning': _aggressivePlaybackTuningEnabled,
+      },
+    );
     if (!widget.target.canPlay) {
+      _traceWindowsMpv('windows-mpv.initialize.no-playable-source');
       setState(() {
         _error = '没有可播放的流地址';
       });
@@ -406,6 +546,20 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final settings = ref.read(appSettingsProvider);
       await ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes();
       final resolvedTarget = await _resolveTarget(widget.target);
+      final resolvedUri = Uri.tryParse(resolvedTarget.streamUrl.trim());
+      _traceWindowsMpv(
+        'windows-mpv.initialize.target-resolved',
+        fields: {
+          'urlScheme': resolvedUri?.scheme ?? '',
+          'sourceName': resolvedTarget.sourceName,
+          'resolution': resolvedTarget.resolutionLabel,
+          'format': resolvedTarget.formatLabel,
+          'videoCodec': resolvedTarget.videoCodec,
+          'audioCodec': resolvedTarget.audioCodec,
+          'bitrate': resolvedTarget.bitrate ?? 0,
+          'headers': resolvedTarget.headers.length,
+        },
+      );
       final playbackMemoryRepository =
           ref.read(playbackMemoryRepositoryProvider);
       final resumeEntry = await playbackMemoryRepository.loadEntryForTarget(
@@ -421,23 +575,35 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         });
       }
       if (settings.playbackEngine == PlaybackEngine.systemPlayer) {
+        _traceWindowsMpv('windows-mpv.initialize.redirect-system-player');
         await _launchWithSystemPlayer(resolvedTarget);
         return;
       }
       if (settings.playbackEngine == PlaybackEngine.nativeContainer) {
+        _traceWindowsMpv('windows-mpv.initialize.redirect-native-container');
         await _launchWithNativeContainer(resolvedTarget);
         return;
       }
       if (_shouldAutoDowngradeToSystemPlayer(resolvedTarget)) {
+        _traceWindowsMpv('windows-mpv.initialize.performance-fallback-check');
         final launched = await _tryLaunchWithPerformanceFallback(
           resolvedTarget,
         );
         if (launched) {
+          _traceWindowsMpv('windows-mpv.initialize.performance-fallback-used');
           return;
         }
       }
       unawaited(_runStartupProbe(resolvedTarget));
       final timeoutSeconds = settings.playbackOpenTimeoutSeconds.clamp(1, 600);
+      _traceWindowsMpv(
+        'windows-mpv.initialize.open-start',
+        fields: {
+          'timeoutSeconds': timeoutSeconds,
+          'bufferSizeBytes': _resolveMpvBufferSizeBytes(resolvedTarget),
+          'hwdec': _resolveMpvHardwareDecodeMode(),
+        },
+      );
       final playback = await _openWithRetry(
         resolvedTarget,
         timeout: Duration(seconds: timeoutSeconds),
@@ -455,6 +621,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _playerPlayingSubscription = playback.player.stream.playing.listen((
         playing,
       ) {
+        _traceWindowsMpv(
+          'windows-mpv.player.playing',
+          fields: {'playing': playing},
+        );
         unawaited(_syncBackgroundPlayback(enabled: playing));
         unawaited(_syncPlaybackSystemSession(force: true));
         if (_isTelevisionPlaybackDevice) {
@@ -482,6 +652,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         unawaited(_persistPlaybackProgress());
         unawaited(_syncPlaybackSystemSession());
       });
+      _bindWindowsMpvTraceStreams(playback.player);
       setState(() {
         _player = playback.player;
         _videoController = playback.videoController;
@@ -493,9 +664,23 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       await _syncSubtitleDelayState(playback.player);
       await _restorePlaybackProgress(playback.player, resumeEntry);
       _syncSkipFlagsWithCurrentPosition();
+      _traceWindowsMpv(
+        'windows-mpv.initialize.ready',
+        fields: {
+          'durationMs': playback.player.state.duration.inMilliseconds,
+          'width': playback.player.state.width ?? 0,
+          'height': playback.player.state.height ?? 0,
+          'buffering': playback.player.state.buffering,
+        },
+      );
       unawaited(_syncBackgroundPlayback(enabled: true));
       unawaited(_syncPlaybackSystemSession(force: true));
-    } catch (error) {
+    } catch (error, stackTrace) {
+      _traceWindowsMpv(
+        'windows-mpv.initialize.failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (!mounted) {
         return;
       }
@@ -521,12 +706,30 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       }
 
       try {
-        return await _openSingleAttempt(
+        _traceWindowsMpv(
+          'windows-mpv.open.attempt',
+          fields: {
+            'attempt': attempt,
+            'remainingMs': remaining.inMilliseconds,
+          },
+        );
+        final opened = await _openSingleAttempt(
           resolvedTarget,
           timeout: remaining,
         );
-      } catch (error) {
+        _traceWindowsMpv(
+          'windows-mpv.open.attempt-success',
+          fields: {'attempt': attempt},
+        );
+        return opened;
+      } catch (error, stackTrace) {
         lastError = error;
+        _traceWindowsMpv(
+          'windows-mpv.open.attempt-failed',
+          fields: {'attempt': attempt},
+          error: error,
+          stackTrace: stackTrace,
+        );
         if (attempt >= _maxPlaybackAttempts) {
           break;
         }
@@ -543,20 +746,32 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     PlaybackTarget resolvedTarget, {
     required Duration timeout,
   }) async {
+    final bufferSizeBytes = _resolveMpvBufferSizeBytes(resolvedTarget);
+    final hardwareDecodeMode = _resolveMpvHardwareDecodeMode();
     final player = Player(
       configuration: PlayerConfiguration(
         title: 'Starflow',
         logLevel: MPVLogLevel.warn,
-        bufferSize: _resolveMpvBufferSizeBytes(resolvedTarget),
+        bufferSize: bufferSizeBytes,
       ),
     );
     final videoController = VideoController(
       player,
       configuration: VideoControllerConfiguration(
-        hwdec: _resolveMpvHardwareDecodeMode(),
+        hwdec: hardwareDecodeMode,
         enableHardwareAcceleration:
             _playbackDecodeMode != PlaybackDecodeMode.softwarePreferred,
       ),
+    );
+    _traceWindowsMpv(
+      'windows-mpv.open.create-player',
+      fields: {
+        'timeoutMs': timeout.inMilliseconds,
+        'bufferSizeBytes': bufferSizeBytes,
+        'hwdec': hardwareDecodeMode,
+        'hardwareAcceleration':
+            _playbackDecodeMode != PlaybackDecodeMode.softwarePreferred,
+      },
     );
     final startupError = Completer<String>();
     var awaitingStartup = true;
@@ -566,6 +781,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       if (normalized.isEmpty) {
         return;
       }
+      _traceWindowsMpv(
+        'windows-mpv.player.error',
+        fields: {
+          'startup': awaitingStartup,
+          'message': normalized,
+        },
+      );
       if (awaitingStartup && !startupError.isCompleted) {
         startupError.complete(normalized);
         return;
@@ -580,6 +802,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     try {
       await _applyMpvPerformanceTuning(player, resolvedTarget);
+      _traceWindowsMpv('windows-mpv.open.tuning-applied');
+      _traceWindowsMpv(
+        'windows-mpv.open.dispatch',
+        fields: {
+          'urlScheme': Uri.tryParse(resolvedTarget.streamUrl)?.scheme ?? ''
+        },
+      );
       await Future.any<void>([
         player.open(
           Media(
@@ -593,12 +822,27 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         }),
       ]).timeout(timeout);
       awaitingStartup = false;
+      _traceWindowsMpv(
+        'windows-mpv.open.ready',
+        fields: {
+          'positionMs': player.state.position.inMilliseconds,
+          'durationMs': player.state.duration.inMilliseconds,
+          'width': player.state.width ?? 0,
+          'height': player.state.height ?? 0,
+          'buffering': player.state.buffering,
+        },
+      );
       return _OpenedPlayback(
         player: player,
         videoController: videoController,
         errorSubscription: errorSubscription,
       );
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _traceWindowsMpv(
+        'windows-mpv.open.failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
       await errorSubscription.cancel();
       await player.dispose();
       rethrow;
@@ -864,6 +1108,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       player,
       'vd-lavc-skiploopfilter',
       shouldSkipLoopFilter ? 'nonref' : 'none',
+    );
+    _traceWindowsMpv(
+      'windows-mpv.tuning.summary',
+      fields: {
+        'remotePlayback': remotePlayback,
+        'heavyPlayback': heavyPlayback,
+        'aggressiveTuning': aggressiveTuning,
+        'leanPlayback': leanPlayback,
+        'qualityPreset': qualityPreset.name,
+        'bufferSizeBytes': bufferSizeBytes,
+        'backBufferBytes': backBufferBytes,
+        'skipLoopFilter': shouldSkipLoopFilter ? 'nonref' : 'none',
+      },
     );
   }
 
@@ -1924,6 +2181,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (!_isReady || player == null) {
       return;
     }
+    _traceWindowsMpv(
+      'windows-mpv.command.toggle-playback',
+      fields: {'playingBefore': player.state.playing},
+    );
     await player.playOrPause();
     if (_isTelevisionPlaybackDevice) {
       _showTvPlaybackChrome(autoHide: player.state.playing);
@@ -1935,6 +2196,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (!_isReady || player == null) {
       return;
     }
+    _traceWindowsMpv(
+      'windows-mpv.command.set-play-when-ready',
+      fields: {
+        'requestedPlaying': playing,
+        'playingBefore': player.state.playing,
+      },
+    );
     if (playing) {
       await player.play();
     } else {
@@ -1953,6 +2221,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     }
     final current = player.state.position;
     final target = current + delta;
+    _traceWindowsMpv(
+      'windows-mpv.command.seek-relative',
+      fields: {
+        'fromMs': current.inMilliseconds,
+        'deltaMs': delta.inMilliseconds,
+        'toMs': target.inMilliseconds < 0 ? 0 : target.inMilliseconds,
+      },
+    );
     await player.seek(target < Duration.zero ? Duration.zero : target);
     if (_isTelevisionPlaybackDevice) {
       _showTvPlaybackChrome();
@@ -1964,6 +2240,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (!_isReady || player == null) {
       return;
     }
+    _traceWindowsMpv(
+      'windows-mpv.command.seek-to',
+      fields: {
+        'fromMs': player.state.position.inMilliseconds,
+        'toMs': position.inMilliseconds < 0 ? 0 : position.inMilliseconds,
+      },
+    );
     await player.seek(position < Duration.zero ? Duration.zero : position);
     if (_isTelevisionPlaybackDevice) {
       _showTvPlaybackChrome();
@@ -2033,6 +2316,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (!_pictureInPictureSupported || _isInPictureInPictureMode) {
       return;
     }
+    _traceWindowsMpv('windows-mpv.command.enter-picture-in-picture');
     final size = _currentPictureInPictureAspectRatio();
     await AndroidPictureInPictureController.enter(
       aspectRatioWidth: size.width,
@@ -2070,13 +2354,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     color: Colors.white.withValues(alpha: 0.92),
                   ),
                 ),
-                const SizedBox(height: 20),
-                StarflowButton(
-                  label: '返回',
-                  icon: Icons.arrow_back_rounded,
-                  onPressed: () => context.pop(),
-                  variant: StarflowButtonVariant.secondary,
-                ),
+                if (!isTelevision) ...[
+                  const SizedBox(height: 20),
+                  StarflowButton(
+                    label: '返回',
+                    icon: Icons.arrow_back_rounded,
+                    onPressed: () => context.pop(),
+                    variant: StarflowButtonVariant.secondary,
+                  ),
+                ],
               ],
             ),
           ),
@@ -2092,6 +2378,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         probe: _startupProbe,
       );
     }
+
+    final embeddedVideo = RepaintBoundary(
+      child: _buildEmbeddedVideo(
+        videoController,
+        isTelevision: isTelevision,
+        settings: settings,
+      ),
+    );
 
     return StreamBuilder<int?>(
       stream: player.stream.width,
@@ -2113,11 +2407,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   Center(
                     child: AspectRatio(
                       aspectRatio: aspectRatio,
-                      child: _buildEmbeddedVideo(
-                        videoController,
-                        isTelevision: isTelevision,
-                        settings: settings,
-                      ),
+                      child: embeddedVideo,
                     ),
                   ),
                   if (!_isLeanPlaybackMode)
@@ -2160,7 +2450,51 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }) {
     final video = Video(
       controller: videoController,
-      controls: isTelevision ? NoVideoControls : AdaptiveVideoControls,
+      controls: isTelevision
+          ? NoVideoControls
+          : (state) => _MpvControlsOverlay(
+                isFullscreen: state.isFullscreen(),
+                player: videoController.player,
+                target: _resolvedTarget ?? widget.target,
+                showVolumeSlider: _showDesktopVolumeSliderForMpv,
+                traceEnabled: _shouldTraceWindowsMpv,
+                onBack: () async {
+                  _traceWindowsMpv(
+                    'windows-mpv.overlay.back-request',
+                    fields: {'fullscreen': state.isFullscreen()},
+                  );
+                  if (state.isFullscreen()) {
+                    await state.exitFullscreen();
+                    return;
+                  }
+                  if (mounted) {
+                    context.pop();
+                  }
+                },
+                onTogglePlayback: _togglePlayback,
+                onSeekTo: _seekTo,
+                onOpenSubtitle: _openCurrentSubtitleSelector,
+                onOpenAudio: _openCurrentAudioSelector,
+                onOpenOptions: () => _showPlaybackOptions(
+                  isTelevision: false,
+                  settings: settings,
+                ),
+                onToggleFullscreen: () async {
+                  _traceWindowsMpv(
+                    'windows-mpv.overlay.fullscreen-toggle-request',
+                    fields: {'fullscreenBefore': state.isFullscreen()},
+                  );
+                  await state.toggleFullscreen();
+                },
+                onShowPictureInPicture:
+                    _pictureInPictureSupported && !_isInPictureInPictureMode
+                        ? _enterPictureInPictureManually
+                        : null,
+                onShowAirPlay:
+                    PlaybackSystemSessionController.supportsAirPlayPicker
+                        ? _showAirPlayRoutePicker
+                        : null,
+              ),
       fill: Colors.black,
       fit: BoxFit.contain,
       subtitleViewConfiguration: _buildSubtitleViewConfiguration(
@@ -2168,133 +2502,123 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         isTelevision: isTelevision,
       ),
     );
-    if (isTelevision) {
-      return video;
+    return video;
+  }
+
+  bool get _showDesktopVolumeSliderForMpv {
+    if (kIsWeb) {
+      return false;
     }
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.windows ||
+      TargetPlatform.macOS ||
+      TargetPlatform.linux =>
+        true,
+      _ => false,
+    };
+  }
 
-    return MaterialDesktopVideoControlsTheme(
-      normal: _buildDesktopVideoControlsTheme(
-        settings,
-        fullscreen: false,
-      ),
-      fullscreen: _buildDesktopVideoControlsTheme(
-        settings,
-        fullscreen: true,
-      ),
-      child: MaterialVideoControlsTheme(
-        normal: _buildMaterialVideoControlsTheme(
-          settings,
-          fullscreen: false,
-        ),
-        fullscreen: _buildMaterialVideoControlsTheme(
-          settings,
-          fullscreen: true,
-        ),
-        child: video,
-      ),
+  void _bindWindowsMpvTraceStreams(Player player) {
+    if (!_shouldTraceWindowsMpv) {
+      return;
+    }
+    _lastTracedVideoWidth = null;
+    _lastTracedVideoHeight = null;
+    _lastTracedBufferingState = null;
+    _lastTracedBufferingBucket = null;
+    _traceWindowsMpvVideoDimensions(
+      width: player.state.width,
+      height: player.state.height,
+    );
+    _traceWindowsMpvBufferingState(
+      player.state.buffering,
+      percentage: player.state.bufferingPercentage,
+    );
+    _playerWidthSubscription = player.stream.width.listen((width) {
+      _traceWindowsMpvVideoDimensions(
+        width: width,
+        height: player.state.height,
+      );
+    });
+    _playerHeightSubscription = player.stream.height.listen((height) {
+      _traceWindowsMpvVideoDimensions(
+        width: player.state.width,
+        height: height,
+      );
+    });
+    _playerBufferingSubscription = player.stream.buffering.listen((buffering) {
+      _traceWindowsMpvBufferingState(
+        buffering,
+        percentage: player.state.bufferingPercentage,
+      );
+    });
+    _playerBufferingPercentageSubscription =
+        player.stream.bufferingPercentage.listen((percentage) {
+      final bucket = _bufferingTraceBucket(percentage);
+      if (bucket == null || bucket == _lastTracedBufferingBucket) {
+        return;
+      }
+      _lastTracedBufferingBucket = bucket;
+      _traceWindowsMpv(
+        'windows-mpv.player.buffering-progress',
+        fields: {
+          'buffering': player.state.buffering,
+          'percent': bucket,
+        },
+      );
+    });
+  }
+
+  void _traceWindowsMpvVideoDimensions({
+    required int? width,
+    required int? height,
+  }) {
+    if (!_shouldTraceWindowsMpv) {
+      return;
+    }
+    if (_lastTracedVideoWidth == width && _lastTracedVideoHeight == height) {
+      return;
+    }
+    _lastTracedVideoWidth = width;
+    _lastTracedVideoHeight = height;
+    _traceWindowsMpv(
+      'windows-mpv.player.video-dimensions',
+      fields: {
+        'width': width ?? 0,
+        'height': height ?? 0,
+      },
     );
   }
 
-  MaterialVideoControlsThemeData _buildMaterialVideoControlsTheme(
-    AppSettings settings, {
-    required bool fullscreen,
+  void _traceWindowsMpvBufferingState(
+    bool buffering, {
+    required double percentage,
   }) {
-    final base = fullscreen
-        ? kDefaultMaterialVideoControlsThemeDataFullscreen
-        : kDefaultMaterialVideoControlsThemeData;
-    return base.copyWith(
-      topButtonBar: [
-        MaterialCustomButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.pop(),
-        ),
-        const Spacer(),
-        if (PlaybackSystemSessionController.supportsAirPlayPicker)
-          MaterialCustomButton(
-            icon: const Icon(Icons.airplay_rounded),
-            onPressed: _showAirPlayRoutePicker,
-          ),
-        if (_pictureInPictureSupported && !_isInPictureInPictureMode)
-          MaterialCustomButton(
-            icon: const Icon(Icons.picture_in_picture_alt_rounded),
-            onPressed: _enterPictureInPictureManually,
-          ),
-      ],
-      topButtonBarMargin: const EdgeInsets.only(left: 0, right: 16),
-      bottomButtonBar: [
-        const MaterialPositionIndicator(),
-        const Spacer(),
-        MaterialCustomButton(
-          icon: const Icon(Icons.closed_caption_rounded),
-          onPressed: _openCurrentSubtitleSelector,
-        ),
-        MaterialCustomButton(
-          icon: const Icon(Icons.audiotrack_rounded),
-          onPressed: _openCurrentAudioSelector,
-        ),
-        MaterialCustomButton(
-          icon: const Icon(Icons.tune_rounded),
-          onPressed: () => _showPlaybackOptions(
-            isTelevision: false,
-            settings: settings,
-          ),
-        ),
-        const MaterialFullscreenButton(),
-      ],
+    if (!_shouldTraceWindowsMpv) {
+      return;
+    }
+    if (_lastTracedBufferingState == buffering) {
+      return;
+    }
+    _lastTracedBufferingState = buffering;
+    if (!buffering) {
+      _lastTracedBufferingBucket = null;
+    }
+    _traceWindowsMpv(
+      'windows-mpv.player.buffering-state',
+      fields: {
+        'buffering': buffering,
+        'percent': percentage.toStringAsFixed(1),
+      },
     );
   }
 
-  MaterialDesktopVideoControlsThemeData _buildDesktopVideoControlsTheme(
-    AppSettings settings, {
-    required bool fullscreen,
-  }) {
-    final base = fullscreen
-        ? kDefaultMaterialDesktopVideoControlsThemeDataFullscreen
-        : kDefaultMaterialDesktopVideoControlsThemeData;
-    return base.copyWith(
-      topButtonBar: [
-        MaterialDesktopCustomButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.pop(),
-        ),
-        const Spacer(),
-        if (PlaybackSystemSessionController.supportsAirPlayPicker)
-          MaterialDesktopCustomButton(
-            icon: const Icon(Icons.airplay_rounded),
-            onPressed: _showAirPlayRoutePicker,
-          ),
-        if (_pictureInPictureSupported && !_isInPictureInPictureMode)
-          MaterialDesktopCustomButton(
-            icon: const Icon(Icons.picture_in_picture_alt_rounded),
-            onPressed: _enterPictureInPictureManually,
-          ),
-      ],
-      topButtonBarMargin: const EdgeInsets.only(left: 0, right: 16),
-      bottomButtonBar: [
-        const MaterialDesktopSkipPreviousButton(),
-        const MaterialDesktopPlayOrPauseButton(),
-        const MaterialDesktopSkipNextButton(),
-        const MaterialDesktopVolumeButton(),
-        const MaterialDesktopPositionIndicator(),
-        const Spacer(),
-        MaterialDesktopCustomButton(
-          icon: const Icon(Icons.closed_caption_rounded),
-          onPressed: _openCurrentSubtitleSelector,
-        ),
-        MaterialDesktopCustomButton(
-          icon: const Icon(Icons.audiotrack_rounded),
-          onPressed: _openCurrentAudioSelector,
-        ),
-        MaterialDesktopCustomButton(
-          icon: const Icon(Icons.tune_rounded),
-          onPressed: () => _showPlaybackOptions(
-            isTelevision: false,
-            settings: settings,
-          ),
-        ),
-        const MaterialDesktopFullscreenButton(),
-      ],
-    );
+  int? _bufferingTraceBucket(double percentage) {
+    if (percentage <= 0) {
+      return null;
+    }
+    final normalized = percentage.clamp(0.0, 100.0);
+    return (normalized / 10).floor() * 10;
   }
 
   double _currentAspectRatio() {
@@ -2566,6 +2890,666 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         SnackBar(content: Text('$failureMessage：$error')),
       );
     }
+  }
+}
+
+class _MpvControlsOverlay extends StatefulWidget {
+  const _MpvControlsOverlay({
+    required this.isFullscreen,
+    required this.player,
+    required this.target,
+    required this.showVolumeSlider,
+    required this.traceEnabled,
+    required this.onBack,
+    required this.onTogglePlayback,
+    required this.onSeekTo,
+    required this.onOpenSubtitle,
+    required this.onOpenAudio,
+    required this.onOpenOptions,
+    required this.onToggleFullscreen,
+    this.onShowPictureInPicture,
+    this.onShowAirPlay,
+  });
+
+  final bool isFullscreen;
+  final Player player;
+  final PlaybackTarget target;
+  final bool showVolumeSlider;
+  final bool traceEnabled;
+  final Future<void> Function() onBack;
+  final Future<void> Function() onTogglePlayback;
+  final Future<void> Function(Duration position) onSeekTo;
+  final Future<void> Function() onOpenSubtitle;
+  final Future<void> Function() onOpenAudio;
+  final Future<void> Function() onOpenOptions;
+  final Future<void> Function() onToggleFullscreen;
+  final Future<void> Function()? onShowPictureInPicture;
+  final Future<void> Function()? onShowAirPlay;
+
+  @override
+  State<_MpvControlsOverlay> createState() => _MpvControlsOverlayState();
+}
+
+class _MpvControlsOverlayState extends State<_MpvControlsOverlay> {
+  static const _kControlsAutoHideDelay = Duration(seconds: 3);
+
+  Timer? _hideTimer;
+  StreamSubscription<bool>? _playingSubscription;
+  bool _controlsVisible = true;
+  double? _draggingPositionMs;
+  bool _restoreAudibleVolume = false;
+  bool _isDisposed = false;
+
+  bool get _canUpdateOverlayState => mounted && context.mounted && !_isDisposed;
+
+  @override
+  void initState() {
+    super.initState();
+    _trace(
+      'windows-mpv.overlay.init',
+      fields: {
+        'fullscreen': widget.isFullscreen,
+        'controlsVisible': _controlsVisible,
+      },
+    );
+    _playingSubscription = widget.player.stream.playing.listen((playing) {
+      if (!mounted) {
+        return;
+      }
+      if (!playing) {
+        _syncAutoHide(forceShow: true, reason: 'player-paused');
+        return;
+      }
+      _syncAutoHide(reason: 'player-playing');
+    });
+    _syncAutoHide(reason: 'init');
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    _cancelHideTimer();
+    unawaited(_playingSubscription?.cancel());
+    _trace(
+      'windows-mpv.overlay.dispose',
+      fields: {
+        'fullscreen': widget.isFullscreen,
+        'controlsVisible': _controlsVisible,
+      },
+    );
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MpvControlsOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final wasFullscreen = oldWidget.isFullscreen;
+    final isFullscreen = widget.isFullscreen;
+    if (wasFullscreen != isFullscreen) {
+      _trace(
+        'windows-mpv.overlay.fullscreen-state',
+        fields: {'fullscreen': isFullscreen},
+      );
+    }
+  }
+
+  void _cancelHideTimer() {
+    _hideTimer?.cancel();
+    _hideTimer = null;
+  }
+
+  void _trace(
+    String stage, {
+    Map<String, Object?> fields = const <String, Object?>{},
+  }) {
+    if (!widget.traceEnabled) {
+      return;
+    }
+    playbackTrace(
+      stage,
+      fields: <String, Object?>{
+        'title': widget.target.title.trim().isEmpty
+            ? 'Starflow'
+            : widget.target.title.trim(),
+        'fullscreen': widget.isFullscreen,
+        ...fields,
+      },
+    );
+  }
+
+  void _setControlsVisible(
+    bool visible, {
+    required String reason,
+  }) {
+    if (!_canUpdateOverlayState) {
+      return;
+    }
+    if (_controlsVisible == visible) {
+      return;
+    }
+    setState(() {
+      _controlsVisible = visible;
+    });
+    _trace(
+      'windows-mpv.overlay.controls-visibility',
+      fields: {
+        'visible': visible,
+        'reason': reason,
+        'playing': widget.player.state.playing,
+        'dragging': _draggingPositionMs != null,
+      },
+    );
+  }
+
+  void _syncAutoHide({
+    bool forceShow = false,
+    String reason = 'sync',
+  }) {
+    if (!_canUpdateOverlayState) {
+      return;
+    }
+    if (forceShow && !_controlsVisible) {
+      _setControlsVisible(true, reason: reason);
+    }
+    if (!widget.player.state.playing || _draggingPositionMs != null) {
+      _cancelHideTimer();
+      if (!_controlsVisible) {
+        _setControlsVisible(true, reason: 'paused-or-dragging');
+      }
+      return;
+    }
+    _cancelHideTimer();
+    _hideTimer = Timer(_kControlsAutoHideDelay, () {
+      if (!_canUpdateOverlayState ||
+          _draggingPositionMs != null ||
+          !widget.player.state.playing) {
+        return;
+      }
+      _setControlsVisible(false, reason: 'auto-hide-timer');
+    });
+  }
+
+  void _showControls({String reason = 'show-controls'}) {
+    _syncAutoHide(forceShow: true, reason: reason);
+  }
+
+  void _toggleControlsVisibility() {
+    if (_controlsVisible) {
+      _cancelHideTimer();
+      _setControlsVisible(false, reason: 'tap-toggle-hide');
+      return;
+    }
+    _showControls(reason: 'tap-toggle-show');
+  }
+
+  Future<void> _handleSeekChanged(double value) async {
+    if (!_canUpdateOverlayState) {
+      return;
+    }
+    final wasDragging = _draggingPositionMs != null;
+    setState(() {
+      _draggingPositionMs = value;
+    });
+    if (!wasDragging) {
+      _trace(
+        'windows-mpv.overlay.seek-drag-start',
+        fields: {'positionMs': value.round()},
+      );
+    }
+    _cancelHideTimer();
+  }
+
+  Future<void> _handleSeekChangeEnd(double value) async {
+    final position = Duration(milliseconds: value.round());
+    if (_canUpdateOverlayState) {
+      setState(() {
+        _draggingPositionMs = null;
+      });
+    }
+    _trace(
+      'windows-mpv.overlay.seek-drag-end',
+      fields: {'positionMs': position.inMilliseconds},
+    );
+    await widget.onSeekTo(position);
+    _showControls(reason: 'seek-complete');
+  }
+
+  Future<void> _toggleMute(double currentVolume) async {
+    if (currentVolume <= 0.1) {
+      final restoredVolume = _restoreAudibleVolume ? 100.0 : 60.0;
+      _restoreAudibleVolume = false;
+      await widget.player.setVolume(restoredVolume);
+      return;
+    }
+    _restoreAudibleVolume = true;
+    await widget.player.setVolume(0);
+  }
+
+  Widget _buildChromeButton({
+    required IconData icon,
+    required Future<void> Function() onPressed,
+    String? tooltip,
+    String? traceStage,
+  }) {
+    return Tooltip(
+      message: tooltip ?? '',
+      child: InkResponse(
+        radius: 22,
+        onTap: () {
+          _showControls(reason: 'button-tap');
+          if (traceStage != null) {
+            _trace(traceStage);
+          }
+          unawaited(onPressed());
+        },
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: const Color(0x66101822),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+          child: Icon(icon, size: 18, color: Colors.white),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isFullscreen = widget.isFullscreen;
+    return MouseRegion(
+      onEnter: (_) => _showControls(reason: 'pointer-enter'),
+      onHover: (_) => _showControls(reason: 'pointer-hover'),
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: _toggleControlsVisibility,
+        onDoubleTap: () {
+          _showControls(reason: 'double-tap');
+          _trace('windows-mpv.overlay.gesture.double-tap-fullscreen');
+          unawaited(widget.onToggleFullscreen());
+        },
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (_controlsVisible)
+              Positioned(
+                top: 16,
+                left: 16,
+                right: 16,
+                child: SafeArea(
+                  bottom: false,
+                  child: Row(
+                    children: [
+                      _buildChromeButton(
+                        icon: isFullscreen
+                            ? Icons.fullscreen_exit_rounded
+                            : Icons.arrow_back_rounded,
+                        tooltip: isFullscreen ? '退出全屏' : '返回',
+                        onPressed: widget.onBack,
+                        traceStage: 'windows-mpv.overlay.action.back',
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          widget.target.title.trim().isEmpty
+                              ? 'Starflow'
+                              : widget.target.title.trim(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            shadows: [
+                              Shadow(
+                                color: Color(0xA6000000),
+                                blurRadius: 12,
+                                offset: Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (widget.onShowAirPlay case final onShowAirPlay?) ...[
+                        const SizedBox(width: 8),
+                        _buildChromeButton(
+                          icon: Icons.airplay_rounded,
+                          tooltip: '投放',
+                          onPressed: onShowAirPlay,
+                          traceStage: 'windows-mpv.overlay.action.airplay',
+                        ),
+                      ],
+                      if (widget.onShowPictureInPicture
+                          case final onShowPictureInPicture?) ...[
+                        const SizedBox(width: 8),
+                        _buildChromeButton(
+                          icon: Icons.picture_in_picture_alt_rounded,
+                          tooltip: '画中画',
+                          onPressed: onShowPictureInPicture,
+                          traceStage:
+                              'windows-mpv.overlay.action.picture-in-picture',
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            if (_controlsVisible)
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: SafeArea(
+                  top: false,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: const Color(0xAA0A0F16),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.08)),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                      child: StreamBuilder<Duration>(
+                        stream: widget.player.stream.position,
+                        initialData: widget.player.state.position,
+                        builder: (context, positionSnapshot) {
+                          return StreamBuilder<Duration>(
+                            stream: widget.player.stream.duration,
+                            initialData: widget.player.state.duration,
+                            builder: (context, durationSnapshot) {
+                              return StreamBuilder<double>(
+                                stream:
+                                    widget.player.stream.bufferingPercentage,
+                                initialData:
+                                    widget.player.state.bufferingPercentage,
+                                builder: (context, bufferingSnapshot) {
+                                  return StreamBuilder<bool>(
+                                    stream: widget.player.stream.playing,
+                                    initialData: widget.player.state.playing,
+                                    builder: (context, playingSnapshot) {
+                                      return StreamBuilder<double>(
+                                        stream: widget.player.stream.volume,
+                                        initialData: widget.player.state.volume,
+                                        builder: (context, volumeSnapshot) {
+                                          final duration =
+                                              durationSnapshot.data ??
+                                                  Duration.zero;
+                                          final actualPosition =
+                                              positionSnapshot.data ??
+                                                  Duration.zero;
+                                          final displayPosition =
+                                              _draggingPositionMs == null
+                                                  ? actualPosition
+                                                  : Duration(
+                                                      milliseconds:
+                                                          _draggingPositionMs!
+                                                              .round(),
+                                                    );
+                                          final durationMs =
+                                              duration.inMilliseconds;
+                                          final sliderMax = durationMs <= 0
+                                              ? 1.0
+                                              : durationMs.toDouble();
+                                          final sliderValue =
+                                              (_draggingPositionMs ??
+                                                      actualPosition
+                                                          .inMilliseconds
+                                                          .toDouble())
+                                                  .clamp(0.0, sliderMax);
+                                          final playedProgress = durationMs <= 0
+                                              ? 0.0
+                                              : (actualPosition.inMilliseconds /
+                                                      durationMs)
+                                                  .clamp(0.0, 1.0);
+                                          final bufferedProgress =
+                                              ((bufferingSnapshot.data ?? 0.0) /
+                                                      100.0)
+                                                  .clamp(playedProgress, 1.0);
+                                          final playing =
+                                              playingSnapshot.data ?? false;
+                                          final volume =
+                                              (volumeSnapshot.data ?? 100.0)
+                                                  .clamp(0.0, 100.0);
+
+                                          return Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              _MpvSeekBar(
+                                                max: sliderMax,
+                                                value: sliderValue,
+                                                bufferedProgress:
+                                                    bufferedProgress,
+                                                enabled: durationMs > 0,
+                                                onChanged: _handleSeekChanged,
+                                                onChangeEnd:
+                                                    _handleSeekChangeEnd,
+                                              ),
+                                              const SizedBox(height: 12),
+                                              Row(
+                                                children: [
+                                                  _buildChromeButton(
+                                                    icon: playing
+                                                        ? Icons.pause_rounded
+                                                        : Icons
+                                                            .play_arrow_rounded,
+                                                    tooltip:
+                                                        playing ? '暂停' : '播放',
+                                                    onPressed:
+                                                        widget.onTogglePlayback,
+                                                    traceStage:
+                                                        'windows-mpv.overlay.action.toggle-playback',
+                                                  ),
+                                                  const SizedBox(width: 12),
+                                                  Text(
+                                                    '${_formatClockDuration(displayPosition)} / ${_formatClockDuration(duration)}',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                  const Spacer(),
+                                                  if (widget.showVolumeSlider)
+                                                    IconButton(
+                                                      onPressed: () {
+                                                        _showControls(
+                                                          reason:
+                                                              'volume-button',
+                                                        );
+                                                        _trace(
+                                                          'windows-mpv.overlay.action.toggle-mute',
+                                                        );
+                                                        unawaited(
+                                                          _toggleMute(volume),
+                                                        );
+                                                      },
+                                                      splashRadius: 18,
+                                                      icon: Icon(
+                                                        volume <= 0.1
+                                                            ? Icons
+                                                                .volume_off_rounded
+                                                            : volume < 50
+                                                                ? Icons
+                                                                    .volume_down_rounded
+                                                                : Icons
+                                                                    .volume_up_rounded,
+                                                        color: Colors.white,
+                                                        size: 20,
+                                                      ),
+                                                    ),
+                                                  if (widget.showVolumeSlider)
+                                                    SizedBox(
+                                                      width: 110,
+                                                      child: SliderTheme(
+                                                        data: SliderTheme.of(
+                                                          context,
+                                                        ).copyWith(
+                                                          trackHeight: 3,
+                                                          overlayShape:
+                                                              SliderComponentShape
+                                                                  .noOverlay,
+                                                          thumbShape:
+                                                              const RoundSliderThumbShape(
+                                                            enabledThumbRadius:
+                                                                6,
+                                                          ),
+                                                        ),
+                                                        child: Slider(
+                                                          min: 0,
+                                                          max: 100,
+                                                          value: volume,
+                                                          onChanged: (value) {
+                                                            _showControls(
+                                                              reason:
+                                                                  'volume-slider',
+                                                            );
+                                                            unawaited(
+                                                              widget.player
+                                                                  .setVolume(
+                                                                      value),
+                                                            );
+                                                          },
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  if (widget.showVolumeSlider)
+                                                    const SizedBox(width: 6),
+                                                  _buildChromeButton(
+                                                    icon: Icons
+                                                        .closed_caption_rounded,
+                                                    tooltip: '字幕',
+                                                    onPressed:
+                                                        widget.onOpenSubtitle,
+                                                    traceStage:
+                                                        'windows-mpv.overlay.action.subtitle',
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  _buildChromeButton(
+                                                    icon: Icons
+                                                        .audiotrack_rounded,
+                                                    tooltip: '音轨',
+                                                    onPressed:
+                                                        widget.onOpenAudio,
+                                                    traceStage:
+                                                        'windows-mpv.overlay.action.audio',
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  _buildChromeButton(
+                                                    icon: Icons.tune_rounded,
+                                                    tooltip: '播放设置',
+                                                    onPressed:
+                                                        widget.onOpenOptions,
+                                                    traceStage:
+                                                        'windows-mpv.overlay.action.options',
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  _buildChromeButton(
+                                                    icon: isFullscreen
+                                                        ? Icons
+                                                            .fullscreen_exit_rounded
+                                                        : Icons
+                                                            .fullscreen_rounded,
+                                                    tooltip: isFullscreen
+                                                        ? '退出全屏'
+                                                        : '全屏',
+                                                    onPressed: widget
+                                                        .onToggleFullscreen,
+                                                    traceStage:
+                                                        'windows-mpv.overlay.action.fullscreen',
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      );
+                                    },
+                                  );
+                                },
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MpvSeekBar extends StatelessWidget {
+  const _MpvSeekBar({
+    required this.max,
+    required this.value,
+    required this.bufferedProgress,
+    required this.enabled,
+    required this.onChanged,
+    required this.onChangeEnd,
+  });
+
+  final double max;
+  final double value;
+  final double bufferedProgress;
+  final bool enabled;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double> onChangeEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 20,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: SizedBox(
+              height: 4,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ColoredBox(
+                    color: Colors.white.withValues(alpha: 0.12),
+                  ),
+                  FractionallySizedBox(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: bufferedProgress.clamp(0.0, 1.0),
+                    child: ColoredBox(
+                      color: Colors.white.withValues(alpha: 0.28),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 4,
+              inactiveTrackColor: Colors.transparent,
+              activeTrackColor: Colors.white,
+              overlayShape: SliderComponentShape.noOverlay,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+            ),
+            child: Slider(
+              min: 0,
+              max: max,
+              value: value.clamp(0.0, max),
+              onChanged: enabled ? onChanged : null,
+              onChangeEnd: enabled ? onChangeEnd : null,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

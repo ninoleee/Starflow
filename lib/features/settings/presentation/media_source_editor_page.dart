@@ -6,7 +6,9 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/presentation/quark_folder_picker_page.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
@@ -39,12 +41,15 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   List<MediaCollection> _availableSections = [];
   bool _isAuthenticating = false;
   bool _isTestingWebDav = false;
+  bool _isTestingQuark = false;
   bool _isLoadingSections = false;
   bool _didHydrateSectionSelection = false;
   late String _connectionMessage;
   late bool _advancedTokenExpanded;
   late final String _sourceId;
   late String _selectedNasPath;
+  late String _selectedQuarkFolderId;
+  late String _selectedQuarkFolderPath;
   late String _boundWebDavEndpoint;
   late bool _webDavStructureInferenceEnabled;
   late bool _webDavSidecarScrapingEnabled;
@@ -58,7 +63,9 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _sourceId =
         e?.id ?? 'media-source-${DateTime.now().millisecondsSinceEpoch}';
     _nameController = TextEditingController(text: e?.name ?? '');
-    _endpointController = TextEditingController(text: e?.endpoint ?? '');
+    _endpointController = TextEditingController(
+      text: e?.kind == MediaSourceKind.quark ? '' : (e?.endpoint ?? ''),
+    );
     _usernameController = TextEditingController(text: e?.username ?? '');
     _passwordController = TextEditingController(text: e?.password ?? '');
     _tokenController = TextEditingController(text: e?.accessToken ?? '');
@@ -74,7 +81,12 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _selectedSectionIds = e?.selectedSectionIds.toSet() ?? <String>{};
     _connectionMessage = _initialConnectionMessage(e);
     _advancedTokenExpanded = _tokenController.text.trim().isNotEmpty;
-    _selectedNasPath = e?.libraryPath ?? '';
+    _selectedNasPath =
+        e?.kind == MediaSourceKind.nas ? (e?.libraryPath ?? '') : '';
+    _selectedQuarkFolderId =
+        e?.kind == MediaSourceKind.quark ? (e?.endpoint ?? '').trim() : '';
+    _selectedQuarkFolderPath =
+        e?.kind == MediaSourceKind.quark ? (e?.libraryPath ?? '').trim() : '';
     _boundWebDavEndpoint =
         (e?.kind == MediaSourceKind.nas ? (e?.endpoint ?? '') : '').trim();
     _webDavStructureInferenceEnabled =
@@ -95,6 +107,15 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     super.dispose();
   }
 
+  String get _quarkCookie {
+    return ref.read(appSettingsProvider).networkStorage.quarkCookie.trim();
+  }
+
+  bool get _hasConfiguredQuarkFolderDraft {
+    return _selectedQuarkFolderId.trim().isNotEmpty ||
+        _selectedQuarkFolderPath.trim().isNotEmpty;
+  }
+
   MediaSourceConfig _draftConfig() {
     return MediaSourceConfig(
       id: _sourceId,
@@ -102,15 +123,23 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
           ? '未命名媒体源'
           : _nameController.text.trim(),
       kind: _kind,
-      endpoint: _endpointController.text.trim(),
+      endpoint: _kind == MediaSourceKind.quark
+          ? _selectedQuarkFolderId.trim()
+          : _endpointController.text.trim(),
       enabled: _enabled,
-      username: _usernameController.text.trim(),
-      password: _passwordController.text,
-      accessToken: _tokenController.text.trim(),
-      userId: _resolvedUserId,
-      serverId: _resolvedServerId,
-      deviceId: _resolvedDeviceId,
-      libraryPath: _kind == MediaSourceKind.nas ? _selectedNasPath.trim() : '',
+      username:
+          _kind == MediaSourceKind.quark ? '' : _usernameController.text.trim(),
+      password: _kind == MediaSourceKind.quark ? '' : _passwordController.text,
+      accessToken:
+          _kind == MediaSourceKind.emby ? _tokenController.text.trim() : '',
+      userId: _kind == MediaSourceKind.emby ? _resolvedUserId : '',
+      serverId: _kind == MediaSourceKind.emby ? _resolvedServerId : '',
+      deviceId: _kind == MediaSourceKind.emby ? _resolvedDeviceId : '',
+      libraryPath: _kind == MediaSourceKind.nas
+          ? _selectedNasPath.trim()
+          : _kind == MediaSourceKind.quark
+              ? _selectedQuarkFolderPath.trim()
+              : '',
       featuredSectionIds: _selectedSectionIdsForSave(),
       webDavStructureInferenceEnabled:
           _kind == MediaSourceKind.nas && _webDavStructureInferenceEnabled,
@@ -140,6 +169,9 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     if (!_didHydrateSectionSelection && _availableSections.isEmpty) {
       return _savedFeaturedSectionIds;
     }
+    if (_availableSections.isEmpty) {
+      return const [];
+    }
     if (_selectedSectionIds.isNotEmpty) {
       return _selectedSectionIds.toList(growable: false);
     }
@@ -153,6 +185,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         _passwordController.text.trim().isNotEmpty ||
         _tokenController.text.trim().isNotEmpty ||
         _selectedNasPath.trim().isNotEmpty ||
+        _hasConfiguredQuarkFolderDraft ||
         _webDavExcludedKeywordsController.text.trim().isNotEmpty ||
         widget.initial != null;
   }
@@ -165,31 +198,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       return;
     }
 
-    final config = MediaSourceConfig(
-      id: _sourceId,
-      name: _nameController.text.trim().isEmpty
-          ? '未命名媒体源'
-          : _nameController.text.trim(),
-      kind: _kind,
-      endpoint: _endpointController.text.trim(),
-      enabled: _enabled,
-      username: _usernameController.text.trim(),
-      password: _passwordController.text,
-      accessToken:
-          _kind == MediaSourceKind.emby ? _tokenController.text.trim() : '',
-      userId: _kind == MediaSourceKind.emby ? _resolvedUserId : '',
-      serverId: _kind == MediaSourceKind.emby ? _resolvedServerId : '',
-      deviceId: _kind == MediaSourceKind.emby ? _resolvedDeviceId : '',
-      libraryPath: _kind == MediaSourceKind.nas ? _selectedNasPath : '',
-      featuredSectionIds: _selectedSectionIdsForSave(),
-      webDavStructureInferenceEnabled:
-          _kind == MediaSourceKind.nas && _webDavStructureInferenceEnabled,
-      webDavSidecarScrapingEnabled:
-          _kind == MediaSourceKind.nas && _webDavSidecarScrapingEnabled,
-      webDavExcludedPathKeywords: _kind == MediaSourceKind.nas
-          ? _parsedWebDavExcludedPathKeywords()
-          : const [],
-    );
+    final config = _draftConfig();
     await ref.read(settingsControllerProvider.notifier).saveMediaSource(config);
     _savedFeaturedSectionIds = [...config.featuredSectionIds];
 
@@ -205,6 +214,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         return '填写账号密码后可以直接验证 Emby 登录。';
       case MediaSourceKind.nas:
         return '填写 WebDAV 地址、用户名和密码后可以直接验证连接。';
+      case MediaSourceKind.quark:
+        return '夸克媒体源会复用「夸克与 STRM」里的全局 Cookie，选择目录后即可使用。';
     }
   }
 
@@ -383,6 +394,169 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     }
   }
 
+  Future<void> _onTestQuarkConnection() async {
+    final cookie = _quarkCookie;
+    if (cookie.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先在夸克与 STRM 中填写夸克 Cookie')),
+      );
+      return;
+    }
+
+    final parentFid =
+        _selectedQuarkFolderId.trim().isEmpty ? '0' : _selectedQuarkFolderId;
+    setState(() {
+      _isTestingQuark = true;
+      _connectionMessage = '正在连接夸克...';
+    });
+    try {
+      final entries = await ref.read(quarkSaveClientProvider).listEntries(
+            cookie: cookie,
+            parentFid: parentFid,
+          );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isTestingQuark = false;
+        _connectionMessage = _hasConfiguredQuarkFolderDraft
+            ? '夸克连接成功，当前目录下有 ${entries.length} 个项目。'
+            : '夸克连接成功，请继续选择要作为媒体源的目录。';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('夸克连接成功')),
+      );
+    } on QuarkSaveException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isTestingQuark = false;
+        _connectionMessage = '连接失败：${error.message}';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('夸克连接失败：${error.message}')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isTestingQuark = false;
+        _connectionMessage = '连接失败：$error';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('夸克连接失败：$error')),
+      );
+    }
+  }
+
+  Future<void> _pickQuarkFolder() async {
+    final cookie = _quarkCookie;
+    if (cookie.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先在夸克与 STRM 中填写夸克 Cookie')),
+      );
+      return;
+    }
+
+    final picked = await Navigator.of(context).push<QuarkDirectoryEntry>(
+      MaterialPageRoute<QuarkDirectoryEntry>(
+        builder: (context) => QuarkFolderPickerPage(
+          cookie: cookie,
+          initialFid: _selectedQuarkFolderId.trim().isEmpty
+              ? '0'
+              : _selectedQuarkFolderId,
+          initialPath: _selectedQuarkFolderPath.trim().isEmpty
+              ? '/'
+              : _selectedQuarkFolderPath,
+        ),
+      ),
+    );
+
+    if (!mounted || picked == null) {
+      return;
+    }
+
+    setState(() {
+      _selectedQuarkFolderId = picked.fid;
+      _selectedQuarkFolderPath = picked.path;
+      _savedFeaturedSectionIds = const [];
+      _availableSections = const [];
+      _selectedSectionIds.clear();
+      _didHydrateSectionSelection = false;
+      _connectionMessage = '已选择夸克目录，可继续测试连接。';
+    });
+  }
+
+  Future<void> _onFetchQuarkSections() async {
+    final cookie = _quarkCookie;
+    if (cookie.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先在夸克与 STRM 中填写夸克 Cookie')),
+      );
+      return;
+    }
+    if (!_hasConfiguredQuarkFolderDraft) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先选择夸克目录')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoadingSections = true;
+      _connectionMessage = '正在读取夸克分区...';
+    });
+    try {
+      final directories =
+          await ref.read(quarkSaveClientProvider).listDirectories(
+                cookie: cookie,
+                parentFid: _selectedQuarkFolderId,
+              );
+      final sections = directories
+          .map(
+            (entry) => MediaCollection(
+              id: entry.fid,
+              title: entry.name,
+              sourceId: _sourceId,
+              sourceName: _nameController.text.trim().isEmpty
+                  ? '未命名媒体源'
+                  : _nameController.text.trim(),
+              sourceKind: MediaSourceKind.quark,
+              subtitle: entry.path,
+            ),
+          )
+          .toList(growable: false);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingSections = false;
+        _applyFetchedSections(sections);
+        _connectionMessage = sections.isEmpty
+            ? '当前夸克目录下没有可直接作为分区的子目录。'
+            : '已读取 ${sections.length} 个夸克分区。';
+      });
+    } on QuarkSaveException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingSections = false;
+        _connectionMessage = '读取分区失败：${error.message}';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingSections = false;
+        _connectionMessage = '读取分区失败：$error';
+      });
+    }
+  }
+
   Future<void> _pickWebDavPath() async {
     final endpoint = _endpointController.text.trim();
     if (endpoint.isEmpty) {
@@ -463,8 +637,14 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       _availableSections = const [];
       _selectedSectionIds.clear();
       _selectedNasPath = '';
+      _selectedQuarkFolderId = '';
+      _selectedQuarkFolderPath = '';
       _boundWebDavEndpoint =
           value == MediaSourceKind.nas ? _endpointController.text.trim() : '';
+      _isAuthenticating = false;
+      _isTestingWebDav = false;
+      _isTestingQuark = false;
+      _isLoadingSections = false;
       _webDavStructureInferenceEnabled = false;
       _webDavSidecarScrapingEnabled = true;
       _webDavExcludedKeywordsController.clear();
@@ -567,6 +747,14 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   @override
   Widget build(BuildContext context) {
     final isEmby = _kind == MediaSourceKind.emby;
+    final isNas = _kind == MediaSourceKind.nas;
+    final isQuark = _kind == MediaSourceKind.quark;
+    final quarkCookieConfigured = ref
+        .watch(appSettingsProvider)
+        .networkStorage
+        .quarkCookie
+        .trim()
+        .isNotEmpty;
 
     return PopScope<void>(
       canPop: false,
@@ -586,61 +774,75 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: [
           const SettingsSectionTitle(label: '基本信息'),
-          SettingsTextInputField(
-            controller: _nameController,
-            labelText: '名称',
-            textInputAction: TextInputAction.next,
-          ),
-          const SizedBox(height: 12),
-          SettingsSelectionTile(
-            title: '类型',
-            value: _kind.label,
-            onPressed: _openKindPicker,
-          ),
+          ...buildSettingsTileGroup([
+            SettingsTextInputField(
+              controller: _nameController,
+              labelText: '名称',
+              textInputAction: TextInputAction.next,
+            ),
+            SettingsSelectionTile(
+              title: '类型',
+              value: _kind.label,
+              onPressed: _openKindPicker,
+            ),
+          ], spacing: 12),
           const SettingsSectionTitle(label: '连接'),
-          SettingsTextInputField(
-            controller: _endpointController,
-            labelText: isEmby ? 'Endpoint' : 'WebDAV Endpoint',
-            keyboardType: TextInputType.url,
-            textInputAction: TextInputAction.next,
-            autocorrect: false,
-            hintText: isEmby
-                ? 'https://emby.example.com'
-                : 'https://nas.example.com/dav',
-          ),
-          if (!isEmby) ...[
+          ...buildSettingsTileGroup([
+            if (!isQuark)
+              SettingsTextInputField(
+                controller: _endpointController,
+                labelText: isEmby ? 'Endpoint' : 'WebDAV Endpoint',
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.next,
+                autocorrect: false,
+                hintText: isEmby
+                    ? 'https://emby.example.com'
+                    : 'https://nas.example.com/dav',
+              ),
+            if (isNas)
+              SettingsSelectionTile(
+                title: '当前路径',
+                value:
+                    _selectedNasPath.trim().isEmpty ? '根目录' : _selectedNasPath,
+                onPressed: _endpointController.text.trim().isEmpty
+                    ? null
+                    : _pickWebDavPath,
+              ),
+            if (isQuark)
+              SettingsSelectionTile(
+                title: '当前目录',
+                value: _selectedQuarkFolderPath.trim().isEmpty
+                    ? '未选择'
+                    : _selectedQuarkFolderPath,
+                subtitle: quarkCookieConfigured
+                    ? '复用「夸克与 STRM」里的全局 Cookie'
+                    : '请先在「夸克与 STRM」中填写夸克 Cookie',
+                onPressed: quarkCookieConfigured ? _pickQuarkFolder : null,
+              ),
+          ], spacing: 12),
+          if (!isQuark) ...[
             const SizedBox(height: 12),
-            StarflowSelectionTile(
-              title: '当前路径',
-              subtitle:
-                  _selectedNasPath.trim().isEmpty ? '根目录' : _selectedNasPath,
-              onPressed: _endpointController.text.trim().isEmpty
-                  ? null
-                  : _pickWebDavPath,
+            AutofillGroup(
+              child: Column(
+                children: buildSettingsTileGroup([
+                  SettingsTextInputField(
+                    controller: _usernameController,
+                    labelText: isEmby ? 'Emby 用户名' : '用户名',
+                    textInputAction: TextInputAction.next,
+                    autofillHints: const [AutofillHints.username],
+                  ),
+                  SettingsTextInputField(
+                    controller: _passwordController,
+                    labelText: isEmby ? 'Emby 密码' : 'WebDAV 密码',
+                    obscureText: true,
+                    textInputAction: TextInputAction.done,
+                    autofillHints: const [AutofillHints.password],
+                    summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
+                  ),
+                ], spacing: 12),
+              ),
             ),
           ],
-          const SizedBox(height: 12),
-          AutofillGroup(
-            child: Column(
-              children: [
-                SettingsTextInputField(
-                  controller: _usernameController,
-                  labelText: isEmby ? 'Emby 用户名' : '用户名',
-                  textInputAction: TextInputAction.next,
-                  autofillHints: const [AutofillHints.username],
-                ),
-                const SizedBox(height: 12),
-                SettingsTextInputField(
-                  controller: _passwordController,
-                  labelText: isEmby ? 'Emby 密码' : 'WebDAV 密码',
-                  obscureText: true,
-                  textInputAction: TextInputAction.done,
-                  autofillHints: const [AutofillHints.password],
-                  summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
-                ),
-              ],
-            ),
-          ),
           if (isEmby) ...[
             const SizedBox(height: 8),
             SettingsExpandableSection(
@@ -661,10 +863,20 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                 ),
               ],
             ),
-          ] else ...[
+          ] else if (isNas) ...[
             const SizedBox(height: 12),
             Text(
               '可直接填写 WebDAV 地址、用户名和密码。',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ] else ...[
+            const SizedBox(height: 12),
+            Text(
+              quarkCookieConfigured
+                  ? '夸克媒体源会复用全局 Cookie，只需选择目录并测试连接。'
+                  : '请先到「夸克与 STRM」填写夸克 Cookie，再回来选择目录。',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -725,59 +937,59 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                     ),
               ),
             ),
-          const SizedBox(height: 12),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _connectionMessage,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  if (isEmby && _resolvedUserId.trim().isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    SelectableText(
-                      'User ID: $_resolvedUserId',
-                      style: Theme.of(context).textTheme.bodySmall,
+          ...buildSettingsTileGroup([
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _connectionMessage,
+                      style: Theme.of(context).textTheme.bodyMedium,
                     ),
+                    if (isEmby && _resolvedUserId.trim().isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      SelectableText(
+                        'User ID: $_resolvedUserId',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-          SettingsToggleTile(
-            title: '启用此媒体源',
-            value: _enabled,
-            onChanged: (value) => setState(() => _enabled = value),
-          ),
-          if (!isEmby) ...[
-            const SizedBox(height: 12),
             SettingsToggleTile(
-              title: '目录结构推断',
-              value: _webDavStructureInferenceEnabled,
-              onChanged: (value) {
-                setState(() {
-                  _webDavStructureInferenceEnabled = value;
-                });
-              },
+              title: '启用此媒体源',
+              value: _enabled,
+              onChanged: (value) => setState(() => _enabled = value),
             ),
-            SettingsToggleTile(
-              title: '本地刮削/NFO',
-              value: _webDavSidecarScrapingEnabled,
-              onChanged: (value) {
-                setState(() {
-                  _webDavSidecarScrapingEnabled = value;
-                });
-              },
-            ),
-            const SizedBox(height: 8),
+            if (isNas)
+              SettingsToggleTile(
+                title: '目录结构推断',
+                value: _webDavStructureInferenceEnabled,
+                onChanged: (value) {
+                  setState(() {
+                    _webDavStructureInferenceEnabled = value;
+                  });
+                },
+              ),
+            if (isNas)
+              SettingsToggleTile(
+                title: '本地刮削/NFO',
+                value: _webDavSidecarScrapingEnabled,
+                onChanged: (value) {
+                  setState(() {
+                    _webDavSidecarScrapingEnabled = value;
+                  });
+                },
+              ),
+          ], spacing: 12),
+          if (isNas) ...[
             SettingsTextInputField(
               controller: _webDavExcludedKeywordsController,
               labelText: '过滤关键字',
@@ -834,7 +1046,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                 ),
               ],
             ),
-          ] else ...[
+          ] else if (isNas) ...[
             const SizedBox(height: 28),
             Align(
               alignment: Alignment.centerLeft,
@@ -864,6 +1076,38 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                             _endpointController.text.trim().isEmpty
                         ? null
                         : _onFetchNasSections,
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 28),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  SettingsActionButton(
+                    label: _isTestingQuark ? '测试中…' : '测试连接',
+                    icon: Icons.cloud_done_outlined,
+                    onPressed: _isTestingQuark || !quarkCookieConfigured
+                        ? null
+                        : _onTestQuarkConnection,
+                  ),
+                  SettingsActionButton(
+                    label: '选择目录',
+                    icon: Icons.folder_open_rounded,
+                    onPressed: quarkCookieConfigured ? _pickQuarkFolder : null,
+                  ),
+                  SettingsActionButton(
+                    label: _isLoadingSections ? '读取中…' : '选择分区',
+                    icon: Icons.view_list_rounded,
+                    onPressed: _isLoadingSections ||
+                            !quarkCookieConfigured ||
+                            !_hasConfiguredQuarkFolderDraft
+                        ? null
+                        : _onFetchQuarkSections,
                   ),
                 ],
               ),

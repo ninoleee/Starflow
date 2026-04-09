@@ -13,6 +13,7 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
+import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
@@ -277,6 +278,95 @@ void main() {
       expect(playback.formatLabel, 'MKV · HEVC · TrueHD');
       expect(playback.fileSizeLabel, '24.0 GB');
       expect(playback.resolutionLabel, '3840x2160');
+    });
+
+    test('resolves Quark playback url for existing matched target', () async {
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': [
+                {
+                  'id': 'quark-main',
+                  'name': 'Quark Drive',
+                  'kind': 'quark',
+                  'endpoint': '0',
+                  'libraryPath': '/',
+                  'enabled': true,
+                },
+              ],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'networkStorage': const {
+                'quarkCookie': 'kps=test; sign=test;',
+              },
+            }),
+          ),
+          quarkSaveClientProvider.overrideWithValue(
+            QuarkSaveClient(
+              MockClient((request) async {
+                expect(request.url.path, '/1/clouddrive/file/download');
+                return http.Response(
+                  jsonEncode({
+                    'code': 0,
+                    'data': {
+                      'download_list': [
+                        {
+                          'fid': 'quark-file-1',
+                          'download_url':
+                              'https://download.example.com/quark-file-1.mkv',
+                          'size': 3221225472,
+                        },
+                      ],
+                    },
+                  }),
+                  200,
+                  headers: const {
+                    'set-cookie': '__puus=abc; Path=/',
+                  },
+                );
+              }),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final target = MediaDetailTarget.fromMediaItem(
+        MediaItem(
+          id: 'quark://entry/quark-file-1',
+          title: '请求救援 S01E01',
+          overview: '来自夸克的条目',
+          posterUrl: '',
+          year: 2025,
+          durationLabel: '剧集',
+          genres: const ['剧情'],
+          sourceId: 'quark-main',
+          sourceName: 'Quark Drive',
+          sourceKind: MediaSourceKind.quark,
+          streamUrl: '',
+          playbackItemId: 'quark-file-1',
+          container: 'mkv',
+          fileSizeBytes: 3221225472,
+          addedAt: DateTime(2026, 4, 4),
+        ),
+      );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(target).future,
+      );
+
+      final playback = resolved.playbackTarget;
+      expect(playback, isNotNull);
+      expect(
+        playback!.streamUrl,
+        'https://download.example.com/quark-file-1.mkv',
+      );
+      expect(playback.formatLabel, 'MKV');
+      expect(playback.fileSizeLabel, '3.00 GB');
+      expect(playback.headers['Cookie'], contains('kps=test'));
+      expect(playback.headers['Cookie'], contains('__puus=abc'));
     });
 
     test('prefers cached local resource state for douban detail target',

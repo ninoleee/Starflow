@@ -19,6 +19,7 @@ import 'package:starflow/features/settings/presentation/performance_settings_pag
 import 'package:starflow/features/settings/presentation/playback_settings_page.dart';
 import 'package:starflow/features/settings/presentation/search_provider_editor_page.dart';
 import 'package:starflow/features/settings/presentation/settings_management_page.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -317,36 +318,36 @@ class SettingsPage extends ConsumerStatefulWidget {
                             ),
                       ),
                       const SizedBox(height: 10),
-                      StarflowToggleTile(
-                        title: '启用 Hero',
-                        value: heroEnabled,
-                        onChanged: (value) {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .setHomeHeroEnabled(value);
-                        },
-                      ),
-                      const SizedBox(height: 10),
-                      StarflowSelectionTile(
-                        title: 'Hero 数据来源',
-                        value: _heroSourceLabel(
-                          settings: settings,
-                          heroCandidates: heroCandidates,
+                      ...buildSettingsTileGroup([
+                        StarflowToggleTile(
+                          title: '启用 Hero',
+                          value: heroEnabled,
+                          onChanged: (value) {
+                            ref
+                                .read(settingsControllerProvider.notifier)
+                                .setHomeHeroEnabled(value);
+                          },
                         ),
-                        onPressed: heroEnabled
-                            ? () => _openHeroSourcePicker(
-                                  context,
-                                  ref,
-                                  settings,
-                                  heroCandidates,
-                                )
-                            : null,
-                      ),
-                      const SizedBox(height: 14),
-                      _SettingsNavigationTile(
-                        title: '打开首页编辑器',
-                        onTap: () => context.pushNamed('home-editor'),
-                      ),
+                        StarflowSelectionTile(
+                          title: 'Hero 数据来源',
+                          value: _heroSourceLabel(
+                            settings: settings,
+                            heroCandidates: heroCandidates,
+                          ),
+                          onPressed: heroEnabled
+                              ? () => _openHeroSourcePicker(
+                                    context,
+                                    ref,
+                                    settings,
+                                    heroCandidates,
+                                  )
+                              : null,
+                        ),
+                        _SettingsNavigationTile(
+                          title: '打开首页编辑器',
+                          onTap: () => context.pushNamed('home-editor'),
+                        ),
+                      ], spacing: 10),
                     ],
                   ),
                 ),
@@ -395,12 +396,7 @@ class SettingsPage extends ConsumerStatefulWidget {
     AppSettings settings,
   ) async {
     final availableLocalSources = settings.mediaSources
-        .where(
-          (source) =>
-              source.enabled &&
-              (source.kind == MediaSourceKind.emby ||
-                  source.kind == MediaSourceKind.nas),
-        )
+        .where(_isSelectableLocalMediaSource)
         .toList(growable: false);
     final availableProviders = settings.searchProviders
         .where((provider) => provider.enabled)
@@ -540,12 +536,7 @@ class SettingsPage extends ConsumerStatefulWidget {
     AppSettings settings,
   ) async {
     final availableSources = settings.mediaSources
-        .where(
-          (source) =>
-              source.enabled &&
-              (source.kind == MediaSourceKind.emby ||
-                  source.kind == MediaSourceKind.nas),
-        )
+        .where(_isSelectableLocalMediaSource)
         .toList(growable: false);
     if (availableSources.isEmpty) {
       return;
@@ -806,12 +797,7 @@ String _playbackSettingsSummary(AppSettings settings) {
 
 String _searchSourceSummary(AppSettings settings) {
   final availableLocalSources = settings.mediaSources
-      .where(
-        (source) =>
-            source.enabled &&
-            (source.kind == MediaSourceKind.emby ||
-                source.kind == MediaSourceKind.nas),
-      )
+      .where(_isSelectableLocalMediaSource)
       .toList(growable: false);
   final availableProviders = settings.searchProviders
       .where((provider) => provider.enabled)
@@ -853,12 +839,7 @@ String _searchSourceSummary(AppSettings settings) {
 
 String _libraryMatchSourceSummary(AppSettings settings) {
   final availableSources = settings.mediaSources
-      .where(
-        (source) =>
-            source.enabled &&
-            (source.kind == MediaSourceKind.emby ||
-                source.kind == MediaSourceKind.nas),
-      )
+      .where(_isSelectableLocalMediaSource)
       .toList(growable: false);
   if (availableSources.isEmpty) {
     return '暂无可选来源';
@@ -881,6 +862,17 @@ String _libraryMatchSourceSummary(AppSettings settings) {
     return selectedNames.join('、');
   }
   return '${selectedNames.take(2).join('、')} 等 ${selectedNames.length} 个来源';
+}
+
+bool _isSelectableLocalMediaSource(MediaSourceConfig source) {
+  if (!source.enabled) {
+    return false;
+  }
+  if (source.kind == MediaSourceKind.quark) {
+    return source.hasConfiguredQuarkFolder;
+  }
+  return source.kind == MediaSourceKind.emby ||
+      source.kind == MediaSourceKind.nas;
 }
 
 String _formatPlaybackSpeedLabel(double speed) {

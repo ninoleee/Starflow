@@ -374,17 +374,18 @@ class _SearchProviderEditorPageState
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: [
           const SettingsSectionTitle(label: '基本信息'),
-          SettingsTextInputField(
-            controller: _nameController,
-            labelText: '名称',
-            textInputAction: TextInputAction.next,
-          ),
-          const SizedBox(height: 12),
-          SettingsSelectionTile(
-            title: '类型',
-            value: _kind.label,
-            onPressed: _openKindPicker,
-          ),
+          ...buildSettingsTileGroup([
+            SettingsTextInputField(
+              controller: _nameController,
+              labelText: '名称',
+              textInputAction: TextInputAction.next,
+            ),
+            SettingsSelectionTile(
+              title: '类型',
+              value: _kind.label,
+              onPressed: _openKindPicker,
+            ),
+          ], spacing: 12),
           const SettingsSectionTitle(label: '连接'),
           SettingsTextInputField(
             controller: _endpointController,
@@ -511,47 +512,52 @@ class _SearchProviderEditorPageState
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          SettingsTextInputField(
-            controller: _blockedKeywordsController,
-            labelText: '过滤词',
-            minLines: 1,
-            maxLines: 3,
-          ),
-          const SizedBox(height: 12),
-          SettingsToggleTile(
-            title: '强匹配',
-            value: _strongMatchEnabled,
-            onChanged: (value) {
-              setState(() => _strongMatchEnabled = value);
-            },
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                '开启后，标题只要包含搜索词拆分后的词组，或中文搜索词中这些字的任意组合，就会保留。',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      height: 1.35,
-                    ),
-              ),
+          ...buildSettingsTileGroup([
+            SettingsTextInputField(
+              controller: _blockedKeywordsController,
+              labelText: '过滤词',
+              minLines: 1,
+              maxLines: 3,
             ),
-          ),
-          const SizedBox(height: 12),
-          SettingsTextInputField(
-            controller: _maxTitleLengthController,
-            labelText: '标题长度上限',
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            hintText: '50',
-          ),
-          SettingsToggleTile(
-            title: '启用此搜索服务',
-            value: _enabled,
-            onChanged: (value) => setState(() => _enabled = value),
-          ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SettingsToggleTile(
+                  title: '强匹配',
+                  value: _strongMatchEnabled,
+                  onChanged: (value) {
+                    setState(() => _strongMatchEnabled = value);
+                  },
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '开启后，标题只要包含搜索词拆分后的词组，或中文搜索词中这些字的任意组合，就会保留。',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                            height: 1.35,
+                          ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            SettingsTextInputField(
+              controller: _maxTitleLengthController,
+              labelText: '标题长度上限',
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              hintText: '50',
+            ),
+            SettingsToggleTile(
+              title: '启用此搜索服务',
+              value: _enabled,
+              onChanged: (value) => setState(() => _enabled = value),
+            ),
+          ], spacing: 12),
           if (widget.initial != null) ...[
             const SizedBox(height: 28),
             Align(

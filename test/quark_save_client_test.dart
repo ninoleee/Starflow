@@ -48,6 +48,53 @@ void main() {
       expect(directories.single.path, '/电影');
     });
 
+    test('resolves a direct download url with merged cookies', () async {
+      final client = QuarkSaveClient(
+        MockClient((request) async {
+          expect(request.url.path, '/1/clouddrive/file/download');
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['fids'], ['video-1']);
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'code': 0,
+                'data': {
+                  'download_list': [
+                    {
+                      'fid': 'video-1',
+                      'download_url':
+                          'https://download.example.com/video-1.mkv',
+                      'size': 4096,
+                    },
+                  ],
+                },
+              }),
+            ),
+            200,
+            headers: const {
+              'content-type': 'application/json',
+              'set-cookie':
+                  '__puus=abc; Path=/, __kp=xyz; Path=/, __puus=abc; Path=/',
+            },
+          );
+        }),
+      );
+
+      final resolved = await client.resolveDownload(
+        cookie: 'kps=test; sign=test;',
+        fid: 'video-1',
+      );
+
+      expect(resolved.url, 'https://download.example.com/video-1.mkv');
+      expect(resolved.fileSizeBytes, 4096);
+      expect(resolved.headers['Cookie'], contains('kps=test'));
+      expect(resolved.headers['Cookie'], contains('sign=test'));
+      expect(resolved.headers['Cookie'], contains('__puus=abc'));
+      expect(resolved.headers['Cookie'], contains('__kp=xyz'));
+      expect(resolved.headers['User-Agent'], isNotEmpty);
+      expect(resolved.headers['Referer'], 'https://drive-pc.quark.cn');
+    });
+
     test('saves a quark share link to root directory', () async {
       final requests = <Uri>[];
       final client = QuarkSaveClient(

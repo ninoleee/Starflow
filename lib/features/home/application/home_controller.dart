@@ -145,7 +145,9 @@ final homeRecentPlaybackEntriesProvider =
     return const [];
   }
 
-  return ref.read(playbackMemoryRepositoryProvider).loadRecentEntries(limit: 6);
+  return ref
+      .read(playbackMemoryRepositoryProvider)
+      .loadRecentDisplayEntries(limit: 6);
 });
 
 final homeCarouselItemsProvider =
@@ -328,7 +330,9 @@ Future<HomeSectionViewModel> _buildLibrarySection({
     viewModels.add(
       HomeCardViewModel(
         id: item.id,
-        title: item.title,
+        title: detailTarget.title.trim().isNotEmpty
+            ? detailTarget.title
+            : item.title,
         subtitle: item.year > 0 ? '${item.year}' : '',
         posterUrl: detailTarget.posterUrl.trim().isNotEmpty
             ? detailTarget.posterUrl
@@ -386,6 +390,7 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
           ? seed.posterHeaders
           : cached.posterHeaders);
   return seed.copyWith(
+    title: cached.title.trim().isNotEmpty ? cached.title : seed.title,
     posterUrl: resolvedPosterUrl,
     posterHeaders: resolvedPosterHeaders,
     backdropUrl: seed.backdropUrl.trim().isNotEmpty
@@ -501,7 +506,10 @@ Future<HomeSectionViewModel> _buildRecentPlaybackSection({
     items.add(
       HomeCardViewModel(
         id: entry.key,
-        title: detailTarget.title,
+        title: _resolveRecentPlaybackDisplayTitle(
+          entry: entry,
+          detailTarget: detailTarget,
+        ),
         subtitle: _buildRecentPlaybackSubtitle(entry),
         posterUrl: detailTarget.posterUrl,
         detailTarget: detailTarget,
@@ -522,23 +530,38 @@ Future<HomeSectionViewModel> _buildRecentPlaybackSection({
 MediaDetailTarget _buildRecentPlaybackDetailTarget(
     PlaybackProgressEntry entry) {
   final target = entry.target;
+  final seriesTitle = _resolveRecentPlaybackSeriesTitle(
+    entry: entry,
+    detailTarget: null,
+  );
+  final useSeriesTarget = seriesTitle.isNotEmpty &&
+      (target.isEpisode ||
+          target.isSeries ||
+          target.seriesId.trim().isNotEmpty ||
+          entry.seriesKey.trim().isNotEmpty);
+  final resolvedTitle = useSeriesTarget ? seriesTitle : target.title;
+  final resolvedItemId = useSeriesTarget && target.seriesId.trim().isNotEmpty
+      ? target.seriesId
+      : target.itemId;
+  final resolvedItemType = useSeriesTarget ? 'series' : target.itemType;
+  final resolvedSearchQuery = seriesTitle.isNotEmpty
+      ? seriesTitle
+      : (target.title.trim().isNotEmpty ? target.title : target.subtitle);
   return MediaDetailTarget(
-    title: target.title,
+    title: resolvedTitle,
     posterUrl: '',
     overview: target.subtitle,
     year: target.year,
     availabilityLabel: target.canPlay
         ? '资源已就绪：${target.sourceKind.label} · ${target.sourceName}'
         : '',
-    searchQuery: target.seriesTitle.trim().isNotEmpty
-        ? target.seriesTitle
-        : target.title,
+    searchQuery: resolvedSearchQuery,
     playbackTarget: target,
-    itemId: target.itemId,
+    itemId: resolvedItemId,
     sourceId: target.sourceId,
-    itemType: target.itemType,
-    seasonNumber: target.seasonNumber,
-    episodeNumber: target.episodeNumber,
+    itemType: resolvedItemType,
+    seasonNumber: useSeriesTarget ? null : target.seasonNumber,
+    episodeNumber: useSeriesTarget ? null : target.episodeNumber,
     resourcePath: target.actualAddress,
     sourceKind: target.sourceKind,
     sourceName: target.sourceName,
@@ -571,6 +594,50 @@ String _buildRecentPlaybackSubtitle(PlaybackProgressEntry entry) {
   }
 
   return parts.join(' · ');
+}
+
+String _resolveRecentPlaybackDisplayTitle({
+  required PlaybackProgressEntry entry,
+  required MediaDetailTarget detailTarget,
+}) {
+  final seriesTitle = _resolveRecentPlaybackSeriesTitle(
+    entry: entry,
+    detailTarget: detailTarget,
+  );
+  final candidates = <String>[
+    detailTarget.title,
+    if (seriesTitle.isNotEmpty) seriesTitle,
+    detailTarget.searchQuery,
+    entry.target.title,
+  ];
+  for (final candidate in candidates) {
+    final trimmed = candidate.trim();
+    if (trimmed.isNotEmpty) {
+      return trimmed;
+    }
+  }
+  return '';
+}
+
+String _resolveRecentPlaybackSeriesTitle({
+  required PlaybackProgressEntry entry,
+  required MediaDetailTarget? detailTarget,
+}) {
+  final detailPlayback = detailTarget?.playbackTarget;
+  final candidates = <String>[
+    detailTarget?.title ?? '',
+    detailPlayback?.resolvedSeriesTitle ?? '',
+    entry.seriesTitle,
+    entry.target.resolvedSeriesTitle,
+    detailTarget?.searchQuery ?? '',
+  ];
+  for (final candidate in candidates) {
+    final trimmed = candidate.trim();
+    if (trimmed.isNotEmpty) {
+      return trimmed;
+    }
+  }
+  return '';
 }
 
 bool _homeHasResolvedLocalResourceState(MediaDetailTarget target) {
@@ -658,7 +725,9 @@ Future<HomeSectionViewModel> _buildDoubanSection({
     );
     items.add(HomeCardViewModel(
       id: entry.id,
-      title: entry.title,
+      title: detailTarget.title.trim().isNotEmpty
+          ? detailTarget.title
+          : entry.title,
       subtitle: entry.year > 0 ? '${entry.year}' : '',
       posterUrl: detailTarget.posterUrl.trim().isNotEmpty
           ? detailTarget.posterUrl
@@ -710,7 +779,9 @@ Future<HomeSectionViewModel> _buildCarouselSection({
             : posterUrl);
     carouselItems.add(HomeCarouselItemViewModel(
       id: item.id,
-      title: item.title,
+      title: detailTarget.title.trim().isNotEmpty
+          ? detailTarget.title
+          : item.title,
       subtitle: [
         if (item.ratingLabel.trim().isNotEmpty) item.ratingLabel,
         if (item.year > 0) '${item.year}',

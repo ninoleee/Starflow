@@ -60,7 +60,9 @@ class MediaRefreshCoordinator {
           (source) =>
               source.enabled &&
               (source.kind == MediaSourceKind.emby ||
-                  source.kind == MediaSourceKind.nas),
+                  source.kind == MediaSourceKind.nas ||
+                  (source.kind == MediaSourceKind.quark &&
+                      source.hasConfiguredQuarkFolder)),
         )
         .map((source) => source.id)
         .toSet();

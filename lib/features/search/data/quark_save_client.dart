@@ -330,6 +330,76 @@ class QuarkSaveClient {
         .toList(growable: false);
   }
 
+  Future<QuarkResolvedDownload> resolveDownload({
+    required String cookie,
+    required String fid,
+  }) async {
+    final trimmedCookie = cookie.trim();
+    final normalizedFid = fid.trim();
+    if (trimmedCookie.isEmpty) {
+      throw const QuarkSaveException('请先填写夸克 Cookie');
+    }
+    if (normalizedFid.isEmpty) {
+      throw const QuarkSaveException('没有可解析的夸克文件 ID');
+    }
+
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/1/clouddrive/file/download').replace(
+        queryParameters: const {
+          'pr': 'ucpro',
+          'fr': 'pc',
+          'uc_param_str': '',
+        },
+      ),
+      headers: _headers(trimmedCookie),
+      body: jsonEncode({
+        'fids': [normalizedFid],
+      }),
+    );
+    final payload = _decode(response);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw QuarkSaveException(
+        _resolveErrorMessage(payload, response.statusCode),
+      );
+    }
+    final code = payload['code'] as int? ?? -1;
+    if (code != 0) {
+      throw QuarkSaveException(
+        _resolveErrorMessage(payload, response.statusCode),
+      );
+    }
+
+    final entries = _downloadCandidates(payload['data']);
+    Map<String, dynamic>? matched;
+    for (final entry in entries) {
+      if ('${entry['fid'] ?? ''}'.trim() == normalizedFid) {
+        matched = entry;
+        break;
+      }
+    }
+    matched ??= entries.isEmpty ? null : entries.first;
+    final downloadUrl = _extractDownloadUrl(matched ?? const {});
+    if (downloadUrl.isEmpty) {
+      throw const QuarkSaveException('夸克没有返回可用的下载地址');
+    }
+
+    final mergedCookie = _mergeCookies(
+      trimmedCookie,
+      response.headers['set-cookie'] ?? '',
+    );
+    return QuarkResolvedDownload(
+      url: downloadUrl,
+      headers: {
+        if (mergedCookie.isNotEmpty) 'Cookie': mergedCookie,
+        'User-Agent': _userAgent,
+        'Referer': _baseUrl,
+      },
+      fileSizeBytes: _tryParseInt(
+        '${(matched ?? const {})['size'] ?? (matched ?? const {})['file_size'] ?? ''}',
+      ),
+    );
+  }
+
   Future<bool> _waitForTask({
     required String cookie,
     required String taskId,
@@ -524,6 +594,88 @@ class QuarkSaveClient {
     return const {};
   }
 
+  List<Map<String, dynamic>> _downloadCandidates(Object? raw) {
+    if (raw is List) {
+      return raw
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList(growable: false);
+    }
+    if (raw is Map) {
+      final map = Map<String, dynamic>.from(raw);
+      final nested = map['list'] ?? map['files'] ?? map['download_list'];
+      if (nested is List) {
+        return nested
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(growable: false);
+      }
+      return [map];
+    }
+    return const [];
+  }
+
+  String _extractDownloadUrl(Map<String, dynamic> json) {
+    for (final key in const [
+      'download_url',
+      'downloadUrl',
+      'url',
+      'file_url',
+      'fileUrl',
+    ]) {
+      final raw = '${json[key] ?? ''}'.trim();
+      if (raw.isNotEmpty) {
+        return raw;
+      }
+    }
+    final nested = json['download_info'] ?? json['downloadInfo'];
+    if (nested is Map) {
+      return _extractDownloadUrl(Map<String, dynamic>.from(nested));
+    }
+    return '';
+  }
+
+  String _mergeCookies(String baseCookie, String setCookieHeader) {
+    final cookies = <String, String>{};
+
+    void collectCookieFragment(String raw) {
+      for (final fragment in raw.split(';')) {
+        final separatorIndex = fragment.indexOf('=');
+        if (separatorIndex <= 0) {
+          continue;
+        }
+        final key = fragment.substring(0, separatorIndex).trim();
+        final value = fragment.substring(separatorIndex + 1).trim();
+        if (key.isEmpty || value.isEmpty) {
+          continue;
+        }
+        cookies[key] = value;
+      }
+    }
+
+    if (baseCookie.trim().isNotEmpty) {
+      collectCookieFragment(baseCookie);
+    }
+    if (setCookieHeader.trim().isNotEmpty) {
+      for (final entry in setCookieHeader.split(',')) {
+        final firstPart = entry.split(';').first.trim();
+        collectCookieFragment(firstPart);
+      }
+    }
+
+    return cookies.entries
+        .map((entry) => '${entry.key}=${entry.value}')
+        .join('; ');
+  }
+
+  int? _tryParseInt(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    return int.tryParse(trimmed);
+  }
+
   String _resolveErrorMessage(Map<String, dynamic> payload, int statusCode) {
     final message = '${payload['message'] ?? payload['msg'] ?? ''}'.trim();
     if (message.isNotEmpty) {
@@ -630,6 +782,18 @@ class QuarkDeleteResult {
   final bool finished;
 }
 
+class QuarkResolvedDownload {
+  const QuarkResolvedDownload({
+    required this.url,
+    this.headers = const {},
+    this.fileSizeBytes,
+  });
+
+  final String url;
+  final Map<String, String> headers;
+  final int? fileSizeBytes;
+}
+
 class QuarkSaveException implements Exception {
   const QuarkSaveException(this.message);
 
@@ -680,12 +844,38 @@ class QuarkFileEntry {
     required this.name,
     required this.path,
     required this.isDirectory,
+    this.sizeBytes,
+    this.updatedAt,
+    this.mimeType = '',
+    this.category = '',
+    this.extension = '',
   });
 
   final String fid;
   final String name;
   final String path;
   final bool isDirectory;
+  final int? sizeBytes;
+  final DateTime? updatedAt;
+  final String mimeType;
+  final String category;
+  final String extension;
+
+  bool get isVideo {
+    if (isDirectory) {
+      return false;
+    }
+    final normalizedMimeType = mimeType.trim().toLowerCase();
+    if (normalizedMimeType.startsWith('video/')) {
+      return true;
+    }
+    final normalizedCategory = category.trim().toLowerCase();
+    if (normalizedCategory == 'video') {
+      return true;
+    }
+    final normalizedExtension = extension.trim().toLowerCase();
+    return _quarkVideoExtensions.contains(normalizedExtension);
+  }
 
   static QuarkFileEntry? fromJson(Map<String, dynamic> json) {
     final fid = '${json['fid'] ?? ''}'.trim();
@@ -704,8 +894,68 @@ class QuarkFileEntry {
       name: name,
       path: normalizedPath,
       isDirectory: json['dir'] == true,
+      sizeBytes: _parseQuarkInt(json['size'] ?? json['file_size']),
+      updatedAt: _parseQuarkDateTime(
+        json['updated_at'] ?? json['update_time'] ?? json['updatedAt'],
+      ),
+      mimeType: '${json['mime_type'] ?? json['mimeType'] ?? ''}'.trim(),
+      category:
+          '${json['obj_category'] ?? json['category'] ?? json['type'] ?? ''}'
+              .trim(),
+      extension: _resolveQuarkExtension(name),
     );
   }
+}
+
+const Set<String> _quarkVideoExtensions = {
+  'mp4',
+  'm4v',
+  'mov',
+  'mkv',
+  'avi',
+  'ts',
+  'webm',
+  'flv',
+  'wmv',
+  'mpg',
+  'mpeg',
+  'm2ts',
+  'iso',
+  'strm',
+};
+
+int? _parseQuarkInt(Object? raw) {
+  final text = '$raw'.trim();
+  if (text.isEmpty || text == 'null') {
+    return null;
+  }
+  return int.tryParse(text);
+}
+
+DateTime? _parseQuarkDateTime(Object? raw) {
+  final text = '$raw'.trim();
+  if (text.isEmpty || text == 'null') {
+    return null;
+  }
+  final numeric = int.tryParse(text);
+  if (numeric != null) {
+    if (numeric > 1000000000000) {
+      return DateTime.fromMillisecondsSinceEpoch(numeric);
+    }
+    if (numeric > 1000000000) {
+      return DateTime.fromMillisecondsSinceEpoch(numeric * 1000);
+    }
+  }
+  return DateTime.tryParse(text);
+}
+
+String _resolveQuarkExtension(String name) {
+  final normalized = name.trim();
+  final dotIndex = normalized.lastIndexOf('.');
+  if (dotIndex < 0 || dotIndex >= normalized.length - 1) {
+    return '';
+  }
+  return normalized.substring(dotIndex + 1).toLowerCase();
 }
 
 class _QuarkShareEntry {

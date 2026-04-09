@@ -43,7 +43,7 @@ final playbackEntryForMediaItemProvider =
 final recentPlaybackEntriesProvider =
     FutureProvider.family<List<PlaybackProgressEntry>, int>((ref, limit) async {
   ref.watch(playbackHistoryRevisionProvider);
-  return ref.read(playbackMemoryRepositoryProvider).loadRecentEntries(
+  return ref.read(playbackMemoryRepositoryProvider).loadRecentDisplayEntries(
         limit: limit,
       );
 });
@@ -109,6 +109,47 @@ class PlaybackMemoryRepository {
       {int limit = 20}) async {
     final snapshot = await _loadSnapshot();
     final entries = snapshot.items.values.toList()
+      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+    return entries.take(limit.clamp(1, recentEntryLimit)).toList(
+          growable: false,
+        );
+  }
+
+  Future<List<PlaybackProgressEntry>> loadRecentDisplayEntries({
+    int limit = 20,
+  }) async {
+    final snapshot = await _loadSnapshot();
+    final combined = <String, PlaybackProgressEntry>{};
+
+    void addEntry(String key, PlaybackProgressEntry entry) {
+      final trimmedKey = key.trim();
+      if (trimmedKey.isEmpty) {
+        return;
+      }
+      final existing = combined[trimmedKey];
+      if (existing == null || entry.updatedAt.isAfter(existing.updatedAt)) {
+        combined[trimmedKey] = entry;
+      }
+    }
+
+    for (final entry in snapshot.items.values) {
+      final seriesKey = entry.seriesKey.trim();
+      if (seriesKey.isNotEmpty) {
+        continue;
+      }
+      addEntry('item:${entry.key}', entry);
+    }
+
+    for (final entry in snapshot.series.values) {
+      final seriesKey = entry.seriesKey.trim();
+      if (seriesKey.isNotEmpty) {
+        addEntry('series:$seriesKey', entry);
+      } else {
+        addEntry('item:${entry.key}', entry);
+      }
+    }
+
+    final entries = combined.values.toList()
       ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
     return entries.take(limit.clamp(1, recentEntryLimit)).toList(
           growable: false,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
@@ -38,6 +39,10 @@ class _MetadataIndexManagementPageState
     extends ConsumerState<MetadataIndexManagementPage> {
   late final TextEditingController _queryController;
   late final TextEditingController _yearController;
+  late final FocusNode _queryFocusNode;
+  late final FocusNode _yearFocusNode;
+  late final FocusNode _preferSeriesFocusNode;
+  late final FocusNode _searchFocusNode;
   late bool _preferSeries;
   late Future<NasMediaIndexRecord?> _recordFuture;
   final TvFocusMemoryController _tvFocusMemoryController =
@@ -63,6 +68,11 @@ class _MetadataIndexManagementPageState
     _yearController = TextEditingController(
       text: widget.target.year > 0 ? '${widget.target.year}' : '',
     );
+    _queryFocusNode = FocusNode(debugLabel: 'metadata-index-query');
+    _yearFocusNode = FocusNode(debugLabel: 'metadata-index-year');
+    _preferSeriesFocusNode =
+        FocusNode(debugLabel: 'metadata-index-prefer-series');
+    _searchFocusNode = FocusNode(debugLabel: 'metadata-index-search');
     final itemType = widget.target.itemType.trim().toLowerCase();
     _preferSeries =
         itemType == 'series' || itemType == 'season' || itemType == 'episode';
@@ -73,6 +83,10 @@ class _MetadataIndexManagementPageState
   void dispose() {
     _queryController.dispose();
     _yearController.dispose();
+    _queryFocusNode.dispose();
+    _yearFocusNode.dispose();
+    _preferSeriesFocusNode.dispose();
+    _searchFocusNode.dispose();
     _tvFocusMemoryController.dispose();
     super.dispose();
   }
@@ -211,6 +225,41 @@ class _MetadataIndexManagementPageState
   bool _hasTmdbAvailable(AppSettings settings) {
     return settings.tmdbMetadataMatchEnabled &&
         settings.tmdbReadAccessToken.trim().isNotEmpty;
+  }
+
+  Widget _wrapTelevisionSearchField({
+    required bool enabled,
+    required FocusNode focusNode,
+    required Widget child,
+  }) {
+    final wrapped = wrapTelevisionDialogFieldTraversal(
+      enabled: enabled,
+      child: child,
+    );
+    if (!enabled) {
+      return wrapped;
+    }
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
+        SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
+        SingleActivator(LogicalKeyboardKey.backspace): DismissIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          DismissIntent: CallbackAction<DismissIntent>(
+            onInvoke: (_) {
+              focusNode.unfocus();
+              if (_searchFocusNode.canRequestFocus) {
+                _searchFocusNode.requestFocus();
+              }
+              return null;
+            },
+          ),
+        },
+        child: wrapped,
+      ),
+    );
   }
 
   MetadataMatchResult _tmdbToMetadataMatch(TmdbMetadataMatch match) {
@@ -501,8 +550,9 @@ class _MetadataIndexManagementPageState
   }
 
   void _invalidateReaders() {
-    ref.invalidate(libraryItemsProvider(LibraryFilter.all));
-    ref.invalidate(libraryItemsProvider(LibraryFilter.nas));
+    for (final filter in LibraryFilter.values) {
+      ref.invalidate(libraryItemsProvider(filter));
+    }
     ref.invalidate(libraryCollectionItemsProvider);
     ref.invalidate(homeRecentItemsProvider);
     ref.invalidate(homeCarouselItemsProvider);
@@ -590,119 +640,146 @@ class _MetadataIndexManagementPageState
                           title: '手动搜索',
                           child: Column(
                             children: [
-                              TextField(
-                                controller: _queryController,
-                                textInputAction: TextInputAction.search,
-                                decoration: const InputDecoration(
-                                  labelText: '片名 / 搜索词',
-                                  hintText: '输入要手动匹配的片名',
-                                  border: OutlineInputBorder(),
+                              FocusTraversalOrder(
+                                order: const NumericFocusOrder(1),
+                                child: _wrapTelevisionSearchField(
+                                  enabled: isTelevision,
+                                  focusNode: _queryFocusNode,
+                                  child: TextField(
+                                    controller: _queryController,
+                                    focusNode: _queryFocusNode,
+                                    textInputAction: TextInputAction.search,
+                                    decoration: const InputDecoration(
+                                      labelText: '片名 / 搜索词',
+                                      hintText: '输入要手动匹配的片名',
+                                      border: OutlineInputBorder(),
+                                    ),
+                                    onSubmitted: (_) => _runSearch(),
+                                  ),
                                 ),
-                                onSubmitted: (_) => _runSearch(),
                               ),
                               const SizedBox(height: 12),
                               Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  SizedBox(
-                                    width: 120,
-                                    child: TextField(
-                                      controller: _yearController,
-                                      keyboardType: TextInputType.number,
-                                      decoration: const InputDecoration(
-                                        labelText: '年份',
-                                        hintText: '可选',
-                                        border: OutlineInputBorder(),
+                                  FocusTraversalOrder(
+                                    order: const NumericFocusOrder(2),
+                                    child: SizedBox(
+                                      width: 120,
+                                      child: _wrapTelevisionSearchField(
+                                        enabled: isTelevision,
+                                        focusNode: _yearFocusNode,
+                                        child: TextField(
+                                          controller: _yearController,
+                                          focusNode: _yearFocusNode,
+                                          keyboardType: TextInputType.number,
+                                          textInputAction: TextInputAction.done,
+                                          decoration: const InputDecoration(
+                                            labelText: '年份',
+                                            hintText: '可选',
+                                            border: OutlineInputBorder(),
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
-                                    child: isTelevision
-                                        ? TvFocusableAction(
-                                            onPressed: () {
-                                              setState(() {
-                                                _preferSeries = !_preferSeries;
-                                              });
-                                            },
-                                            focusId:
-                                                'detail:index:prefer-series',
-                                            borderRadius:
-                                                BorderRadius.circular(18),
-                                            child: Container(
-                                              decoration: BoxDecoration(
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .surfaceContainerHighest,
-                                                borderRadius:
-                                                    BorderRadius.circular(18),
-                                              ),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 14,
-                                                vertical: 16,
-                                              ),
-                                              child: Row(
-                                                children: [
-                                                  const Expanded(
-                                                    child: Text(
-                                                      '按剧集优先匹配',
+                                    child: FocusTraversalOrder(
+                                      order: const NumericFocusOrder(3),
+                                      child: isTelevision
+                                          ? TvFocusableAction(
+                                              onPressed: () {
+                                                setState(() {
+                                                  _preferSeries =
+                                                      !_preferSeries;
+                                                });
+                                              },
+                                              focusNode: _preferSeriesFocusNode,
+                                              focusId:
+                                                  'detail:index:prefer-series',
+                                              borderRadius:
+                                                  BorderRadius.circular(18),
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .surfaceContainerHighest,
+                                                  borderRadius:
+                                                      BorderRadius.circular(18),
+                                                ),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 14,
+                                                  vertical: 16,
+                                                ),
+                                                child: Row(
+                                                  children: [
+                                                    const Expanded(
+                                                      child: Text(
+                                                        '按剧集优先匹配',
+                                                      ),
                                                     ),
-                                                  ),
-                                                  Icon(
-                                                    _preferSeries
-                                                        ? Icons
-                                                            .check_circle_rounded
-                                                        : Icons
-                                                            .radio_button_unchecked_rounded,
-                                                  ),
-                                                ],
+                                                    Icon(
+                                                      _preferSeries
+                                                          ? Icons
+                                                              .check_circle_rounded
+                                                          : Icons
+                                                              .radio_button_unchecked_rounded,
+                                                    ),
+                                                  ],
+                                                ),
                                               ),
+                                            )
+                                          : StarflowToggleTile(
+                                              title: '按剧集优先匹配',
+                                              value: _preferSeries,
+                                              onChanged: (value) {
+                                                setState(() {
+                                                  _preferSeries = value;
+                                                });
+                                              },
                                             ),
-                                          )
-                                        : StarflowToggleTile(
-                                            title: '按剧集优先匹配',
-                                            value: _preferSeries,
-                                            onChanged: (value) {
-                                              setState(() {
-                                                _preferSeries = value;
-                                              });
-                                            },
-                                          ),
+                                    ),
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 12),
                               Align(
                                 alignment: Alignment.centerLeft,
-                                child: isTelevision
-                                    ? TvAdaptiveButton(
-                                        label: _isSearching ? '搜索中...' : '开始搜索',
-                                        icon: Icons.manage_search_rounded,
-                                        autofocus: true,
-                                        onPressed:
-                                            _isSearching ? null : _runSearch,
-                                        focusId: 'detail:index:search',
-                                      )
-                                    : FilledButton.icon(
-                                        onPressed:
-                                            _isSearching ? null : _runSearch,
-                                        icon: _isSearching
-                                            ? const SizedBox(
-                                                width: 16,
-                                                height: 16,
-                                                child:
-                                                    CircularProgressIndicator(
-                                                  strokeWidth: 2,
+                                child: FocusTraversalOrder(
+                                  order: const NumericFocusOrder(4),
+                                  child: isTelevision
+                                      ? TvAdaptiveButton(
+                                          label:
+                                              _isSearching ? '搜索中...' : '开始搜索',
+                                          icon: Icons.manage_search_rounded,
+                                          autofocus: true,
+                                          focusNode: _searchFocusNode,
+                                          onPressed:
+                                              _isSearching ? null : _runSearch,
+                                          focusId: 'detail:index:search',
+                                        )
+                                      : FilledButton.icon(
+                                          onPressed:
+                                              _isSearching ? null : _runSearch,
+                                          icon: _isSearching
+                                              ? const SizedBox(
+                                                  width: 16,
+                                                  height: 16,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                  ),
+                                                )
+                                              : const Icon(
+                                                  Icons.manage_search_rounded,
                                                 ),
-                                              )
-                                            : const Icon(
-                                                Icons.manage_search_rounded,
-                                              ),
-                                        label: Text(
-                                          _isSearching ? '搜索中...' : '开始搜索',
+                                          label: Text(
+                                            _isSearching ? '搜索中...' : '开始搜索',
+                                          ),
                                         ),
-                                      ),
+                                ),
                               ),
                             ],
                           ),

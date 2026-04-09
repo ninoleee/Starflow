@@ -29,6 +29,7 @@ import 'package:starflow/features/playback/data/playback_memory_repository.dart'
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
+import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -141,12 +142,16 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
     return nextTarget;
   }
 
-  final shouldResolve = playback.sourceKind == MediaSourceKind.emby &&
+  final shouldResolveEmby = playback.sourceKind == MediaSourceKind.emby &&
       playback.itemId.trim().isNotEmpty &&
       (playback.streamUrl.trim().isEmpty ||
           playback.formatLabel.trim().isEmpty ||
           playback.resolutionLabel.trim().isEmpty ||
           playback.fileSizeLabel.trim().isEmpty);
+  final shouldResolveQuark = playback.sourceKind == MediaSourceKind.quark &&
+      playback.itemId.trim().isNotEmpty &&
+      playback.streamUrl.trim().isEmpty;
+  final shouldResolve = shouldResolveEmby || shouldResolveQuark;
   if (!shouldResolve) {
     DebugTraceOnce.logMetadata(
       traceKey,
@@ -160,34 +165,62 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
     return nextTarget;
   }
 
-  MediaSourceConfig? source;
-  for (final candidate in settings.mediaSources) {
-    if (candidate.id == playback.sourceId) {
-      source = candidate;
-      break;
-    }
-  }
-  if (source == null || !source.hasActiveSession) {
-    DebugTraceOnce.logMetadata(
-      traceKey,
-      'playback-resolve',
-      'skipped no active emby source',
-    );
-    await saveResolvedTarget();
-    return nextTarget;
-  }
-
   try {
-    DebugTraceOnce.logMetadata(
-      traceKey,
-      'playback-resolve',
-      'request itemId=${playback.itemId} source=${source.name}',
-    );
-    final resolvedPlayback =
-        await ref.read(embyApiClientProvider).resolvePlaybackTarget(
-              source: source,
-              target: playback,
-            );
+    late final PlaybackTarget resolvedPlayback;
+    if (playback.sourceKind == MediaSourceKind.emby) {
+      MediaSourceConfig? source;
+      for (final candidate in settings.mediaSources) {
+        if (candidate.id == playback.sourceId) {
+          source = candidate;
+          break;
+        }
+      }
+      if (source == null || !source.hasActiveSession) {
+        DebugTraceOnce.logMetadata(
+          traceKey,
+          'playback-resolve',
+          'skipped no active emby source',
+        );
+        await saveResolvedTarget();
+        return nextTarget;
+      }
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'playback-resolve',
+        'request itemId=${playback.itemId} source=${source.name}',
+      );
+      resolvedPlayback =
+          await ref.read(embyApiClientProvider).resolvePlaybackTarget(
+                source: source,
+                target: playback,
+              );
+    } else {
+      final cookie = settings.networkStorage.quarkCookie.trim();
+      if (cookie.isEmpty) {
+        DebugTraceOnce.logMetadata(
+          traceKey,
+          'playback-resolve',
+          'skipped missing quark cookie',
+        );
+        await saveResolvedTarget();
+        return nextTarget;
+      }
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'playback-resolve',
+        'request itemId=${playback.itemId} source=${playback.sourceName}',
+      );
+      final resolvedDownload =
+          await ref.read(quarkSaveClientProvider).resolveDownload(
+                cookie: cookie,
+                fid: playback.itemId,
+              );
+      resolvedPlayback = playback.copyWith(
+        streamUrl: resolvedDownload.url,
+        headers: resolvedDownload.headers,
+        fileSizeBytes: resolvedDownload.fileSizeBytes ?? playback.fileSizeBytes,
+      );
+    }
     nextTarget = nextTarget.copyWith(playbackTarget: resolvedPlayback);
     DebugTraceOnce.logMetadata(
       traceKey,
@@ -684,6 +717,7 @@ MediaDetailTarget _mergeCachedDetailTarget({
       _shouldPreferCachedSourceContext(current, cached) ||
           preferCachedResourceState;
   final merged = current.copyWith(
+    title: cached.title.trim().isNotEmpty ? cached.title : current.title,
     posterUrl: current.posterUrl.trim().isNotEmpty
         ? current.posterUrl
         : cached.posterUrl,
@@ -867,7 +901,7 @@ PlaybackTarget? _mergeCachedPlaybackTarget(
     return current;
   }
   return PlaybackTarget(
-    title: current.title.trim().isNotEmpty ? current.title : cached.title,
+    title: cached.title.trim().isNotEmpty ? cached.title : current.title,
     sourceId:
         current.sourceId.trim().isNotEmpty ? current.sourceId : cached.sourceId,
     streamUrl: current.streamUrl.trim().isNotEmpty
@@ -886,9 +920,9 @@ PlaybackTarget? _mergeCachedPlaybackTarget(
     year: current.year > 0 ? current.year : cached.year,
     seriesId:
         current.seriesId.trim().isNotEmpty ? current.seriesId : cached.seriesId,
-    seriesTitle: current.seriesTitle.trim().isNotEmpty
-        ? current.seriesTitle
-        : cached.seriesTitle,
+    seriesTitle: cached.seriesTitle.trim().isNotEmpty
+        ? cached.seriesTitle
+        : current.seriesTitle,
     preferredMediaSourceId: current.preferredMediaSourceId.trim().isNotEmpty
         ? current.preferredMediaSourceId
         : cached.preferredMediaSourceId,
@@ -1277,6 +1311,28 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
     });
   }
 
+  final allowedQuarkSources = allowedSources
+      .where((source) => source.kind == MediaSourceKind.quark)
+      .toList(growable: false);
+  for (final source in allowedQuarkSources) {
+    taskFactories.add(() async {
+      controller.throwIfCancelled();
+      try {
+        final items = await mediaRepository.fetchLibrary(
+          kind: MediaSourceKind.quark,
+          sourceId: source.id,
+          limit: detailLibraryMatchLimit,
+        );
+        controller.throwIfCancelled();
+        return buildCandidates(items);
+      } on _LibraryMatchCancelledException {
+        rethrow;
+      } catch (_) {
+        return const <_LibraryMatchCandidate>[];
+      }
+    });
+  }
+
   if (taskFactories.isEmpty) {
     return snapshot();
   }
@@ -1332,7 +1388,9 @@ List<MediaSourceConfig> _resolveLibraryMatchSources(AppSettings settings) {
         (source) =>
             source.enabled &&
             (source.kind == MediaSourceKind.emby ||
-                source.kind == MediaSourceKind.nas),
+                source.kind == MediaSourceKind.nas ||
+                (source.kind == MediaSourceKind.quark &&
+                    source.hasConfiguredQuarkFolder)),
       )
       .toList(growable: false);
   final selectedIds = settings.libraryMatchSourceIds.toSet();
@@ -2181,6 +2239,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   @override
   void initState() {
     super.initState();
+    _heroArtworkFocusNode.addListener(_handleHeroArtworkFocusChanged);
     _startDetailTasks();
   }
 
@@ -2210,6 +2269,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   void dispose() {
     _cancelActiveLibraryMatch();
     _detailSessionId += 1;
+    _heroArtworkFocusNode.removeListener(_handleHeroArtworkFocusChanged);
     _heroArtworkFocusNode.dispose();
     _heroSearchFocusNode.dispose();
     _heroPlayFocusNode.dispose();
@@ -2221,6 +2281,34 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   void _cancelActiveLibraryMatch() {
     _activeLibraryMatchController?.cancel();
     _activeLibraryMatchController = null;
+  }
+
+  void _handleHeroArtworkFocusChanged() {
+    if (!mounted ||
+        (!_heroArtworkFocusNode.hasFocus &&
+            !_heroArtworkFocusNode.hasPrimaryFocus)) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !_scrollController.hasClients ||
+          (!_heroArtworkFocusNode.hasFocus &&
+              !_heroArtworkFocusNode.hasPrimaryFocus)) {
+        return;
+      }
+      final position = _scrollController.position;
+      final targetOffset = position.minScrollExtent;
+      if ((position.pixels - targetOffset).abs() < 1) {
+        return;
+      }
+      unawaited(
+        _scrollController.animateTo(
+          targetOffset,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+        ),
+      );
+    });
   }
 
   void _startDetailTasks() {
@@ -5010,15 +5098,17 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
     required Map<String, FocusNode> nodes,
     required ScrollController scrollController,
   }) {
-    final targetIndex = currentIndex + step;
-    if (targetIndex < 0 || targetIndex >= keys.length) {
-      return true;
-    }
-    if (_requestDetailFocus([nodes[keys[targetIndex]]])) {
+    final targetIndex = _findReachableEpisodeIndex(
+      keys: keys,
+      startIndex: currentIndex + step,
+      step: step,
+      nodes: nodes,
+    );
+    if (targetIndex == null) {
       return true;
     }
     if (!scrollController.hasClients) {
-      return true;
+      return _requestDetailFocus([nodes[keys[targetIndex]]]);
     }
     unawaited(
       _revealEpisodeRowIndex(
@@ -5026,9 +5116,27 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
         keys: keys,
         nodes: nodes,
         scrollController: scrollController,
+        step: step,
       ),
     );
     return true;
+  }
+
+  int? _findReachableEpisodeIndex({
+    required List<String> keys,
+    required int startIndex,
+    required int step,
+    required Map<String, FocusNode> nodes,
+  }) {
+    for (var index = startIndex;
+        index >= 0 && index < keys.length;
+        index += step) {
+      final node = nodes[keys[index]];
+      if (node != null && node.canRequestFocus) {
+        return index;
+      }
+    }
+    return null;
   }
 
   Future<void> _revealEpisodeRowIndex({
@@ -5036,6 +5144,7 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
     required List<String> keys,
     required Map<String, FocusNode> nodes,
     required ScrollController scrollController,
+    required int step,
   }) async {
     if (!mounted || !scrollController.hasClients) {
       return;
@@ -5044,17 +5153,41 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
       return;
     }
     final position = scrollController.position;
-    final targetOffset = (index * _episodeCardStride)
-        .clamp(position.minScrollExtent, position.maxScrollExtent)
-        .toDouble();
-    if ((position.pixels - targetOffset).abs() >= 1) {
+    final itemStart = index * _episodeCardStride;
+    final itemEnd = itemStart + _episodeCardWidth;
+    final viewportStart = position.pixels;
+    final viewportEnd = viewportStart + position.viewportDimension;
+    double? targetOffset;
+    if (itemStart < viewportStart + 1) {
+      targetOffset = itemStart;
+    } else if (itemEnd > viewportEnd - 1) {
+      targetOffset = itemEnd - position.viewportDimension;
+    }
+    if (targetOffset != null) {
+      targetOffset = targetOffset
+          .clamp(position.minScrollExtent, position.maxScrollExtent)
+          .toDouble();
+    }
+    if (targetOffset != null && (position.pixels - targetOffset).abs() >= 1) {
       scrollController.jumpTo(targetOffset);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
       }
-      _requestDetailFocus([nodes[keys[index]]]);
+      if (_requestDetailFocus([nodes[keys[index]]])) {
+        return;
+      }
+      final fallbackIndex = _findReachableEpisodeIndex(
+        keys: keys,
+        startIndex: index + step,
+        step: step,
+        nodes: nodes,
+      );
+      if (fallbackIndex == null) {
+        return;
+      }
+      _requestDetailFocus([nodes[keys[fallbackIndex]]]);
     });
   }
 

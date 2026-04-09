@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
@@ -204,7 +205,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         'page.search.failed',
         fields: {
           'query': query,
-          'selectedSources': _selectedSources.map((item) => item.name).join('/'),
+          'selectedSources':
+              _selectedSources.map((item) => item.name).join('/'),
         },
         error: error,
         stackTrace: stackTrace,
@@ -331,6 +333,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     final request = widget.request;
     final applyMode = request.applyMode;
     final title = request.title.trim().isEmpty ? '在线字幕' : request.title.trim();
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
 
     return PopScope<Object?>(
       canPop: !request.standalone,
@@ -342,18 +345,21 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       },
       child: Scaffold(
         appBar: AppBar(
+          automaticallyImplyLeading: !isTelevision,
           title: Text(applyMode == SubtitleSearchApplyMode.downloadOnly
               ? '下载字幕'
               : '搜索并加载字幕'),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded),
-            onPressed: () async {
-              final navigator = Navigator.of(context);
-              if (await _handleClose()) {
-                navigator.maybePop();
-              }
-            },
-          ),
+          leading: isTelevision
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  onPressed: () async {
+                    final navigator = Navigator.of(context);
+                    if (await _handleClose()) {
+                      navigator.maybePop();
+                    }
+                  },
+                ),
         ),
         body: AppPageBackground(
           child: SafeArea(

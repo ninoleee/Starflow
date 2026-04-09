@@ -7,6 +7,7 @@ import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/domain/nas_media_recognition.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -90,6 +91,10 @@ class AppMediaRepository implements MediaRepository {
         .mediaSources
         .where((item) => item.enabled)
         .toList();
+  }
+
+  String get _quarkCookie {
+    return ref.read(appSettingsProvider).networkStorage.quarkCookie.trim();
   }
 
   List<MediaItem> get _enabledLibrary {
@@ -201,6 +206,10 @@ class AppMediaRepository implements MediaRepository {
       return;
     }
 
+    if (source.kind == MediaSourceKind.quark) {
+      return;
+    }
+
     if (source.kind == MediaSourceKind.emby) {
       if (!source.hasActiveSession) {
         return;
@@ -269,7 +278,36 @@ class AppMediaRepository implements MediaRepository {
         break;
       }
     }
-    if (source == null || source.kind != MediaSourceKind.nas) {
+    if (source == null) {
+      return;
+    }
+
+    if (source.kind == MediaSourceKind.quark) {
+      final cookie = _quarkCookie;
+      if (cookie.isEmpty) {
+        throw Exception('请先在夸克与 STRM 里填写夸克 Cookie');
+      }
+      final parsed = _parseQuarkResourceId(normalizedResourcePath);
+      final fid = parsed?.fid.trim() ?? '';
+      if (fid.isEmpty) {
+        throw Exception('没有可删除的夸克文件 ID');
+      }
+      await _quarkSaveClient.deleteEntries(
+        cookie: cookie,
+        fids: [fid],
+      );
+      await ref
+          .read(localStorageCacheRepositoryProvider)
+          .clearDetailCacheForResource(
+            sourceId: normalizedSourceId,
+            resourceId: normalizedResourcePath,
+            resourcePath: parsed?.path ?? '',
+            treatAsScope: false,
+          );
+      return;
+    }
+
+    if (source.kind != MediaSourceKind.nas) {
       return;
     }
 
@@ -336,6 +374,10 @@ class AppMediaRepository implements MediaRepository {
       }
     }
     if (source == null || !source.enabled) {
+      return const [];
+    }
+
+    if (source.kind == MediaSourceKind.quark) {
       return const [];
     }
 
@@ -441,6 +483,52 @@ class AppMediaRepository implements MediaRepository {
         );
       }
 
+      if (source.kind == MediaSourceKind.quark) {
+        if (!source.hasConfiguredQuarkFolder) {
+          return const _SourceFetchResult(items: <MediaItem>[]);
+        }
+        final cookie = _quarkCookie;
+        if (cookie.isEmpty) {
+          return const _SourceFetchResult(items: <MediaItem>[]);
+        }
+        if (sectionId?.trim().isNotEmpty == true) {
+          final resolvedSectionId = sectionId!.trim();
+          return _SourceFetchResult(
+            items: await _loadQuarkLibrary(
+              source,
+              cookie: cookie,
+              parentFid: resolvedSectionId,
+              sectionId: resolvedSectionId,
+              sectionName: await _resolveSectionName(source, sectionId),
+              limit: limit,
+            ),
+          );
+        }
+
+        final selectedCollections = await _selectedCollectionsForSource(source);
+        if (hasScopedSections) {
+          if (selectedCollections.isEmpty) {
+            return const _SourceFetchResult(items: <MediaItem>[]);
+          }
+          return _SourceFetchResult(
+            items: await _fetchLibraryFromCollections(
+              source,
+              selectedCollections,
+              limit: limit,
+            ),
+          );
+        }
+
+        return _SourceFetchResult(
+          items: await _loadQuarkLibrary(
+            source,
+            cookie: cookie,
+            parentFid: source.quarkFolderId,
+            limit: limit,
+          ),
+        );
+      }
+
       if (source.endpoint.trim().isNotEmpty) {
         if (source.hasExplicitNoSectionsSelected) {
           await _nasMediaIndexer.clearSource(source.id);
@@ -532,6 +620,16 @@ class AppMediaRepository implements MediaRepository {
             sectionName: collection.title,
           );
         }
+        if (source.kind == MediaSourceKind.quark) {
+          return _loadQuarkLibrary(
+            source,
+            cookie: _quarkCookie,
+            parentFid: collection.id,
+            sectionId: collection.id,
+            sectionName: collection.title,
+            limit: limit,
+          );
+        }
         return _nasMediaIndexer.loadLibrary(
           source,
           sectionId: collection.id,
@@ -599,6 +697,30 @@ class AppMediaRepository implements MediaRepository {
         return const [];
       }
       collections = await _embyApiClient.fetchCollections(source);
+    } else if (source.kind == MediaSourceKind.quark) {
+      if (!source.hasConfiguredQuarkFolder) {
+        return const [];
+      }
+      final cookie = _quarkCookie;
+      if (cookie.isEmpty) {
+        return const [];
+      }
+      final directories = await _quarkSaveClient.listDirectories(
+        cookie: cookie,
+        parentFid: source.quarkFolderId,
+      );
+      collections = directories
+          .map(
+            (entry) => MediaCollection(
+              id: entry.fid,
+              title: entry.name,
+              sourceId: source.id,
+              sourceName: source.name,
+              sourceKind: source.kind,
+              subtitle: entry.path,
+            ),
+          )
+          .toList(growable: false);
     } else {
       if (source.endpoint.trim().isEmpty) {
         return const [];
@@ -619,6 +741,148 @@ class AppMediaRepository implements MediaRepository {
     return collections
         .where((collection) => selectedIds.contains(collection.id))
         .toList();
+  }
+
+  Future<List<MediaItem>> _loadQuarkLibrary(
+    MediaSourceConfig source, {
+    required String cookie,
+    required String parentFid,
+    String sectionId = '',
+    String sectionName = '',
+    required int limit,
+  }) async {
+    final normalizedCookie = cookie.trim();
+    if (normalizedCookie.isEmpty) {
+      return const [];
+    }
+    final normalizedParentFid =
+        parentFid.trim().isEmpty ? source.quarkFolderId : parentFid.trim();
+    final items = <MediaItem>[];
+    final queue = <_QuarkDirectoryCursor>[
+      _QuarkDirectoryCursor(
+        fid: normalizedParentFid,
+      ),
+    ];
+
+    for (var index = 0; index < queue.length && items.length < limit; index++) {
+      final cursor = queue[index];
+      final entries = await _quarkSaveClient.listEntries(
+        cookie: normalizedCookie,
+        parentFid: cursor.fid,
+      );
+      for (final entry in entries) {
+        if (entry.isDirectory) {
+          queue.add(
+            _QuarkDirectoryCursor(
+              fid: entry.fid,
+            ),
+          );
+          continue;
+        }
+        if (!entry.isVideo) {
+          continue;
+        }
+        items.add(
+          _buildQuarkMediaItem(
+            source: source,
+            entry: entry,
+            sectionId: sectionId,
+            sectionName: sectionName,
+          ),
+        );
+        if (items.length >= limit) {
+          break;
+        }
+      }
+    }
+
+    return items;
+  }
+
+  MediaItem _buildQuarkMediaItem({
+    required MediaSourceConfig source,
+    required QuarkFileEntry entry,
+    required String sectionId,
+    required String sectionName,
+  }) {
+    final recognition = NasMediaRecognizer.recognize(entry.path);
+    final normalizedTitle = recognition.title.trim().isNotEmpty
+        ? recognition.title.trim()
+        : _stripFileExtension(entry.name);
+    final normalizedItemType = recognition.itemType.trim().isNotEmpty
+        ? recognition.itemType.trim()
+        : 'movie';
+    final resourceId = _buildQuarkResourceId(
+      fid: entry.fid,
+      path: entry.path,
+    );
+    return MediaItem(
+      id: resourceId,
+      title: normalizedTitle,
+      originalTitle: _stripFileExtension(entry.name),
+      sortTitle: normalizedTitle,
+      overview: '',
+      posterUrl: '',
+      year: recognition.year,
+      durationLabel: normalizedItemType == 'episode' ? '剧集' : '文件',
+      genres: const [],
+      directors: const [],
+      actors: const [],
+      itemType: normalizedItemType,
+      isFolder: false,
+      sectionId: sectionId,
+      sectionName: sectionName,
+      sourceId: source.id,
+      sourceName: source.name,
+      sourceKind: source.kind,
+      streamUrl: '',
+      actualAddress: entry.path,
+      playbackItemId: entry.fid,
+      seasonNumber: recognition.seasonNumber,
+      episodeNumber: recognition.episodeNumber,
+      imdbId: recognition.imdbId,
+      ratingLabels: const [],
+      container: entry.extension,
+      fileSizeBytes: entry.sizeBytes,
+      addedAt: entry.updatedAt ?? DateTime.now(),
+    );
+  }
+
+  String _buildQuarkResourceId({
+    required String fid,
+    required String path,
+  }) {
+    final normalizedFid = Uri.encodeComponent(fid.trim());
+    return Uri(
+      scheme: 'quark',
+      host: 'entry',
+      path: '/$normalizedFid',
+      queryParameters: {
+        if (path.trim().isNotEmpty) 'path': path.trim(),
+      },
+    ).toString();
+  }
+
+  _ParsedQuarkResourceId? _parseQuarkResourceId(String raw) {
+    final uri = Uri.tryParse(raw.trim());
+    if (uri == null || uri.scheme != 'quark') {
+      return null;
+    }
+    final segments = uri.pathSegments
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+    if (segments.isEmpty) {
+      return null;
+    }
+    final fid = Uri.decodeComponent(segments.last);
+    if (fid.isEmpty) {
+      return null;
+    }
+    return _ParsedQuarkResourceId(
+      fid: fid,
+      path: uri.queryParameters['path']?.trim() ?? '',
+    );
   }
 
   bool _looksLikePlayableResourcePath(String value) {
@@ -1131,7 +1395,8 @@ class AppMediaRepository implements MediaRepository {
   }
 
   bool _looksLikeSeasonFolderLabel(String value) {
-    return looksLikeSeasonFolderLabel(value);
+    return looksLikeSeasonFolderLabel(value) ||
+        looksLikeNumericTopicSeason(value);
   }
 
   List<String> _buildQuarkDirectoryCandidateVariations(String rawValue) {
@@ -1294,4 +1559,22 @@ class _MatchedSyncDeleteScope {
       matchMode: matchMode ?? this.matchMode,
     );
   }
+}
+
+class _QuarkDirectoryCursor {
+  const _QuarkDirectoryCursor({
+    required this.fid,
+  });
+
+  final String fid;
+}
+
+class _ParsedQuarkResourceId {
+  const _ParsedQuarkResourceId({
+    required this.fid,
+    required this.path,
+  });
+
+  final String fid;
+  final String path;
 }

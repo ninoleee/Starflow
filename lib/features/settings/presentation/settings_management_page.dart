@@ -61,7 +61,9 @@ class _SettingsManagementPageState
     final service = ref.watch(settingsTransferServiceProvider);
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final isIos = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
-    final usesSystemExport = isIos && service.supportsSystemExport;
+    final usesWebTransfer = kIsWeb && service.isSupported;
+    final usesSystemExport =
+        (usesWebTransfer || isIos) && service.supportsSystemExport;
 
     return SettingsPageScaffold(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -75,9 +77,11 @@ class _SettingsManagementPageState
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          usesSystemExport
-                              ? '可以把当前设置导出到本地 JSON 文件，也可以从本地 JSON 文件导入并覆盖当前配置。iOS 上导出会直接打开系统文件导出器，可保存到“文件 / iCloud / 本机其他位置”。'
-                              : '可以把当前设置导出到本地 JSON 文件，也可以从本地 JSON 文件导入并覆盖当前配置。导出时会先选择目录，再自动生成文件名。',
+                          usesWebTransfer
+                              ? '浏览器会直接下载当前配置为 JSON，也可以选择本地 JSON 文件导入并覆盖当前配置。'
+                              : usesSystemExport
+                                  ? '可以把当前设置导出到本地 JSON 文件，也可以从本地 JSON 文件导入并覆盖当前配置。iOS 上导出会直接打开系统文件导出器，可保存到“文件 / iCloud / 本机其他位置”。'
+                                  : '可以把当前设置导出到本地 JSON 文件，也可以从本地 JSON 文件导入并覆盖当前配置。导出时会先选择目录，再自动生成文件名。',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                         const SizedBox(height: 16),
@@ -95,29 +99,43 @@ class _SettingsManagementPageState
                         _ActionButton(
                           icon: Icons.save_alt_rounded,
                           label: _isExporting
-                              ? (usesSystemExport ? '正在打开导出器…' : '正在导出…')
+                              ? usesWebTransfer
+                                  ? '正在准备下载…'
+                                  : usesSystemExport
+                                      ? '正在打开导出器…'
+                                      : '正在导出…'
                               : '导出当前配置',
                           onPressed: _isExporting || _isImporting
                               ? null
                               : () => _exportSettings(settings),
                         ),
                         const SizedBox(height: 24),
-                        _PathEditor(
-                          label: '导入路径',
-                          controller: _importPathController,
-                          hintText: '填写要导入的 JSON 文件路径',
-                          icon: Icons.download_rounded,
-                          actionLabel: '选择文件',
-                          onActionPressed: _pickImportPath,
-                        ),
-                        const SizedBox(height: 12),
-                        _ActionButton(
-                          icon: Icons.restore_page_rounded,
-                          label: _isImporting ? '正在导入…' : '导入并覆盖配置',
-                          onPressed: _isExporting || _isImporting
-                              ? null
-                              : _confirmImport,
-                        ),
+                        if (usesWebTransfer)
+                          _ActionButton(
+                            icon: Icons.restore_page_rounded,
+                            label: _isImporting ? '正在导入…' : '选择 JSON 并导入',
+                            onPressed: _isExporting || _isImporting
+                                ? null
+                                : _importSettingsFromPicker,
+                          )
+                        else ...[
+                          _PathEditor(
+                            label: '导入路径',
+                            controller: _importPathController,
+                            hintText: '填写要导入的 JSON 文件路径',
+                            icon: Icons.download_rounded,
+                            actionLabel: '选择文件',
+                            onActionPressed: _pickImportPath,
+                          ),
+                          const SizedBox(height: 12),
+                          _ActionButton(
+                            icon: Icons.restore_page_rounded,
+                            label: _isImporting ? '正在导入…' : '导入并覆盖配置',
+                            onPressed: _isExporting || _isImporting
+                                ? null
+                                : _confirmImport,
+                          ),
+                        ],
                       ],
                     )
               : Text(service.unsupportedReason),
@@ -129,7 +147,9 @@ class _SettingsManagementPageState
   Future<void> _exportSettings(AppSettings settings) async {
     final service = ref.read(settingsTransferServiceProvider);
     final isIos = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
-    final usesSystemExport = isIos && service.supportsSystemExport;
+    final usesWebTransfer = kIsWeb && service.isSupported;
+    final usesSystemExport =
+        (usesWebTransfer || isIos) && service.supportsSystemExport;
     final targetPath = _exportPathController.text.trim();
     if (!usesSystemExport && targetPath.isEmpty) {
       _showMessage('请先填写导出路径');
@@ -159,7 +179,11 @@ class _SettingsManagementPageState
         _showMessage('已导出到 ${result.path}');
         return;
       }
-      _showMessage('配置已导出，可在“文件”中查看。');
+      if (kIsWeb) {
+        _showMessage('浏览器已开始下载配置文件。');
+      } else {
+        _showMessage('配置已导出，可在“文件”中查看。');
+      }
     } catch (error) {
       _showMessage('导出失败：$error');
     } finally {
@@ -286,6 +310,20 @@ class _SettingsManagementPageState
     });
   }
 
+  Future<void> _importSettingsFromPicker() async {
+    String? picked;
+    try {
+      picked = await ref.read(settingsTransferServiceProvider).pickImportPath();
+    } catch (error) {
+      _showMessage('选择导入文件失败：$error');
+      return;
+    }
+    if (picked == null || !mounted) {
+      return;
+    }
+    await _confirmImportWithPath(picked);
+  }
+
   String _defaultExportFileName() {
     final timestamp = DateTime.now()
         .toIso8601String()
@@ -295,7 +333,10 @@ class _SettingsManagementPageState
   }
 
   Future<void> _confirmImport() async {
-    final sourcePath = _importPathController.text.trim();
+    await _confirmImportWithPath(_importPathController.text.trim());
+  }
+
+  Future<void> _confirmImportWithPath(String sourcePath) async {
     if (sourcePath.isEmpty) {
       _showMessage('请先填写导入路径');
       return;

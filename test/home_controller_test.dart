@@ -259,6 +259,251 @@ void main() {
       expect(sections.first.items.first.subtitle, contains('27:15 / 1:42:00'));
     });
 
+    test('recent playback module shows series title instead of episode title',
+        () async {
+      SharedPreferences.setMockInitialValues(const {});
+      final prefs = await SharedPreferences.getInstance();
+      final playbackMemoryRepository =
+          PlaybackMemoryRepository(sharedPreferences: prefs);
+      final target = const PlaybackTarget(
+        title: '第 2 集',
+        sourceId: 'webdav-main',
+        streamUrl: 'https://media.example.com/episode-2.mkv',
+        sourceName: '家庭影音库',
+        sourceKind: MediaSourceKind.nas,
+        itemId: 'episode-2',
+        itemType: 'episode',
+        year: 2025,
+        seriesId: 'series-1',
+        seriesTitle: '人生切割术',
+        seasonNumber: 1,
+        episodeNumber: 2,
+      );
+      await playbackMemoryRepository.saveProgress(
+        target: target,
+        position: const Duration(minutes: 12, seconds: 8),
+        duration: const Duration(minutes: 48),
+      );
+
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings(
+              mediaSources: const [],
+              searchProviders: const [],
+              doubanAccount: const DoubanAccountConfig(
+                enabled: true,
+                userId: 'demo-user',
+              ),
+              homeModules: [
+                HomeModuleConfig.recentPlayback(),
+              ],
+            ),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            _FakeMediaRepository(library: const []),
+          ),
+          playbackMemoryRepositoryProvider.overrideWithValue(
+            playbackMemoryRepository,
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final sections = await container.read(homeSectionsProvider.future);
+      expect(sections, hasLength(1));
+      expect(sections.first.items, hasLength(1));
+      expect(sections.first.items.first.title, '人生切割术');
+      expect(sections.first.items.first.subtitle, contains('S01E02'));
+      expect(sections.first.items.first.detailTarget.itemType, 'series');
+      expect(sections.first.items.first.detailTarget.itemId, 'series-1');
+      expect(
+        sections.first.items.first.detailTarget.playbackTarget?.title,
+        '第 2 集',
+      );
+    });
+
+    test('recent playback module collapses multiple episode records per series',
+        () async {
+      SharedPreferences.setMockInitialValues(const {});
+      final prefs = await SharedPreferences.getInstance();
+      final playbackMemoryRepository =
+          PlaybackMemoryRepository(sharedPreferences: prefs);
+      await playbackMemoryRepository.saveProgress(
+        target: const PlaybackTarget(
+          title: '第 1 集',
+          sourceId: 'webdav-main',
+          streamUrl: 'https://media.example.com/episode-1.mkv',
+          sourceName: '家庭影音库',
+          sourceKind: MediaSourceKind.nas,
+          itemId: 'episode-1',
+          itemType: 'episode',
+          year: 2025,
+          seriesId: 'series-1',
+          seriesTitle: '人生切割术',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+        position: const Duration(minutes: 8),
+        duration: const Duration(minutes: 48),
+      );
+      await playbackMemoryRepository.saveProgress(
+        target: const PlaybackTarget(
+          title: '孤注一掷',
+          sourceId: 'webdav-main',
+          streamUrl: 'https://media.example.com/movie.mkv',
+          sourceName: '家庭影音库',
+          sourceKind: MediaSourceKind.nas,
+          itemId: 'movie-1',
+          itemType: 'movie',
+          year: 2023,
+        ),
+        position: const Duration(minutes: 16),
+        duration: const Duration(hours: 1, minutes: 57),
+      );
+      await playbackMemoryRepository.saveProgress(
+        target: const PlaybackTarget(
+          title: '第 2 集',
+          sourceId: 'webdav-main',
+          streamUrl: 'https://media.example.com/episode-2.mkv',
+          sourceName: '家庭影音库',
+          sourceKind: MediaSourceKind.nas,
+          itemId: 'episode-2',
+          itemType: 'episode',
+          year: 2025,
+          seriesId: 'series-1',
+          seriesTitle: '人生切割术',
+          seasonNumber: 1,
+          episodeNumber: 2,
+        ),
+        position: const Duration(minutes: 12),
+        duration: const Duration(minutes: 48),
+      );
+
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings(
+              mediaSources: const [],
+              searchProviders: const [],
+              doubanAccount: const DoubanAccountConfig(
+                enabled: true,
+                userId: 'demo-user',
+              ),
+              homeModules: [
+                HomeModuleConfig.recentPlayback(),
+              ],
+            ),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            _FakeMediaRepository(library: const []),
+          ),
+          playbackMemoryRepositoryProvider.overrideWithValue(
+            playbackMemoryRepository,
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final sections = await container.read(homeSectionsProvider.future);
+      expect(sections, hasLength(1));
+      expect(sections.first.items, hasLength(2));
+      expect(sections.first.items.first.title, '人生切割术');
+      expect(sections.first.items.first.subtitle, contains('S01E02'));
+      expect(sections.first.items.last.title, '孤注一掷');
+    });
+
+    test('recent playback module prefers associated series metadata', () async {
+      SharedPreferences.setMockInitialValues(const {});
+      final prefs = await SharedPreferences.getInstance();
+      final playbackMemoryRepository =
+          PlaybackMemoryRepository(sharedPreferences: prefs);
+      await playbackMemoryRepository.saveProgress(
+        target: const PlaybackTarget(
+          title: '第 2 集',
+          sourceId: 'webdav-main',
+          streamUrl: 'https://media.example.com/episode-2.mkv',
+          sourceName: '家庭影音库',
+          sourceKind: MediaSourceKind.nas,
+          itemId: 'episode-2',
+          itemType: 'episode',
+          year: 2025,
+          seriesId: 'series-1',
+          seriesTitle: '人生切割术',
+          seasonNumber: 1,
+          episodeNumber: 2,
+        ),
+        position: const Duration(minutes: 12),
+        duration: const Duration(minutes: 48),
+      );
+      final cacheRepository = _FakeLocalStorageCacheRepository(
+        target: MediaDetailTarget(
+          title: '人生切割术（已关联）',
+          posterUrl: 'https://cache.example.com/severance.jpg',
+          overview: '已关联的剧集信息',
+          year: 2025,
+          availabilityLabel: '资源已就绪：WebDAV · 家庭影音库',
+          searchQuery: '人生切割术',
+          sourceKind: MediaSourceKind.nas,
+          sourceName: '家庭影音库',
+          sourceId: 'webdav-main',
+          itemId: 'series-1',
+          itemType: 'series',
+          playbackTarget: const PlaybackTarget(
+            title: '第 2 集',
+            sourceId: 'webdav-main',
+            streamUrl: 'https://media.example.com/episode-2.mkv',
+            sourceName: '家庭影音库',
+            sourceKind: MediaSourceKind.nas,
+            itemId: 'episode-2',
+            itemType: 'episode',
+            seriesId: 'series-1',
+            seriesTitle: '人生切割术（已关联）',
+            seasonNumber: 1,
+            episodeNumber: 2,
+          ),
+        ),
+      );
+
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings(
+              mediaSources: const [],
+              searchProviders: const [],
+              doubanAccount: const DoubanAccountConfig(
+                enabled: true,
+                userId: 'demo-user',
+              ),
+              homeModules: [
+                HomeModuleConfig.recentPlayback(),
+              ],
+            ),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            _FakeMediaRepository(library: const []),
+          ),
+          playbackMemoryRepositoryProvider.overrideWithValue(
+            playbackMemoryRepository,
+          ),
+          localStorageCacheRepositoryProvider
+              .overrideWithValue(cacheRepository),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final sections = await container.read(homeSectionsProvider.future);
+      expect(sections, hasLength(1));
+      expect(sections.first.items, hasLength(1));
+      expect(sections.first.items.first.title, '人生切割术（已关联）');
+      expect(
+        sections.first.items.first.posterUrl,
+        'https://cache.example.com/severance.jpg',
+      );
+      expect(sections.first.items.first.detailTarget.itemType, 'series');
+      expect(sections.first.items.first.detailTarget.itemId, 'series-1');
+    });
+
     test('douban section prefers cached poster from detail cache', () async {
       final cacheRepository = _FakeLocalStorageCacheRepository(
         target: MediaDetailTarget(

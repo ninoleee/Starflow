@@ -10,7 +10,6 @@ import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
@@ -20,11 +19,6 @@ import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:url_launcher/url_launcher.dart';
-
-final searchCollectionsProvider = FutureProvider<List<MediaCollection>>((ref) {
-  ref.watch(appSettingsProvider);
-  return ref.read(mediaRepositoryProvider).fetchCollections();
-});
 
 class SearchPage extends ConsumerStatefulWidget {
   const SearchPage({
@@ -159,11 +153,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     await _rememberQuery(keyword);
     final settings = ref.read(appSettingsProvider);
     final enabledProviders = _visibleSearchProviders(settings);
-    final scopedCollections = await ref.read(searchCollectionsProvider.future);
-    final localSources = _visibleLocalSources(
-      settings: settings,
-      collections: scopedCollections,
-    );
+    final localSources = _visibleLocalSources(settings: settings);
     final targets = _buildTargets(
       localSources: localSources,
       providers: enabledProviders,
@@ -243,13 +233,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final headerTopInset = kToolbarHeight;
     final enabledProviders = _visibleSearchProviders(settings);
-    final collectionsAsync = ref.watch(searchCollectionsProvider);
-    final scopedCollections =
-        collectionsAsync.valueOrNull ?? const <MediaCollection>[];
-    final localSources = _visibleLocalSources(
-      settings: settings,
-      collections: scopedCollections,
-    );
+    final localSources = _visibleLocalSources(settings: settings);
     final targets = _buildTargets(
       localSources: localSources,
       providers: enabledProviders,
@@ -499,36 +483,53 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final result = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
-        final dialog = AlertDialog(
-          title: const Text('输入搜索关键字'),
-          content: wrapTelevisionDialogFieldTraversal(
-            enabled: isTelevision,
-            child: TextField(
-              controller: controller,
-              focusNode: queryFocusNode,
-              autofocus: true,
-              textInputAction: TextInputAction.search,
-              onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
-              decoration: const InputDecoration(
-                hintText: '电影、剧集、番剧...',
+        final dialog = FocusTraversalGroup(
+          policy: OrderedTraversalPolicy(),
+          child: AlertDialog(
+            title: const Text('输入搜索关键字'),
+            content: SizedBox(
+              width: 420,
+              child: FocusTraversalOrder(
+                order: const NumericFocusOrder(1),
+                child: wrapTelevisionDialogFieldTraversal(
+                  enabled: isTelevision,
+                  child: TextField(
+                    controller: controller,
+                    focusNode: queryFocusNode,
+                    autofocus: true,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (value) =>
+                        Navigator.of(dialogContext).pop(value),
+                    decoration: const InputDecoration(
+                      hintText: '电影、剧集、番剧...',
+                    ),
+                  ),
+                ),
               ),
             ),
+            actions: [
+              FocusTraversalOrder(
+                order: const NumericFocusOrder(2),
+                child: StarflowButton(
+                  label: '取消',
+                  focusNode: cancelFocusNode,
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  variant: StarflowButtonVariant.ghost,
+                  compact: true,
+                ),
+              ),
+              FocusTraversalOrder(
+                order: const NumericFocusOrder(3),
+                child: StarflowButton(
+                  label: '搜索',
+                  focusNode: confirmFocusNode,
+                  onPressed: () =>
+                      Navigator.of(dialogContext).pop(controller.text),
+                  compact: true,
+                ),
+              ),
+            ],
           ),
-          actions: [
-            StarflowButton(
-              label: '取消',
-              focusNode: cancelFocusNode,
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              variant: StarflowButtonVariant.ghost,
-              compact: true,
-            ),
-            StarflowButton(
-              label: '搜索',
-              focusNode: confirmFocusNode,
-              onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-              compact: true,
-            ),
-          ],
         );
         return wrapTelevisionDialogBackHandling(
           enabled: isTelevision,
@@ -681,20 +682,16 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   List<MediaSourceConfig> _visibleLocalSources({
     required AppSettings settings,
-    required List<MediaCollection> collections,
   }) {
     final allowedIds = settings.searchSourceIds.toSet();
-    final visibleSourceIds = collections
-        .map((collection) => collection.sourceId.trim())
-        .where((id) => id.isNotEmpty)
-        .toSet();
     final availableSources = settings.mediaSources
         .where(
           (source) =>
               source.enabled &&
               (source.kind == MediaSourceKind.emby ||
-                  source.kind == MediaSourceKind.nas) &&
-              visibleSourceIds.contains(source.id),
+                  source.kind == MediaSourceKind.nas ||
+                  (source.kind == MediaSourceKind.quark &&
+                      source.hasConfiguredQuarkFolder)),
         )
         .toList(growable: false);
     if (allowedIds.isEmpty) {

@@ -91,7 +91,9 @@ class _NetworkStorageSettingsPageState
           (source) =>
               source.enabled &&
               (source.kind == MediaSourceKind.emby ||
-                  source.kind == MediaSourceKind.nas),
+                  source.kind == MediaSourceKind.nas ||
+                  (source.kind == MediaSourceKind.quark &&
+                      source.hasConfiguredQuarkFolder)),
         )
         .toList(growable: false);
   }

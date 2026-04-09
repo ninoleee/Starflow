@@ -24,6 +24,7 @@ enum LibraryFilter {
   all,
   emby,
   nas,
+  quark,
 }
 
 extension LibraryFilterX on LibraryFilter {
@@ -35,6 +36,8 @@ extension LibraryFilterX on LibraryFilter {
         return 'Emby';
       case LibraryFilter.nas:
         return 'WebDAV';
+      case LibraryFilter.quark:
+        return 'Quark';
     }
   }
 
@@ -46,6 +49,8 @@ extension LibraryFilterX on LibraryFilter {
         return MediaSourceKind.emby;
       case LibraryFilter.nas:
         return MediaSourceKind.nas;
+      case LibraryFilter.quark:
+        return MediaSourceKind.quark;
     }
   }
 }
@@ -363,7 +368,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
   }
 
   List<String> _rebuildableWebDavSourceIds(AppSettings settings) {
-    if (_filter == LibraryFilter.emby) {
+    if (_filter == LibraryFilter.emby || _filter == LibraryFilter.quark) {
       return const [];
     }
     return settings.mediaSources
@@ -380,7 +385,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     Iterable<WebDavScrapeProgress> progressEntries,
     AppSettings settings,
   ) {
-    if (_filter == LibraryFilter.emby) {
+    if (_filter == LibraryFilter.emby || _filter == LibraryFilter.quark) {
       return const [];
     }
     final enabledWebDavSourceIds = settings.mediaSources

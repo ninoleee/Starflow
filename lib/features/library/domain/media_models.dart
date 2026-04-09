@@ -1,6 +1,7 @@
 enum MediaSourceKind {
   emby,
   nas,
+  quark,
 }
 
 const kNoSectionsSelectedSentinel = '__none__';
@@ -12,6 +13,8 @@ extension MediaSourceKindX on MediaSourceKind {
         return 'Emby';
       case MediaSourceKind.nas:
         return 'WebDAV';
+      case MediaSourceKind.quark:
+        return 'Quark';
     }
   }
 
@@ -65,6 +68,9 @@ class MediaSourceConfig {
   bool get hasActiveSession => hasAccessToken && userId.trim().isNotEmpty;
 
   String get connectionStatusLabel {
+    if (kind == MediaSourceKind.quark) {
+      return hasConfiguredQuarkFolder ? '已配置' : '待选择目录';
+    }
     if (kind != MediaSourceKind.emby) {
       return '已配置';
     }
@@ -168,6 +174,29 @@ class MediaSourceConfig {
               .where((item) => item.trim().isNotEmpty)
               .toList(),
     );
+  }
+
+  bool get hasConfiguredQuarkFolder {
+    if (kind != MediaSourceKind.quark) {
+      return false;
+    }
+    return endpoint.trim().isNotEmpty || libraryPath.trim().isNotEmpty;
+  }
+
+  String get quarkFolderId {
+    if (kind != MediaSourceKind.quark) {
+      return '';
+    }
+    final normalized = endpoint.trim();
+    return normalized.isEmpty ? '0' : normalized;
+  }
+
+  String get quarkFolderPath {
+    if (kind != MediaSourceKind.quark) {
+      return '';
+    }
+    final normalized = libraryPath.trim();
+    return normalized.isEmpty ? '/' : normalized;
   }
 }
 

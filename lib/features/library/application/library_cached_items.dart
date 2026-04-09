@@ -34,6 +34,13 @@ MediaItem _mergeCachedLibraryItem(
           ? item.posterHeaders
           : cached.posterHeaders);
   return item.copyWith(
+    title: cached.title.trim().isNotEmpty ? cached.title : item.title,
+    originalTitle: cached.title.trim().isNotEmpty &&
+            item.originalTitle.trim().isEmpty &&
+            cached.title.trim() != item.title.trim()
+        ? item.title
+        : item.originalTitle,
+    sortTitle: cached.title.trim().isNotEmpty ? cached.title : item.sortTitle,
     posterUrl: resolvedPosterUrl,
     posterHeaders: resolvedPosterHeaders,
     backdropUrl: item.backdropUrl.trim().isNotEmpty

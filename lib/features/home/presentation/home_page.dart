@@ -2294,28 +2294,52 @@ class _FeaturedHeroArtwork extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (style.usesPosterArtwork) {
-      final posterImage = item.portraitImage.url.trim().isNotEmpty
-          ? item.portraitImage
-          : item.landscapeImage;
-      if (posterImage.url.trim().isEmpty) {
-        return const SizedBox.shrink();
-      }
-      return AppNetworkImage(
-        posterImage.url,
-        headers: posterImage.headers,
-        fit: BoxFit.cover,
-        alignment: Alignment.topCenter,
-      );
-    }
-
     final screenSize = MediaQuery.sizeOf(context);
     final isPortraitScreen = screenSize.height > screenSize.width;
-    final selectedImage =
-        isPortraitScreen ? item.portraitImage : item.landscapeImage;
+    final selectedImage = isPortraitScreen
+        ? (item.portraitImage.url.trim().isNotEmpty
+            ? item.portraitImage
+            : item.landscapeImage)
+        : (item.landscapeImage.url.trim().isNotEmpty
+            ? item.landscapeImage
+            : item.portraitImage);
 
     if (selectedImage.url.trim().isEmpty) {
       return const SizedBox.shrink();
+    }
+
+    if (style.usesPosterArtwork && !selectedImage.preferContain) {
+      return AppNetworkImage(
+        selectedImage.url,
+        headers: selectedImage.headers,
+        fit: BoxFit.cover,
+        alignment: Alignment.center,
+      );
+    }
+
+    if (style.usesPosterArtwork) {
+      return Align(
+        alignment: Alignment.centerRight,
+        child: FractionallySizedBox(
+          widthFactor: isPortraitScreen
+              ? (displayMode == HomeHeroDisplayMode.normal ? 0.68 : 0.58)
+              : (displayMode == HomeHeroDisplayMode.normal ? 0.54 : 0.42),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              0,
+              displayMode == HomeHeroDisplayMode.normal ? 22 : 28,
+              displayMode == HomeHeroDisplayMode.normal ? 18 : 24,
+              displayMode == HomeHeroDisplayMode.normal ? 22 : 28,
+            ),
+            child: AppNetworkImage(
+              selectedImage.url,
+              headers: selectedImage.headers,
+              fit: BoxFit.contain,
+              alignment: Alignment.centerRight,
+            ),
+          ),
+        ),
+      );
     }
 
     if (!selectedImage.preferContain) {

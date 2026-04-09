@@ -483,26 +483,29 @@ class _PlaybackSubtitleSettingsPageState
                 ),
           ),
           const SizedBox(height: 10),
-          for (final source in OnlineSubtitleSource.values) ...[
-            SettingsToggleTile(
-              title: source.label,
-              subtitle: source.description,
-              value: _draftOnlineSubtitleSources.contains(source),
-              onChanged: (value) {
-                setState(() {
-                  final next = _draftOnlineSubtitleSources.toSet();
-                  if (value) {
-                    next.add(source);
-                  } else {
-                    next.remove(source);
-                  }
-                  _draftOnlineSubtitleSources = next.toList(growable: false);
-                });
-              },
-            ),
-            if (source != OnlineSubtitleSource.values.last)
-              const SizedBox(height: 12),
-          ],
+          ...buildSettingsTileGroup(
+            [
+              for (final source in OnlineSubtitleSource.values)
+                SettingsToggleTile(
+                  title: source.label,
+                  subtitle: source.description,
+                  value: _draftOnlineSubtitleSources.contains(source),
+                  onChanged: (value) {
+                    setState(() {
+                      final next = _draftOnlineSubtitleSources.toSet();
+                      if (value) {
+                        next.add(source);
+                      } else {
+                        next.remove(source);
+                      }
+                      _draftOnlineSubtitleSources =
+                          next.toList(growable: false);
+                    });
+                  },
+                ),
+            ],
+            spacing: 12,
+          ),
         ],
       ),
     );

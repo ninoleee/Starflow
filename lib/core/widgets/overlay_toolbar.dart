@@ -22,6 +22,7 @@ class OverlayToolbar extends ConsumerWidget {
     final topInset = MediaQuery.paddingOf(context).top;
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final backAction = onBack ?? () => Navigator.maybePop(context);
+    final showBackButton = !isTelevision;
     return Material(
       type: MaterialType.transparency,
       child: Padding(
@@ -31,22 +32,7 @@ class OverlayToolbar extends ConsumerWidget {
           width: double.infinity,
           child: Row(
             children: [
-              if (isTelevision)
-                Padding(
-                  padding: const EdgeInsets.only(left: 8),
-                  child: TvFocusableAction(
-                    onPressed: backAction,
-                    borderRadius: BorderRadius.circular(18),
-                    child: Padding(
-                      padding: const EdgeInsets.all(10),
-                      child: Icon(
-                        Icons.arrow_back_rounded,
-                        color: color,
-                      ),
-                    ),
-                  ),
-                )
-              else
+              if (showBackButton)
                 TvFocusableAction(
                   onPressed: backAction,
                   borderRadius: BorderRadius.circular(14),

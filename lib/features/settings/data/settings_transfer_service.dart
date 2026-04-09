@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/settings/data/settings_transfer_service_stub.dart'
     if (dart.library.io) 'package:starflow/features/settings/data/settings_transfer_service_io.dart'
+    if (dart.library.js_interop) 'package:starflow/features/settings/data/settings_transfer_service_web.dart'
     as impl;
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
