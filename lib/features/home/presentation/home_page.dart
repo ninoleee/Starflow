@@ -306,16 +306,17 @@ class _HomePageState extends ConsumerState<HomePage> {
     HomeSectionViewModel section, {
     required bool useHeroNextSectionFocusNode,
   }) {
+    final viewAllTarget = section.viewAllTarget;
+    final openViewAll = viewAllTarget == null
+        ? null
+        : () {
+            context.pushNamed(
+              viewAllTarget.routeName,
+              extra: viewAllTarget.extra,
+            );
+          };
     return _HomeSection(
       title: section.title,
-      onTitleTap: section.viewAllTarget == null
-          ? null
-          : () {
-              context.pushNamed(
-                section.viewAllTarget!.routeName,
-                extra: section.viewAllTarget!.extra,
-              );
-            },
       child: section.layout == HomeSectionLayout.carousel
           ? _HomeCarousel(
               items: section.carouselItems,
@@ -335,10 +336,17 @@ class _HomePageState extends ConsumerState<HomePage> {
                       physics: const BouncingScrollPhysics(),
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       scrollDirection: Axis.horizontal,
-                      itemCount: section.items.length,
+                      itemCount:
+                          section.items.length + (openViewAll == null ? 0 : 1),
                       separatorBuilder: (context, index) =>
                           const SizedBox(width: 10),
                       itemBuilder: (context, index) {
+                        if (index >= section.items.length) {
+                          return _HomeSectionViewAllTile(
+                            focusId: 'home:section:${section.id}:view-all',
+                            onTap: openViewAll!,
+                          );
+                        }
                         final item = section.items[index];
                         return MediaPosterTile(
                           title: item.title,
@@ -1253,12 +1261,10 @@ class _HomeSection extends StatelessWidget {
   const _HomeSection({
     required this.title,
     required this.child,
-    this.onTitleTap,
   });
 
   final String title;
   final Widget child;
-  final VoidCallback? onTitleTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1273,32 +1279,80 @@ class _HomeSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (onTitleTap == null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: titleWidget,
-          )
-        else
-          TvFocusableAction(
-            onPressed: onTitleTap,
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              child: Row(
-                children: [
-                  Expanded(child: titleWidget),
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    size: 18,
-                    color: const Color(0xFF95A4C0),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: titleWidget,
+        ),
+        const SizedBox(height: 12),
         child,
       ],
+    );
+  }
+}
+
+class _HomeSectionViewAllTile extends ConsumerWidget {
+  const _HomeSectionViewAllTile({
+    required this.onTap,
+    this.focusId,
+  });
+
+  final VoidCallback onTap;
+  final String? focusId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final content = SizedBox(
+      width: 140,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const detailsReservedHeight = 42.0;
+          final availablePosterHeight =
+              (constraints.maxHeight - detailsReservedHeight)
+                  .clamp(0.0, constraints.maxHeight)
+                  .toDouble();
+          final naturalPosterHeight =
+              constraints.hasBoundedWidth ? constraints.maxWidth / 0.7 : 0.0;
+          final posterHeight = naturalPosterHeight < availablePosterHeight
+              ? naturalPosterHeight
+              : availablePosterHeight;
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                height: posterHeight,
+                width: double.infinity,
+                child: Center(
+                  child: Icon(
+                    Icons.chevron_right_rounded,
+                    size: 42,
+                    color: Colors.white.withValues(alpha: 0.82),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Expanded(child: SizedBox.shrink()),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (isTelevision) {
+      return TvFocusableAction(
+        onPressed: onTap,
+        focusId: focusId,
+        borderRadius: BorderRadius.circular(18),
+        visualStyle: TvFocusVisualStyle.floating,
+        child: content,
+      );
+    }
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: content,
     );
   }
 }

@@ -164,8 +164,8 @@ class MediaPosterTile extends ConsumerWidget {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.18),
-                        width: 1.1,
+                        color: Colors.white.withValues(alpha: 0.34),
+                        width: 1.35,
                       ),
                     ),
                   ),
@@ -190,7 +190,7 @@ class MediaPosterTile extends ConsumerWidget {
                   aspectRatio: 0.7,
                   child: buildPosterFrame(),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 Text(
                   title,
                   maxLines: 1,
@@ -241,7 +241,7 @@ class MediaPosterTile extends ConsumerWidget {
                   width: double.infinity,
                   child: SizedBox.expand(child: buildPosterFrame()),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 Expanded(
                   child: Align(
                     alignment: Alignment.topLeft,
