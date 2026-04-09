@@ -1601,7 +1601,9 @@ class NasMediaIndexer {
     final relativeDirectories = resourceSegments.length <= commonLength + 1
         ? const <String>[]
         : resourceSegments.sublist(commonLength, resourceSegments.length - 1);
-    return relativeDirectories.any(_looksLikeSeasonFolderLabel);
+    final firstSeasonDirectoryIndex =
+        relativeDirectories.indexWhere(_looksLikeSeasonFolderLabel);
+    return firstSeasonDirectoryIndex == 0;
   }
 
   String _nearestNonSeasonDirectory(Iterable<String> directories) {
@@ -1665,13 +1667,10 @@ class NasMediaIndexer {
     var hitFilteredDirectory = false;
     for (var index = relativeDirectories.length - 1; index >= 0; index--) {
       final rawDirectory = relativeDirectories[index].trim();
-      if (rawDirectory.isEmpty || _looksLikeSeasonFolderLabel(rawDirectory)) {
+      if (rawDirectory.isEmpty) {
         continue;
       }
       final cleanedDirectory = _cleanIndexedTitleLabel(rawDirectory);
-      if (cleanedDirectory.isEmpty) {
-        continue;
-      }
       if (_matchesSeriesTitleFilterKeyword(
         rawDirectory,
         cleanedValue: cleanedDirectory,
@@ -1679,6 +1678,12 @@ class NasMediaIndexer {
       )) {
         hitFilteredDirectory = true;
         break;
+      }
+      if (_looksLikeSeasonFolderLabel(rawDirectory)) {
+        continue;
+      }
+      if (cleanedDirectory.isEmpty) {
+        continue;
       }
       lastInferredTitle = cleanedDirectory;
     }
@@ -1699,13 +1704,10 @@ class NasMediaIndexer {
     int? lastUsableIndex;
     for (var index = relativeDirectories.length - 1; index >= 0; index--) {
       final rawDirectory = relativeDirectories[index].trim();
-      if (rawDirectory.isEmpty || _looksLikeSeasonFolderLabel(rawDirectory)) {
+      if (rawDirectory.isEmpty) {
         continue;
       }
       final cleanedDirectory = _cleanIndexedTitleLabel(rawDirectory);
-      if (cleanedDirectory.isEmpty) {
-        continue;
-      }
       if (_matchesSeriesTitleFilterKeyword(
         rawDirectory,
         cleanedValue: cleanedDirectory,
@@ -1713,6 +1715,12 @@ class NasMediaIndexer {
       )) {
         filteredIndex = index;
         break;
+      }
+      if (_looksLikeSeasonFolderLabel(rawDirectory)) {
+        continue;
+      }
+      if (cleanedDirectory.isEmpty) {
+        continue;
       }
       lastUsableIndex = index;
     }

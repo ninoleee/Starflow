@@ -143,18 +143,18 @@ void main() {
       scannedItems: const [
         _PendingTestItem(
           id: 'filtered-ep-1',
-          path: '怪奇物语/Stranger.Things.S04.2160p.NF.WEB-DL.x265.10bit.HDR/Stranger.Things.S04E01.2160p.NF.WEB-DL.x265.10bit.HDR.strm',
-          title:
-              'Stranger.Things.S04E01.2160p.NF.WEB-DL.x265.10bit.HDR',
+          path:
+              '怪奇物语/Stranger.Things.S04.2160p.NF.WEB-DL.x265.10bit.HDR/Stranger.Things.S04E01.2160p.NF.WEB-DL.x265.10bit.HDR.strm',
+          title: 'Stranger.Things.S04E01.2160p.NF.WEB-DL.x265.10bit.HDR',
           itemType: 'episode',
           seasonNumber: 4,
           episodeNumber: 1,
         ),
         _PendingTestItem(
           id: 'filtered-ep-2',
-          path: '怪奇物语/Stranger.Things.S04.2160p.NF.WEB-DL.x265.10bit.HDR/Stranger.Things.S04E02.2160p.NF.WEB-DL.x265.10bit.HDR.strm',
-          title:
-              'Stranger.Things.S04E02.2160p.NF.WEB-DL.x265.10bit.HDR',
+          path:
+              '怪奇物语/Stranger.Things.S04.2160p.NF.WEB-DL.x265.10bit.HDR/Stranger.Things.S04E02.2160p.NF.WEB-DL.x265.10bit.HDR.strm',
+          title: 'Stranger.Things.S04E02.2160p.NF.WEB-DL.x265.10bit.HDR',
           itemType: 'episode',
           seasonNumber: 4,
           episodeNumber: 2,
@@ -163,7 +163,7 @@ void main() {
     );
 
     final settings = SeedData.defaultSettings.copyWith(
-      mediaSources: const [source],
+      mediaSources: [source],
       wmdbMetadataMatchEnabled: false,
       tmdbMetadataMatchEnabled: false,
       imdbRatingMatchEnabled: false,

@@ -470,15 +470,10 @@ class NasMediaRecognizer {
     var hitFilteredDirectory = false;
     for (var index = pathSegments.length - 2; index >= 0; index--) {
       final rawSegment = pathSegments[index].trim();
-      if (rawSegment.isEmpty ||
-          _looksLikeSeasonFolder(rawSegment) ||
-          _looksLikeWrapperFolder(rawSegment)) {
+      if (rawSegment.isEmpty) {
         continue;
       }
       final cleanedSegment = _cleanTitle(rawSegment);
-      if (cleanedSegment.isEmpty) {
-        continue;
-      }
       if (_matchesSeriesTitleFilter(
         rawSegment,
         cleanedSegment: cleanedSegment,
@@ -486,6 +481,13 @@ class NasMediaRecognizer {
       )) {
         hitFilteredDirectory = true;
         break;
+      }
+      if (_looksLikeSeasonFolder(rawSegment) ||
+          _looksLikeWrapperFolder(rawSegment)) {
+        continue;
+      }
+      if (cleanedSegment.isEmpty) {
+        continue;
       }
       lastInferredTitle = cleanedSegment;
     }

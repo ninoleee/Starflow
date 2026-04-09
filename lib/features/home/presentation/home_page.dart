@@ -2308,7 +2308,8 @@ class _FeaturedHeroArtwork extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    if (style.usesPosterArtwork && !selectedImage.preferContain) {
+    if (style.usesPosterArtwork &&
+        (isPortraitScreen || !selectedImage.preferContain)) {
       return AppNetworkImage(
         selectedImage.url,
         headers: selectedImage.headers,
