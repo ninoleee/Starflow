@@ -400,6 +400,24 @@ class QuarkSaveClient {
     );
   }
 
+  Future<String> readTextFile({
+    required String cookie,
+    required String fid,
+  }) async {
+    final resolved = await resolveDownload(
+      cookie: cookie,
+      fid: fid,
+    );
+    final response = await _client.get(
+      Uri.parse(resolved.url),
+      headers: resolved.headers,
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw QuarkSaveException('夸克文件读取失败：HTTP ${response.statusCode}');
+    }
+    return utf8.decode(response.bodyBytes, allowMalformed: true);
+  }
+
   Future<bool> _waitForTask({
     required String cookie,
     required String taskId,

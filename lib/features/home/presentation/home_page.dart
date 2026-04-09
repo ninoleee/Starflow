@@ -143,6 +143,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 hasPendingSections: hasPendingSections,
                 heroEnabled: heroModule?.enabled ?? false,
                 heroSourceModuleId: heroSourceModuleId,
+                heroStyle: heroStyle,
                 heroLogoTitleEnabled: heroLogoTitleEnabled,
                 heroBackgroundEnabled: effectiveHeroBackgroundEnabled,
                 translucentEffectsEnabled: effectiveTranslucentEffectsEnabled,
@@ -151,7 +152,6 @@ class _HomePageState extends ConsumerState<HomePage> {
                     performanceLightweightHomeHeroEnabled,
                 isTelevision: isTelevision,
                 heroDisplayMode: heroDisplayMode,
-                heroStyle: heroStyle,
               ),
       ),
     );
@@ -165,6 +165,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     required bool hasPendingSections,
     required bool heroEnabled,
     required String heroSourceModuleId,
+    required HomeHeroStyle heroStyle,
     required bool heroLogoTitleEnabled,
     required bool heroBackgroundEnabled,
     required bool translucentEffectsEnabled,
@@ -172,7 +173,6 @@ class _HomePageState extends ConsumerState<HomePage> {
     required bool lightweightHomeHeroEnabled,
     required bool isTelevision,
     required HomeHeroDisplayMode heroDisplayMode,
-    required HomeHeroStyle heroStyle,
   }) {
     final featuredSection = heroEnabled
         ? _resolveStableHeroSection(
@@ -222,6 +222,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 child: _FeaturedHero(
                   key: _featuredHeroKey,
                   items: featuredItems,
+                  style: heroStyle,
                   isTelevision: isTelevision,
                   staticModeEnabled: staticHomeHeroEnabled,
                   lightweightVisualEnabled: lightweightHomeHeroEnabled,
@@ -229,7 +230,6 @@ class _HomePageState extends ConsumerState<HomePage> {
                   logoTitleEnabled: heroLogoTitleEnabled,
                   translucentEffectsEnabled: translucentEffectsEnabled,
                   displayMode: heroDisplayMode,
-                  style: heroStyle,
                   focusScopePrefix: 'home:hero',
                   onFocusBelowControl: _focusBelowHeroContent,
                   onFocusedItemChanged: _handleFocusedHeroChanged,
@@ -848,40 +848,22 @@ extension _HomeHeroDisplayModeLayoutX on HomeHeroDisplayMode {
       };
 }
 
-extension _HomeHeroArtworkStyleX on HomeHeroStyle {
-  bool get usesPosterArtwork => this == HomeHeroStyle.poster;
-}
-
-double _resolveHeroTextWidthFactor({
-  required HomeHeroDisplayMode displayMode,
-  required HomeHeroStyle style,
-}) {
-  final baseWidthFactor = switch (displayMode) {
+double _resolveHeroTextWidthFactor(HomeHeroDisplayMode displayMode) {
+  return switch (displayMode) {
     HomeHeroDisplayMode.normal => 0.92,
     HomeHeroDisplayMode.borderless => 0.62,
   };
-  if (style != HomeHeroStyle.poster) {
-    return baseWidthFactor;
-  }
-  return baseWidthFactor < 0.74 ? baseWidthFactor : 0.74;
 }
 
-double _resolveHeroTitleFontSize({
-  required HomeHeroDisplayMode displayMode,
-  required HomeHeroStyle style,
-}) {
+double _resolveHeroTitleFontSize(HomeHeroDisplayMode displayMode) {
   return switch (displayMode) {
-    HomeHeroDisplayMode.normal => style == HomeHeroStyle.poster ? 32 : 30,
+    HomeHeroDisplayMode.normal => 30,
     HomeHeroDisplayMode.borderless => 36,
   };
 }
 
-BoxConstraints _resolveHeroLogoConstraints({
-  required HomeHeroDisplayMode displayMode,
-  required HomeHeroStyle style,
-}) {
-  final useLargeLogo = displayMode == HomeHeroDisplayMode.borderless ||
-      style == HomeHeroStyle.poster;
+BoxConstraints _resolveHeroLogoConstraints(HomeHeroDisplayMode displayMode) {
+  final useLargeLogo = displayMode == HomeHeroDisplayMode.borderless;
   return BoxConstraints(
     maxWidth: useLargeLogo ? 360 : 320,
     maxHeight: useLargeLogo ? 96 : 84,
@@ -1378,15 +1360,6 @@ class _FeaturedHeroItem {
   final String overview;
   final MediaDetailTarget detailTarget;
 
-  bool get onlyHasSingleUsableImage {
-    final imageUrls = <String>{
-      landscapeImage.url.trim(),
-      portraitImage.url.trim(),
-      backgroundImage.url.trim(),
-    }..removeWhere((url) => url.isEmpty);
-    return imageUrls.length == 1;
-  }
-
   factory _FeaturedHeroItem.fromCarousel(HomeCarouselItemViewModel item) {
     final fallbackImage = item.imageUrl.trim().isEmpty
         ? _FeaturedHeroImage(
@@ -1658,8 +1631,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
   void didUpdateWidget(covariant _FeaturedHero oldWidget) {
     super.didUpdateWidget(oldWidget);
     _syncCardFocusNodes();
-    if (oldWidget.displayMode != widget.displayMode ||
-        oldWidget.style != widget.style) {
+    if (oldWidget.displayMode != widget.displayMode) {
       final int nextPage = widget.items.isEmpty
           ? 0
           : _page.round().clamp(0, widget.items.length - 1);
@@ -1846,7 +1818,6 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                       child: _FeaturedHeroCard(
                         item: item,
                         displayMode: widget.displayMode,
-                        style: widget.style,
                         isTelevision: widget.isTelevision,
                         logoTitleEnabled: widget.logoTitleEnabled,
                         translucentEffectsEnabled:
@@ -2025,7 +1996,6 @@ class _FeaturedHeroCard extends StatelessWidget {
   const _FeaturedHeroCard({
     required this.item,
     required this.displayMode,
-    required this.style,
     required this.isTelevision,
     required this.logoTitleEnabled,
     required this.translucentEffectsEnabled,
@@ -2040,7 +2010,6 @@ class _FeaturedHeroCard extends StatelessWidget {
 
   final _FeaturedHeroItem item;
   final HomeHeroDisplayMode displayMode;
-  final HomeHeroStyle style;
   final bool isTelevision;
   final bool logoTitleEnabled;
   final bool translucentEffectsEnabled;
@@ -2054,16 +2023,8 @@ class _FeaturedHeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final configuredStyle =
-        simplifyVisualEffects ? HomeHeroStyle.poster : style;
-    final effectiveArtworkStyle = _resolveFeaturedHeroArtworkStyle(
-      configuredStyle: configuredStyle,
-      item: item,
-    );
-    final usesPosterHeroStyle = effectiveArtworkStyle.usesPosterArtwork;
-    final usesCompositeBackdrop = !simplifyVisualEffects &&
-        displayMode.usesFrostedBackdrop &&
-        !usesPosterHeroStyle;
+    final usesCompositeBackdrop =
+        !simplifyVisualEffects && displayMode.usesFrostedBackdrop;
     final borderRadius = BorderRadius.circular(displayMode.cardBorderRadius);
     final Gradient contentGradient = simplifyVisualEffects
         ? LinearGradient(
@@ -2147,16 +2108,12 @@ class _FeaturedHeroCard extends StatelessWidget {
             _FeaturedHeroArtwork(
               item: item,
               displayMode: displayMode,
-              style: effectiveArtworkStyle,
             ),
             Align(
               alignment: Alignment.bottomLeft,
               child: IgnorePointer(
                 child: FractionallySizedBox(
-                  widthFactor: _resolveHeroTextWidthFactor(
-                    displayMode: displayMode,
-                    style: effectiveArtworkStyle,
-                  ),
+                  widthFactor: _resolveHeroTextWidthFactor(displayMode),
                   heightFactor: 0.72,
                   alignment: Alignment.bottomLeft,
                   child: DecoratedBox(
@@ -2187,7 +2144,6 @@ class _FeaturedHeroCard extends StatelessWidget {
                   _HeroTitle(
                     item: item,
                     displayMode: displayMode,
-                    style: effectiveArtworkStyle,
                     logoTitleEnabled: logoTitleEnabled,
                     simplifyVisualEffects: simplifyVisualEffects,
                   ),
@@ -2285,12 +2241,10 @@ class _FeaturedHeroArtwork extends StatelessWidget {
   const _FeaturedHeroArtwork({
     required this.item,
     required this.displayMode,
-    required this.style,
   });
 
   final _FeaturedHeroItem item;
   final HomeHeroDisplayMode displayMode;
-  final HomeHeroStyle style;
 
   @override
   Widget build(BuildContext context) {
@@ -2308,41 +2262,6 @@ class _FeaturedHeroArtwork extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    if (style.usesPosterArtwork &&
-        (isPortraitScreen || !selectedImage.preferContain)) {
-      return AppNetworkImage(
-        selectedImage.url,
-        headers: selectedImage.headers,
-        fit: BoxFit.cover,
-        alignment: Alignment.center,
-      );
-    }
-
-    if (style.usesPosterArtwork) {
-      return Align(
-        alignment: Alignment.centerRight,
-        child: FractionallySizedBox(
-          widthFactor: isPortraitScreen
-              ? (displayMode == HomeHeroDisplayMode.normal ? 0.68 : 0.58)
-              : (displayMode == HomeHeroDisplayMode.normal ? 0.54 : 0.42),
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              0,
-              displayMode == HomeHeroDisplayMode.normal ? 22 : 28,
-              displayMode == HomeHeroDisplayMode.normal ? 18 : 24,
-              displayMode == HomeHeroDisplayMode.normal ? 22 : 28,
-            ),
-            child: AppNetworkImage(
-              selectedImage.url,
-              headers: selectedImage.headers,
-              fit: BoxFit.contain,
-              alignment: Alignment.centerRight,
-            ),
-          ),
-        ),
-      );
-    }
-
     if (!selectedImage.preferContain) {
       return AppNetworkImage(
         selectedImage.url,
@@ -2352,71 +2271,48 @@ class _FeaturedHeroArtwork extends StatelessWidget {
       );
     }
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        if (item.backgroundImage.url.trim().isNotEmpty)
-          Opacity(
-            opacity: 0.24,
-            child: AppNetworkImage(
-              item.backgroundImage.url,
-              headers: item.backgroundImage.headers,
-              fit: BoxFit.cover,
-              alignment: Alignment.center,
-            ),
+    if (isPortraitScreen) {
+      return AppNetworkImage(
+        selectedImage.url,
+        headers: selectedImage.headers,
+        fit: BoxFit.cover,
+        alignment: Alignment.center,
+      );
+    }
+
+    return Align(
+      alignment: Alignment.centerRight,
+      child: FractionallySizedBox(
+        widthFactor: displayMode == HomeHeroDisplayMode.normal ? 0.54 : 0.42,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            0,
+            displayMode == HomeHeroDisplayMode.normal ? 22 : 28,
+            displayMode == HomeHeroDisplayMode.normal ? 18 : 24,
+            displayMode == HomeHeroDisplayMode.normal ? 22 : 28,
           ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: FractionallySizedBox(
-            widthFactor: isPortraitScreen
-                ? (displayMode == HomeHeroDisplayMode.normal ? 0.68 : 0.58)
-                : (displayMode == HomeHeroDisplayMode.normal ? 0.54 : 0.42),
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                0,
-                displayMode == HomeHeroDisplayMode.normal ? 22 : 28,
-                displayMode == HomeHeroDisplayMode.normal ? 18 : 24,
-                displayMode == HomeHeroDisplayMode.normal ? 22 : 28,
-              ),
-              child: AppNetworkImage(
-                selectedImage.url,
-                headers: selectedImage.headers,
-                fit: BoxFit.contain,
-                alignment: Alignment.centerRight,
-              ),
-            ),
+          child: AppNetworkImage(
+            selectedImage.url,
+            headers: selectedImage.headers,
+            fit: BoxFit.contain,
+            alignment: Alignment.centerRight,
           ),
         ),
-      ],
+      ),
     );
   }
-}
-
-HomeHeroStyle _resolveFeaturedHeroArtworkStyle({
-  required HomeHeroStyle configuredStyle,
-  required _FeaturedHeroItem item,
-}) {
-  if (configuredStyle == HomeHeroStyle.poster) {
-    return HomeHeroStyle.poster;
-  }
-  if (item.onlyHasSingleUsableImage) {
-    return HomeHeroStyle.poster;
-  }
-  return configuredStyle;
 }
 
 class _HeroTitle extends StatelessWidget {
   const _HeroTitle({
     required this.item,
     required this.displayMode,
-    required this.style,
     required this.logoTitleEnabled,
     required this.simplifyVisualEffects,
   });
 
   final _FeaturedHeroItem item;
   final HomeHeroDisplayMode displayMode;
-  final HomeHeroStyle style;
   final bool logoTitleEnabled;
   final bool simplifyVisualEffects;
 
@@ -2426,10 +2322,7 @@ class _HeroTitle extends StatelessWidget {
         logoTitleEnabled && item.detailTarget.logoUrl.trim().isNotEmpty;
     if (hasLogo) {
       return ConstrainedBox(
-        constraints: _resolveHeroLogoConstraints(
-          displayMode: displayMode,
-          style: style,
-        ),
+        constraints: _resolveHeroLogoConstraints(displayMode),
         child: AppNetworkImage(
           item.detailTarget.logoUrl,
           headers: item.detailTarget.logoHeaders,
@@ -2439,7 +2332,6 @@ class _HeroTitle extends StatelessWidget {
             return _HeroTitleText(
               item: item,
               displayMode: displayMode,
-              style: style,
               simplifyVisualEffects: simplifyVisualEffects,
             );
           },
@@ -2449,7 +2341,6 @@ class _HeroTitle extends StatelessWidget {
     return _HeroTitleText(
       item: item,
       displayMode: displayMode,
-      style: style,
       simplifyVisualEffects: simplifyVisualEffects,
     );
   }
@@ -2459,13 +2350,11 @@ class _HeroTitleText extends StatelessWidget {
   const _HeroTitleText({
     required this.item,
     required this.displayMode,
-    required this.style,
     required this.simplifyVisualEffects,
   });
 
   final _FeaturedHeroItem item;
   final HomeHeroDisplayMode displayMode;
-  final HomeHeroStyle style;
   final bool simplifyVisualEffects;
 
   @override
@@ -2477,10 +2366,7 @@ class _HeroTitleText extends StatelessWidget {
       style: Theme.of(context).textTheme.headlineSmall?.copyWith(
             color: Colors.white,
             fontWeight: FontWeight.w800,
-            fontSize: _resolveHeroTitleFontSize(
-              displayMode: displayMode,
-              style: style,
-            ),
+            fontSize: _resolveHeroTitleFontSize(displayMode),
             height: 1.05,
             shadows: simplifyVisualEffects
                 ? null

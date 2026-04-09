@@ -271,7 +271,7 @@ extension MediaSourceConfigWebDavFilterX on MediaSourceConfig {
   }
 
   bool matchesWebDavExcludedPath(String rawPath) {
-    if (kind != MediaSourceKind.nas) {
+    if (kind != MediaSourceKind.nas && kind != MediaSourceKind.quark) {
       return false;
     }
     final keywords = normalizedWebDavExcludedPathKeywords;
@@ -299,7 +299,7 @@ extension MediaSourceConfigWebDavFilterX on MediaSourceConfig {
   }
 
   bool matchesWebDavSeriesTitleFilter(String rawValue) {
-    if (kind != MediaSourceKind.nas) {
+    if (kind != MediaSourceKind.nas && kind != MediaSourceKind.quark) {
       return false;
     }
     final keywords = normalizedWebDavSeriesTitleFilterKeywords;

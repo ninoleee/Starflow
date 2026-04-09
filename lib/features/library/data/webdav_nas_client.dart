@@ -707,6 +707,7 @@ class WebDavNasClient {
       '.m4v',
       '.mov',
       '.mkv',
+      '.iso',
       '.avi',
       '.ts',
       '.webm',

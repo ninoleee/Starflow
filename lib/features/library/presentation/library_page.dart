@@ -55,6 +55,66 @@ extension LibraryFilterX on LibraryFilter {
   }
 }
 
+enum _LibraryRefreshSourceKind {
+  webDav,
+  quark,
+}
+
+extension _LibraryRefreshSourceKindX on _LibraryRefreshSourceKind {
+  String get label {
+    switch (this) {
+      case _LibraryRefreshSourceKind.webDav:
+        return 'WebDAV';
+      case _LibraryRefreshSourceKind.quark:
+        return 'Quark';
+    }
+  }
+
+  String get rebuildTitle => '重建 $label 索引';
+
+  String rebuildDescription({
+    required bool interruptIncrementalRefresh,
+  }) {
+    if (interruptIncrementalRefresh) {
+      return '当前正在执行增量更新。继续后会先停止这次增量，再对当前启用的 $label 媒体源执行全量重扫。';
+    }
+    switch (this) {
+      case _LibraryRefreshSourceKind.webDav:
+        return '这会对当前启用的 WebDAV 媒体源执行全量重扫，忽略已有指纹并重新抓取 sidecar、WMDB、TMDB 和 IMDb 信息。';
+      case _LibraryRefreshSourceKind.quark:
+        return '这会对当前启用的 Quark 媒体源执行全量重扫，并重新扫描目录结构推断、本地刮削与媒体条目。';
+    }
+  }
+
+  String incrementalCompletedMessage(int sourceCount) {
+    if (sourceCount == 1) {
+      return '已完成 $label 增量更新';
+    }
+    return '已完成 $sourceCount 个 $label 媒体源的增量更新';
+  }
+
+  String rebuildCompletedMessage(int sourceCount) {
+    if (sourceCount == 1) {
+      return '已完成 $label 索引重建';
+    }
+    return '已完成 $sourceCount 个 $label 媒体源的全量重扫';
+  }
+}
+
+class _LibraryRefreshScope {
+  const _LibraryRefreshScope({
+    required this.kind,
+    required this.sourceIds,
+  });
+
+  final _LibraryRefreshSourceKind kind;
+  final List<String> sourceIds;
+
+  String get incrementalButtonLabel => '增量更新 ${kind.label}';
+
+  String get rebuildButtonLabel => '重建 ${kind.label} 索引';
+}
+
 final libraryItemsProvider =
     FutureProvider.family<List<MediaItem>, LibraryFilter>((ref, filter) async {
   ref.watch(nasMediaIndexRevisionProvider);
@@ -116,7 +176,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final itemsAsync = ref.watch(libraryItemsProvider(_filter));
     final collectionsAsync = ref.watch(libraryCollectionsProvider(_filter));
-    final rebuildableSourceIds = _rebuildableWebDavSourceIds(settings);
+    final refreshScope = _currentRefreshScope(settings);
     final scrapeProgress = ref.watch(webDavScrapeProgressProvider);
     final visibleProgress = _visibleWebDavProgress(
       scrapeProgress.values,
@@ -165,7 +225,8 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                     ],
                   ),
                   const SizedBox(height: 18),
-                  if (rebuildableSourceIds.isNotEmpty) ...[
+                  if (refreshScope != null &&
+                      refreshScope.sourceIds.isNotEmpty) ...[
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Wrap(
@@ -176,13 +237,13 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                             TvAdaptiveButton(
                               label: _isIncrementalRefreshing
                                   ? '更新中...'
-                                  : '增量更新 WebDAV',
+                                  : refreshScope.incrementalButtonLabel,
                               icon: Icons.refresh_rounded,
                               onPressed:
                                   _isIncrementalRefreshing || _isForceRescanning
                                       ? null
                                       : () => _runIncrementalRefresh(
-                                            rebuildableSourceIds,
+                                            refreshScope,
                                           ),
                               variant: TvButtonVariant.outlined,
                               focusId: 'library:refresh:incremental',
@@ -193,7 +254,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                                   _isIncrementalRefreshing || _isForceRescanning
                                       ? null
                                       : () => _runIncrementalRefresh(
-                                            rebuildableSourceIds,
+                                            refreshScope,
                                           ),
                               style: OutlinedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(
@@ -215,19 +276,19 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                               label: Text(
                                 _isIncrementalRefreshing
                                     ? '更新中...'
-                                    : '增量更新 WebDAV',
+                                    : refreshScope.incrementalButtonLabel,
                               ),
                             ),
                           if (isTelevision)
                             TvAdaptiveButton(
                               label: _isForceRescanning
                                   ? '重建中...'
-                                  : '重建 WebDAV 索引',
+                                  : refreshScope.rebuildButtonLabel,
                               icon: Icons.restart_alt_rounded,
                               onPressed: _isForceRescanning
                                   ? null
                                   : () => _confirmForceRescan(
-                                        rebuildableSourceIds,
+                                        refreshScope,
                                       ),
                               variant: TvButtonVariant.outlined,
                               focusId: 'library:refresh:rescan',
@@ -237,7 +298,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                               onPressed: _isForceRescanning
                                   ? null
                                   : () => _confirmForceRescan(
-                                        rebuildableSourceIds,
+                                        refreshScope,
                                       ),
                               style: OutlinedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(
@@ -257,7 +318,9 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                                     )
                                   : const Icon(Icons.restart_alt_rounded),
                               label: Text(
-                                _isForceRescanning ? '重建中...' : '重建 WebDAV 索引',
+                                _isForceRescanning
+                                    ? '重建中...'
+                                    : refreshScope.rebuildButtonLabel,
                               ),
                             ),
                         ],
@@ -367,13 +430,49 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     );
   }
 
-  List<String> _rebuildableWebDavSourceIds(AppSettings settings) {
-    if (_filter == LibraryFilter.emby || _filter == LibraryFilter.quark) {
-      return const [];
+  _LibraryRefreshScope? _currentRefreshScope(AppSettings settings) {
+    switch (_filter) {
+      case LibraryFilter.nas:
+        final sourceIds = _refreshableSourceIds(
+          settings,
+          kind: MediaSourceKind.nas,
+        );
+        if (sourceIds.isEmpty) {
+          return null;
+        }
+        return _LibraryRefreshScope(
+          kind: _LibraryRefreshSourceKind.webDav,
+          sourceIds: sourceIds,
+        );
+      case LibraryFilter.quark:
+        final sourceIds = _refreshableSourceIds(
+          settings,
+          kind: MediaSourceKind.quark,
+        );
+        if (sourceIds.isEmpty) {
+          return null;
+        }
+        return _LibraryRefreshScope(
+          kind: _LibraryRefreshSourceKind.quark,
+          sourceIds: sourceIds,
+        );
+      case LibraryFilter.all:
+      case LibraryFilter.emby:
+        return null;
     }
+  }
+
+  List<String> _refreshableSourceIds(
+    AppSettings settings, {
+    required MediaSourceKind kind,
+  }) {
     return settings.mediaSources
         .where(
-          (source) => source.enabled && source.kind == MediaSourceKind.nas,
+          (source) =>
+              source.enabled &&
+              source.kind == kind &&
+              (kind != MediaSourceKind.quark ||
+                  source.hasConfiguredQuarkFolder),
         )
         .map((source) => source.id.trim())
         .where((sourceId) => sourceId.isNotEmpty)
@@ -385,7 +484,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     Iterable<WebDavScrapeProgress> progressEntries,
     AppSettings settings,
   ) {
-    if (_filter == LibraryFilter.emby || _filter == LibraryFilter.quark) {
+    if (_filter != LibraryFilter.nas) {
       return const [];
     }
     final enabledWebDavSourceIds = settings.mediaSources
@@ -400,15 +499,15 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     return visible;
   }
 
-  Future<void> _confirmForceRescan(List<String> sourceIds) async {
+  Future<void> _confirmForceRescan(_LibraryRefreshScope scope) async {
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('重建 WebDAV 索引'),
+            title: Text(scope.kind.rebuildTitle),
             content: Text(
-              _isIncrementalRefreshing
-                  ? '当前正在执行增量更新。继续后会先停止这次增量，再对当前启用的 WebDAV 媒体源执行全量重扫。'
-                  : '这会对当前启用的 WebDAV 媒体源执行全量重扫，忽略已有指纹并重新抓取 sidecar、WMDB、TMDB 和 IMDb 信息。',
+              scope.kind.rebuildDescription(
+                interruptIncrementalRefresh: _isIncrementalRefreshing,
+              ),
             ),
             actions: [
               StarflowButton(
@@ -429,10 +528,10 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     if (!confirmed || !mounted) {
       return;
     }
-    await _runForceRescan(sourceIds);
+    await _runForceRescan(scope);
   }
 
-  Future<void> _runForceRescan(List<String> sourceIds) async {
+  Future<void> _runForceRescan(_LibraryRefreshScope scope) async {
     _refreshIntentSerial += 1;
     setState(() {
       _isIncrementalRefreshing = false;
@@ -441,7 +540,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     try {
       await ref
           .read(mediaRefreshCoordinatorProvider)
-          .rebuildSelectedSources(sourceIds: sourceIds);
+          .rebuildSelectedSources(sourceIds: scope.sourceIds);
       for (final filter in LibraryFilter.values) {
         ref.invalidate(libraryItemsProvider(filter));
         ref.invalidate(libraryCollectionsProvider(filter));
@@ -452,9 +551,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            sourceIds.length == 1
-                ? '已完成 WebDAV 索引重建'
-                : '已完成 ${sourceIds.length} 个 WebDAV 媒体源的全量重扫',
+            scope.kind.rebuildCompletedMessage(scope.sourceIds.length),
           ),
         ),
       );
@@ -467,14 +564,14 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     }
   }
 
-  Future<void> _runIncrementalRefresh(List<String> sourceIds) async {
+  Future<void> _runIncrementalRefresh(_LibraryRefreshScope scope) async {
     final refreshIntent = ++_refreshIntentSerial;
     setState(() {
       _isIncrementalRefreshing = true;
     });
     try {
       await ref.read(mediaRefreshCoordinatorProvider).refreshSelectedSources(
-            sourceIds: sourceIds,
+            sourceIds: scope.sourceIds,
           );
       if (refreshIntent != _refreshIntentSerial) {
         return;
@@ -489,9 +586,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            sourceIds.length == 1
-                ? '已完成 WebDAV 增量更新'
-                : '已完成 ${sourceIds.length} 个 WebDAV 媒体源的增量更新',
+            scope.kind.incrementalCompletedMessage(scope.sourceIds.length),
           ),
         ),
       );
@@ -569,7 +664,12 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
 
     switch (action) {
       case _LibraryItemAction.rebuildSourceIndex:
-        await _runForceRescan([item.sourceId]);
+        await _runForceRescan(
+          _LibraryRefreshScope(
+            kind: _LibraryRefreshSourceKind.webDav,
+            sourceIds: [item.sourceId],
+          ),
+        );
       case _LibraryItemAction.manualIndex:
         await context.pushNamed(
           'metadata-index',

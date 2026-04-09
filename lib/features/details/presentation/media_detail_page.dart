@@ -23,6 +23,7 @@ import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
+import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
@@ -4754,14 +4755,26 @@ class _HeroContent extends ConsumerWidget {
                           focusNode: playFocusNode,
                           focusId: 'detail:hero:play',
                           autofocus: true,
-                          onPressed: () {
+                          onPressed: () async {
+                            await ActivePlaybackCleanupCoordinator.cleanupAll(
+                              reason: 'open-new-playback',
+                            );
+                            if (!context.mounted) {
+                              return;
+                            }
                             context.pushNamed('player',
                                 extra: primaryPlaybackTarget);
                           },
                         ),
                       )
                     : FilledButton.icon(
-                        onPressed: () {
+                        onPressed: () async {
+                          await ActivePlaybackCleanupCoordinator.cleanupAll(
+                            reason: 'open-new-playback',
+                          );
+                          if (!context.mounted) {
+                            return;
+                          }
                           context.pushNamed('player',
                               extra: primaryPlaybackTarget);
                         },

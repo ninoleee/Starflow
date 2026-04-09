@@ -136,6 +136,68 @@ void main() {
       expect(resolvedUrl, 'https://pan.quark.cn/s/abc123');
     });
 
+    test('discovers iso files as playable media', () async {
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Movies/') {
+            return http.Response(
+              '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Movies/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Movies</d:displayname>
+        <d:getlastmodified>Fri, 10 Apr 2026 08:00:00 GMT</d:getlastmodified>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Movies/Concert%20Disc.iso</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Concert Disc.iso</d:displayname>
+        <d:getcontentlength>734003200</d:getcontentlength>
+        <d:getcontenttype>application/octet-stream</d:getcontenttype>
+        <d:getlastmodified>Fri, 10 Apr 2026 08:30:00 GMT</d:getlastmodified>
+        <d:resourcetype />
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''',
+              207,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'nas-iso',
+          name: 'ISO NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/Movies/',
+          enabled: true,
+          webDavSidecarScrapingEnabled: false,
+        ),
+        limit: 20,
+      );
+
+      expect(items, hasLength(1));
+      expect(items.single.title, 'Concert Disc');
+      expect(
+        items.single.streamUrl,
+        'https://nas.example.com/dav/Movies/Concert%20Disc.iso',
+      );
+      expect(items.single.actualAddress, '/dav/Movies/Concert Disc.iso');
+      expect(items.single.container, 'iso');
+      expect(items.single.fileSizeBytes, 734003200);
+    });
+
     test('can disable local sidecar scraping independently from structure',
         () async {
       final client = WebDavNasClient(

@@ -13,6 +13,7 @@ import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
+import 'package:xml/xml.dart';
 
 abstract class MediaRepository {
   Future<List<MediaSourceConfig>> fetchSources();
@@ -207,6 +208,10 @@ class AppMediaRepository implements MediaRepository {
     }
 
     if (source.kind == MediaSourceKind.quark) {
+      await _refreshQuarkSource(
+        source,
+        forceFullRescan: forceFullRescan,
+      );
       return;
     }
 
@@ -251,6 +256,46 @@ class AppMediaRepository implements MediaRepository {
       scopedCollections:
           _hasScopedSections(source) ? selectedCollections : null,
       forceFullRescan: forceFullRescan,
+    );
+  }
+
+  Future<void> _refreshQuarkSource(
+    MediaSourceConfig source, {
+    required bool forceFullRescan,
+  }) async {
+    if (forceFullRescan) {
+      await ref
+          .read(localStorageCacheRepositoryProvider)
+          .clearDetailCacheForSource(source.id);
+    }
+    if (!source.hasConfiguredQuarkFolder) {
+      return;
+    }
+    final cookie = _quarkCookie;
+    if (cookie.isEmpty) {
+      return;
+    }
+    if (source.hasExplicitNoSectionsSelected) {
+      return;
+    }
+    final selectedCollections = await _selectedCollectionsForSource(source);
+    if (_hasScopedSections(source)) {
+      if (selectedCollections.isEmpty) {
+        return;
+      }
+      await _fetchLibraryFromCollections(
+        source,
+        selectedCollections,
+        limit: 200,
+      );
+      return;
+    }
+    await _loadQuarkLibrary(
+      source,
+      cookie: cookie,
+      parentFid: source.quarkFolderId,
+      parentPath: source.quarkFolderPath,
+      limit: 200,
     );
   }
 
@@ -438,6 +483,27 @@ class AppMediaRepository implements MediaRepository {
     return '';
   }
 
+  Future<String> _resolveSectionPath(
+    MediaSourceConfig source,
+    String? sectionId,
+  ) async {
+    final normalized = sectionId?.trim() ?? '';
+    if (normalized.isEmpty) {
+      return '';
+    }
+
+    final collections = await _fetchCollectionsForSource(
+      source,
+      applySelection: false,
+    );
+    for (final collection in collections) {
+      if (collection.id == normalized) {
+        return collection.subtitle.trim();
+      }
+    }
+    return '';
+  }
+
   Future<_SourceFetchResult> _fetchLibraryForSource(
     MediaSourceConfig source, {
     required String? sectionId,
@@ -498,6 +564,7 @@ class AppMediaRepository implements MediaRepository {
               source,
               cookie: cookie,
               parentFid: resolvedSectionId,
+              parentPath: await _resolveSectionPath(source, sectionId),
               sectionId: resolvedSectionId,
               sectionName: await _resolveSectionName(source, sectionId),
               limit: limit,
@@ -524,6 +591,7 @@ class AppMediaRepository implements MediaRepository {
             source,
             cookie: cookie,
             parentFid: source.quarkFolderId,
+            parentPath: source.quarkFolderPath,
             limit: limit,
           ),
         );
@@ -625,6 +693,7 @@ class AppMediaRepository implements MediaRepository {
             source,
             cookie: _quarkCookie,
             parentFid: collection.id,
+            parentPath: collection.subtitle,
             sectionId: collection.id,
             sectionName: collection.title,
             limit: limit,
@@ -747,6 +816,7 @@ class AppMediaRepository implements MediaRepository {
     MediaSourceConfig source, {
     required String cookie,
     required String parentFid,
+    String parentPath = '',
     String sectionId = '',
     String sectionName = '',
     required int limit,
@@ -757,24 +827,46 @@ class AppMediaRepository implements MediaRepository {
     }
     final normalizedParentFid =
         parentFid.trim().isEmpty ? source.quarkFolderId : parentFid.trim();
+    final normalizedParentPath = _normalizeQuarkDirectoryPath(
+      parentPath.trim().isNotEmpty
+          ? parentPath.trim()
+          : normalizedParentFid == source.quarkFolderId
+              ? source.quarkFolderPath
+              : '/',
+    );
+    if (source.matchesWebDavExcludedPath(normalizedParentPath)) {
+      return const [];
+    }
     final items = <MediaItem>[];
+    final directoryEntriesByPath = <String, List<QuarkFileEntry>>{};
+    final textFileCache = <String, Future<String>>{};
+    final downloadCache = <String, Future<QuarkResolvedDownload>>{};
     final queue = <_QuarkDirectoryCursor>[
       _QuarkDirectoryCursor(
         fid: normalizedParentFid,
+        path: normalizedParentPath,
       ),
     ];
 
     for (var index = 0; index < queue.length && items.length < limit; index++) {
       final cursor = queue[index];
+      if (source.matchesWebDavExcludedPath(cursor.path)) {
+        continue;
+      }
       final entries = await _quarkSaveClient.listEntries(
         cookie: normalizedCookie,
         parentFid: cursor.fid,
       );
+      directoryEntriesByPath[cursor.path] = entries;
       for (final entry in entries) {
+        if (source.matchesWebDavExcludedPath(entry.path)) {
+          continue;
+        }
         if (entry.isDirectory) {
           queue.add(
             _QuarkDirectoryCursor(
               fid: entry.fid,
+              path: _normalizeQuarkDirectoryPath(entry.path),
             ),
           );
           continue;
@@ -783,11 +875,15 @@ class AppMediaRepository implements MediaRepository {
           continue;
         }
         items.add(
-          _buildQuarkMediaItem(
+          await _buildQuarkMediaItem(
             source: source,
             entry: entry,
+            cookie: normalizedCookie,
             sectionId: sectionId,
             sectionName: sectionName,
+            directoryEntriesByPath: directoryEntriesByPath,
+            textFileCache: textFileCache,
+            downloadCache: downloadCache,
           ),
         );
         if (items.length >= limit) {
@@ -799,19 +895,36 @@ class AppMediaRepository implements MediaRepository {
     return items;
   }
 
-  MediaItem _buildQuarkMediaItem({
+  Future<MediaItem> _buildQuarkMediaItem({
     required MediaSourceConfig source,
     required QuarkFileEntry entry,
+    required String cookie,
     required String sectionId,
     required String sectionName,
-  }) {
-    final recognition = NasMediaRecognizer.recognize(entry.path);
-    final normalizedTitle = recognition.title.trim().isNotEmpty
-        ? recognition.title.trim()
+    required Map<String, List<QuarkFileEntry>> directoryEntriesByPath,
+    required Map<String, Future<String>> textFileCache,
+    required Map<String, Future<QuarkResolvedDownload>> downloadCache,
+  }) async {
+    final recognition = _resolveQuarkRecognition(source, entry);
+    var seed = _buildQuarkBaseMetadataSeed(
+      source: source,
+      entry: entry,
+      recognition: recognition,
+    );
+    if (source.webDavSidecarScrapingEnabled) {
+      seed = await _applyQuarkSidecarMetadata(
+        source: source,
+        entry: entry,
+        cookie: cookie,
+        seed: seed,
+        directoryEntriesByPath: directoryEntriesByPath,
+        textFileCache: textFileCache,
+        downloadCache: downloadCache,
+      );
+    }
+    final normalizedTitle = seed.title.trim().isNotEmpty
+        ? seed.title.trim()
         : _stripFileExtension(entry.name);
-    final normalizedItemType = recognition.itemType.trim().isNotEmpty
-        ? recognition.itemType.trim()
-        : 'movie';
     final resourceId = _buildQuarkResourceId(
       fid: entry.fid,
       path: entry.path,
@@ -821,14 +934,23 @@ class AppMediaRepository implements MediaRepository {
       title: normalizedTitle,
       originalTitle: _stripFileExtension(entry.name),
       sortTitle: normalizedTitle,
-      overview: '',
-      posterUrl: '',
-      year: recognition.year,
-      durationLabel: normalizedItemType == 'episode' ? '剧集' : '文件',
-      genres: const [],
-      directors: const [],
-      actors: const [],
-      itemType: normalizedItemType,
+      overview: seed.overview,
+      posterUrl: seed.posterUrl,
+      posterHeaders: seed.posterHeaders,
+      backdropUrl: seed.backdropUrl,
+      backdropHeaders: seed.backdropHeaders,
+      logoUrl: seed.logoUrl,
+      logoHeaders: seed.logoHeaders,
+      bannerUrl: seed.bannerUrl,
+      bannerHeaders: seed.bannerHeaders,
+      extraBackdropUrls: seed.extraBackdropUrls,
+      extraBackdropHeaders: seed.extraBackdropHeaders,
+      year: seed.year,
+      durationLabel: seed.durationLabel,
+      genres: seed.genres,
+      directors: seed.directors,
+      actors: seed.actors,
+      itemType: seed.itemType,
       isFolder: false,
       sectionId: sectionId,
       sectionName: sectionName,
@@ -838,14 +960,794 @@ class AppMediaRepository implements MediaRepository {
       streamUrl: '',
       actualAddress: entry.path,
       playbackItemId: entry.fid,
-      seasonNumber: recognition.seasonNumber,
-      episodeNumber: recognition.episodeNumber,
-      imdbId: recognition.imdbId,
+      seasonNumber: seed.seasonNumber,
+      episodeNumber: seed.episodeNumber,
+      imdbId: seed.imdbId,
+      tmdbId: seed.tmdbId,
       ratingLabels: const [],
-      container: entry.extension,
+      container: seed.container,
+      videoCodec: seed.videoCodec,
+      audioCodec: seed.audioCodec,
+      width: seed.width,
+      height: seed.height,
+      bitrate: seed.bitrate,
       fileSizeBytes: entry.sizeBytes,
       addedAt: entry.updatedAt ?? DateTime.now(),
     );
+  }
+
+  NasMediaRecognition _resolveQuarkRecognition(
+    MediaSourceConfig source,
+    QuarkFileEntry entry,
+  ) {
+    final useStructureInference = source.webDavStructureInferenceEnabled;
+    return NasMediaRecognizer.recognize(
+      useStructureInference ? entry.path : entry.name,
+      seriesTitleFilterKeywords: useStructureInference
+          ? source.normalizedWebDavSeriesTitleFilterKeywords
+          : const <String>[],
+    );
+  }
+
+  WebDavMetadataSeed _buildQuarkBaseMetadataSeed({
+    required MediaSourceConfig source,
+    required QuarkFileEntry entry,
+    required NasMediaRecognition recognition,
+  }) {
+    final normalizedTitle = recognition.title.trim().isNotEmpty
+        ? recognition.title.trim()
+        : _stripFileExtension(entry.name);
+    final normalizedItemType = recognition.itemType.trim().isNotEmpty
+        ? recognition.itemType.trim()
+        : 'movie';
+    return WebDavMetadataSeed(
+      title: normalizedTitle,
+      overview: '',
+      posterUrl: '',
+      posterHeaders: const <String, String>{},
+      backdropUrl: '',
+      backdropHeaders: const <String, String>{},
+      logoUrl: '',
+      logoHeaders: const <String, String>{},
+      bannerUrl: '',
+      bannerHeaders: const <String, String>{},
+      extraBackdropUrls: const <String>[],
+      extraBackdropHeaders: const <String, String>{},
+      year: recognition.year,
+      durationLabel: normalizedItemType == 'episode' ? '剧集' : '文件',
+      genres: const <String>[],
+      directors: const <String>[],
+      actors: const <String>[],
+      itemType: normalizedItemType,
+      seasonNumber: recognition.seasonNumber,
+      episodeNumber: recognition.episodeNumber,
+      imdbId: recognition.imdbId,
+      tmdbId: '',
+      container: entry.extension,
+      videoCodec: '',
+      audioCodec: '',
+      width: null,
+      height: null,
+      bitrate: null,
+      hasSidecarMatch: false,
+    );
+  }
+
+  Future<WebDavMetadataSeed> _applyQuarkSidecarMetadata({
+    required MediaSourceConfig source,
+    required QuarkFileEntry entry,
+    required String cookie,
+    required WebDavMetadataSeed seed,
+    required Map<String, List<QuarkFileEntry>> directoryEntriesByPath,
+    required Map<String, Future<String>> textFileCache,
+    required Map<String, Future<QuarkResolvedDownload>> downloadCache,
+  }) async {
+    final currentDirectoryPath = _parentQuarkDirectoryPath(entry.path) ?? '/';
+    final parentDirectoryPath = _parentQuarkDirectoryPath(currentDirectoryPath);
+    final grandParentDirectoryPath = parentDirectoryPath == null
+        ? null
+        : _parentQuarkDirectoryPath(parentDirectoryPath);
+    final siblings = directoryEntriesByPath[currentDirectoryPath] ??
+        const <QuarkFileEntry>[];
+    final parentEntries = parentDirectoryPath == null
+        ? const <QuarkFileEntry>[]
+        : (directoryEntriesByPath[parentDirectoryPath] ??
+            const <QuarkFileEntry>[]);
+    final grandParentEntries = grandParentDirectoryPath == null
+        ? const <QuarkFileEntry>[]
+        : (directoryEntriesByPath[grandParentDirectoryPath] ??
+            const <QuarkFileEntry>[]);
+
+    final primaryNfoEntry = _findBestQuarkNfoEntry(entry, siblings);
+    final seasonNfoEntry = _findNamedQuarkFileEntry(
+      siblings,
+      const ['season.nfo', 'index.nfo'],
+      excluding: primaryNfoEntry,
+    );
+    final seriesNfoEntry = _findNamedQuarkFileEntry(
+          parentEntries,
+          const ['tvshow.nfo', 'index.nfo'],
+        ) ??
+        _findNamedQuarkFileEntry(
+          grandParentEntries,
+          const ['tvshow.nfo', 'index.nfo'],
+        );
+
+    final primaryNfoMetadata = await _loadQuarkNfoMetadata(
+      entry: primaryNfoEntry,
+      cookie: cookie,
+      textFileCache: textFileCache,
+    );
+    final seasonNfoMetadata = await _loadQuarkNfoMetadata(
+      entry: seasonNfoEntry,
+      cookie: cookie,
+      textFileCache: textFileCache,
+    );
+    final seriesNfoMetadata = await _loadQuarkNfoMetadata(
+      entry: seriesNfoEntry,
+      cookie: cookie,
+      textFileCache: textFileCache,
+    );
+    final nfoMetadata = _mergeQuarkNfoMetadata(
+      primary: primaryNfoMetadata,
+      secondary: _mergeQuarkNfoMetadata(
+        primary: seasonNfoMetadata,
+        secondary: seriesNfoMetadata,
+      ),
+    );
+
+    final posterEntry = _findBestQuarkPosterEntry(entry, siblings) ??
+        _findQuarkArtworkByRole(
+            parentEntries, const ['poster', 'folder', 'cover']) ??
+        _findQuarkArtworkByRole(
+          grandParentEntries,
+          const ['poster', 'folder', 'cover'],
+        );
+    final backdropEntry = _findQuarkArtworkByRole(
+            siblings, const ['fanart', 'backdrop', 'landscape']) ??
+        _findQuarkArtworkByRole(
+          parentEntries,
+          const ['fanart', 'backdrop', 'landscape'],
+        ) ??
+        _findQuarkArtworkByRole(
+          grandParentEntries,
+          const ['fanart', 'backdrop', 'landscape'],
+        );
+    final logoEntry = _findQuarkArtworkByRole(
+          siblings,
+          const ['clearlogo', 'logo'],
+        ) ??
+        _findQuarkArtworkByRole(
+          parentEntries,
+          const ['clearlogo', 'logo'],
+        ) ??
+        _findQuarkArtworkByRole(
+          grandParentEntries,
+          const ['clearlogo', 'logo'],
+        );
+    final bannerEntry = _findQuarkArtworkByRole(
+          siblings,
+          const ['banner'],
+        ) ??
+        _findQuarkArtworkByRole(
+          parentEntries,
+          const ['banner'],
+        ) ??
+        _findQuarkArtworkByRole(
+          grandParentEntries,
+          const ['banner'],
+        );
+
+    final posterArtwork = await _resolveQuarkArtwork(
+      localEntry: posterEntry,
+      remoteUrl: nfoMetadata?.thumbUrl ?? '',
+      cookie: cookie,
+      downloadCache: downloadCache,
+    );
+    final backdropArtwork = await _resolveQuarkArtwork(
+      localEntry: backdropEntry,
+      remoteUrl: nfoMetadata?.backdropUrl ?? '',
+      cookie: cookie,
+      downloadCache: downloadCache,
+    );
+    final logoArtwork = await _resolveQuarkArtwork(
+      localEntry: logoEntry,
+      remoteUrl: nfoMetadata?.logoUrl ?? '',
+      cookie: cookie,
+      downloadCache: downloadCache,
+    );
+    final bannerArtwork = await _resolveQuarkArtwork(
+      localEntry: bannerEntry,
+      remoteUrl: nfoMetadata?.bannerUrl ?? '',
+      cookie: cookie,
+      downloadCache: downloadCache,
+    );
+
+    final hasSidecarMatch = nfoMetadata != null ||
+        posterArtwork.url.isNotEmpty ||
+        backdropArtwork.url.isNotEmpty ||
+        logoArtwork.url.isNotEmpty ||
+        bannerArtwork.url.isNotEmpty ||
+        (nfoMetadata?.extraBackdropUrls.isNotEmpty ?? false);
+    return seed.copyWith(
+      title: nfoMetadata?.title.trim().isNotEmpty == true
+          ? nfoMetadata!.title.trim()
+          : seed.title,
+      overview: nfoMetadata?.overview.trim().isNotEmpty == true
+          ? nfoMetadata!.overview.trim()
+          : seed.overview,
+      posterUrl:
+          posterArtwork.url.isNotEmpty ? posterArtwork.url : seed.posterUrl,
+      posterHeaders: posterArtwork.url.isNotEmpty
+          ? posterArtwork.headers
+          : seed.posterHeaders,
+      backdropUrl: backdropArtwork.url.isNotEmpty
+          ? backdropArtwork.url
+          : seed.backdropUrl,
+      backdropHeaders: backdropArtwork.url.isNotEmpty
+          ? backdropArtwork.headers
+          : seed.backdropHeaders,
+      logoUrl: logoArtwork.url.isNotEmpty ? logoArtwork.url : seed.logoUrl,
+      logoHeaders:
+          logoArtwork.url.isNotEmpty ? logoArtwork.headers : seed.logoHeaders,
+      bannerUrl:
+          bannerArtwork.url.isNotEmpty ? bannerArtwork.url : seed.bannerUrl,
+      bannerHeaders: bannerArtwork.url.isNotEmpty
+          ? bannerArtwork.headers
+          : seed.bannerHeaders,
+      extraBackdropUrls: nfoMetadata?.extraBackdropUrls.isNotEmpty == true
+          ? nfoMetadata!.extraBackdropUrls
+          : seed.extraBackdropUrls,
+      extraBackdropHeaders: nfoMetadata?.extraBackdropUrls.isNotEmpty == true
+          ? const <String, String>{}
+          : seed.extraBackdropHeaders,
+      year: (nfoMetadata?.year ?? 0) > 0 ? nfoMetadata!.year : seed.year,
+      durationLabel: nfoMetadata?.durationLabel.trim().isNotEmpty == true
+          ? nfoMetadata!.durationLabel.trim()
+          : seed.durationLabel,
+      genres: nfoMetadata?.genres.isNotEmpty == true
+          ? nfoMetadata!.genres
+          : seed.genres,
+      directors: nfoMetadata?.directors.isNotEmpty == true
+          ? nfoMetadata!.directors
+          : seed.directors,
+      actors: nfoMetadata?.actors.isNotEmpty == true
+          ? nfoMetadata!.actors
+          : seed.actors,
+      itemType: nfoMetadata?.itemType.trim().isNotEmpty == true
+          ? nfoMetadata!.itemType.trim()
+          : seed.itemType,
+      seasonNumber: nfoMetadata?.seasonNumber ?? seed.seasonNumber,
+      episodeNumber: nfoMetadata?.episodeNumber ?? seed.episodeNumber,
+      imdbId: nfoMetadata?.imdbId.trim().isNotEmpty == true
+          ? nfoMetadata!.imdbId.trim()
+          : seed.imdbId,
+      tmdbId: nfoMetadata?.tmdbId.trim().isNotEmpty == true
+          ? nfoMetadata!.tmdbId.trim()
+          : seed.tmdbId,
+      container: nfoMetadata?.container.trim().isNotEmpty == true
+          ? nfoMetadata!.container.trim()
+          : seed.container,
+      videoCodec: nfoMetadata?.videoCodec.trim().isNotEmpty == true
+          ? nfoMetadata!.videoCodec.trim()
+          : seed.videoCodec,
+      audioCodec: nfoMetadata?.audioCodec.trim().isNotEmpty == true
+          ? nfoMetadata!.audioCodec.trim()
+          : seed.audioCodec,
+      width: nfoMetadata?.width ?? seed.width,
+      height: nfoMetadata?.height ?? seed.height,
+      bitrate: nfoMetadata?.bitrate ?? seed.bitrate,
+      hasSidecarMatch: seed.hasSidecarMatch || hasSidecarMatch,
+    );
+  }
+
+  Future<_QuarkParsedNfoMetadata?> _loadQuarkNfoMetadata({
+    required QuarkFileEntry? entry,
+    required String cookie,
+    required Map<String, Future<String>> textFileCache,
+  }) async {
+    if (entry == null) {
+      return null;
+    }
+    try {
+      final raw = await textFileCache.putIfAbsent(
+        entry.fid,
+        () => _quarkSaveClient.readTextFile(
+          cookie: cookie,
+          fid: entry.fid,
+        ),
+      );
+      return _parseQuarkNfoMetadata(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _QuarkParsedNfoMetadata? _parseQuarkNfoMetadata(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    try {
+      final document = XmlDocument.parse(trimmed);
+      final root = document.rootElement;
+      final durationLabel = _formatRuntimeLabel(
+        _quarkXmlSingleText(root, 'runtime'),
+      );
+      return _QuarkParsedNfoMetadata(
+        title: _quarkXmlSingleText(root, 'title'),
+        overview: _quarkXmlSingleText(root, 'plot'),
+        thumbUrl: _quarkResolveNfoArtUrl(
+          root,
+          tagNames: const ['thumb', 'poster'],
+        ),
+        backdropUrl: _quarkResolveNfoArtUrl(
+          root,
+          tagNames: const ['fanart', 'backdrop', 'landscape'],
+        ),
+        logoUrl: _quarkResolveNfoArtUrl(
+          root,
+          tagNames: const ['clearlogo', 'logo'],
+        ),
+        bannerUrl: _quarkResolveNfoArtUrl(
+          root,
+          tagNames: const ['banner'],
+        ),
+        extraBackdropUrls: _quarkResolveNfoExtraBackdropUrls(root),
+        year: _parseQuarkNfoYear(
+          _quarkXmlSingleText(root, 'year'),
+          fallbackDateText:
+              '${_quarkXmlSingleText(root, 'premiered')} ${_quarkXmlSingleText(root, 'aired')}',
+        ),
+        durationLabel: durationLabel,
+        genres: _quarkXmlTexts(root, 'genre'),
+        directors: _quarkXmlTexts(root, 'director'),
+        actors: _quarkResolveNfoActors(root),
+        itemType: _resolveQuarkNfoItemType(root.name.local),
+        seasonNumber: _tryParseInt(_quarkXmlSingleText(root, 'season')),
+        episodeNumber: _tryParseInt(_quarkXmlSingleText(root, 'episode')),
+        imdbId: _resolveQuarkNfoExternalId(
+          root,
+          type: 'imdb',
+          fallbackTag: 'imdbid',
+        ),
+        tmdbId: _resolveQuarkNfoExternalId(
+          root,
+          type: 'tmdb',
+          fallbackTag: 'tmdbid',
+        ),
+        container: _quarkResolveNfoStreamValue(
+          root,
+          primary: 'container',
+          section: 'fileinfo',
+        ),
+        videoCodec: _quarkResolveNfoStreamValue(
+          root,
+          primary: 'codec',
+          section: 'video',
+        ),
+        audioCodec: _quarkResolveNfoStreamValue(
+          root,
+          primary: 'codec',
+          section: 'audio',
+        ),
+        width: _tryParseInt(
+          _quarkResolveNfoStreamValue(
+            root,
+            primary: 'width',
+            section: 'video',
+          ),
+        ),
+        height: _tryParseInt(
+          _quarkResolveNfoStreamValue(
+            root,
+            primary: 'height',
+            section: 'video',
+          ),
+        ),
+        bitrate: _tryParseInt(
+          _quarkResolveNfoStreamValue(
+            root,
+            primary: 'bitrate',
+            section: 'video',
+          ),
+        ),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _QuarkParsedNfoMetadata? _mergeQuarkNfoMetadata({
+    required _QuarkParsedNfoMetadata? primary,
+    required _QuarkParsedNfoMetadata? secondary,
+  }) {
+    if (primary == null) {
+      return secondary;
+    }
+    if (secondary == null) {
+      return primary;
+    }
+    return _QuarkParsedNfoMetadata(
+      title: primary.title.trim().isNotEmpty ? primary.title : secondary.title,
+      overview: primary.overview.trim().isNotEmpty
+          ? primary.overview
+          : secondary.overview,
+      thumbUrl: primary.thumbUrl.trim().isNotEmpty
+          ? primary.thumbUrl
+          : secondary.thumbUrl,
+      backdropUrl: primary.backdropUrl.trim().isNotEmpty
+          ? primary.backdropUrl
+          : secondary.backdropUrl,
+      logoUrl: primary.logoUrl.trim().isNotEmpty
+          ? primary.logoUrl
+          : secondary.logoUrl,
+      bannerUrl: primary.bannerUrl.trim().isNotEmpty
+          ? primary.bannerUrl
+          : secondary.bannerUrl,
+      extraBackdropUrls: primary.extraBackdropUrls.isNotEmpty
+          ? primary.extraBackdropUrls
+          : secondary.extraBackdropUrls,
+      year: primary.year > 0 ? primary.year : secondary.year,
+      durationLabel: primary.durationLabel.trim().isNotEmpty &&
+              primary.durationLabel.trim() != '文件'
+          ? primary.durationLabel
+          : secondary.durationLabel,
+      genres: primary.genres.isNotEmpty ? primary.genres : secondary.genres,
+      directors: primary.directors.isNotEmpty
+          ? primary.directors
+          : secondary.directors,
+      actors: primary.actors.isNotEmpty ? primary.actors : secondary.actors,
+      itemType: primary.itemType.trim().isNotEmpty
+          ? primary.itemType
+          : secondary.itemType,
+      seasonNumber: primary.seasonNumber ?? secondary.seasonNumber,
+      episodeNumber: primary.episodeNumber ?? secondary.episodeNumber,
+      imdbId:
+          primary.imdbId.trim().isNotEmpty ? primary.imdbId : secondary.imdbId,
+      tmdbId:
+          primary.tmdbId.trim().isNotEmpty ? primary.tmdbId : secondary.tmdbId,
+      container: primary.container.trim().isNotEmpty
+          ? primary.container
+          : secondary.container,
+      videoCodec: primary.videoCodec.trim().isNotEmpty
+          ? primary.videoCodec
+          : secondary.videoCodec,
+      audioCodec: primary.audioCodec.trim().isNotEmpty
+          ? primary.audioCodec
+          : secondary.audioCodec,
+      width: primary.width ?? secondary.width,
+      height: primary.height ?? secondary.height,
+      bitrate: primary.bitrate ?? secondary.bitrate,
+    );
+  }
+
+  QuarkFileEntry? _findBestQuarkNfoEntry(
+    QuarkFileEntry videoEntry,
+    List<QuarkFileEntry> siblings,
+  ) {
+    final baseName = _stripFileExtension(videoEntry.name).toLowerCase();
+    return _findNamedQuarkFileEntry(
+      siblings,
+      [
+        '$baseName.nfo',
+        'movie.nfo',
+        'tvshow.nfo',
+        'index.nfo',
+      ],
+    );
+  }
+
+  QuarkFileEntry? _findNamedQuarkFileEntry(
+    List<QuarkFileEntry> entries,
+    List<String> preferredNames, {
+    QuarkFileEntry? excluding,
+  }) {
+    final loweredEntries = entries
+        .where((entry) => !entry.isDirectory)
+        .where((entry) => entry.name.toLowerCase().endsWith('.nfo'))
+        .toList(growable: false);
+    for (final preferredName in preferredNames) {
+      for (final entry in loweredEntries) {
+        if (excluding != null && entry.fid == excluding.fid) {
+          continue;
+        }
+        if (entry.name.toLowerCase() == preferredName.toLowerCase()) {
+          return entry;
+        }
+      }
+    }
+    return null;
+  }
+
+  QuarkFileEntry? _findBestQuarkPosterEntry(
+    QuarkFileEntry videoEntry,
+    List<QuarkFileEntry> siblings,
+  ) {
+    final baseName = _stripFileExtension(videoEntry.name);
+    return _findQuarkArtworkByRole(
+      siblings,
+      [
+        '$baseName-poster',
+        baseName,
+        'poster',
+        'folder',
+        'cover',
+      ],
+    );
+  }
+
+  QuarkFileEntry? _findQuarkArtworkByRole(
+    List<QuarkFileEntry> entries,
+    List<String> names,
+  ) {
+    final preferredNames = _expandQuarkArtworkNames(names);
+    final imageEntries = entries
+        .where((entry) => !entry.isDirectory && _isQuarkImageEntry(entry))
+        .toList(growable: false);
+    for (final preferredName in preferredNames) {
+      for (final entry in imageEntries) {
+        if (entry.name.toLowerCase() == preferredName.toLowerCase()) {
+          return entry;
+        }
+      }
+    }
+    return null;
+  }
+
+  List<String> _expandQuarkArtworkNames(List<String> names) {
+    final values = <String>[];
+    final seen = <String>{};
+    for (final rawName in names) {
+      final normalized = rawName.trim();
+      if (normalized.isEmpty) {
+        continue;
+      }
+      if (normalized.contains('.')) {
+        final lowered = normalized.toLowerCase();
+        if (seen.add(lowered)) {
+          values.add(normalized);
+        }
+        continue;
+      }
+      for (final extension in _quarkImageExtensions) {
+        final candidate = '$normalized.$extension';
+        final lowered = candidate.toLowerCase();
+        if (seen.add(lowered)) {
+          values.add(candidate);
+        }
+      }
+    }
+    return values;
+  }
+
+  bool _isQuarkImageEntry(QuarkFileEntry entry) {
+    return _quarkImageExtensions.contains(entry.extension.trim().toLowerCase());
+  }
+
+  Future<_QuarkArtworkResolution> _resolveQuarkArtwork({
+    required QuarkFileEntry? localEntry,
+    required String remoteUrl,
+    required String cookie,
+    required Map<String, Future<QuarkResolvedDownload>> downloadCache,
+  }) async {
+    if (localEntry != null) {
+      try {
+        final download = await downloadCache.putIfAbsent(
+          localEntry.fid,
+          () => _quarkSaveClient.resolveDownload(
+            cookie: cookie,
+            fid: localEntry.fid,
+          ),
+        );
+        return _QuarkArtworkResolution(
+          url: download.url,
+          headers: download.headers,
+        );
+      } catch (_) {
+        // Fall through to remote artwork URL when local sidecar download fails.
+      }
+    }
+    final normalizedRemoteUrl = remoteUrl.trim();
+    final parsedRemoteUrl = Uri.tryParse(normalizedRemoteUrl);
+    if (parsedRemoteUrl != null && parsedRemoteUrl.hasScheme) {
+      return _QuarkArtworkResolution(url: normalizedRemoteUrl);
+    }
+    return const _QuarkArtworkResolution();
+  }
+
+  String _normalizeQuarkDirectoryPath(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty || trimmed == '/') {
+      return '/';
+    }
+    final normalized =
+        trimmed.replaceAll('\\', '/').replaceAll(RegExp(r'/+'), '/');
+    final withLeadingSlash =
+        normalized.startsWith('/') ? normalized : '/$normalized';
+    return withLeadingSlash.endsWith('/')
+        ? withLeadingSlash.substring(0, withLeadingSlash.length - 1)
+        : withLeadingSlash;
+  }
+
+  String? _parentQuarkDirectoryPath(String raw) {
+    final normalized = _normalizeQuarkDirectoryPath(raw);
+    if (normalized == '/') {
+      return null;
+    }
+    final segments = normalized
+        .split('/')
+        .map((segment) => segment.trim())
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    if (segments.isEmpty) {
+      return null;
+    }
+    if (segments.length == 1) {
+      return '/';
+    }
+    return '/${segments.take(segments.length - 1).join('/')}';
+  }
+
+  String _quarkXmlSingleText(XmlElement node, String localName) {
+    final match = node.descendants.whereType<XmlElement>().firstWhere(
+          (element) => element.name.local == localName,
+          orElse: () => XmlElement(XmlName(localName)),
+        );
+    return match.innerText.trim();
+  }
+
+  List<String> _quarkXmlTexts(XmlElement node, String localName) {
+    return node.descendants
+        .whereType<XmlElement>()
+        .where((element) => element.name.local == localName)
+        .map((element) => element.innerText.trim())
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  List<String> _quarkResolveNfoActors(XmlElement root) {
+    return root.descendants
+        .whereType<XmlElement>()
+        .where((element) => element.name.local == 'actor')
+        .map((element) => _quarkXmlSingleText(element, 'name'))
+        .where((value) => value.trim().isNotEmpty)
+        .toList(growable: false);
+  }
+
+  String _resolveQuarkNfoItemType(String rawRootName) {
+    switch (rawRootName.trim().toLowerCase()) {
+      case 'movie':
+        return 'movie';
+      case 'tvshow':
+        return 'series';
+      case 'episodedetails':
+        return 'episode';
+      default:
+        return '';
+    }
+  }
+
+  String _formatRuntimeLabel(String raw) {
+    final minutes = _tryParseInt(raw);
+    if (minutes != null && minutes > 0) {
+      return '$minutes分钟';
+    }
+    return '文件';
+  }
+
+  int? _tryParseInt(String raw) {
+    return int.tryParse(raw.trim());
+  }
+
+  int _parseQuarkNfoYear(
+    String raw, {
+    String fallbackDateText = '',
+  }) {
+    final parsed = _tryParseInt(raw);
+    if (parsed != null && parsed > 0) {
+      return parsed;
+    }
+    final match = RegExp(r'(\d{4})').firstMatch(fallbackDateText);
+    return match == null ? 0 : int.parse(match.group(1)!);
+  }
+
+  String _resolveQuarkNfoExternalId(
+    XmlElement root, {
+    required String type,
+    required String fallbackTag,
+  }) {
+    for (final element in root.descendants.whereType<XmlElement>()) {
+      if (element.name.local != 'uniqueid') {
+        continue;
+      }
+      final idType = element.getAttribute('type')?.trim().toLowerCase() ?? '';
+      if (idType == type) {
+        final value = element.innerText.trim();
+        if (value.isNotEmpty) {
+          return value;
+        }
+      }
+    }
+    return _quarkXmlSingleText(root, fallbackTag);
+  }
+
+  String _quarkResolveNfoArtUrl(
+    XmlElement root, {
+    required List<String> tagNames,
+  }) {
+    final normalizedTagNames =
+        tagNames.map((item) => item.trim().toLowerCase()).toSet();
+    for (final element in root.descendants.whereType<XmlElement>()) {
+      if (!normalizedTagNames.contains(element.name.local.toLowerCase())) {
+        continue;
+      }
+      final value = element.innerText.trim();
+      final parsed = Uri.tryParse(value);
+      if (parsed != null && parsed.hasScheme) {
+        return value;
+      }
+    }
+    for (final art in root.descendants.whereType<XmlElement>()) {
+      if (art.name.local != 'art') {
+        continue;
+      }
+      for (final child in art.children.whereType<XmlElement>()) {
+        if (!normalizedTagNames.contains(child.name.local.toLowerCase())) {
+          continue;
+        }
+        final value = child.innerText.trim();
+        final parsed = Uri.tryParse(value);
+        if (parsed != null && parsed.hasScheme) {
+          return value;
+        }
+      }
+    }
+    return '';
+  }
+
+  List<String> _quarkResolveNfoExtraBackdropUrls(XmlElement root) {
+    final urls = <String>[];
+    for (final element in root.descendants.whereType<XmlElement>()) {
+      if (element.name.local != 'thumb') {
+        continue;
+      }
+      final parentName = element.parentElement?.name.local.toLowerCase() ?? '';
+      if (parentName != 'fanart') {
+        continue;
+      }
+      final value = element.innerText.trim();
+      final parsed = Uri.tryParse(value);
+      if (parsed != null && parsed.hasScheme) {
+        urls.add(value);
+      }
+    }
+    return urls;
+  }
+
+  String _quarkResolveNfoStreamValue(
+    XmlElement root, {
+    required String primary,
+    required String section,
+  }) {
+    final streamDetails = root.descendants.whereType<XmlElement>().firstWhere(
+          (element) => element.name.local == 'streamdetails',
+          orElse: () => XmlElement(XmlName('streamdetails')),
+        );
+    if (streamDetails.children.isEmpty) {
+      return '';
+    }
+
+    for (final child in streamDetails.descendants.whereType<XmlElement>()) {
+      if (child.name.local != section) {
+        continue;
+      }
+      final value = _quarkXmlSingleText(child, primary);
+      if (value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+    return '';
   }
 
   String _buildQuarkResourceId({
@@ -1564,10 +2466,81 @@ class _MatchedSyncDeleteScope {
 class _QuarkDirectoryCursor {
   const _QuarkDirectoryCursor({
     required this.fid,
+    required this.path,
   });
 
   final String fid;
+  final String path;
 }
+
+class _QuarkParsedNfoMetadata {
+  const _QuarkParsedNfoMetadata({
+    required this.title,
+    required this.overview,
+    required this.thumbUrl,
+    required this.backdropUrl,
+    required this.logoUrl,
+    required this.bannerUrl,
+    required this.extraBackdropUrls,
+    required this.year,
+    required this.durationLabel,
+    required this.genres,
+    required this.directors,
+    required this.actors,
+    required this.itemType,
+    required this.seasonNumber,
+    required this.episodeNumber,
+    required this.imdbId,
+    required this.tmdbId,
+    required this.container,
+    required this.videoCodec,
+    required this.audioCodec,
+    required this.width,
+    required this.height,
+    required this.bitrate,
+  });
+
+  final String title;
+  final String overview;
+  final String thumbUrl;
+  final String backdropUrl;
+  final String logoUrl;
+  final String bannerUrl;
+  final List<String> extraBackdropUrls;
+  final int year;
+  final String durationLabel;
+  final List<String> genres;
+  final List<String> directors;
+  final List<String> actors;
+  final String itemType;
+  final int? seasonNumber;
+  final int? episodeNumber;
+  final String imdbId;
+  final String tmdbId;
+  final String container;
+  final String videoCodec;
+  final String audioCodec;
+  final int? width;
+  final int? height;
+  final int? bitrate;
+}
+
+class _QuarkArtworkResolution {
+  const _QuarkArtworkResolution({
+    this.url = '',
+    this.headers = const <String, String>{},
+  });
+
+  final String url;
+  final Map<String, String> headers;
+}
+
+const Set<String> _quarkImageExtensions = {
+  'jpg',
+  'jpeg',
+  'png',
+  'webp',
+};
 
 class _ParsedQuarkResourceId {
   const _ParsedQuarkResourceId({

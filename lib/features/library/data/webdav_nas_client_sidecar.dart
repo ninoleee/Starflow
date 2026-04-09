@@ -416,6 +416,7 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
       '.m4v',
       '.mov',
       '.mkv',
+      '.iso',
       '.avi',
       '.ts',
       '.webm',

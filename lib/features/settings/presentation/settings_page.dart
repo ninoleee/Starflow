@@ -252,45 +252,6 @@ class SettingsPage extends ConsumerStatefulWidget {
                         ],
                       ),
                       const SizedBox(height: 14),
-                      Text(
-                        'Hero 样式',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 10),
-                      if (settings.performanceLightweightHomeHeroEnabled) ...[
-                        Text(
-                          '已开启 Hero 轻量卡面，当前会强制使用海报样式并关闭阴影；关闭该项后这里的样式才会完全生效。',
-                          style:
-                              Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                                  ),
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          for (final style in HomeHeroStyle.values)
-                            StarflowChipButton(
-                              label: style.label,
-                              selected: style == settings.homeHeroStyle,
-                              onPressed: heroEnabled
-                                  ? () {
-                                      ref
-                                          .read(settingsControllerProvider
-                                              .notifier)
-                                          .setHomeHeroStyle(style);
-                                    }
-                                  : null,
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
                       StarflowToggleTile(
                         title: '标题优先展示 Logo',
                         value: settings.homeHeroLogoTitleEnabled,

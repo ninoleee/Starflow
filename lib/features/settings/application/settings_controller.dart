@@ -7,6 +7,7 @@ import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
+import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -217,6 +218,12 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     required PlaybackMpvQualityPreset playbackMpvQualityPreset,
   }) async {
     final current = state.valueOrNull ?? await _repository.load();
+    if (current.playbackBackgroundPlaybackEnabled &&
+        !backgroundPlaybackEnabled) {
+      await ActivePlaybackCleanupCoordinator.cleanupAll(
+        reason: 'background-playback-disabled',
+      );
+    }
     await _persist(
       current.copyWith(
         playbackOpenTimeoutSeconds: openTimeoutSeconds.clamp(1, 600),
@@ -240,11 +247,6 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   Future<void> setHomeHeroDisplayMode(HomeHeroDisplayMode mode) async {
     final current = state.valueOrNull ?? await _repository.load();
     await _persist(current.copyWith(homeHeroDisplayMode: mode));
-  }
-
-  Future<void> setHomeHeroStyle(HomeHeroStyle style) async {
-    final current = state.valueOrNull ?? await _repository.load();
-    await _persist(current.copyWith(homeHeroStyle: style));
   }
 
   Future<void> setHomeHeroEnabled(bool enabled) async {

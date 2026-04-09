@@ -147,15 +147,19 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
               : '',
       featuredSectionIds: _selectedSectionIdsForSave(),
       webDavStructureInferenceEnabled:
-          _kind == MediaSourceKind.nas && _webDavStructureInferenceEnabled,
+          (_kind == MediaSourceKind.nas || _kind == MediaSourceKind.quark) &&
+              _webDavStructureInferenceEnabled,
       webDavSidecarScrapingEnabled:
-          _kind == MediaSourceKind.nas && _webDavSidecarScrapingEnabled,
-      webDavExcludedPathKeywords: _kind == MediaSourceKind.nas
-          ? _parsedWebDavExcludedPathKeywords()
-          : const [],
-      webDavSeriesTitleFilterKeywords: _kind == MediaSourceKind.nas
-          ? _parsedWebDavSeriesTitleFilterKeywords()
-          : const [],
+          (_kind == MediaSourceKind.nas || _kind == MediaSourceKind.quark) &&
+              _webDavSidecarScrapingEnabled,
+      webDavExcludedPathKeywords:
+          (_kind == MediaSourceKind.nas || _kind == MediaSourceKind.quark)
+              ? _parsedWebDavExcludedPathKeywords()
+              : const [],
+      webDavSeriesTitleFilterKeywords:
+          (_kind == MediaSourceKind.nas || _kind == MediaSourceKind.quark)
+              ? _parsedWebDavSeriesTitleFilterKeywords()
+              : const [],
     );
   }
 
@@ -773,6 +777,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     final isEmby = _kind == MediaSourceKind.emby;
     final isNas = _kind == MediaSourceKind.nas;
     final isQuark = _kind == MediaSourceKind.quark;
+    final supportsNasInferenceOptions = isNas || isQuark;
     final quarkCookieConfigured = ref
         .watch(appSettingsProvider)
         .networkStorage
@@ -992,7 +997,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
               value: _enabled,
               onChanged: (value) => setState(() => _enabled = value),
             ),
-            if (isNas)
+            if (supportsNasInferenceOptions)
               SettingsToggleTile(
                 title: '目录结构推断',
                 value: _webDavStructureInferenceEnabled,
@@ -1002,7 +1007,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                   });
                 },
               ),
-            if (isNas)
+            if (supportsNasInferenceOptions)
               SettingsToggleTile(
                 title: '本地刮削/NFO',
                 value: _webDavSidecarScrapingEnabled,
@@ -1013,7 +1018,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                 },
               ),
           ], spacing: 12),
-          if (isNas) ...[
+          if (supportsNasInferenceOptions) ...[
             SettingsTextInputField(
               controller: _webDavExcludedKeywordsController,
               labelText: '过滤关键字',

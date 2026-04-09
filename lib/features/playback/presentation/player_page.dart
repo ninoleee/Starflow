@@ -21,6 +21,7 @@ import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
@@ -105,6 +106,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   late final StateController<bool> _playbackPerformanceModeController;
   Timer? _tvPlaybackChromeHideTimer;
   Future<void>? _exitPlaybackFuture;
+  int? _activePlaybackCleanupToken;
 
   @override
   void initState() {
@@ -119,6 +121,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       }
       _playbackPerformanceModeController.state = true;
     });
+    _activePlaybackCleanupToken = ActivePlaybackCleanupCoordinator.register(
+      _handleExternalPlaybackCleanup,
+    );
     unawaited(_bindPictureInPictureSupport());
     unawaited(_bindPlaybackSystemSession());
     _initialize();
@@ -128,6 +133,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _tvPlaybackChromeHideTimer?.cancel();
+    final activePlaybackCleanupToken = _activePlaybackCleanupToken;
+    if (activePlaybackCleanupToken != null) {
+      ActivePlaybackCleanupCoordinator.unregister(activePlaybackCleanupToken);
+      _activePlaybackCleanupToken = null;
+    }
     Future<void>(() {
       _playbackPerformanceModeController.state = false;
     });
@@ -178,6 +188,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     await heightSubscription?.cancel();
     await bufferingSubscription?.cancel();
     await bufferingPercentageSubscription?.cancel();
+  }
+
+  Future<void> _handleExternalPlaybackCleanup(String reason) async {
+    await _stopPlaybackBeforeExit(reason: reason);
   }
 
   @override
@@ -599,6 +613,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 
   Future<void> _initialize() async {
+    await ActivePlaybackCleanupCoordinator.cleanupAll(
+      reason: 'player-page-initialize',
+      exceptToken: _activePlaybackCleanupToken,
+    );
     await _waitForPendingPlayerShutdowns(reason: 'player-page-initialize');
     _traceWindowsMpv(
       'windows-mpv.initialize.begin',
@@ -3030,6 +3048,8 @@ class _MpvControlsOverlay extends StatefulWidget {
 
 class _MpvControlsOverlayState extends State<_MpvControlsOverlay> {
   static const _kControlsAutoHideDelay = Duration(seconds: 3);
+  static const _kHoverWakeThrottle = Duration(milliseconds: 180);
+  static const double _kHoverWakeDistance = 12;
 
   Timer? _hideTimer;
   StreamSubscription<bool>? _playingSubscription;
@@ -3037,6 +3057,8 @@ class _MpvControlsOverlayState extends State<_MpvControlsOverlay> {
   double? _draggingPositionMs;
   bool _restoreAudibleVolume = false;
   bool _isDisposed = false;
+  Offset? _lastHoverPosition;
+  DateTime? _lastHoverAt;
 
   bool get _canUpdateOverlayState => mounted && context.mounted && !_isDisposed;
 
@@ -3171,6 +3193,44 @@ class _MpvControlsOverlayState extends State<_MpvControlsOverlay> {
     _syncAutoHide(forceShow: true, reason: reason);
   }
 
+  void _handlePointerEnter(PointerEnterEvent event) {
+    _lastHoverPosition = event.position;
+    _lastHoverAt = DateTime.now();
+    _showControls(reason: 'pointer-enter');
+  }
+
+  void _handlePointerExit(PointerExitEvent event) {
+    _lastHoverPosition = null;
+    _lastHoverAt = null;
+  }
+
+  void _handlePointerHover(PointerHoverEvent event) {
+    final previousPosition = _lastHoverPosition;
+    final previousAt = _lastHoverAt;
+    final now = DateTime.now();
+    _lastHoverPosition = event.position;
+    _lastHoverAt = now;
+
+    if (_controlsVisible) {
+      _showControls(reason: 'pointer-hover');
+      return;
+    }
+
+    if (!widget.isFullscreen) {
+      if (previousPosition == null) {
+        return;
+      }
+      final movedDistance = (event.position - previousPosition).distance;
+      final isThrottled = previousAt != null &&
+          now.difference(previousAt) < _kHoverWakeThrottle;
+      if (isThrottled || movedDistance < _kHoverWakeDistance) {
+        return;
+      }
+    }
+
+    _showControls(reason: 'pointer-hover');
+  }
+
   void _toggleControlsVisibility() {
     if (_controlsVisible) {
       _cancelHideTimer();
@@ -3258,8 +3318,9 @@ class _MpvControlsOverlayState extends State<_MpvControlsOverlay> {
   Widget build(BuildContext context) {
     final isFullscreen = widget.isFullscreen;
     return MouseRegion(
-      onEnter: (_) => _showControls(reason: 'pointer-enter'),
-      onHover: (_) => _showControls(reason: 'pointer-hover'),
+      onEnter: _handlePointerEnter,
+      onExit: _handlePointerExit,
+      onHover: _handlePointerHover,
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onTap: _toggleControlsVisibility,
