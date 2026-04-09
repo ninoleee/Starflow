@@ -2231,8 +2231,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       FocusNode(debugLabel: 'detail-hero-artwork');
   final FocusNode _heroPlayFocusNode =
       FocusNode(debugLabel: 'detail-hero-play');
-  final FocusNode _heroSearchFocusNode =
-      FocusNode(debugLabel: 'detail-hero-search');
   final TvFocusMemoryController _tvFocusMemoryController =
       TvFocusMemoryController();
 
@@ -2271,7 +2269,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     _detailSessionId += 1;
     _heroArtworkFocusNode.removeListener(_handleHeroArtworkFocusChanged);
     _heroArtworkFocusNode.dispose();
-    _heroSearchFocusNode.dispose();
     _heroPlayFocusNode.dispose();
     _scrollController.dispose();
     _tvFocusMemoryController.dispose();
@@ -3615,7 +3612,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                     isTelevision: isTelevision,
                     artworkFocusNode: _heroArtworkFocusNode,
                     playFocusNode: _heroPlayFocusNode,
-                    searchFocusNode: _heroSearchFocusNode,
                   ),
                   Padding(
                     padding: EdgeInsets.zero,
@@ -3976,6 +3972,54 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                     ),
                                   ],
                                 ],
+                                if (target.searchQuery.trim().isNotEmpty) ...[
+                                  const SizedBox(height: 12),
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: isTelevision
+                                        ? TvAdaptiveButton(
+                                            label: '搜索在线资源',
+                                            icon: Icons.search_rounded,
+                                            focusId:
+                                                'detail:resource:search-online',
+                                            onPressed: () {
+                                              context.pushNamed(
+                                                'detail-search',
+                                                queryParameters: {
+                                                  'q': target.searchQuery,
+                                                },
+                                              );
+                                            },
+                                            variant: TvButtonVariant.text,
+                                          )
+                                        : TextButton.icon(
+                                            onPressed: () {
+                                              context.pushNamed(
+                                                'detail-search',
+                                                queryParameters: {
+                                                  'q': target.searchQuery,
+                                                },
+                                              );
+                                            },
+                                            icon: const Icon(
+                                              Icons.search_rounded,
+                                              size: 16,
+                                            ),
+                                            label: const Text('搜索在线资源'),
+                                            style: TextButton.styleFrom(
+                                              foregroundColor: Colors.white,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 0,
+                                                vertical: 0,
+                                              ),
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                            ),
+                                          ),
+                                  ),
+                                ],
                                 if (_canShowManualResourceMatchButton(
                                     target)) ...[
                                   const SizedBox(height: 12),
@@ -4333,14 +4377,13 @@ bool _isUnavailableAvailabilityLabel(String label) {
   return _availabilityFeedbackLabel(label) == '无';
 }
 
-class _HeroSection extends StatelessWidget {
+class _HeroSection extends ConsumerWidget {
   const _HeroSection({
     required this.target,
     required this.simplifyVisualEffects,
     required this.isTelevision,
     this.artworkFocusNode,
     this.playFocusNode,
-    this.searchFocusNode,
   });
 
   final MediaDetailTarget target;
@@ -4348,10 +4391,9 @@ class _HeroSection extends StatelessWidget {
   final bool isTelevision;
   final FocusNode? artworkFocusNode;
   final FocusNode? playFocusNode;
-  final FocusNode? searchFocusNode;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final screenWidth = MediaQuery.sizeOf(context).width;
     final screenHeight = MediaQuery.sizeOf(context).height;
     final isCompact = screenWidth < 760;
@@ -4407,8 +4449,16 @@ class _HeroSection extends StatelessWidget {
             ],
             stops: const [0, 0.5, 1],
           );
-    final hasHeroAction =
-        target.isPlayable || target.searchQuery.trim().isNotEmpty;
+    final resumeEntry =
+        ref.watch(playbackResumeForDetailTargetProvider(target)).valueOrNull;
+    final showResumeAction =
+        resumeEntry != null && (target.isSeries || resumeEntry.canResume);
+    final primaryPlaybackTarget = _resolvePrimaryPlaybackTarget(
+      target,
+      resumeEntry,
+      preferResume: showResumeAction,
+    );
+    final hasHeroAction = primaryPlaybackTarget != null;
     final heroArtwork = Stack(
       fit: StackFit.expand,
       children: [
@@ -4448,10 +4498,7 @@ class _HeroSection extends StatelessWidget {
               onDirection: (direction) {
                 switch (direction) {
                   case TraversalDirection.down:
-                    return _requestDetailFocus([
-                      playFocusNode,
-                      searchFocusNode,
-                    ]);
+                    return _requestDetailFocus([playFocusNode]);
                   case TraversalDirection.left:
                   case TraversalDirection.right:
                   case TraversalDirection.up:
@@ -4483,7 +4530,6 @@ class _HeroSection extends StatelessWidget {
                     simplifyVisualEffects: simplifyVisualEffects,
                     artworkFocusNode: artworkFocusNode,
                     playFocusNode: playFocusNode,
-                    searchFocusNode: searchFocusNode,
                   );
 
                   if (isCompact) {
@@ -4516,7 +4562,6 @@ class _HeroContent extends ConsumerWidget {
     required this.simplifyVisualEffects,
     this.artworkFocusNode,
     this.playFocusNode,
-    this.searchFocusNode,
   });
 
   final MediaDetailTarget target;
@@ -4525,7 +4570,6 @@ class _HeroContent extends ConsumerWidget {
   final bool simplifyVisualEffects;
   final FocusNode? artworkFocusNode;
   final FocusNode? playFocusNode;
-  final FocusNode? searchFocusNode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -4539,10 +4583,6 @@ class _HeroContent extends ConsumerWidget {
         target, resumeEntry,
         preferResume: showResumeAction);
     final primaryPlaybackLabel = showResumeAction ? '继续播放' : '立即播放';
-    final canSearchResource = target.searchQuery.trim().isNotEmpty;
-    final searchAutofocus = primaryPlaybackTarget == null && canSearchResource;
-    final hasPlayAction = primaryPlaybackTarget != null;
-    final hasSearchAction = canSearchResource;
     final metadataChipPadding = EdgeInsets.symmetric(
       horizontal: simplifyVisualEffects ? 10 : 11,
       vertical: simplifyVisualEffects ? 5 : 6,
@@ -4700,13 +4740,7 @@ class _HeroContent extends ConsumerWidget {
                         onDirection: (direction) {
                           switch (direction) {
                             case TraversalDirection.right:
-                              if (!hasSearchAction) {
-                                return true;
-                              }
-                              return _requestDetailFocus([
-                                    searchFocusNode,
-                                  ]) ||
-                                  true;
+                              return true;
                             case TraversalDirection.left:
                             case TraversalDirection.down:
                               return false;
@@ -4741,112 +4775,6 @@ class _HeroContent extends ConsumerWidget {
                         ),
                         icon: const Icon(Icons.play_arrow_rounded),
                         label: Text(primaryPlaybackLabel),
-                      ),
-              if (!target.isPlayable && target.searchQuery.trim().isNotEmpty)
-                isTelevision
-                    ? wrapTelevisionDirectionalHandling(
-                        onDirection: (direction) {
-                          switch (direction) {
-                            case TraversalDirection.left:
-                              if (!hasPlayAction) {
-                                return false;
-                              }
-                              return _requestDetailFocus([playFocusNode]) ||
-                                  true;
-                            case TraversalDirection.right:
-                              return true;
-                            case TraversalDirection.up:
-                              return _requestDetailFocus([artworkFocusNode]);
-                            case TraversalDirection.down:
-                              return false;
-                          }
-                        },
-                        child: TvAdaptiveButton(
-                          label: '搜索资源',
-                          icon: Icons.search_rounded,
-                          focusNode: searchFocusNode,
-                          focusId: 'detail:hero:search',
-                          autofocus: searchAutofocus,
-                          onPressed: () {
-                            context.pushNamed(
-                              'detail-search',
-                              queryParameters: {'q': target.searchQuery},
-                            );
-                          },
-                        ),
-                      )
-                    : FilledButton.icon(
-                        onPressed: () {
-                          context.pushNamed(
-                            'detail-search',
-                            queryParameters: {'q': target.searchQuery},
-                          );
-                        },
-                        style: FilledButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xFF081120),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 15,
-                          ),
-                        ),
-                        icon: const Icon(Icons.search_rounded),
-                        label: const Text('搜索资源'),
-                      ),
-              if (target.isPlayable && target.searchQuery.trim().isNotEmpty)
-                isTelevision
-                    ? wrapTelevisionDirectionalHandling(
-                        onDirection: (direction) {
-                          switch (direction) {
-                            case TraversalDirection.left:
-                              if (!hasPlayAction) {
-                                return false;
-                              }
-                              return _requestDetailFocus([playFocusNode]) ||
-                                  true;
-                            case TraversalDirection.right:
-                              return true;
-                            case TraversalDirection.up:
-                              return _requestDetailFocus([artworkFocusNode]);
-                            case TraversalDirection.down:
-                              return false;
-                          }
-                        },
-                        child: TvAdaptiveButton(
-                          label: '搜索资源',
-                          icon: Icons.search_rounded,
-                          focusNode: searchFocusNode,
-                          focusId: 'detail:hero:search',
-                          autofocus: searchAutofocus,
-                          onPressed: () {
-                            context.pushNamed(
-                              'detail-search',
-                              queryParameters: {'q': target.searchQuery},
-                            );
-                          },
-                          variant: TvButtonVariant.outlined,
-                        ),
-                      )
-                    : OutlinedButton.icon(
-                        onPressed: () {
-                          context.pushNamed(
-                            'detail-search',
-                            queryParameters: {'q': target.searchQuery},
-                          );
-                        },
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          side: BorderSide(
-                            color: Colors.white.withValues(alpha: 0.24),
-                          ),
-                          backgroundColor: Colors.white.withValues(alpha: 0.06),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 15,
-                          ),
-                        ),
-                        icon: const Icon(Icons.search_rounded),
-                        label: const Text('搜索资源'),
                       ),
             ],
           ),

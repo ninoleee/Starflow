@@ -104,6 +104,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   int? _lastTracedBufferingBucket;
   late final StateController<bool> _playbackPerformanceModeController;
   Timer? _tvPlaybackChromeHideTimer;
+  Future<void>? _exitPlaybackFuture;
 
   @override
   void initState() {
@@ -133,14 +134,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     unawaited(_persistPlaybackProgress(force: true));
     unawaited(_teardownPictureInPicture());
     unawaited(_teardownPlaybackSystemSession());
-    unawaited(_playerErrorSubscription?.cancel());
-    unawaited(_playerPlayingSubscription?.cancel());
-    unawaited(_playerPositionSubscription?.cancel());
-    unawaited(_playerDurationSubscription?.cancel());
-    unawaited(_playerWidthSubscription?.cancel());
-    unawaited(_playerHeightSubscription?.cancel());
-    unawaited(_playerBufferingSubscription?.cancel());
-    unawaited(_playerBufferingPercentageSubscription?.cancel());
+    unawaited(_cancelPlayerSubscriptions());
     final player = _player;
     _player = null;
     _videoController = null;
@@ -154,6 +148,36 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       );
     }
     super.dispose();
+  }
+
+  Future<void> _cancelPlayerSubscriptions() async {
+    final errorSubscription = _playerErrorSubscription;
+    final playingSubscription = _playerPlayingSubscription;
+    final positionSubscription = _playerPositionSubscription;
+    final durationSubscription = _playerDurationSubscription;
+    final widthSubscription = _playerWidthSubscription;
+    final heightSubscription = _playerHeightSubscription;
+    final bufferingSubscription = _playerBufferingSubscription;
+    final bufferingPercentageSubscription =
+        _playerBufferingPercentageSubscription;
+
+    _playerErrorSubscription = null;
+    _playerPlayingSubscription = null;
+    _playerPositionSubscription = null;
+    _playerDurationSubscription = null;
+    _playerWidthSubscription = null;
+    _playerHeightSubscription = null;
+    _playerBufferingSubscription = null;
+    _playerBufferingPercentageSubscription = null;
+
+    await errorSubscription?.cancel();
+    await playingSubscription?.cancel();
+    await positionSubscription?.cancel();
+    await durationSubscription?.cancel();
+    await widthSubscription?.cancel();
+    await heightSubscription?.cancel();
+    await bufferingSubscription?.cancel();
+    await bufferingPercentageSubscription?.cancel();
   }
 
   @override
@@ -313,6 +337,59 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     });
     _playerShutdownQueue = shutdown.catchError((_) {});
     await shutdown;
+  }
+
+  Future<void> _stopPlaybackBeforeExit({
+    required String reason,
+  }) async {
+    _traceWindowsMpv(
+      'windows-mpv.exit.stop-before-pop',
+      fields: {'reason': reason},
+    );
+    await _persistPlaybackProgress(force: true);
+    await _cancelPlayerSubscriptions();
+    final player = _player;
+    _player = null;
+    _videoController = null;
+    _isReady = false;
+    await _teardownPictureInPicture();
+    await _teardownPlaybackSystemSession();
+    if (player != null) {
+      await _enqueuePlayerShutdown(player, reason: reason);
+    }
+  }
+
+  Future<void> _requestExitPlayer({
+    required String reason,
+  }) async {
+    final inFlight = _exitPlaybackFuture;
+    if (inFlight != null) {
+      await inFlight;
+      return;
+    }
+    final request = _performExitPlayer(reason: reason);
+    _exitPlaybackFuture = request;
+    try {
+      await request;
+    } finally {
+      if (identical(_exitPlaybackFuture, request)) {
+        _exitPlaybackFuture = null;
+      }
+    }
+  }
+
+  Future<void> _performExitPlayer({
+    required String reason,
+  }) async {
+    if (!_backgroundPlaybackEnabled) {
+      await _stopPlaybackBeforeExit(reason: reason);
+    } else {
+      await _persistPlaybackProgress(force: true);
+    }
+    if (!mounted) {
+      return;
+    }
+    context.pop();
   }
 
   Future<void> _bindPictureInPictureSupport() async {
@@ -1853,16 +1930,23 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final theme = Theme.of(context);
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final playbackSettings = ref.watch(appSettingsProvider);
+    final viewportSize = MediaQuery.sizeOf(context);
+    final expandEmbeddedMpvSurfaceInPortrait =
+        !isTelevision && viewportSize.height > viewportSize.width;
     final showMinimalPlayerChrome = _isInPictureInPictureMode ||
         (!isTelevision && playbackSettings.performanceLeanPlaybackUiEnabled);
 
     return PopScope<Object?>(
-      canPop: !isTelevision,
+      canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop || !isTelevision) {
+        if (didPop) {
           return;
         }
-        unawaited(_handleTvBack());
+        if (isTelevision) {
+          unawaited(_handleTvBack());
+        } else {
+          unawaited(_requestExitPlayer(reason: 'route-back'));
+        }
       },
       child: Shortcuts(
         shortcuts: isTelevision
@@ -1901,7 +1985,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 if (isTelevision) {
                   unawaited(_handleTvBack());
                 } else {
-                  context.pop();
+                  unawaited(_requestExitPlayer(reason: 'dismiss-intent'));
                 }
                 return null;
               },
@@ -1953,16 +2037,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
               body: showMinimalPlayerChrome
                   ? ColoredBox(
                       color: Colors.black,
-                      child: Center(
-                        child: AspectRatio(
-                          aspectRatio: _currentAspectRatio(),
-                          child: _buildVideoSurface(
-                            theme,
-                            isTelevision: isTelevision,
-                            settings: playbackSettings,
-                          ),
-                        ),
-                      ),
+                      child: expandEmbeddedMpvSurfaceInPortrait
+                          ? _buildVideoSurface(
+                              theme,
+                              isTelevision: isTelevision,
+                              settings: playbackSettings,
+                            )
+                          : Center(
+                              child: AspectRatio(
+                                aspectRatio: _currentAspectRatio(),
+                                child: _buildVideoSurface(
+                                  theme,
+                                  isTelevision: isTelevision,
+                                  settings: playbackSettings,
+                                ),
+                              ),
+                            ),
                     )
                   : !isTelevision
                       ? _buildVideoSurface(
@@ -1986,7 +2076,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       return;
     }
     if (_error != null) {
-      context.pop();
+      await _requestExitPlayer(reason: 'tv-error-exit');
       return;
     }
     if (_tvPlaybackChromeVisible) {
@@ -2027,7 +2117,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (!mounted || !shouldExit) {
       return;
     }
-    context.pop();
+    await _requestExitPlayer(reason: 'tv-confirm-exit');
   }
 
   Widget _buildTvPlaybackSurface(
@@ -2359,7 +2449,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   StarflowButton(
                     label: '返回',
                     icon: Icons.arrow_back_rounded,
-                    onPressed: () => context.pop(),
+                    onPressed: () {
+                      unawaited(
+                          _requestExitPlayer(reason: 'error-button-exit'));
+                    },
                     variant: StarflowButtonVariant.secondary,
                   ),
                 ],
@@ -2399,17 +2492,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             final height = heightSnapshot.data ?? 0;
             final aspectRatio =
                 width > 0 && height > 0 ? width / height : 16 / 9;
+            final viewportSize = MediaQuery.sizeOf(context);
+            final expandEmbeddedMpvSurfaceInPortrait =
+                !isTelevision && viewportSize.height > viewportSize.width;
             return ColoredBox(
               color: Colors.black,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  Center(
-                    child: AspectRatio(
-                      aspectRatio: aspectRatio,
-                      child: embeddedVideo,
-                    ),
-                  ),
+                  expandEmbeddedMpvSurfaceInPortrait
+                      ? Positioned.fill(child: embeddedVideo)
+                      : Center(
+                          child: AspectRatio(
+                            aspectRatio: aspectRatio,
+                            child: embeddedVideo,
+                          ),
+                        ),
                   if (!_isLeanPlaybackMode)
                     StreamBuilder<bool>(
                       stream: player.stream.buffering,
@@ -2468,7 +2566,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     return;
                   }
                   if (mounted) {
-                    context.pop();
+                    await _requestExitPlayer(reason: 'overlay-back');
                   }
                 },
                 onTogglePlayback: _togglePlayback,
