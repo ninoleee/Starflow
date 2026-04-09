@@ -185,6 +185,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   PlaybackDecodeMode get _playbackDecodeMode =>
       ref.read(appSettingsProvider).playbackDecodeMode;
 
+  PlaybackMpvQualityPreset get _playbackMpvQualityPreset =>
+      ref.read(appSettingsProvider).playbackMpvQualityPreset;
+
   Future<void> _bindPictureInPictureSupport() async {
     if (!AndroidPictureInPictureController.isSupportedPlatform) {
       return;
@@ -671,6 +674,56 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     }
   }
 
+  Future<void> _setMpvOption(Player player, String name, String value) async {
+    if (kIsWeb) {
+      return;
+    }
+    final native = player.platform;
+    if (native == null) {
+      return;
+    }
+    try {
+      await (native as dynamic).setProperty(name, value);
+    } catch (_) {
+      // Keep playback available even if a tuning hint is unsupported.
+    }
+  }
+
+  Future<void> _applyMpvVisualQualityPreset(
+    Player player,
+    PlaybackMpvQualityPreset preset,
+  ) async {
+    switch (preset) {
+      case PlaybackMpvQualityPreset.qualityFirst:
+        await _setMpvOption(player, 'deband', 'yes');
+        await _setMpvOption(player, 'scale', 'ewa_lanczossharp');
+        await _setMpvOption(player, 'cscale', 'ewa_lanczossoft');
+        await _setMpvOption(player, 'dscale', 'mitchell');
+        await _setMpvOption(player, 'sigmoid-upscaling', 'yes');
+        await _setMpvOption(player, 'correct-downscaling', 'yes');
+        await _setMpvOption(player, 'interpolation', 'no');
+        break;
+      case PlaybackMpvQualityPreset.balanced:
+        await _setMpvOption(player, 'deband', 'yes');
+        await _setMpvOption(player, 'scale', 'spline36');
+        await _setMpvOption(player, 'cscale', 'bilinear');
+        await _setMpvOption(player, 'dscale', 'mitchell');
+        await _setMpvOption(player, 'sigmoid-upscaling', 'no');
+        await _setMpvOption(player, 'correct-downscaling', 'yes');
+        await _setMpvOption(player, 'interpolation', 'no');
+        break;
+      case PlaybackMpvQualityPreset.performanceFirst:
+        await _setMpvOption(player, 'deband', 'no');
+        await _setMpvOption(player, 'scale', 'bilinear');
+        await _setMpvOption(player, 'cscale', 'bilinear');
+        await _setMpvOption(player, 'dscale', 'bilinear');
+        await _setMpvOption(player, 'sigmoid-upscaling', 'no');
+        await _setMpvOption(player, 'correct-downscaling', 'no');
+        await _setMpvOption(player, 'interpolation', 'no');
+        break;
+    }
+  }
+
   bool get _isTelevisionPlaybackDevice =>
       ref.read(isTelevisionProvider).valueOrNull ?? false;
 
@@ -732,15 +785,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       return;
     }
 
-    final native = player.platform;
-    if (native == null) {
-      return;
-    }
-
     final remotePlayback = _isLikelyRemotePlaybackTarget(target);
     final heavyPlayback = _isHeavyPlaybackTarget(target);
     final aggressiveTuning = _shouldUseAggressiveMpvTuning(target);
     final leanPlayback = _preferLeanPlaybackRendering;
+    final qualityPreset = _playbackMpvQualityPreset;
     final bufferSizeBytes = _resolveMpvBufferSizeBytes(target);
     var backBufferBytes = bufferSizeBytes ~/ 4;
     if (backBufferBytes < _kMinMpvBackBufferSizeBytes) {
@@ -749,39 +798,24 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       backBufferBytes = _kMaxMpvBackBufferSizeBytes;
     }
 
-    Future<void> setOption(String name, String value) async {
-      try {
-        await (native as dynamic).setProperty(name, value);
-      } catch (_) {
-        // Keep playback available even if a tuning hint is unsupported.
-      }
-    }
-
-    Future<void> runCommand(List<String> command) async {
-      try {
-        await (native as dynamic).command(command);
-      } catch (_) {
-        // Keep playback available even if a tuning hint is unsupported.
-      }
-    }
-
-    await setOption('demuxer-thread', 'yes');
-    await setOption('demuxer-max-bytes', bufferSizeBytes.toString());
-    await setOption('demuxer-max-back-bytes', backBufferBytes.toString());
-    await setOption('interpolation', 'no');
-    await setOption('deband', 'no');
-    await setOption('audio-display', 'no');
+    await _setMpvOption(player, 'demuxer-thread', 'yes');
+    await _setMpvOption(
+        player, 'demuxer-max-bytes', bufferSizeBytes.toString());
+    await _setMpvOption(
+      player,
+      'demuxer-max-back-bytes',
+      backBufferBytes.toString(),
+    );
+    await _setMpvOption(player, 'audio-display', 'no');
+    await _applyMpvVisualQualityPreset(player, qualityPreset);
 
     if (_isTelevisionPlaybackDevice) {
-      await setOption('osd-bar', 'no');
-    }
-
-    if (aggressiveTuning || _isTelevisionPlaybackDevice) {
-      await runCommand(const ['apply-profile', 'fast']);
+      await _setMpvOption(player, 'osd-bar', 'no');
     }
 
     if (remotePlayback) {
-      await setOption(
+      await _setMpvOption(
+        player,
         'demuxer-readahead-secs',
         aggressiveTuning
             ? '16'
@@ -789,11 +823,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 ? '10'
                 : '6',
       );
-      await setOption(
+      await _setMpvOption(
+        player,
         'demuxer-hysteresis-secs',
         aggressiveTuning ? '8' : '4',
       );
-      await setOption(
+      await _setMpvOption(
+        player,
         'cache-pause-wait',
         aggressiveTuning
             ? '1.5'
@@ -801,19 +837,34 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 ? '1.0'
                 : '0.6',
       );
-      if (aggressiveTuning || heavyPlayback) {
-        await setOption('cache-pause-initial', 'yes');
-      }
+      await _setMpvOption(
+        player,
+        'cache-pause-initial',
+        (aggressiveTuning || heavyPlayback) ? 'yes' : 'no',
+      );
     }
 
-    if (leanPlayback || aggressiveTuning || heavyPlayback) {
-      await setOption('vd-lavc-dr', 'yes');
-    }
+    await _setMpvOption(
+      player,
+      'vd-lavc-dr',
+      (leanPlayback ||
+              aggressiveTuning ||
+              heavyPlayback ||
+              qualityPreset == PlaybackMpvQualityPreset.performanceFirst)
+          ? 'yes'
+          : 'no',
+    );
 
-    if (_playbackDecodeMode == PlaybackDecodeMode.softwarePreferred &&
-        (aggressiveTuning || heavyPlayback)) {
-      await setOption('vd-lavc-skiploopfilter', 'nonref');
-    }
+    final shouldSkipLoopFilter =
+        _playbackDecodeMode == PlaybackDecodeMode.softwarePreferred &&
+            (aggressiveTuning ||
+                heavyPlayback ||
+                qualityPreset == PlaybackMpvQualityPreset.performanceFirst);
+    await _setMpvOption(
+      player,
+      'vd-lavc-skiploopfilter',
+      shouldSkipLoopFilter ? 'nonref' : 'none',
+    );
   }
 
   Future<void> _applyStartupPlaybackPreferences(Player player) async {
@@ -2347,6 +2398,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             _seriesSkipPreference,
             target: _resolvedTarget ?? widget.target,
           ),
+          onSelectMpvQualityPreset: _selectPlaybackMpvQualityPreset,
           onSelectSpeed: (currentRate) =>
               _selectPlaybackSpeed(player, currentRate),
           onSelectSubtitle: (tracks, current) =>
@@ -2363,6 +2415,43 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         );
       },
     );
+  }
+
+  Future<void> _selectPlaybackMpvQualityPreset() async {
+    final currentPreset = _playbackMpvQualityPreset;
+    final selection = await showDialog<PlaybackMpvQualityPreset>(
+      context: context,
+      builder: (dialogContext) {
+        return SimpleDialog(
+          title: const Text('MPV 画质策略'),
+          children: [
+            for (final preset in PlaybackMpvQualityPreset.values)
+              SimpleDialogOption(
+                onPressed: () => Navigator.of(dialogContext).pop(preset),
+                child: Text(
+                  preset == currentPreset
+                      ? '${preset.label}  当前'
+                      : preset.label,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+    if (selection == null || selection == currentPreset) {
+      return;
+    }
+
+    await ref
+        .read(settingsControllerProvider.notifier)
+        .setPlaybackMpvQualityPreset(selection);
+
+    final player = _player;
+    final target = _resolvedTarget ?? widget.target;
+    if (player != null) {
+      await _applyMpvPerformanceTuning(player, target);
+    }
+    _showMessage('MPV 画质策略已切换为 ${selection.label}');
   }
 
   Future<void> _selectPlaybackSpeed(Player player, double currentRate) async {
@@ -2700,7 +2789,7 @@ class _OpenedPlayback {
   final StreamSubscription<String> errorSubscription;
 }
 
-class _PlaybackOptionsDialog extends StatelessWidget {
+class _PlaybackOptionsDialog extends ConsumerWidget {
   const _PlaybackOptionsDialog({
     required this.player,
     required this.target,
@@ -2708,6 +2797,7 @@ class _PlaybackOptionsDialog extends StatelessWidget {
     required this.defaultSubtitleScaleLabel,
     required this.subtitleDelayLabel,
     required this.seriesSkipLabel,
+    required this.onSelectMpvQualityPreset,
     required this.onSelectSpeed,
     required this.onSelectSubtitle,
     required this.onSelectAudio,
@@ -2723,6 +2813,7 @@ class _PlaybackOptionsDialog extends StatelessWidget {
   final String defaultSubtitleScaleLabel;
   final String subtitleDelayLabel;
   final String seriesSkipLabel;
+  final Future<void> Function() onSelectMpvQualityPreset;
   final Future<void> Function(double currentRate) onSelectSpeed;
   final Future<void> Function(
     List<SubtitleTrack> tracks,
@@ -2762,7 +2853,12 @@ class _PlaybackOptionsDialog extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mpvQualityPresetLabel = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.playbackMpvQualityPreset.label,
+      ),
+    );
     return AlertDialog(
       title: const Text('播放设置'),
       content: SizedBox(
@@ -2810,6 +2906,13 @@ class _PlaybackOptionsDialog extends StatelessWidget {
                           title: '播放速度',
                           value: _formatPlaybackSpeed(rate),
                           onPressed: () => onSelectSpeed(rate),
+                        ),
+                        const SizedBox(height: 10),
+                        _PlaybackOptionTile(
+                          isTelevision: isTelevision,
+                          title: 'MPV 画质策略',
+                          value: mpvQualityPresetLabel,
+                          onPressed: onSelectMpvQualityPreset,
                         ),
                         const SizedBox(height: 10),
                         _PlaybackOptionTile(

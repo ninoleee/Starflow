@@ -658,6 +658,7 @@ class SettingsPage extends ConsumerStatefulWidget {
               settings.playbackBackgroundPlaybackEnabled,
           initialPlaybackEngine: settings.playbackEngine,
           initialPlaybackDecodeMode: settings.playbackDecodeMode,
+          initialPlaybackMpvQualityPreset: settings.playbackMpvQualityPreset,
         ),
       ),
     );
@@ -794,6 +795,7 @@ String _playbackSettingsSummary(AppSettings settings) {
   return [
     settings.playbackEngine.label,
     settings.playbackDecodeMode.label,
+    'MPV ${settings.playbackMpvQualityPreset.label}',
     '${settings.playbackOpenTimeoutSeconds}s 超时',
     '${_formatPlaybackSpeedLabel(settings.playbackDefaultSpeed)} 默认倍速',
     '字幕 ${settings.playbackSubtitlePreference.label}',

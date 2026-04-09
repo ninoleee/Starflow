@@ -216,6 +216,45 @@ extension PlaybackDecodeModeX on PlaybackDecodeMode {
   }
 }
 
+enum PlaybackMpvQualityPreset {
+  qualityFirst,
+  balanced,
+  performanceFirst,
+}
+
+extension PlaybackMpvQualityPresetX on PlaybackMpvQualityPreset {
+  String get label {
+    switch (this) {
+      case PlaybackMpvQualityPreset.qualityFirst:
+        return '画质优先';
+      case PlaybackMpvQualityPreset.balanced:
+        return '平衡';
+      case PlaybackMpvQualityPreset.performanceFirst:
+        return '性能优先';
+    }
+  }
+
+  String get description {
+    switch (this) {
+      case PlaybackMpvQualityPreset.qualityFirst:
+        return '优先保留去色带与更锐利的缩放策略，适合更在意观感的场景。';
+      case PlaybackMpvQualityPreset.balanced:
+        return '默认推荐，兼顾清晰度、稳定性与设备负载。';
+      case PlaybackMpvQualityPreset.performanceFirst:
+        return '优先降低缩放与后处理压力，适合较弱设备或高码率片源。';
+    }
+  }
+
+  static PlaybackMpvQualityPreset fromName(String raw) {
+    return switch (raw) {
+      'qualityFirst' => PlaybackMpvQualityPreset.qualityFirst,
+      'performanceFirst' => PlaybackMpvQualityPreset.performanceFirst,
+      'balanced' => PlaybackMpvQualityPreset.balanced,
+      _ => PlaybackMpvQualityPreset.balanced,
+    };
+  }
+}
+
 enum PlaybackSubtitleScale {
   compact,
   standard,
@@ -719,6 +758,7 @@ class AppSettings {
     this.playbackBackgroundPlaybackEnabled = true,
     this.playbackEngine = PlaybackEngine.embeddedMpv,
     this.playbackDecodeMode = PlaybackDecodeMode.auto,
+    this.playbackMpvQualityPreset = PlaybackMpvQualityPreset.balanced,
   });
 
   final List<MediaSourceConfig> mediaSources;
@@ -760,6 +800,7 @@ class AppSettings {
   final bool playbackBackgroundPlaybackEnabled;
   final PlaybackEngine playbackEngine;
   final PlaybackDecodeMode playbackDecodeMode;
+  final PlaybackMpvQualityPreset playbackMpvQualityPreset;
 
   AppSettings copyWith({
     List<MediaSourceConfig>? mediaSources,
@@ -801,6 +842,7 @@ class AppSettings {
     bool? playbackBackgroundPlaybackEnabled,
     PlaybackEngine? playbackEngine,
     PlaybackDecodeMode? playbackDecodeMode,
+    PlaybackMpvQualityPreset? playbackMpvQualityPreset,
   }) {
     return AppSettings(
       mediaSources: mediaSources ?? this.mediaSources,
@@ -876,6 +918,8 @@ class AppSettings {
           this.playbackBackgroundPlaybackEnabled,
       playbackEngine: playbackEngine ?? this.playbackEngine,
       playbackDecodeMode: playbackDecodeMode ?? this.playbackDecodeMode,
+      playbackMpvQualityPreset:
+          playbackMpvQualityPreset ?? this.playbackMpvQualityPreset,
     );
   }
 
@@ -926,6 +970,7 @@ class AppSettings {
       'playbackBackgroundPlaybackEnabled': playbackBackgroundPlaybackEnabled,
       'playbackEngine': playbackEngine.name,
       'playbackDecodeMode': playbackDecodeMode.name,
+      'playbackMpvQualityPreset': playbackMpvQualityPreset.name,
     };
   }
 
@@ -1045,6 +1090,9 @@ class AppSettings {
       ),
       playbackDecodeMode: PlaybackDecodeModeX.fromName(
         json['playbackDecodeMode'] as String? ?? '',
+      ),
+      playbackMpvQualityPreset: PlaybackMpvQualityPresetX.fromName(
+        json['playbackMpvQualityPreset'] as String? ?? '',
       ),
     );
   }

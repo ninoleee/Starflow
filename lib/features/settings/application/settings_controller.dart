@@ -196,6 +196,15 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(playbackEngine: playbackEngine));
   }
 
+  Future<void> setPlaybackMpvQualityPreset(
+    PlaybackMpvQualityPreset playbackMpvQualityPreset,
+  ) async {
+    final current = state.valueOrNull ?? await _repository.load();
+    await _persist(
+      current.copyWith(playbackMpvQualityPreset: playbackMpvQualityPreset),
+    );
+  }
+
   Future<void> savePlaybackPreferences({
     required int openTimeoutSeconds,
     required double defaultSpeed,
@@ -205,6 +214,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     required bool backgroundPlaybackEnabled,
     required PlaybackEngine playbackEngine,
     required PlaybackDecodeMode playbackDecodeMode,
+    required PlaybackMpvQualityPreset playbackMpvQualityPreset,
   }) async {
     final current = state.valueOrNull ?? await _repository.load();
     await _persist(
@@ -218,6 +228,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         playbackBackgroundPlaybackEnabled: backgroundPlaybackEnabled,
         playbackEngine: playbackEngine,
         playbackDecodeMode: playbackDecodeMode,
+        playbackMpvQualityPreset: playbackMpvQualityPreset,
       ),
     );
   }

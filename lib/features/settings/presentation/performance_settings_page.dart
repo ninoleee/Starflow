@@ -55,31 +55,35 @@ class PerformanceSettingsPage extends ConsumerWidget {
           },
         ),
         const SettingsSectionTitle(label: '界面'),
-        SettingsToggleTile(
-          title: '透明磨砂效果',
-          subtitle: '关闭后可减少模糊和毛玻璃效果。',
-          value: settings.translucentEffectsEnabled,
-          onChanged: (value) {
-            controller.setTranslucentEffectsEnabled(value);
-          },
-        ),
-        SettingsToggleTile(
-          title: '自动隐藏菜单栏',
-          subtitle: '普通端会按页面交互自动隐藏；TV 端会在焦点离开左侧菜单后收起。',
-          value: settings.autoHideNavigationBarEnabled,
-          onChanged: (value) {
-            controller.setAutoHideNavigationBarEnabled(value);
-          },
-        ),
+        ...buildSettingsTileGroup([
+          SettingsToggleTile(
+            title: '透明磨砂效果',
+            subtitle: '关闭后可减少模糊和毛玻璃效果。',
+            value: settings.translucentEffectsEnabled,
+            onChanged: (value) {
+              controller.setTranslucentEffectsEnabled(value);
+            },
+          ),
+          SettingsToggleTile(
+            title: '自动隐藏菜单栏',
+            subtitle: '普通端会按页面交互自动隐藏；TV 端会在焦点离开左侧菜单后收起。',
+            value: settings.autoHideNavigationBarEnabled,
+            onChanged: (value) {
+              controller.setAutoHideNavigationBarEnabled(value);
+            },
+          ),
+        ]),
         const SettingsSectionTitle(label: '首页 Hero'),
-        SettingsToggleTile(
-          title: 'Hero 全屏背景图',
-          subtitle: '关闭后首页 Hero 不再加载全屏背景图。',
-          value: settings.homeHeroBackgroundEnabled,
-          onChanged: (value) {
-            controller.setHomeHeroBackgroundEnabled(value);
-          },
-        ),
+        ...buildSettingsTileGroup([
+          SettingsToggleTile(
+            title: 'Hero 全屏背景图',
+            subtitle: '关闭后首页 Hero 不再加载全屏背景图。',
+            value: settings.homeHeroBackgroundEnabled,
+            onChanged: (value) {
+              controller.setHomeHeroBackgroundEnabled(value);
+            },
+          ),
+        ]),
       ],
     );
   }

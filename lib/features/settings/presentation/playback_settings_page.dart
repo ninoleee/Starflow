@@ -17,6 +17,7 @@ class PlaybackSettingsPage extends ConsumerStatefulWidget {
     required this.initialBackgroundPlaybackEnabled,
     required this.initialPlaybackEngine,
     required this.initialPlaybackDecodeMode,
+    required this.initialPlaybackMpvQualityPreset,
   });
 
   final int initialTimeoutSeconds;
@@ -27,6 +28,7 @@ class PlaybackSettingsPage extends ConsumerStatefulWidget {
   final bool initialBackgroundPlaybackEnabled;
   final PlaybackEngine initialPlaybackEngine;
   final PlaybackDecodeMode initialPlaybackDecodeMode;
+  final PlaybackMpvQualityPreset initialPlaybackMpvQualityPreset;
 
   @override
   ConsumerState<PlaybackSettingsPage> createState() =>
@@ -44,6 +46,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   late bool _draftBackgroundPlaybackEnabled;
   late PlaybackEngine _draftPlaybackEngine;
   late PlaybackDecodeMode _draftPlaybackDecodeMode;
+  late PlaybackMpvQualityPreset _draftPlaybackMpvQualityPreset;
   bool _skipAutoSaveOnPop = false;
 
   @override
@@ -60,6 +63,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     _draftBackgroundPlaybackEnabled = widget.initialBackgroundPlaybackEnabled;
     _draftPlaybackEngine = widget.initialPlaybackEngine;
     _draftPlaybackDecodeMode = widget.initialPlaybackDecodeMode;
+    _draftPlaybackMpvQualityPreset = widget.initialPlaybackMpvQualityPreset;
   }
 
   @override
@@ -83,6 +87,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
           backgroundPlaybackEnabled: _draftBackgroundPlaybackEnabled,
           playbackEngine: _draftPlaybackEngine,
           playbackDecodeMode: _draftPlaybackDecodeMode,
+          playbackMpvQualityPreset: _draftPlaybackMpvQualityPreset,
         );
     if (popAfterSave && mounted) {
       _skipAutoSaveOnPop = true;
@@ -102,7 +107,9 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
         _draftBackgroundPlaybackEnabled !=
             widget.initialBackgroundPlaybackEnabled ||
         _draftPlaybackEngine != widget.initialPlaybackEngine ||
-        _draftPlaybackDecodeMode != widget.initialPlaybackDecodeMode;
+        _draftPlaybackDecodeMode != widget.initialPlaybackDecodeMode ||
+        _draftPlaybackMpvQualityPreset !=
+            widget.initialPlaybackMpvQualityPreset;
   }
 
   Future<void> _discardAndClose() async {
@@ -180,6 +187,19 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
           const SizedBox(height: 8),
           Text(
             _buildPlaybackDecodeModeDescription(),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 18),
+          SettingsSelectionTile(
+            title: 'MPV 画质策略',
+            value: _draftPlaybackMpvQualityPreset.label,
+            onPressed: _openPlaybackMpvQualityPresetPicker,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _buildPlaybackMpvQualityPresetDescription(),
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -299,6 +319,22 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     });
   }
 
+  Future<void> _openPlaybackMpvQualityPresetPicker() async {
+    final selection = await showSettingsOptionDialog<PlaybackMpvQualityPreset>(
+      context: context,
+      title: '选择 MPV 画质策略',
+      options: PlaybackMpvQualityPreset.values,
+      currentValue: _draftPlaybackMpvQualityPreset,
+      labelBuilder: (preset) => preset.label,
+    );
+    if (selection == null) {
+      return;
+    }
+    setState(() {
+      _draftPlaybackMpvQualityPreset = selection;
+    });
+  }
+
   static String _formatSpeedLabel(double speed) {
     if (speed == speed.roundToDouble()) {
       return '${speed.toStringAsFixed(0)}x';
@@ -325,6 +361,16 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
       }
     } else {
       buffer.write(' 作用于内置 MPV。');
+    }
+    return buffer.toString();
+  }
+
+  String _buildPlaybackMpvQualityPresetDescription() {
+    final buffer = StringBuffer(_draftPlaybackMpvQualityPreset.description);
+    if (_draftPlaybackEngine != PlaybackEngine.embeddedMpv) {
+      buffer.write(' 当前只作用于内置 MPV，切到原生或系统播放器时不会生效。');
+    } else {
+      buffer.write(' 也可以在播放器内的“播放设置”里临时切换。');
     }
     return buffer.toString();
   }

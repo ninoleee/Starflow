@@ -2169,6 +2169,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   int _detailSessionId = 0;
   _LibraryMatchTaskController? _activeLibraryMatchController;
   final ScrollController _scrollController = ScrollController();
+  final FocusNode _heroArtworkFocusNode =
+      FocusNode(debugLabel: 'detail-hero-artwork');
   final FocusNode _heroPlayFocusNode =
       FocusNode(debugLabel: 'detail-hero-play');
   final FocusNode _heroSearchFocusNode =
@@ -2208,6 +2210,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   void dispose() {
     _cancelActiveLibraryMatch();
     _detailSessionId += 1;
+    _heroArtworkFocusNode.dispose();
     _heroSearchFocusNode.dispose();
     _heroPlayFocusNode.dispose();
     _scrollController.dispose();
@@ -3521,6 +3524,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                   _HeroSection(
                     target: playbackTargetDecorated,
                     simplifyVisualEffects: performanceSlimDetailHeroEnabled,
+                    isTelevision: isTelevision,
+                    artworkFocusNode: _heroArtworkFocusNode,
                     playFocusNode: _heroPlayFocusNode,
                     searchFocusNode: _heroSearchFocusNode,
                   ),
@@ -4244,12 +4249,16 @@ class _HeroSection extends StatelessWidget {
   const _HeroSection({
     required this.target,
     required this.simplifyVisualEffects,
+    required this.isTelevision,
+    this.artworkFocusNode,
     this.playFocusNode,
     this.searchFocusNode,
   });
 
   final MediaDetailTarget target;
   final bool simplifyVisualEffects;
+  final bool isTelevision;
+  final FocusNode? artworkFocusNode;
   final FocusNode? playFocusNode;
   final FocusNode? searchFocusNode;
 
@@ -4310,6 +4319,33 @@ class _HeroSection extends StatelessWidget {
             ],
             stops: const [0, 0.5, 1],
           );
+    final hasHeroAction =
+        target.isPlayable || target.searchQuery.trim().isNotEmpty;
+    final heroArtwork = Stack(
+      fit: StackFit.expand,
+      children: [
+        _BackdropImage(
+          imageUrl: _resolvePrimaryBackdropAsset(target).url,
+          imageHeaders: _resolvePrimaryBackdropAsset(target).headers,
+          fallbackSources: _buildPrimaryBackdropFallbackSources(target),
+        ),
+        IgnorePointer(
+          child: Align(
+            alignment: Alignment.bottomLeft,
+            child: FractionallySizedBox(
+              widthFactor: overlayWidthFactor,
+              heightFactor: overlayHeightFactor,
+              alignment: Alignment.bottomLeft,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: overlayGradient,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
 
     return SizedBox(
       height: heroHeight,
@@ -4317,26 +4353,33 @@ class _HeroSection extends StatelessWidget {
         fit: StackFit.expand,
         clipBehavior: Clip.none,
         children: [
-          _BackdropImage(
-            imageUrl: _resolvePrimaryBackdropAsset(target).url,
-            imageHeaders: _resolvePrimaryBackdropAsset(target).headers,
-            fallbackSources: _buildPrimaryBackdropFallbackSources(target),
-          ),
-          IgnorePointer(
-            child: Align(
-              alignment: Alignment.bottomLeft,
-              child: FractionallySizedBox(
-                widthFactor: overlayWidthFactor,
-                heightFactor: overlayHeightFactor,
-                alignment: Alignment.bottomLeft,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: overlayGradient,
-                  ),
-                ),
+          if (!isTelevision)
+            heroArtwork
+          else
+            TvDirectionalActionPanel(
+              onDirection: (direction) {
+                switch (direction) {
+                  case TraversalDirection.down:
+                    return _requestDetailFocus([
+                      playFocusNode,
+                      searchFocusNode,
+                    ]);
+                  case TraversalDirection.left:
+                  case TraversalDirection.right:
+                  case TraversalDirection.up:
+                    return false;
+                }
+              },
+              child: TvFocusableAction(
+                onPressed: () {},
+                focusNode: artworkFocusNode,
+                focusId: 'detail:hero:artwork',
+                autofocus: !hasHeroAction,
+                borderRadius: BorderRadius.zero,
+                visualStyle: TvFocusVisualStyle.subtle,
+                child: heroArtwork,
               ),
             ),
-          ),
           Positioned(
             left: 16,
             right: 16,
@@ -4350,6 +4393,7 @@ class _HeroSection extends StatelessWidget {
                     metadata: metadata,
                     peopleLine: peopleLine,
                     simplifyVisualEffects: simplifyVisualEffects,
+                    artworkFocusNode: artworkFocusNode,
                     playFocusNode: playFocusNode,
                     searchFocusNode: searchFocusNode,
                   );
@@ -4382,6 +4426,7 @@ class _HeroContent extends ConsumerWidget {
     required this.metadata,
     required this.peopleLine,
     required this.simplifyVisualEffects,
+    this.artworkFocusNode,
     this.playFocusNode,
     this.searchFocusNode,
   });
@@ -4390,6 +4435,7 @@ class _HeroContent extends ConsumerWidget {
   final List<String> metadata;
   final String peopleLine;
   final bool simplifyVisualEffects;
+  final FocusNode? artworkFocusNode;
   final FocusNode? playFocusNode;
   final FocusNode? searchFocusNode;
 
@@ -4574,9 +4620,10 @@ class _HeroContent extends ConsumerWidget {
                                   ]) ||
                                   true;
                             case TraversalDirection.left:
-                            case TraversalDirection.up:
                             case TraversalDirection.down:
                               return false;
+                            case TraversalDirection.up:
+                              return _requestDetailFocus([artworkFocusNode]);
                           }
                         },
                         child: TvAdaptiveButton(
@@ -4621,6 +4668,7 @@ class _HeroContent extends ConsumerWidget {
                             case TraversalDirection.right:
                               return true;
                             case TraversalDirection.up:
+                              return _requestDetailFocus([artworkFocusNode]);
                             case TraversalDirection.down:
                               return false;
                           }
@@ -4671,6 +4719,7 @@ class _HeroContent extends ConsumerWidget {
                             case TraversalDirection.right:
                               return true;
                             case TraversalDirection.up:
+                              return _requestDetailFocus([artworkFocusNode]);
                             case TraversalDirection.down:
                               return false;
                           }
@@ -4826,6 +4875,8 @@ class _EpisodeBrowser extends StatefulWidget {
 class _EpisodeBrowserState extends State<_EpisodeBrowser> {
   static const double _episodeCardWidth = 292;
   static const double _episodeCardSpacing = 14;
+  static const double _episodeCardStride =
+      _episodeCardWidth + _episodeCardSpacing;
 
   final Map<String, FocusNode> _seasonFocusNodes = <String, FocusNode>{};
   final Map<String, FocusNode> _episodePlayFocusNodes = <String, FocusNode>{};
@@ -4957,13 +5008,54 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
     required int currentIndex,
     required int step,
     required Map<String, FocusNode> nodes,
+    required ScrollController scrollController,
   }) {
     final targetIndex = currentIndex + step;
     if (targetIndex < 0 || targetIndex >= keys.length) {
       return true;
     }
-    _requestDetailFocus([nodes[keys[targetIndex]]]);
+    if (_requestDetailFocus([nodes[keys[targetIndex]]])) {
+      return true;
+    }
+    if (!scrollController.hasClients) {
+      return true;
+    }
+    unawaited(
+      _revealEpisodeRowIndex(
+        index: targetIndex,
+        keys: keys,
+        nodes: nodes,
+        scrollController: scrollController,
+      ),
+    );
     return true;
+  }
+
+  Future<void> _revealEpisodeRowIndex({
+    required int index,
+    required List<String> keys,
+    required Map<String, FocusNode> nodes,
+    required ScrollController scrollController,
+  }) async {
+    if (!mounted || !scrollController.hasClients) {
+      return;
+    }
+    if (index < 0 || index >= keys.length) {
+      return;
+    }
+    final position = scrollController.position;
+    final targetOffset = (index * _episodeCardStride)
+        .clamp(position.minScrollExtent, position.maxScrollExtent)
+        .toDouble();
+    if ((position.pixels - targetOffset).abs() >= 1) {
+      scrollController.jumpTo(targetOffset);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _requestDetailFocus([nodes[keys[index]]]);
+    });
   }
 
   @override
@@ -5053,6 +5145,7 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
                             currentIndex: index,
                             step: -1,
                             nodes: _episodePlayFocusNodes,
+                            scrollController: controller,
                           );
                         case TraversalDirection.right:
                           return _moveEpisodeRow(
@@ -5060,6 +5153,7 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
                             currentIndex: index,
                             step: 1,
                             nodes: _episodePlayFocusNodes,
+                            scrollController: controller,
                           );
                         case TraversalDirection.down:
                           return _requestDetailFocus([detailFocusNode]);
@@ -5076,6 +5170,7 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
                             currentIndex: index,
                             step: -1,
                             nodes: _episodeDetailFocusNodes,
+                            scrollController: controller,
                           );
                         case TraversalDirection.right:
                           return _moveEpisodeRow(
@@ -5083,6 +5178,7 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
                             currentIndex: index,
                             step: 1,
                             nodes: _episodeDetailFocusNodes,
+                            scrollController: controller,
                           );
                         case TraversalDirection.up:
                           return _requestDetailFocus([

@@ -275,6 +275,24 @@ class SettingsSectionTitle extends StatelessWidget {
   }
 }
 
+List<Widget> buildSettingsTileGroup(
+  List<Widget> children, {
+  double spacing = 18,
+}) {
+  if (children.isEmpty) {
+    return const <Widget>[];
+  }
+
+  final result = <Widget>[];
+  for (var index = 0; index < children.length; index++) {
+    if (index > 0) {
+      result.add(SizedBox(height: spacing));
+    }
+    result.add(children[index]);
+  }
+  return result;
+}
+
 Future<SettingsCloseAction> showSettingsCloseConfirmDialog(
   BuildContext context,
 ) async {

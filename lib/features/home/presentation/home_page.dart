@@ -344,6 +344,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                           title: item.title,
                           subtitle: item.subtitle,
                           posterUrl: item.posterUrl,
+                          tvPosterFocusOutlineOnly: true,
                           focusNode: useHeroNextSectionFocusNode && index == 0
                               ? _heroNextSectionFocusNode
                               : null,

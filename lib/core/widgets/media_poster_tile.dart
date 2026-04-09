@@ -22,6 +22,7 @@ class MediaPosterTile extends ConsumerWidget {
     this.focusId,
     this.focusNode,
     this.autofocus = false,
+    this.tvPosterFocusOutlineOnly = false,
   });
 
   final String title;
@@ -39,6 +40,7 @@ class MediaPosterTile extends ConsumerWidget {
   final String? focusId;
   final FocusNode? focusNode;
   final bool autofocus;
+  final bool tvPosterFocusOutlineOnly;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -53,6 +55,7 @@ class MediaPosterTile extends ConsumerWidget {
     // 豆瓣带 imageView2 等参数的图在部分设备上与 decode 尺寸限制组合可能解码失败，故不缩采样。
     final skipResizeForDecode =
         host.endsWith('.doubanio.com') || host == 'img.douban.com';
+    final enablePosterFocusOutline = isTelevision && tvPosterFocusOutlineOnly;
 
     final Widget posterChild;
     if (trimmedPoster.isEmpty) {
@@ -103,7 +106,7 @@ class MediaPosterTile extends ConsumerWidget {
     }
 
     Widget buildPosterFrame() {
-      return ClipRRect(
+      final posterFrame = ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: Stack(
           fit: StackFit.expand,
@@ -139,6 +142,38 @@ class MediaPosterTile extends ConsumerWidget {
               ),
           ],
         ),
+      );
+      if (!enablePosterFocusOutline) {
+        return posterFrame;
+      }
+      return Builder(
+        builder: (context) {
+          final focusState = Focus.of(context);
+          final isPosterFocused =
+              focusState.hasFocus || focusState.hasPrimaryFocus;
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              posterFrame,
+              IgnorePointer(
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 110),
+                  curve: Curves.easeOut,
+                  opacity: isPosterFocused ? 1 : 0,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.18),
+                        width: 1.1,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       );
     }
 
