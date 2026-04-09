@@ -88,6 +88,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     super.dispose();
   }
 
+  void _handleBack() {
+    if (context.canPop()) {
+      context.pop();
+      return;
+    }
+    context.goNamed('home');
+  }
+
   Future<void> _loadTelevisionPreferences() async {
     final preferences = ref.read(searchPreferencesRepositoryProvider);
     final recentQueries = await preferences.loadRecentQueries();
@@ -233,7 +241,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   Widget build(BuildContext context) {
     final settings = ref.watch(appSettingsProvider);
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
-    final headerTopInset = widget.showBackButton ? kToolbarHeight : 0.0;
+    final headerTopInset = kToolbarHeight;
     final enabledProviders = _visibleSearchProviders(settings);
     final collectionsAsync = ref.watch(searchCollectionsProvider);
     final scopedCollections =
@@ -467,15 +475,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                 ),
               ),
             ),
-            if (widget.showBackButton)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: OverlayToolbar(
-                  onBack: () => context.pop(),
-                ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: OverlayToolbar(
+                onBack: _handleBack,
               ),
+            ),
           ],
         ),
       ),

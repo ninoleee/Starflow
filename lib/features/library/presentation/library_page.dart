@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
+import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/application/library_cached_items.dart';
@@ -96,6 +97,14 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     super.dispose();
   }
 
+  void _handleBack() {
+    if (context.canPop()) {
+      context.pop();
+      return;
+    }
+    context.goNamed('home');
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(appSettingsProvider);
@@ -114,211 +123,240 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
       scopeId: 'library',
       isTelevision: isTelevision,
       child: Scaffold(
-        body: AppPageBackground(
-          contentPadding: appPageContentPadding(
-            context,
-            includeBottomNavigationBar: true,
-          ),
-          child: ListView(
-            controller: _scrollController,
-            padding: EdgeInsets.zero,
-            children: [
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  for (var index = 0;
-                      index < LibraryFilter.values.length;
-                      index++)
-                    _LibraryFilterChip(
-                      filter: LibraryFilter.values[index],
-                      selected: LibraryFilter.values[index] == _filter,
-                      focusNode: index == 0 ? _topFilterFocusNode : null,
-                      focusId:
-                          'library:filter:${LibraryFilter.values[index].name}',
-                      autofocus: index == 0 && isTelevision,
-                      onPressed: () {
-                        setState(() {
-                          _filter = LibraryFilter.values[index];
-                          _currentPage = 0;
-                        });
-                      },
-                    ),
-                ],
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            AppPageBackground(
+              contentPadding: appPageContentPadding(
+                context,
+                includeBottomNavigationBar: true,
               ),
-              const SizedBox(height: 18),
-              if (rebuildableSourceIds.isNotEmpty) ...[
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Wrap(
+              child: ListView(
+                controller: _scrollController,
+                padding: EdgeInsets.zero,
+                children: [
+                  const SizedBox(height: kToolbarHeight),
+                  Wrap(
                     spacing: 10,
                     runSpacing: 10,
                     children: [
-                      if (isTelevision)
-                        TvAdaptiveButton(
-                          label: _isIncrementalRefreshing
-                              ? '更新中...'
-                              : '增量更新 WebDAV',
-                          icon: Icons.refresh_rounded,
-                          onPressed: _isIncrementalRefreshing ||
-                                  _isForceRescanning
-                              ? null
-                              : () =>
-                                  _runIncrementalRefresh(rebuildableSourceIds),
-                          variant: TvButtonVariant.outlined,
-                          focusId: 'library:refresh:incremental',
-                        )
-                      else
-                        OutlinedButton.icon(
-                          onPressed: _isIncrementalRefreshing ||
-                                  _isForceRescanning
-                              ? null
-                              : () =>
-                                  _runIncrementalRefresh(rebuildableSourceIds),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 10,
-                            ),
-                            minimumSize: const Size(0, 40),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          icon: _isIncrementalRefreshing
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.refresh_rounded),
-                          label: Text(
-                            _isIncrementalRefreshing ? '更新中...' : '增量更新 WebDAV',
-                          ),
-                        ),
-                      if (isTelevision)
-                        TvAdaptiveButton(
-                          label: _isForceRescanning ? '重建中...' : '重建 WebDAV 索引',
-                          icon: Icons.restart_alt_rounded,
-                          onPressed: _isForceRescanning
-                              ? null
-                              : () => _confirmForceRescan(rebuildableSourceIds),
-                          variant: TvButtonVariant.outlined,
-                          focusId: 'library:refresh:rescan',
-                        )
-                      else
-                        OutlinedButton.icon(
-                          onPressed: _isForceRescanning
-                              ? null
-                              : () => _confirmForceRescan(rebuildableSourceIds),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 10,
-                            ),
-                            minimumSize: const Size(0, 40),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          icon: _isForceRescanning
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.restart_alt_rounded),
-                          label: Text(
-                            _isForceRescanning ? '重建中...' : '重建 WebDAV 索引',
-                          ),
+                      for (var index = 0;
+                          index < LibraryFilter.values.length;
+                          index++)
+                        _LibraryFilterChip(
+                          filter: LibraryFilter.values[index],
+                          selected: LibraryFilter.values[index] == _filter,
+                          focusNode: index == 0 ? _topFilterFocusNode : null,
+                          focusId:
+                              'library:filter:${LibraryFilter.values[index].name}',
+                          autofocus: index == 0 && isTelevision,
+                          onPressed: () {
+                            setState(() {
+                              _filter = LibraryFilter.values[index];
+                              _currentPage = 0;
+                            });
+                          },
                         ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 16),
-              ],
-              if (visibleProgress.isNotEmpty) ...[
-                ...visibleProgress.map(
-                  (progress) => Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: _WebDavScrapeProgressCard(progress: progress),
-                  ),
-                ),
-                const SizedBox(height: 6),
-              ],
-              collectionsAsync.when(
-                data: (collections) {
-                  if (collections.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 18),
-                    child: SizedBox(
-                      height: 56,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        clipBehavior: Clip.none,
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        itemCount: collections.length,
-                        separatorBuilder: (context, index) =>
-                            const SizedBox(width: 10),
-                        itemBuilder: (context, index) {
-                          final collection = collections[index];
-                          return _LibraryCollectionChip(
-                            label: collection.title,
-                            focusId: 'library:collection:${collection.id}',
-                            autofocus: index == 0 && isTelevision,
-                            onPressed: () {
-                              context.pushNamed(
-                                'collection',
-                                extra: LibraryCollectionTarget(
-                                  title: collection.title,
-                                  sourceId: collection.sourceId,
-                                  sourceName: collection.sourceName,
-                                  sourceKind: collection.sourceKind,
-                                  sectionId: collection.id,
-                                  subtitle: collection.subtitle,
+                  const SizedBox(height: 18),
+                  if (rebuildableSourceIds.isNotEmpty) ...[
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          if (isTelevision)
+                            TvAdaptiveButton(
+                              label: _isIncrementalRefreshing
+                                  ? '更新中...'
+                                  : '增量更新 WebDAV',
+                              icon: Icons.refresh_rounded,
+                              onPressed:
+                                  _isIncrementalRefreshing || _isForceRescanning
+                                      ? null
+                                      : () => _runIncrementalRefresh(
+                                            rebuildableSourceIds,
+                                          ),
+                              variant: TvButtonVariant.outlined,
+                              focusId: 'library:refresh:incremental',
+                            )
+                          else
+                            OutlinedButton.icon(
+                              onPressed:
+                                  _isIncrementalRefreshing || _isForceRescanning
+                                      ? null
+                                      : () => _runIncrementalRefresh(
+                                            rebuildableSourceIds,
+                                          ),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
                                 ),
-                              );
-                            },
-                          );
-                        },
+                                minimumSize: const Size(0, 40),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              icon: _isIncrementalRefreshing
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.refresh_rounded),
+                              label: Text(
+                                _isIncrementalRefreshing
+                                    ? '更新中...'
+                                    : '增量更新 WebDAV',
+                              ),
+                            ),
+                          if (isTelevision)
+                            TvAdaptiveButton(
+                              label: _isForceRescanning
+                                  ? '重建中...'
+                                  : '重建 WebDAV 索引',
+                              icon: Icons.restart_alt_rounded,
+                              onPressed: _isForceRescanning
+                                  ? null
+                                  : () => _confirmForceRescan(
+                                        rebuildableSourceIds,
+                                      ),
+                              variant: TvButtonVariant.outlined,
+                              focusId: 'library:refresh:rescan',
+                            )
+                          else
+                            OutlinedButton.icon(
+                              onPressed: _isForceRescanning
+                                  ? null
+                                  : () => _confirmForceRescan(
+                                        rebuildableSourceIds,
+                                      ),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
+                                ),
+                                minimumSize: const Size(0, 40),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              icon: _isForceRescanning
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.restart_alt_rounded),
+                              label: Text(
+                                _isForceRescanning ? '重建中...' : '重建 WebDAV 索引',
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                  );
-                },
-                loading: () => const SizedBox.shrink(),
-                error: (error, stackTrace) => const SizedBox.shrink(),
-              ),
-              itemsAsync.when(
-                data: (items) {
-                  return LibraryPagedGrid(
-                    items: items,
-                    currentPage: _currentPage,
-                    isTelevision: isTelevision,
-                    focusScopePrefix: 'library',
-                    onPageChanged: (page) {
-                      setState(() {
-                        _currentPage = page;
-                      });
-                    },
-                    onItemContextAction: (item) =>
-                        _handleItemContextAction(item),
-                    emptyMessage: '无',
-                    header: Text(
-                      _filter == LibraryFilter.all
-                          ? '全部内容'
-                          : '${_filter.label} 内容',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                          ),
+                    const SizedBox(height: 16),
+                  ],
+                  if (visibleProgress.isNotEmpty) ...[
+                    ...visibleProgress.map(
+                      (progress) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _WebDavScrapeProgressCard(progress: progress),
+                      ),
                     ),
-                  );
-                },
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (error, stackTrace) => Text('加载失败：$error'),
+                    const SizedBox(height: 6),
+                  ],
+                  collectionsAsync.when(
+                    data: (collections) {
+                      if (collections.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 18),
+                        child: SizedBox(
+                          height: 56,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            clipBehavior: Clip.none,
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            itemCount: collections.length,
+                            separatorBuilder: (context, index) =>
+                                const SizedBox(width: 10),
+                            itemBuilder: (context, index) {
+                              final collection = collections[index];
+                              return _LibraryCollectionChip(
+                                label: collection.title,
+                                focusId: 'library:collection:${collection.id}',
+                                autofocus: index == 0 && isTelevision,
+                                onPressed: () {
+                                  context.pushNamed(
+                                    'collection',
+                                    extra: LibraryCollectionTarget(
+                                      title: collection.title,
+                                      sourceId: collection.sourceId,
+                                      sourceName: collection.sourceName,
+                                      sourceKind: collection.sourceKind,
+                                      sectionId: collection.id,
+                                      subtitle: collection.subtitle,
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                      );
+                    },
+                    loading: () => const SizedBox.shrink(),
+                    error: (error, stackTrace) => const SizedBox.shrink(),
+                  ),
+                  itemsAsync.when(
+                    data: (items) {
+                      return LibraryPagedGrid(
+                        items: items,
+                        currentPage: _currentPage,
+                        isTelevision: isTelevision,
+                        focusScopePrefix: 'library',
+                        onPageChanged: (page) {
+                          setState(() {
+                            _currentPage = page;
+                          });
+                        },
+                        onItemContextAction: (item) =>
+                            _handleItemContextAction(item),
+                        emptyMessage: '无',
+                        header: Text(
+                          _filter == LibraryFilter.all
+                              ? '全部内容'
+                              : '${_filter.label} 内容',
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                  ),
+                        ),
+                      );
+                    },
+                    loading: () => const Center(
+                      child: CircularProgressIndicator(),
+                    ),
+                    error: (error, stackTrace) => Text('加载失败：$error'),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: OverlayToolbar(
+                onBack: _handleBack,
+              ),
+            ),
+          ],
         ),
       ),
     );
