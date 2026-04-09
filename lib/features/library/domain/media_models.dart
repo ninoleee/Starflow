@@ -44,6 +44,7 @@ class MediaSourceConfig {
     this.webDavStructureInferenceEnabled = false,
     this.webDavSidecarScrapingEnabled = true,
     this.webDavExcludedPathKeywords = const [],
+    this.webDavSeriesTitleFilterKeywords = const [],
   });
 
   final String id;
@@ -62,6 +63,7 @@ class MediaSourceConfig {
   final bool webDavStructureInferenceEnabled;
   final bool webDavSidecarScrapingEnabled;
   final List<String> webDavExcludedPathKeywords;
+  final List<String> webDavSeriesTitleFilterKeywords;
 
   bool get hasAccessToken => accessToken.trim().isNotEmpty;
 
@@ -100,6 +102,7 @@ class MediaSourceConfig {
     bool? webDavStructureInferenceEnabled,
     bool? webDavSidecarScrapingEnabled,
     List<String>? webDavExcludedPathKeywords,
+    List<String>? webDavSeriesTitleFilterKeywords,
   }) {
     return MediaSourceConfig(
       id: id ?? this.id,
@@ -121,6 +124,8 @@ class MediaSourceConfig {
           webDavSidecarScrapingEnabled ?? this.webDavSidecarScrapingEnabled,
       webDavExcludedPathKeywords:
           webDavExcludedPathKeywords ?? this.webDavExcludedPathKeywords,
+      webDavSeriesTitleFilterKeywords: webDavSeriesTitleFilterKeywords ??
+          this.webDavSeriesTitleFilterKeywords,
     );
   }
 
@@ -142,6 +147,7 @@ class MediaSourceConfig {
       'webDavStructureInferenceEnabled': webDavStructureInferenceEnabled,
       'webDavSidecarScrapingEnabled': webDavSidecarScrapingEnabled,
       'webDavExcludedPathKeywords': webDavExcludedPathKeywords,
+      'webDavSeriesTitleFilterKeywords': webDavSeriesTitleFilterKeywords,
     };
   }
 
@@ -170,6 +176,12 @@ class MediaSourceConfig {
           json['webDavSidecarScrapingEnabled'] as bool? ?? true,
       webDavExcludedPathKeywords:
           (json['webDavExcludedPathKeywords'] as List<dynamic>? ?? const [])
+              .map((item) => '$item')
+              .where((item) => item.trim().isNotEmpty)
+              .toList(),
+      webDavSeriesTitleFilterKeywords:
+          (json['webDavSeriesTitleFilterKeywords'] as List<dynamic>? ??
+                  const [])
               .map((item) => '$item')
               .where((item) => item.trim().isNotEmpty)
               .toList(),
@@ -245,6 +257,19 @@ extension MediaSourceConfigWebDavFilterX on MediaSourceConfig {
     return values;
   }
 
+  List<String> get normalizedWebDavSeriesTitleFilterKeywords {
+    final seen = <String>{};
+    final values = <String>[];
+    for (final item in webDavSeriesTitleFilterKeywords) {
+      final normalized = item.trim().toLowerCase();
+      if (normalized.isEmpty || !seen.add(normalized)) {
+        continue;
+      }
+      values.add(normalized);
+    }
+    return values;
+  }
+
   bool matchesWebDavExcludedPath(String rawPath) {
     if (kind != MediaSourceKind.nas) {
       return false;
@@ -271,6 +296,21 @@ extension MediaSourceConfigWebDavFilterX on MediaSourceConfig {
   bool matchesWebDavExcludedUri(Uri uri) {
     return matchesWebDavExcludedPath(uri.toString()) ||
         matchesWebDavExcludedPath(uri.path);
+  }
+
+  bool matchesWebDavSeriesTitleFilter(String rawValue) {
+    if (kind != MediaSourceKind.nas) {
+      return false;
+    }
+    final keywords = normalizedWebDavSeriesTitleFilterKeywords;
+    if (keywords.isEmpty) {
+      return false;
+    }
+    final normalized = rawValue.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return false;
+    }
+    return keywords.any(normalized.contains);
   }
 }
 

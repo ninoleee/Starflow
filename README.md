@@ -515,6 +515,7 @@ flutter build apk --release
   - 第二段是月份
   - 第三段是当月递增序号
   - 每个月第一次打包时第三段自动归 `0`
+- 当前显示版本号只保留标准三段式 `主版本.月份.序号`
 - 当前 Android TV 构建最低兼容版本为 `Android 6.0 / API 23`
 - Release APK 当前启用了 `v1 + v2` 签名，兼容老一些的电视安装器
 - 当前 Release APK 仍使用本机 debug keystore 签名；如果电视里装过其他签名的旧版 `com.example.starflow`，覆盖安装会失败，需要先卸载旧版再安装

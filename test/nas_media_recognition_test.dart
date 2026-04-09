@@ -37,4 +37,16 @@ void main() {
     expect(result.parentTitle, '奔跑吧');
     expect(result.title, '奔跑吧');
   });
+
+  test('NasMediaRecognizer stops upward series inference at filtered folders',
+      () {
+    final result = NasMediaRecognizer.recognize(
+      '怪奇物语/Stranger.Things.S04.2160p.NF.WEB-DL.x265.10bit.HDR/Stranger.Things.S04E01.2160p.NF.WEB-DL.x265.10bit.HDR.strm',
+      seriesTitleFilterKeywords: const ['2160p'],
+    );
+
+    expect(result.itemType, 'episode');
+    expect(result.parentTitle, 'Stranger Things');
+    expect(result.title, 'Stranger Things');
+  });
 }

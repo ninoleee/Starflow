@@ -2,8 +2,9 @@ part of 'webdav_nas_client.dart';
 
 extension _WebDavNasClientStructure on WebDavNasClient {
   List<_PendingWebDavScannedItem> _applyDirectoryStructureInference(
-    List<_PendingWebDavScannedItem> items,
-  ) {
+    List<_PendingWebDavScannedItem> items, {
+    required MediaSourceConfig source,
+  }) {
     if (items.isEmpty) {
       return items;
     }
@@ -14,7 +15,10 @@ extension _WebDavNasClientStructure on WebDavNasClient {
       },
     );
 
-    final context = _buildStructureContext(items);
+    final context = _buildStructureContext(
+      items,
+      source: source,
+    );
     final seriesRootPlans = _buildSeriesRootPlans(context);
     final seriesRootForResource = _mapSeriesRootForResource(
       items: items,
@@ -56,8 +60,9 @@ extension _WebDavNasClientStructure on WebDavNasClient {
   }
 
   _StructureInferenceContext _buildStructureContext(
-    List<_PendingWebDavScannedItem> items,
-  ) {
+    List<_PendingWebDavScannedItem> items, {
+    required MediaSourceConfig source,
+  }) {
     final filesByDirectory = <String, List<_PendingWebDavScannedItem>>{};
     final childVideoCountsByDirectory = <String, Map<String, int>>{};
     final childItemsByDirectory =
@@ -65,10 +70,15 @@ extension _WebDavNasClientStructure on WebDavNasClient {
     final recognitionByResource = <String, NasMediaRecognition>{};
     final explicitEpisodeCountByDirectory = <String, int>{};
 
+    final seriesTitleFilterKeywords =
+        source.normalizedWebDavSeriesTitleFilterKeywords;
     for (final item in items) {
       final directoryKey = _segmentsKey(item.relativeDirectories);
       filesByDirectory.putIfAbsent(directoryKey, () => []).add(item);
-      final recognition = NasMediaRecognizer.recognize(item.actualAddress);
+      final recognition = NasMediaRecognizer.recognize(
+        item.actualAddress,
+        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+      );
       recognitionByResource[item.resourceId] = recognition;
       if (_hasExplicitEpisodeCue(item, recognition)) {
         explicitEpisodeCountByDirectory[directoryKey] =

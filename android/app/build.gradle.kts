@@ -7,6 +7,17 @@ plugins {
 
 val starflowMinSdk = 23
 
+fun computeStarflowVersionCode(versionName: String): Int {
+    val sanitizedVersionName = versionName.substringBefore("+")
+    val match = Regex("""^(\d+)\.(\d+)\.(\d+)$""").matchEntire(sanitizedVersionName)
+        ?: return 1
+    val major = match.groupValues[1].toInt()
+    val month = match.groupValues[2].toInt()
+    val sequence = match.groupValues[3].toInt()
+    val yearOffset = java.time.LocalDate.now().year - 2000
+    return (yearOffset * 1_000_000) + (major * 10_000) + (month * 100) + sequence
+}
+
 android {
     namespace = "com.example.starflow"
     compileSdk = maxOf(flutter.compileSdkVersion, 31)
@@ -35,8 +46,8 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = starflowMinSdk
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        versionCode = computeStarflowVersionCode(flutter.versionName)
+        versionName = flutter.versionName.substringBefore("+")
     }
 
     buildTypes {

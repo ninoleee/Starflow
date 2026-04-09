@@ -118,6 +118,88 @@ void main() {
     expect(episodes.single.episodeNumber, 1);
   });
 
+  test(
+      'NasMediaIndexer stops upward structure series inference at filtered folders',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-filtered-series',
+      name: 'WebDAV Filtered Series',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/shows/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+      webDavSeriesTitleFilterKeywords: ['2160p'],
+    );
+    final collection = const MediaCollection(
+      id: 'https://nas.example.com/dav/shows/',
+      title: '剧集',
+      sourceId: 'webdav-filtered-series',
+      sourceName: 'WebDAV Filtered Series',
+      sourceKind: MediaSourceKind.nas,
+    );
+
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'filtered-ep-1',
+          path: '怪奇物语/Stranger.Things.S04.2160p.NF.WEB-DL.x265.10bit.HDR/Stranger.Things.S04E01.2160p.NF.WEB-DL.x265.10bit.HDR.strm',
+          title:
+              'Stranger.Things.S04E01.2160p.NF.WEB-DL.x265.10bit.HDR',
+          itemType: 'episode',
+          seasonNumber: 4,
+          episodeNumber: 1,
+        ),
+        _PendingTestItem(
+          id: 'filtered-ep-2',
+          path: '怪奇物语/Stranger.Things.S04.2160p.NF.WEB-DL.x265.10bit.HDR/Stranger.Things.S04E02.2160p.NF.WEB-DL.x265.10bit.HDR.strm',
+          title:
+              'Stranger.Things.S04E02.2160p.NF.WEB-DL.x265.10bit.HDR',
+          itemType: 'episode',
+          seasonNumber: 4,
+          episodeNumber: 2,
+        ),
+      ],
+    );
+
+    final settings = SeedData.defaultSettings.copyWith(
+      mediaSources: const [source],
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(
+      source,
+      scopedCollections: [collection],
+    );
+    final library = await indexer.loadLibrary(
+      source,
+      scopedCollections: [collection],
+      limit: 20,
+    );
+
+    expect(library, hasLength(1));
+    expect(library.single.itemType, 'series');
+    expect(library.single.title, 'Stranger Things');
+  });
+
   test('NasMediaIndexer writes manual metadata matches back into local index',
       () async {
     final store = _MemoryNasMediaIndexStore();

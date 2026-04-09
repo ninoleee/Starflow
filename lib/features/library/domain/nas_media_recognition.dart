@@ -82,7 +82,14 @@ class NasMediaRecognizer {
     caseSensitive: false,
   );
 
-  static NasMediaRecognition recognize(String actualAddress) {
+  static NasMediaRecognition recognize(
+    String actualAddress, {
+    List<String> seriesTitleFilterKeywords = const [],
+  }) {
+    final normalizedSeriesTitleFilterKeywords = seriesTitleFilterKeywords
+        .map((item) => item.trim().toLowerCase())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
     final normalizedPath = actualAddress
         .split('/')
         .map((segment) => segment.trim())
@@ -116,13 +123,14 @@ class NasMediaRecognizer {
     final parentLooksLikeWrapperFolder = _looksLikeWrapperFolder(parentRaw);
     final grandParentLooksLikeSeasonFolder =
         _looksLikeSeasonFolder(grandParentRaw);
-    final parentTitle = parentLooksLikeSeasonFolder
+    final inferredParentTitle = parentLooksLikeSeasonFolder
         ? cleanedGrandParentTitle
         : parentLooksLikeWrapperFolder
             ? (grandParentLooksLikeSeasonFolder ? '' : cleanedGrandParentTitle)
             : cleanedParentTitle;
 
     String title = cleanedFileTitle;
+    var resolvedParentTitle = inferredParentTitle.trim();
     String itemType = '';
     var preferSeries = false;
     int? seasonNumber;
@@ -134,8 +142,8 @@ class NasMediaRecognizer {
       seasonNumber =
           episodeMatch.seasonNumber ?? parentSeason ?? grandParentSeason;
       episodeNumber = episodeMatch.episodeNumber;
-      if (parentTitle.trim().isNotEmpty) {
-        title = parentTitle.trim();
+      if (resolvedParentTitle.isNotEmpty) {
+        title = resolvedParentTitle;
       }
     } else if (_looksLikeSeriesFolder(parentRaw)) {
       final leadingEpisodeNumber = _matchLeadingEpisodeCue(fileBaseName);
@@ -150,8 +158,8 @@ class NasMediaRecognizer {
       } else {
         preferSeries = true;
       }
-    } else if (parentLooksLikeSeasonFolder && parentTitle.trim().isNotEmpty) {
-      title = parentTitle.trim();
+    } else if (parentLooksLikeSeasonFolder && resolvedParentTitle.isNotEmpty) {
+      title = resolvedParentTitle;
       itemType = 'episode';
       preferSeries = true;
       seasonNumber = parentSeason ?? grandParentSeason;
@@ -161,8 +169,8 @@ class NasMediaRecognizer {
     }
 
     if (title.trim().isEmpty) {
-      title = parentTitle.trim().isNotEmpty
-          ? parentTitle.trim()
+      title = resolvedParentTitle.isNotEmpty
+          ? resolvedParentTitle
           : _cleanTitle(fileBaseName);
     }
     if (title.trim().isEmpty) {
@@ -172,11 +180,24 @@ class NasMediaRecognizer {
       title = fileBaseName.trim();
     }
 
+    if (itemType == 'episode' &&
+        normalizedSeriesTitleFilterKeywords.isNotEmpty) {
+      final stoppedTitle = _resolveStoppedSeriesTitleFromFilteredDirectory(
+        pathSegments: normalizedPath,
+        fileBaseName: fileBaseName,
+        seriesTitleFilterKeywords: normalizedSeriesTitleFilterKeywords,
+      );
+      if (stoppedTitle != null && stoppedTitle.trim().isNotEmpty) {
+        title = stoppedTitle.trim();
+        resolvedParentTitle = stoppedTitle.trim();
+      }
+    }
+
     final result = NasMediaRecognition(
       title: title.trim(),
       searchQuery: title.trim(),
       originalFileName: fileName.trim(),
-      parentTitle: parentTitle.trim(),
+      parentTitle: resolvedParentTitle,
       year: year,
       itemType: itemType,
       preferSeries: preferSeries,
@@ -431,13 +452,84 @@ class NasMediaRecognizer {
   }
 
   static String _compactDescriptor(String input) {
-    return stripEmbeddedExternalIdTags(input)
-        .trim()
-        .toLowerCase()
-        .replaceAll(
+    return stripEmbeddedExternalIdTags(input).trim().toLowerCase().replaceAll(
           RegExp(r'[【】\[\]\(\)（）{}<>《》"“”‘’·_.\-\s+&/\\|,:;]+'),
           '',
         );
+  }
+
+  static String? _resolveStoppedSeriesTitleFromFilteredDirectory({
+    required List<String> pathSegments,
+    required String fileBaseName,
+    required List<String> seriesTitleFilterKeywords,
+  }) {
+    if (seriesTitleFilterKeywords.isEmpty || pathSegments.length < 2) {
+      return null;
+    }
+    var lastInferredTitle = _fallbackSeriesTitleFromFile(fileBaseName);
+    var hitFilteredDirectory = false;
+    for (var index = pathSegments.length - 2; index >= 0; index--) {
+      final rawSegment = pathSegments[index].trim();
+      if (rawSegment.isEmpty ||
+          _looksLikeSeasonFolder(rawSegment) ||
+          _looksLikeWrapperFolder(rawSegment)) {
+        continue;
+      }
+      final cleanedSegment = _cleanTitle(rawSegment);
+      if (cleanedSegment.isEmpty) {
+        continue;
+      }
+      if (_matchesSeriesTitleFilter(
+        rawSegment,
+        cleanedSegment: cleanedSegment,
+        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+      )) {
+        hitFilteredDirectory = true;
+        break;
+      }
+      lastInferredTitle = cleanedSegment;
+    }
+    if (!hitFilteredDirectory || lastInferredTitle.trim().isEmpty) {
+      return null;
+    }
+    return lastInferredTitle.trim();
+  }
+
+  static String _fallbackSeriesTitleFromFile(String fileBaseName) {
+    final cleanedFileTitle = _cleanTitle(
+      fileBaseName,
+      removeEpisodeTokens: true,
+    );
+    if (cleanedFileTitle.isNotEmpty) {
+      return cleanedFileTitle;
+    }
+    final cleanedTitle = _cleanTitle(fileBaseName);
+    if (cleanedTitle.isNotEmpty) {
+      return cleanedTitle;
+    }
+    final stripped = stripEmbeddedExternalIdTags(fileBaseName).trim();
+    if (stripped.isNotEmpty) {
+      return stripped;
+    }
+    return fileBaseName.trim();
+  }
+
+  static bool _matchesSeriesTitleFilter(
+    String rawValue, {
+    required String cleanedSegment,
+    required List<String> seriesTitleFilterKeywords,
+  }) {
+    if (seriesTitleFilterKeywords.isEmpty) {
+      return false;
+    }
+    final haystacks = <String>{
+      rawValue.trim().toLowerCase(),
+      cleanedSegment.trim().toLowerCase(),
+      _compactDescriptor(rawValue),
+    }..removeWhere((value) => value.isEmpty);
+    return seriesTitleFilterKeywords.any(
+      (keyword) => haystacks.any((value) => value.contains(keyword)),
+    );
   }
 
   static String _cleanLeadingEpisodeRemainder(String input) {

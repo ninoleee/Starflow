@@ -30,6 +30,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   late final TextEditingController _passwordController;
   late final TextEditingController _tokenController;
   late final TextEditingController _webDavExcludedKeywordsController;
+  late final TextEditingController _webDavSeriesTitleFilterKeywordsController;
 
   late MediaSourceKind _kind;
   late bool _enabled;
@@ -72,6 +73,9 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _webDavExcludedKeywordsController = TextEditingController(
       text: (e?.webDavExcludedPathKeywords ?? const []).join('\n'),
     );
+    _webDavSeriesTitleFilterKeywordsController = TextEditingController(
+      text: (e?.webDavSeriesTitleFilterKeywords ?? const []).join('\n'),
+    );
     _kind = e?.kind ?? MediaSourceKind.emby;
     _enabled = e?.enabled ?? true;
     _resolvedUserId = e?.userId ?? '';
@@ -104,6 +108,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _passwordController.dispose();
     _tokenController.dispose();
     _webDavExcludedKeywordsController.dispose();
+    _webDavSeriesTitleFilterKeywordsController.dispose();
     super.dispose();
   }
 
@@ -148,6 +153,9 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       webDavExcludedPathKeywords: _kind == MediaSourceKind.nas
           ? _parsedWebDavExcludedPathKeywords()
           : const [],
+      webDavSeriesTitleFilterKeywords: _kind == MediaSourceKind.nas
+          ? _parsedWebDavSeriesTitleFilterKeywords()
+          : const [],
     );
   }
 
@@ -156,6 +164,21 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     final values = <String>[];
     for (final chunk
         in _webDavExcludedKeywordsController.text.split(RegExp(r'[\n,，;；]+'))) {
+      final normalized = chunk.trim();
+      if (normalized.isEmpty || !seen.add(normalized.toLowerCase())) {
+        continue;
+      }
+      values.add(normalized);
+    }
+    return values;
+  }
+
+  List<String> _parsedWebDavSeriesTitleFilterKeywords() {
+    final seen = <String>{};
+    final values = <String>[];
+    for (final chunk in _webDavSeriesTitleFilterKeywordsController.text.split(
+      RegExp(r'[\n,，;；]+'),
+    )) {
       final normalized = chunk.trim();
       if (normalized.isEmpty || !seen.add(normalized.toLowerCase())) {
         continue;
@@ -187,6 +210,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         _selectedNasPath.trim().isNotEmpty ||
         _hasConfiguredQuarkFolderDraft ||
         _webDavExcludedKeywordsController.text.trim().isNotEmpty ||
+        _webDavSeriesTitleFilterKeywordsController.text.trim().isNotEmpty ||
         widget.initial != null;
   }
 
@@ -1016,6 +1040,38 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
               padding: const EdgeInsets.only(top: 6),
               child: Text(
                 '支持填写多个。每行一个，或用逗号分隔；命中任意关键字的路径都会被过滤。',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SettingsTextInputField(
+              controller: _webDavSeriesTitleFilterKeywordsController,
+              labelText: '剧名过滤项',
+              minLines: 2,
+              maxLines: 5,
+              hintText: '比如：电视剧、2160p、合集',
+              alignLabelWithHint: true,
+              summaryBuilder: (value) {
+                if (value.isEmpty) {
+                  return '未填写';
+                }
+                final keywords = value
+                    .split(RegExp(r'[\n,，;；]+'))
+                    .map((item) => item.trim())
+                    .where((item) => item.isNotEmpty)
+                    .toList(growable: false);
+                if (keywords.isEmpty) {
+                  return '未填写';
+                }
+                return '已填写 ${keywords.length} 项';
+              },
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                '只在目录结构推断里生效。识别到剧文件或季目录后向上推断剧名时，命中过滤项会立刻停止，改用上一个已推断目录；如果没有目录则退回文件名。',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),

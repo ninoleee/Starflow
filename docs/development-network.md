@@ -152,6 +152,7 @@ PowerShell 下推荐使用包装脚本运行 Flutter：
 - TV 安装包默认用 `.\scripts\build_tv_apk.ps1` 生成，并直接输出到桌面
 - `build_tv_apk.ps1` 内部固定使用 `flutter build apk --release --android-skip-build-dependency-validation`，因为当前 TV 分支仍明确保留 `Android 6.0 / API 23` 兼容目标
 - `build_tv_apk.ps1` 只会在显式传入 `-SettingsJsonPath` 时临时嵌入配置 JSON
+- 当前 TV 显示版本号只保留标准三段式 `主版本.月份.序号`
 - 当前 Release APK 启用了 `v1 + v2` 签名，兼容老一些的电视安装器
 - 如果 TV 端覆盖安装失败，优先检查设备里是否已经装过其他签名的旧版 `com.example.starflow`；当前包仍使用本机 debug keystore 签名，这种情况通常需要先卸载旧包再安装
 - Windows 安装器默认用 `.\scripts\build_windows_installer.ps1` 生成，并直接输出到桌面

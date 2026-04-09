@@ -19,7 +19,7 @@ function Get-ResolvedOutputDir([string]$path) {
 
 function Update-PubspecVersion([string]$pubspecPath) {
   $raw = Get-Content -LiteralPath $pubspecPath -Raw
-  $match = [regex]::Match($raw, '(?m)^version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)\s*$')
+  $match = [regex]::Match($raw, '(?m)^version:\s*(\d+)\.(\d+)\.(\d+)(?:\+\d+)?\s*$')
   if (-not $match.Success) {
     throw "Unable to parse version from $pubspecPath"
   }
@@ -27,7 +27,6 @@ function Update-PubspecVersion([string]$pubspecPath) {
   $major = [int]$match.Groups[1].Value
   $currentMonthInVersion = [int]$match.Groups[2].Value
   $currentSequence = [int]$match.Groups[3].Value
-  $build = [int]$match.Groups[4].Value
   $month = (Get-Date).Month
   $nextSequence = if ($currentMonthInVersion -eq $month) {
     $currentSequence + 1
@@ -35,10 +34,10 @@ function Update-PubspecVersion([string]$pubspecPath) {
     0
   }
 
-  $nextVersion = "{0}.{1}.{2}+{3}" -f $major, $month, $nextSequence, ($build + 1)
+  $nextVersion = "{0}.{1}.{2}" -f $major, $month, $nextSequence
   $updated = [regex]::Replace(
     $raw,
-    '(?m)^version:\s*\d+\.\d+\.\d+\+\d+\s*$',
+    '(?m)^version:\s*\d+\.\d+\.\d+(?:\+\d+)?\s*$',
     "version: $nextVersion",
     1
   )
@@ -95,13 +94,12 @@ try {
     }
   }
 
-  $displayVersion = $version.Split("+")[0]
   $namePrefix = if ([string]::IsNullOrWhiteSpace($SettingsJsonPath)) {
     "starflow-tv"
   } else {
     "starflow-tv-config"
   }
-  $targetName = "$namePrefix-$displayVersion.apk"
+  $targetName = "$namePrefix-$version.apk"
   $sourceApk = Join-Path $repoRoot "build\\app\\outputs\\flutter-apk\\app-release.apk"
   $targetApk = Join-Path $resolvedOutputDir $targetName
 

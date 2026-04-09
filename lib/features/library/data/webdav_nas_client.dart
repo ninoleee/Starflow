@@ -456,7 +456,10 @@ class WebDavNasClient {
     _throwIfCancelled(shouldCancel);
     final pendingItems = walkResult.items;
     final items = (source.webDavStructureInferenceEnabled
-            ? _applyDirectoryStructureInference(pendingItems)
+            ? _applyDirectoryStructureInference(
+                pendingItems,
+                source: source,
+              )
             : pendingItems)
         .map((item) => item.toScannedItem())
         .toList(growable: false);
