@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
@@ -214,6 +215,10 @@ class _DoubanPagedGrid extends StatelessWidget {
                   subtitle: entry.year > 0 ? '${entry.year}' : '',
                   posterUrl: entry.posterUrl,
                   posterHeaders: const {},
+                  imageBadgeText: resolvePreferredPosterRatingLabel(
+                    [entry.ratingLabel],
+                    preferDoubanOnly: true,
+                  ),
                   width: null,
                   onTap: () {
                     context.pushNamed(

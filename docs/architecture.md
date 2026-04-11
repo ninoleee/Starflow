@@ -146,6 +146,7 @@ lib/
 
 - 首页拆层：`_homeSectionSeedProvider` 负责来源抓取，`homeSectionProvider` 负责基于详情缓存 revision 的轻量装饰；详情缓存变化不再把首页整轮抓取一起打掉
 - 首页重建范围收口：普通 section 改成各自独立订阅，`Hero` 当前项和分页状态也改成局部 `ValueNotifier` 监听，减少首页根节点重建
+- 首页 presentation 落点也已进一步收口到 `home_page.dart`、`home_page_hero.dart`、`home_page_sections.dart`；页面主文件保留页面级状态、预取和焦点编排，厚的 Hero / section / shell UI 分别下沉到独立 part 文件
 - 首页 `Hero` 后台补数新增快照去重与预取协同；同一批条目在首次进入、返回前台和高频 rebuild 时不会重复排队刷新
 - 详情缓存批量化：`LocalStorageCacheRepository.loadDetailTargetsBatch(...)` 已接入首页和媒体库的卡片装配链，减少同一批条目的重复本地读取
 - 设置粒度收口：`home_settings_slices.dart` 以及设置 / 搜索页里的 slice provider 开始替代整份 `AppSettings` 宽监听，优先只让高频页面订阅自己真正依赖的配置片段
@@ -157,15 +158,21 @@ lib/
 - 绘制范围收口：页面背景 glow、桌面横向翻页按钮和海报卡片布局已经分别加上独立重绘边界或局部 notifier，滚动和焦点切换时避免整段区域跟着重建
 - 统一性能派生：`AppSettingsPerformanceX` 新增 `effectiveUiPerformanceTier` 及一组 `effective*` 派生入口，路由、导航壳和播放器统一按同一档位判断动画、磨砂、自动隐藏和轻量播放 UI
 - 读链路与后台任务分离：空索引时的自动重建通过 `EmptyLibraryAutoRebuildScheduler` 后台 best-effort 调度，读链路不再同步阻塞一次重建
-- 播放启动拆分：`playback_startup_preparation.dart` 负责启动前准备，`playback_startup_routing.dart` 负责路线判定，`player_page.dart` 只负责执行对应分支
+- 播放启动拆分：`PlaybackStartupCoordinator` 串起目标解析、续播/跳过准备与路由判定，`PlaybackStartupExecutor` 负责执行系统播放器 / 原生容器 / 性能回退分支，`player_page.dart` 只保留页面壳和内置 `MPV` 打开编排
 - `TV` 播放控制层收口：播放器页把高频控制状态合并成单个 notifier，替代多层 `StreamBuilder` 套娃，减少播放中叠层刷新成本
+- 播放页 presentation 收口：`player_page.dart` 已继续瘦身，平台会话、启动/MPV、运行期动作和播放器控制拆到 `player_page_platform_session.part.dart`、`player_page_startup_mpv.part.dart`、`player_page_runtime_actions.part.dart`、`player_page_controls.part.dart`；控制叠层、播放设置、启动覆盖层、TV chrome 与运行期对话框拆到独立 widget 文件
 - `mpv_tuning_policy.dart` 负责收口 `MPV` 的远程/直播识别、重片源判定、运行期质量预设降档和本地 `ISO` 设备源判断，避免这些策略散落在页面状态里
+- 首页 application 收口：`home_controller.dart` 现在主要保留 controller 与 provider wiring，`home_controller_models.dart` 承载 view model，`home_feed_repository.dart` 承载首页 seed/cached section 装配
+- `PlaybackMemoryRepository` 已补单调递增 `updatedAt` 策略，保证最近播放在 Windows 或高频保存场景下仍按真正“最后一次写入”稳定排序
+- NAS 索引链收口：`NasMediaIndexer` 已拆成 `nas_media_indexer_refresh_flow.dart / nas_media_indexer_storage_access.dart / nas_media_indexer_indexing.dart / nas_media_indexer_grouping.dart / nas_media_indexer_refresh_support.dart` 多段 `part` 文件；主文件回到约 `1k` 行量级，先把刷新编排、存储访问、metadata 匹配与分组逻辑解耦，为后续 isolate 化、`IndexStore` 增量 upsert 和多级并发预算继续铺路
 
 聚焦验证结果：
 
 - 相关关键文件的 `flutter analyze` 已通过
 - 首页装配、详情缓存批量读取、媒体库缓存合并、播放启动拆分、搜索仓库和空库后台重建相关测试已通过
 - `test/perf/bootstrap_smoke_test.dart`、`test/perf/home_settings_slices_smoke_test.dart`、`test/perf/player_open_smoke_test.dart` 已通过
+- `test/home_controller_test.dart`、`test/home_settings_slices_test.dart`、`test/playback_memory_repository_test.dart`、`test/nas_media_indexer_test.dart` 已通过
+- `NasMediaIndexer` 拆分后的定向验证已通过：`dart analyze lib/features/library/data/nas_media_indexer*.dart` 与 `flutter test test/nas_media_indexer_test.dart`
 - 当前还留有一条非失败开发态 trace：`test/media_repository_quark_source_test.dart` 会打印 `indexer.refresh.background.error ... ProviderContainer already disposed`，说明后台任务链的 dispose 时序后续仍值得继续治理
 
 ## 3.2 跨 feature 新结构关系（Home / Detail / Playback / Library / Settings Slices）
@@ -177,6 +184,14 @@ lib/
 - `HomePageController`：负责首页模块 `prime / refresh / sections` 的页面级编排。
 - `HomeFeedRepository`：负责首页模块 seed 数据装配（最近新增、最近播放、分区、豆瓣）和缓存装饰入口。
 - `HomeHeroPrefetchCoordinator`：负责 Hero 后台补全调度（会话隔离、去重、暂停态跳过）。
+- 首页 application 入口：
+  - `home_controller.dart`：controller/provider 装配与页面级 refresh/prime 编排
+  - `home_controller_models.dart`：`HomeSectionViewModel`、`HomeCardViewModel` 等视图模型
+  - `home_feed_repository.dart`：首页 seed section 构建、批量详情缓存合并、最近播放标题映射
+- 首页 presentation 入口：
+  - `home_page.dart`：页面级 retained async、Hero 选择同步、prefetch 和焦点编排
+  - `home_page_hero.dart`：Hero item 组装、分页、焦点、视觉层与背景素材选择
+  - `home_page_sections.dart`：section slot、背景 shell、carousel、loading/empty、view-all 与海报 fallback 装配
 - 首页 provider 关系：
   - `_homeSectionSeedProvider` 负责来源抓取
   - `homeSectionProvider` 负责详情缓存批量合并（`loadDetailTargetsBatch(...)`）
@@ -195,10 +210,11 @@ lib/
 ### Playback
 
 - `PlaybackTargetResolver`：先把播放目标解析到可播地址/headers。
-- `preparePlaybackStartup(...)`：读取续播、跳过配置并生成启动路由输入。
+- `PlaybackStartupCoordinator`：统一串起目标解析、续播/跳过配置读取与路由判定输入准备。
 - `PlaybackEngineRouter`：封装路由判定（系统播放器 / 原生容器 / 性能回退 / 内置 MPV）。
-- `PlaybackStartupCoordinator`：串起“取消刷新 -> 目标解析 -> 启动准备 -> 路由决策”。
 - `PlaybackStartupExecutor`：执行路由动作，并返回是否继续走内置 `MPV` 打开链。
+- `player_page.dart`：只保留页面壳、状态字段和顶层装配；平台会话、启动/MPV、运行期动作和播放器控制已经沉到 `presentation/widgets/player_page_*.part.dart` 与独立 widgets。
+- `PlaybackMemoryRepository`：负责最近播放/续播记忆，并通过单调递增 `updatedAt` 保证最近播放列表稳定排序。
 
 ### Library
 
@@ -301,6 +317,8 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
   2. `homeSectionProvider` 再基于详情缓存 revision 做批量缓存合并
 - 详情缓存 revision 更新时只会重跑第 `2` 段装饰层，不会把第 `1` 段来源抓取层一起重新执行
 - 首页和媒体库读取详情缓存时会优先复用 `loadDetailTargetsBatch(...)`，避免同一屏卡片逐条走本地读取
+- 首页页面层当前已经拆成 `home_page.dart + home_page_hero.dart + home_page_sections.dart`；Hero 子树、桌面翻页按钮和 section slot 不再和页面级状态堆在同一个主文件里
+- 首页控制层当前已经拆成 `HomePageController + HomeFeedRepository + view models` 三层，页面、数据装配和 provider wiring 的职责边界更清晰
 - 首页普通模块已经改成各自独立订阅；某个 section 更新时，不再让整个首页树跟着重建
 - 如果缓存里已经有刮削或手动关联后的标题，首页 `Hero`、卡片和后续详情入口都会优先展示这份标题，而不是继续显示原始文件名或 seed 标题
 - 最近播放模块直接读取本地播放记忆，并优先尝试从详情缓存补海报
@@ -364,6 +382,16 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 对 `2.巴以 / 5.美国 / 9.韩国` 这类“数字 + 标题”的专题目录，会额外要求同级里存在多个同类兄弟目录，避免把普通数字目录误判成季
 - 一旦当前层被识别为季目录，上一级目录就会作为剧名；像 `怪奇物语/Season 1/Season 2`、`怪奇物语/Stranger.Things.S02.2160p.BluRay.REMUX` 都会把 `怪奇物语` 当剧名
 - 当路径里已经确认存在显式季目录时，即使当前只有一季，也会继续保留“剧 -> 季 -> 集”层级，不再因为单季而直接拍平成集列表
+- 当前实现上，`NasMediaIndexer` 已拆成 grouping / refresh flow / storage access / indexing / refresh support 多个 part 文件；并发预算也在 indexer 内按 `source / collection / enrichment` 三层收口
+
+当前文件组织上，`NasMediaIndexer` 已按职责拆成：
+
+- `nas_media_indexer.dart`：公共入口、共享小工具、对外方法与少量胶水代码
+- `nas_media_indexer_refresh_flow.dart`：刷新编排、后台补全、自动重建、作用域删除、详情补全入口
+- `nas_media_indexer_storage_access.dart`：记录复用、手动 metadata 回写、source records cache、library match cache
+- `nas_media_indexer_indexing.dart`：识别、在线 metadata 匹配、query 规范化、指纹与 scope key 计算
+- `nas_media_indexer_grouping.dart`：剧/季/集分组、结构推断、展示排序与合成 item
+- `nas_media_indexer_refresh_support.dart`：source/collection 级并发辅助、取消控制与刷新句柄
 
 媒体库页额外提供这些运维动作：
 
@@ -527,15 +555,13 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 主流程大致是：
 
 1. 进入播放器页
-2. `preparePlaybackStartup(...)` 读取本地续播、按剧跳过偏好，并得到启动路由
-3. 如果是 `Emby / Quark`，则先补齐真实播放源
-4. `decidePlaybackStartupRoute(...)` 按播放器内核、`TV` / 高压力片源与性能策略决定走系统播放器、原生容器、性能回退还是内置 `MPV`
-5. 如果当前路由是系统播放器，则按平台分支走外部打开逻辑后直接返回
-6. 如果当前路由是 App 内原生播放器，则按平台拉起原生播放器容器页后直接返回
-7. 否则进行轻量探测和等待态展示
-8. 调用 `player.open`
-9. 失败自动重试，最多 `3` 次
-10. 超过配置的最大打开超时时间则终止
+2. `PlaybackStartupCoordinator` 解析播放目标，读取本地续播和按剧跳过偏好，并得到路由动作
+3. 如果是 `Emby / Quark`，会在这一步补齐真实播放源和请求头
+4. `PlaybackStartupExecutor` 按播放器内核、`TV` / 高压力片源与性能策略执行系统播放器、原生容器或性能回退分支
+5. 如果执行结果要求继续走内置 `MPV`，则进入轻量探测和等待态展示
+6. 调用内置 `MPV` 打开链并应用启动期调优
+7. 失败自动重试，最多 `3` 次
+8. 超过配置的最大打开超时时间则终止
 
 当前播放页已落地的能力包括：
 
@@ -557,12 +583,21 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - Android `TV` 从原生播放器拉起独立字幕搜索页时，会把当前 `query / title / input` 一并透传给 Flutter 路由，避免字幕搜索页空查询打开
 - 播放设置里的字幕默认项已收拢到独立二级页，和播放中临时字幕操作分开
 - 非 `TV` 的内嵌 `MPV` 当前使用 Starflow 自己的轻量播放叠层，而不是 `media_kit` 默认控制条：
-  - 叠层保留返回、播放/暂停、进度、字幕、音轨、全屏和设置入口
-  - 桌面端可按需显示音量滑杆；`PiP / AirPlay` 入口继续按平台能力显示
-- 非 `TV` 叠层的 fullscreen 状态由父级先读取，再以普通 `bool` 传给 `_MpvControlsOverlay`；叠层在 `dispose()` 期间不再回头查 `FullscreenInheritedWidget`，避免 Windows 全屏退出时触发 deactivated ancestor 断言
+  - 首层只保留返回、播放/暂停、进度、全屏和“更多”；音量、字幕、音轨与其他高级播放项统一收进播放设置弹窗
+  - 顶部标题栏、底部控制区和播放设置弹窗都收敛到更官方的 Material 组件组合：`Material + IconButton + Slider + Text + ListTile + TextButton`
+  - `PiP / AirPlay` 入口继续按平台能力显示
+- 非 `TV` 叠层的 fullscreen 状态由父级先读取，再以普通 `bool` 传给 `PlayerMpvControlsOverlay`；叠层在 `dispose()` 期间不再回头查 `FullscreenInheritedWidget`，避免 Windows 全屏退出时触发 deactivated ancestor 断言
 - Windows `MPV` 会在新播放器初始化前先等待 `_playerShutdownQueue` 清空，通过 `_waitForPendingPlayerShutdowns(...)` 与 `_enqueuePlayerShutdown(...)` 串行执行上一实例的 `pause -> stop -> dispose`
 - 播放退出、关闭后台播放、外部清理请求和打开新片源当前已经统一收口到同一套 detach/shutdown 流程；只有明确允许后台播放时才保留后台音频
-- `_MpvControlsOverlay` 的自动隐藏定时器、hover 唤醒和 `setState` 现在都受 `_isDisposed / _canUpdateOverlayState` 保护，并在全屏切换时重置 pointer wake 状态，减少全屏切换或返回时的 `setState after dispose`、`mouse_tracker` 异常以及窗口态闪烁
+- `PlayerMpvControlsOverlay` 的自动隐藏定时器、点击唤醒与 `setState` 现在都受 `_isDisposed / _canUpdateOverlayState` 保护；窗口态已不再响应 hover 唤醒，并会在全屏切换时重置 pointer wake 状态，减少全屏切换或返回时的 `setState after dispose`、`mouse_tracker` 异常以及窗口态闪烁
+- `PlaybackOptionsDialog` 现在把轨道、倍速和音量等运行期状态收口成单层订阅 view state，替代多层 `StreamBuilder` 套娃，减少播放中弹窗的重复重建
+- 播放页 presentation 当前已分成：
+  - `player_page.dart`：页面壳、字段与顶层 wiring
+  - `player_page_platform_session.part.dart`：PiP、后台播放、系统播放会话
+  - `player_page_startup_mpv.part.dart`：播放启动、打开重试、`MPV` / ISO / 调优链
+  - `player_page_runtime_actions.part.dart`：续播、跳过、字幕、外挂字幕、在线字幕、启动 probe
+  - `player_page_controls.part.dart`：返回、进度、选择器、播放设置、视频 surface
+  - `player_mpv_controls_overlay.dart`、`player_playback_options_dialog.dart`、`player_playback_overlays.dart`、`player_playback_dialogs.dart`、`player_tv_playback_widgets.dart`：纯展示层组件
 - `lib/core/utils/playback_trace.dart` 与 `subtitle_search_trace.dart` 仍保留本地 scoped trace 能力，但默认关闭；排障时才临时打开，且不会上报到服务端
 - 内置 `MPV` 现已把 `ISO` 打开路径统一纳入同一条执行链：本地路径 / `file://` / UNC 优先尝试 `dvd-device / bluray-device`，远程 `ISO` 则直接回退普通 `Media(...)` 打开，并在回退前清理残留的 `dvd-device / bluray-device / http-header-fields`
 - `TV` 分支当前仍保留自定义播放叠层：
@@ -580,7 +615,8 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - `ASSRT` 如果返回错误页会直接按源失败处理，不再把错误页误判成“0 结果”
 - `SubHD` 当前只支持应用内搜索结果浏览，不能在应用内直接下载；详情页会继续只保留可直接下载且可自动挂载的字幕结果
 - 下载后的在线字幕会缓存在应用支持目录下的 `starflow-subtitle-cache`；如果同一结果已经下载并解压过，再次选择时优先复用本地缓存
-- 播放器页本身不再直接承载全部启动决策；启动前准备和路线判定已经拆到独立 application 文件，便于 controller 级测试和后续替换策略
+- 播放器页本身不再直接承载全部启动决策；目标解析、路由判定与执行分支已经拆到独立 application 文件，页面层主要负责装配、等待态和内置 `MPV` 运行期行为，便于 controller 级测试和后续替换策略
+- 播放器页 presentation 也已进一步拆开：`player_page.dart` 主要保留会话和流程编排，控制叠层、启动等待态、播放设置弹窗与平台会话子树分别沉到 `presentation/widgets` 与 `player_page_*.part.dart`
 
 高性能模式在全局视觉层面当前还会做这些简化：
 
@@ -617,6 +653,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 最近播放只保留最近 `20` 条
 - 最近播放模块可直接消费这份记录
 - 首页消费最近播放记录时，会把“记录到某一集”的续播信息映射成“剧集总名 + 单集副标题”的展示形式
+- `PlaybackMemoryRepository` 现在会保证每次保存都生成单调递增的 `updatedAt`，避免同毫秒写入时最近播放顺序抖动
 - 片头 / 片尾跳过规则按剧绑定，不扩散到其他剧
 
 平台差异：
@@ -819,15 +856,18 @@ Android TV 下的设置页还额外做了遥控器适配：
 
 - 设置模型与迁移
 - 首页装配逻辑
+- 首页控制器与 settings slices
 - 首页 / 媒体库详情缓存批量读取
 - 详情缓存
 - 页面级 `RetainedAsync` 保留态控制器
 - `Emby / WebDAV` 客户端
 - `WebDAV` 识别与索引
+- `NasMediaIndexer` 分组、增量刷新和并发预算
 - 空库自动重建后台调度
 - 元数据客户端
 - 搜索 provider 与搜索仓库
 - 夸克保存和 `SmartStrm`
+- 播放记忆与最近播放排序稳定性
 - 播放启动准备与路由判定
 
 ## 15. 当前架构判断

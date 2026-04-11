@@ -10,8 +10,9 @@ import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
-import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
+import 'package:starflow/features/search/application/search_favorite_metadata_service.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
@@ -139,9 +140,12 @@ class _SearchPageState extends ConsumerState<SearchPage>
   final TvFocusMemoryController _tvFocusMemoryController =
       TvFocusMemoryController();
   List<SearchResult> _results = const [];
+  List<SearchResult> _favoriteResults = const [];
   List<String> _recentQueries = const [];
   bool _isSearching = false;
+  bool _showFavoriteResults = false;
   Set<String> _selectedTargetIds = const {_SearchTarget.allId};
+  Set<String> _favoriteResultKeys = const <String>{};
   String? _errorMessage;
   int _activeSearchRequestId = 0;
   int _totalSearchTaskCount = 0;
@@ -161,7 +165,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialQuery ?? '');
-    unawaited(_loadTelevisionPreferences());
+    unawaited(_loadSearchPreferences());
     _scheduleAutoSearch(widget.initialQuery);
   }
 
@@ -206,10 +210,16 @@ class _SearchPageState extends ConsumerState<SearchPage>
     _cancelSearchTasks();
   }
 
-  Future<void> _loadTelevisionPreferences() async {
+  List<SearchResult> get _displayedResults =>
+      _showFavoriteResults ? _favoriteResults : _results;
+
+  Future<void> _loadSearchPreferences() async {
     final preferences = ref.read(searchPreferencesRepositoryProvider);
     final recentQueries = await preferences.loadRecentQueries();
     final selectedTargets = await preferences.loadSelectedTargetIds();
+    final favoriteResults = _dedupeFavoriteResults(
+      await preferences.loadFavoriteResults(),
+    );
     if (!mounted) {
       return;
     }
@@ -225,6 +235,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
             .where((item) => item.isNotEmpty)
             .toSet();
       }
+      _favoriteResults = favoriteResults;
+      _favoriteResultKeys =
+          favoriteResults.map(searchResultFavoriteKey).toSet();
     });
   }
 
@@ -253,6 +266,89 @@ class _SearchPageState extends ConsumerState<SearchPage>
     await ref
         .read(searchPreferencesRepositoryProvider)
         .saveRecentQueries(nextQueries);
+  }
+
+  List<SearchResult> _dedupeFavoriteResults(Iterable<SearchResult> values) {
+    final seen = <String>{};
+    final deduped = <SearchResult>[];
+    for (final item in values) {
+      final key = searchResultFavoriteKey(item);
+      if (!seen.add(key)) {
+        continue;
+      }
+      deduped.add(item);
+    }
+    return deduped;
+  }
+
+  void _scrollToTop() {
+    if (!_scrollController.hasClients) {
+      return;
+    }
+    _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  void _toggleFavoriteResultsView() {
+    if (!_showFavoriteResults) {
+      _cancelSearchTasks();
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _showFavoriteResults = !_showFavoriteResults;
+    });
+    _scrollToTop();
+  }
+
+  Future<void> _toggleFavoriteResult(SearchResult result) async {
+    final key = searchResultFavoriteKey(result);
+    final removing = _favoriteResultKeys.contains(key);
+    final normalizedResult = removing
+        ? result
+        : await ref.read(searchFavoriteMetadataServiceProvider).enrichFavorite(
+              result: result,
+              query: _controller.text.trim(),
+              settings: ref.read(appSettingsProvider),
+            );
+    final favoriteResult = normalizedResult.copyWith(
+      favoriteFolderName: resolveSearchFavoriteFolderName(
+        result: normalizedResult,
+        searchQuery: _controller.text.trim(),
+      ),
+    );
+    final nextFavorites = removing
+        ? _favoriteResults
+            .where((item) => searchResultFavoriteKey(item) != key)
+            .toList(growable: false)
+        : _dedupeFavoriteResults([
+            favoriteResult,
+            ..._favoriteResults.where(
+              (item) => searchResultFavoriteKey(item) != key,
+            ),
+          ]);
+    if (mounted) {
+      setState(() {
+        _favoriteResults = nextFavorites;
+        _favoriteResultKeys =
+            nextFavorites.map(searchResultFavoriteKey).toSet();
+      });
+    }
+    await ref
+        .read(searchPreferencesRepositoryProvider)
+        .saveFavoriteResults(nextFavorites);
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(removing ? '已取消收藏' : '已收藏到搜索结果'),
+      ),
+    );
   }
 
   Future<void> _runRecentQuery(String query) async {
@@ -387,6 +483,11 @@ class _SearchPageState extends ConsumerState<SearchPage>
   Future<void> _performSearch() async {
     final keyword = _controller.text.trim();
     if (keyword.isEmpty) {
+      if (_showFavoriteResults && mounted) {
+        setState(() {
+          _showFavoriteResults = false;
+        });
+      }
       _cancelSearchTasks(clearResults: true);
       return;
     }
@@ -407,6 +508,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
     _cancelPendingSearchUiCommit(clearState: true);
 
     setState(() {
+      _showFavoriteResults = false;
       _selectedTargetIds = selectedTargets.map((item) => item.id).toSet();
       _isSearching = true;
       _results = const [];
@@ -473,6 +575,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
     final enabledProviders =
         ref.watch(_searchPageVisibleSearchProvidersProvider);
     final localSources = ref.watch(_searchPageVisibleLocalSourcesProvider);
+    final displayedResults = _displayedResults;
     final targets = _buildTargets(
       localSources: localSources,
       providers: enabledProviders,
@@ -517,25 +620,45 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                       focusNode: _queryFocusNode,
                                       onEditQuery: _openTelevisionQueryDialog,
                                       onSearch: _performSearch,
+                                      onToggleFavorites:
+                                          _toggleFavoriteResultsView,
+                                      showFavoriteResults: _showFavoriteResults,
                                     )
-                                  : TextField(
-                                      controller: _controller,
-                                      textInputAction: TextInputAction.search,
-                                      onSubmitted: (_) => _performSearch(),
-                                      decoration: InputDecoration(
-                                        hintText: '搜索电影、剧集或番剧资源',
-                                        suffixIcon: Padding(
-                                          padding: const EdgeInsets.all(6),
-                                          child: StarflowIconButton(
-                                            icon: Icons.search_rounded,
-                                            tooltip: '搜索',
-                                            onPressed: _performSearch,
-                                            variant:
-                                                StarflowButtonVariant.ghost,
-                                            size: 40,
+                                  : Row(
+                                      children: [
+                                        Expanded(
+                                          child: TextField(
+                                            controller: _controller,
+                                            textInputAction:
+                                                TextInputAction.search,
+                                            onSubmitted: (_) =>
+                                                _performSearch(),
+                                            decoration: const InputDecoration(
+                                              hintText: '搜索电影、剧集或番剧资源',
+                                            ),
                                           ),
                                         ),
-                                      ),
+                                        const SizedBox(width: 8),
+                                        StarflowIconButton(
+                                          icon: Icons.search_rounded,
+                                          tooltip: '搜索',
+                                          onPressed: _performSearch,
+                                          variant: StarflowButtonVariant.ghost,
+                                          size: 40,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        StarflowIconButton(
+                                          icon: _showFavoriteResults
+                                              ? Icons.manage_search_rounded
+                                              : Icons.favorite_rounded,
+                                          tooltip: _showFavoriteResults
+                                              ? '返回搜索结果'
+                                              : '查看收藏',
+                                          onPressed: _toggleFavoriteResultsView,
+                                          variant: StarflowButtonVariant.ghost,
+                                          size: 40,
+                                        ),
+                                      ],
                                     ),
                             ),
                             if (isTelevision && _recentQueries.isNotEmpty) ...[
@@ -561,8 +684,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                       label: _recentQueries[index],
                                       autofocus: index == 0,
                                       focusId: 'search:recent:$index',
-                                      onPressed: () =>
-                                          _runRecentQuery(_recentQueries[index]),
+                                      onPressed: () => _runRecentQuery(
+                                          _recentQueries[index]),
                                     ),
                                 ],
                               ),
@@ -637,7 +760,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                       ),
                               ),
                             const SizedBox(height: 12),
-                            if (_isSearching) ...[
+                            if (!_showFavoriteResults && _isSearching) ...[
                               LinearProgressIndicator(
                                 value: _totalSearchTaskCount > 0
                                     ? _completedSearchTaskCount /
@@ -646,52 +769,62 @@ class _SearchPageState extends ConsumerState<SearchPage>
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                _results.isEmpty
+                                displayedResults.isEmpty
                                     ? '正在搜索...'
                                     : '正在继续搜索 $_completedSearchTaskCount/$_totalSearchTaskCount',
                               ),
                               const SizedBox(height: 10),
                             ],
-                            if (_controller.text.trim().isNotEmpty &&
-                                (_results.isNotEmpty ||
+                            if (_showFavoriteResults &&
+                                displayedResults.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Text('收藏 ${displayedResults.length} 条'),
+                              )
+                            else if (_controller.text.trim().isNotEmpty &&
+                                (displayedResults.isNotEmpty ||
                                     _filteredResultCount > 0))
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
                                 child: Text(
-                                  '结果 ${_results.length} 条 · 过滤 $_filteredResultCount 条',
+                                  '结果 ${displayedResults.length} 条 · 过滤 $_filteredResultCount 条',
                                 ),
                               ),
-                            if (_errorMessage != null)
+                            if (!_showFavoriteResults && _errorMessage != null)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
                                 child: Text('搜索失败：$_errorMessage'),
                               )
-                            else if (_results.isEmpty)
+                            else if (displayedResults.isEmpty)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
                                 child: Text(
-                                  _controller.text.trim().isEmpty
-                                      ? '输入关键字后开始搜索。'
-                                      : _filteredResultCount > 0
-                                          ? '没有可用结果，已过滤 $_filteredResultCount 条结果。'
-                                          : '没有找到结果。',
+                                  _showFavoriteResults
+                                      ? '还没有收藏结果。'
+                                      : _controller.text.trim().isEmpty
+                                          ? '输入关键字后开始搜索。'
+                                          : _filteredResultCount > 0
+                                              ? '没有可用结果，已过滤 $_filteredResultCount 条结果。'
+                                              : '没有找到结果。',
                                 ),
                               ),
                           ],
                         ),
                       ),
                     ),
-                    if (_results.isNotEmpty)
+                    if (displayedResults.isNotEmpty)
                       SliverList(
                         delegate: SliverChildBuilderDelegate(
                           (context, index) {
-                            final result = _results[index];
+                            final result = displayedResults[index];
                             return _SearchResultCard(
                               result: result,
                               focusId: 'search:result:${result.id}',
                               autofocus: index == 0,
-                              isSaving:
-                                  _savingResultIds.contains(result.id),
+                              isSaving: _savingResultIds.contains(result.id),
+                              isFavorite: _favoriteResultKeys.contains(
+                                searchResultFavoriteKey(result),
+                              ),
                               showSaveAction: _canSaveResultToQuark(
                                 result: result,
                                 networkStorage: networkStorage,
@@ -700,9 +833,12 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                 result: result,
                                 networkStorage: networkStorage,
                               ),
+                              onToggleFavorite: () {
+                                unawaited(_toggleFavoriteResult(result));
+                              },
                             );
                           },
-                          childCount: _results.length,
+                          childCount: displayedResults.length,
                         ),
                       ),
                     const SliverToBoxAdapter(child: SizedBox(height: 8)),
@@ -1022,66 +1158,22 @@ class _SearchPageState extends ConsumerState<SearchPage>
     });
 
     try {
-      final response = await ref.read(quarkSaveClientProvider).saveShareLink(
-            shareUrl: result.resourceUrl,
-            cookie: cookie,
-            toPdirFid: storage.quarkSaveFolderId,
-            toPdirPath: storage.quarkSaveFolderPath,
-            saveFolderName: _controller.text.trim().isNotEmpty
-                ? _controller.text.trim()
-                : result.title.trim(),
-          );
-      var triggeredTask = false;
-      SmartStrmTriggerResult? smartStrmResult;
-      final refreshDelaySeconds = _mediaRefreshDelaySeconds(storage);
-      final smartStrmDelaySeconds = _smartStrmDelaySeconds(storage);
-      if (storage.smartStrmWebhookUrl.trim().isNotEmpty &&
-          storage.smartStrmTaskName.trim().isNotEmpty) {
-        smartStrmResult =
-            await ref.read(smartStrmWebhookClientProvider).triggerTask(
-                  webhookUrl: storage.smartStrmWebhookUrl,
-                  taskName: storage.smartStrmTaskName,
-                  storagePath: storage.quarkSaveFolderPath == '/'
-                      ? ''
-                      : storage.quarkSaveFolderPath,
-                  delay: smartStrmDelaySeconds,
-                );
-        triggeredTask = true;
-      }
-      final refreshSourceIds = storage.refreshMediaSourceIds
-          .map((item) => item.trim())
-          .where((item) => item.isNotEmpty)
-          .toList(growable: false);
-      if (refreshSourceIds.isNotEmpty) {
-        unawaited(
-          ref.read(mediaRefreshCoordinatorProvider).refreshSelectedSources(
-                sourceIds: refreshSourceIds,
-                delaySeconds: refreshDelaySeconds,
-              ),
-        );
-      }
+      final response =
+          await ref.read(quarkSaveWorkflowServiceProvider).saveToQuark(
+                shareUrl: result.resourceUrl,
+                saveFolderName: resolveSearchSaveFolderName(
+                  result: result,
+                  isFavoriteResultsView: _showFavoriteResults,
+                  searchQuery: _controller.text.trim(),
+                ),
+                networkStorage: storage,
+              );
       if (!mounted) {
         return;
       }
-      final message = response.taskId.isEmpty
-          ? '已提交到夸克，保存 ${response.savedCount} 个文件'
-          : '已提交到夸克，任务 ${response.taskId}';
-      final strmMessage = triggeredTask
-          ? _smartStrmSuccessMessage(
-              smartStrmResult,
-              delaySeconds: smartStrmDelaySeconds,
-            )
-          : '';
-      final refreshMessage = refreshSourceIds.isEmpty
-          ? ''
-          : refreshDelaySeconds > 0
-              ? '，$refreshDelaySeconds 秒后刷新媒体源'
-              : '，即将刷新媒体源';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            '$message${strmMessage.isEmpty ? '' : '，$strmMessage'}$refreshMessage',
-          ),
+          content: Text(response.buildSuccessMessage()),
         ),
       );
     } on QuarkSaveException catch (error) {
@@ -1113,37 +1205,6 @@ class _SearchPageState extends ConsumerState<SearchPage>
       }
     }
   }
-
-  int _mediaRefreshDelaySeconds(NetworkStorageConfig storage) {
-    final configured = storage.refreshDelaySeconds;
-    return configured <= 0 ? 1 : configured;
-  }
-
-  int _smartStrmDelaySeconds(NetworkStorageConfig storage) {
-    final configured = storage.smartStrmDelaySeconds;
-    return configured <= 0 ? 1 : configured;
-  }
-
-  String _smartStrmSuccessMessage(
-    SmartStrmTriggerResult? result, {
-    int delaySeconds = 0,
-  }) {
-    if (delaySeconds > 0) {
-      return 'STRM 已延迟 $delaySeconds 秒触发';
-    }
-    if (result == null) {
-      return '已触发 STRM 任务';
-    }
-    final addedCount = result.addedCount;
-    if (addedCount != null) {
-      return 'STRM 新增成功 $addedCount 条';
-    }
-    final message = result.message.trim();
-    if (message.isNotEmpty) {
-      return 'STRM $message';
-    }
-    return '已触发 STRM 任务';
-  }
 }
 
 class _SearchResultCard extends ConsumerWidget {
@@ -1152,16 +1213,20 @@ class _SearchResultCard extends ConsumerWidget {
     required this.focusId,
     required this.autofocus,
     required this.isSaving,
+    required this.isFavorite,
     required this.showSaveAction,
     required this.onSave,
+    required this.onToggleFavorite,
   });
 
   final SearchResult result;
   final String focusId;
   final bool autofocus;
   final bool isSaving;
+  final bool isFavorite;
   final bool showSaveAction;
   final VoidCallback onSave;
+  final VoidCallback onToggleFavorite;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1225,28 +1290,64 @@ class _SearchResultCard extends ConsumerWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        if (showSaveAction)
-                          Padding(
-                            padding: const EdgeInsets.only(left: 6),
-                            child: isTelevision
-                                ? TvAdaptiveButton(
-                                    label: isSaving ? '保存中' : '保存',
-                                    icon: Icons.bookmark_add_rounded,
-                                    onPressed: isSaving ? null : onSave,
-                                    variant: TvButtonVariant.text,
-                                  )
-                                : SizedBox(
-                                    width: 32,
-                                    height: 32,
-                                    child: StarflowIconButton(
-                                      size: 32,
-                                      tooltip: '保存到夸克',
-                                      variant: StarflowButtonVariant.ghost,
-                                      onPressed: isSaving ? null : onSave,
-                                      icon: Icons.bookmark_add_rounded,
+                        Padding(
+                          padding: const EdgeInsets.only(left: 6),
+                          child: isTelevision
+                              ? Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    TvAdaptiveButton(
+                                      label: isFavorite ? '取消收藏' : '收藏',
+                                      icon: isFavorite
+                                          ? Icons.favorite_rounded
+                                          : Icons.favorite_border_rounded,
+                                      onPressed: onToggleFavorite,
+                                      variant: TvButtonVariant.text,
                                     ),
-                                  ),
-                          ),
+                                    if (showSaveAction) ...[
+                                      const SizedBox(width: 6),
+                                      TvAdaptiveButton(
+                                        label: isSaving ? '保存中' : '保存',
+                                        icon: Icons.bookmark_add_rounded,
+                                        onPressed: isSaving ? null : onSave,
+                                        variant: TvButtonVariant.text,
+                                      ),
+                                    ],
+                                  ],
+                                )
+                              : Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox(
+                                      width: 32,
+                                      height: 32,
+                                      child: StarflowIconButton(
+                                        size: 32,
+                                        tooltip: isFavorite ? '取消收藏' : '收藏',
+                                        variant: StarflowButtonVariant.ghost,
+                                        onPressed: onToggleFavorite,
+                                        icon: isFavorite
+                                            ? Icons.favorite_rounded
+                                            : Icons.favorite_border_rounded,
+                                      ),
+                                    ),
+                                    if (showSaveAction) ...[
+                                      const SizedBox(width: 4),
+                                      SizedBox(
+                                        width: 32,
+                                        height: 32,
+                                        child: StarflowIconButton(
+                                          size: 32,
+                                          tooltip: '保存到夸克',
+                                          variant: StarflowButtonVariant.ghost,
+                                          onPressed: isSaving ? null : onSave,
+                                          icon: Icons.bookmark_add_rounded,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 6),
@@ -1521,12 +1622,16 @@ class _TelevisionSearchInput extends StatelessWidget {
     this.focusNode,
     required this.onEditQuery,
     required this.onSearch,
+    required this.onToggleFavorites,
+    required this.showFavoriteResults,
   });
 
   final String query;
   final FocusNode? focusNode;
   final VoidCallback onEditQuery;
   final VoidCallback onSearch;
+  final VoidCallback onToggleFavorites;
+  final bool showFavoriteResults;
 
   @override
   Widget build(BuildContext context) {
@@ -1576,6 +1681,16 @@ class _TelevisionSearchInput extends StatelessWidget {
           icon: Icons.search_rounded,
           onPressed: onSearch,
           focusId: 'search:query-submit',
+        ),
+        const SizedBox(width: 12),
+        TvAdaptiveButton(
+          label: showFavoriteResults ? '搜索结果' : '收藏',
+          icon: showFavoriteResults
+              ? Icons.manage_search_rounded
+              : Icons.favorite_rounded,
+          onPressed: onToggleFavorites,
+          focusId: 'search:favorites-toggle',
+          variant: TvButtonVariant.outlined,
         ),
       ],
     );

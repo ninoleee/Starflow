@@ -74,7 +74,7 @@ class PlaybackMemoryRepository {
       return null;
     }
     final snapshot = await _loadSnapshot();
-    return snapshot.items[key];
+    return _normalizeEntry(snapshot.items[key]);
   }
 
   Future<PlaybackProgressEntry?> loadResumeForDetailTarget(
@@ -92,7 +92,7 @@ class PlaybackMemoryRepository {
       if (seriesKey.isEmpty) {
         return null;
       }
-      return snapshot.series[seriesKey];
+      return _normalizeEntry(snapshot.series[seriesKey]);
     }
 
     final playbackTarget = target.playbackTarget;
@@ -103,14 +103,17 @@ class PlaybackMemoryRepository {
     if (itemKey.isEmpty) {
       return null;
     }
-    return snapshot.items[itemKey];
+    return _normalizeEntry(snapshot.items[itemKey]);
   }
 
   Future<List<PlaybackProgressEntry>> loadRecentEntries(
       {int limit = 20}) async {
     final snapshot = await _loadSnapshot();
-    final entries = snapshot.items.values.toList()
-      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+    final entries = snapshot.items.values
+        .map(_normalizeEntry)
+        .whereType<PlaybackProgressEntry>()
+        .toList()
+      ..sort(_compareEntriesByRecency);
     return entries.take(limit.clamp(1, recentEntryLimit)).toList(
           growable: false,
         );
@@ -133,7 +136,11 @@ class PlaybackMemoryRepository {
       }
     }
 
-    for (final entry in snapshot.items.values) {
+    for (final rawEntry in snapshot.items.values) {
+      final entry = _normalizeEntry(rawEntry);
+      if (entry == null) {
+        continue;
+      }
       final seriesKey = entry.seriesKey.trim();
       if (seriesKey.isNotEmpty) {
         continue;
@@ -141,7 +148,11 @@ class PlaybackMemoryRepository {
       addEntry('item:${entry.key}', entry);
     }
 
-    for (final entry in snapshot.series.values) {
+    for (final rawEntry in snapshot.series.values) {
+      final entry = _normalizeEntry(rawEntry);
+      if (entry == null) {
+        continue;
+      }
       final seriesKey = entry.seriesKey.trim();
       if (seriesKey.isNotEmpty) {
         addEntry('series:$seriesKey', entry);
@@ -150,8 +161,7 @@ class PlaybackMemoryRepository {
       }
     }
 
-    final entries = combined.values.toList()
-      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+    final entries = combined.values.toList()..sort(_compareEntriesByRecency);
     return entries.take(limit.clamp(1, recentEntryLimit)).toList(
           growable: false,
         );
@@ -192,14 +202,15 @@ class PlaybackMemoryRepository {
       duration: clampedDuration,
       progress: progress,
     );
-    final now = DateTime.now();
     final snapshot = await _loadSnapshot();
+    final now = _nextUpdatedAt(snapshot);
 
     final seriesKey = buildSeriesKeyForTarget(target);
     final seriesTitle = target.resolvedSeriesTitle;
+    final persistedTarget = _normalizeTargetForPersistence(target);
     final entry = PlaybackProgressEntry(
       key: itemKey,
-      target: target,
+      target: persistedTarget,
       updatedAt: now,
       seriesKey: seriesKey,
       seriesTitle: seriesTitle,
@@ -289,11 +300,36 @@ class PlaybackMemoryRepository {
       return;
     }
 
-    final sorted = items.values.toList()
-      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+    final sorted = items.values.toList()..sort(_compareEntriesByRecency);
     final allowed =
         sorted.take(recentEntryLimit).map((entry) => entry.key).toSet();
     items.removeWhere((key, _) => !allowed.contains(key));
+  }
+
+  DateTime _nextUpdatedAt(PlaybackMemorySnapshot snapshot) {
+    var next = DateTime.now();
+    for (final entry in snapshot.items.values) {
+      if (!next.isAfter(entry.updatedAt)) {
+        next = entry.updatedAt.add(const Duration(milliseconds: 1));
+      }
+    }
+    for (final entry in snapshot.series.values) {
+      if (!next.isAfter(entry.updatedAt)) {
+        next = entry.updatedAt.add(const Duration(milliseconds: 1));
+      }
+    }
+    return next;
+  }
+
+  int _compareEntriesByRecency(
+    PlaybackProgressEntry left,
+    PlaybackProgressEntry right,
+  ) {
+    final updatedAtComparison = right.updatedAt.compareTo(left.updatedAt);
+    if (updatedAtComparison != 0) {
+      return updatedAtComparison;
+    }
+    return right.key.compareTo(left.key);
   }
 
   bool _isCompleted({
@@ -307,6 +343,88 @@ class PlaybackMemoryRepository {
     final remaining = duration - position;
     return progress >= 0.985 || remaining <= const Duration(seconds: 8);
   }
+
+  PlaybackProgressEntry? _normalizeEntry(PlaybackProgressEntry? entry) {
+    if (entry == null) {
+      return null;
+    }
+    final normalizedTarget = _normalizeTargetForPersistence(entry.target);
+    if (_samePlaybackTargets(normalizedTarget, entry.target)) {
+      return entry;
+    }
+    return entry.copyWith(target: normalizedTarget);
+  }
+
+  PlaybackTarget _normalizeTargetForPersistence(PlaybackTarget target) {
+    if (target.sourceKind != MediaSourceKind.quark ||
+        !_isLoopbackPlaybackRelayUrl(target.streamUrl)) {
+      return target;
+    }
+    return target.copyWith(
+      streamUrl: '',
+      headers: const <String, String>{},
+    );
+  }
+
+  bool _samePlaybackTargets(PlaybackTarget left, PlaybackTarget right) {
+    return left.title == right.title &&
+        left.sourceId == right.sourceId &&
+        left.streamUrl == right.streamUrl &&
+        left.sourceName == right.sourceName &&
+        left.sourceKind == right.sourceKind &&
+        left.actualAddress == right.actualAddress &&
+        left.itemId == right.itemId &&
+        left.itemType == right.itemType &&
+        left.year == right.year &&
+        left.seriesId == right.seriesId &&
+        left.seriesTitle == right.seriesTitle &&
+        left.preferredMediaSourceId == right.preferredMediaSourceId &&
+        left.subtitle == right.subtitle &&
+        left.externalSubtitleFilePath == right.externalSubtitleFilePath &&
+        left.externalSubtitleDisplayName == right.externalSubtitleDisplayName &&
+        _sameHeaders(left.headers, right.headers) &&
+        left.container == right.container &&
+        left.videoCodec == right.videoCodec &&
+        left.audioCodec == right.audioCodec &&
+        left.seasonNumber == right.seasonNumber &&
+        left.episodeNumber == right.episodeNumber &&
+        left.width == right.width &&
+        left.height == right.height &&
+        left.bitrate == right.bitrate &&
+        left.fileSizeBytes == right.fileSizeBytes;
+  }
+
+  bool _sameHeaders(Map<String, String> left, Map<String, String> right) {
+    if (left.length != right.length) {
+      return false;
+    }
+    for (final entry in left.entries) {
+      if (right[entry.key] != entry.value) {
+        return false;
+      }
+    }
+    return true;
+  }
+}
+
+bool _isLoopbackPlaybackRelayUrl(String url) {
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null) {
+    return false;
+  }
+  final scheme = uri.scheme.toLowerCase();
+  if (scheme != 'http' && scheme != 'https') {
+    return false;
+  }
+  final host = uri.host.trim().toLowerCase();
+  if (host != '127.0.0.1' && host != 'localhost' && host != '::1') {
+    return false;
+  }
+  final segments = uri.pathSegments
+      .map((item) => item.trim())
+      .where((item) => item.isNotEmpty)
+      .toList(growable: false);
+  return segments.isNotEmpty && segments.first == 'playback-relay';
 }
 
 String buildPlaybackItemKey(PlaybackTarget target) {

@@ -25,6 +25,70 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('MediaRefreshCoordinator', () {
+    test('always includes enabled quark sources for quark saves', () {
+      const mediaSources = [
+        MediaSourceConfig(
+          id: 'emby-main',
+          name: 'Emby',
+          kind: MediaSourceKind.emby,
+          endpoint: 'https://emby.example.com',
+          enabled: true,
+        ),
+        MediaSourceConfig(
+          id: 'quark-main',
+          name: 'Quark',
+          kind: MediaSourceKind.quark,
+          endpoint: 'root-folder',
+          libraryPath: '/影视',
+          enabled: true,
+        ),
+        MediaSourceConfig(
+          id: 'quark-disabled',
+          name: 'Quark Disabled',
+          kind: MediaSourceKind.quark,
+          endpoint: 'other-folder',
+          libraryPath: '/电影',
+          enabled: false,
+        ),
+      ];
+
+      final refreshIds = resolveRefreshSourceIdsForQuarkSave(
+        mediaSources: mediaSources,
+        configuredRefreshSourceIds: const [],
+        includeConfiguredSources: false,
+      );
+
+      expect(refreshIds, ['quark-main']);
+    });
+
+    test('merges configured refresh ids with quark sources for quark saves',
+        () {
+      const mediaSources = [
+        MediaSourceConfig(
+          id: 'quark-main',
+          name: 'Quark',
+          kind: MediaSourceKind.quark,
+          endpoint: 'root-folder',
+          libraryPath: '/影视',
+          enabled: true,
+        ),
+        MediaSourceConfig(
+          id: 'nas-main',
+          name: 'WebDAV',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://dav.example.com',
+          enabled: true,
+        ),
+      ];
+
+      final refreshIds = resolveRefreshSourceIdsForQuarkSave(
+        mediaSources: mediaSources,
+        configuredRefreshSourceIds: const ['nas-main', 'quark-main'],
+      );
+
+      expect(refreshIds, ['nas-main', 'quark-main']);
+    });
+
     test(
         'rebuilding a Quark source refreshes cached library providers with latest items',
         () async {

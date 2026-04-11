@@ -1438,6 +1438,70 @@ void main() {
       expect(resolved.headers, isEmpty);
     });
 
+    test('resolves deferred nas strm direct-link file size', () async {
+      final requests = <String>[];
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          requests.add('${request.method} ${request.url}');
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/LazyStrm/Episode%2001.strm') {
+            return http.Response(
+              'https://media.example.com/lazy/e01.mkv\n',
+              200,
+            );
+          }
+          if (request.method == 'HEAD' &&
+              request.url.toString() ==
+                  'https://media.example.com/lazy/e01.mkv') {
+            return http.Response(
+              '',
+              200,
+              headers: const {
+                'content-length': '2147483648',
+              },
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      const source = MediaSourceConfig(
+        id: 'nas-lazy-strm',
+        name: 'Lazy STRM NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/dav/Shows/LazyStrm/',
+        enabled: true,
+        username: 'alice',
+        password: 'secret',
+      );
+
+      final resolved = await client.resolvePlaybackTarget(
+        source: source,
+        target: const PlaybackTarget(
+          title: 'Episode 01',
+          sourceId: 'nas-lazy-strm',
+          streamUrl:
+              'https://nas.example.com/dav/Shows/LazyStrm/Episode%2001.strm',
+          sourceName: 'Lazy STRM NAS',
+          sourceKind: MediaSourceKind.nas,
+          actualAddress: '/dav/Shows/LazyStrm/Episode 01.strm',
+          container: 'strm',
+          fileSizeBytes: 128,
+        ),
+      );
+
+      expect(
+        resolved.streamUrl,
+        'https://media.example.com/lazy/e01.mkv',
+      );
+      expect(resolved.fileSizeBytes, 2147483648);
+      expect(
+        requests,
+        contains('HEAD https://media.example.com/lazy/e01.mkv'),
+      );
+    });
+
     test('deletes files using their direct WebDAV resource uri', () async {
       final requests = <String>[];
       final client = WebDavNasClient(

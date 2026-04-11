@@ -311,7 +311,151 @@ void main() {
       expect(quarkClient.listParentFids, ['folder-root']);
       expect(quarkClient.deletedFids, ['quark-dir-mitang']);
     });
+
+    test(
+        'deletes indexed Quark scope paths from browse pages and clears local index',
+        () async {
+      const source = MediaSourceConfig(
+        id: 'quark-main',
+        name: 'Quark Drive',
+        kind: MediaSourceKind.quark,
+        endpoint: 'root-folder',
+        libraryPath: '/影视',
+        enabled: true,
+      );
+      final quarkClient = _RecordingQuarkSaveClient(
+        directories: const [],
+        resolvedDirectoriesByPath: const {
+          '/影视/圆桌派': QuarkDirectoryEntry(
+            fid: 'series-dir',
+            name: '圆桌派',
+            path: '/影视/圆桌派',
+          ),
+        },
+      );
+      final cacheRepository = _RecordingLocalStorageCacheRepository();
+      final indexer = _FakeNasMediaIndexer(
+        scopeRecordsByPath: {
+          '/影视/圆桌派': [
+            _quarkIndexRecord(
+              source: source,
+              fid: 'episode-1',
+              path: '/影视/圆桌派/Season 1/S01E01.mp4',
+            ),
+            _quarkIndexRecord(
+              source: source,
+              fid: 'episode-2',
+              path: '/影视/圆桌派/Season 1/S01E02.mp4',
+            ),
+          ],
+        },
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [source],
+              searchProviders: const [],
+              homeModules: const [],
+              networkStorage: const NetworkStorageConfig(
+                quarkCookie: 'foo=bar',
+              ),
+            ),
+          ),
+          embyApiClientProvider.overrideWithValue(
+            EmbyApiClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          webDavNasClientProvider
+              .overrideWithValue(_RecordingWebDavNasClient()),
+          quarkSaveClientProvider.overrideWithValue(quarkClient),
+          nasMediaIndexerProvider.overrideWithValue(indexer),
+          localStorageCacheRepositoryProvider
+              .overrideWithValue(cacheRepository),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final repository = container.read(mediaRepositoryProvider);
+
+      await repository.deleteResource(
+        sourceId: source.id,
+        resourcePath: '/影视/圆桌派',
+      );
+
+      expect(quarkClient.deletedFids, ['series-dir']);
+      expect(indexer.removedScopes, ['/影视/圆桌派']);
+      expect(cacheRepository.clearedResources, hasLength(1));
+      expect(cacheRepository.clearedResources.single.resourceId, isEmpty);
+      expect(
+        cacheRepository.clearedResources.single.resourcePath,
+        '/影视/圆桌派',
+      );
+      expect(cacheRepository.clearedResources.single.treatAsScope, isTrue);
+    });
   });
+}
+
+NasMediaIndexRecord _quarkIndexRecord({
+  required MediaSourceConfig source,
+  required String fid,
+  required String path,
+}) {
+  final resourceId = Uri(
+    scheme: 'quark',
+    host: 'entry',
+    path: '/$fid',
+    queryParameters: {
+      'path': path,
+      'parentFid': 'parent-$fid',
+    },
+  ).toString();
+  final item = MediaItem(
+    id: resourceId,
+    title: path.split('/').last,
+    overview: '',
+    posterUrl: '',
+    year: 0,
+    durationLabel: '文件',
+    genres: const [],
+    itemType: 'episode',
+    sourceId: source.id,
+    sourceName: source.name,
+    sourceKind: source.kind,
+    streamUrl: '',
+    actualAddress: path,
+    playbackItemId: fid,
+    addedAt: DateTime(2026, 4, 11),
+  );
+  return NasMediaIndexRecord(
+    id: NasMediaIndexRecord.buildRecordId(
+      sourceId: source.id,
+      resourceId: resourceId,
+    ),
+    sourceId: source.id,
+    sectionId: '',
+    sectionName: '',
+    resourceId: resourceId,
+    resourcePath: path,
+    fingerprint: 'fp-$fid',
+    fileSizeBytes: 0,
+    modifiedAt: DateTime(2026, 4, 11),
+    indexedAt: DateTime(2026, 4, 11),
+    scrapedAt: DateTime(2026, 4, 11),
+    recognizedTitle: item.title,
+    searchQuery: item.title,
+    originalFileName: item.title,
+    parentTitle: '圆桌派',
+    recognizedYear: 0,
+    recognizedItemType: item.itemType,
+    preferSeries: true,
+    sidecarStatus: NasMetadataFetchStatus.never,
+    wmdbStatus: NasMetadataFetchStatus.never,
+    tmdbStatus: NasMetadataFetchStatus.never,
+    imdbStatus: NasMetadataFetchStatus.never,
+    item: item,
+  );
 }
 
 class _RecordingWebDavNasClient extends WebDavNasClient {
@@ -333,9 +477,11 @@ class _RecordingWebDavNasClient extends WebDavNasClient {
 class _RecordingQuarkSaveClient extends QuarkSaveClient {
   _RecordingQuarkSaveClient({
     required this.directories,
+    this.resolvedDirectoriesByPath = const {},
   }) : super(MockClient((request) async => http.Response('', 200)));
 
   final List<QuarkDirectoryEntry> directories;
+  final Map<String, QuarkDirectoryEntry> resolvedDirectoriesByPath;
   final List<String> listParentFids = <String>[];
   final List<String> deletedFids = <String>[];
 
@@ -360,11 +506,23 @@ class _RecordingQuarkSaveClient extends QuarkSaveClient {
       finished: true,
     );
   }
+
+  @override
+  Future<QuarkDirectoryEntry?> resolveDirectoryByPath({
+    required String cookie,
+    required String path,
+  }) async {
+    return resolvedDirectoriesByPath[normalizeQuarkDirectoryPath(path)];
+  }
 }
 
 class _FakeNasMediaIndexer extends NasMediaIndexer {
-  _FakeNasMediaIndexer()
-      : super(
+  _FakeNasMediaIndexer({
+    Map<String, NasMediaIndexRecord> recordsByResourceId = const {},
+    Map<String, List<NasMediaIndexRecord>> scopeRecordsByPath = const {},
+  })  : _recordsByResourceId = recordsByResourceId,
+        _scopeRecordsByPath = scopeRecordsByPath,
+        super(
           store: SembastNasMediaIndexStore(
             databaseOpener: () => databaseFactoryMemory.openDatabase(
               'media-repository-delete-sync-quark-test',
@@ -386,6 +544,8 @@ class _FakeNasMediaIndexer extends NasMediaIndexer {
           progressController: WebDavScrapeProgressController(),
         );
 
+  final Map<String, NasMediaIndexRecord> _recordsByResourceId;
+  final Map<String, List<NasMediaIndexRecord>> _scopeRecordsByPath;
   final List<String> removedScopes = <String>[];
 
   @override
@@ -393,7 +553,7 @@ class _FakeNasMediaIndexer extends NasMediaIndexer {
     required String sourceId,
     required String resourceId,
   }) async {
-    return null;
+    return _recordsByResourceId[resourceId];
   }
 
   @override
@@ -409,7 +569,7 @@ class _FakeNasMediaIndexer extends NasMediaIndexer {
     required String sourceId,
     required String resourcePath,
   }) async {
-    return const <NasMediaIndexRecord>[];
+    return _scopeRecordsByPath[resourcePath] ?? const <NasMediaIndexRecord>[];
   }
 }
 

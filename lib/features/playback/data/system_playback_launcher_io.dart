@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
+import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:starflow/features/playback/data/system_playback_launcher.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -21,7 +22,13 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
     if (uri == null || !uri.hasScheme) {
       return const SystemPlaybackLaunchResult(
         launched: false,
-        message: '播放地址无效，无法调用系统播放器。',
+        message: '播放地址无效，无法调用外部系统播放器。',
+      );
+    }
+    if (_requiresExternalPlaybackHeaders(target)) {
+      return const SystemPlaybackLaunchResult(
+        launched: false,
+        message: '当前资源依赖请求头鉴权，外部系统播放器暂不支持。请改用内置 MPV 或原生播放器。',
       );
     }
 
@@ -33,7 +40,7 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
       final launched = await _launchAndroidVideoIntent(target);
       return SystemPlaybackLaunchResult(
         launched: launched,
-        message: launched ? '' : '系统播放器启动失败。',
+        message: launched ? '' : '外部系统播放器启动失败。',
       );
     }
 
@@ -48,7 +55,7 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
     }
     return SystemPlaybackLaunchResult(
       launched: launched,
-      message: launched ? '' : '系统播放器启动失败。',
+      message: launched ? '' : '外部系统播放器启动失败。',
     );
   }
 
@@ -59,7 +66,7 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
     final launched = await _openFile(file.path);
     return SystemPlaybackLaunchResult(
       launched: launched,
-      message: launched ? '' : '系统播放器启动失败。',
+      message: launched ? '' : '外部系统播放器启动失败。',
     );
   }
 
@@ -106,16 +113,32 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
   }
 
   Future<bool> _launchAndroidVideoIntent(PlaybackTarget target) async {
+    _traceQuarkSystemLaunch(
+      'quark.system-launch.android.channel.begin',
+      target: target,
+      fields: {'streamUrl': target.streamUrl},
+    );
     try {
       final launched =
           await _platformChannel.invokeMethod<bool>('launchSystemVideoPlayer', {
         'url': target.streamUrl.trim(),
         'title': target.title,
       });
+      _traceQuarkSystemLaunch(
+        'quark.system-launch.android.channel.result',
+        target: target,
+        fields: {'launched': launched == true},
+      );
       if (launched == true) {
         return true;
       }
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _traceQuarkSystemLaunch(
+        'quark.system-launch.android.channel.failed',
+        target: target,
+        error: error,
+        stackTrace: stackTrace,
+      );
       // Fall back to a best-effort non-browser external launch below.
     }
 
@@ -123,19 +146,36 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
     if (uri == null || !uri.hasScheme) {
       return false;
     }
+    _traceQuarkSystemLaunch(
+      'quark.system-launch.android.url.begin',
+      target: target,
+      fields: {'streamUrl': target.streamUrl},
+    );
     try {
-      return await launchUrl(
+      final launched = await launchUrl(
         uri,
         mode: LaunchMode.externalNonBrowserApplication,
       );
-    } catch (_) {
+      _traceQuarkSystemLaunch(
+        'quark.system-launch.android.url.result',
+        target: target,
+        fields: {'launched': launched},
+      );
+      return launched;
+    } catch (error, stackTrace) {
+      _traceQuarkSystemLaunch(
+        'quark.system-launch.android.url.failed',
+        target: target,
+        error: error,
+        stackTrace: stackTrace,
+      );
       return false;
     }
   }
 
   String _sanitizeFileName(String raw) {
     final sanitized = raw
-        .replaceAll(RegExp(r'[\\/:*?"<>|]'), ' ')
+        .replaceAll(RegExp(r'[\\/:*?"<>|&^%!]+'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
     if (sanitized.isEmpty) {
@@ -143,4 +183,37 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
     }
     return sanitized.length > 48 ? sanitized.substring(0, 48) : sanitized;
   }
+
+  bool _requiresExternalPlaybackHeaders(PlaybackTarget target) {
+    if (target.headers.isEmpty) {
+      return false;
+    }
+    return target.headers.entries.any(
+      (entry) =>
+          entry.key.trim().isNotEmpty && entry.value.trim().isNotEmpty,
+    );
+  }
+}
+
+void _traceQuarkSystemLaunch(
+  String stage, {
+  required PlaybackTarget target,
+  Map<String, Object?> fields = const <String, Object?>{},
+  Object? error,
+  StackTrace? stackTrace,
+}) {
+  if (target.sourceKind.name != 'quark') {
+    return;
+  }
+  playbackTrace(
+    stage,
+    fields: <String, Object?>{
+      'title': target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
+      'sourceKind': target.sourceKind.name,
+      'container': target.container,
+      ...fields,
+    },
+    error: error,
+    stackTrace: stackTrace,
+  );
 }

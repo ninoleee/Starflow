@@ -23,6 +23,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -89,6 +90,10 @@ class NativePlaybackActivity : Activity() {
         override fun onPlaybackStateChanged(playbackState: Int) {
             syncPlaybackSystemSession()
             updatePictureInPictureParams()
+            logPlayback(
+                "native.playback.state state=${playbackStateLabel(playbackState)} " +
+                    "positionMs=${player?.currentPosition ?: -1L}",
+            )
         }
 
         override fun onPositionDiscontinuity(
@@ -97,6 +102,16 @@ class NativePlaybackActivity : Activity() {
             reason: Int,
         ) {
             syncPlaybackSystemSession()
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            logPlayback(
+                "native.playback.error code=${error.errorCode} " +
+                    "name=${error.errorCodeName} message=${error.message ?: ""} " +
+                    "url=${summarizeUrl(intent.getStringExtra(EXTRA_URL)?.trim().orEmpty())} " +
+                    "container=${decodePlaybackTargetObject().optString("container").trim()}",
+                error,
+            )
         }
     }
     private val isTelevisionDevice: Boolean by lazy {
@@ -409,9 +424,19 @@ class NativePlaybackActivity : Activity() {
         }
         val title = intent.getStringExtra(EXTRA_TITLE)?.trim().orEmpty()
         val headersJson = intent.getStringExtra(EXTRA_HEADERS_JSON)?.trim().orEmpty()
+        val targetObject = decodePlaybackTargetObject()
+        logPlayback(
+            "native.initialize.begin " +
+                "url=${summarizeUrl(url)} " +
+                "actual=${summarizeUrl(targetObject.optString("actualAddress").trim())} " +
+                "source=${targetObject.optString("sourceName").trim()} " +
+                "container=${targetObject.optString("container").trim()} " +
+                "headers=${summarizeHeaderKeys(headersJson)}",
+        )
         val decodeMode = PlaybackDecodeMode.fromRaw(
             intent.getStringExtra(EXTRA_DECODE_MODE)?.trim().orEmpty(),
         )
+        val guessedMimeType = guessVideoMimeType(targetObject, url).takeIf { it != "-" }
 
         restoredResumePositionMs = loadResumePositionMs()
 
@@ -429,7 +454,8 @@ class NativePlaybackActivity : Activity() {
                     headers[key] = json.optString(key)
                 }
                 dataSourceFactory.setDefaultRequestProperties(headers)
-            } catch (_: Throwable) {
+            } catch (error: Throwable) {
+                logPlayback("native.initialize.headers-parse-failed", error)
             }
         }
 
@@ -451,14 +477,23 @@ class NativePlaybackActivity : Activity() {
             .setRenderersFactory(renderersFactory)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .build()
-        val initialMediaItem = MediaItem.Builder()
+        val initialMediaItemBuilder = MediaItem.Builder()
             .setUri(url)
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(title.ifEmpty { null })
                     .build(),
             )
-            .build()
+        if (guessedMimeType != null) {
+            initialMediaItemBuilder.setMimeType(guessedMimeType)
+        }
+        val initialMediaItem = initialMediaItemBuilder.build()
+        logPlayback(
+            "native.initialize.media-item " +
+                "resumeMs=$restoredResumePositionMs " +
+                "decodeMode=$decodeMode " +
+                "mimeGuess=${guessedMimeType ?: "-"}",
+        )
         baseMediaItem = initialMediaItem
 
         exoPlayer.apply {
@@ -472,6 +507,7 @@ class NativePlaybackActivity : Activity() {
             prepare()
         }
         exoPlayer.addListener(playerListener)
+        logPlayback("native.initialize.prepare-called playWhenReady=${exoPlayer.playWhenReady}")
 
         player = exoPlayer
         playerView.player = exoPlayer
@@ -1660,6 +1696,78 @@ class NativePlaybackActivity : Activity() {
 
     private fun showToast(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun logPlayback(message: String, error: Throwable? = null) {
+        // Logging intentionally disabled for production playback runs.
+    }
+
+    private fun decodePlaybackTargetObject(): JSONObject {
+        return try {
+            JSONObject(playbackTargetJson)
+        } catch (_: Throwable) {
+            JSONObject()
+        }
+    }
+
+    private fun summarizeHeaderKeys(headersJson: String): String {
+        if (headersJson.isBlank()) {
+            return "-"
+        }
+        return try {
+            val json = JSONObject(headersJson)
+            val keys = mutableListOf<String>()
+            val iterator = json.keys()
+            while (iterator.hasNext()) {
+                keys += iterator.next()
+            }
+            if (keys.isEmpty()) "-" else keys.joinToString("|")
+        } catch (_: Throwable) {
+            "invalid-json"
+        }
+    }
+
+    private fun summarizeUrl(raw: String): String {
+        if (raw.isBlank()) {
+            return "-"
+        }
+        return try {
+            val uri = Uri.parse(raw)
+            val path = uri.path?.takeIf { it.isNotBlank() } ?: "/"
+            "${uri.scheme}://${uri.host ?: ""}$path"
+        } catch (_: Throwable) {
+            raw
+        }
+    }
+
+    private fun guessVideoMimeType(targetObject: JSONObject, url: String): String {
+        val container = targetObject.optString("container").trim().lowercase(Locale.US)
+        return when {
+            container == "mp4" || container == "m4v" -> MimeTypes.VIDEO_MP4
+            container == "webm" -> MimeTypes.VIDEO_WEBM
+            container == "mkv" -> MimeTypes.VIDEO_MATROSKA
+            container == "ts" || container == "m2ts" -> MimeTypes.VIDEO_MP2T
+            container == "mpg" || container == "mpeg" -> MimeTypes.VIDEO_MPEG
+            url.lowercase(Locale.US).endsWith(".mp4") ||
+                url.lowercase(Locale.US).endsWith(".m4v") -> MimeTypes.VIDEO_MP4
+            url.lowercase(Locale.US).endsWith(".webm") -> MimeTypes.VIDEO_WEBM
+            url.lowercase(Locale.US).endsWith(".mkv") -> MimeTypes.VIDEO_MATROSKA
+            url.lowercase(Locale.US).endsWith(".ts") ||
+                url.lowercase(Locale.US).endsWith(".m2ts") -> MimeTypes.VIDEO_MP2T
+            url.lowercase(Locale.US).endsWith(".mpg") ||
+                url.lowercase(Locale.US).endsWith(".mpeg") -> MimeTypes.VIDEO_MPEG
+            else -> "-"
+        }
+    }
+
+    private fun playbackStateLabel(playbackState: Int): String {
+        return when (playbackState) {
+            Player.STATE_IDLE -> "IDLE"
+            Player.STATE_BUFFERING -> "BUFFERING"
+            Player.STATE_READY -> "READY"
+            Player.STATE_ENDED -> "ENDED"
+            else -> playbackState.toString()
+        }
     }
 
     private fun enterImmersiveMode() {

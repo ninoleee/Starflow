@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -36,6 +37,15 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       );
     }
 
+    _traceQuarkNativeLaunch(
+      'quark.native-launch.invoke.begin',
+      target: target,
+      fields: {
+        'decodeMode': decodeMode.name,
+        'streamUrl': target.streamUrl,
+        'headers': target.headers.keys.join('|'),
+      },
+    );
     try {
       final launched = await _platformChannel.invokeMethod<bool>(
         'launchNativePlaybackContainer',
@@ -49,15 +59,53 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
           'seriesKey': buildSeriesKeyForTarget(target),
         },
       );
+      _traceQuarkNativeLaunch(
+        'quark.native-launch.invoke.result',
+        target: target,
+        fields: {
+          'decodeMode': decodeMode.name,
+          'launched': launched == true,
+        },
+      );
       return NativePlaybackLaunchResult(
         launched: launched == true,
         message: launched == true ? '' : '原生播放器启动失败。',
       );
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _traceQuarkNativeLaunch(
+        'quark.native-launch.invoke.failed',
+        target: target,
+        fields: {'decodeMode': decodeMode.name},
+        error: error,
+        stackTrace: stackTrace,
+      );
       return const NativePlaybackLaunchResult(
         launched: false,
         message: '原生播放器启动失败。',
       );
     }
   }
+}
+
+void _traceQuarkNativeLaunch(
+  String stage, {
+  required PlaybackTarget target,
+  Map<String, Object?> fields = const <String, Object?>{},
+  Object? error,
+  StackTrace? stackTrace,
+}) {
+  if (target.sourceKind.name != 'quark') {
+    return;
+  }
+  playbackTrace(
+    stage,
+    fields: <String, Object?>{
+      'title': target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
+      'sourceKind': target.sourceKind.name,
+      'container': target.container,
+      ...fields,
+    },
+    error: error,
+    stackTrace: stackTrace,
+  );
 }

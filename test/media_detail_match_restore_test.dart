@@ -10,6 +10,7 @@ import 'package:starflow/features/details/application/detail_external_episode_va
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
+import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
@@ -377,6 +378,168 @@ void main() {
   });
 
   testWidgets(
+      'detail page merges matched resources with same-episode file variants',
+      (tester) async {
+    const seedTarget = MediaDetailTarget(
+      title: '第 1 集',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '无',
+      searchQuery: '测试剧 第 1 集',
+      sourceName: '豆瓣',
+    );
+    const choiceA = MediaDetailTarget(
+      title: '第 1 集',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：WebDAV · nas-A',
+      searchQuery: '测试剧 第 1 集',
+      sourceId: 'nas-a',
+      itemId: 'episode-a',
+      itemType: 'episode',
+      sectionName: '版本A',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'nas-A',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '第 1 集',
+        sourceId: 'nas-a',
+        streamUrl: 'https://example.com/show-s01e01-a.mkv',
+        sourceName: 'nas-A',
+        sourceKind: MediaSourceKind.nas,
+        actualAddress: '/shows/测试剧/Season 1/第1集-A.mkv',
+        itemId: 'episode-a',
+        itemType: 'episode',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+    const choiceA2 = MediaDetailTarget(
+      title: '第 1 集',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：WebDAV · nas-A',
+      searchQuery: '测试剧 第 1 集',
+      sourceId: 'nas-a',
+      itemId: 'episode-a-2',
+      itemType: 'episode',
+      sectionName: '版本A',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'nas-A',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '第 1 集',
+        sourceId: 'nas-a',
+        streamUrl: 'https://example.com/show-s01e01-a-2.mkv',
+        sourceName: 'nas-A',
+        sourceKind: MediaSourceKind.nas,
+        actualAddress: '/shows/测试剧/Season 1/第1集-A-备用.mkv',
+        itemId: 'episode-a-2',
+        itemType: 'episode',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+    const choiceB = MediaDetailTarget(
+      title: '第 1 集',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：WebDAV · nas-B',
+      searchQuery: '测试剧 第 1 集',
+      sourceId: 'nas-b',
+      itemId: 'episode-b',
+      itemType: 'episode',
+      sectionName: '版本B',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'nas-B',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '第 1 集',
+        sourceId: 'nas-b',
+        streamUrl: 'https://example.com/show-s01e01-b.mkv',
+        sourceName: 'nas-B',
+        sourceKind: MediaSourceKind.nas,
+        actualAddress: '/shows-b/测试剧/Season 1/第1集-B.mkv',
+        itemId: 'episode-b',
+        itemType: 'episode',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+    final settings = AppSettings.fromJson({
+      'mediaSources': const [],
+      'searchProviders': const [],
+      'doubanAccount': const {'enabled': false},
+      'homeModules': const [],
+      'tmdbMetadataMatchEnabled': false,
+      'wmdbMetadataMatchEnabled': false,
+      'imdbRatingMatchEnabled': false,
+      'detailAutoLibraryMatchEnabled': false,
+    });
+    final indexer = _buildNoopNasMediaIndexer(settings);
+    addTearDown(indexer.dispose);
+    final cacheRepository = _RecordingRestoreCacheRepository();
+    await cacheRepository.saveDetailTarget(
+      seedTarget: seedTarget,
+      resolvedTarget: choiceA,
+      libraryMatchChoices: const [choiceA, choiceB],
+      selectedLibraryMatchIndex: 0,
+    );
+    final service = _FakeDetailExternalEpisodeVariantService(
+      statesByItemId: {
+        'episode-a': const DetailExternalEpisodeVariantState(
+          choices: [choiceA, choiceA2],
+          selectedIndex: 0,
+        ),
+      },
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(settings),
+          mediaRepositoryProvider.overrideWithValue(
+            const _NoopMediaRepository(),
+          ),
+          localStorageCacheRepositoryProvider
+              .overrideWithValue(cacheRepository),
+          nasMediaIndexerProvider.overrideWithValue(indexer),
+          detailExternalEpisodeVariantServiceProvider
+              .overrideWithValue(service),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(target: seedTarget),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('播放版本'), findsOneWidget);
+    final dropdown = tester.widget<DropdownButton<int>>(
+      find.byType(DropdownButton<int>),
+    );
+    final labels = dropdown.items!
+        .map((item) => (item.child as Text).data ?? '')
+        .toList(growable: false);
+    expect(labels, contains('nas-A · 第1集-A.mkv'));
+    expect(labels, contains('nas-A · 第1集-A-备用.mkv'));
+    expect(labels, contains('nas-B · 第1集-B.mkv'));
+    expect(cacheRepository.lastSavedState?.libraryMatchChoices.length, 3);
+  });
+
+  testWidgets(
       'detail page keeps series episode browser after restoring playable library choice',
       (tester) async {
     tester.view.physicalSize = const Size(800, 1800);
@@ -502,7 +665,7 @@ void main() {
       scrollable: find.byType(Scrollable).first,
     );
     expect(find.text('测试剧 第 1 集'), findsOneWidget);
-    expect(find.text('本地资源'), findsOneWidget);
+    expect(find.text('播放版本'), findsOneWidget);
     final dropdown = tester.widget<DropdownButton<int>>(
       find.byType(DropdownButton<int>),
     );
@@ -512,6 +675,236 @@ void main() {
     expect(dropdown.value, 1);
     expect(labels, contains('客厅 Emby · 测试剧 · 版本A'));
     expect(labels, contains('客厅 Emby · 测试剧 · 版本B'));
+  });
+
+  testWidgets(
+      'detail page restores series library match choices from real cache repository',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final prefs = await SharedPreferences.getInstance();
+    final cacheRepository =
+        LocalStorageCacheRepository(sharedPreferences: prefs);
+
+    const seedTarget = MediaDetailTarget(
+      title: '测试剧',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '无',
+      searchQuery: '测试剧',
+      sourceId: 'emby-main',
+      itemId: 'series-1',
+      itemType: 'series',
+      sectionId: 'shows',
+      sectionName: '剧集',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+    );
+    const choiceA = MediaDetailTarget(
+      title: '测试剧',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：Emby · 客厅 Emby',
+      searchQuery: '测试剧',
+      sourceId: 'emby-main',
+      itemId: 'episode-a',
+      itemType: 'episode',
+      sectionId: 'shows',
+      sectionName: '版本A',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '测试剧',
+        sourceId: 'emby-main',
+        streamUrl: 'https://emby.example/Items/episode-a/stream.mkv',
+        sourceName: '客厅 Emby',
+        sourceKind: MediaSourceKind.emby,
+        itemId: 'episode-a',
+        itemType: 'episode',
+        seriesId: 'series-1',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+    const choiceB = MediaDetailTarget(
+      title: '测试剧',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：Emby · 客厅 Emby',
+      searchQuery: '测试剧',
+      sourceId: 'emby-main',
+      itemId: 'episode-b',
+      itemType: 'episode',
+      sectionId: 'shows',
+      sectionName: '版本B',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '测试剧',
+        sourceId: 'emby-main',
+        streamUrl: 'https://emby.example/Items/episode-b/stream.mkv',
+        sourceName: '客厅 Emby',
+        sourceKind: MediaSourceKind.emby,
+        itemId: 'episode-b',
+        itemType: 'episode',
+        seriesId: 'series-1',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+
+    await cacheRepository.saveDetailTarget(
+      seedTarget: seedTarget,
+      resolvedTarget: choiceB,
+      libraryMatchChoices: const [choiceA, choiceB],
+      selectedLibraryMatchIndex: 1,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'tmdbMetadataMatchEnabled': false,
+              'wmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+              'detailAutoLibraryMatchEnabled': false,
+            }),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            const _SeriesRestoreMediaRepository(),
+          ),
+          localStorageCacheRepositoryProvider
+              .overrideWithValue(cacheRepository),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(target: seedTarget),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('播放版本'), findsOneWidget);
+    final dropdown = tester.widget<DropdownButton<int>>(
+      find.byType(DropdownButton<int>),
+    );
+    final labels = dropdown.items!
+        .map((item) => (item.child as Text).data ?? '')
+        .toList(growable: false);
+    expect(dropdown.value, 1);
+    expect(labels, contains('客厅 Emby · 测试剧 · 版本A'));
+    expect(labels, contains('客厅 Emby · 测试剧 · 版本B'));
+  });
+
+  testWidgets(
+      'detail page restores single series resource state from cached episode target',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const seedTarget = MediaDetailTarget(
+      title: '测试剧',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '无',
+      searchQuery: '测试剧',
+      sourceId: 'emby-main',
+      itemId: 'series-1',
+      itemType: 'series',
+      sectionId: 'shows',
+      sectionName: '剧集',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+    );
+    const cachedEpisodeTarget = MediaDetailTarget(
+      title: '测试剧',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：Emby · 客厅 Emby',
+      searchQuery: '测试剧',
+      sourceId: 'emby-main',
+      itemId: 'episode-a',
+      itemType: 'episode',
+      sectionId: 'shows',
+      sectionName: '版本A',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '测试剧',
+        sourceId: 'emby-main',
+        streamUrl: 'https://emby.example/Items/episode-a/stream.mkv',
+        sourceName: '客厅 Emby',
+        sourceKind: MediaSourceKind.emby,
+        itemId: 'episode-a',
+        itemType: 'episode',
+        seriesId: 'series-1',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'tmdbMetadataMatchEnabled': false,
+              'wmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+              'detailAutoLibraryMatchEnabled': false,
+            }),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            const _SeriesRestoreMediaRepository(),
+          ),
+          localStorageCacheRepositoryProvider.overrideWithValue(
+            _FakeRestoreCacheRepository(
+              cachedState: const CachedDetailState(
+                target: cachedEpisodeTarget,
+              ),
+            ),
+          ),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(target: seedTarget),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('资源已就绪：Emby · 客厅 Emby'), findsOneWidget);
+    expect(find.text('播放版本'), findsNothing);
   });
 
   testWidgets('detail page shows external-id reason as alternative ids',
@@ -796,7 +1189,9 @@ class _FakeRestoreCacheRepository extends LocalStorageCacheRepository {
 
   @override
   Future<CachedDetailState?> loadDetailState(
-      MediaDetailTarget seedTarget) async {
+    MediaDetailTarget seedTarget, {
+    bool allowStructuralMismatch = false,
+  }) async {
     return cachedState;
   }
 
@@ -812,6 +1207,20 @@ class _RecordingRestoreCacheRepository extends LocalStorageCacheRepository {
       : super(preferences: _MemoryPreferencesStore());
 
   CachedDetailState? lastSavedState;
+
+  @override
+  Future<CachedDetailState?> loadDetailState(
+    MediaDetailTarget seedTarget, {
+    bool allowStructuralMismatch = false,
+  }) async {
+    return lastSavedState;
+  }
+
+  @override
+  Future<MediaDetailTarget?> loadDetailTarget(
+      MediaDetailTarget seedTarget) async {
+    return lastSavedState?.target;
+  }
 
   @override
   Future<void> saveDetailTarget({
@@ -890,9 +1299,13 @@ NasMediaIndexer _buildNoopNasMediaIndexer(AppSettings settings) {
 
 class _FakeDetailExternalEpisodeVariantService
     extends DetailExternalEpisodeVariantService {
-  _FakeDetailExternalEpisodeVariantService({required this.state});
+  _FakeDetailExternalEpisodeVariantService({
+    this.state,
+    this.statesByItemId = const {},
+  });
 
   final DetailExternalEpisodeVariantState? state;
+  final Map<String, DetailExternalEpisodeVariantState?> statesByItemId;
   final List<MediaDetailTarget> requestedTargets = <MediaDetailTarget>[];
 
   @override
@@ -900,9 +1313,10 @@ class _FakeDetailExternalEpisodeVariantService
     required MediaDetailTarget target,
     required AppSettings settings,
     required NasMediaIndexer nasMediaIndexer,
+    required EmbyApiClient embyApiClient,
   }) async {
     requestedTargets.add(target);
-    return state;
+    return statesByItemId[target.itemId.trim()] ?? state;
   }
 }
 

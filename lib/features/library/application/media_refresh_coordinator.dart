@@ -13,6 +13,36 @@ final mediaRefreshCoordinatorProvider =
   return MediaRefreshCoordinator(ref);
 });
 
+List<String> resolveRefreshSourceIdsForQuarkSave({
+  required List<MediaSourceConfig> mediaSources,
+  required Iterable<String> configuredRefreshSourceIds,
+  bool includeConfiguredSources = true,
+}) {
+  final resolved = <String>{};
+
+  if (includeConfiguredSources) {
+    resolved.addAll(
+      configuredRefreshSourceIds
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty),
+    );
+  }
+
+  resolved.addAll(
+    mediaSources
+        .where(
+          (source) =>
+              source.enabled &&
+              source.kind == MediaSourceKind.quark &&
+              source.hasConfiguredQuarkFolder,
+        )
+        .map((source) => source.id.trim())
+        .where((item) => item.isNotEmpty),
+  );
+
+  return resolved.toList(growable: false);
+}
+
 class MediaRefreshCoordinator {
   MediaRefreshCoordinator(this._ref);
 

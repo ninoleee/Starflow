@@ -177,6 +177,7 @@ class _ExternalScanStructureModule {
       final recognition = NasMediaRecognizer.recognize(
         item.actualAddress,
         seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+        specialEpisodeKeywords: specialEpisodeKeywords,
       );
       recognitionByResource[item.resourceId] = recognition;
       if (_hasExplicitEpisodeCue(item, recognition)) {
@@ -254,6 +255,7 @@ class _ExternalScanStructureModule {
           'directory': directoryKey,
           'rootItemsAsSpecials': plan.rootItemsAsSpecials,
           'seasonDirs': plan.seasonNumberByChildDirectory,
+          'collapsedChildDirs': plan.collapseChildDirectoriesToRoot.toList(),
         },
       );
     }
@@ -386,8 +388,20 @@ class _ExternalScanStructureModule {
     final isRootDirectFile = item.relativeDirectories.length == rootDepth;
     final childDirectoryName =
         isRootDirectFile ? '' : item.relativeDirectories[rootDepth];
+    final collapseChildDirectoryToRoot = !isRootDirectFile &&
+        plan.collapseChildDirectoriesToRoot.contains(childDirectoryName);
     final relativeDirectoriesAfterRoot =
         item.relativeDirectories.skip(rootDepth).toList(growable: false);
+    final effectiveRelativeDirectoriesAfterRoot =
+        collapseChildDirectoryToRoot && relativeDirectoriesAfterRoot.isNotEmpty
+            ? relativeDirectoriesAfterRoot.skip(1).toList(growable: false)
+            : relativeDirectoriesAfterRoot;
+    final effectiveIsRootDirectFile =
+        isRootDirectFile || collapseChildDirectoryToRoot;
+    final effectiveChildDirectoryName = effectiveIsRootDirectFile ||
+            effectiveRelativeDirectoriesAfterRoot.isEmpty
+        ? ''
+        : effectiveRelativeDirectoriesAfterRoot.first;
     final matchesSpecialEpisodeKeyword = _matchesSpecialEpisodeKeyword(
       item,
       specialEpisodeKeywords: specialEpisodeKeywords,
@@ -395,12 +409,12 @@ class _ExternalScanStructureModule {
     );
     final hintedSeasonNumber = matchesSpecialEpisodeKeyword
         ? 0
-        : isRootDirectFile
+        : effectiveIsRootDirectFile
             ? null
-            : plan.seasonNumberByChildDirectory[childDirectoryName];
+            : plan.seasonNumberByChildDirectory[effectiveChildDirectoryName];
     final derivedSeasonNumber = matchesSpecialEpisodeKeyword
         ? 0
-        : isRootDirectFile
+        : effectiveIsRootDirectFile
             ? plan.rootItemsAsSpecials
                 ? 0
                 : 1
@@ -409,13 +423,13 @@ class _ExternalScanStructureModule {
         matchesSpecialEpisodeKeyword ? 0 : explicitSeasonNumber;
     final seasonGroupKey = resolvedExplicitSeasonNumber != null
         ? _buildExplicitSeasonGroupKey(resolvedExplicitSeasonNumber)
-        : isRootDirectFile
+        : effectiveIsRootDirectFile
             ? (plan.rootItemsAsSpecials
                 ? _directSeasonGroupKey
                 : _implicitSeasonGroupKey)
             : hintedSeasonNumber != null
                 ? _buildExplicitSeasonGroupKey(hintedSeasonNumber)
-                : childDirectoryName;
+                : effectiveChildDirectoryName;
 
     final seasonOrder = seasonOrderByRoot.putIfAbsent(
       seriesRootKey,
@@ -440,6 +454,7 @@ class _ExternalScanStructureModule {
         'episode': explicitEpisodeNumber,
         'title': nextSeed.title,
         'specialKeyword': matchesSpecialEpisodeKeyword,
+        'collapsedWrapperChild': collapseChildDirectoryToRoot,
       },
     );
     return _AssignedSeriesEpisode(
@@ -515,6 +530,12 @@ class _ExternalScanStructureModule {
         items: entry.value,
         recognitionByResource: context.recognitionByResource,
       );
+      final groupHasExplicitEpisodeNumber = orderedEpisodes.any((item) {
+        final recognition = context.recognitionByResource[item.resourceId];
+        return (item.metadataSeed.episodeNumber ??
+                recognition?.episodeNumber) !=
+            null;
+      });
       for (var index = 0; index < orderedEpisodes.length; index++) {
         final item = orderedEpisodes[index];
         final recognition = context.recognitionByResource[item.resourceId];
@@ -533,9 +554,13 @@ class _ExternalScanStructureModule {
                 : isImplicitSeasonGroup
                     ? 1
                     : 1);
+        final resolvedEpisodeNumber = explicitEpisodeNumber ??
+            ((resolvedSeasonNumber == 0 || !groupHasExplicitEpisodeNumber)
+                ? index + 1
+                : null);
         episodeOverrides[item.resourceId] = item.metadataSeed.copyWith(
           seasonNumber: resolvedSeasonNumber,
-          episodeNumber: explicitEpisodeNumber ?? index + 1,
+          episodeNumber: resolvedEpisodeNumber,
         );
       }
     }
@@ -675,6 +700,7 @@ class _ExternalScanStructureModule {
     final directExplicitEpisodeCount =
         explicitEpisodeCountByDirectory[directoryKey] ?? 0;
     final seasonHintsByChildDirectory = <String, _SeasonDirectoryHint>{};
+    final collapseChildDirectoriesToRoot = <String>{};
     for (final entry in childGroups.entries) {
       final hint = _resolveSeasonDirectoryHint(
         childDirectoryName: entry.key,
@@ -686,6 +712,28 @@ class _ExternalScanStructureModule {
       if (hint != null) {
         seasonHintsByChildDirectory[entry.key] = hint;
       }
+    }
+
+    final hasOnlyFlatWrapperChildDirectories = childGroups.isNotEmpty &&
+        childGroups.entries.every(
+          (entry) => _isFlatWrapperChildDirectory(
+            directoryKey: directoryKey,
+            childDirectoryName: entry.key,
+            items: entry.value,
+          ),
+        );
+    final shouldCollapseWrapperChildDirectories =
+        hasOnlyFlatWrapperChildDirectories && directItems.length <= 3;
+    if (shouldCollapseWrapperChildDirectories) {
+      collapseChildDirectoriesToRoot.addAll(childGroups.keys);
+      webDavTrace(
+        'structure.plan.collapseWrapperChildren',
+        fields: {
+          'directory': directoryKey,
+          'directItems': directItems.length,
+          'childDirs': childGroups.keys.toList(growable: false),
+        },
+      );
     }
 
     final hasImplicitRootEpisodes =
@@ -713,6 +761,7 @@ class _ExternalScanStructureModule {
           'directItems': directItems.length,
           'childDirs': childGroups.keys.toList(),
           'seasonHints': seasonHintsByChildDirectory,
+          'collapsedChildDirs': collapseChildDirectoriesToRoot.toList(),
         },
       );
       return null;
@@ -725,6 +774,7 @@ class _ExternalScanStructureModule {
         'directItems': directItems.length,
         'rootItemsAsSpecials': directItems.isNotEmpty,
         'seasonHints': seasonHintsByChildDirectory,
+        'collapsedChildDirs': collapseChildDirectoriesToRoot.toList(),
       },
     );
     return _SeriesRootInferencePlan(
@@ -734,6 +784,7 @@ class _ExternalScanStructureModule {
           childDirectoryName:
               seasonHintsByChildDirectory[childDirectoryName]?.seasonNumber,
       },
+      collapseChildDirectoriesToRoot: collapseChildDirectoriesToRoot,
     );
   }
 
@@ -834,6 +885,19 @@ class _ExternalScanStructureModule {
 
   int? _parseLeadingNumericSeasonNumber(String value) {
     return parseLeadingNumericSeasonNumber(value);
+  }
+
+  bool _isFlatWrapperChildDirectory({
+    required String directoryKey,
+    required String childDirectoryName,
+    required List<_PendingWebDavScannedItem> items,
+  }) {
+    if (!NasMediaRecognizer.matchesWrapperFolderLabel(childDirectoryName)) {
+      return false;
+    }
+    final rootDepth = _segmentsFromKey(directoryKey).length;
+    return items
+        .every((item) => item.relativeDirectories.length == rootDepth + 1);
   }
 
   DateTime? _parseEpisodeDateFromFileName(String value) {
@@ -941,49 +1005,10 @@ class _ExternalScanStructureModule {
     Iterable<String> rawValues, {
     required List<String> specialEpisodeKeywords,
   }) {
-    if (specialEpisodeKeywords.isEmpty) {
-      return false;
-    }
-    final haystacks = <String>{};
-    for (final rawValue in rawValues) {
-      haystacks.addAll(_keywordMatchForms(rawValue));
-    }
-    if (haystacks.isEmpty) {
-      return false;
-    }
-    for (final keyword in specialEpisodeKeywords) {
-      for (final normalizedKeyword in _keywordMatchForms(keyword)) {
-        if (normalizedKeyword.isEmpty) {
-          continue;
-        }
-        if (haystacks.any((haystack) => haystack.contains(normalizedKeyword))) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  Set<String> _keywordMatchForms(String rawValue) {
-    final values = <String>{};
-    final trimmed = rawValue.trim();
-    if (trimmed.isEmpty) {
-      return values;
-    }
-    final lowered = trimmed.toLowerCase();
-    values.add(lowered);
-    final stripped = stripEmbeddedExternalIdTags(trimmed).trim().toLowerCase();
-    if (stripped.isNotEmpty) {
-      values.add(stripped);
-    }
-    final compact = stripped.isNotEmpty ? stripped : lowered;
-    values.add(
-      compact.replaceAll(
-        RegExp(r'[【】\[\]\(\)（）{}<>《》"“”‘’·_.\-\s+&/\\|,:;]+'),
-        '',
-      ),
+    return MediaNaming.matchesAnyKeyword(
+      rawValues,
+      keywords: specialEpisodeKeywords,
     );
-    return values..removeWhere((value) => value.isEmpty);
   }
 
   String _stripFileExtension(String fileName) {

@@ -7,16 +7,21 @@
 截至 `2026-04-11`，这轮架构/性能优化里和“请求行为”最相关的补充点是：
 
 - 首页已经拆成 seed 抓取层 + 详情缓存装饰层；详情缓存 revision 更新时只会重做本地合并，不会把整轮来源 / 豆瓣抓取一起重新触发
+- 首页 presentation 现在也拆成 `home_page.dart`、`home_page_hero.dart`、`home_page_sections.dart`；这次拆分只影响本地 widget/焦点/装配边界，不新增任何网络协议或额外请求源
+- 首页 application 现在也拆成 `home_controller.dart`、`home_controller_models.dart`、`home_feed_repository.dart`；这同样只是本地职责收口，不引入新的网络请求
 - 首页与媒体库的详情缓存合并已统一走批量读取接口；同一批 seed target 会复用一次本地 payload 读取，重点减少卡片装配阶段的重复本地 `I/O`
 - 页面级异步状态统一到 `RetainedAsyncController / retained_async_value` 后，详情、媒体库、人物作品等页在失活或回前台时更倾向复用已有稳定结果
 - 详情页、媒体库、人物作品页和搜索页在 inactive 时现在优先取消当前会话或刷新任务，不再无条件失效成功 provider；返回页面时会明显减少重复请求
 - 搜索页空关键词会直接短路；多来源结果会先聚合，再按短节流批量提交 UI，不再每个来源返回就触发一次全量排序和整页刷新
 - 持久化图片缓存 identity 已升级成 `URL + headers`，并增加磁盘 metadata、`30` 天过期和 stale fallback；这会减少不同鉴权图片串 cache，也减少短期失败时的重复拉图
 - “空库自动重建”已经转到后台调度器；当前读链路不再同步等待一次重建任务完成
-- 播放启动链拆成准备阶段和路由决策阶段后，播放器打开前会先读取本地续播 / 跳过规则并做路线判断；这只调整本地准备顺序，不引入新的网络协议
+- 播放启动链已经收口到 `PlaybackStartupCoordinator / PlaybackTargetResolver / PlaybackEngineRouter / PlaybackStartupExecutor`；播放器打开前会先读取本地续播 / 跳过规则并做路线判断；这只调整本地准备顺序，不引入新的网络协议
+- 播放页 presentation 现在继续拆到 `player_page.dart` + `player_page_*.part.dart` + 独立 overlay/dialog widgets；这属于本地代码组织与重建范围收口，不改变任何线上请求协议
 - 进入播放器时会更早切到“播放优先”模式；从网络侧看，首页 Hero 补数、详情页自动补全和隐藏页图片加载会更快被压住
 - `MPV` 的远程流调优、质量预设自动降档和 `ISO` 设备源判断已经收口到本地策略层；这些都只改变本地打开方式和缓冲参数，不引入新的网络协议
 - `playback trace / subtitle search trace` 现在默认关闭；即使临时打开，也只写本地日志，不会上报到服务端
+- `NasMediaIndexer` 当前已经拆成 `refresh_flow / storage_access / indexing / grouping / refresh_support` 多段 `part` 文件；这次拆分只是在本地把刷新编排、索引计算、分组和缓存访问解耦，不新增任何新的网络协议或请求源
+- `PlaybackMemoryRepository` 新增的单调时间戳策略只影响本地“最近播放”排序稳定性，尤其是 Windows 下的同毫秒写入场景；它不涉及任何网络请求
 
 当前还有一个开发态残留：`test/media_repository_quark_source_test.dart` 里仍会打印一条 `indexer.refresh.background.error ... ProviderContainer already disposed` 非失败 trace。它不会改变线上请求协议，但在排查后台刷新时值得留意。
 
@@ -24,6 +29,7 @@
 
 - `WebDAV` 调试日志默认不开启，网络排障时如果需要看扫描与索引过程，可临时修改 `lib/core/utils/webdav_trace.dart` 接入输出
 - `WebDAV / NAS` 标题识别会在本地剥离 `{tmdbid-...}`、`{tvdbid-...}`、`{imdbid-...}`、`{doubanid-...}` 这类嵌入式外部 ID 标签；这一步只影响本地展示标题和搜索词，不新增网络请求
+- `NasMediaIndexer` 主文件压回约 `1k` 行并拆出多个 helper 后，`index_refresh` 相关请求扇出仍然和之前一致；后续如果要排查刷新请求行为，需要把这些 `nas_media_indexer*.dart` 文件视为同一条链路来看
 - 如果条目后续已经刮削过或手动关联过详情信息，首页、媒体库和详情页展示时会优先使用缓存里的更新后标题；这同样只是本地缓存合并优先级调整，不增加新的网络请求
 - `WebDAV / NAS` 识别里新增的包装目录 / 版本说明忽略，例如 `分段版 / 特效中字 / 会员版 / 导演剪辑版 / 清晰度 / 音轨 / 字幕`，也完全发生在本地，不增加新的网络请求
 - `WebDAV / Quark` 媒体源现在还支持“顶层推断目录”：只在目录结构推断里，识别到剧文件或季目录后向上推断剧名时生效；命中这里填写的顶层目录名会立刻停止继续向上，改用下一级已推断目录，没有目录时退回文件名，同样不会增加新的网络请求
@@ -54,10 +60,10 @@
 - 新增的 `Quark` 媒体源也复用这套夸克 `Cookie + 目录列举 + 下载直链` 接口；不会引入额外的专用媒体服务器协议
 - 如果开启了“同步删除夸克目录”，并配置了监听的 `WebDAV` 目录，删除命中这些目录下的文件或文件夹时，也会复用同一套夸克目录接口，到当前保存目录里删除匹配到的影片或剧集目录
 - `App 内原生播放器` 与新增的解码模式设置也不引入新的网络协议，仍然复用同一条播放地址和请求头链路
-- 非 `TV` 内嵌 `MPV` 改为 Starflow 自己的轻量播放叠层，也只是本地播放器 UI 收敛；字幕 / 音轨 / 外挂字幕 / 在线字幕 / 字幕偏移入口继续复用现有播放链路，不新增新的服务端接口
+- 非 `TV` 内嵌 `MPV` 改为 Starflow 自己的轻量播放叠层，也只是本地播放器 UI 收敛；首层现在只保留返回 / 播放 / 进度 / 全屏 / 更多，音量、字幕、音轨、外挂字幕、在线字幕与字幕偏移仍然复用现有播放链路，不新增新的服务端接口
 - Windows `MPV` 在下一次打开前先串行等待上一实例完成 `pause -> stop -> dispose`，关闭后台播放、退出播放器和打开新片源也会复用同一套本地清理流程，不新增网络请求
 - `lib/core/utils/playback_trace.dart` 与 `lib/core/utils/subtitle_search_trace.dart` 的本地 trace 默认关闭；需要排障时才临时打开，也只写本地调试日志与 timeline，不会上报到服务端
-- 非 `TV` 叠层里的 fullscreen 状态透传、auto-hide 定时器取消和 dispose 保护也都属于本地 widget 生命周期修正，不涉及新的网络协议
+- 非 `TV` 叠层里的 fullscreen 状态透传、窗口态 click-only 唤醒、auto-hide 定时器取消、播放设置弹窗 Material 化和 dispose 保护也都属于本地 widget 生命周期修正，不涉及新的网络协议
 - `TV` 播放器新增的“首层极简 + 二层高级”交互，同样只是本地遥控器焦点与播放器控件拆分，不新增新的服务端接口
 - 详情页与播放器页的在线字幕搜索现在都走应用内实现，不依赖外部浏览器；是否真的发起请求由 `设置 -> 播放 -> 字幕 -> 在线字幕来源` 控制
 - 详情页不再在进入时自动搜索字幕；只有手动点击“搜索字幕 / 刷新字幕”时才会发起请求，搜索结果和下载后的字幕文件都会优先复用本地缓存，避免重复请求

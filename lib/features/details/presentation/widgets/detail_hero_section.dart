@@ -490,17 +490,44 @@ String? _resolveDetailHeroEpisodeTitle(MediaDetailTarget target) {
   if (!_isEpisodeDetailTarget(target)) {
     return null;
   }
-  final episodeTitle = target.title.trim().isNotEmpty
-      ? target.title.trim()
-      : (target.playbackTarget?.title.trim() ?? '');
-  if (episodeTitle.isEmpty) {
+  final fileName = _resolveDetailEpisodeFileName(target);
+  if (fileName.isEmpty) {
     return null;
   }
   final primaryTitle = _resolveDetailHeroPrimaryTitle(target);
-  if (episodeTitle == primaryTitle) {
+  if (fileName == primaryTitle) {
     return null;
   }
-  return episodeTitle;
+  return fileName;
+}
+
+String _resolveDetailEpisodeFileName(MediaDetailTarget target) {
+  for (final value in [
+    target.playbackTarget?.actualAddress ?? '',
+    target.resourcePath,
+    target.playbackTarget?.streamUrl ?? '',
+  ]) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      continue;
+    }
+    final uri = Uri.tryParse(trimmed);
+    final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
+    final normalized = rawPath.replaceAll('\\', '/').trim();
+    if (normalized.isEmpty) {
+      continue;
+    }
+    final fileName = normalized.split('/').last.trim();
+    if (fileName.isEmpty) {
+      continue;
+    }
+    try {
+      return Uri.decodeComponent(fileName);
+    } on ArgumentError {
+      return fileName;
+    }
+  }
+  return '';
 }
 
 bool requestDetailFocus(Iterable<FocusNode?> nodes) {

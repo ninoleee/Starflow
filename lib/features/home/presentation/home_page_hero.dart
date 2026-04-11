@@ -1146,23 +1146,42 @@ class _FeaturedHeroArtwork extends StatelessWidget {
           );
         }
 
+        final useCenteredContainLayout = selectedImage.preferContain;
+        final topPadding =
+            displayMode == HomeHeroDisplayMode.normal ? 22.0 : 28.0;
+        final sidePadding =
+            displayMode == HomeHeroDisplayMode.normal ? 22.0 : 28.0;
+        final bottomPadding =
+            displayMode == HomeHeroDisplayMode.normal ? 22.0 : 28.0;
+
         return Align(
-          alignment: Alignment.centerRight,
+          alignment: useCenteredContainLayout
+              ? Alignment.center
+              : Alignment.centerRight,
           child: FractionallySizedBox(
             widthFactor:
                 displayMode == HomeHeroDisplayMode.normal ? 0.54 : 0.42,
             child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                0,
-                displayMode == HomeHeroDisplayMode.normal ? 22 : 28,
-                displayMode == HomeHeroDisplayMode.normal ? 18 : 24,
-                displayMode == HomeHeroDisplayMode.normal ? 22 : 28,
-              ),
+              padding: useCenteredContainLayout
+                  ? EdgeInsets.fromLTRB(
+                      sidePadding,
+                      topPadding,
+                      sidePadding,
+                      bottomPadding,
+                    )
+                  : EdgeInsets.fromLTRB(
+                      0,
+                      topPadding,
+                      displayMode == HomeHeroDisplayMode.normal ? 18 : 24,
+                      bottomPadding,
+                    ),
               child: AppNetworkImage(
                 selectedImage.url,
                 headers: selectedImage.headers,
                 fit: BoxFit.contain,
-                alignment: Alignment.centerRight,
+                alignment: useCenteredContainLayout
+                    ? Alignment.center
+                    : Alignment.centerRight,
                 cacheWidth: cacheWidth,
                 cacheHeight: cacheHeight,
               ),

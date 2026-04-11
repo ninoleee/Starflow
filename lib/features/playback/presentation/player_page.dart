@@ -18,6 +18,7 @@ import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
 import 'package:starflow/features/playback/application/playback_engine_router.dart';
@@ -167,6 +168,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   int? _lastTracedVideoHeight;
   bool? _lastTracedBufferingState;
   int? _lastTracedBufferingBucket;
+  late final ProviderContainer _providerContainer;
   late final StateController<bool> _playbackPerformanceModeController;
   Timer? _tvPlaybackChromeHideTimer;
   Future<void>? _exitPlaybackFuture;
@@ -175,6 +177,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   @override
   void initState() {
     super.initState();
+    _providerContainer = ProviderScope.containerOf(context, listen: false);
     WidgetsBinding.instance.addObserver(this);
     _playbackPerformanceModeController = ref.read(
       playbackPerformanceModeProvider.notifier,
@@ -197,6 +200,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _tvPlaybackChromeHideTimer?.cancel();
+    if (_useWindowManagedEmbeddedMpvFullscreen && _isEmbeddedMpvFullscreen) {
+      unawaited(defaultExitNativeFullscreen());
+    }
     final activePlaybackCleanupToken = _activePlaybackCleanupToken;
     if (activePlaybackCleanupToken != null) {
       ActivePlaybackCleanupCoordinator.unregister(activePlaybackCleanupToken);
@@ -360,6 +366,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _playbackSettings.playbackTraceEnabled;
   }
 
+  bool get _useWindowManagedEmbeddedMpvFullscreen {
+    if (kIsWeb) {
+      return false;
+    }
+    return defaultTargetPlatform == TargetPlatform.windows &&
+        !_isTelevisionPlaybackDevice;
+  }
+
   void _traceWindowsMpv(
     String stage, {
     Map<String, Object?> fields = const <String, Object?>{},
@@ -491,6 +505,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Future<void> _performExitPlayer({
     required String reason,
   }) async {
+    if (_useWindowManagedEmbeddedMpvFullscreen && _isEmbeddedMpvFullscreen) {
+      await _setEmbeddedMpvFullscreen(
+        false,
+        reason: '$reason-before-exit',
+      );
+    }
     if (!_backgroundPlaybackEnabled) {
       await _stopPlaybackBeforeExit(reason: reason);
     } else {
@@ -528,7 +548,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         if (isTelevision) {
           unawaited(_handleTvBack());
         } else {
-          unawaited(_requestExitPlayer(reason: 'route-back'));
+          unawaited(_handleDesktopBack(reason: 'route-back'));
         }
       },
       child: Shortcuts(
@@ -568,7 +588,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 if (isTelevision) {
                   unawaited(_handleTvBack());
                 } else {
-                  unawaited(_requestExitPlayer(reason: 'dismiss-intent'));
+                  unawaited(_handleDesktopBack(reason: 'dismiss-intent'));
                 }
                 return null;
               },
@@ -666,13 +686,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                       bufferingPercentage:
                                           state.bufferingPercentage,
                                       onOpenSubtitle: () {
-                                        _showTvPlaybackChrome(autoHide: false);
+                                        _showTvPlaybackChrome(
+                                            autoHide: false);
                                         unawaited(
                                           _openCurrentSubtitleSelector(),
                                         );
                                       },
                                       onOpenAudio: () {
-                                        _showTvPlaybackChrome(autoHide: false);
+                                        _showTvPlaybackChrome(
+                                            autoHide: false);
                                         unawaited(
                                           _openCurrentAudioSelector(),
                                         );

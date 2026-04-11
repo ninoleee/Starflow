@@ -240,6 +240,247 @@ void main() {
   });
 
   test(
+      'NasMediaIndexer keeps upper and lower variety parts separate while preserving same-part variants',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-variety-split-parts',
+      name: 'WebDAV Variety Split Parts',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Shows/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    const collection = MediaCollection(
+      id: 'https://nas.example.com/dav/Shows/',
+      title: '综艺',
+      sourceId: 'webdav-variety-split-parts',
+      sourceName: 'WebDAV Variety Split Parts',
+      sourceKind: MediaSourceKind.nas,
+    );
+
+    final client = _FakeWebDavNasClient(
+      scannedItems: [
+        _episodeItem(
+          id: 'episode-upper-a',
+          path: '乘风2026/Season 01/2026.04.03-第1期（上）.mkv',
+          title: '2026.04.03-第1期（上）',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+        _episodeItem(
+          id: 'episode-upper-b',
+          path: '乘风2026/Season 01/2026.04.03-第1期（上）.备用.mkv',
+          title: '2026.04.03-第1期（上）',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+        _episodeItem(
+          id: 'episode-lower',
+          path: '乘风2026/Season 01/2026.04.04-第1期（下）.mkv',
+          title: '2026.04.04-第1期（下）',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+      ],
+    );
+
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(
+      source,
+      scopedCollections: [collection],
+    );
+    final library = await indexer.loadLibrary(
+      source,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(library, hasLength(1));
+
+    final seasons = await indexer.loadChildren(
+      source,
+      parentId: library.single.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(seasons, hasLength(1));
+
+    final episodes = await indexer.loadChildren(
+      source,
+      parentId: seasons.single.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(episodes, hasLength(2));
+
+    final upperEpisode = episodes.firstWhere(
+      (item) => item.actualAddress.contains('（上）'),
+    );
+    final lowerEpisode = episodes.firstWhere(
+      (item) => item.actualAddress.contains('（下）'),
+    );
+
+    final upperVariants = await indexer.loadEpisodeVariants(
+      source,
+      itemId: upperEpisode.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+    );
+    expect(upperVariants, hasLength(2));
+    expect(
+      upperVariants.map((item) => item.id),
+      containsAll(<String>['episode-upper-a', 'episode-upper-b']),
+    );
+
+    final lowerVariants = await indexer.loadEpisodeVariants(
+      source,
+      itemId: lowerEpisode.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+    );
+    expect(lowerVariants, hasLength(1));
+    expect(lowerVariants.single.id, 'episode-lower');
+  });
+
+  test(
+      'NasMediaIndexer unwraps resolution folders before season folders and merges same-episode variants',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-resolution-wrapper-episodes',
+      name: 'WebDAV Resolution Wrapper Episodes',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Shows/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    const collection = MediaCollection(
+      id: 'https://nas.example.com/dav/Shows/',
+      title: '剧集',
+      sourceId: 'webdav-resolution-wrapper-episodes',
+      sourceName: 'WebDAV Resolution Wrapper Episodes',
+      sourceKind: MediaSourceKind.nas,
+    );
+
+    final client = _FakeWebDavNasClient(
+      scannedItems: [
+        _episodeItem(
+          id: 'resolution-episode-a',
+          path: '食贫道/2160p/Season 01/食贫道.S01E01.2160p.mkv',
+          title: '第 1 集',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+        _episodeItem(
+          id: 'resolution-episode-b',
+          path: '食贫道/1080p/Season 01/食贫道.S01E01.1080p.mkv',
+          title: '第 1 集',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+        _episodeItem(
+          id: 'resolution-episode-c',
+          path: '食贫道/2160p/Season 01/食贫道.S01E02.2160p.mkv',
+          title: '第 2 集',
+          seasonNumber: 1,
+          episodeNumber: 2,
+        ),
+      ],
+    );
+
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(
+      source,
+      scopedCollections: [collection],
+    );
+    final library = await indexer.loadLibrary(
+      source,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(library, hasLength(1));
+    expect(library.single.title, '食贫道');
+
+    final seasons = await indexer.loadChildren(
+      source,
+      parentId: library.single.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(seasons, hasLength(1));
+    expect(seasons.single.seasonNumber, 1);
+
+    final episodes = await indexer.loadChildren(
+      source,
+      parentId: seasons.single.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(episodes, hasLength(2));
+
+    final mergedEpisode = episodes.firstWhere(
+      (item) => item.seasonNumber == 1 && item.episodeNumber == 1,
+    );
+    final variants = await indexer.loadEpisodeVariants(
+      source,
+      itemId: mergedEpisode.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+    );
+    expect(variants, hasLength(2));
+    expect(
+      variants.map((item) => item.id),
+      containsAll(<String>['resolution-episode-a', 'resolution-episode-b']),
+    );
+  });
+
+  test(
       'NasMediaIndexer stops upward structure series inference at filtered folders',
       () async {
     final store = _MemoryNasMediaIndexStore();
@@ -1787,6 +2028,90 @@ void main() {
   });
 
   test(
+      'NasMediaIndexer keeps mixed-case resolution wrapper folders under the outer series title',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-pinzhuo-resolution-wrapper',
+      name: 'WebDAV Pinzhuo Resolution Wrapper',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://webdav.example.com/movies/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'pinzhuo-root',
+          path:
+              'strm/quark/拼桌/2025.2160p.WEB-DL.HQ.H265.10bit.DDP5.1&DTS5.1.(mkv).strm',
+          title: '2025.2160p.WEB-DL.HQ.H265.10bit.DDP5.1&DTS5.1.(mkv)',
+          itemType: '',
+          seasonNumber: null,
+          episodeNumber: null,
+        ),
+        _PendingTestItem(
+          id: 'pinzhuo-hdr60',
+          path:
+              'strm/quark/拼桌/4K hDr60FpS高码率/2025.2160p.60FpS.HDR.WEB-DL.H265.DDP2.0.(mkv).strm',
+          title: '2025.2160p.60FpS.HDR.WEB-DL.H265.DDP2.0.(mkv)',
+          itemType: '',
+          seasonNumber: null,
+          episodeNumber: null,
+        ),
+        _PendingTestItem(
+          id: 'pinzhuo-hqsdr',
+          path: 'strm/quark/拼桌/4K HqSdR高码率/PINZHUO.(mp4).strm',
+          title: 'PINZHUO.(mp4)',
+          itemType: '',
+          seasonNumber: null,
+          episodeNumber: null,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    final library = await indexer.loadLibrary(source, limit: 20);
+
+    expect(library.map((item) => item.title), contains('拼桌'));
+    expect(
+        library.map((item) => item.title), isNot(contains('4K hDr60FpS高码率')));
+    expect(library.map((item) => item.title), isNot(contains('4K HqSdR高码率')));
+    expect(
+      library.where((item) => item.title == '拼桌'),
+      hasLength(1),
+    );
+
+    final series = library.singleWhere((item) => item.title == '拼桌');
+    final seasons = await indexer.loadChildren(
+      source,
+      parentId: series.id,
+      limit: 20,
+    );
+    expect(seasons, hasLength(1));
+  });
+
+  test(
       'NasMediaIndexer preserves numeric season folders and treats root files as specials',
       () async {
     final store = _MemoryNasMediaIndexStore();
@@ -3162,6 +3487,143 @@ void main() {
     expect(
       (await store.loadSourceRecords(source.id)).map((item) => item.resourceId),
       ['keep-1'],
+    );
+  });
+
+  test(
+      'NasMediaIndexer re-adds a WebDAV resource with the same id on a later incremental refresh',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-readd-same-id',
+      name: 'WebDAV Readd Same Id',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Shows/',
+      enabled: true,
+    );
+    final scannedItems = <_PendingTestItem>[
+      const _PendingTestItem(
+        id: 'same-resource',
+        path: 'Shows/食贫道/Season 01/食贫道.S01E01.mkv',
+        title: '食贫道',
+        itemType: 'episode',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    ];
+    final client = _FakeWebDavNasClient(scannedItems: scannedItems);
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    await _drainAsyncTasks();
+    expect(
+      (await store.loadSourceRecords(source.id)).map((item) => item.resourceId),
+      ['same-resource'],
+    );
+
+    scannedItems.clear();
+    await indexer.refreshSource(source);
+    await _drainAsyncTasks();
+    expect(await store.loadSourceRecords(source.id), isEmpty);
+
+    scannedItems.add(
+      const _PendingTestItem(
+        id: 'same-resource',
+        path: 'Shows/食贫道/Season 01/食贫道.S01E01.mkv',
+        title: '食贫道',
+        itemType: 'episode',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+    await indexer.refreshSource(source);
+    await _drainAsyncTasks();
+    expect(
+      (await store.loadSourceRecords(source.id)).map((item) => item.resourceId),
+      ['same-resource'],
+    );
+  });
+
+  test(
+      'NasMediaIndexer re-adds a WebDAV resource after local scope removal on incremental refresh',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-readd-after-local-remove',
+      name: 'WebDAV Readd After Local Remove',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Shows/',
+      enabled: true,
+    );
+    final scannedItems = <_PendingTestItem>[
+      const _PendingTestItem(
+        id: 'same-resource',
+        path: 'Shows/食贫道/Season 01/食贫道.S01E01.mkv',
+        title: '食贫道',
+        itemType: 'episode',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    ];
+    final client = _FakeWebDavNasClient(scannedItems: scannedItems);
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    await _drainAsyncTasks();
+    expect(
+      (await store.loadSourceRecords(source.id)).map((item) => item.resourceId),
+      ['same-resource'],
+    );
+
+    await indexer.removeResourceScope(
+      sourceId: source.id,
+      resourcePath: 'Shows/食贫道',
+    );
+    expect(await store.loadSourceRecords(source.id), isEmpty);
+
+    await indexer.refreshSource(source);
+    await _drainAsyncTasks();
+    expect(
+      (await store.loadSourceRecords(source.id)).map((item) => item.resourceId),
+      ['same-resource'],
     );
   });
 

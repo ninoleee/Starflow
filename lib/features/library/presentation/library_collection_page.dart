@@ -10,6 +10,7 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
+import 'package:starflow/features/details/application/detail_rating_prefetch_coordinator.dart';
 import 'package:starflow/features/library/application/library_cached_items.dart';
 import 'package:starflow/features/library/application/library_refresh_revision.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
@@ -52,12 +53,15 @@ class LibraryCollectionPage extends ConsumerStatefulWidget {
 
 class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
     with PageActivityMixin<LibraryCollectionPage> {
+  static const int _gridPageSize = 24;
   int _currentPage = 0;
   final ScrollController _scrollController = ScrollController();
   final FocusNode _headerFocusNode =
       FocusNode(debugLabel: 'library-collection-header');
   final TvFocusMemoryController _tvFocusMemoryController =
       TvFocusMemoryController();
+  final DetailRatingPrefetchCoordinator _ratingPrefetchCoordinator =
+      DetailRatingPrefetchCoordinator();
   AsyncValue<List<MediaItem>>? _cachedItemsAsync;
 
   @override
@@ -70,6 +74,7 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
 
   @override
   void onPageBecameInactive() {
+    _ratingPrefetchCoordinator.reset();
     unawaited(
       ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes(
             includeForceFull: false,
@@ -139,6 +144,12 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
                   const SizedBox(height: 20),
                   itemsAsync.when(
                     data: (items) {
+                      _ratingPrefetchCoordinator.schedulePrefetch(
+                        ref: ref,
+                        targets: _visibleItemsForCurrentPage(items)
+                            .map(MediaDetailTarget.fromMediaItem),
+                        isPageActive: () => mounted && isPageVisible,
+                      );
                       return LibraryPagedGrid(
                         items: items,
                         currentPage: _currentPage,
@@ -177,7 +188,7 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
   }
 
   Future<void> _handleItemContextAction(MediaItem item) async {
-    if (item.sourceKind != MediaSourceKind.nas) {
+    if (!_supportsManagedIndexedItem(item)) {
       return;
     }
     final action = await showModalBottomSheet<_LibraryCollectionItemAction>(
@@ -254,6 +265,16 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
     }
   }
 
+  List<MediaItem> _visibleItemsForCurrentPage(List<MediaItem> items) {
+    final totalPages = (items.length / _gridPageSize).ceil();
+    final safePage =
+        totalPages <= 0 ? 0 : _currentPage.clamp(0, totalPages - 1);
+    return items
+        .skip(safePage * _gridPageSize)
+        .take(_gridPageSize)
+        .toList(growable: false);
+  }
+
   Future<void> _confirmDeleteResource(MediaItem item) async {
     final directResourceUri = Uri.tryParse(item.id.trim());
     final resourcePath =
@@ -271,8 +292,8 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
             title: Text(isDirectory ? '删除目录' : '删除文件'),
             content: Text(
               isDirectory
-                  ? '将从 WebDAV 删除“${item.title}”对应目录，并从本地索引中移除相关条目。'
-                  : '将从 WebDAV 删除“${item.title}”对应文件，并从本地索引中移除该条目。',
+                  ? '将从${_managedSourceLabel(item)}删除“${item.title}”对应目录，并从本地索引中移除相关条目。'
+                  : '将从${_managedSourceLabel(item)}删除“${item.title}”对应文件，并从本地索引中移除该条目。',
             ),
             actions: [
               StarflowButton(
@@ -314,6 +335,15 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
         SnackBar(content: Text('删除失败：$error')),
       );
     }
+  }
+
+  bool _supportsManagedIndexedItem(MediaItem item) {
+    return item.sourceKind == MediaSourceKind.nas ||
+        item.sourceKind == MediaSourceKind.quark;
+  }
+
+  String _managedSourceLabel(MediaItem item) {
+    return item.sourceKind == MediaSourceKind.quark ? ' Quark ' : ' WebDAV ';
   }
 }
 

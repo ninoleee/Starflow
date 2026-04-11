@@ -48,3 +48,11 @@ final backgroundEnrichmentSuspendedProvider = Provider<bool>((ref) {
     ),
   );
 });
+
+// Backward-compatible aggregate flag used by older callers/tests.
+final backgroundWorkSuspendedProvider = Provider<bool>((ref) {
+  final state = ref.watch(backgroundWorkSuspensionStateProvider);
+  return state.animationsSuspended &&
+      state.imageLoadingSuspended &&
+      state.enrichmentSuspended;
+});

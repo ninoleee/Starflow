@@ -1,4 +1,5 @@
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/domain/media_naming.dart';
 
 class ScoredMediaItem {
   const ScoredMediaItem({required this.item, required this.score});
@@ -253,16 +254,5 @@ Iterable<String> _expandTitleVariants(String raw) sync* {
 }
 
 String _normalizeTitle(String value) {
-  return value
-      .toLowerCase()
-      .replaceAll(
-        RegExp(
-          r'\b(2160p|1080p|720p|480p|bluray|blu-ray|bdrip|brrip|webrip|web-dl|webdl|hdrip|dvdrip|remux|x264|x265|h264|h265|hevc|aac|dts|atmos|hdr|uhd|proper|repack|extended|limited|internal|multi|dubbed|subs?)\b',
-          caseSensitive: false,
-        ),
-        ' ',
-      )
-      .replaceAll(RegExp(r'\bS\d{1,2}E\d{1,2}\b', caseSensitive: false), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .replaceAll(RegExp(r'[^a-z0-9\u4e00-\u9fff]+'), '');
+  return MediaNaming.normalizeLookupTitle(value);
 }

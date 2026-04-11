@@ -1,3 +1,5 @@
+import 'package:starflow/features/library/domain/media_naming.dart';
+
 enum MediaSourceKind {
   emby,
   nas,
@@ -5,34 +7,6 @@ enum MediaSourceKind {
 }
 
 const kNoSectionsSelectedSentinel = '__none__';
-const List<String> kDefaultVarietySpecialEpisodeKeywords = <String>[
-  '先导片',
-  '先导篇',
-  '先导',
-  '特别篇',
-  '特辑',
-  '番外',
-  '彩蛋',
-  '加更',
-  '加更版',
-  '超前',
-  '超前营业',
-  '纯享',
-  '纯享版',
-  '舞台纯享',
-  '舞台纯享版',
-  '直拍',
-  '直拍版',
-  'reaction',
-  '训练室',
-  '训练室全纪录',
-  '练习室',
-  '见面会',
-  '未播',
-  '幕后',
-  '幕后花絮',
-  '直播回顾',
-];
 
 extension MediaSourceKindX on MediaSourceKind {
   String get label {
@@ -411,11 +385,10 @@ extension MediaSourceConfigWebDavFilterX on MediaSourceConfig {
     if (keywords.isEmpty) {
       return false;
     }
-    final normalized = rawValue.trim().toLowerCase();
-    if (normalized.isEmpty) {
-      return false;
-    }
-    return keywords.any(normalized.contains);
+    return MediaNaming.matchesAnyKeyword(
+      [rawValue],
+      keywords: keywords,
+    );
   }
 
   bool matchesWebDavExtraKeyword(String rawValue) {
@@ -426,11 +399,10 @@ extension MediaSourceConfigWebDavFilterX on MediaSourceConfig {
     if (keywords.isEmpty) {
       return false;
     }
-    final normalized = rawValue.trim().toLowerCase();
-    if (normalized.isEmpty) {
-      return false;
-    }
-    return keywords.any(normalized.contains);
+    return MediaNaming.matchesAnyKeyword(
+      [rawValue],
+      keywords: keywords,
+    );
   }
 }
 

@@ -1,3 +1,4 @@
+import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
@@ -81,6 +82,6 @@ MediaItem _mergeCachedLibraryItem(
     imdbId: item.imdbId.trim().isNotEmpty ? item.imdbId : cached.imdbId,
     tmdbId: item.tmdbId.trim().isNotEmpty ? item.tmdbId : cached.tmdbId,
     ratingLabels:
-        item.ratingLabels.isNotEmpty ? item.ratingLabels : cached.ratingLabels,
+        mergeDistinctRatingLabels(cached.ratingLabels, item.ratingLabels),
   );
 }

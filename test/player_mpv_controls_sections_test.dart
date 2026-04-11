@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-// Contract keys for the upcoming player_mpv_controls_sections.dart widget.
-const Key _kLeanActionsSectionKey = Key('player-mpv-controls:actions:lean');
-const Key _kFullActionsSectionKey = Key('player-mpv-controls:actions:full');
+import 'package:starflow/features/playback/presentation/widgets/player_mpv_controls_sections.dart';
 
 void main() {
   group('Player MPV controls sections contract', () {
@@ -17,8 +14,11 @@ void main() {
         ),
       );
 
-      expect(find.byKey(_kLeanActionsSectionKey), findsOneWidget);
-      expect(find.byKey(_kFullActionsSectionKey), findsNothing);
+      expect(find.byKey(kPlayerMpvLeanActionsSectionKey), findsOneWidget);
+      expect(find.byKey(kPlayerMpvFullActionsSectionKey), findsNothing);
+      expect(find.byIcon(Icons.closed_caption_rounded), findsNothing);
+      expect(find.byIcon(Icons.audiotrack_rounded), findsNothing);
+      expect(find.byIcon(Icons.more_horiz_rounded), findsOneWidget);
     });
 
     testWidgets('renders full actions section in full mode', (tester) async {
@@ -30,37 +30,32 @@ void main() {
         ),
       );
 
-      expect(find.byKey(_kLeanActionsSectionKey), findsNothing);
-      expect(find.byKey(_kFullActionsSectionKey), findsOneWidget);
+      expect(find.byKey(kPlayerMpvLeanActionsSectionKey), findsNothing);
+      expect(find.byKey(kPlayerMpvFullActionsSectionKey), findsOneWidget);
+      expect(find.byIcon(Icons.closed_caption_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.audiotrack_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.tune_rounded), findsOneWidget);
     });
   });
 }
 
 Widget _buildUnderTest({required bool leanMode}) {
-  // TODO(soon): replace this fixture with:
-  // `PlayerMpvControlsSections(leanMode: leanMode, ...)` from
-  // `player_mpv_controls_sections.dart` once the widget lands.
-  return _TestPlayerMpvControlsSections(leanMode: leanMode);
-}
-
-class _TestPlayerMpvControlsSections extends StatelessWidget {
-  const _TestPlayerMpvControlsSections({required this.leanMode});
-
-  final bool leanMode;
-
-  @override
-  Widget build(BuildContext context) {
-    if (leanMode) {
-      return const SizedBox(
-        key: _kLeanActionsSectionKey,
-        width: 1,
-        height: 1,
-      );
-    }
-    return const SizedBox(
-      key: _kFullActionsSectionKey,
-      width: 1,
-      height: 1,
-    );
-  }
+  return Center(
+    child: PlayerMpvActionButtonsSection(
+      data: PlayerMpvActionButtonsSectionData(
+        isFullscreen: false,
+        onOpenSubtitle: leanMode ? null : () {},
+        onOpenAudio: leanMode ? null : () {},
+        onOpenOptions: () {},
+        onToggleFullscreen: () {},
+        leanMode: leanMode,
+        showSubtitleButton: !leanMode,
+        showAudioButton: !leanMode,
+        showTooltips: false,
+        compact: leanMode,
+        optionsIcon: leanMode ? Icons.more_horiz_rounded : Icons.tune_rounded,
+        optionsTooltip: leanMode ? '更多' : '播放设置',
+      ),
+    ),
+  );
 }

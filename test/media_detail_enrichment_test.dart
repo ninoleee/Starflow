@@ -11,6 +11,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
@@ -1127,6 +1128,182 @@ void main() {
       expect(resolved.imdbId, 'tt0133093');
       expect(tmdbFindRequests, 1);
       expect(wmdbRequests, 1);
+    });
+
+    test(
+        'auto enrich keeps episode overview empty instead of using series overview',
+        () async {
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'wmdbMetadataMatchEnabled': true,
+              'tmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+            }),
+          ),
+          wmdbMetadataClientProvider.overrideWithValue(
+            WmdbMetadataClient(
+              MockClient((request) async {
+                return http.Response(
+                  jsonEncode({
+                    'data': [
+                      {
+                        'data': [
+                          {
+                            'poster': 'https://img.wmdb.tv/tv/poster/test.jpg',
+                            'name': '测试剧',
+                            'description': '这是整部剧的总介绍。',
+                            'lang': 'Cn',
+                          },
+                        ],
+                        'originalName': 'Test Show',
+                        'imdbId': 'tt1234567',
+                        'tmdbId': '9876',
+                        'doubanId': '123456',
+                        'doubanRating': '8.8',
+                        'year': '2026',
+                      },
+                    ],
+                  }),
+                  200,
+                  headers: const {'content-type': 'application/json'},
+                );
+              }),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const target = MediaDetailTarget(
+        title: '第1集 风暴前夜',
+        posterUrl: '',
+        overview: '',
+        year: 2026,
+        availabilityLabel: '资源已就绪：WebDAV · NAS',
+        searchQuery: '测试剧',
+        playbackTarget: PlaybackTarget(
+          title: '第1集 风暴前夜',
+          sourceId: 'nas-main',
+          streamUrl: 'https://example.com/show-s01e01.mp4',
+          sourceName: 'NAS',
+          sourceKind: MediaSourceKind.nas,
+          itemType: 'episode',
+          seriesTitle: '测试剧',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+        itemId: 'episode-1',
+        sourceId: 'nas-main',
+        itemType: 'episode',
+        seasonNumber: 1,
+        episodeNumber: 1,
+        sourceKind: MediaSourceKind.nas,
+        sourceName: 'NAS',
+      );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(target).future,
+      );
+
+      expect(resolved.overview, isEmpty);
+    });
+
+    test('resolves nas strm direct link and playable size for detail page',
+        () async {
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': [
+                {
+                  'id': 'nas-main',
+                  'name': 'NAS',
+                  'kind': 'nas',
+                  'endpoint': 'https://nas.example.com/dav/',
+                  'enabled': true,
+                  'username': 'alice',
+                  'password': 'secret',
+                },
+              ],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'wmdbMetadataMatchEnabled': false,
+              'tmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+            }),
+          ),
+          webDavNasClientProvider.overrideWithValue(
+            WebDavNasClient(
+              MockClient((request) async {
+                if (request.method == 'GET' &&
+                    request.url.toString() ==
+                        'https://nas.example.com/dav/Movies/Test.strm') {
+                  return http.Response(
+                    'https://media.example.com/library/test.mkv\n',
+                    200,
+                  );
+                }
+                if (request.method == 'HEAD' &&
+                    request.url.toString() ==
+                        'https://media.example.com/library/test.mkv') {
+                  return http.Response(
+                    '',
+                    200,
+                    headers: const {
+                      'content-length': '3221225472',
+                    },
+                  );
+                }
+                return http.Response('Not found', 404);
+              }),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const target = MediaDetailTarget(
+        title: '测试 STRM',
+        posterUrl: '',
+        overview: '',
+        availabilityLabel: '资源已就绪：WebDAV · NAS',
+        searchQuery: '测试 STRM',
+        playbackTarget: PlaybackTarget(
+          title: '测试 STRM',
+          sourceId: 'nas-main',
+          streamUrl: 'https://nas.example.com/dav/Movies/Test.strm',
+          sourceName: 'NAS',
+          sourceKind: MediaSourceKind.nas,
+          actualAddress: '/Movies/Test.strm',
+          itemId: 'movie-1',
+          itemType: 'movie',
+          container: 'strm',
+          fileSizeBytes: 128,
+        ),
+        itemId: 'movie-1',
+        sourceId: 'nas-main',
+        itemType: 'movie',
+        resourcePath: '/Movies/Test.strm',
+        sourceKind: MediaSourceKind.nas,
+        sourceName: 'NAS',
+      );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(target).future,
+      );
+
+      expect(
+        resolved.playbackTarget?.streamUrl,
+        'https://media.example.com/library/test.mkv',
+      );
+      expect(resolved.playbackTarget?.fileSizeBytes, 3221225472);
     });
 
     test('keeps existing douban label when wmdb also returns douban rating',

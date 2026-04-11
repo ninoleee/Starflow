@@ -15,7 +15,7 @@ class UrlSystemPlaybackLauncher implements SystemPlaybackLauncher {
     if (uri == null || !uri.hasScheme) {
       return const SystemPlaybackLaunchResult(
         launched: false,
-        message: '播放地址无效，无法调用系统播放器。',
+        message: '播放地址无效，无法调用外部系统播放器。',
       );
     }
 
@@ -25,7 +25,7 @@ class UrlSystemPlaybackLauncher implements SystemPlaybackLauncher {
     );
     return SystemPlaybackLaunchResult(
       launched: launched,
-      message: launched ? '' : '系统播放器启动失败。',
+      message: launched ? '' : '外部系统播放器启动失败。',
     );
   }
 }

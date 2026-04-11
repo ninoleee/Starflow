@@ -438,6 +438,7 @@ class QuarkExternalStorageClient {
       seriesTitleFilterKeywords: useStructureInference
           ? source.normalizedWebDavSeriesTitleFilterKeywords
           : const <String>[],
+      specialEpisodeKeywords: source.normalizedWebDavSpecialEpisodeKeywords,
     );
   }
 

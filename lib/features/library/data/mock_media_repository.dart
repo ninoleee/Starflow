@@ -5,6 +5,7 @@ import 'package:starflow/features/library/application/app_media_query_service.da
 import 'package:starflow/features/library/application/empty_library_auto_rebuild_scheduler.dart';
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/data/quark_external_storage_client.dart';
 import 'package:starflow/features/library/data/season_folder_label_parser.dart';
@@ -319,21 +320,63 @@ class AppMediaRepository implements MediaRepository {
         throw Exception('请先在夸克与 STRM 里填写夸克 Cookie');
       }
       final parsed = _parseQuarkResourceId(normalizedResourcePath);
-      final fid = parsed?.fid.trim() ?? '';
-      if (fid.isEmpty) {
-        throw Exception('没有可删除的夸克文件 ID');
+      final directResourceId = normalizedResourcePath;
+      final record = parsed != null
+          ? await _nasMediaIndexer.loadRecord(
+              sourceId: normalizedSourceId,
+              resourceId: directResourceId,
+            )
+          : null;
+      final effectiveResourcePath = parsed?.path.trim().isNotEmpty == true
+          ? parsed!.path.trim()
+          : (record?.resourcePath.trim().isNotEmpty == true
+              ? record!.resourcePath.trim()
+              : normalizedResourcePath);
+      final directoryEntry = parsed == null
+          ? await _quarkSaveClient.resolveDirectoryByPath(
+              cookie: cookie,
+              path: _normalizeQuarkDirectoryPath(effectiveResourcePath),
+            )
+          : null;
+      final scopeRecords = directoryEntry != null
+          ? const <NasMediaIndexRecord>[]
+          : parsed?.fid.trim().isNotEmpty == true
+              ? (record == null ? const <NasMediaIndexRecord>[] : [record])
+              : await _nasMediaIndexer.loadRecordsInScope(
+                  sourceId: normalizedSourceId,
+                  resourcePath: effectiveResourcePath,
+                );
+      final fids = <String>{
+        if (directoryEntry?.fid.trim().isNotEmpty == true)
+          directoryEntry!.fid.trim(),
+        if (parsed?.fid.trim().isNotEmpty == true) parsed!.fid.trim(),
+        for (final scopedRecord in scopeRecords)
+          if (_parseQuarkResourceId(scopedRecord.resourceId)
+                  ?.fid
+                  .trim()
+                  .isNotEmpty ==
+              true)
+            _parseQuarkResourceId(scopedRecord.resourceId)!.fid.trim(),
+      }.toList(growable: false);
+      if (fids.isEmpty) {
+        throw Exception('没有可删除的夸克资源 ID');
       }
       await _quarkSaveClient.deleteEntries(
         cookie: cookie,
-        fids: [fid],
+        fids: fids,
+      );
+      await _nasMediaIndexer.removeResourceScope(
+        sourceId: normalizedSourceId,
+        resourcePath: effectiveResourcePath,
       );
       await ref
           .read(localStorageCacheRepositoryProvider)
           .clearDetailCacheForResource(
             sourceId: normalizedSourceId,
-            resourceId: normalizedResourcePath,
-            resourcePath: parsed?.path ?? '',
-            treatAsScope: false,
+            resourceId: parsed != null ? directResourceId : '',
+            resourcePath: effectiveResourcePath,
+            treatAsScope:
+                !_looksLikePlayableResourcePath(effectiveResourcePath),
           );
       return;
     }
@@ -1083,6 +1126,7 @@ class AppMediaRepository implements MediaRepository {
       seriesTitleFilterKeywords: useStructureInference
           ? source.normalizedWebDavSeriesTitleFilterKeywords
           : const <String>[],
+      specialEpisodeKeywords: source.normalizedWebDavSpecialEpisodeKeywords,
     );
   }
 

@@ -31,16 +31,26 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
 
     try {
       final coordinator = PlaybackStartupCoordinator(
-        read: ref.read,
-        targetResolver: PlaybackTargetResolver(read: ref.read),
+        read: _providerContainer.read,
+        targetResolver: PlaybackTargetResolver(read: _providerContainer.read),
         engineRouter: const PlaybackEngineRouter(),
       );
       final outcome = await coordinator.start(
         initialTarget: widget.target,
-        isTelevision: ref.read(isTelevisionProvider).value ?? false,
+        isTelevision: _isTelevisionPlaybackDevice,
         isWeb: kIsWeb,
       );
       final resolvedTarget = outcome.resolvedTarget;
+      _traceQuarkPlaybackStartup(
+        'quark.startup.outcome',
+        target: resolvedTarget,
+        fields: {
+          'routeAction': outcome.routeAction.name,
+          'engine': outcome.settings.playbackEngine.name,
+          'headers': resolvedTarget.headers.length,
+          'streamUrl': resolvedTarget.streamUrl,
+        },
+      );
       _traceWindowsMpv(
         'windows-mpv.initialize.target-resolved',
         fields: {
@@ -72,6 +82,14 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       final shouldOpen = await executor.execute(
         outcome.routeAction,
         resolvedTarget,
+      );
+      _traceQuarkPlaybackStartup(
+        'quark.startup.executor-result',
+        target: resolvedTarget,
+        fields: {
+          'routeAction': outcome.routeAction.name,
+          'shouldOpenEmbedded': shouldOpen,
+        },
       );
       if (!shouldOpen) {
         return;
@@ -166,6 +184,12 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       unawaited(_syncBackgroundPlayback(enabled: true));
       unawaited(_syncPlaybackSystemSession(force: true));
     } catch (error, stackTrace) {
+      _traceQuarkPlaybackStartup(
+        'quark.startup.failed',
+        target: _resolvedTarget ?? widget.target,
+        error: error,
+        stackTrace: stackTrace,
+      );
       _traceWindowsMpv(
         'windows-mpv.initialize.failed',
         error: error,
@@ -355,11 +379,26 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   }
 
   Future<void> _launchWithSystemPlayer(PlaybackTarget target) async {
+    _traceQuarkPlaybackStartup(
+      'quark.launch.system.begin',
+      target: target,
+      fields: {'streamUrl': target.streamUrl},
+    );
     final result =
-        await ref.read(systemPlaybackLauncherProvider).launch(target);
+        await _providerContainer.read(systemPlaybackLauncherProvider).launch(
+          target,
+        );
+    _traceQuarkPlaybackStartup(
+      'quark.launch.system.result',
+      target: target,
+      fields: {
+        'launched': result.launched,
+        'message': result.message,
+      },
+    );
     if (!result.launched) {
       throw _PlayerOpenException(
-        result.message.isEmpty ? '系统播放器启动失败' : result.message,
+        result.message.isEmpty ? '外部系统播放器启动失败' : result.message,
       );
     }
 
@@ -370,10 +409,28 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   }
 
   Future<void> _launchWithNativeContainer(PlaybackTarget target) async {
-    final result = await ref.read(nativePlaybackLauncherProvider).launch(
+    _traceQuarkPlaybackStartup(
+      'quark.launch.native.begin',
+      target: target,
+      fields: {
+        'streamUrl': target.streamUrl,
+        'decodeMode': _playbackDecodeMode.name,
+      },
+    );
+    final result = await _providerContainer
+        .read(nativePlaybackLauncherProvider)
+        .launch(
           target,
           decodeMode: _playbackDecodeMode,
         );
+    _traceQuarkPlaybackStartup(
+      'quark.launch.native.result',
+      target: target,
+      fields: {
+        'launched': result.launched,
+        'message': result.message,
+      },
+    );
     if (!result.launched) {
       throw _PlayerOpenException(
         result.message.isEmpty ? '原生播放器启动失败' : result.message,
@@ -389,10 +446,25 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   Future<bool> _tryLaunchWithPerformanceFallback(
     PlaybackTarget target,
   ) async {
-    final nativeResult = await ref.read(nativePlaybackLauncherProvider).launch(
+    _traceQuarkPlaybackStartup(
+      'quark.launch.fallback.begin',
+      target: target,
+      fields: {'decodeMode': _playbackDecodeMode.name},
+    );
+    final nativeResult = await _providerContainer
+        .read(nativePlaybackLauncherProvider)
+        .launch(
           target,
           decodeMode: _playbackDecodeMode,
         );
+    _traceQuarkPlaybackStartup(
+      'quark.launch.fallback.native-result',
+      target: target,
+      fields: {
+        'launched': nativeResult.launched,
+        'message': nativeResult.message,
+      },
+    );
     if (nativeResult.launched) {
       if (mounted) {
         context.pop();
@@ -401,7 +473,17 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     }
 
     final result =
-        await ref.read(systemPlaybackLauncherProvider).launch(target);
+        await _providerContainer.read(systemPlaybackLauncherProvider).launch(
+          target,
+        );
+    _traceQuarkPlaybackStartup(
+      'quark.launch.fallback.system-result',
+      target: target,
+      fields: {
+        'launched': result.launched,
+        'message': result.message,
+      },
+    );
     if (!result.launched) {
       return false;
     }
@@ -794,7 +876,30 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   }
 
   bool get _isTelevisionPlaybackDevice =>
-      ref.read(isTelevisionProvider).value ?? false;
+      _providerContainer.read(isTelevisionProvider).value ?? false;
+
+  void _traceQuarkPlaybackStartup(
+    String stage, {
+    required PlaybackTarget target,
+    Map<String, Object?> fields = const <String, Object?>{},
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    if (target.sourceKind != MediaSourceKind.quark) {
+      return;
+    }
+    playbackTrace(
+      stage,
+      fields: <String, Object?>{
+        'title': target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
+        'sourceKind': target.sourceKind.name,
+        'container': target.container,
+        ...fields,
+      },
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
 
   int _resolveMpvBufferSizeBytes(PlaybackTarget target) {
     if (isLikelyQuarkPlaybackTarget(target)) {
@@ -859,7 +964,13 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     if (_isEmbeddedMpvFullscreen == isFullscreen) {
       return;
     }
-    _isEmbeddedMpvFullscreen = isFullscreen;
+    if (mounted) {
+      setState(() {
+        _isEmbeddedMpvFullscreen = isFullscreen;
+      });
+    } else {
+      _isEmbeddedMpvFullscreen = isFullscreen;
+    }
     final player = _player;
     if (player == null) {
       return;

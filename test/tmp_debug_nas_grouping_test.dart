@@ -81,7 +81,7 @@ void main() {
     }).toList(growable: false);
 
     for (final item in matched) {
-      print(
+      debugPrint(
         '[DebugItem] title=${item.title} | id=${item.id} | type=${item.itemType} | address=${item.actualAddress}',
       );
     }

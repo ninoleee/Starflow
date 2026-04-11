@@ -144,9 +144,18 @@ void main() {
       expect(items.first.title, contains('Movie'));
 
       final series = items.singleWhere((item) => item.itemType == 'series');
-      final children = await repository.fetchChildren(
+      final seasons = await repository.fetchChildren(
         sourceId: source.id,
         parentId: series.id,
+        limit: 10,
+      );
+      expect(seasons, hasLength(1));
+      expect(seasons.single.itemType, 'season');
+      expect(seasons.single.seasonNumber, 1);
+
+      final children = await repository.fetchChildren(
+        sourceId: source.id,
+        parentId: seasons.single.id,
         limit: 10,
       );
       final episode =
@@ -263,9 +272,18 @@ void main() {
       expect(library.single.itemType, 'series');
       expect(library.single.title, '圆桌派');
 
-      final children = await repository.fetchChildren(
+      final seasons = await repository.fetchChildren(
         sourceId: source.id,
         parentId: library.single.id,
+        limit: 10,
+      );
+      expect(seasons, hasLength(1));
+      expect(seasons.single.itemType, 'season');
+      expect(seasons.single.seasonNumber, 1);
+
+      final children = await repository.fetchChildren(
+        sourceId: source.id,
+        parentId: seasons.single.id,
         limit: 10,
       );
       expect(children, hasLength(2));
@@ -777,6 +795,208 @@ void main() {
       final specialEpisode =
           items.firstWhere((item) => item.playbackItemId == 'special-episode');
       expect(specialEpisode.metadataSeed.seasonNumber, 0);
+    });
+
+    test('keeps variety specials separated instead of merging them away',
+        () async {
+      const source = MediaSourceConfig(
+        id: 'quark-variety-merge-guard',
+        name: 'Quark Variety Merge Guard',
+        kind: MediaSourceKind.quark,
+        endpoint: 'variety-merge-root',
+        libraryPath: '/综艺',
+        enabled: true,
+        webDavStructureInferenceEnabled: true,
+      );
+      final quarkClient = _FakeQuarkSaveClient(
+        entriesByParentFid: {
+          'variety-merge-root': [
+            QuarkFileEntry(
+              fid: 'ride-the-wind-dir',
+              name: '乘风2026',
+              path: '/乘风2026',
+              isDirectory: true,
+            ),
+          ],
+          'ride-the-wind-dir': [
+            QuarkFileEntry(
+              fid: 'episode-main-a',
+              name: '2026.04.03-第1期（上）.mp4',
+              path: '/2026.04.03-第1期（上）.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 3, 20),
+              category: 'video',
+              extension: 'mp4',
+            ),
+            QuarkFileEntry(
+              fid: 'episode-main-b',
+              name: '2026.04.04-第1期（下）.mp4',
+              path: '/2026.04.04-第1期（下）.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 4, 20),
+              category: 'video',
+              extension: 'mp4',
+            ),
+            QuarkFileEntry(
+              fid: 'episode-special-linkup',
+              name: '2026.03.28-乘风亲友连麦大会第1期.mp4',
+              path: '/2026.03.28-乘风亲友连麦大会第1期.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 3, 28, 20),
+              category: 'video',
+              extension: 'mp4',
+            ),
+            QuarkFileEntry(
+              fid: 'episode-special-extra',
+              name: '2026.04.01-加更版第1期.mp4',
+              path: '/2026.04.01-加更版第1期.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 1, 20),
+              category: 'video',
+              extension: 'mp4',
+            ),
+            QuarkFileEntry(
+              fid: 'episode-special-pilot',
+              name: '2026.04.02-先导片.mp4',
+              path: '/2026.04.02-先导片.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 2, 20),
+              category: 'video',
+              extension: 'mp4',
+            ),
+            QuarkFileEntry(
+              fid: 'episode-special-stage-1',
+              name: '2026.04.04-舞台纯享版第1期.mp4',
+              path: '/2026.04.04-舞台纯享版第1期.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 4, 21),
+              category: 'video',
+              extension: 'mp4',
+            ),
+            QuarkFileEntry(
+              fid: 'episode-special-stage-2',
+              name: '2026.04.11-舞台纯享版第2期.mp4',
+              path: '/2026.04.11-舞台纯享版第2期.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 11, 20),
+              category: 'video',
+              extension: 'mp4',
+            ),
+          ],
+        },
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [source],
+              searchProviders: const [],
+              homeModules: const [],
+              networkStorage: const NetworkStorageConfig(
+                quarkCookie: 'kps=test; sign=test;',
+              ),
+            ),
+          ),
+          embyApiClientProvider.overrideWithValue(
+            EmbyApiClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          webDavNasClientProvider.overrideWithValue(
+            WebDavNasClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          nasMediaIndexStoreProvider.overrideWithValue(
+            SembastNasMediaIndexStore(
+              databaseOpener: () => databaseFactoryMemory.openDatabase(
+                'media-repository-quark-source-test-merge-guard',
+              ),
+            ),
+          ),
+          wmdbMetadataClientProvider.overrideWithValue(
+            WmdbMetadataClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          tmdbMetadataClientProvider.overrideWithValue(
+            TmdbMetadataClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          imdbRatingClientProvider.overrideWithValue(
+            ImdbRatingClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          quarkSaveClientProvider.overrideWithValue(quarkClient),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final repository = container.read(mediaRepositoryProvider);
+      var library =
+          await repository.fetchLibrary(sourceId: source.id, limit: 10);
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (library.isEmpty && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        library = await repository.fetchLibrary(sourceId: source.id, limit: 10);
+      }
+
+      expect(library, hasLength(1));
+      expect(library.single.title, '乘风2026');
+
+      final seasons = await repository.fetchChildren(
+        sourceId: source.id,
+        parentId: library.single.id,
+        limit: 10,
+      );
+      expect(
+        seasons
+            .where((item) => item.itemType == 'season')
+            .map((item) => item.seasonNumber),
+        containsAll(<int?>[0, 1]),
+      );
+
+      final specialsSeason =
+          seasons.firstWhere((item) => item.seasonNumber == 0);
+      final regularSeason =
+          seasons.firstWhere((item) => item.seasonNumber == 1);
+
+      final specials = await repository.fetchChildren(
+        sourceId: source.id,
+        parentId: specialsSeason.id,
+        limit: 20,
+      );
+      expect(
+          specials.where((item) => item.itemType == 'episode'), hasLength(5));
+      expect(
+        specials.map((item) => item.actualAddress),
+        containsAll(<String>[
+          '/综艺/乘风2026/2026.03.28-乘风亲友连麦大会第1期.mp4',
+          '/综艺/乘风2026/2026.04.01-加更版第1期.mp4',
+          '/综艺/乘风2026/2026.04.02-先导片.mp4',
+          '/综艺/乘风2026/2026.04.04-舞台纯享版第1期.mp4',
+          '/综艺/乘风2026/2026.04.11-舞台纯享版第2期.mp4',
+        ]),
+      );
+
+      final regularEpisodes = await repository.fetchChildren(
+        sourceId: source.id,
+        parentId: regularSeason.id,
+        limit: 20,
+      );
+      expect(
+        regularEpisodes.where((item) => item.itemType == 'episode'),
+        hasLength(2),
+      );
+      expect(
+        regularEpisodes.map((item) => item.actualAddress),
+        containsAll(<String>[
+          '/综艺/乘风2026/2026.04.03-第1期（上）.mp4',
+          '/综艺/乘风2026/2026.04.04-第1期（下）.mp4',
+        ]),
+      );
     });
 
     test('filters keyword-matched quark extras from structure inference',

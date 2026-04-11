@@ -354,6 +354,14 @@ class SearchResult {
     this.publishedAt = '',
     this.imageUrls = const [],
     this.detailTarget,
+    this.favoriteFolderName = '',
+    this.originalSearchTitle = '',
+    this.metadataMediaType = '',
+    this.doubanId = '',
+    this.imdbId = '',
+    this.tmdbId = '',
+    this.tvdbId = '',
+    this.wikidataId = '',
   });
 
   final String id;
@@ -373,6 +381,188 @@ class SearchResult {
   final String publishedAt;
   final List<String> imageUrls;
   final MediaDetailTarget? detailTarget;
+  final String favoriteFolderName;
+  final String originalSearchTitle;
+  final String metadataMediaType;
+  final String doubanId;
+  final String imdbId;
+  final String tmdbId;
+  final String tvdbId;
+  final String wikidataId;
+
+  SearchResult copyWith({
+    String? title,
+    MediaDetailTarget? detailTarget,
+    String? favoriteFolderName,
+    String? originalSearchTitle,
+    String? metadataMediaType,
+    String? doubanId,
+    String? imdbId,
+    String? tmdbId,
+    String? tvdbId,
+    String? wikidataId,
+  }) {
+    return SearchResult(
+      id: id,
+      title: title ?? this.title,
+      posterUrl: posterUrl,
+      posterHeaders: posterHeaders,
+      providerId: providerId,
+      providerName: providerName,
+      quality: quality,
+      sizeLabel: sizeLabel,
+      seeders: seeders,
+      summary: summary,
+      resourceUrl: resourceUrl,
+      password: password,
+      cloudType: cloudType,
+      source: source,
+      publishedAt: publishedAt,
+      imageUrls: imageUrls,
+      detailTarget: detailTarget ?? this.detailTarget,
+      favoriteFolderName: favoriteFolderName ?? this.favoriteFolderName,
+      originalSearchTitle: originalSearchTitle ?? this.originalSearchTitle,
+      metadataMediaType: metadataMediaType ?? this.metadataMediaType,
+      doubanId: doubanId ?? this.doubanId,
+      imdbId: imdbId ?? this.imdbId,
+      tmdbId: tmdbId ?? this.tmdbId,
+      tvdbId: tvdbId ?? this.tvdbId,
+      wikidataId: wikidataId ?? this.wikidataId,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'posterUrl': posterUrl,
+      'posterHeaders': posterHeaders,
+      'providerId': providerId,
+      'providerName': providerName,
+      'quality': quality,
+      'sizeLabel': sizeLabel,
+      'seeders': seeders,
+      'summary': summary,
+      'resourceUrl': resourceUrl,
+      'password': password,
+      'cloudType': cloudType,
+      'source': source,
+      'publishedAt': publishedAt,
+      'imageUrls': imageUrls,
+      'detailTarget': detailTarget?.toJson(),
+      'favoriteFolderName': favoriteFolderName,
+      'originalSearchTitle': originalSearchTitle,
+      'metadataMediaType': metadataMediaType,
+      'doubanId': doubanId,
+      'imdbId': imdbId,
+      'tmdbId': tmdbId,
+      'tvdbId': tvdbId,
+      'wikidataId': wikidataId,
+    };
+  }
+
+  factory SearchResult.fromJson(Map<String, dynamic> json) {
+    return SearchResult(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      posterUrl: json['posterUrl'] as String? ?? '',
+      posterHeaders: (json['posterHeaders'] as Map<dynamic, dynamic>? ??
+              const <dynamic, dynamic>{})
+          .map((key, value) => MapEntry('$key', '$value')),
+      providerId: json['providerId'] as String? ?? '',
+      providerName: json['providerName'] as String? ?? '',
+      quality: json['quality'] as String? ?? '',
+      sizeLabel: json['sizeLabel'] as String? ?? '',
+      seeders: (json['seeders'] as num?)?.toInt() ?? 0,
+      summary: json['summary'] as String? ?? '',
+      resourceUrl: json['resourceUrl'] as String? ?? '',
+      password: json['password'] as String? ?? '',
+      cloudType: json['cloudType'] as String? ?? '',
+      source: json['source'] as String? ?? '',
+      publishedAt: json['publishedAt'] as String? ?? '',
+      imageUrls: (json['imageUrls'] as List<dynamic>? ?? const <dynamic>[])
+          .map((item) => '$item')
+          .where((item) => item.trim().isNotEmpty)
+          .toList(growable: false),
+      detailTarget: (json['detailTarget'] as Map?) == null
+          ? null
+          : MediaDetailTarget.fromJson(
+              Map<String, dynamic>.from(json['detailTarget'] as Map),
+            ),
+      favoriteFolderName: json['favoriteFolderName'] as String? ?? '',
+      originalSearchTitle: json['originalSearchTitle'] as String? ?? '',
+      metadataMediaType: json['metadataMediaType'] as String? ?? '',
+      doubanId: json['doubanId'] as String? ?? '',
+      imdbId: json['imdbId'] as String? ?? '',
+      tmdbId: json['tmdbId'] as String? ?? '',
+      tvdbId: json['tvdbId'] as String? ?? '',
+      wikidataId: json['wikidataId'] as String? ?? '',
+    );
+  }
+}
+
+String searchResultFavoriteKey(SearchResult result) {
+  final normalizedResourceUrl = normalizeSearchResourceUrl(result.resourceUrl);
+  if (normalizedResourceUrl.isNotEmpty) {
+    return 'resource|$normalizedResourceUrl';
+  }
+
+  final detailTarget = result.detailTarget;
+  if (detailTarget != null) {
+    return [
+      'detail',
+      detailTarget.sourceKind?.name ?? '',
+      detailTarget.sourceId.trim(),
+      detailTarget.itemId.trim(),
+      detailTarget.searchQuery.trim(),
+      detailTarget.title.trim(),
+    ].join('|');
+  }
+
+  return [
+    'fallback',
+    result.providerId.trim().toLowerCase(),
+    result.title.trim().toLowerCase(),
+    result.summary.trim().toLowerCase(),
+  ].join('|');
+}
+
+String resolveSearchFavoriteFolderName({
+  required SearchResult result,
+  String searchQuery = '',
+}) {
+  final query = searchQuery.trim();
+  if (query.isNotEmpty) {
+    return query;
+  }
+  for (final candidate in [
+    result.favoriteFolderName,
+    result.title,
+    result.originalSearchTitle,
+  ]) {
+    final trimmed = candidate.trim();
+    if (trimmed.isNotEmpty) {
+      return trimmed;
+    }
+  }
+  return '';
+}
+
+String resolveSearchSaveFolderName({
+  required SearchResult result,
+  required bool isFavoriteResultsView,
+  String searchQuery = '',
+}) {
+  if (isFavoriteResultsView) {
+    return resolveSearchFavoriteFolderName(result: result);
+  }
+
+  final query = searchQuery.trim();
+  if (query.isNotEmpty) {
+    return query;
+  }
+
+  return resolveSearchFavoriteFolderName(result: result);
 }
 
 class SearchFetchResult {

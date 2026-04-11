@@ -1,0 +1,207 @@
+import 'dart:async';
+
+import 'package:flutter/widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/utils/media_rating_labels.dart';
+import 'package:starflow/features/details/application/detail_target_resolver.dart';
+import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/library/data/nas_media_indexer.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/application/playback_session.dart';
+import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
+
+class DetailRatingPrefetchCoordinator {
+  int _refreshSessionId = 0;
+  final Set<String> _scheduledRefreshKeys = <String>{};
+
+  void reset() {
+    _refreshSessionId += 1;
+    _scheduledRefreshKeys.clear();
+  }
+
+  void schedulePrefetch({
+    required WidgetRef ref,
+    required Iterable<MediaDetailTarget> targets,
+    required bool Function() isPageActive,
+    bool preferDoubanOnly = false,
+  }) {
+    if (!isPageActive() || ref.read(backgroundEnrichmentSuspendedProvider)) {
+      return;
+    }
+
+    final sessionId = _refreshSessionId;
+    final candidates = <MediaDetailTarget>[];
+    for (final target in targets) {
+      if (!_needsRatingPrefetch(
+        target,
+        preferDoubanOnly: preferDoubanOnly,
+      )) {
+        continue;
+      }
+      final refreshKey = _ratingPrefetchKey(
+        target,
+        preferDoubanOnly: preferDoubanOnly,
+      );
+      if (refreshKey.isEmpty || !_scheduledRefreshKeys.add(refreshKey)) {
+        continue;
+      }
+      candidates.add(target);
+    }
+    if (candidates.isEmpty) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_isRefreshSessionActive(
+        ref: ref,
+        sessionId: sessionId,
+        isPageActive: isPageActive,
+      )) {
+        return;
+      }
+      unawaited(
+        _prefetchRatingsInBackground(
+          ref: ref,
+          targets: candidates,
+          sessionId: sessionId,
+          isPageActive: isPageActive,
+        ),
+      );
+    });
+  }
+
+  bool _isRefreshSessionActive({
+    required WidgetRef ref,
+    required int sessionId,
+    required bool Function() isPageActive,
+  }) {
+    return isPageActive() &&
+        _refreshSessionId == sessionId &&
+        !ref.read(backgroundEnrichmentSuspendedProvider);
+  }
+
+  Future<void> _prefetchRatingsInBackground({
+    required WidgetRef ref,
+    required List<MediaDetailTarget> targets,
+    required int sessionId,
+    required bool Function() isPageActive,
+  }) async {
+    try {
+      await Future.wait(
+        targets.map(
+          (target) => _prefetchSingleTarget(
+            ref: ref,
+            target: target,
+            sessionId: sessionId,
+            isPageActive: isPageActive,
+          ),
+        ),
+        eagerError: false,
+      );
+    } catch (_) {
+      // Best-effort only.
+    }
+  }
+
+  Future<void> _prefetchSingleTarget({
+    required WidgetRef ref,
+    required MediaDetailTarget target,
+    required int sessionId,
+    required bool Function() isPageActive,
+  }) async {
+    if (!_isRefreshSessionActive(
+      ref: ref,
+      sessionId: sessionId,
+      isPageActive: isPageActive,
+    )) {
+      return;
+    }
+
+    try {
+      MediaDetailTarget? updatedTarget;
+      if (target.sourceKind == MediaSourceKind.nas &&
+          target.sourceId.trim().isNotEmpty &&
+          target.itemId.trim().isNotEmpty) {
+        updatedTarget = await ref
+            .read(nasMediaIndexerProvider)
+            .enrichDetailTargetMetadataIfNeeded(target);
+      }
+      updatedTarget ??=
+          await ref.read(detailTargetResolverProvider).resolveMetadataOnly(
+                target: target,
+                backgroundWorkSuspended: false,
+              );
+
+      if (!_isRefreshSessionActive(
+        ref: ref,
+        sessionId: sessionId,
+        isPageActive: isPageActive,
+      )) {
+        return;
+      }
+      if (!_ratingPrefetchProducedUpdate(target, updatedTarget)) {
+        return;
+      }
+      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+            seedTarget: target,
+            resolvedTarget: updatedTarget,
+          );
+    } catch (_) {
+      // Best-effort only.
+    }
+  }
+
+  bool _needsRatingPrefetch(
+    MediaDetailTarget target, {
+    required bool preferDoubanOnly,
+  }) {
+    final searchQuery =
+        (target.searchQuery.trim().isEmpty ? target.title : target.searchQuery)
+            .trim();
+    if (searchQuery.isEmpty &&
+        target.doubanId.trim().isEmpty &&
+        target.imdbId.trim().isEmpty) {
+      return false;
+    }
+    return resolvePreferredPosterRatingLabel(
+      target.ratingLabels,
+      preferDoubanOnly: preferDoubanOnly,
+    ).isEmpty;
+  }
+
+  bool _ratingPrefetchProducedUpdate(
+    MediaDetailTarget current,
+    MediaDetailTarget next,
+  ) {
+    final currentBadge =
+        resolvePreferredPosterRatingLabel(current.ratingLabels);
+    final nextBadge = resolvePreferredPosterRatingLabel(next.ratingLabels);
+    if (nextBadge.isNotEmpty && nextBadge != currentBadge) {
+      return true;
+    }
+    return current.doubanId.trim() != next.doubanId.trim() ||
+        current.imdbId.trim().toLowerCase() !=
+            next.imdbId.trim().toLowerCase() ||
+        current.tmdbId.trim() != next.tmdbId.trim() ||
+        current.posterUrl.trim() != next.posterUrl.trim() ||
+        current.searchQuery.trim() != next.searchQuery.trim();
+  }
+
+  String _ratingPrefetchKey(
+    MediaDetailTarget target, {
+    required bool preferDoubanOnly,
+  }) {
+    final parts = [
+      preferDoubanOnly ? 'douban-only' : 'fallback',
+      target.sourceKind?.name ?? '',
+      target.sourceId.trim(),
+      target.itemId.trim(),
+      target.doubanId.trim(),
+      target.imdbId.trim().toLowerCase(),
+      target.tmdbId.trim(),
+      target.title.trim().toLowerCase(),
+      target.searchQuery.trim().toLowerCase(),
+    ].where((item) => item.isNotEmpty).toList(growable: false);
+    return parts.join('|');
+  }
+}

@@ -152,7 +152,7 @@ extension PlaybackEngineX on PlaybackEngine {
       case PlaybackEngine.nativeContainer:
         return 'App 内原生播放器';
       case PlaybackEngine.systemPlayer:
-        return '系统播放器';
+        return '外部系统播放器';
     }
   }
 

@@ -10,6 +10,25 @@ final quarkSaveClientProvider = Provider<QuarkSaveClient>((ref) {
   return QuarkSaveClient(client);
 });
 
+String normalizeQuarkDirectoryPath(String rawPath) {
+  final trimmed = rawPath.trim();
+  if (trimmed.isEmpty || trimmed == '/') {
+    return '/';
+  }
+  final normalized = trimmed.replaceAll('\\', '/');
+  final withLeadingSlash =
+      normalized.startsWith('/') ? normalized : '/$normalized';
+  return withLeadingSlash.replaceFirst(RegExp(r'/+$'), '');
+}
+
+String sanitizeQuarkDirectoryName(String rawName) {
+  final sanitized = rawName
+      .replaceAll(RegExp(r'[\\/:*?"<>|]+'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  return sanitized == '.' || sanitized == '..' ? '' : sanitized;
+}
+
 class QuarkSaveClient {
   QuarkSaveClient(this._client);
 
@@ -53,22 +72,32 @@ class QuarkSaveClient {
       throw const QuarkSaveException('分享链接里没有可保存的文件');
     }
 
-    final normalizedTargetDirectoryPath = _normalizeDirectoryPath(toPdirPath);
+    final normalizedTargetDirectoryPath = normalizeQuarkDirectoryPath(
+      toPdirPath,
+    );
     var resolvedTargetDirectoryId =
         toPdirFid.trim().isEmpty ? '0' : toPdirFid.trim();
-    final sanitizedFolderName = _sanitizeDirectoryName(saveFolderName);
-    final currentTargetDirectoryName = _sanitizeDirectoryName(
-        _lastDirectoryName(normalizedTargetDirectoryPath));
+    final sanitizedFolderName = sanitizeQuarkDirectoryName(saveFolderName);
+    final currentTargetDirectoryName = sanitizeQuarkDirectoryName(
+      _lastQuarkDirectoryName(normalizedTargetDirectoryPath),
+    );
+    var shouldRecursivelyDeduplicate = false;
     final shouldCreateNamedDirectory = sanitizedFolderName.isNotEmpty &&
         currentTargetDirectoryName.toLowerCase() !=
             sanitizedFolderName.toLowerCase();
     if (shouldCreateNamedDirectory) {
-      resolvedTargetDirectoryId = await _ensureDirectory(
+      final ensuredTargetDirectory = await _ensureDirectory(
         cookie: trimmedCookie,
         parentFid: resolvedTargetDirectoryId,
         parentPath: toPdirPath,
         folderName: sanitizedFolderName,
       );
+      resolvedTargetDirectoryId = ensuredTargetDirectory.fid;
+      shouldRecursivelyDeduplicate = ensuredTargetDirectory.alreadyExists;
+    } else if (sanitizedFolderName.isNotEmpty &&
+        currentTargetDirectoryName.toLowerCase() ==
+            sanitizedFolderName.toLowerCase()) {
+      shouldRecursivelyDeduplicate = true;
     }
     final effectiveSharedEntries = sanitizedFolderName.isEmpty
         ? sharedEntries
@@ -78,55 +107,117 @@ class QuarkSaveClient {
             cookie: trimmedCookie,
             entries: sharedEntries,
           );
-    final resolvedTargetDirectoryPath = !shouldCreateNamedDirectory
-        ? normalizedTargetDirectoryPath
-        : sanitizedFolderName.isEmpty
-            ? normalizedTargetDirectoryPath
-            : normalizedTargetDirectoryPath == '/'
-                ? '/$sanitizedFolderName'
-                : '$normalizedTargetDirectoryPath/$sanitizedFolderName';
-
-    final response = await _client.post(
-      Uri.parse('$_baseUrl/1/clouddrive/share/sharepage/save').replace(
-        queryParameters: {
-          'pr': 'ucpro',
-          'fr': 'pc',
-          'uc_param_str': '',
-          'app': 'clouddrive',
-          '__dt': '${(math.Random().nextDouble() * 4 + 1).round() * 60 * 1000}',
-          '__t': '${DateTime.now().millisecondsSinceEpoch / 1000}',
-        },
-      ),
-      headers: _headers(trimmedCookie),
-      body: jsonEncode({
-        'fid_list': effectiveSharedEntries.map((item) => item.fid).toList(),
-        'fid_token_list':
-            effectiveSharedEntries.map((item) => item.shareFidToken).toList(),
-        'to_pdir_fid': resolvedTargetDirectoryId,
-        'pwd_id': parsed.pwdId,
-        'stoken': stoken,
-        'pdir_fid': '0',
-        'scene': 'link',
-      }),
+    final resolvedTargetDirectoryPath = _resolveQuarkTargetFolderPath(
+      toPdirPath: toPdirPath,
+      saveFolderName: saveFolderName,
     );
-
-    final payload = _decode(response);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw QuarkSaveException(
-          _resolveErrorMessage(payload, response.statusCode));
+    final savePlan = shouldRecursivelyDeduplicate
+        ? await _buildRecursiveSavePlan(
+            pwdId: parsed.pwdId,
+            stoken: stoken,
+            cookie: trimmedCookie,
+            targetDirectoryFid: resolvedTargetDirectoryId,
+            entries: effectiveSharedEntries,
+          )
+        : _QuarkRecursiveSavePlan(
+            batches: [
+              if (effectiveSharedEntries.isNotEmpty)
+                _QuarkSaveBatch(
+                  targetDirectoryFid: resolvedTargetDirectoryId,
+                  entries: effectiveSharedEntries,
+                ),
+            ],
+            skippedCount: 0,
+          );
+    if (savePlan.batches.isEmpty) {
+      return QuarkSaveResult(
+        taskId: '',
+        savedCount: 0,
+        skippedCount: savePlan.skippedCount,
+        targetFolderPath: resolvedTargetDirectoryPath,
+      );
     }
-    final code = payload['code'] as int? ?? -1;
-    if (code != 0) {
-      throw QuarkSaveException(
-          _resolveErrorMessage(payload, response.statusCode));
+
+    final taskIds = <String>[];
+    var savedCount = 0;
+    for (final batch in savePlan.batches) {
+      if (batch.entries.isEmpty) {
+        continue;
+      }
+      final taskId = await _saveShareEntries(
+        pwdId: parsed.pwdId,
+        stoken: stoken,
+        cookie: trimmedCookie,
+        targetDirectoryFid: batch.targetDirectoryFid,
+        entries: batch.entries,
+      );
+      if (taskId.isNotEmpty) {
+        taskIds.add(taskId);
+      }
+      savedCount += batch.entries.length;
     }
 
-    final data = payload['data'] as Map<String, dynamic>? ?? const {};
-    final taskId = '${data['task_id'] ?? ''}'.trim();
     return QuarkSaveResult(
-      taskId: taskId,
-      savedCount: effectiveSharedEntries.length,
+      taskId: taskIds.length == 1 ? taskIds.single : '',
+      savedCount: savedCount,
+      skippedCount: savePlan.skippedCount,
       targetFolderPath: resolvedTargetDirectoryPath,
+    );
+  }
+
+  Future<QuarkSharePreview> previewShareLink({
+    required String shareUrl,
+    required String cookie,
+    String toPdirPath = '/',
+    String saveFolderName = '',
+  }) async {
+    final trimmedCookie = cookie.trim();
+    if (trimmedCookie.isEmpty) {
+      throw const QuarkSaveException('请先在搜索设置里填写夸克 Cookie');
+    }
+
+    final parsed = _parseShareUrl(shareUrl);
+    if (parsed == null) {
+      throw const QuarkSaveException('不是可识别的夸克分享链接');
+    }
+
+    final stoken = await _fetchShareToken(
+      pwdId: parsed.pwdId,
+      passcode: parsed.passcode,
+      cookie: trimmedCookie,
+    );
+    final sharedEntries = await _fetchShareEntries(
+      pwdId: parsed.pwdId,
+      stoken: stoken,
+      pdirFid: parsed.pdirFid,
+      cookie: trimmedCookie,
+    );
+    if (sharedEntries.isEmpty) {
+      throw const QuarkSaveException('分享链接里没有可保存的文件');
+    }
+
+    final sanitizedFolderName = sanitizeQuarkDirectoryName(saveFolderName);
+    final effectiveSharedEntries = sanitizedFolderName.isEmpty
+        ? sharedEntries
+        : await _flattenTopDirectory(
+            pwdId: parsed.pwdId,
+            stoken: stoken,
+            cookie: trimmedCookie,
+            entries: sharedEntries,
+          );
+
+    final previewEntries = await _collectSharePreviewEntries(
+      pwdId: parsed.pwdId,
+      stoken: stoken,
+      cookie: trimmedCookie,
+      entries: effectiveSharedEntries,
+    );
+    return QuarkSharePreview(
+      targetFolderPath: _resolveQuarkTargetFolderPath(
+        toPdirPath: toPdirPath,
+        saveFolderName: saveFolderName,
+      ),
+      entries: previewEntries,
     );
   }
 
@@ -253,19 +344,23 @@ class QuarkSaveClient {
     );
   }
 
-  Future<String> _ensureDirectory({
+  Future<_QuarkEnsuredDirectory> _ensureDirectory({
     required String cookie,
     required String parentFid,
     required String parentPath,
     required String folderName,
   }) async {
+    final folderNameKey = _normalizeQuarkEntryNameKey(folderName);
     final existingDirectories = await listDirectories(
       cookie: cookie,
       parentFid: parentFid,
     );
     for (final directory in existingDirectories) {
-      if (directory.name.trim() == folderName) {
-        return directory.fid;
+      if (_normalizeQuarkEntryNameKey(directory.name) == folderNameKey) {
+        return _QuarkEnsuredDirectory(
+          fid: directory.fid,
+          alreadyExists: true,
+        );
       }
     }
 
@@ -303,7 +398,10 @@ class QuarkSaveClient {
         '${(payload['data'] as Map<String, dynamic>? ?? const {})['fid'] ?? ''}'
             .trim();
     if (createdFid.isNotEmpty) {
-      return createdFid;
+      return _QuarkEnsuredDirectory(
+        fid: createdFid,
+        alreadyExists: false,
+      );
     }
 
     final refreshedDirectories = await listDirectories(
@@ -311,8 +409,11 @@ class QuarkSaveClient {
       parentFid: parentFid,
     );
     for (final directory in refreshedDirectories) {
-      if (directory.name.trim() == folderName) {
-        return directory.fid;
+      if (_normalizeQuarkEntryNameKey(directory.name) == folderNameKey) {
+        return _QuarkEnsuredDirectory(
+          fid: directory.fid,
+          alreadyExists: false,
+        );
       }
     }
     throw const QuarkSaveException('夸克文件夹创建成功，但未返回目录 ID');
@@ -331,6 +432,76 @@ class QuarkSaveClient {
         .map(QuarkDirectoryEntry.fromFileEntry)
         .whereType<QuarkDirectoryEntry>()
         .toList(growable: false);
+  }
+
+  Future<QuarkDirectoryEntry?> resolveDirectoryByPath({
+    required String cookie,
+    required String path,
+  }) async {
+    final normalizedPath = normalizeQuarkDirectoryPath(path);
+    if (normalizedPath == '/') {
+      return const QuarkDirectoryEntry(
+        fid: '0',
+        name: '',
+        path: '/',
+      );
+    }
+
+    var currentFid = '0';
+    QuarkDirectoryEntry? resolvedDirectory;
+    final segments = normalizedPath
+        .split('/')
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+    for (final segment in segments) {
+      final directories = await listDirectories(
+        cookie: cookie,
+        parentFid: currentFid,
+      );
+      final match = directories.firstWhere(
+        (directory) =>
+            _normalizeQuarkEntryNameKey(directory.name) ==
+            _normalizeQuarkEntryNameKey(segment),
+        orElse: () => const QuarkDirectoryEntry(
+          fid: '',
+          name: '',
+          path: '',
+        ),
+      );
+      if (match.fid.isEmpty) {
+        return null;
+      }
+      currentFid = match.fid;
+      resolvedDirectory = match;
+    }
+    return resolvedDirectory;
+  }
+
+  Future<List<QuarkFileEntry>> listEntriesRecursively({
+    required String cookie,
+    String parentFid = '0',
+  }) async {
+    final collected = <String, QuarkFileEntry>{};
+
+    Future<void> visit(String currentParentFid) async {
+      final entries = await listEntries(
+        cookie: cookie,
+        parentFid: currentParentFid,
+      );
+      for (final entry in entries) {
+        collected.putIfAbsent(entry.fid, () => entry);
+      }
+      for (final entry in entries) {
+        if (!entry.isDirectory) {
+          continue;
+        }
+        await visit(entry.fid);
+      }
+    }
+
+    await visit(parentFid.trim().isEmpty ? '0' : parentFid.trim());
+    return collected.values.toList(growable: false);
   }
 
   Future<QuarkResolvedDownload> resolveDownload({
@@ -592,6 +763,192 @@ class QuarkSaveClient {
     return nestedEntries;
   }
 
+  Future<List<QuarkSharePreviewEntry>> _collectSharePreviewEntries({
+    required String pwdId,
+    required String stoken,
+    required String cookie,
+    required List<_QuarkShareEntry> entries,
+    String parentRelativePath = '',
+  }) async {
+    final previewEntries = <QuarkSharePreviewEntry>[];
+    for (final entry in entries) {
+      final relativePath = parentRelativePath.isEmpty
+          ? entry.name
+          : '$parentRelativePath/${entry.name}';
+      previewEntries.add(
+        QuarkSharePreviewEntry(
+          name: entry.name,
+          relativePath: relativePath,
+          isDirectory: entry.isDirectory,
+        ),
+      );
+      if (!entry.isDirectory) {
+        continue;
+      }
+      final nestedEntries = await _fetchShareEntries(
+        pwdId: pwdId,
+        stoken: stoken,
+        pdirFid: entry.fid,
+        cookie: cookie,
+      );
+      if (nestedEntries.isEmpty) {
+        continue;
+      }
+      previewEntries.addAll(
+        await _collectSharePreviewEntries(
+          pwdId: pwdId,
+          stoken: stoken,
+          cookie: cookie,
+          entries: nestedEntries,
+          parentRelativePath: relativePath,
+        ),
+      );
+    }
+    return previewEntries;
+  }
+
+  Future<_QuarkRecursiveSavePlan> _buildRecursiveSavePlan({
+    required String pwdId,
+    required String stoken,
+    required String cookie,
+    required String targetDirectoryFid,
+    required List<_QuarkShareEntry> entries,
+  }) async {
+    if (entries.isEmpty) {
+      return const _QuarkRecursiveSavePlan();
+    }
+    final existingEntries = await listEntries(
+      cookie: cookie,
+      parentFid: targetDirectoryFid,
+    );
+    if (existingEntries.isEmpty) {
+      return _QuarkRecursiveSavePlan(
+        batches: [
+          _QuarkSaveBatch(
+            targetDirectoryFid: targetDirectoryFid,
+            entries: entries,
+          ),
+        ],
+        skippedCount: 0,
+      );
+    }
+    final existingFileNameKeys = existingEntries
+        .where((item) => !item.isDirectory)
+        .map((item) => _normalizeQuarkEntryNameKey(item.name))
+        .where((item) => item.isNotEmpty)
+        .toSet();
+    final existingDirectoriesByName = <String, QuarkFileEntry>{};
+    for (final entry in existingEntries) {
+      if (!entry.isDirectory) {
+        continue;
+      }
+      final nameKey = _normalizeQuarkEntryNameKey(entry.name);
+      if (nameKey.isEmpty || existingDirectoriesByName.containsKey(nameKey)) {
+        continue;
+      }
+      existingDirectoriesByName[nameKey] = entry;
+    }
+
+    final batches = <_QuarkSaveBatch>[];
+    final pendingEntries = <_QuarkShareEntry>[];
+    var skippedCount = 0;
+    for (final entry in entries) {
+      final nameKey = _normalizeQuarkEntryNameKey(entry.name);
+      if (!entry.isDirectory) {
+        if (nameKey.isNotEmpty && existingFileNameKeys.contains(nameKey)) {
+          skippedCount += 1;
+        } else {
+          pendingEntries.add(entry);
+        }
+        continue;
+      }
+      final matchedDirectory =
+          nameKey.isEmpty ? null : existingDirectoriesByName[nameKey];
+      if (matchedDirectory == null) {
+        pendingEntries.add(entry);
+        continue;
+      }
+      final nestedEntries = await _fetchShareEntries(
+        pwdId: pwdId,
+        stoken: stoken,
+        pdirFid: entry.fid,
+        cookie: cookie,
+      );
+      if (nestedEntries.isEmpty) {
+        continue;
+      }
+      final nestedPlan = await _buildRecursiveSavePlan(
+        pwdId: pwdId,
+        stoken: stoken,
+        cookie: cookie,
+        targetDirectoryFid: matchedDirectory.fid,
+        entries: nestedEntries,
+      );
+      skippedCount += nestedPlan.skippedCount;
+      batches.addAll(nestedPlan.batches);
+    }
+    if (pendingEntries.isNotEmpty) {
+      batches.insert(
+        0,
+        _QuarkSaveBatch(
+          targetDirectoryFid: targetDirectoryFid,
+          entries: pendingEntries,
+        ),
+      );
+    }
+    return _QuarkRecursiveSavePlan(
+      batches: batches,
+      skippedCount: skippedCount,
+    );
+  }
+
+  Future<String> _saveShareEntries({
+    required String pwdId,
+    required String stoken,
+    required String cookie,
+    required String targetDirectoryFid,
+    required List<_QuarkShareEntry> entries,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/1/clouddrive/share/sharepage/save').replace(
+        queryParameters: {
+          'pr': 'ucpro',
+          'fr': 'pc',
+          'uc_param_str': '',
+          'app': 'clouddrive',
+          '__dt': '${(math.Random().nextDouble() * 4 + 1).round() * 60 * 1000}',
+          '__t': '${DateTime.now().millisecondsSinceEpoch / 1000}',
+        },
+      ),
+      headers: _headers(cookie),
+      body: jsonEncode({
+        'fid_list': entries.map((item) => item.fid).toList(),
+        'fid_token_list': entries.map((item) => item.shareFidToken).toList(),
+        'to_pdir_fid': targetDirectoryFid,
+        'pwd_id': pwdId,
+        'stoken': stoken,
+        'pdir_fid': '0',
+        'scene': 'link',
+      }),
+    );
+
+    final payload = _decode(response);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw QuarkSaveException(
+        _resolveErrorMessage(payload, response.statusCode),
+      );
+    }
+    final code = payload['code'] as int? ?? -1;
+    if (code != 0) {
+      throw QuarkSaveException(
+        _resolveErrorMessage(payload, response.statusCode),
+      );
+    }
+
+    final data = payload['data'] as Map<String, dynamic>? ?? const {};
+    return '${data['task_id'] ?? ''}'.trim();
+  }
+
   Map<String, String> _headers(String cookie) {
     return {
       'Accept': 'application/json',
@@ -706,38 +1063,6 @@ class QuarkSaveClient {
     return '夸克保存失败：HTTP $statusCode';
   }
 
-  String _normalizeDirectoryPath(String rawPath) {
-    final trimmed = rawPath.trim();
-    if (trimmed.isEmpty || trimmed == '/') {
-      return '/';
-    }
-    final normalized = trimmed.replaceAll('\\', '/');
-    final withLeadingSlash =
-        normalized.startsWith('/') ? normalized : '/$normalized';
-    return withLeadingSlash.replaceFirst(RegExp(r'/+$'), '');
-  }
-
-  String _sanitizeDirectoryName(String rawName) {
-    final sanitized = rawName
-        .replaceAll(RegExp(r'[\\/:*?"<>|]+'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    return sanitized == '.' || sanitized == '..' ? '' : sanitized;
-  }
-
-  String _lastDirectoryName(String path) {
-    final normalized = _normalizeDirectoryPath(path);
-    if (normalized == '/') {
-      return '';
-    }
-    final segments = normalized
-        .split('/')
-        .map((item) => item.trim())
-        .where((item) => item.isNotEmpty)
-        .toList(growable: false);
-    return segments.isEmpty ? '' : segments.last;
-  }
-
   _ParsedQuarkShare? _parseShareUrl(String rawUrl) {
     final uri = Uri.tryParse(rawUrl.trim());
     if (uri == null) {
@@ -774,12 +1099,48 @@ class QuarkSaveResult {
   const QuarkSaveResult({
     required this.taskId,
     required this.savedCount,
+    this.skippedCount = 0,
     required this.targetFolderPath,
   });
 
   final String taskId;
   final int savedCount;
+  final int skippedCount;
   final String targetFolderPath;
+
+  String get summary => '保存 $savedCount 个，略过 $skippedCount 个';
+}
+
+class QuarkSharePreview {
+  const QuarkSharePreview({
+    required this.targetFolderPath,
+    this.entries = const [],
+  });
+
+  final String targetFolderPath;
+  final List<QuarkSharePreviewEntry> entries;
+
+  List<QuarkSharePreviewEntry> get videoEntries {
+    return entries.where((entry) => entry.isVideo).toList(growable: false);
+  }
+}
+
+class QuarkSharePreviewEntry {
+  const QuarkSharePreviewEntry({
+    required this.name,
+    required this.relativePath,
+    required this.isDirectory,
+  });
+
+  final String name;
+  final String relativePath;
+  final bool isDirectory;
+
+  String get extension => _resolveQuarkExtension(name);
+
+  bool get isVideo {
+    return !isDirectory && _quarkVideoExtensions.contains(extension);
+  }
 }
 
 class QuarkConnectionStatus {
@@ -835,6 +1196,16 @@ class _ParsedQuarkShare {
   final String pwdId;
   final String passcode;
   final String pdirFid;
+}
+
+class _QuarkEnsuredDirectory {
+  const _QuarkEnsuredDirectory({
+    required this.fid,
+    required this.alreadyExists,
+  });
+
+  final String fid;
+  final bool alreadyExists;
 }
 
 class QuarkDirectoryEntry {
@@ -983,24 +1354,88 @@ String _resolveQuarkExtension(String name) {
 class _QuarkShareEntry {
   const _QuarkShareEntry({
     required this.fid,
+    required this.name,
     required this.shareFidToken,
     required this.isDirectory,
   });
 
   final String fid;
+  final String name;
   final String shareFidToken;
   final bool isDirectory;
 
   static _QuarkShareEntry? fromJson(Map<String, dynamic> json) {
     final fid = '${json['fid'] ?? ''}'.trim();
+    final name = '${json['file_name'] ?? json['name'] ?? ''}'.trim();
     final shareFidToken = '${json['share_fid_token'] ?? ''}'.trim();
-    if (fid.isEmpty || shareFidToken.isEmpty) {
+    if (fid.isEmpty || name.isEmpty || shareFidToken.isEmpty) {
       return null;
     }
     return _QuarkShareEntry(
       fid: fid,
+      name: name,
       shareFidToken: shareFidToken,
       isDirectory: json['dir'] == true,
     );
   }
+}
+
+class _QuarkSaveBatch {
+  const _QuarkSaveBatch({
+    required this.targetDirectoryFid,
+    required this.entries,
+  });
+
+  final String targetDirectoryFid;
+  final List<_QuarkShareEntry> entries;
+}
+
+class _QuarkRecursiveSavePlan {
+  const _QuarkRecursiveSavePlan({
+    this.batches = const [],
+    this.skippedCount = 0,
+  });
+
+  final List<_QuarkSaveBatch> batches;
+  final int skippedCount;
+}
+
+String _normalizeQuarkEntryNameKey(String raw) {
+  return raw.trim().toLowerCase();
+}
+
+String _resolveQuarkTargetFolderPath({
+  required String toPdirPath,
+  required String saveFolderName,
+}) {
+  final normalizedTargetDirectoryPath = normalizeQuarkDirectoryPath(
+    toPdirPath,
+  );
+  final sanitizedFolderName = sanitizeQuarkDirectoryName(saveFolderName);
+  final currentTargetDirectoryName = sanitizeQuarkDirectoryName(
+    _lastQuarkDirectoryName(normalizedTargetDirectoryPath),
+  );
+  final shouldCreateNamedDirectory = sanitizedFolderName.isNotEmpty &&
+      currentTargetDirectoryName.toLowerCase() !=
+          sanitizedFolderName.toLowerCase();
+  if (!shouldCreateNamedDirectory || sanitizedFolderName.isEmpty) {
+    return normalizedTargetDirectoryPath;
+  }
+  if (normalizedTargetDirectoryPath == '/') {
+    return '/$sanitizedFolderName';
+  }
+  return '$normalizedTargetDirectoryPath/$sanitizedFolderName';
+}
+
+String _lastQuarkDirectoryName(String path) {
+  final normalized = normalizeQuarkDirectoryPath(path);
+  if (normalized == '/') {
+    return '';
+  }
+  final segments = normalized
+      .split('/')
+      .map((item) => item.trim())
+      .where((item) => item.isNotEmpty)
+      .toList(growable: false);
+  return segments.isEmpty ? '' : segments.last;
 }

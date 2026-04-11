@@ -161,4 +161,35 @@ void main() {
     expect(preference.outroDuration, const Duration(seconds: 72));
     expect(preference.seriesTitle, '请回答1988');
   });
+
+  test('does not persist loopback relay url in playback history', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final repository = PlaybackMemoryRepository(sharedPreferences: prefs);
+    const target = PlaybackTarget(
+      title: '夸克电影',
+      sourceId: 'quark-main',
+      streamUrl: 'http://127.0.0.1:55065/playback-relay/session/movie.mp4',
+      sourceName: '夸克',
+      sourceKind: MediaSourceKind.quark,
+      actualAddress: 'https://webdav.example.com/quark/movie.strm',
+      itemId: 'quark-movie-1',
+      itemType: 'movie',
+      headers: {'Cookie': 'stale-cookie'},
+      container: 'mp4',
+    );
+
+    await repository.saveProgress(
+      target: target,
+      position: const Duration(minutes: 8),
+      duration: const Duration(minutes: 90),
+    );
+
+    final entry = await repository.loadEntryForTarget(target);
+
+    expect(entry, isNotNull);
+    expect(entry!.target.streamUrl, isEmpty);
+    expect(entry.target.headers, isEmpty);
+    expect(entry.target.itemId, 'quark-movie-1');
+    expect(entry.target.needsResolution, isTrue);
+  });
 }

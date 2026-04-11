@@ -4,7 +4,7 @@ part of '../player_page.dart';
 
 extension _PlayerPageStateRuntimeActions on _PlayerPageState {
   Future<void> _applyStartupPlaybackPreferences(Player player) async {
-    final settings = ref.read(appSettingsProvider);
+    final settings = _providerContainer.read(appSettingsProvider);
 
     try {
       if ((settings.playbackDefaultSpeed - 1.0).abs() > 0.0001) {
@@ -53,7 +53,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     _lastProgressPersistedAt = now;
     _lastPersistedPosition = _latestPosition;
 
-    await ref.read(playbackMemoryRepositoryProvider).saveProgress(
+    await _providerContainer.read(playbackMemoryRepositoryProvider).saveProgress(
           target: target,
           position: _latestPosition,
           duration: _latestDuration > Duration.zero
@@ -252,12 +252,12 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
   }
 
   Future<void> _loadExternalSubtitle(Player player) async {
-    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
+    final isTelevision = _isTelevisionPlaybackDevice;
     if (isTelevision) {
       _showMessage('电视模式暂不打开系统文件选择器，请改用内嵌字幕或在其他设备上准备字幕文件。');
       return;
     }
-    final picker = ref.read(subtitleFilePickerProvider);
+    final picker = _providerContainer.read(subtitleFilePickerProvider);
     if (!picker.isSupported) {
       _showMessage(picker.unsupportedReason);
       return;

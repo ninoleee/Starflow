@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -36,6 +37,14 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
     if (upstreamUri == null || !upstreamUri.hasScheme) {
       return target;
     }
+    _traceQuarkRelay(
+      'quark.relay.prepare.begin',
+      target: target,
+      fields: {
+        'upstreamUrl': upstreamUri.toString(),
+        'headers': target.headers.keys.join('|'),
+      },
+    );
 
     await _ensureServer();
     await clear(reason: 'replace-playback-relay-session');
@@ -48,6 +57,7 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
       headers: normalizedHeaders,
       cookies:
           _parseCookieHeader(normalizedHeaders[HttpHeaders.cookieHeader] ?? ''),
+      fallbackContentType: _fallbackContentTypeForTarget(target),
     );
     _sessions[sessionId] = session;
 
@@ -60,15 +70,24 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
       pathSegments: [
         kPlaybackRelayPathSegment,
         sessionId,
-        _safeRelayPathSegment(target.title),
+        _safeRelayPathSegment(target),
       ],
     );
 
-    return target.copyWith(
+    final relayTarget = target.copyWith(
       streamUrl: relayUri.toString(),
       actualAddress: upstreamUri.toString(),
       headers: const <String, String>{},
     );
+    _traceQuarkRelay(
+      'quark.relay.prepare.ready',
+      target: relayTarget,
+      fields: {
+        'relayUrl': relayUri.toString(),
+        'fallbackContentType': session.fallbackContentType,
+      },
+    );
+    return relayTarget;
   }
 
   @override
@@ -136,6 +155,19 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
       );
       request.response.statusCode = upstream.statusCode;
       _copyUpstreamHeaders(upstream.headers, request.response.headers);
+      _applyFallbackResponseHeaders(session, request.response.headers);
+      _traceQuarkRelay(
+        'quark.relay.request.ready',
+        fields: {
+          'method': request.method,
+          'path': request.uri.path,
+          'statusCode': upstream.statusCode,
+          'contentType':
+              request.response.headers.value(HttpHeaders.contentTypeHeader) ??
+                  '',
+          'upstreamUrl': session.currentUri.toString(),
+        },
+      );
 
       if (request.method == 'HEAD') {
         await upstream.drain<void>();
@@ -144,11 +176,22 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
       }
 
       await upstream.pipe(request.response);
-    } catch (_) {
+    } catch (error, stackTrace) {
       try {
         request.response.statusCode = HttpStatus.badGateway;
         request.response.write('Playback relay failed');
       } catch (_) {}
+      _traceQuarkRelay(
+        'quark.relay.request.failed',
+        fields: {
+          'method': request.method,
+          'path': request.uri.path,
+          'upstreamUrl':
+              _sessionUrlForTrace(segments: request.uri.pathSegments),
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       await request.response.close();
     }
   }
@@ -163,8 +206,23 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
           HttpHeaders.acceptHeader: <String>['*/*'],
         },
       );
+      _traceQuarkRelay(
+        'quark.relay.warmup.ready',
+        fields: {
+          'statusCode': response.statusCode,
+          'upstreamUrl': session.currentUri.toString(),
+          'contentType':
+              response.headers.value(HttpHeaders.contentTypeHeader) ?? '',
+        },
+      );
       await response.drain<void>();
-    } catch (_) {
+    } catch (error, stackTrace) {
+      _traceQuarkRelay(
+        'quark.relay.warmup.failed',
+        fields: {'upstreamUrl': session.currentUri.toString()},
+        error: error,
+        stackTrace: stackTrace,
+      );
       // Warm-up is best-effort. Playback must still proceed even if the
       // upstream refuses the initial probe or DNS is temporarily unavailable.
     }
@@ -283,7 +341,8 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
       HttpHeaders.cacheControlHeader ||
       HttpHeaders.ifModifiedSinceHeader ||
       HttpHeaders.ifRangeHeader ||
-      HttpHeaders.pragmaHeader => true,
+      HttpHeaders.pragmaHeader =>
+        true,
       _ => false,
     };
   }
@@ -301,7 +360,8 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
     });
   }
 
-  void _captureResponseCookies(_RelaySession session, HttpClientResponse response) {
+  void _captureResponseCookies(
+      _RelaySession session, HttpClientResponse response) {
     for (final cookie in response.cookies) {
       final name = cookie.name.trim();
       if (name.isEmpty) {
@@ -310,8 +370,8 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
       session.cookies[name] = cookie.value;
     }
 
-    final setCookieHeaders = response.headers[HttpHeaders.setCookieHeader] ??
-        const <String>[];
+    final setCookieHeaders =
+        response.headers[HttpHeaders.setCookieHeader] ?? const <String>[];
     for (final header in setCookieHeaders) {
       final cookieMap = _parseCookieHeader(header.split(';').first);
       session.cookies.addAll(cookieMap);
@@ -377,7 +437,8 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
       'te' ||
       'trailer' ||
       'transfer-encoding' ||
-      'upgrade' => true,
+      'upgrade' =>
+        true,
       _ => false,
     };
   }
@@ -395,15 +456,93 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
     return '${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}-${_nextSessionId.toRadixString(36)}';
   }
 
-  String _safeRelayPathSegment(String title) {
-    final sanitized = title
+  String _safeRelayPathSegment(PlaybackTarget target) {
+    final sanitizedBaseName = target.title
         .replaceAll(RegExp(r'[\\/:*?"<>|]+'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
-    if (sanitized.isEmpty) {
-      return 'stream';
+    final fileExtension = _preferredRelayFileExtension(target);
+    final baseName = sanitizedBaseName.isEmpty ? 'stream' : sanitizedBaseName;
+    if (fileExtension.isEmpty ||
+        baseName.toLowerCase().endsWith('.$fileExtension')) {
+      return baseName;
     }
-    return sanitized;
+    return '$baseName.$fileExtension';
+  }
+
+  void _applyFallbackResponseHeaders(
+    _RelaySession session,
+    HttpHeaders headers,
+  ) {
+    if (session.fallbackContentType.isEmpty) {
+      return;
+    }
+    final existingContentType =
+        headers.value(HttpHeaders.contentTypeHeader)?.trim().toLowerCase() ??
+            '';
+    if (existingContentType.isEmpty ||
+        existingContentType == 'application/octet-stream') {
+      headers.set(HttpHeaders.contentTypeHeader, session.fallbackContentType);
+    }
+  }
+
+  String _fallbackContentTypeForTarget(PlaybackTarget target) {
+    final fileExtension = _preferredRelayFileExtension(target);
+    return switch (fileExtension) {
+      'mp4' || 'm4v' => 'video/mp4',
+      'mov' => 'video/quicktime',
+      'mkv' => 'video/x-matroska',
+      'avi' => 'video/x-msvideo',
+      'ts' || 'm2ts' => 'video/mp2t',
+      'webm' => 'video/webm',
+      'flv' => 'video/x-flv',
+      'wmv' => 'video/x-ms-wmv',
+      'mpg' || 'mpeg' => 'video/mpeg',
+      _ => '',
+    };
+  }
+
+  String _preferredRelayFileExtension(PlaybackTarget target) {
+    for (final candidate in [
+      target.container,
+      _fileExtensionFromUrl(target.actualAddress),
+      _fileExtensionFromUrl(target.streamUrl),
+    ]) {
+      final normalized = candidate.trim().toLowerCase();
+      if (_isUsableRelayFileExtension(normalized)) {
+        return normalized;
+      }
+    }
+    return '';
+  }
+
+  String _fileExtensionFromUrl(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      return '';
+    }
+    final uri = Uri.tryParse(trimmed);
+    final path = (uri?.path ?? trimmed).trim();
+    final dotIndex = path.lastIndexOf('.');
+    if (dotIndex < 0 || dotIndex >= path.length - 1) {
+      return '';
+    }
+    return path.substring(dotIndex + 1).trim().toLowerCase();
+  }
+
+  bool _isUsableRelayFileExtension(String value) {
+    if (value.isEmpty || value.length > 8) {
+      return false;
+    }
+    return RegExp(r'^[a-z0-9]+$').hasMatch(value);
+  }
+
+  String _sessionUrlForTrace({required List<String> segments}) {
+    if (segments.length < 2) {
+      return '';
+    }
+    final session = _sessions[segments[1].trim()];
+    return session?.currentUri.toString() ?? '';
   }
 }
 
@@ -413,10 +552,33 @@ class _RelaySession {
     required this.currentUri,
     required this.headers,
     required this.cookies,
+    required this.fallbackContentType,
   });
 
   final Uri originUri;
   Uri currentUri;
   final Map<String, String> headers;
   final Map<String, String> cookies;
+  final String fallbackContentType;
+}
+
+void _traceQuarkRelay(
+  String stage, {
+  PlaybackTarget? target,
+  Map<String, Object?> fields = const <String, Object?>{},
+  Object? error,
+  StackTrace? stackTrace,
+}) {
+  playbackTrace(
+    stage,
+    fields: <String, Object?>{
+      if (target != null)
+        'title': target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
+      if (target != null) 'sourceKind': target.sourceKind.name,
+      if (target != null) 'container': target.container,
+      ...fields,
+    },
+    error: error,
+    stackTrace: stackTrace,
+  );
 }

@@ -6,8 +6,6 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
-import 'package:starflow/features/playback/application/playback_stream_relay_service.dart';
 import 'package:starflow/features/playback/application/playback_target_resolver.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
@@ -15,9 +13,8 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
-  test('PlaybackTargetResolver wraps Quark targets with playback relay',
+  test('PlaybackTargetResolver returns direct Quark targets with headers',
       () async {
-    final relayService = _FakePlaybackStreamRelayService();
     final container = ProviderContainer(
       overrides: [
         appSettingsProvider.overrideWithValue(
@@ -63,7 +60,6 @@ void main() {
             }),
           ),
         ),
-        playbackStreamRelayServiceProvider.overrideWithValue(relayService),
       ],
     );
     addTearDown(container.dispose);
@@ -84,22 +80,17 @@ void main() {
 
     expect(
       resolved.streamUrl,
-      'http://127.0.0.1:8787/playback-relay/session/quark-file-1.mkv',
+      'https://download.example.com/quark-file-1.mkv',
     );
     expect(resolved.actualAddress,
         'https://download.example.com/quark-file-1.mkv');
-    expect(resolved.headers, isEmpty);
+    expect(resolved.headers['Cookie'], contains('__puus=abc'));
     expect(resolved.fileSizeBytes, 3221225472);
-    expect(relayService.preparedTarget, isNotNull);
-    expect(
-      relayService.preparedTarget!.headers['Cookie'],
-      contains('__puus=abc'),
-    );
   });
 
-  test('PlaybackTargetResolver resolves Quark resource ids to file ids', () async {
+  test('PlaybackTargetResolver resolves Quark resource ids to file ids',
+      () async {
     final requestedFids = <String>[];
-    final relayService = _FakePlaybackStreamRelayService();
     final container = ProviderContainer(
       overrides: [
         appSettingsProvider.overrideWithValue(
@@ -146,7 +137,6 @@ void main() {
             }),
           ),
         ),
-        playbackStreamRelayServiceProvider.overrideWithValue(relayService),
       ],
     );
     addTearDown(container.dispose);
@@ -167,32 +157,93 @@ void main() {
     expect(requestedFids, ['quark-file-2']);
     expect(resolved.itemId, 'quark-file-2');
     expect(
-      resolved.streamUrl.startsWith('http://127.0.0.1:8787/playback-relay/'),
-      isTrue,
+      resolved.streamUrl,
+      'https://download.example.com/quark-file-2.mkv',
     );
-    expect(relayService.preparedTarget?.actualAddress,
+    expect(resolved.actualAddress,
         'https://download.example.com/quark-file-2.mkv');
   });
-}
 
-class _FakePlaybackStreamRelayService implements PlaybackStreamRelayService {
-  PlaybackTarget? preparedTarget;
-
-  @override
-  Future<void> clear({String reason = ''}) async {}
-
-  @override
-  Future<void> close() async {}
-
-  @override
-  Future<PlaybackTarget> prepareTarget(PlaybackTarget target) async {
-    preparedTarget = target;
-    final fileName = Uri.tryParse(target.streamUrl)?.pathSegments.lastOrNull ??
-        'stream.mkv';
-    return target.copyWith(
-      streamUrl:
-          'http://127.0.0.1:8787/$kPlaybackRelayPathSegment/session/$fileName',
-      headers: const <String, String>{},
+  test('PlaybackTargetResolver resets stale loopback relay targets for Quark',
+      () async {
+    final requestedFids = <String>[];
+    final container = ProviderContainer(
+      overrides: [
+        appSettingsProvider.overrideWithValue(
+          SeedData.defaultSettings.copyWith(
+            mediaSources: const [
+              MediaSourceConfig(
+                id: 'quark-main',
+                name: 'Quark Drive',
+                kind: MediaSourceKind.quark,
+                endpoint: '0',
+                libraryPath: '/',
+                enabled: true,
+              ),
+            ],
+            networkStorage: const NetworkStorageConfig(
+              quarkCookie: 'kps=test; sign=test;',
+            ),
+          ),
+        ),
+        quarkSaveClientProvider.overrideWithValue(
+          QuarkSaveClient(
+            MockClient((request) async {
+              final body = jsonDecode(request.body) as Map<String, dynamic>;
+              requestedFids.addAll(
+                (body['fids'] as List<dynamic>? ?? const [])
+                    .map((item) => '$item'),
+              );
+              return http.Response(
+                jsonEncode({
+                  'code': 0,
+                  'data': {
+                    'download_list': [
+                      {
+                        'fid': 'quark-file-stale',
+                        'download_url':
+                            'https://download.example.com/fresh-quark-file.mp4',
+                        'size': 2048,
+                      },
+                    ],
+                  },
+                }),
+                200,
+                headers: const {
+                  'set-cookie': '__puus=fresh; Path=/',
+                },
+              );
+            }),
+          ),
+        ),
+      ],
     );
-  }
+    addTearDown(container.dispose);
+
+    final resolver = PlaybackTargetResolver(read: container.read);
+    final target = const PlaybackTarget(
+      title: 'Quark Resume',
+      sourceId: 'quark-main',
+      sourceName: 'Quark Drive',
+      sourceKind: MediaSourceKind.quark,
+      streamUrl: 'http://127.0.0.1:55065/playback-relay/stale/movie.mp4',
+      actualAddress: 'https://webdav.example.com/quark/movie.strm',
+      itemId: 'quark-file-stale',
+      itemType: 'movie',
+      container: 'mp4',
+    );
+
+    final resolved = await resolver.resolve(target);
+
+    expect(requestedFids, ['quark-file-stale']);
+    expect(
+      resolved.streamUrl,
+      'https://download.example.com/fresh-quark-file.mp4',
+    );
+    expect(
+      resolved.actualAddress,
+      'https://download.example.com/fresh-quark-file.mp4',
+    );
+    expect(resolved.headers['Cookie'], contains('__puus=fresh'));
+  });
 }

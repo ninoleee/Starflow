@@ -1,12 +1,15 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 class AppTheme {
+  static const String _webFontFamily = 'system-ui';
   static const _cjkFontFallback = <String>[
     'PingFang SC',
     'Hiragino Sans GB',
     'Noto Sans CJK SC',
     'Source Han Sans SC',
     'Microsoft YaHei',
+    'sans-serif',
   ];
 
   static ThemeData get lightTheme {
@@ -59,10 +62,12 @@ class AppTheme {
     ColorScheme colorScheme, {
     Color? scaffoldBackgroundOverride,
   }) {
-    final baseTextTheme = ThemeData(
-      useMaterial3: true,
-      colorScheme: colorScheme,
-    ).textTheme;
+    final baseTextTheme = _applyAppFonts(
+      ThemeData(
+        useMaterial3: true,
+        colorScheme: colorScheme,
+      ).textTheme,
+    );
 
     final navUnselectedIcon = colorScheme.brightness == Brightness.dark
         ? colorScheme.onSurfaceVariant
@@ -71,6 +76,7 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
+      fontFamily: kIsWeb ? _webFontFamily : null,
       scaffoldBackgroundColor:
           scaffoldBackgroundOverride ?? colorScheme.surface,
       splashFactory: InkSparkle.splashFactory,
@@ -78,25 +84,21 @@ class AppTheme {
         headlineSmall: baseTextTheme.headlineSmall?.copyWith(
           fontWeight: FontWeight.w800,
           letterSpacing: 0,
-          fontFamilyFallback: _cjkFontFallback,
           color: colorScheme.onSurface,
         ),
         titleLarge: baseTextTheme.titleLarge?.copyWith(
           fontWeight: FontWeight.w700,
           letterSpacing: 0,
-          fontFamilyFallback: _cjkFontFallback,
           color: colorScheme.onSurface,
         ),
         titleMedium: baseTextTheme.titleMedium?.copyWith(
           fontWeight: FontWeight.w700,
           letterSpacing: 0,
-          fontFamilyFallback: _cjkFontFallback,
           color: colorScheme.onSurface,
         ),
         titleSmall: baseTextTheme.titleSmall?.copyWith(
           fontWeight: FontWeight.w700,
           letterSpacing: 0,
-          fontFamilyFallback: _cjkFontFallback,
           color: colorScheme.onSurface,
         ),
         bodyLarge: baseTextTheme.bodyLarge?.copyWith(
@@ -121,7 +123,6 @@ class AppTheme {
           color: colorScheme.onSurface,
           fontWeight: FontWeight.w700,
           letterSpacing: 0,
-          fontFamilyFallback: _cjkFontFallback,
         ),
       ),
       cardTheme: CardThemeData(
@@ -274,6 +275,36 @@ class AppTheme {
           borderRadius: BorderRadius.circular(18),
         ),
       ),
+    );
+  }
+
+  static TextTheme _applyAppFonts(TextTheme textTheme) {
+    return textTheme.copyWith(
+      displayLarge: _withAppFont(textTheme.displayLarge),
+      displayMedium: _withAppFont(textTheme.displayMedium),
+      displaySmall: _withAppFont(textTheme.displaySmall),
+      headlineLarge: _withAppFont(textTheme.headlineLarge),
+      headlineMedium: _withAppFont(textTheme.headlineMedium),
+      headlineSmall: _withAppFont(textTheme.headlineSmall),
+      titleLarge: _withAppFont(textTheme.titleLarge),
+      titleMedium: _withAppFont(textTheme.titleMedium),
+      titleSmall: _withAppFont(textTheme.titleSmall),
+      bodyLarge: _withAppFont(textTheme.bodyLarge),
+      bodyMedium: _withAppFont(textTheme.bodyMedium),
+      bodySmall: _withAppFont(textTheme.bodySmall),
+      labelLarge: _withAppFont(textTheme.labelLarge),
+      labelMedium: _withAppFont(textTheme.labelMedium),
+      labelSmall: _withAppFont(textTheme.labelSmall),
+    );
+  }
+
+  static TextStyle? _withAppFont(TextStyle? style) {
+    if (style == null) {
+      return null;
+    }
+    return style.copyWith(
+      fontFamily: kIsWeb ? _webFontFamily : null,
+      fontFamilyFallback: _cjkFontFallback,
     );
   }
 }

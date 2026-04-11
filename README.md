@@ -32,7 +32,7 @@
   - 首页 `Hero` 的后台补数
   - 详情页自动补元数据与本地资源匹配启动
   - 隐藏页面里的网络图片继续发起加载
-- 非 `TV` 的内嵌 `MPV` 现在使用轻量自定义播放叠层，保留返回、播放/暂停、进度、字幕、音轨、全屏和设置等常用入口；桌面端可按需显示音量滑杆，支持的平台会继续显示 `PiP / AirPlay` 入口
+- 非 `TV` 的内嵌 `MPV` 现在使用更轻的官方式 Material 播放叠层：顶部去掉额外阴影/装饰，底栏只保留 `Material + IconButton + Slider + Text` 这组基础控件；窗口态只允许点击呼出控件，音量/字幕/音轨统一收进“更多”播放设置，支持的平台会继续显示 `PiP / AirPlay` 入口
 - Windows 的内置 `MPV` 在打开新会话前会串行等待上一实例完成 `pause -> stop -> dispose`，并把退出页、切新片源、关闭后台播放等入口统一收敛到同一套清理流程，尽量避免叠音、退出后残留后台播放和全屏退出时的销毁异常
 - 内置 `MPV` 现在已补上 `ISO` 直开支持：本地文件、`file://` 与局域网路径会优先走 `dvd-device / bluray-device`，远程 `ISO` 则退回普通媒体打开，避免把远程地址误当设备源
 - 播放 trace、字幕搜索 trace 默认关闭，内置 `MPV` 日志级别也已压到 `error`
@@ -42,6 +42,8 @@
 - 首页模块装配现在拆成 `_homeSectionSeedProvider` 抓取层 + `homeSectionProvider` 缓存装饰层；详情缓存 revision 更新时只会重做轻量合并，不会让首页整轮重新抓取来源或豆瓣数据
 - 首页普通模块已经改成按 section 独立订阅；`Hero` 当前项、翻页按钮和指示状态也收敛到局部监听，切换时不再带动整页 `setState`
 - 首页 `Hero` 的后台补数现在增加了列表快照去重与预取协同；同一批条目在首次进入和前后台切换时不会重复排队补数
+- 首页 presentation 已继续拆成页面编排层 + Hero/section 子树；`home_page.dart` 主要保留页面级状态、焦点和 section 装配，`home_page_hero.dart` 收口 Hero / pager / artwork，`home_page_sections.dart` 收口 section slot / shell / carousel / loading 这组通用展示块
+- 首页 application 已继续拆成 `HomePageController` 主编排、`home_controller_models.dart` 视图模型和 `HomeFeedRepository` 数据装配层，`home_controller.dart` 主要保留 controller + provider wiring
 - 首页与媒体库读取详情缓存时已经统一切到批量读取接口；豆瓣列表、最近播放、普通海报流和轮播都会复用同一条批量缓存合并链路
 - 页面级异步状态继续统一到 `RetainedAsyncController / resolveRetainedAsyncValue`；详情、媒体库、人物作品等页在 inactive / 回前台 / 播放让路场景下会优先保留最近一次已解析结果
 - 详情页、媒体库、人物作品页与搜索页在页面失活时，现在优先取消当前会话或刷新任务，不再无条件失效成功缓存，返回页面时会减少重复 loading 和重复请求
@@ -51,8 +53,11 @@
 - 图片缓存 identity 已升级成 `URL + headers`，并增加磁盘 metadata、`30` 天过期、stale fallback 与双阈值内存淘汰；同一张候选图的解析与尺寸分析现在也会在组件间共享同一条 future，减少同屏重复拉图和重复解码
 - 页面背景 glow、桌面横向翻页按钮和海报卡片排版都已收口到更轻的重绘边界；滚动和焦点切换时只刷新真正变化的局部区域
 - `AppSettingsPerformanceX` 现在提供统一的 `effective*` 性能派生策略；路由、导航壳、首页 Hero、详情页和播放器都会按同一套有效策略决定是否启用动画、磨砂、自动隐藏和轻量叠层
-- 播放启动链已经拆成“启动前准备 + 路由判定”两步；进入播放器时也会更早切到“播放优先”模式，尽快压住首页 Hero 补数、详情自动补元数据和隐藏页图片加载
+- 播放启动链已经收口到 `PlaybackStartupCoordinator / PlaybackTargetResolver / PlaybackEngineRouter / PlaybackStartupExecutor`；进入播放器时也会更早切到“播放优先”模式，尽快压住首页 Hero 补数、详情自动补元数据和隐藏页图片加载
+- 播放页 presentation 已继续收口：`player_page.dart` 主要保留页面壳、状态字段和顶层装配；`widgets/player_page_platform_session.part.dart`、`player_page_startup_mpv.part.dart`、`player_page_runtime_actions.part.dart`、`player_page_controls.part.dart` 负责平台会话、启动/MPV、运行期动作和播放器控制编排；`player_mpv_controls_overlay.dart`、`player_playback_options_dialog.dart`、`player_playback_overlays.dart`、`player_playback_dialogs.dart`、`player_tv_playback_widgets.dart` 负责播放器 UI 子树
 - `TV` 播放页的控制层状态已收口到单一 notifier，减少多层 `StreamBuilder` 套娃造成的重复 rebuild
+- `NasMediaIndexer` 已按 `refresh_flow / storage_access / indexing / grouping / refresh_support` 收口成多 `part` 文件；主文件已压到约 `1k` 行以内，便于后续继续推进 isolate 化、增量查询和 source/collection/enrichment 并发预算
+- `PlaybackMemoryRepository` 现在使用单调递增的 `updatedAt` 生成策略，避免 Windows 或高频保存场景下“最近播放”因同毫秒写入而出现不稳定排序
 
 ## 主导航
 
@@ -163,6 +168,7 @@
   - 会优先尝试从本地详情缓存补海报
 - 首页会优先合并本地详情缓存，减少重复补元数据
 - 首页模块装配当前分成“seed section 构建 + 批量详情缓存合并”两段；普通海报流、最近播放、豆瓣列表和轮播都会复用同一条缓存合并链路；详情缓存更新时只会重做这一层装饰合并，不会让首页整轮重新抓取
+- 首页 presentation 当前也已经拆层：`home_page.dart` 主要保留 retained async、Hero 选择同步、预取和页面级焦点编排；`home_page_hero.dart` 负责 Hero 视觉/分页/焦点；`home_page_sections.dart` 负责 section slot、背景 shell、carousel、loading/empty 和 view-all 这组通用展示块
 - 首页 `Hero`、背景图和海报图会按实际显示尺寸传递 decode 尺寸，移动端 `PageController` 也做了边界稳定化，降低首屏切换和大图解码抖动
 - 如果条目已经刮削过或已经关联到本地详情缓存，首页 `Hero` 和各类海报卡片会优先显示刮削/关联后的标题；没有时才回退到原始标题或来源标题
 
@@ -251,7 +257,7 @@
 - Quark 播放前会按需解析真实下载地址，并补齐请求头
 - 打开播放时会展示轻量等待态
 - 打开播放前会先做一轮轻量启动准备：读取本地续播、按剧跳过规则和启动路由判定，再决定走内置 `MPV`、原生容器页还是系统播放器
-- 播放启动链当前已拆成 `preparePlaybackStartup` 与 `decidePlaybackStartupRoute` 两段，方便把“准备数据”和“选择内核 / 回退路线”分开测试与演进
+- 播放启动链当前已收口到 `PlaybackStartupCoordinator / PlaybackTargetResolver / PlaybackEngineRouter / PlaybackStartupExecutor`，方便把“目标解析 / 启动准备 / 路由判定 / 执行分支”分开测试与演进
 - 播放失败最多自动重试 `3` 次
 - 可配置最大打开超时时间
 - 可配置解码模式：
@@ -272,6 +278,7 @@
 - Android 调用系统播放器时优先走原生 `Intent ACTION_VIEW + video/*`
 - 桌面端调用系统播放器时会生成临时 `.m3u` 后交给系统默认视频应用
 - 内置播放器支持播放内设置：
+  - 音量调节
   - 播放速度
   - 音轨切换
   - 字幕轨切换
@@ -279,8 +286,9 @@
   - 加载外部字幕
   - 在线查找字幕
 - 非 `TV` 的内置 `MPV` 当前使用 Starflow 自己的轻量播放叠层，而不是 `media_kit` 默认控制条：
-  - 保留返回、播放/暂停、进度、字幕、音轨、全屏和设置等常用入口
-  - 桌面端会按需显示音量滑杆；`PiP / AirPlay` 入口继续按平台能力显示
+  - 首层只保留返回、播放/暂停、进度、全屏和“更多”；音量、字幕、音轨与其他高级播放项统一收进播放设置弹窗
+  - 顶部标题栏与底部控制区都收敛成更官方的 Material 轻量样式，去掉额外阴影/装饰；播放设置弹窗也改成 `ListTile / Slider / TextButton`
+  - 非全屏 / 窗口态彻底关闭 hover 唤醒，只允许点击显示控件；`PiP / AirPlay` 入口继续按平台能力显示
   - 全屏状态由父级先解析后再以普通 `bool` 传给叠层，避免叠层在销毁阶段反查 inherited fullscreen 状态
   - 竖屏和窗口态仍保持“顶部标题栏 + 底部控制区”的轻量布局，不会把主要控件堆在画面中间
 - Windows 的内置 `MPV` 会在下一次打开前串行等待上一实例完成 `pause -> stop -> dispose`，并复用同一套退出清理路径，减少快速切换片源、关闭后台播放或退出全屏时出现叠音与残留后台播放
@@ -329,7 +337,7 @@
   - 高性能模式、`TV` 或重片源 / 高压力场景下会尝试应用更激进的 `MPV fast profile`
   - `TV` 与高性能模式下会进一步简化字幕渲染，降低叠加压力
   - 软解优先且片源较重时，会适度降低解码压力，尽量换取更稳的播放
-  - Windows 非全屏轻量叠层会限制鼠标移入唤醒频率，并在全屏切换时重置悬浮状态，减少无控件状态下的闪烁
+  - Windows 非全屏轻量叠层已关闭 hover 唤醒，只允许点击显示，并在全屏切换时重置悬浮状态，减少无控件状态下的闪烁
 - `ISO` 片源当前对所有内置 `MPV` 打开路径统一生效：本地 `ISO` 优先走设备模式，远程 `ISO` 自动回退直开，避免错误残留 `dvd-device / bluray-device` 选项
 - 高性能模式开启后会更积极优先硬解；其中高码率或设备解码压力较大的片源，在 Android TV 上会优先尝试切到 `App 内原生播放器`，再退到系统播放器
 - `App 内原生播放器` 目前专注于性能和稳定播放：
@@ -459,6 +467,7 @@
 - 聚合后的剧集父子关系
 - 最终展示用 `MediaItem`
 - 如果后续刮削、手动索引管理或详情缓存里已经写入了更新后的标题，首页、媒体库和详情页会优先消费这份标题做展示
+- 当前索引实现已拆成多段 helper：`nas_media_indexer.dart` 负责入口与共享小工具，`nas_media_indexer_refresh_flow.dart / nas_media_indexer_storage_access.dart / nas_media_indexer_indexing.dart / nas_media_indexer_grouping.dart / nas_media_indexer_refresh_support.dart` 负责刷新、存储访问、索引计算、分组与并发辅助
 
 ## 仓库结构
 
@@ -662,16 +671,19 @@ C:\anaconda3\python.exe tool\generate_brand_assets.py
 
 - 设置模型与迁移
 - 首页装配
+- 首页控制器与 settings slice
 - 首页详情缓存批量合并
 - 本地详情缓存
 - 页面级 `RetainedAsync` 状态保留
 - Emby / WebDAV 客户端
 - `WebDAV` 识别与索引
+- `NasMediaIndexer` 分组、增量刷新与并发预算
 - 空库自动重建后台调度
 - `WMDB / TMDB / IMDb`
 - `PanSou / CloudSaver`
 - 夸克保存与 `SmartStrm`
 - 搜索仓库
+- 播放记忆与最近播放排序稳定性
 - 播放启动准备与路由判定
 - 组件级基础冒烟测试
 
@@ -685,16 +697,19 @@ flutter test
 
 `tool/perf/run_perf_baselines.dart` 现在可以按场景精确定义跑 `flutter test` 的组合命令、收集运行次数、算出 p50/p95，并输出到 `tool/perf/perf_baselines.json`，方便把启动、首页、详情、播放器等关键路径的性能变化记录在同一套基线里。
 
+最近这轮对 `home_page.dart`、`home_controller.dart`、`player_page.dart` + `widgets/player_page_*.part.dart`、`nas_media_indexer.dart` 和 `playback_memory_repository.dart` 的收口，都建议至少补跑一次对应 smoke 或 perf baseline。更细的运行建议见 [docs/performance.md](docs/performance.md)。
+
 ## Player Open Smoke
 
 新添的 `test/perf/player_open_smoke_test.dart` 从 playback 启动准备、目标解析、路由决策到执行器一条链路穿透，并用内存存储的续播/跳过配置覆盖高码率电视目标，确保 `player_open` 性能场景能真实触发 `PlaybackStartupCoordinator`/`PlaybackTargetResolver`/`PlaybackEngineRouter`/`PlaybackStartupExecutor` 的协作流程。
 
 ## 当前优化落地
 
-- P0：首页与媒体库批量缓存、播放设置 slice provider、统一 async retained 模式、空库重建后台化、首页播放链稳定化与启动 probe/图片 lazy 构建；优先把体验收益拿出来。
-- P1：按功能模块收口控制层（`HomePageController`、`DetailPageController`、`PlaybackStartupCoordinator` + 相关 resolver/router/executor、媒体库查询服务拆分），打通播放启动、首页、详情、媒体库敏感区域的架构边界。
-- P2：索引逐源增量查、新索引器隔离到 isolate、刷新链路按 source/collection/enrichment 级别限流、Background Work 细化开关、带并发预算的性能工程。
-- P3：建立启动/首页/详情/播放/索引五条性能基线、在 controller 级补齐 smoke/perf 测试与 smoke validation、控制新增文件体量避免非计划大页。
+- 已完成的 `P0` 收口：首页与媒体库批量缓存、settings slice provider、统一 `RetainedAsync` 模式、空库自动重建后台化、首页 Hero/PageController 稳定化、图片 decode 尺寸与结果懒构建。
+- 已完成的 `P1` 关键边界：`HomePageController / HomeFeedRepository / HomeHeroPrefetchCoordinator`、`DetailPageController / DetailTargetResolver`、`PlaybackStartupCoordinator / PlaybackTargetResolver / PlaybackEngineRouter / PlaybackStartupExecutor`、`AppMediaQueryService`。
+- 已完成的主文件瘦身：首页、播放页和 NAS 索引器都已经沉到更明确的子文件层级；其中 `player_page.dart` 已回到页面壳量级，播放器控制、启动/MPV、运行期动作与 TV chrome/对话框都已拆到 `presentation/widgets/` 下的 widgets 与 `part` 文件。
+- 已补的稳定性验证：聚焦 `flutter analyze` 与 `flutter test` 已覆盖首页、播放、索引和播放记忆链路；`PlaybackMemoryRepository` 的时间戳稳定化也已经收口，修复了 Windows 下最近播放排序抖动。
+- 持续推进的深水区：`P2` 里的索引逐源增量查询 / upsert、CPU 识别链 isolate 化、更细的刷新并发预算与后台工作分级开关仍是后续重点。
 
 ## 常用设置路径
 
@@ -710,4 +725,5 @@ flutter test
 ## 相关文档
 
 - [docs/architecture.md](docs/architecture.md)
+- [docs/performance.md](docs/performance.md)
 - [docs/development-network.md](docs/development-network.md)

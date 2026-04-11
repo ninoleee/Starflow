@@ -52,6 +52,52 @@ extension _PlayerPageStateControls on _PlayerPageState {
     await _requestExitPlayer(reason: 'tv-confirm-exit');
   }
 
+  Future<void> _handleDesktopBack({
+    required String reason,
+  }) async {
+    if (_useWindowManagedEmbeddedMpvFullscreen && _isEmbeddedMpvFullscreen) {
+      await _setEmbeddedMpvFullscreen(
+        false,
+        reason: '$reason-exit-fullscreen',
+      );
+      return;
+    }
+    await _requestExitPlayer(reason: reason);
+  }
+
+  Future<void> _setEmbeddedMpvFullscreen(
+    bool isFullscreen, {
+    required String reason,
+  }) async {
+    if (_isEmbeddedMpvFullscreen == isFullscreen) {
+      return;
+    }
+    _traceWindowsMpv(
+      'windows-mpv.overlay.fullscreen-state-request',
+      fields: {
+        'reason': reason,
+        'fullscreenBefore': _isEmbeddedMpvFullscreen,
+        'fullscreenAfter': isFullscreen,
+      },
+    );
+    if (_useWindowManagedEmbeddedMpvFullscreen) {
+      if (isFullscreen) {
+        await defaultEnterNativeFullscreen();
+      } else {
+        await defaultExitNativeFullscreen();
+      }
+    }
+    await _syncEmbeddedMpvFullscreen(isFullscreen);
+  }
+
+  Future<void> _toggleEmbeddedMpvFullscreen() async {
+    final fullscreenBefore = _isEmbeddedMpvFullscreen;
+    await _setEmbeddedMpvFullscreen(
+      !fullscreenBefore,
+      reason: 'overlay-toggle',
+    );
+  }
+
   Future<void> _togglePlayback() async {
     final player = _player;
     if (!_isReady || player == null) {
@@ -332,31 +378,22 @@ extension _PlayerPageStateControls on _PlayerPageState {
     required bool isTelevision,
     required AppSettings settings,
   }) {
+    final useWindowManagedFullscreen =
+        !isTelevision && _useWindowManagedEmbeddedMpvFullscreen;
     final video = Video(
       controller: videoController,
-      controls: isTelevision
+      controls: isTelevision || useWindowManagedFullscreen
           ? NoVideoControls
-          : (state) => PlayerMpvControlsOverlay(
-                isFullscreen: state.isFullscreen(),
+          : (state) {
+              final isFullscreen = _isEmbeddedMpvFullscreen;
+              return PlayerMpvControlsOverlay(
+                isFullscreen: isFullscreen,
                 player: videoController.player,
                 target: _resolvedTarget ?? widget.target,
                 showVolumeSlider: _showDesktopVolumeSliderForMpv,
+                preferLightweightChrome: _leanPlaybackUiEnabled,
                 traceEnabled: _shouldTraceWindowsMpv,
-                onBack: () async {
-                  final wasFullscreen = state.isFullscreen();
-                  _traceWindowsMpv(
-                    'windows-mpv.overlay.back-request',
-                    fields: {'fullscreen': wasFullscreen},
-                  );
-                  if (wasFullscreen) {
-                    await state.exitFullscreen();
-                    await _syncEmbeddedMpvFullscreen(false);
-                    return;
-                  }
-                  if (mounted) {
-                    await _requestExitPlayer(reason: 'overlay-back');
-                  }
-                },
+                onBack: () => _handleDesktopBack(reason: 'overlay-back'),
                 onTogglePlayback: _togglePlayback,
                 onSeekTo: _seekTo,
                 onOpenSubtitle: _openCurrentSubtitleSelector,
@@ -366,7 +403,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
                   settings: settings,
                 ),
                 onToggleFullscreen: () async {
-                  final fullscreenBefore = state.isFullscreen();
+                  final fullscreenBefore = _isEmbeddedMpvFullscreen;
                   _traceWindowsMpv(
                     'windows-mpv.overlay.fullscreen-toggle-request',
                     fields: {'fullscreenBefore': fullscreenBefore},
@@ -382,7 +419,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
                     PlaybackSystemSessionController.supportsAirPlayPicker
                         ? _showAirPlayRoutePicker
                         : null,
-              ),
+              );
+            },
       fill: Colors.black,
       fit: BoxFit.contain,
       subtitleViewConfiguration: _buildSubtitleViewConfiguration(
@@ -390,7 +428,43 @@ extension _PlayerPageStateControls on _PlayerPageState {
         isTelevision: isTelevision,
       ),
     );
-    return video;
+    if (!useWindowManagedFullscreen) {
+      return video;
+    }
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(child: video),
+        Positioned.fill(
+          child: PlayerMpvControlsOverlay(
+            isFullscreen: _isEmbeddedMpvFullscreen,
+            player: videoController.player,
+            target: _resolvedTarget ?? widget.target,
+            showVolumeSlider: _showDesktopVolumeSliderForMpv,
+            preferLightweightChrome: _leanPlaybackUiEnabled,
+            traceEnabled: _shouldTraceWindowsMpv,
+            onBack: () => _handleDesktopBack(reason: 'overlay-back'),
+            onTogglePlayback: _togglePlayback,
+            onSeekTo: _seekTo,
+            onOpenSubtitle: _openCurrentSubtitleSelector,
+            onOpenAudio: _openCurrentAudioSelector,
+            onOpenOptions: () => _showPlaybackOptions(
+              isTelevision: false,
+              settings: settings,
+            ),
+            onToggleFullscreen: _toggleEmbeddedMpvFullscreen,
+            onShowPictureInPicture:
+                _pictureInPictureSupported && !_isInPictureInPictureMode
+                    ? _enterPictureInPictureManually
+                    : null,
+            onShowAirPlay:
+                PlaybackSystemSessionController.supportsAirPlayPicker
+                    ? _showAirPlayRoutePicker
+                    : null,
+          ),
+        ),
+      ],
+    );
   }
 
   bool get _showDesktopVolumeSliderForMpv {
@@ -591,6 +665,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
               _selectSubtitleTrack(player, tracks, current),
           onSelectAudio: (tracks, current) =>
               _selectAudioTrack(player, tracks, current),
+          onSetVolume: (value) => player.setVolume(value),
           onAdjustSubtitleDelay: () => _openSubtitleDelayDialog(player),
           onLoadExternalSubtitle: () => _loadExternalSubtitle(player),
           onSearchSubtitlesOnline: () => _showOnlineSubtitleSearch(

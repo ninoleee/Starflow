@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/core/utils/detail_resource_switch_trace.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_library_match_service.dart';
 import 'package:starflow/features/details/application/detail_page_controller.dart';
@@ -69,6 +70,8 @@ class DetailResourceInfoSection extends StatelessWidget {
     required this.onLibraryMatchSelected,
     required this.onOpenTelevisionLibraryMatchPicker,
     required this.onMatchLocalResource,
+    required this.onCheckOnlineResourceUpdate,
+    required this.isCheckingOnlineResourceUpdate,
     required this.onOpenPlaybackEnginePicker,
     required this.onPlaybackEngineSelected,
     required this.onSearchSubtitles,
@@ -92,6 +95,8 @@ class DetailResourceInfoSection extends StatelessWidget {
   final ValueChanged<int> onLibraryMatchSelected;
   final VoidCallback onOpenTelevisionLibraryMatchPicker;
   final VoidCallback? onMatchLocalResource;
+  final VoidCallback? onCheckOnlineResourceUpdate;
+  final bool isCheckingOnlineResourceUpdate;
   final VoidCallback onOpenPlaybackEnginePicker;
   final ValueChanged<PlaybackEngine> onPlaybackEngineSelected;
   final VoidCallback? onSearchSubtitles;
@@ -106,6 +111,35 @@ class DetailResourceInfoSection extends StatelessWidget {
     final showPlayableVariantSwitcher = _shouldShowPlayableVariantSwitcher(
       target,
       libraryView,
+    );
+    final playableChoiceCount =
+        libraryView.choices.where((choice) => choice.isPlayable).length;
+    final episodeLikeChoiceCount = libraryView.choices.where((choice) {
+      final itemType = choice.itemType.trim().toLowerCase();
+      final playbackItemType =
+          choice.playbackTarget?.normalizedItemType.trim().toLowerCase() ?? '';
+      return itemType == 'episode' || playbackItemType == 'episode';
+    }).length;
+    final showLibrarySwitcher =
+        libraryView.choices.length > 1 && !showPlayableVariantSwitcher;
+    detailResourceSwitchTrace(
+      'resource.ui.visibility',
+      dedupeKey: _detailResourceTraceKey(target),
+      fields: {
+        'title': target.title,
+        'itemType': target.itemType,
+        'isPlayable': target.isPlayable,
+        'availability': target.availabilityLabel,
+        'choices': libraryView.choices.length,
+        'playableChoices': playableChoiceCount,
+        'episodeLikeChoices': episodeLikeChoiceCount,
+        'selectedIndex': libraryView.selectedIndex,
+        'effectiveIndex': libraryView.effectiveSelectedIndex,
+        'showPlayable': showPlayableVariantSwitcher,
+        'showLibrary': showLibrarySwitcher,
+        'selectedChoice': _detailResourceSelectedChoiceLabel(libraryView),
+        'choiceSample': _detailResourceChoiceSample(libraryView.choices),
+      },
     );
 
     return Column(
@@ -188,6 +222,50 @@ class DetailResourceInfoSection extends StatelessWidget {
                   ),
           ),
         ],
+        if (onCheckOnlineResourceUpdate != null) ...[
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: isTelevision
+                ? TvAdaptiveButton(
+                    label: isCheckingOnlineResourceUpdate ? '检查中...' : '检查更新',
+                    icon: Icons.update_rounded,
+                    focusId: 'detail:resource:check-online-update',
+                    onPressed: isCheckingOnlineResourceUpdate
+                        ? null
+                        : onCheckOnlineResourceUpdate,
+                    variant: TvButtonVariant.text,
+                  )
+                : TextButton.icon(
+                    onPressed: isCheckingOnlineResourceUpdate
+                        ? null
+                        : onCheckOnlineResourceUpdate,
+                    icon: isCheckingOnlineResourceUpdate
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.update_rounded,
+                            size: 16,
+                          ),
+                    label: Text(
+                      isCheckingOnlineResourceUpdate ? '检查中...' : '检查更新',
+                    ),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 0,
+                        vertical: 0,
+                      ),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+          ),
+        ],
         if (_canShowManualResourceMatchButton(target)) ...[
           const SizedBox(height: 12),
           Align(
@@ -197,11 +275,13 @@ class DetailResourceInfoSection extends StatelessWidget {
                     label: libraryView.isMatching ? '匹配中...' : '匹配资源库',
                     icon: Icons.link_rounded,
                     focusId: 'detail:resource:match-library',
-                    onPressed: libraryView.isMatching ? null : onMatchLocalResource,
+                    onPressed:
+                        libraryView.isMatching ? null : onMatchLocalResource,
                     variant: TvButtonVariant.text,
                   )
                 : TextButton.icon(
-                    onPressed: libraryView.isMatching ? null : onMatchLocalResource,
+                    onPressed:
+                        libraryView.isMatching ? null : onMatchLocalResource,
                     icon: libraryView.isMatching
                         ? const SizedBox(
                             width: 14,
@@ -375,6 +455,33 @@ class DetailResourceInfoSection extends StatelessWidget {
   }
 }
 
+String _detailResourceTraceKey(MediaDetailTarget target) {
+  final parts = [
+    target.sourceKind?.name ?? '',
+    target.sourceId.trim(),
+    target.itemId.trim(),
+    target.title.trim().toLowerCase(),
+    target.searchQuery.trim().toLowerCase(),
+  ].where((item) => item.isNotEmpty).toList(growable: false);
+  return parts.isEmpty ? 'detail-resource-ui' : parts.join('|');
+}
+
+String _detailResourceSelectedChoiceLabel(
+    DetailLibraryMatchViewState viewData) {
+  if (viewData.choices.isEmpty) {
+    return '';
+  }
+  final selected = viewData.choices[viewData.effectiveSelectedIndex];
+  return detailPlayableVariantOptionLabel(selected);
+}
+
+String _detailResourceChoiceSample(List<MediaDetailTarget> choices) {
+  if (choices.isEmpty) {
+    return '';
+  }
+  return choices.take(4).map(detailPlayableVariantOptionLabel).join(' || ');
+}
+
 class _DetailLibraryMatchSelectionControl extends StatelessWidget {
   const _DetailLibraryMatchSelectionControl({
     required this.isTelevision,
@@ -461,11 +568,18 @@ bool _shouldShowPlayableVariantSwitcher(
   DetailLibraryMatchViewState viewData,
 ) {
   final itemType = target.itemType.trim().toLowerCase();
-  return target.isPlayable &&
-      itemType != 'series' &&
-      itemType != 'season' &&
-      viewData.choices.length > 1 &&
+  final hasPlayableChoices = viewData.choices.length > 1 &&
       viewData.choices.any((choice) => choice.isPlayable);
+  final hasEpisodeLikeChoices = viewData.choices.any((choice) {
+    final choiceItemType = choice.itemType.trim().toLowerCase();
+    final playbackItemType =
+        choice.playbackTarget?.normalizedItemType.trim().toLowerCase() ?? '';
+    return choiceItemType == 'episode' || playbackItemType == 'episode';
+  });
+  return target.isPlayable &&
+      itemType != 'season' &&
+      hasPlayableChoices &&
+      (itemType != 'series' || hasEpisodeLikeChoices);
 }
 
 bool _shouldShowLocalResourceMatcher(MediaDetailTarget target) {

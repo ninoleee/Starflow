@@ -2,7 +2,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
@@ -39,7 +41,82 @@ class DetailTargetResolver {
     return _resolveDetailTargetIfNeeded(target: target);
   }
 
+  Future<MediaDetailTarget> resolveMetadataOnly({
+    required MediaDetailTarget target,
+    required bool backgroundWorkSuspended,
+  }) async {
+    if (backgroundWorkSuspended) {
+      final cachedTarget = await _detailCache.loadDetailTarget(target);
+      return normalizeRatingLabelsInTarget(
+        cachedTarget == null
+            ? target
+            : _mergeCachedDetailTarget(target, cachedTarget),
+      );
+    }
+    return _resolveMetadataOnlyIfNeeded(target: target);
+  }
+
   Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
+    required MediaDetailTarget target,
+  }) async {
+    final nextTarget = await _resolveMetadataOnlyIfNeeded(target: target);
+    final traceKey = _detailTraceKey(target);
+    final playback = nextTarget.playbackTarget;
+    if (playback == null) {
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'playback-resolve',
+        'skipped no playback target',
+      );
+      return nextTarget;
+    }
+
+    final shouldResolve =
+        _shouldResolvePlaybackTarget(playback, settings: _settings);
+    if (!shouldResolve) {
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'playback-resolve',
+        'skipped streamReady=${playback.streamUrl.trim().isNotEmpty} '
+            'format=${playback.formatLabel.trim().isNotEmpty} '
+            'resolution=${playback.resolutionLabel.trim().isNotEmpty} '
+            'fileSize=${playback.fileSizeLabel.trim().isNotEmpty}',
+      );
+      return nextTarget;
+    }
+
+    try {
+      final resolvedPlayback = await _resolvePlayback(
+        target: playback,
+        settings: _settings,
+        traceKey: traceKey,
+      );
+      final updatedTarget =
+          nextTarget.copyWith(playbackTarget: resolvedPlayback);
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'playback-resolve',
+        'success format=${resolvedPlayback.formatLabel} '
+            'resolution=${resolvedPlayback.resolutionLabel} '
+            'size=${resolvedPlayback.fileSizeLabel}',
+      );
+      await _persistResolvedTarget(target, updatedTarget);
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'done',
+        'final poster=${updatedTarget.posterUrl.trim().isNotEmpty} '
+            'backdrop=${updatedTarget.backdropUrl.trim().isNotEmpty} '
+            'logo=${updatedTarget.logoUrl.trim().isNotEmpty} '
+            'ratings=${updatedTarget.ratingLabels.join(' | ')}',
+      );
+      return updatedTarget;
+    } catch (_) {
+      DebugTraceOnce.logMetadata(traceKey, 'playback-resolve', 'failed');
+      return nextTarget;
+    }
+  }
+
+  Future<MediaDetailTarget> _resolveMetadataOnlyIfNeeded({
     required MediaDetailTarget target,
   }) async {
     final traceKey = _detailTraceKey(target);
@@ -89,53 +166,9 @@ class DetailTargetResolver {
     }
 
     await _persistResolvedTarget(target, nextTarget);
-
-    final playback = nextTarget.playbackTarget;
-    if (playback == null) {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'playback-resolve',
-        'skipped no playback target',
-      );
-      return nextTarget;
-    }
-
-    final shouldResolve =
-        _shouldResolvePlaybackTarget(playback, settings: _settings);
-    if (!shouldResolve) {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'playback-resolve',
-        'skipped streamReady=${playback.streamUrl.trim().isNotEmpty} '
-            'format=${playback.formatLabel.trim().isNotEmpty} '
-            'resolution=${playback.resolutionLabel.trim().isNotEmpty} '
-            'fileSize=${playback.fileSizeLabel.trim().isNotEmpty}',
-      );
-      return nextTarget;
-    }
-
-    try {
-      final resolvedPlayback = await _resolvePlayback(
-        target: playback,
-        settings: _settings,
-        traceKey: traceKey,
-      );
-      nextTarget = nextTarget.copyWith(playbackTarget: resolvedPlayback);
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'playback-resolve',
-        'success format=${resolvedPlayback.formatLabel} '
-            'resolution=${resolvedPlayback.resolutionLabel} '
-            'size=${resolvedPlayback.fileSizeLabel}',
-      );
-    } catch (_) {
-      DebugTraceOnce.logMetadata(traceKey, 'playback-resolve', 'failed');
-      return nextTarget;
-    }
-    await _persistResolvedTarget(target, nextTarget);
     DebugTraceOnce.logMetadata(
       traceKey,
-      'done',
+      'metadata-done',
       'final poster=${nextTarget.posterUrl.trim().isNotEmpty} '
           'backdrop=${nextTarget.backdropUrl.trim().isNotEmpty} '
           'logo=${nextTarget.logoUrl.trim().isNotEmpty} '
@@ -165,6 +198,9 @@ class DetailTargetResolver {
   }) async {
     if (target.sourceKind == MediaSourceKind.emby) {
       return _resolveEmbyPlayback(target, settings, traceKey);
+    }
+    if (target.sourceKind == MediaSourceKind.nas) {
+      return _resolveNasPlayback(target, settings, traceKey);
     }
     return _resolveQuarkPlayback(target, settings, traceKey);
   }
@@ -218,6 +254,31 @@ class DetailTargetResolver {
     );
   }
 
+  Future<PlaybackTarget> _resolveNasPlayback(
+    PlaybackTarget target,
+    DetailEnrichmentSettings settings,
+    String traceKey,
+  ) async {
+    MediaSourceConfig? source;
+    for (final candidate in settings.mediaSources) {
+      if (candidate.id == target.sourceId) {
+        source = candidate;
+        break;
+      }
+    }
+    if (source == null || source.kind != MediaSourceKind.nas) {
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'playback-resolve',
+        'skipped no active nas source',
+      );
+      throw const _PlaybackResolutionException();
+    }
+    return _ref
+        .read(webDavNasClientProvider)
+        .resolvePlaybackTarget(source: source, target: target);
+  }
+
   bool _shouldResolvePlaybackTarget(
     PlaybackTarget target, {
     required DetailEnrichmentSettings settings,
@@ -231,7 +292,10 @@ class DetailTargetResolver {
     final needsQuark = target.sourceKind == MediaSourceKind.quark &&
         target.itemId.trim().isNotEmpty &&
         target.streamUrl.trim().isEmpty;
-    return needsEmby || needsQuark;
+    final needsNas = target.sourceKind == MediaSourceKind.nas &&
+        target.sourceId.trim().isNotEmpty &&
+        target.needsResolution;
+    return needsEmby || needsQuark || needsNas;
   }
 }
 
@@ -264,8 +328,8 @@ bool _shouldAutoEnrichMetadataTarget({
           target.imdbId.trim().isEmpty ||
           target.backdropUrl.trim().isEmpty ||
           target.logoUrl.trim().isEmpty);
-  final needsImdb =
-      _shouldUseStandaloneImdbRating(settings) && target.needsImdbRatingMatch;
+  final needsImdb = _shouldUseStandaloneImdbRating(settings) &&
+      _needsStandaloneImdbFallback(target);
   return needsWmdb || needsTmdb || needsImdb;
 }
 
@@ -390,7 +454,7 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
     }
   }
   if (_shouldUseStandaloneImdbRating(settings) &&
-      nextTarget.needsImdbRatingMatch) {
+      _needsStandaloneImdbFallback(nextTarget)) {
     try {
       final currentQuery = _detailMetadataQuery(nextTarget);
       DebugTraceOnce.logMetadata(
@@ -465,9 +529,11 @@ bool _hasRatingLabelKeyword(Iterable<String> labels, String keyword) {
 }
 
 bool _shouldUseStandaloneImdbRating(DetailEnrichmentSettings settings) {
-  return settings.imdbRatingMatchEnabled &&
-      (!settings.tmdbMetadataMatchEnabled ||
-          settings.tmdbReadAccessToken.trim().isEmpty);
+  return settings.imdbRatingMatchEnabled;
+}
+
+bool _needsStandaloneImdbFallback(MediaDetailTarget target) {
+  return resolvePreferredPosterRatingLabel(target.ratingLabels).isEmpty;
 }
 
 Future<String> _resolveTmdbBackdropForTarget({
@@ -563,6 +629,10 @@ MediaDetailTarget _mergeCachedDetailTarget(
       : (current.posterHeaders.isNotEmpty
           ? current.posterHeaders
           : cached.posterHeaders);
+  final ignoreCachedEpisodeOverview = _isEpisodeLikeTarget(current) &&
+      !current.hasUsefulOverview &&
+      current.sourceId.trim() == cached.sourceId.trim() &&
+      current.itemId.trim() == cached.itemId.trim();
   return current.copyWith(
     title: cached.title.trim().isNotEmpty ? cached.title : current.title,
     posterUrl: resolvedPosterUrl,
@@ -590,7 +660,9 @@ MediaDetailTarget _mergeCachedDetailTarget(
     extraBackdropHeaders: current.extraBackdropHeaders.isNotEmpty
         ? current.extraBackdropHeaders
         : cached.extraBackdropHeaders,
-    overview: current.hasUsefulOverview ? current.overview : cached.overview,
+    overview: ignoreCachedEpisodeOverview
+        ? current.overview
+        : (current.hasUsefulOverview ? current.overview : cached.overview),
     durationLabel: current.durationLabel.trim().isNotEmpty
         ? current.durationLabel
         : cached.durationLabel,
@@ -727,15 +799,15 @@ PlaybackTarget? _mergeCachedPlaybackTarget(
     preferredMediaSourceId: current.preferredMediaSourceId.trim().isNotEmpty
         ? current.preferredMediaSourceId
         : cached.preferredMediaSourceId,
-    subtitle: current.subtitle.trim().isNotEmpty
-        ? current.subtitle
-        : cached.subtitle,
+    subtitle:
+        current.subtitle.trim().isNotEmpty ? current.subtitle : cached.subtitle,
     headers: current.headers.isNotEmpty ? current.headers : cached.headers,
     streamUrl: current.streamUrl.trim().isNotEmpty
         ? current.streamUrl
         : cached.streamUrl,
-    container:
-        current.container.trim().isNotEmpty ? current.container : cached.container,
+    container: current.container.trim().isNotEmpty
+        ? current.container
+        : cached.container,
     videoCodec: current.videoCodec.trim().isNotEmpty
         ? current.videoCodec
         : cached.videoCodec,
@@ -870,6 +942,7 @@ MediaDetailTarget _applyMetadataMatchToDetailTarget(
       ? _toMediaPersonProfiles(match.platformProfiles)
       : const <MediaPersonProfile>[];
   final shouldReplaceCompanies = match.provider == MetadataMatchProvider.tmdb;
+  final preserveEpisodeOverview = _isEpisodeLikeTarget(target);
 
   String pickString(String current, String incoming) {
     if (replaceExisting) {
@@ -913,11 +986,13 @@ MediaDetailTarget _applyMetadataMatchToDetailTarget(
     extraBackdropHeaders: replaceExisting && match.extraBackdropUrls.isNotEmpty
         ? const <String, String>{}
         : target.extraBackdropHeaders,
-    overview: replaceExisting
-        ? _firstNonEmpty(match.overview, target.overview)
-        : (target.hasUsefulOverview
-            ? target.overview
-            : pickString('', match.overview)),
+    overview: preserveEpisodeOverview
+        ? target.overview
+        : replaceExisting
+            ? _firstNonEmpty(match.overview, target.overview)
+            : (target.hasUsefulOverview
+                ? target.overview
+                : pickString('', match.overview)),
     year: replaceExisting
         ? (match.year > 0 ? match.year : target.year)
         : (target.year > 0 ? target.year : match.year),

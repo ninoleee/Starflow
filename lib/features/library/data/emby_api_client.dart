@@ -134,19 +134,10 @@ class EmbyApiClient {
       throw const EmbyApiException('Emby 会话已失效，请重新登录');
     }
 
-    final response = await _requestJson(
-      source.endpoint,
-      path: 'Items/${target.itemId}/PlaybackInfo',
-      method: 'GET',
-      token: source.accessToken,
-      deviceId: source.deviceId,
-      query: {
-        'UserId': source.userId,
-        'StartTimeTicks': '0',
-        'IsPlayback': 'true',
-        if (target.preferredMediaSourceId.trim().isNotEmpty)
-          'MediaSourceId': target.preferredMediaSourceId.trim(),
-      },
+    final response = await _requestPlaybackInfo(
+      source: source,
+      target: target,
+      mediaSourceId: target.preferredMediaSourceId,
     );
 
     final playSessionId = response.json['PlaySessionId'] as String? ?? '';
@@ -163,69 +154,53 @@ class EmbyApiClient {
       throw const EmbyApiException('Emby 没有返回可用的播放地址');
     }
 
-    final resolvedUri = _resolvePlaybackUri(
-      baseUri: response.baseUri,
-      itemId: target.itemId,
+    return _buildPlaybackTargetFromMediaSource(
+      source: source,
+      response: response,
+      target: target,
       mediaSource: selectedSource,
-      accessToken: source.accessToken,
       playSessionId: playSessionId,
     );
-    final videoStream = _selectMediaStream(
-      selectedSource,
-      type: 'Video',
-    );
-    final audioStream = _selectMediaStream(
-      selectedSource,
-      type: 'Audio',
-    );
-    final requiredHeaders = Map<String, dynamic>.from(
-      selectedSource['RequiredHttpHeaders'] as Map? ?? const {},
-    );
-    final resolvedSourcePath = (selectedSource['Path'] as String? ?? '').trim();
-    final actualAddress = target.actualAddress.trim().isNotEmpty
-        ? target.actualAddress
-        : resolvedSourcePath;
+  }
 
-    return PlaybackTarget(
-      title: target.title,
-      sourceId: target.sourceId,
-      itemId: target.itemId,
-      itemType: target.itemType,
-      year: target.year,
-      seriesId: target.seriesId,
-      seriesTitle: target.seriesTitle,
-      preferredMediaSourceId: selectedSource['Id'] as String? ?? '',
-      streamUrl: resolvedUri.toString(),
-      actualAddress: actualAddress,
-      sourceName: target.sourceName,
-      sourceKind: target.sourceKind,
-      subtitle: target.subtitle,
-      container: selectedSource['Container'] as String? ?? '',
-      videoCodec: videoStream?['Codec'] as String? ?? '',
-      audioCodec: audioStream?['Codec'] as String? ?? '',
-      seasonNumber: target.seasonNumber,
-      episodeNumber: target.episodeNumber,
-      width:
-          ((selectedSource['Width'] as num?) ?? (videoStream?['Width'] as num?))
-              ?.toInt(),
-      height: ((selectedSource['Height'] as num?) ??
-              (videoStream?['Height'] as num?))
-          ?.toInt(),
-      bitrate: ((selectedSource['Bitrate'] as num?) ??
-              (videoStream?['BitRate'] as num?) ??
-              (audioStream?['BitRate'] as num?))
-          ?.toInt(),
-      fileSizeBytes: (selectedSource['Size'] as num?)?.toInt(),
-      headers: {
-        ...requiredHeaders
-            .map((key, value) => MapEntry(key.toString(), value.toString())),
-        'X-Emby-Token': source.accessToken,
-        'X-Emby-Authorization': _authorizationHeader(
-          token: source.accessToken,
-          deviceId: source.deviceId,
-        ),
-      },
+  Future<List<PlaybackTarget>> fetchPlaybackVariants({
+    required MediaSourceConfig source,
+    required PlaybackTarget target,
+  }) async {
+    if (target.itemId.trim().isEmpty || !source.hasActiveSession) {
+      return const [];
+    }
+
+    final response = await _requestPlaybackInfo(
+      source: source,
+      target: target,
     );
+    final playSessionId = response.json['PlaySessionId'] as String? ?? '';
+    final mediaSources =
+        (response.json['MediaSources'] as List<dynamic>? ?? const [])
+            .map((entry) => Map<String, dynamic>.from(entry as Map))
+            .toList(growable: false);
+    if (mediaSources.isEmpty) {
+      return const [];
+    }
+
+    final variants = <PlaybackTarget>[];
+    final seenKeys = <String>{};
+    for (final mediaSource in mediaSources) {
+      final variant = _buildPlaybackTargetFromMediaSource(
+        source: source,
+        response: response,
+        target: target,
+        mediaSource: mediaSource,
+        playSessionId: playSessionId,
+      );
+      final key = _playbackVariantKey(variant);
+      if (!seenKeys.add(key)) {
+        continue;
+      }
+      variants.add(variant);
+    }
+    return variants;
   }
 
   Future<List<MediaItem>> fetchChildren(
@@ -248,6 +223,117 @@ class EmbyApiClient {
       queryMode: _EmbyItemsQueryMode.hierarchyBrowse,
     );
     return _sortHierarchyItems(items);
+  }
+
+  Future<_EmbyJsonResponse> _requestPlaybackInfo({
+    required MediaSourceConfig source,
+    required PlaybackTarget target,
+    String mediaSourceId = '',
+  }) {
+    return _requestJson(
+      source.endpoint,
+      path: 'Items/${target.itemId}/PlaybackInfo',
+      method: 'GET',
+      token: source.accessToken,
+      deviceId: source.deviceId,
+      query: {
+        'UserId': source.userId,
+        'StartTimeTicks': '0',
+        'IsPlayback': 'true',
+        if (mediaSourceId.trim().isNotEmpty)
+          'MediaSourceId': mediaSourceId.trim(),
+      },
+    );
+  }
+
+  PlaybackTarget _buildPlaybackTargetFromMediaSource({
+    required MediaSourceConfig source,
+    required _EmbyJsonResponse response,
+    required PlaybackTarget target,
+    required Map<String, dynamic> mediaSource,
+    required String playSessionId,
+  }) {
+    final resolvedUri = _resolvePlaybackUri(
+      baseUri: response.baseUri,
+      itemId: target.itemId,
+      mediaSource: mediaSource,
+      accessToken: source.accessToken,
+      playSessionId: playSessionId,
+    );
+    final videoStream = _selectMediaStream(
+      mediaSource,
+      type: 'Video',
+    );
+    final audioStream = _selectMediaStream(
+      mediaSource,
+      type: 'Audio',
+    );
+    final requiredHeaders = Map<String, dynamic>.from(
+      mediaSource['RequiredHttpHeaders'] as Map? ?? const {},
+    );
+    final resolvedSourcePath = (mediaSource['Path'] as String? ?? '').trim();
+    final actualAddress = resolvedSourcePath.isNotEmpty
+        ? resolvedSourcePath
+        : target.actualAddress;
+
+    return PlaybackTarget(
+      title: target.title,
+      sourceId: target.sourceId,
+      itemId: target.itemId,
+      itemType: target.itemType,
+      year: target.year,
+      seriesId: target.seriesId,
+      seriesTitle: target.seriesTitle,
+      preferredMediaSourceId: mediaSource['Id'] as String? ?? '',
+      streamUrl: resolvedUri.toString(),
+      actualAddress: actualAddress,
+      sourceName: target.sourceName,
+      sourceKind: target.sourceKind,
+      subtitle: target.subtitle,
+      container: mediaSource['Container'] as String? ?? '',
+      videoCodec: videoStream?['Codec'] as String? ?? '',
+      audioCodec: audioStream?['Codec'] as String? ?? '',
+      seasonNumber: target.seasonNumber,
+      episodeNumber: target.episodeNumber,
+      width: ((mediaSource['Width'] as num?) ?? (videoStream?['Width'] as num?))
+          ?.toInt(),
+      height:
+          ((mediaSource['Height'] as num?) ?? (videoStream?['Height'] as num?))
+              ?.toInt(),
+      bitrate: ((mediaSource['Bitrate'] as num?) ??
+              (videoStream?['BitRate'] as num?) ??
+              (audioStream?['BitRate'] as num?))
+          ?.toInt(),
+      fileSizeBytes: (mediaSource['Size'] as num?)?.toInt(),
+      headers: {
+        ...requiredHeaders
+            .map((key, value) => MapEntry(key.toString(), value.toString())),
+        'X-Emby-Token': source.accessToken,
+        'X-Emby-Authorization': _authorizationHeader(
+          token: source.accessToken,
+          deviceId: source.deviceId,
+        ),
+      },
+    );
+  }
+
+  String _playbackVariantKey(PlaybackTarget target) {
+    return [
+      target.sourceId.trim(),
+      target.itemId.trim(),
+      target.preferredMediaSourceId.trim(),
+      _normalizedVariantPath(target.actualAddress),
+    ].join('|');
+  }
+
+  String _normalizedVariantPath(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return '';
+    }
+    final uri = Uri.tryParse(trimmed);
+    final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
+    return rawPath.replaceAll('\\', '/').trim();
   }
 
   Future<List<MediaItem>> _fetchSectionItems({

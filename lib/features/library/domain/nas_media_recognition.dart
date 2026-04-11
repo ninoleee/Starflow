@@ -1,18 +1,17 @@
 import 'package:starflow/core/utils/webdav_trace.dart';
 import 'package:starflow/features/library/data/season_folder_label_parser.dart';
+import 'package:starflow/features/library/domain/media_naming.dart';
 
-String stripEmbeddedExternalIdTags(String input) {
-  final trimmed = input.trim();
-  if (trimmed.isEmpty) {
-    return '';
-  }
-  return trimmed.replaceAll(
-    RegExp(
-      r'\{\s*(?:tmdb(?:id)?|tmbid|tvdb(?:id)?|imdb(?:id)?|douban(?:id)?)\s*[-:=]?\s*[\w.-]+\s*\}',
-      caseSensitive: false,
-    ),
-    ' ',
-  );
+bool looksLikeReleaseTokenLabel(String input) {
+  return NasMediaRecognizer.matchesReleaseTokenLabel(input);
+}
+
+String compactNasWrapperDescriptorLabel(String input) {
+  return NasMediaRecognizer.compactWrapperDescriptorLabel(input);
+}
+
+bool looksLikeWrapperFolderLabel(String input) {
+  return NasMediaRecognizer.matchesWrapperFolderLabel(input);
 }
 
 class NasMediaRecognition {
@@ -27,6 +26,7 @@ class NasMediaRecognition {
     this.imdbId = '',
     this.seasonNumber,
     this.episodeNumber,
+    this.episodePart = '',
   });
 
   final String title;
@@ -39,10 +39,60 @@ class NasMediaRecognition {
   final String imdbId;
   final int? seasonNumber;
   final int? episodeNumber;
+  final String episodePart;
 }
 
 class NasMediaRecognizer {
   const NasMediaRecognizer._();
+
+  // Episode/issue markers for variety-style naming.
+  static const List<String> _episodeUnitKeywords = ['集', '话', '期'];
+  static const List<String> _episodePartUpperKeywords = [
+    '上半场',
+    '上半',
+    '上篇',
+    '上集',
+    '上部',
+    '上',
+    'part 1',
+    'part 01',
+  ];
+  static const List<String> _episodePartMiddleKeywords = [
+    '中篇',
+    '中集',
+    '中部',
+    '中',
+    'part 3',
+    'part 03',
+  ];
+  static const List<String> _episodePartLowerKeywords = [
+    '下半场',
+    '下半',
+    '下篇',
+    '下集',
+    '下部',
+    '下',
+    'part 2',
+    'part 02',
+  ];
+
+  static const List<String> _cleanTitleOnlyDescriptorKeywords =
+      MediaNaming.cleanTitleOnlyDescriptorKeywords;
+
+  // Reusable combined descriptor groups for different matcher contexts.
+  static const List<String> _sharedDescriptorKeywords =
+      MediaNaming.sharedDescriptorKeywords;
+  static const List<String> _wrapperOnlyDescriptorKeywords =
+      MediaNaming.wrapperOnlyDescriptorKeywords;
+
+  // Technical/release tokens that usually indicate wrappers rather than title.
+  static const List<String> _sharedTechnicalTokenPatterns =
+      MediaNaming.sharedTechnicalTokenPatterns;
+  static const List<String> _releaseOnlyTokenPatterns = [
+    r's\d{1,2}',
+    r'season ?\d{1,2}',
+  ];
+  static const List<String> _wrapperOnlyTokenPatterns = [r'web'];
 
   static const Set<String> _genericLibraryFolders = {
     'movie',
@@ -68,29 +118,104 @@ class NasMediaRecognizer {
     '动漫',
   };
 
-  static final RegExp _wrapperDescriptorPattern = RegExp(
-    r'^(?:'
-    r'分段版|特效中字|特效字幕|字幕版|中字|中文字幕|中英字幕|双语字幕|双语|简繁字幕|内封中字|外挂字幕|'
-    r'国语版|粤语版|国粤版|国粤双语|国语|粤语|原声|'
-    r'会员版|纯享版|导演剪辑版|导演版|加长版|未删减版|完整版|删减版|重剪版|重制版|珍藏版|纪念版|'
-    r'特典|花絮|幕后|加更|彩蛋|番外|特别篇|剧场版|'
-    r'杜比视界|杜比全景声|高码率|原画|蓝光原盘|原盘|'
-    r'remux|bluray|bdrip|brrip|webrip|webdl|web|'
-    r'2160p|1080p|720p|480p|4k|8k|uhd|hdr10\+|hdr10|hdr|dovi|dv|dolbyvision|'
-    r'x264|x265|h264|h265|hevc|avc|aac|ac3|eac3|ddp(?:51|71)?|dts|truehd|atmos|'
-    r'10bit|8bit|nf|amzn|dsnp|max|hmax|complete|proper|repack|multi'
-    r')+$',
+  static final RegExp _releaseTokenLabelPattern = RegExp(
+    '^(?:${MediaNaming.buildAlternationPattern([
+          ..._releaseOnlyTokenPatterns,
+          ..._sharedTechnicalTokenPatterns,
+          ...MediaNaming.escapePatternKeywords(_sharedDescriptorKeywords),
+        ])})\$',
     caseSensitive: false,
   );
+  static final RegExp _wrapperDescriptorPattern = RegExp(
+    '^(?:${MediaNaming.buildAlternationPattern([
+          ..._sharedTechnicalTokenPatterns,
+          ..._wrapperOnlyTokenPatterns,
+          ...MediaNaming.escapePatternKeywords(_sharedDescriptorKeywords),
+          ...MediaNaming.escapePatternKeywords(_wrapperOnlyDescriptorKeywords),
+        ])})+\$',
+    caseSensitive: false,
+  );
+  static final RegExp _cleanTitleReleaseTokenPattern = RegExp(
+    r'\b('
+    '${MediaNaming.buildAlternationPattern([
+          ..._sharedTechnicalTokenPatterns,
+          ...MediaNaming.escapePatternKeywords([
+            ..._sharedDescriptorKeywords,
+            ..._cleanTitleOnlyDescriptorKeywords,
+          ]),
+        ])}'
+    r')\b',
+    caseSensitive: false,
+  );
+
+  static final Map<String, String> _episodePartTokenByKeyword = {
+    for (final keyword in _episodePartUpperKeywords)
+      _normalizeEpisodePartKeyword(keyword): 'upper',
+    for (final keyword in _episodePartMiddleKeywords)
+      _normalizeEpisodePartKeyword(keyword): 'middle',
+    for (final keyword in _episodePartLowerKeywords)
+      _normalizeEpisodePartKeyword(keyword): 'lower',
+  };
+
+  static final String _episodeUnitPattern =
+      _episodeUnitKeywords.map(RegExp.escape).join();
+  static final String _episodePartKeywordPattern =
+      MediaNaming.buildAlternationPattern(
+    MediaNaming.escapePatternKeywords([
+      ..._episodePartUpperKeywords,
+      ..._episodePartMiddleKeywords,
+      ..._episodePartLowerKeywords,
+    ]),
+  );
+  static final String _chineseEpisodePatternSource =
+      '第\\s*0*(\\d{1,4})\\s*[$_episodeUnitPattern]';
+  static final String _optionalEpisodePartPatternSource =
+      '(?:\\s*[-_.]?\\s*[（(\\[【]?\\s*($_episodePartKeywordPattern)\\s*[）)\\]】]?)?';
+  static final RegExp _chineseEpisodePattern = RegExp(
+    '$_chineseEpisodePatternSource$_optionalEpisodePartPatternSource',
+    caseSensitive: false,
+  );
+  static final RegExp _chineseEpisodePartPattern = RegExp(
+    '第\\s*0*\\d{1,4}\\s*[$_episodeUnitPattern]$_optionalEpisodePartPatternSource',
+    caseSensitive: false,
+  );
+  static final RegExp _stripChineseEpisodeTokenPattern = RegExp(
+    '第\\s*\\d{1,3}\\s*[$_episodeUnitPattern]$_optionalEpisodePartPatternSource',
+    caseSensitive: false,
+  );
+
+  static bool matchesReleaseTokenLabel(String input) {
+    final normalized = input.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return false;
+    }
+    return _releaseTokenLabelPattern.hasMatch(normalized);
+  }
+
+  static String compactWrapperDescriptorLabel(String input) {
+    return MediaNaming.compactKeywordLabel(input);
+  }
+
+  static bool matchesWrapperFolderLabel(String input) {
+    final compact = compactWrapperDescriptorLabel(input);
+    if (compact.isEmpty) {
+      return false;
+    }
+    if (looksLikeSeasonFolderLabel(input)) {
+      return false;
+    }
+    return _wrapperDescriptorPattern.hasMatch(compact);
+  }
 
   static NasMediaRecognition recognize(
     String actualAddress, {
     List<String> seriesTitleFilterKeywords = const [],
+    List<String> specialEpisodeKeywords = const [],
   }) {
-    final normalizedSeriesTitleFilterKeywords = seriesTitleFilterKeywords
-        .map((item) => item.trim().toLowerCase())
-        .where((item) => item.isNotEmpty)
-        .toList(growable: false);
+    final normalizedSeriesTitleFilterKeywords =
+        MediaNaming.normalizeKeywords(seriesTitleFilterKeywords);
+    final normalizedSpecialEpisodeKeywords =
+        MediaNaming.normalizeKeywords(specialEpisodeKeywords);
     final normalizedPath = actualAddress
         .split('/')
         .map((segment) => segment.trim())
@@ -107,7 +232,10 @@ class NasMediaRecognizer {
         : '';
     final imdbId = _resolveImdbId([fileBaseName, parentRaw, grandParentRaw]);
 
-    final episodeMatch = _matchEpisode(fileBaseName);
+    final episodeMatch = _matchEpisode(
+      fileBaseName,
+      specialEpisodeKeywords: normalizedSpecialEpisodeKeywords,
+    );
     final parentSeason = _matchSeason(parentRaw);
     final grandParentSeason = _matchSeason(grandParentRaw);
     final year = _findYear([fileBaseName, parentRaw, grandParentRaw]);
@@ -121,7 +249,8 @@ class NasMediaRecognizer {
     final cleanedGrandParentTitle = _cleanTitle(grandParentRaw);
 
     final parentLooksLikeSeasonFolder = _looksLikeSeasonFolder(parentRaw);
-    final parentLooksLikeWrapperFolder = _looksLikeWrapperFolder(parentRaw);
+    final parentLooksLikeWrapperFolder =
+        NasMediaRecognizer.matchesWrapperFolderLabel(parentRaw);
     final grandParentLooksLikeSeasonFolder =
         _looksLikeSeasonFolder(grandParentRaw);
     final inferredParentTitle = parentLooksLikeSeasonFolder
@@ -136,6 +265,7 @@ class NasMediaRecognizer {
     var preferSeries = false;
     int? seasonNumber;
     int? episodeNumber;
+    var episodePart = '';
 
     if (episodeMatch != null) {
       itemType = 'episode';
@@ -143,6 +273,7 @@ class NasMediaRecognizer {
       seasonNumber =
           episodeMatch.seasonNumber ?? parentSeason ?? grandParentSeason;
       episodeNumber = episodeMatch.episodeNumber;
+      episodePart = episodeMatch.episodePart;
       if (resolvedParentTitle.isNotEmpty) {
         title = resolvedParentTitle;
       }
@@ -205,6 +336,7 @@ class NasMediaRecognizer {
       imdbId: imdbId,
       seasonNumber: seasonNumber,
       episodeNumber: episodeNumber,
+      episodePart: episodePart,
     );
     webDavTrace(
       'recognize',
@@ -216,10 +348,23 @@ class NasMediaRecognizer {
         'preferSeries': result.preferSeries,
         'season': result.seasonNumber,
         'episode': result.episodeNumber,
+        'episodePart': result.episodePart,
         'imdbId': result.imdbId,
       },
     );
     return result;
+  }
+
+  static String resolveEpisodePartToken(
+    String input, {
+    List<String> specialEpisodeKeywords = const [],
+  }) {
+    final normalizedSpecialEpisodeKeywords =
+        MediaNaming.normalizeKeywords(specialEpisodeKeywords);
+    return _extractEpisodePartToken(
+      input,
+      specialEpisodeKeywords: normalizedSpecialEpisodeKeywords,
+    );
   }
 
   static String _resolveImdbId(List<String> inputs) {
@@ -256,14 +401,16 @@ class NasMediaRecognizer {
     return 0;
   }
 
-  static _EpisodeMatch? _matchEpisode(String input) {
+  static _EpisodeMatch? _matchEpisode(
+    String input, {
+    List<String> specialEpisodeKeywords = const [],
+  }) {
     final normalized = input.trim();
     for (final pattern in const [
       r'(?:^|[ ._\-])s(\d{1,2})[ ._\-]*e(\d{1,3})(?:$|[ ._\-])',
       r'(?:^|[ ._\-])season[ ._\-]?(\d{1,2})[ ._\-]*(?:episode|ep)[ ._\-]?(\d{1,3})(?:$|[ ._\-])',
       r'(?<!\d)e(\d{1,3})(?!\d)',
       r'(?:^|[ ._\-])ep(?:isode)?[ ._\-]?(\d{1,3})(?:$|[ ._\-])',
-      r'第(\d{1,4})[集话期]',
     ]) {
       final match =
           RegExp(pattern, caseSensitive: false).firstMatch(normalized);
@@ -281,7 +428,55 @@ class NasMediaRecognizer {
         episodeNumber: int.tryParse(match.group(1) ?? ''),
       );
     }
-    return null;
+    final chineseMatch = _chineseEpisodePattern.firstMatch(normalized);
+    if (chineseMatch == null) {
+      return null;
+    }
+    return _EpisodeMatch(
+      seasonNumber: null,
+      episodeNumber: int.tryParse(chineseMatch.group(1) ?? ''),
+      episodePart: _matchesAnySpecialEpisodeKeyword(
+        normalized,
+        specialEpisodeKeywords: specialEpisodeKeywords,
+      )
+          ? ''
+          : _normalizeEpisodePartToken(chineseMatch.group(2) ?? ''),
+    );
+  }
+
+  static String _extractEpisodePartToken(
+    String input, {
+    required List<String> specialEpisodeKeywords,
+  }) {
+    final normalized = stripEmbeddedExternalIdTags(input).trim();
+    if (normalized.isEmpty ||
+        _matchesAnySpecialEpisodeKeyword(
+          normalized,
+          specialEpisodeKeywords: specialEpisodeKeywords,
+        )) {
+      return '';
+    }
+    final match = _chineseEpisodePartPattern.firstMatch(normalized);
+    return _normalizeEpisodePartToken(match?.group(1) ?? '');
+  }
+
+  static String _normalizeEpisodePartToken(String input) {
+    final normalized = _normalizeEpisodePartKeyword(input);
+    return _episodePartTokenByKeyword[normalized] ?? '';
+  }
+
+  static String _normalizeEpisodePartKeyword(String input) {
+    return input.trim().toLowerCase().replaceAll(RegExp(r'[\s._\-]+'), '');
+  }
+
+  static bool _matchesAnySpecialEpisodeKeyword(
+    String input, {
+    required List<String> specialEpisodeKeywords,
+  }) {
+    return MediaNaming.matchesAnyKeyword(
+      [input],
+      keywords: specialEpisodeKeywords,
+    );
   }
 
   static int? _matchLeadingEpisodeCue(String input) {
@@ -347,8 +542,8 @@ class NasMediaRecognizer {
     if (_genericLibraryFolders.contains(normalized.toLowerCase())) {
       return false;
     }
-    return !_looksLikeReleaseToken(input) &&
-        !_looksLikeWrapperFolder(input) &&
+    return !matchesReleaseTokenLabel(input) &&
+        !matchesWrapperFolderLabel(input) &&
         normalized.length >= 2;
   }
 
@@ -380,83 +575,25 @@ class NasMediaRecognizer {
             RegExp(r'\bep(?:isode)?[ ._\-]?\d{1,3}\b', caseSensitive: false),
             ' ',
           )
-          .replaceAll(RegExp(r'第\d{1,3}[集话]'), ' ');
+          .replaceAll(_stripChineseEpisodeTokenPattern, ' ');
     }
     if (removeYear) {
       value = value.replaceAll(RegExp(r'(?<!\d)(19\d{2}|20\d{2})(?!\d)'), ' ');
     }
 
-    value = value.replaceAll(
-      RegExp(
-        r'\b('
-        r'2160p|1080p|720p|480p|4k|8k|uhd|hdr10\+|hdr|dovi|dv|dolby[ ._\-]?vision|'
-        r'web[ ._\-]?dl|webrip|web[ ._\-]?rip|blu[ ._\-]?ray|bdrip|brrip|remux|'
-        r'x264|x265|h264|h265|hevc|avc|aac|ac3|eac3|ddp|dts|truehd|atmos|10bit|8bit|'
-        r'proper|repack|complete|multi|nf|amzn|dsnp|max|hmax|'
-        r'中字|双语|国粤|简繁|内封|外挂|中英字幕'
-        r')\b',
-        caseSensitive: false,
-      ),
-      ' ',
-    );
-    for (final token in const [
-      '分段版',
-      '特效中字',
-      '特效字幕',
-      '会员版',
-      '纯享版',
-      '导演剪辑版',
-      '导演版',
-      '加长版',
-      '未删减版',
-      '完整版',
-      '删减版',
-      '花絮',
-      '幕后',
-      '加更',
-      '彩蛋',
-      '番外',
-      '特别篇',
-      '剧场版',
-      '高码率',
-      '原画',
+    value = value.replaceAll(_cleanTitleReleaseTokenPattern, ' ');
+    for (final token in [
+      ..._sharedDescriptorKeywords,
+      ..._cleanTitleOnlyDescriptorKeywords
     ]) {
       value = value.replaceAll(token, ' ');
     }
     value = value.replaceAll(RegExp(r'\s+'), ' ').trim();
     value = value.replaceAll(RegExp(r'^[\-\._\s]+|[\-\._\s]+$'), '').trim();
-    if (_looksLikeReleaseToken(value)) {
+    if (matchesReleaseTokenLabel(value)) {
       return '';
     }
     return value;
-  }
-
-  static bool _looksLikeReleaseToken(String input) {
-    final normalized = input.trim().toLowerCase();
-    if (normalized.isEmpty) {
-      return false;
-    }
-    return RegExp(
-      r'^(s\d{1,2}|season ?\d{1,2}|2160p|1080p|720p|480p|4k|8k|uhd|hdr10\+?|hdr|dovi|dv|web ?dl|webrip|bluray|remux|x264|x265|h264|h265|hevc|avc|aac|ac3|eac3|ddp(?: ?(?:5[ .]?1|7[ .]?1))?|dts|truehd|atmos|10bit|8bit|nf|amzn|dsnp|max|hmax|中字|中文字幕|中英字幕|双语|简繁|内封|外挂|特效中字|特效字幕|分段版|会员版|纯享版|导演剪辑版|导演版|加长版|未删减版|完整版|删减版|花絮|幕后|加更|彩蛋|番外|特别篇|剧场版|高码率|原画)$',
-    ).hasMatch(normalized);
-  }
-
-  static bool _looksLikeWrapperFolder(String input) {
-    final compact = _compactDescriptor(input);
-    if (compact.isEmpty) {
-      return false;
-    }
-    if (_looksLikeSeasonFolder(input)) {
-      return false;
-    }
-    return _wrapperDescriptorPattern.hasMatch(compact);
-  }
-
-  static String _compactDescriptor(String input) {
-    return stripEmbeddedExternalIdTags(input).trim().toLowerCase().replaceAll(
-          RegExp(r'[【】\[\]\(\)（）{}<>《》"“”‘’·_.\-\s+&/\\|,:;]+'),
-          '',
-        );
   }
 
   static String? _resolveStoppedSeriesTitleFromFilteredDirectory({
@@ -494,7 +631,7 @@ class NasMediaRecognizer {
                 rawSegment,
                 parentMatchesFilter: parentMatchesFilter,
               )) ||
-          _looksLikeWrapperFolder(rawSegment)) {
+          matchesWrapperFolderLabel(rawSegment)) {
         continue;
       }
       if (cleanedSegment.isEmpty) {
@@ -553,7 +690,7 @@ class NasMediaRecognizer {
     final haystacks = <String>{
       rawValue.trim().toLowerCase(),
       cleanedSegment.trim().toLowerCase(),
-      _compactDescriptor(rawValue),
+      compactWrapperDescriptorLabel(rawValue),
     }..removeWhere((value) => value.isEmpty);
     return seriesTitleFilterKeywords.any(
       (keyword) => haystacks.any((value) => value.contains(keyword)),
@@ -590,8 +727,8 @@ class NasMediaRecognizer {
     for (final token in tokens) {
       final normalizedToken = token.toLowerCase();
       if (allowedFileTokens.contains(normalizedToken) ||
-          _looksLikeReleaseToken(normalizedToken) ||
-          _looksLikeWrapperFolder(token)) {
+          matchesReleaseTokenLabel(normalizedToken) ||
+          matchesWrapperFolderLabel(token)) {
         continue;
       }
       if (RegExp(r'^\d{3,4}p$', caseSensitive: false).hasMatch(token)) {
@@ -615,8 +752,10 @@ class _EpisodeMatch {
   const _EpisodeMatch({
     required this.seasonNumber,
     required this.episodeNumber,
+    this.episodePart = '',
   });
 
   final int? seasonNumber;
   final int? episodeNumber;
+  final String episodePart;
 }

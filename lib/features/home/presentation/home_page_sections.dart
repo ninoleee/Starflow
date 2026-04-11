@@ -22,6 +22,16 @@ class _HomeSectionSlot extends ConsumerStatefulWidget {
 
 class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot> {
   AsyncValue<HomeSectionViewModel?>? _cachedState;
+  final DetailRatingPrefetchCoordinator _ratingPrefetchCoordinator =
+      DetailRatingPrefetchCoordinator();
+
+  @override
+  void didUpdateWidget(covariant _HomeSectionSlot oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.isPageVisible && widget.isPageVisible) {
+      _ratingPrefetchCoordinator.reset();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,6 +71,15 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot> {
     BuildContext context,
     HomeSectionViewModel section,
   ) {
+    if (section.layout == HomeSectionLayout.posterRail &&
+        section.items.isNotEmpty) {
+      _ratingPrefetchCoordinator.schedulePrefetch(
+        ref: ref,
+        targets: section.items.map((item) => item.detailTarget),
+        isPageActive: () => mounted && widget.isPageVisible,
+        preferDoubanOnly: _isHomeDoubanPosterModule(widget.module),
+      );
+    }
     final viewAllTarget = section.viewAllTarget;
     final openViewAll = viewAllTarget == null
         ? null
@@ -107,6 +126,10 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot> {
                           title: item.title,
                           subtitle: item.subtitle,
                           posterUrl: item.posterUrl,
+                          imageBadgeText: _resolveHomePosterBadgeText(
+                            module: widget.module,
+                            item: item,
+                          ),
                           tvPosterFocusOutlineOnly: true,
                           focusNode:
                               widget.useHeroNextSectionFocusNode && index == 0
@@ -133,6 +156,26 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot> {
                 ),
     );
   }
+}
+
+bool _isHomeDoubanPosterModule(HomeModuleConfig module) {
+  return switch (module.type) {
+    HomeModuleType.doubanInterest => true,
+    HomeModuleType.doubanSuggestion => true,
+    HomeModuleType.doubanList => true,
+    HomeModuleType.doubanCarousel => true,
+    _ => false,
+  };
+}
+
+String _resolveHomePosterBadgeText({
+  required HomeModuleConfig module,
+  required HomeCardViewModel item,
+}) {
+  return resolvePreferredPosterRatingLabel(
+    item.detailTarget.ratingLabels,
+    preferDoubanOnly: _isHomeDoubanPosterModule(module),
+  );
 }
 
 class _HomeShell extends StatelessWidget {

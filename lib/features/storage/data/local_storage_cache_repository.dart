@@ -58,10 +58,15 @@ class LocalStorageCacheRepository {
   final void Function()? _notifyDetailCacheChanged;
 
   Future<CachedDetailState?> loadDetailState(
-    MediaDetailTarget seedTarget,
-  ) async {
+    MediaDetailTarget seedTarget, {
+    bool allowStructuralMismatch = false,
+  }) async {
     final payload = await _loadDetailPayload();
-    return _loadDetailStateFromPayload(payload, seedTarget);
+    return _loadDetailStateFromPayload(
+      payload,
+      seedTarget,
+      allowStructuralMismatch: allowStructuralMismatch,
+    );
   }
 
   Future<MediaDetailTarget?> loadDetailTarget(
@@ -85,8 +90,9 @@ class LocalStorageCacheRepository {
 
   CachedDetailState? _loadDetailStateFromPayload(
     _DetailCachePayload payload,
-    MediaDetailTarget seedTarget,
-  ) {
+    MediaDetailTarget seedTarget, {
+    bool allowStructuralMismatch = false,
+  }) {
     for (final lookupKey in buildLookupKeys(seedTarget)) {
       final recordId = payload.lookupKeys[lookupKey];
       if (recordId == null) {
@@ -94,10 +100,16 @@ class LocalStorageCacheRepository {
       }
       final record = payload.records[recordId];
       if (record != null &&
-          _canShareDetailCacheRecord(
-            left: seedTarget,
-            right: record.target,
-          )) {
+          (_canShareDetailCacheRecord(
+                left: seedTarget,
+                right: record.target,
+              ) ||
+              (allowStructuralMismatch &&
+                  _canRestoreStructuralMismatchRecord(
+                    seedTarget: seedTarget,
+                    record: record,
+                    matchedLookupKey: lookupKey,
+                  )))) {
         return CachedDetailState(
           target: record.target,
           libraryMatchChoices: record.libraryMatchChoices,
@@ -582,6 +594,57 @@ bool _canShareDetailCacheRecord({
     return false;
   }
   return true;
+}
+
+bool _canRestoreStructuralMismatchRecord({
+  required MediaDetailTarget seedTarget,
+  required _CachedDetailRecord record,
+  required String matchedLookupKey,
+}) {
+  final seedKind = _detailLookupKind(seedTarget);
+  final recordKind = _detailLookupKind(record.target);
+  final isCrossKindPair = (_isTopLevelDetailKind(seedKind) &&
+          _isNestedEpisodicKind(recordKind)) ||
+      (_isNestedEpisodicKind(seedKind) && _isTopLevelDetailKind(recordKind));
+  if (!isCrossKindPair) {
+    return false;
+  }
+
+  final normalizedLookupKey = matchedLookupKey.trim();
+  if (normalizedLookupKey.isEmpty ||
+      !record.lookupKeys.contains(normalizedLookupKey)) {
+    return false;
+  }
+
+  if (_isStrongStructuralLookupKey(normalizedLookupKey)) {
+    return true;
+  }
+  return record.libraryMatchChoices.isNotEmpty;
+}
+
+bool _isStrongStructuralLookupKey(String lookupKey) {
+  final normalized = lookupKey.trim().toLowerCase();
+  if (normalized.isEmpty) {
+    return false;
+  }
+  for (final prefix in const [
+    'library|',
+    'douban|',
+    'imdb|',
+    'tmdb|',
+    'tvdb|',
+    'wikidata|',
+  ]) {
+    if (normalized.startsWith(prefix)) {
+      return true;
+    }
+  }
+
+  final parts = normalized.split('|');
+  if (parts.length >= 3 && (parts.first == 'title' || parts.first == 'query')) {
+    return true;
+  }
+  return false;
 }
 
 void _addTextLookupKeys({

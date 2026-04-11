@@ -65,6 +65,12 @@ class DetailCachedStateRestorer {
   }) {
     final structuralSeed =
         cachedState.target.isSeries ? cachedState.target : pageSeedTarget;
+    final preservedResolvedTarget = structuralSeed.isSeries
+        ? _libraryMatchService.preserveSeriesStructuralTargetIfNeeded(
+            current: structuralSeed,
+            resolved: cachedState.target,
+          )
+        : cachedState.target;
 
     final preservedChoices = structuralSeed.isSeries
         ? cachedState.libraryMatchChoices
@@ -85,6 +91,9 @@ class DetailCachedStateRestorer {
             preservedChoices.length - 1,
           )
         : 0;
+    final shouldRestoreSingleResolvedTarget = !hasMultiChoices &&
+        structuralSeed.isSeries &&
+        _hasResolvedStructuralResourceState(preservedResolvedTarget);
 
     final normalizedSubtitleIndex = normalizeSubtitleSearchIndex(
       cachedState.selectedSubtitleSearchIndex,
@@ -97,11 +106,22 @@ class DetailCachedStateRestorer {
       selectedLibraryMatchIndex: selectedLibraryMatchIndex,
       subtitleSearchChoices: cachedState.subtitleSearchChoices,
       selectedSubtitleSearchIndex: normalizedSubtitleIndex,
-      manualOverrideTarget:
-          hasMultiChoices ? preservedChoices[selectedLibraryMatchIndex] : null,
+      manualOverrideTarget: hasMultiChoices
+          ? preservedChoices[selectedLibraryMatchIndex]
+          : (shouldRestoreSingleResolvedTarget
+              ? preservedResolvedTarget
+              : null),
       structuralSeedTarget: structuralSeed,
     );
   }
+}
+
+bool _hasResolvedStructuralResourceState(MediaDetailTarget target) {
+  final availability = target.availabilityLabel.trim();
+  return target.isPlayable ||
+      (availability.isNotEmpty && availability != '无') ||
+      target.sourceId.trim().isNotEmpty ||
+      target.itemId.trim().isNotEmpty;
 }
 
 int normalizeSubtitleSearchIndex(

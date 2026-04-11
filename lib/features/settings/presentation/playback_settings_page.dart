@@ -397,7 +397,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   String _buildPlaybackDecodeModeDescription() {
     final buffer = StringBuffer(_draftPlaybackDecodeMode.description);
     if (_draftPlaybackEngine == PlaybackEngine.systemPlayer) {
-      buffer.write(' 当前选择的是系统播放器，此设置不会生效。');
+      buffer.write(' 当前选择的是外部系统播放器，此设置不会生效。');
     } else if (_draftPlaybackEngine == PlaybackEngine.nativeContainer) {
       if (defaultTargetPlatform == TargetPlatform.iOS) {
         buffer.write(' iOS 原生容器页走系统 AVPlayer 解码链路，此设置当前不会生效。');
@@ -413,7 +413,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   String _buildPlaybackMpvQualityPresetDescription() {
     final buffer = StringBuffer(_draftPlaybackMpvQualityPreset.description);
     if (_draftPlaybackEngine != PlaybackEngine.embeddedMpv) {
-      buffer.write(' 当前只作用于内置 MPV，切到原生或系统播放器时不会生效。');
+      buffer.write(' 当前只作用于内置 MPV，切到原生或外部系统播放器时不会生效。');
     } else {
       buffer.write(' 也可以在播放器内的“播放设置”里临时切换。');
     }

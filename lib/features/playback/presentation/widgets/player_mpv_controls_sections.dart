@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 
+const Key kPlayerMpvLeanActionsSectionKey =
+    Key('player-mpv-controls:actions:lean');
+const Key kPlayerMpvFullActionsSectionKey =
+    Key('player-mpv-controls:actions:full');
+
 @immutable
 class PlayerMpvSeekSectionData {
   const PlayerMpvSeekSectionData({
@@ -25,11 +30,15 @@ class PlayerMpvPlaybackInfoSectionData {
     required this.isPlaying,
     required this.positionText,
     required this.onTogglePlayback,
+    this.compact = false,
+    this.showTooltips = true,
   });
 
   final bool isPlaying;
   final String positionText;
   final VoidCallback onTogglePlayback;
+  final bool compact;
+  final bool showTooltips;
 }
 
 @immutable
@@ -40,6 +49,7 @@ class PlayerMpvVolumeSectionData {
     required this.icon,
     required this.onToggleMute,
     required this.onVolumeChanged,
+    this.compact = false,
   });
 
   final bool visible;
@@ -47,23 +57,38 @@ class PlayerMpvVolumeSectionData {
   final IconData icon;
   final VoidCallback onToggleMute;
   final ValueChanged<double> onVolumeChanged;
+  final bool compact;
 }
 
 @immutable
 class PlayerMpvActionButtonsSectionData {
   const PlayerMpvActionButtonsSectionData({
     required this.isFullscreen,
-    required this.onOpenSubtitle,
-    required this.onOpenAudio,
     required this.onOpenOptions,
     required this.onToggleFullscreen,
+    this.onOpenSubtitle,
+    this.onOpenAudio,
+    this.leanMode = false,
+    this.showSubtitleButton = true,
+    this.showAudioButton = true,
+    this.showTooltips = true,
+    this.compact = false,
+    this.optionsIcon = Icons.tune_rounded,
+    this.optionsTooltip = '播放设置',
   });
 
   final bool isFullscreen;
-  final VoidCallback onOpenSubtitle;
-  final VoidCallback onOpenAudio;
+  final VoidCallback? onOpenSubtitle;
+  final VoidCallback? onOpenAudio;
   final VoidCallback onOpenOptions;
   final VoidCallback onToggleFullscreen;
+  final bool leanMode;
+  final bool showSubtitleButton;
+  final bool showAudioButton;
+  final bool showTooltips;
+  final bool compact;
+  final IconData optionsIcon;
+  final String optionsTooltip;
 }
 
 class PlayerMpvBottomControlsSection extends StatelessWidget {
@@ -109,20 +134,24 @@ class PlayerMpvBottomPanel extends StatelessWidget {
     this.padding = const EdgeInsets.fromLTRB(16, 12, 16, 12),
     this.backgroundColor = const Color(0xAA0A0F16),
     this.borderRadius = 18,
+    this.showBorder = true,
   });
 
   final Widget child;
   final EdgeInsetsGeometry padding;
   final Color backgroundColor;
   final double borderRadius;
+  final bool showBorder;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: backgroundColor,
+    return Material(
+      color: backgroundColor,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(borderRadius),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        side: showBorder
+            ? BorderSide(color: Colors.white.withValues(alpha: 0.08))
+            : BorderSide.none,
       ),
       child: Padding(padding: padding, child: child),
     );
@@ -251,6 +280,8 @@ class PlayerMpvPlaybackInfoSection extends StatelessWidget {
           icon: data.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
           tooltip: data.isPlaying ? '暂停' : '播放',
           onPressed: data.onTogglePlayback,
+          compact: data.compact,
+          showTooltip: data.showTooltips,
         ),
         const SizedBox(width: 12),
         Text(
@@ -281,7 +312,7 @@ class PlayerMpvTrailingSections extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final children = <Widget>[
-      PlayerMpvVolumeSection(data: volume),
+      if (volume.visible) PlayerMpvVolumeSection(data: volume),
       PlayerMpvActionButtonsSection(data: actions),
     ];
     if (compact) {
@@ -318,11 +349,11 @@ class PlayerMpvVolumeSection extends StatelessWidget {
           icon: Icon(
             data.icon,
             color: Colors.white,
-            size: 20,
+            size: data.compact ? 18 : 20,
           ),
         ),
         SizedBox(
-          width: 110,
+          width: data.compact ? 92 : 110,
           child: SliderTheme(
             data: SliderTheme.of(context).copyWith(
               trackHeight: 3,
@@ -353,23 +384,34 @@ class PlayerMpvActionButtonsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
+      key: data.leanMode
+          ? kPlayerMpvLeanActionsSectionKey
+          : kPlayerMpvFullActionsSectionKey,
       mainAxisSize: MainAxisSize.min,
       children: _withGap(
         [
+          if (data.showSubtitleButton && data.onOpenSubtitle != null)
+            PlayerMpvControlButton(
+              icon: Icons.closed_caption_rounded,
+              tooltip: '字幕',
+              onPressed: data.onOpenSubtitle!,
+              compact: data.compact,
+              showTooltip: data.showTooltips,
+            ),
+          if (data.showAudioButton && data.onOpenAudio != null)
+            PlayerMpvControlButton(
+              icon: Icons.audiotrack_rounded,
+              tooltip: '音轨',
+              onPressed: data.onOpenAudio!,
+              compact: data.compact,
+              showTooltip: data.showTooltips,
+            ),
           PlayerMpvControlButton(
-            icon: Icons.closed_caption_rounded,
-            tooltip: '字幕',
-            onPressed: data.onOpenSubtitle,
-          ),
-          PlayerMpvControlButton(
-            icon: Icons.audiotrack_rounded,
-            tooltip: '音轨',
-            onPressed: data.onOpenAudio,
-          ),
-          PlayerMpvControlButton(
-            icon: Icons.tune_rounded,
-            tooltip: '播放设置',
+            icon: data.optionsIcon,
+            tooltip: data.optionsTooltip,
             onPressed: data.onOpenOptions,
+            compact: data.compact,
+            showTooltip: data.showTooltips,
           ),
           PlayerMpvControlButton(
             icon: data.isFullscreen
@@ -377,6 +419,8 @@ class PlayerMpvActionButtonsSection extends StatelessWidget {
                 : Icons.fullscreen_rounded,
             tooltip: data.isFullscreen ? '退出全屏' : '全屏',
             onPressed: data.onToggleFullscreen,
+            compact: data.compact,
+            showTooltip: data.showTooltips,
           ),
         ],
         8,
@@ -391,28 +435,43 @@ class PlayerMpvControlButton extends StatelessWidget {
     required this.icon,
     required this.onPressed,
     this.tooltip,
+    this.compact = false,
+    this.showTooltip = true,
   });
 
   final IconData icon;
   final VoidCallback onPressed;
   final String? tooltip;
+  final bool compact;
+  final bool showTooltip;
+
+  Widget _wrapTooltip(Widget child) {
+    final message = tooltip?.trim() ?? '';
+    if (!showTooltip || message.isEmpty) {
+      return child;
+    }
+    return Tooltip(
+      message: message,
+      child: child,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip ?? '',
-      child: InkResponse(
-        radius: 22,
-        onTap: onPressed,
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: const Color(0x66101822),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-          ),
-          child: Icon(icon, size: 18, color: Colors.white),
+    return _wrapTooltip(
+      IconButton(
+        onPressed: onPressed,
+        icon: Icon(icon, size: compact ? 16 : 18),
+        color: Colors.white,
+        padding: EdgeInsets.zero,
+        constraints: BoxConstraints.tightFor(
+          width: compact ? 32 : 36,
+          height: compact ? 32 : 36,
+        ),
+        style: IconButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          foregroundColor: Colors.white,
         ),
       ),
     );
@@ -420,15 +479,18 @@ class PlayerMpvControlButton extends StatelessWidget {
 }
 
 List<Widget> _withGap(List<Widget> children, double gap) {
-  if (children.isEmpty) {
-    return children;
+  final visibleChildren = children
+      .where((child) => child is! SizedBox || child != const SizedBox.shrink())
+      .toList(growable: false);
+  if (visibleChildren.isEmpty) {
+    return visibleChildren;
   }
   final result = <Widget>[];
-  for (var i = 0; i < children.length; i++) {
+  for (var i = 0; i < visibleChildren.length; i++) {
     if (i > 0) {
       result.add(SizedBox(width: gap));
     }
-    result.add(children[i]);
+    result.add(visibleChildren[i]);
   }
   return result;
 }

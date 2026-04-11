@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -115,6 +116,8 @@ class LibraryPagedGrid extends StatelessWidget {
                   subtitle: item.year > 0 ? '${item.year}' : '',
                   posterUrl: posterAsset.url,
                   posterHeaders: posterAsset.headers,
+                  imageBadgeText:
+                      resolvePreferredPosterRatingLabel(item.ratingLabels),
                   posterFallbackSources: posterAssets
                       .skip(1)
                       .map(

@@ -11,12 +11,15 @@ import 'package:starflow/core/navigation/page_activity_mixin.dart';
 import 'package:starflow/core/navigation/retained_async_controller.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/debug_trace_once.dart';
+import 'package:starflow/core/utils/detail_resource_switch_trace.dart';
+import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
 import 'package:starflow/features/details/application/detail_external_episode_variant_service.dart';
 import 'package:starflow/features/details/application/detail_library_match_service.dart';
+import 'package:starflow/features/details/application/detail_online_resource_update_service.dart';
 import 'package:starflow/features/details/application/detail_page_actions.dart';
 import 'package:starflow/features/details/application/detail_page_controller.dart';
 import 'package:starflow/features/details/application/detail_subtitle_controller.dart';
@@ -28,6 +31,7 @@ import 'package:starflow/features/details/presentation/widgets/detail_hero_secti
 import 'package:starflow/features/details/presentation/widgets/detail_resource_info_section.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_television_picker_dialog.dart';
+import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -40,6 +44,11 @@ import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
+import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
+import 'package:starflow/features/search/data/quark_save_client.dart';
+import 'package:starflow/features/search/data/search_preferences_repository.dart';
+import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
+import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -78,9 +87,11 @@ bool _hasRatingLabelKeyword(Iterable<String> labels, String keyword) {
 }
 
 bool _shouldUseStandaloneImdbRating(DetailEnrichmentSettings settings) {
-  return settings.imdbRatingMatchEnabled &&
-      (!settings.tmdbMetadataMatchEnabled ||
-          settings.tmdbReadAccessToken.trim().isEmpty);
+  return settings.imdbRatingMatchEnabled;
+}
+
+bool _needsStandaloneImdbFallback(MediaDetailTarget target) {
+  return resolvePreferredPosterRatingLabel(target.ratingLabels).isEmpty;
 }
 
 bool _isEpisodeLikeTarget(MediaDetailTarget target) {
@@ -89,6 +100,70 @@ bool _isEpisodeLikeTarget(MediaDetailTarget target) {
       target.seasonNumber! >= 0 &&
       target.episodeNumber != null &&
       target.episodeNumber! > 0;
+}
+
+bool _isOverviewMetadataRefreshTarget(MediaDetailTarget target) {
+  final itemType = target.itemType.trim().toLowerCase();
+  if (itemType == 'episode' || itemType == 'season') {
+    return false;
+  }
+  if (target.episodeNumber != null && target.episodeNumber! > 0) {
+    return false;
+  }
+  return true;
+}
+
+bool _canAttemptDetailMetadataRefresh({
+  required DetailEnrichmentSettings settings,
+  required MediaDetailTarget target,
+}) {
+  final query = _detailMetadataQuery(target);
+  final doubanId = target.doubanId.trim();
+  final preferredImdbId = _resolvePreferredImdbId(target.imdbId, query);
+  final canUseWmdb = settings.wmdbMetadataMatchEnabled &&
+      (query.isNotEmpty || doubanId.isNotEmpty);
+  final canUseTmdb = settings.tmdbMetadataMatchEnabled &&
+      settings.tmdbReadAccessToken.trim().isNotEmpty &&
+      (query.isNotEmpty || preferredImdbId.isNotEmpty);
+  final canUseImdb =
+      _shouldUseStandaloneImdbRating(settings) && query.isNotEmpty;
+  return canUseWmdb || canUseTmdb || canUseImdb;
+}
+
+bool _hasExistingMetadataRefreshMarker(MediaDetailTarget target) {
+  if (target.doubanId.trim().isNotEmpty ||
+      target.imdbId.trim().isNotEmpty ||
+      target.tmdbId.trim().isNotEmpty ||
+      target.tvdbId.trim().isNotEmpty ||
+      target.wikidataId.trim().isNotEmpty ||
+      target.tmdbSetId.trim().isNotEmpty ||
+      target.providerIds.isNotEmpty) {
+    return true;
+  }
+  return !target.needsMetadataMatch && !target.needsImdbRatingMatch;
+}
+
+bool _shouldAutoRefreshOverviewMetadata({
+  required MediaDetailTarget pageTarget,
+  required MediaDetailTarget currentTarget,
+  required DetailEnrichmentSettings settings,
+  required DetailMetadataRefreshStatus refreshStatus,
+}) {
+  if (refreshStatus != DetailMetadataRefreshStatus.never) {
+    return false;
+  }
+  if (!_isOverviewMetadataRefreshTarget(pageTarget) ||
+      !_isOverviewMetadataRefreshTarget(currentTarget)) {
+    return false;
+  }
+  if (_hasExistingMetadataRefreshMarker(pageTarget) ||
+      _hasExistingMetadataRefreshMarker(currentTarget)) {
+    return false;
+  }
+  return _canAttemptDetailMetadataRefresh(
+    settings: settings,
+    target: currentTarget,
+  );
 }
 
 Future<String> _resolveTmdbBackdropForTarget({
@@ -401,7 +476,7 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
   }
 
   if (_shouldUseStandaloneImdbRating(settings) &&
-      (forceSearch || nextTarget.needsImdbRatingMatch)) {
+      (forceSearch || _needsStandaloneImdbFallback(nextTarget))) {
     try {
       final currentQuery = _detailMetadataQuery(nextTarget);
       DebugTraceOnce.logMetadata(
@@ -478,6 +553,30 @@ String _detailTraceKey(MediaDetailTarget target) {
     target.tmdbId.trim(),
   ].where((item) => item.isNotEmpty).join('|');
   return id.isEmpty ? 'detail' : id;
+}
+
+String _detailResourceTraceTarget(MediaDetailTarget? target) {
+  if (target == null) {
+    return '';
+  }
+  final playback = target.playbackTarget;
+  final path = _normalizeLibraryMatchPath(
+    playback?.actualAddress ?? target.resourcePath,
+  );
+  final stream = _normalizeLibraryMatchPath(playback?.streamUrl ?? '');
+  final identity = path.isNotEmpty ? path : stream;
+  return [
+    target.sourceName.trim().isEmpty ? '-' : target.sourceName.trim(),
+    target.itemType.trim().isEmpty ? '-' : target.itemType.trim(),
+    target.itemId.trim().isEmpty ? '-' : target.itemId.trim(),
+    target.isPlayable ? 'playable' : 'not-playable',
+    target.sectionName.trim().isEmpty ? '-' : target.sectionName.trim(),
+    identity.isEmpty ? '-' : identity,
+  ].join(' | ');
+}
+
+String _detailResourceTraceChoiceSample(Iterable<MediaDetailTarget> choices) {
+  return choices.take(4).map(_detailResourceTraceTarget).join(' || ');
 }
 
 bool _hasMetadataChanged(
@@ -593,9 +692,10 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
 
   final byId = <String, _LibraryMatchCandidate>{};
   void upsert(_LibraryMatchCandidate c) {
-    final ex = byId[c.item.id];
+    final key = _libraryMatchCandidateKey(c.item);
+    final ex = byId[key];
     if (ex == null || c.score > ex.score) {
-      byId[c.item.id] = c;
+      byId[key] = c;
     }
   }
 
@@ -858,6 +958,124 @@ class _LibraryMatchCandidate {
   final double score;
 }
 
+String _libraryMatchCandidateKey(MediaItem item) {
+  final normalizedAddress = _normalizeLibraryMatchPath(item.actualAddress);
+  final normalizedStreamUrl = _normalizeLibraryMatchPath(item.streamUrl);
+  final variantIdentity =
+      normalizedAddress.isNotEmpty ? normalizedAddress : normalizedStreamUrl;
+  return [
+    item.sourceKind.name,
+    item.sourceId.trim(),
+    item.id.trim(),
+    item.playbackItemId.trim(),
+    item.preferredMediaSourceId.trim(),
+    variantIdentity,
+  ].join('|');
+}
+
+String _normalizeLibraryMatchPath(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  final uri = Uri.tryParse(trimmed);
+  final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
+  return rawPath.replaceAll('\\', '/').trim();
+}
+
+List<MediaDetailTarget> _mergeExpandedLibraryChoices(
+  Iterable<MediaDetailTarget> choices,
+) {
+  final merged = <MediaDetailTarget>[];
+  final seenKeys = <String>{};
+  for (final choice in choices) {
+    final key = _libraryMatchTargetKey(choice);
+    if (!seenKeys.add(key)) {
+      continue;
+    }
+    merged.add(choice);
+  }
+  return merged;
+}
+
+int _resolveExpandedLibraryMatchIndex({
+  required MediaDetailTarget target,
+  required List<MediaDetailTarget> choices,
+}) {
+  if (choices.isEmpty) {
+    return 0;
+  }
+
+  final targetMediaSourceId =
+      target.playbackTarget?.preferredMediaSourceId.trim() ?? '';
+  if (targetMediaSourceId.isNotEmpty) {
+    final byMediaSourceId = choices.indexWhere(
+      (choice) =>
+          choice.playbackTarget?.preferredMediaSourceId.trim() ==
+          targetMediaSourceId,
+    );
+    if (byMediaSourceId >= 0) {
+      return byMediaSourceId;
+    }
+  }
+
+  final targetKey = _libraryMatchTargetKey(target);
+  final byKey = choices.indexWhere(
+    (choice) => _libraryMatchTargetKey(choice) == targetKey,
+  );
+  if (byKey >= 0) {
+    return byKey;
+  }
+
+  final targetPath = _normalizeLibraryMatchPath(
+    target.playbackTarget?.actualAddress ?? target.resourcePath,
+  );
+  if (targetPath.isNotEmpty) {
+    final byPath = choices.indexWhere(
+      (choice) =>
+          _normalizeLibraryMatchPath(
+            choice.playbackTarget?.actualAddress ?? choice.resourcePath,
+          ) ==
+          targetPath,
+    );
+    if (byPath >= 0) {
+      return byPath;
+    }
+  }
+
+  final targetItemId = target.itemId.trim();
+  if (targetItemId.isNotEmpty) {
+    final byItemId = choices.indexWhere(
+      (choice) => choice.itemId.trim() == targetItemId,
+    );
+    if (byItemId >= 0) {
+      return byItemId;
+    }
+  }
+
+  return 0;
+}
+
+String _libraryMatchTargetKey(MediaDetailTarget target) {
+  final playback = target.playbackTarget;
+  final normalizedAddress = _normalizeLibraryMatchPath(
+    playback?.actualAddress ?? target.resourcePath,
+  );
+  final normalizedStreamUrl = _normalizeLibraryMatchPath(
+    playback?.streamUrl ?? '',
+  );
+  final variantIdentity =
+      normalizedAddress.isNotEmpty ? normalizedAddress : normalizedStreamUrl;
+  return [
+    (target.sourceKind ?? MediaSourceKind.nas).name,
+    target.sourceId.trim(),
+    target.itemId.trim(),
+    playback?.itemId.trim() ?? '',
+    playback?.preferredMediaSourceId.trim() ?? '',
+    variantIdentity,
+  ].join('|');
+}
+
 List<String> _buildManualMatchTitles({
   required MediaDetailTarget target,
   required String query,
@@ -1046,6 +1264,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     with PageActivityMixin<MediaDetailPage> {
   String _selectedSeasonId = '';
   bool _isRefreshingMetadata = false;
+  bool _isCheckingOnlineResourceUpdate = false;
+  bool _isSavingOnlineResourceUpdate = false;
+  List<SearchResult> _favoriteSearchResults = const <SearchResult>[];
   _LibraryMatchTaskController? _activeLibraryMatchController;
   late final DetailPageController _pageController;
   final ScrollController _scrollController = ScrollController();
@@ -1119,6 +1340,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
 
   @override
   void onPageBecameActive() {
+    unawaited(_loadFavoriteSearchResults());
     _startDetailTasks();
   }
 
@@ -1130,12 +1352,236 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     }
     setState(() {
       _isRefreshingMetadata = false;
+      _isCheckingOnlineResourceUpdate = false;
+      _isSavingOnlineResourceUpdate = false;
     });
     _updateLibraryMatchView(isMatching: false);
     _updateSubtitleSearchView(
       isSearching: false,
       busyResultId: null,
     );
+  }
+
+  Future<void> _loadFavoriteSearchResults() async {
+    final favorites = await ref
+        .read(searchPreferencesRepositoryProvider)
+        .loadFavoriteResults();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _favoriteSearchResults = favorites;
+    });
+  }
+
+  Future<void> _checkFavoriteOnlineResourceUpdate(
+    MediaDetailTarget target,
+  ) async {
+    if (_isCheckingOnlineResourceUpdate || _isSavingOnlineResourceUpdate) {
+      return;
+    }
+
+    await _loadFavoriteSearchResults();
+    if (!mounted) {
+      return;
+    }
+
+    final service = ref.read(detailOnlineResourceUpdateServiceProvider);
+    final favoriteMatch = service.resolveFavoriteMatch(
+      target: target,
+      favorites: _favoriteSearchResults,
+    );
+    if (favoriteMatch == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('还没有可用于检查更新的在线收藏资源')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isCheckingOnlineResourceUpdate = true;
+    });
+
+    try {
+      final networkStorage = ref.read(
+        appSettingsProvider.select((settings) => settings.networkStorage),
+      );
+      final result = await service.checkForUpdates(
+        target: target,
+        favoriteMatch: favoriteMatch,
+        networkStorage: networkStorage,
+        quarkSaveClient: ref.read(quarkSaveClientProvider),
+      );
+      if (!mounted) {
+        return;
+      }
+      final shouldSave = await _showOnlineResourceUpdateDialog(
+        title: result.hasUpdates ? '发现更新' : '检查更新',
+        message: result.buildDialogMessage(),
+        canSave: result.hasUpdates,
+      );
+      if (!mounted || !shouldSave) {
+        return;
+      }
+      await _saveFavoriteOnlineResourceUpdate(
+        favoriteMatch: result.favoriteMatch,
+        networkStorage: networkStorage,
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('检查更新失败：$error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCheckingOnlineResourceUpdate = false;
+        });
+      }
+    }
+  }
+
+  Future<bool> _showOnlineResourceUpdateDialog({
+    required String title,
+    required String message,
+    bool canSave = false,
+  }) async {
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
+    final saveFocusNode = FocusNode(debugLabel: 'detail-update-save');
+    final closeFocusNode = FocusNode(debugLabel: 'detail-update-close');
+    try {
+      final result = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          final dialog = AlertDialog(
+            title: Text(title),
+            content: SingleChildScrollView(
+              child: SelectableText(message),
+            ),
+            actions: [
+              if (canSave)
+                if (isTelevision)
+                  TvAdaptiveButton(
+                    label: '保存到夸克',
+                    icon: Icons.bookmark_add_rounded,
+                    focusNode: saveFocusNode,
+                    autofocus: true,
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    focusId: 'detail:update-dialog:save',
+                  )
+                else
+                  TextButton.icon(
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    icon: const Icon(Icons.bookmark_add_rounded),
+                    label: const Text('保存到夸克'),
+                  ),
+              if (isTelevision)
+                TvAdaptiveButton(
+                  label: '关闭',
+                  icon: Icons.close_rounded,
+                  focusNode: closeFocusNode,
+                  autofocus: !canSave,
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  focusId: 'detail:update-dialog:close',
+                  variant: TvButtonVariant.outlined,
+                )
+              else
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('关闭'),
+                ),
+            ],
+          );
+          return wrapTelevisionDialogBackHandling(
+            enabled: isTelevision,
+            dialogContext: dialogContext,
+            inputFocusNodes: const <FocusNode>[],
+            contentFocusNodes: const <FocusNode>[],
+            actionFocusNodes: isTelevision
+                ? [
+                    if (canSave) saveFocusNode,
+                    closeFocusNode,
+                  ]
+                : const <FocusNode>[],
+            child: dialog,
+          );
+        },
+      );
+      return result == true;
+    } finally {
+      saveFocusNode.dispose();
+      closeFocusNode.dispose();
+    }
+  }
+
+  Future<void> _saveFavoriteOnlineResourceUpdate({
+    required DetailFavoriteSearchResourceMatch favoriteMatch,
+    required NetworkStorageConfig networkStorage,
+  }) async {
+    if (_isSavingOnlineResourceUpdate) {
+      return;
+    }
+
+    final cookie = networkStorage.quarkCookie.trim();
+    if (cookie.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先在搜索设置里填写夸克 Cookie')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSavingOnlineResourceUpdate = true;
+    });
+
+    try {
+      final response =
+          await ref.read(quarkSaveWorkflowServiceProvider).saveToQuark(
+                shareUrl: favoriteMatch.result.resourceUrl,
+                saveFolderName: favoriteMatch.folderName,
+                networkStorage: networkStorage,
+              );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(response.buildSuccessMessage()),
+        ),
+      );
+    } on QuarkSaveException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    } on SmartStrmWebhookException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('夸克保存成功，但 STRM 触发失败：${error.message}')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('保存失败：$error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSavingOnlineResourceUpdate = false;
+        });
+      }
+    }
   }
 
   void _cancelActiveLibraryMatch() {
@@ -1253,7 +1699,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         return;
       }
 
-      await _restoreCachedDetailState(sessionId);
+      final restoredMetadataRefreshStatus =
+          await _restoreCachedDetailState(sessionId);
       if (!_isSessionActive(sessionId)) {
         return;
       }
@@ -1286,9 +1733,28 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         hasOnlineSubtitleSources: onlineSubtitleSources.isNotEmpty,
         detailAutoLibraryMatchEnabled: detailAutoLibraryMatchEnabled,
       );
+      var currentTarget = runtimePlan.effectiveTarget;
+      final enrichmentSettings = ref.read(detailEnrichmentSettingsProvider);
+      if (_shouldAutoRefreshOverviewMetadata(
+        pageTarget: widget.target,
+        currentTarget: currentTarget,
+        settings: enrichmentSettings,
+        refreshStatus: restoredMetadataRefreshStatus,
+      )) {
+        await _refreshMetadata(
+          currentTarget,
+          sessionId: sessionId,
+          showFeedback: false,
+        );
+        if (!_isSessionActive(sessionId)) {
+          return;
+        }
+        currentTarget = _manualOverrideTarget ?? currentTarget;
+      }
+
       if (runtimePlan.shouldRunInitialSubtitleSearch) {
         await _searchSubtitlesForDetail(
-          runtimePlan.effectiveTarget,
+          currentTarget,
           showFeedback: false,
         );
         if (!_isSessionActive(sessionId)) {
@@ -1296,7 +1762,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         }
       }
 
-      final currentTarget = runtimePlan.effectiveTarget;
       if (runtimePlan.shouldWarmEnrichedTarget) {
         unawaited(ref.read(enrichedDetailTargetProvider(currentTarget).future));
       }
@@ -1309,8 +1774,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       }
 
       final resolved = await ref.read(
-        enrichedDetailTargetProvider(runtimePlan.resolveTargetForAutoMatch)
-            .future,
+        enrichedDetailTargetProvider(currentTarget).future,
       );
       if (!_isSessionActive(sessionId) ||
           _manualOverrideTarget != null ||
@@ -1345,12 +1809,28 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         !controller.cancelled;
   }
 
-  Future<void> _restoreCachedDetailState(int sessionId) async {
-    final cachedState = await ref
-        .read(localStorageCacheRepositoryProvider)
-        .loadDetailState(widget.target);
-    if (!_isSessionActive(sessionId) || cachedState == null) {
-      return;
+  Future<DetailMetadataRefreshStatus> _restoreCachedDetailState(
+    int sessionId,
+  ) async {
+    final cachedState =
+        await ref.read(localStorageCacheRepositoryProvider).loadDetailState(
+              widget.target,
+              allowStructuralMismatch: true,
+            );
+    if (!_isSessionActive(sessionId)) {
+      return DetailMetadataRefreshStatus.never;
+    }
+    if (cachedState == null) {
+      detailResourceSwitchTrace(
+        'cache.restore.miss',
+        dedupeKey: 'cache.restore|${_detailTraceKey(widget.target)}',
+        fields: {
+          'seed': _detailResourceTraceTarget(widget.target),
+          'itemType': widget.target.itemType,
+          'title': widget.target.title,
+        },
+      );
+      return DetailMetadataRefreshStatus.never;
     }
     final restorePlan = _detailCachedStateRestorer.buildPlan(
       pageSeedTarget: widget.target,
@@ -1368,50 +1848,212 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       busyResultId: null,
       statusMessage: null,
     );
+    detailResourceSwitchTrace(
+      'cache.restore.hit',
+      dedupeKey: 'cache.restore|${_detailTraceKey(widget.target)}',
+      fields: {
+        'seed': _detailResourceTraceTarget(widget.target),
+        'cachedTarget': _detailResourceTraceTarget(cachedState.target),
+        'choices': restorePlan.libraryMatchChoices.length,
+        'selectedIndex': restorePlan.selectedLibraryMatchIndex,
+        'manualOverride': _detailResourceTraceTarget(
+          restorePlan.manualOverrideTarget,
+        ),
+        'metadataStatus': cachedState.metadataRefreshStatus.name,
+        'choiceSample':
+            _detailResourceTraceChoiceSample(restorePlan.libraryMatchChoices),
+      },
+    );
     final manualOverrideTarget = restorePlan.manualOverrideTarget;
     if (manualOverrideTarget == null) {
-      return;
+      return cachedState.metadataRefreshStatus;
     }
     _pageController.setManualOverrideTarget(manualOverrideTarget);
+    return cachedState.metadataRefreshStatus;
   }
 
   Future<void> _restoreIndexedEpisodeVariantChoices(
     int sessionId,
     MediaDetailTarget currentTarget,
   ) async {
-    if (_libraryMatchChoices.length > 1) {
-      return;
-    }
-
-    final variantState =
-        await ref.read(detailExternalEpisodeVariantServiceProvider).loadChoices(
-              target: currentTarget,
-              settings: ref.read(appSettingsProvider),
-              nasMediaIndexer: ref.read(nasMediaIndexerProvider),
-            );
-    if (!_isSessionActive(sessionId) ||
-        variantState == null ||
-        variantState.choices.length <= 1) {
-      return;
-    }
-
-    final selectedIndex = variantState.selectedIndex.clamp(
-      0,
-      variantState.choices.length - 1,
+    detailResourceSwitchTrace(
+      'variant.restore.start',
+      dedupeKey: 'variant.restore|${_detailTraceKey(widget.target)}',
+      fields: {
+        'target': _detailResourceTraceTarget(currentTarget),
+        'baseChoices': _libraryMatchChoices.length,
+        'baseSample': _detailResourceTraceChoiceSample(_libraryMatchChoices),
+      },
     );
-    final selectedTarget = variantState.choices[selectedIndex];
+    final expandedState = await _expandEpisodeLikeLibraryMatchChoices(
+      baseChoices:
+          _libraryMatchChoices.isEmpty ? [currentTarget] : _libraryMatchChoices,
+      selectedTarget: currentTarget,
+    );
+    if (!_isSessionActive(sessionId) ||
+        expandedState == null ||
+        expandedState.choices.length <= 1) {
+      detailResourceSwitchTrace(
+        'variant.restore.skip',
+        dedupeKey: 'variant.restore|${_detailTraceKey(widget.target)}',
+        fields: {
+          'target': _detailResourceTraceTarget(currentTarget),
+          'expandedChoices': expandedState?.choices.length ?? 0,
+          'selectedIndex': expandedState?.selectedIndex ?? -1,
+        },
+      );
+      return;
+    }
+
+    final selectedIndex = expandedState.selectedIndex.clamp(
+      0,
+      expandedState.choices.length - 1,
+    );
+    final selectedTarget = expandedState.choices[selectedIndex];
     _updateLibraryMatchView(
-      choices: variantState.choices,
+      choices: expandedState.choices,
       selectedIndex: selectedIndex,
       isMatching: false,
     );
     _pageController.setManualOverrideTarget(selectedTarget);
+    detailResourceSwitchTrace(
+      'variant.restore.done',
+      dedupeKey: 'variant.restore|${_detailTraceKey(widget.target)}',
+      fields: {
+        'selectedIndex': selectedIndex,
+        'selectedTarget': _detailResourceTraceTarget(selectedTarget),
+        'choices': expandedState.choices.length,
+        'choiceSample': _detailResourceTraceChoiceSample(expandedState.choices),
+      },
+    );
     await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
           seedTarget: widget.target,
           resolvedTarget: selectedTarget,
-          libraryMatchChoices: variantState.choices,
+          libraryMatchChoices: expandedState.choices,
           selectedLibraryMatchIndex: selectedIndex,
         );
+  }
+
+  Future<DetailExternalEpisodeVariantState?>
+      _expandEpisodeLikeLibraryMatchChoices({
+    required List<MediaDetailTarget> baseChoices,
+    required MediaDetailTarget selectedTarget,
+  }) async {
+    final initialChoices = _mergeExpandedLibraryChoices([
+      ...baseChoices,
+      selectedTarget,
+    ]);
+    if (initialChoices.isEmpty) {
+      return null;
+    }
+
+    final settings = ref.read(appSettingsProvider);
+    final nasMediaIndexer = ref.read(nasMediaIndexerProvider);
+    final embyApiClient = ref.read(embyApiClientProvider);
+    final variantService =
+        ref.read(detailExternalEpisodeVariantServiceProvider);
+    final expandedChoices = <MediaDetailTarget>[];
+    var expandedSelectedTarget = selectedTarget;
+    final selectedTargetKey = _libraryMatchTargetKey(selectedTarget);
+    detailResourceSwitchTrace(
+      'variant.expand.start',
+      dedupeKey: 'variant.expand|${_detailTraceKey(widget.target)}',
+      fields: {
+        'selected': _detailResourceTraceTarget(selectedTarget),
+        'baseChoices': baseChoices.length,
+        'initialChoices': initialChoices.length,
+        'initialSample': _detailResourceTraceChoiceSample(initialChoices),
+      },
+    );
+
+    for (final choice in initialChoices) {
+      DetailExternalEpisodeVariantState? variantState;
+      try {
+        variantState = await variantService.loadChoices(
+          target: choice,
+          settings: settings,
+          nasMediaIndexer: nasMediaIndexer,
+          embyApiClient: embyApiClient,
+        );
+        detailResourceSwitchTrace(
+          'variant.expand.choice',
+          dedupeKey:
+              'variant.expand.choice|${_detailTraceKey(choice)}|${choice.itemId}',
+          fields: {
+            'choice': _detailResourceTraceTarget(choice),
+            'variantChoices': variantState?.choices.length ?? 0,
+            'selectedIndex': variantState?.selectedIndex ?? -1,
+            'variantSample': _detailResourceTraceChoiceSample(
+              variantState?.choices ?? const <MediaDetailTarget>[],
+            ),
+          },
+        );
+      } catch (error, stackTrace) {
+        variantState = null;
+        detailResourceSwitchTrace(
+          'variant.expand.error',
+          dedupeKey:
+              'variant.expand.choice|${_detailTraceKey(choice)}|${choice.itemId}',
+          fields: {
+            'choice': _detailResourceTraceTarget(choice),
+          },
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+      final resolvedChoices =
+          variantState == null || variantState.choices.length <= 1
+              ? [choice]
+              : variantState.choices;
+      if (_libraryMatchTargetKey(choice) == selectedTargetKey &&
+          resolvedChoices.isNotEmpty) {
+        if (variantState != null && variantState.choices.isNotEmpty) {
+          final variantIndex = variantState.selectedIndex.clamp(
+            0,
+            variantState.choices.length - 1,
+          );
+          expandedSelectedTarget = variantState.choices[variantIndex];
+        } else {
+          expandedSelectedTarget = resolvedChoices.first;
+        }
+      }
+      expandedChoices.addAll(resolvedChoices);
+    }
+
+    final mergedChoices = _mergeExpandedLibraryChoices(expandedChoices);
+    if (mergedChoices.length <= 1) {
+      detailResourceSwitchTrace(
+        'variant.expand.done',
+        dedupeKey: 'variant.expand|${_detailTraceKey(widget.target)}',
+        fields: {
+          'expandedChoices': expandedChoices.length,
+          'mergedChoices': mergedChoices.length,
+          'selected': _detailResourceTraceTarget(expandedSelectedTarget),
+          'mergedSample': _detailResourceTraceChoiceSample(mergedChoices),
+        },
+      );
+      return null;
+    }
+
+    final resolvedSelectedIndex = _resolveExpandedLibraryMatchIndex(
+      target: expandedSelectedTarget,
+      choices: mergedChoices,
+    );
+    detailResourceSwitchTrace(
+      'variant.expand.done',
+      dedupeKey: 'variant.expand|${_detailTraceKey(widget.target)}',
+      fields: {
+        'expandedChoices': expandedChoices.length,
+        'mergedChoices': mergedChoices.length,
+        'selectedIndex': resolvedSelectedIndex,
+        'selected': _detailResourceTraceTarget(expandedSelectedTarget),
+        'mergedSample': _detailResourceTraceChoiceSample(mergedChoices),
+      },
+    );
+    return DetailExternalEpisodeVariantState(
+      choices: mergedChoices,
+      selectedIndex: resolvedSelectedIndex,
+    );
   }
 
   Future<void> _matchLocalResource(
@@ -1470,6 +2112,16 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           if (partialMerged.isEmpty) {
             return;
           }
+          detailResourceSwitchTrace(
+            'resource.match.partial',
+            dedupeKey: 'resource.match|${_detailTraceKey(widget.target)}',
+            fields: {
+              'target': _detailResourceTraceTarget(currentTarget),
+              'partialCandidates': partialCandidates.length,
+              'partialMerged': partialMerged.length,
+              'partialSample': _detailResourceTraceChoiceSample(partialMerged),
+            },
+          );
           _updateLibraryMatchView(
             choices: partialMerged.length > 1
                 ? partialMerged
@@ -1491,23 +2143,64 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         candidates,
         query,
       );
+      detailResourceSwitchTrace(
+        'resource.match.final',
+        dedupeKey: 'resource.match|${_detailTraceKey(widget.target)}',
+        fields: {
+          'target': _detailResourceTraceTarget(currentTarget),
+          'candidateCount': candidates.length,
+          'mergedChoices': merged.length,
+          'mergedSample': _detailResourceTraceChoiceSample(merged),
+        },
+      );
+      final expandedVariantState = await _expandEpisodeLikeLibraryMatchChoices(
+        baseChoices: merged,
+        selectedTarget: merged.isEmpty ? currentTarget : merged.first,
+      );
+      final effectiveChoices = expandedVariantState?.choices ?? merged;
+      final effectiveSelectedIndex = expandedVariantState?.selectedIndex.clamp(
+            0,
+            effectiveChoices.isEmpty ? 0 : effectiveChoices.length - 1,
+          ) ??
+          0;
 
       _updateLibraryMatchView(
-        choices: merged.length > 1 ? merged : const <MediaDetailTarget>[],
-        selectedIndex: 0,
+        choices: effectiveChoices.length > 1
+            ? effectiveChoices
+            : const <MediaDetailTarget>[],
+        selectedIndex: effectiveSelectedIndex,
         isMatching: false,
       );
-      if (merged.length == 1 || merged.length > 1) {
-        _pageController.setManualOverrideTarget(merged.first);
+      detailResourceSwitchTrace(
+        'resource.match.effective',
+        dedupeKey: 'resource.match|${_detailTraceKey(widget.target)}',
+        fields: {
+          'choices': effectiveChoices.length,
+          'selectedIndex': effectiveSelectedIndex,
+          'selected': effectiveChoices.isEmpty
+              ? ''
+              : _detailResourceTraceTarget(
+                  effectiveChoices[effectiveSelectedIndex],
+                ),
+          'choiceSample': _detailResourceTraceChoiceSample(effectiveChoices),
+        },
+      );
+      if (effectiveChoices.isNotEmpty) {
+        _pageController.setManualOverrideTarget(
+          effectiveChoices[effectiveSelectedIndex],
+        );
       }
 
       unawaited(
         ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
               seedTarget: currentTarget,
-              resolvedTarget: merged.isEmpty ? currentTarget : merged.first,
-              libraryMatchChoices:
-                  merged.length > 1 ? merged : const <MediaDetailTarget>[],
-              selectedLibraryMatchIndex: 0,
+              resolvedTarget: effectiveChoices.isEmpty
+                  ? currentTarget
+                  : effectiveChoices[effectiveSelectedIndex],
+              libraryMatchChoices: effectiveChoices.length > 1
+                  ? effectiveChoices
+                  : const <MediaDetailTarget>[],
+              selectedLibraryMatchIndex: effectiveSelectedIndex,
             ),
       );
 
@@ -1520,15 +2213,15 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         return;
       }
       final messenger = ScaffoldMessenger.of(context);
-      if (merged.isEmpty) {
+      if (effectiveChoices.isEmpty) {
         messenger.showSnackBar(
           const SnackBar(content: Text('没有找到可匹配的本地资源')),
         );
         return;
       }
 
-      if (merged.length == 1) {
-        final matched = merged.first;
+      if (effectiveChoices.length == 1) {
+        final matched = effectiveChoices.first;
         messenger.showSnackBar(
           SnackBar(
             content: Text(
@@ -1543,7 +2236,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
 
       messenger.showSnackBar(
         SnackBar(
-          content: Text('匹配到 ${merged.length} 个本地资源，可在下方选择'),
+          content: Text('匹配到 ${effectiveChoices.length} 个本地资源，可在下方选择'),
         ),
       );
     } on _LibraryMatchCancelledException {
@@ -1596,15 +2289,19 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         _pageController.setManualOverrideTarget(nextTarget);
       }
 
-      if (changed) {
-        unawaited(
-          ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
-                seedTarget: currentTarget,
-                resolvedTarget: nextTarget,
-              ),
-        );
-      }
+      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+            seedTarget: widget.target,
+            resolvedTarget: nextTarget,
+            metadataRefreshStatus: DetailMetadataRefreshStatus.succeeded,
+          );
     } catch (error) {
+      if (_isSessionActive(activeSessionId)) {
+        await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+              seedTarget: widget.target,
+              resolvedTarget: currentTarget,
+              metadataRefreshStatus: DetailMetadataRefreshStatus.failed,
+            );
+      }
       if (!_isSessionActive(activeSessionId) || !showFeedback || !mounted) {
         return;
       }
@@ -1661,9 +2358,28 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     final resolvedTarget =
         _pageController.applySelectedLibraryMatchIndex(index);
     if (resolvedTarget == null) {
+      detailResourceSwitchTrace(
+        'resource.select.skip',
+        dedupeKey: 'resource.select|${_detailTraceKey(widget.target)}',
+        fields: {
+          'index': index,
+          'choices': _libraryMatchChoices.length,
+        },
+      );
       return;
     }
     final resolvedIndex = _selectedLibraryMatchIndex;
+    detailResourceSwitchTrace(
+      'resource.select.apply',
+      dedupeKey: 'resource.select|${_detailTraceKey(widget.target)}',
+      fields: {
+        'index': index,
+        'resolvedIndex': resolvedIndex,
+        'target': _detailResourceTraceTarget(resolvedTarget),
+        'choices': _libraryMatchChoices.length,
+        'choiceSample': _detailResourceTraceChoiceSample(_libraryMatchChoices),
+      },
+    );
     unawaited(
       ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
             seedTarget: widget.target,
@@ -2183,9 +2899,21 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         (settings) => settings.performanceSlimDetailHeroEnabled,
       ),
     );
+    final networkStorage = ref.watch(
+      appSettingsProvider.select((settings) => settings.networkStorage),
+    );
     final playbackEngine = ref.watch(
       appSettingsProvider.select((settings) => settings.playbackEngine),
     );
+    final favoriteOnlineResourceMatch = ref
+        .read(detailOnlineResourceUpdateServiceProvider)
+        .resolveFavoriteMatch(
+          target: target,
+          favorites: _favoriteSearchResults,
+        );
+    final canCheckFavoriteOnlineResourceUpdate =
+        favoriteOnlineResourceMatch != null &&
+            networkStorage.quarkCookie.trim().isNotEmpty;
 
     return TvPageFocusScope(
       controller: _tvFocusMemoryController,
@@ -2306,27 +3034,59 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                             ),
                           ),
                         if (target.overview.trim().isEmpty &&
-                            _episodeDetailSubtitleLine(
-                                  currentTarget: target,
-                                  pageTarget: widget.target,
-                                ) !=
-                                null)
+                            (_episodeDetailSubtitleLine(
+                                      currentTarget: target,
+                                      pageTarget: widget.target,
+                                    ) !=
+                                    null ||
+                                _episodeDetailFileNameLine(
+                                      currentTarget: target,
+                                      pageTarget: widget.target,
+                                    ) !=
+                                    null))
                           DetailBlock(
                             title: _overviewSectionTitle(
                               currentTarget: target,
                               pageTarget: widget.target,
                             ),
-                            child: Text(
-                              _episodeDetailSubtitleLine(
-                                currentTarget: target,
-                                pageTarget: widget.target,
-                              )!,
-                              style: const TextStyle(
-                                color: Color(0xFFF1F5FF),
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                height: 1.4,
-                              ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (_episodeDetailSubtitleLine(
+                                  currentTarget: target,
+                                  pageTarget: widget.target,
+                                )
+                                    case final episodeTitle?)
+                                  Text(
+                                    episodeTitle,
+                                    style: const TextStyle(
+                                      color: Color(0xFFF1F5FF),
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                if (_episodeDetailFileNameLine(
+                                  currentTarget: target,
+                                  pageTarget: widget.target,
+                                )
+                                    case final fileName?) ...[
+                                  if (_episodeDetailSubtitleLine(
+                                        currentTarget: target,
+                                        pageTarget: widget.target,
+                                      ) !=
+                                      null)
+                                    const SizedBox(height: 8),
+                                  Text(
+                                    fileName,
+                                    style: const TextStyle(
+                                      color: Color(0xFFB9C8DE),
+                                      fontSize: 14,
+                                      height: 1.5,
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
                         if (buildDetailGalleryImages(target).isNotEmpty)
@@ -2427,6 +3187,15 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                               onMatchLocalResource: _libraryMatchView.isMatching
                                   ? null
                                   : () => _matchLocalResource(target),
+                              onCheckOnlineResourceUpdate:
+                                  canCheckFavoriteOnlineResourceUpdate
+                                      ? () =>
+                                          _checkFavoriteOnlineResourceUpdate(
+                                            target,
+                                          )
+                                      : null,
+                              isCheckingOnlineResourceUpdate:
+                                  _isCheckingOnlineResourceUpdate,
                               onOpenPlaybackEnginePicker: () =>
                                   _openPlaybackEnginePicker(playbackEngine),
                               onPlaybackEngineSelected: (selection) {
@@ -2543,20 +3312,57 @@ String? _episodeDetailSubtitleLine({
   if (pageTarget.itemType.trim().toLowerCase() != 'episode') {
     return null;
   }
-  final episodeTitle = currentTarget.title.trim().isNotEmpty
-      ? currentTarget.title.trim()
-      : (currentTarget.playbackTarget?.title.trim() ?? pageTarget.title.trim());
-  if (episodeTitle.isEmpty) {
+  final fileName = _resolvedEpisodeDetailFileName(currentTarget);
+  if (fileName.isEmpty) {
     return null;
   }
   final primaryTitle = _overviewSectionTitle(
     currentTarget: currentTarget,
     pageTarget: pageTarget,
   );
-  if (episodeTitle == primaryTitle) {
+  if (fileName == primaryTitle) {
     return null;
   }
-  return episodeTitle;
+  return fileName;
+}
+
+String? _episodeDetailFileNameLine({
+  required MediaDetailTarget currentTarget,
+  required MediaDetailTarget pageTarget,
+}) {
+  if (pageTarget.itemType.trim().toLowerCase() != 'episode') {
+    return null;
+  }
+  return null;
+}
+
+String _resolvedEpisodeDetailFileName(MediaDetailTarget currentTarget) {
+  for (final value in [
+    currentTarget.playbackTarget?.actualAddress ?? '',
+    currentTarget.resourcePath,
+    currentTarget.playbackTarget?.streamUrl ?? '',
+  ]) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      continue;
+    }
+    final uri = Uri.tryParse(trimmed);
+    final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
+    final normalized = rawPath.replaceAll('\\', '/').trim();
+    if (normalized.isEmpty) {
+      continue;
+    }
+    final fileName = normalized.split('/').last.trim();
+    if (fileName.isEmpty) {
+      continue;
+    }
+    try {
+      return Uri.decodeComponent(fileName);
+    } on ArgumentError {
+      return fileName;
+    }
+  }
+  return '';
 }
 
 String _availabilityFeedbackLabel(String label) {

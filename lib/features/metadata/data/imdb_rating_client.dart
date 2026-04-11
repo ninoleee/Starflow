@@ -4,6 +4,7 @@ import 'package:archive/archive.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
+import 'package:starflow/features/library/domain/media_naming.dart';
 
 final imdbRatingClientProvider = Provider<ImdbRatingClient>((ref) {
   final client = ref.watch(starflowHttpClientProvider);
@@ -272,25 +273,11 @@ class ImdbRatingClient {
   }
 
   static String _cleanQuery(String value) {
-    return value
-        .replaceAll(RegExp(r'[._]+'), ' ')
-        .replaceAll(RegExp(r'\[[^\]]*\]|\([^\)]*\)'), ' ')
-        .replaceAll(
-          RegExp(
-            r'\b(2160p|1080p|720p|480p|bluray|blu-ray|bdrip|brrip|webrip|web-dl|webdl|hdrip|dvdrip|remux|x264|x265|h264|h265|hevc|aac|dts|atmos|hdr|uhd|proper|repack|extended|limited|internal|multi|dubbed|subs?)\b',
-            caseSensitive: false,
-          ),
-          ' ',
-        )
-        .replaceAll(RegExp(r'\bS\d{1,2}E\d{1,2}\b', caseSensitive: false), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
+    return MediaNaming.cleanLookupQuery(value);
   }
 
   static String _normalizeTitle(String value) {
-    return _cleanQuery(value)
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9\u4e00-\u9fff]+'), '');
+    return MediaNaming.normalizeLookupTitle(value);
   }
 }
 

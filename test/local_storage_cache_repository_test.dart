@@ -177,6 +177,71 @@ void main() {
     expect(results[2], isNull);
   });
 
+  test(
+      'loads series restore cache state when cached target is an episode choice',
+      () async {
+    final prefs = await SharedPreferences.getInstance();
+    final repository = LocalStorageCacheRepository(sharedPreferences: prefs);
+
+    const seedTarget = MediaDetailTarget(
+      title: '测试剧',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '无',
+      searchQuery: '测试剧',
+      sourceId: 'emby-main',
+      itemId: 'series-1',
+      itemType: 'series',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+    );
+    const resolvedTarget = MediaDetailTarget(
+      title: '测试剧',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：Emby · 客厅 Emby',
+      searchQuery: '测试剧',
+      sourceId: 'emby-main',
+      itemId: 'episode-b',
+      itemType: 'episode',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '测试剧',
+        sourceId: 'emby-main',
+        streamUrl: 'https://emby.example/Items/episode-b/stream.mkv',
+        sourceName: '客厅 Emby',
+        sourceKind: MediaSourceKind.emby,
+        itemId: 'episode-b',
+        itemType: 'episode',
+        seriesId: 'series-1',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+
+    await repository.saveDetailTarget(
+      seedTarget: seedTarget,
+      resolvedTarget: resolvedTarget,
+    );
+
+    final defaultLoaded = await repository.loadDetailState(seedTarget);
+    final restoreLoaded = await repository.loadDetailState(
+      seedTarget,
+      allowStructuralMismatch: true,
+    );
+
+    expect(defaultLoaded, isNull);
+    expect(restoreLoaded, isNotNull);
+    expect(restoreLoaded!.target.itemType, 'episode');
+    expect(restoreLoaded.target.playbackTarget?.seriesId, 'series-1');
+  });
+
   test('removes only the deleted resource from cached match choices', () async {
     final prefs = await SharedPreferences.getInstance();
     final repository = LocalStorageCacheRepository(sharedPreferences: prefs);

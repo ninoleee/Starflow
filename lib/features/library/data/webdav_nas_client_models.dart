@@ -330,10 +330,12 @@ class _SeriesRootInferencePlan {
   const _SeriesRootInferencePlan({
     required this.rootItemsAsSpecials,
     required this.seasonNumberByChildDirectory,
+    this.collapseChildDirectoriesToRoot = const <String>{},
   });
 
   final bool rootItemsAsSpecials;
   final Map<String, int?> seasonNumberByChildDirectory;
+  final Set<String> collapseChildDirectoriesToRoot;
 }
 
 class _SeasonDirectoryHint {

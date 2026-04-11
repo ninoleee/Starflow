@@ -485,6 +485,7 @@ class DetailLibraryMatchService {
         ? _toMediaPersonProfiles(match.platformProfiles)
         : const <MediaPersonProfile>[];
     final shouldReplaceCompanies = match.provider == MetadataMatchProvider.tmdb;
+    final preserveEpisodeOverview = _isEpisodeLikeDetailTarget(target);
     return target.copyWith(
       posterUrl: replaceExisting
           ? firstNonEmpty(match.posterUrl, target.posterUrl)
@@ -537,13 +538,15 @@ class DetailLibraryMatchService {
               ? const <String, String>{}
               : target.extraBackdropHeaders)
           : target.extraBackdropHeaders,
-      overview: replaceExisting
-          ? firstNonEmpty(match.overview, target.overview)
-          : (target.hasUsefulOverview
-              ? target.overview
-              : (match.overview.trim().isNotEmpty
-                  ? match.overview
-                  : target.overview)),
+      overview: preserveEpisodeOverview
+          ? target.overview
+          : replaceExisting
+              ? firstNonEmpty(match.overview, target.overview)
+              : (target.hasUsefulOverview
+                  ? target.overview
+                  : (match.overview.trim().isNotEmpty
+                      ? match.overview
+                      : target.overview)),
       year: replaceExisting
           ? (match.year > 0 ? match.year : target.year)
           : (target.year > 0 ? target.year : match.year),
@@ -748,6 +751,14 @@ class DetailLibraryMatchService {
       return primaryTrimmed;
     }
     return fallback.trim();
+  }
+
+  bool _isEpisodeLikeDetailTarget(MediaDetailTarget target) {
+    return target.itemType.trim().toLowerCase() == 'episode' &&
+        target.seasonNumber != null &&
+        target.seasonNumber! >= 0 &&
+        target.episodeNumber != null &&
+        target.episodeNumber! > 0;
   }
 
   List<String> mergeLabels(List<String> primary, List<String> secondary) {

@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 final detailExternalEpisodeVariantServiceProvider =
@@ -26,21 +28,30 @@ class DetailExternalEpisodeVariantService {
     required MediaDetailTarget target,
     required AppSettings settings,
     required NasMediaIndexer nasMediaIndexer,
+    required EmbyApiClient embyApiClient,
   }) async {
-    if (!_supportsTarget(target)) {
-      return null;
-    }
-
     final source = settings.mediaSources
         .where(
           (candidate) =>
               candidate.enabled &&
               candidate.id == target.sourceId &&
-              (candidate.kind == MediaSourceKind.nas ||
+              (candidate.kind == MediaSourceKind.emby ||
+                  candidate.kind == MediaSourceKind.nas ||
                   candidate.kind == MediaSourceKind.quark),
         )
         .firstOrNull;
     if (source == null) {
+      return null;
+    }
+
+    if (source.kind == MediaSourceKind.emby) {
+      return _loadEmbyChoices(
+        target: target,
+        source: source,
+        embyApiClient: embyApiClient,
+      );
+    }
+    if (!_supportsIndexedEpisodeTarget(target)) {
       return null;
     }
 
@@ -66,7 +77,7 @@ class DetailExternalEpisodeVariantService {
     );
   }
 
-  bool _supportsTarget(MediaDetailTarget target) {
+  bool _supportsIndexedEpisodeTarget(MediaDetailTarget target) {
     final itemType = target.itemType.trim().toLowerCase();
     final playback = target.playbackTarget;
     final isEpisodeLike =
@@ -78,10 +89,102 @@ class DetailExternalEpisodeVariantService {
             target.sourceKind == MediaSourceKind.quark);
   }
 
+  Future<DetailExternalEpisodeVariantState?> _loadEmbyChoices({
+    required MediaDetailTarget target,
+    required MediaSourceConfig source,
+    required EmbyApiClient embyApiClient,
+  }) async {
+    final playback = target.playbackTarget;
+    final playbackItemId = playback?.itemId.trim() ?? '';
+    final targetItemId = target.itemId.trim();
+    final resolvedItemId =
+        playbackItemId.isNotEmpty ? playbackItemId : targetItemId;
+    if (resolvedItemId.isEmpty || playback == null || !playback.canPlay) {
+      return null;
+    }
+
+    final seedPlayback = playback.copyWith(
+      title: playback.title.trim().isNotEmpty ? playback.title : target.title,
+      sourceId:
+          playback.sourceId.trim().isNotEmpty ? playback.sourceId : source.id,
+      sourceName: playback.sourceName.trim().isNotEmpty
+          ? playback.sourceName
+          : source.name,
+      sourceKind: source.kind,
+      itemId: resolvedItemId,
+      itemType: playback.itemType.trim().isNotEmpty
+          ? playback.itemType
+          : target.itemType,
+      year: playback.year > 0 ? playback.year : target.year,
+      actualAddress: playback.actualAddress.trim().isNotEmpty
+          ? playback.actualAddress
+          : target.resourcePath,
+      seriesId: playback.seriesId.trim().isNotEmpty ? playback.seriesId : '',
+      seriesTitle: playback.resolvedSeriesTitle.trim().isNotEmpty
+          ? playback.resolvedSeriesTitle
+          : target.title,
+    );
+
+    final variants = await embyApiClient.fetchPlaybackVariants(
+      source: source,
+      target: seedPlayback,
+    );
+    if (variants.length <= 1) {
+      return null;
+    }
+
+    final choices = variants
+        .map(
+          (variant) => _buildPlaybackChoiceTarget(
+            playback: variant,
+            current: target,
+            source: source,
+          ),
+        )
+        .toList(growable: false);
+    if (choices.length <= 1) {
+      return null;
+    }
+
+    return DetailExternalEpisodeVariantState(
+      choices: choices,
+      selectedIndex: _resolveSelectedIndex(target: target, choices: choices),
+    );
+  }
+
   int _resolveSelectedIndex({
     required MediaDetailTarget target,
     required List<MediaDetailTarget> choices,
   }) {
+    final targetMediaSourceId =
+        target.playbackTarget?.preferredMediaSourceId.trim() ?? '';
+    if (targetMediaSourceId.isNotEmpty) {
+      final byMediaSourceId = choices.indexWhere(
+        (choice) =>
+            choice.playbackTarget?.preferredMediaSourceId.trim() ==
+            targetMediaSourceId,
+      );
+      if (byMediaSourceId >= 0) {
+        return byMediaSourceId;
+      }
+    }
+
+    final targetPath = _normalizedPath(
+      target.playbackTarget?.actualAddress ?? target.resourcePath,
+    );
+    if (targetPath.isNotEmpty) {
+      final byPath = choices.indexWhere(
+        (choice) =>
+            _normalizedPath(
+              choice.playbackTarget?.actualAddress ?? choice.resourcePath,
+            ) ==
+            targetPath,
+      );
+      if (byPath >= 0) {
+        return byPath;
+      }
+    }
+
     final targetItemId = target.itemId.trim();
     if (targetItemId.isNotEmpty) {
       final byItemId = choices.indexWhere(
@@ -99,22 +202,6 @@ class DetailExternalEpisodeVariantService {
       );
       if (byPlaybackId >= 0) {
         return byPlaybackId;
-      }
-    }
-
-    final targetPath = _normalizedPath(
-      target.playbackTarget?.actualAddress ?? target.resourcePath,
-    );
-    if (targetPath.isNotEmpty) {
-      final byPath = choices.indexWhere(
-        (choice) =>
-            _normalizedPath(
-              choice.playbackTarget?.actualAddress ?? choice.resourcePath,
-            ) ==
-            targetPath,
-      );
-      if (byPath >= 0) {
-        return byPath;
       }
     }
 
@@ -219,6 +306,46 @@ class DetailExternalEpisodeVariantService {
           ? base.sourceName
           : current.sourceName,
       playbackTarget: mergedPlayback,
+    );
+  }
+
+  MediaDetailTarget _buildPlaybackChoiceTarget({
+    required PlaybackTarget playback,
+    required MediaDetailTarget current,
+    required MediaSourceConfig source,
+  }) {
+    final currentPlayback = current.playbackTarget;
+    final mergedPlayback = playback.copyWith(
+      seriesId: playback.seriesId.trim().isNotEmpty
+          ? playback.seriesId
+          : (currentPlayback?.seriesId.trim().isNotEmpty == true
+              ? currentPlayback!.seriesId.trim()
+              : ''),
+      seriesTitle: playback.resolvedSeriesTitle.trim().isNotEmpty
+          ? playback.resolvedSeriesTitle
+          : (currentPlayback?.resolvedSeriesTitle.trim().isNotEmpty == true
+              ? currentPlayback!.resolvedSeriesTitle.trim()
+              : current.title),
+    );
+
+    return current.copyWith(
+      itemId: current.itemId.trim().isNotEmpty
+          ? current.itemId
+          : mergedPlayback.itemId,
+      sourceId: source.id,
+      itemType: current.itemType.trim().isNotEmpty
+          ? current.itemType
+          : mergedPlayback.itemType,
+      year: current.year > 0 ? current.year : mergedPlayback.year,
+      availabilityLabel: current.availabilityLabel.trim().isNotEmpty
+          ? current.availabilityLabel
+          : '资源已就绪：${source.kind.label} · ${source.name}',
+      playbackTarget: mergedPlayback,
+      resourcePath: mergedPlayback.actualAddress.trim().isNotEmpty
+          ? mergedPlayback.actualAddress
+          : current.resourcePath,
+      sourceKind: source.kind,
+      sourceName: source.name,
     );
   }
 

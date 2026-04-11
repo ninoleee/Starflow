@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/utils/webdav_trace.dart';
 import 'package:starflow/features/library/data/season_folder_label_parser.dart';
+import 'package:starflow/features/library/domain/media_naming.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/nas_media_recognition.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -588,6 +589,10 @@ class WebDavNasClient {
     if (resolvedPlayableUrl.trim().isEmpty) {
       return target;
     }
+    final resolvedFileSizeBytes = await _resolvePlayableFileSizeBytes(
+      source,
+      streamUrl: resolvedPlayableUrl,
+    );
 
     return PlaybackTarget(
       title: target.title,
@@ -612,7 +617,7 @@ class WebDavNasClient {
       width: target.width,
       height: target.height,
       bitrate: target.bitrate,
-      fileSizeBytes: target.fileSizeBytes,
+      fileSizeBytes: resolvedFileSizeBytes,
     );
   }
 
@@ -674,6 +679,90 @@ class WebDavNasClient {
         }
       }
     }
+  }
+
+  Future<int?> _resolvePlayableFileSizeBytes(
+    MediaSourceConfig source, {
+    required String streamUrl,
+  }) async {
+    final resolvedUrl = streamUrl.trim();
+    if (resolvedUrl.isEmpty) {
+      return null;
+    }
+    final uri = Uri.tryParse(resolvedUrl);
+    if (uri == null || !uri.hasScheme) {
+      return null;
+    }
+
+    final headers = _headersForResolvedStream(source, resolvedUrl);
+    final directSize = await _tryReadContentLength(
+      () => _client.head(uri, headers: headers),
+    );
+    if (directSize != null && directSize > 0) {
+      return directSize;
+    }
+
+    return _tryReadRangeContentLength(
+      uri,
+      headers: headers,
+    );
+  }
+
+  Future<int?> _tryReadContentLength(
+    Future<http.Response> Function() request,
+  ) async {
+    try {
+      final response = await request().timeout(const Duration(seconds: 5));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return null;
+      }
+
+      return _parsePositiveInt(response.headers['content-length']);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<int?> _tryReadRangeContentLength(
+    Uri uri, {
+    required Map<String, String> headers,
+  }) async {
+    try {
+      final request = http.Request('GET', uri)
+        ..headers.addAll(headers)
+        ..headers['Range'] = 'bytes=0-0';
+      final response =
+          await _client.send(request).timeout(const Duration(seconds: 5));
+      try {
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          return null;
+        }
+
+        final contentRange = response.headers['content-range']?.trim() ?? '';
+        final rangeMatch =
+            RegExp(r'bytes\s+\d+-\d+/(\d+)$').firstMatch(contentRange);
+        if (rangeMatch != null) {
+          final parsed = _parsePositiveInt(rangeMatch.group(1));
+          if (parsed != null && parsed > 0) {
+            return parsed;
+          }
+        }
+
+        return _parsePositiveInt(response.headers['content-length']);
+      } finally {
+        await response.stream.listen(null).cancel();
+      }
+    } catch (_) {
+      return null;
+    }
+  }
+
+  int? _parsePositiveInt(String? rawValue) {
+    final parsed = int.tryParse(rawValue?.trim() ?? '');
+    if (parsed == null || parsed <= 0) {
+      return null;
+    }
+    return parsed;
   }
 
   Uri _resolveResourceUri(

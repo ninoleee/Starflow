@@ -536,7 +536,11 @@ class _DetailEpisodeCard extends ConsumerWidget {
     final playbackEntry =
         ref.watch(playbackEntryForMediaItemProvider(item)).value;
     final badgeText = _episodeBadgeText(item, playbackEntry);
-    final summary = _episodeSummary(item);
+    final summary = _episodeSummary(
+      item,
+      seriesTarget: seriesTarget,
+    );
+    final titleText = _episodeTitleText(item);
 
     void onOpenDetail() {
       context.pushNamed(
@@ -596,7 +600,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
                         right: 46,
                         top: 14,
                         child: Text(
-                          item.title,
+                          titleText,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -690,9 +694,14 @@ class _DetailEpisodeCard extends ConsumerWidget {
     return entries.join(' · ');
   }
 
-  String _episodeSummary(MediaItem item) {
-    if (item.overview.trim().isNotEmpty) {
-      return item.overview;
+  String _episodeSummary(
+    MediaItem item, {
+    required MediaDetailTarget seriesTarget,
+  }) {
+    final episodeOverview = item.overview.trim();
+    final seriesOverview = seriesTarget.overview.trim();
+    if (episodeOverview.isNotEmpty && episodeOverview != seriesOverview) {
+      return episodeOverview;
     }
     final fallback = <String>[
       if (item.seasonNumber != null && item.episodeNumber != null)
@@ -701,10 +710,29 @@ class _DetailEpisodeCard extends ConsumerWidget {
         item.durationLabel,
       if (!item.isPlayable) '当前没有可直接播放的资源',
     ];
-    if (fallback.isEmpty) {
-      return '暂无简介';
+    final fileName = _episodeFileName(item);
+    if (fallback.isNotEmpty) {
+      final detailLine = fallback.join(' · ');
+      if (fileName.isNotEmpty) {
+        return '$detailLine\n$fileName';
+      }
+      return detailLine;
     }
-    return fallback.join(' · ');
+    if (fileName.isNotEmpty) {
+      return fileName;
+    }
+    return '暂无简介';
+  }
+
+  String _episodeTitleText(MediaItem item) {
+    final fileSize = _episodeDisplayFileSizeLabel(item);
+    if (fileSize.isEmpty) {
+      return item.title;
+    }
+    if (item.title.trim().isEmpty) {
+      return fileSize;
+    }
+    return '${item.title} · $fileSize';
   }
 
   String _progressLabel(
@@ -720,6 +748,35 @@ class _DetailEpisodeCard extends ConsumerWidget {
     }
     return '已看 ${(progress * 100).round()}%';
   }
+}
+
+String _episodeDisplayFileSizeLabel(MediaItem item) {
+  return formatByteSize(item.fileSizeBytes).trim();
+}
+
+String _episodeFileName(MediaItem item) {
+  for (final value in [item.actualAddress, item.streamUrl]) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      continue;
+    }
+    final uri = Uri.tryParse(trimmed);
+    final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
+    final normalized = rawPath.replaceAll('\\', '/').trim();
+    if (normalized.isEmpty) {
+      continue;
+    }
+    final fileName = normalized.split('/').last.trim();
+    if (fileName.isEmpty) {
+      continue;
+    }
+    try {
+      return Uri.decodeComponent(fileName);
+    } on ArgumentError {
+      return fileName;
+    }
+  }
+  return '';
 }
 
 class _DetailEpisodeArtwork extends StatelessWidget {

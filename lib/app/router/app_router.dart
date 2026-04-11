@@ -44,34 +44,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       StatefulShellRoute.indexedStack(
-        pageBuilder: (context, state, navigationShell) {
-          final performanceReduceMotionEnabled =
-              ProviderScope.containerOf(context, listen: false)
-                  .read(_performanceReduceMotionEnabledProvider);
-          if (performanceReduceMotionEnabled) {
-            return _buildNoTransitionPage(
-              state: state,
-              child: AppNavigationShell(navigationShell: navigationShell),
-            );
-          }
-          return CustomTransitionPage<void>(
-            key: state.pageKey,
-            child: AppNavigationShell(navigationShell: navigationShell),
-            transitionDuration: const Duration(milliseconds: 260),
-            reverseTransitionDuration: const Duration(milliseconds: 200),
-            transitionsBuilder:
-                (context, animation, secondaryAnimation, child) {
-              final curved = CurvedAnimation(
-                parent: animation,
-                curve: Curves.easeOutCubic,
-                reverseCurve: Curves.easeInCubic,
-              );
-              return FadeTransition(
-                opacity: Tween<double>(begin: 0.2, end: 1).animate(curved),
-                child: child,
-              );
-            },
-          );
+        builder: (context, state, navigationShell) {
+          return AppNavigationShell(navigationShell: navigationShell);
         },
         branches: [
           StatefulShellBranch(

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
+import 'package:starflow/features/playback/presentation/widgets/player_mpv_controls_sections.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_formatters.dart';
 
 class PlayerMpvControlsOverlay extends StatefulWidget {
@@ -14,6 +15,7 @@ class PlayerMpvControlsOverlay extends StatefulWidget {
     required this.player,
     required this.target,
     required this.showVolumeSlider,
+    required this.preferLightweightChrome,
     required this.traceEnabled,
     required this.onBack,
     required this.onTogglePlayback,
@@ -30,6 +32,7 @@ class PlayerMpvControlsOverlay extends StatefulWidget {
   final Player player;
   final PlaybackTarget target;
   final bool showVolumeSlider;
+  final bool preferLightweightChrome;
   final bool traceEnabled;
   final Future<void> Function() onBack;
   final Future<void> Function() onTogglePlayback;
@@ -55,12 +58,15 @@ class _PlayerMpvControlsOverlayState extends State<PlayerMpvControlsOverlay> {
   StreamSubscription<bool>? _playingSubscription;
   bool _controlsVisible = true;
   double? _draggingPositionMs;
-  bool _restoreAudibleVolume = false;
   bool _isDisposed = false;
   Offset? _lastHoverPosition;
   DateTime? _lastHoverAt;
 
   bool get _canUpdateOverlayState => mounted && context.mounted && !_isDisposed;
+  bool get _showLightweightChrome =>
+      widget.preferLightweightChrome && !widget.isFullscreen;
+  bool get _showTooltips =>
+      !widget.preferLightweightChrome || widget.isFullscreen;
 
   @override
   void initState() {
@@ -315,44 +321,47 @@ class _PlayerMpvControlsOverlayState extends State<PlayerMpvControlsOverlay> {
     _showControls(reason: 'seek-complete');
   }
 
-  Future<void> _toggleMute(double currentVolume) async {
-    if (currentVolume <= 0.1) {
-      final restoredVolume = _restoreAudibleVolume ? 100.0 : 60.0;
-      _restoreAudibleVolume = false;
-      await widget.player.setVolume(restoredVolume);
-      return;
-    }
-    _restoreAudibleVolume = true;
-    await widget.player.setVolume(0);
-  }
-
   Widget _buildChromeButton({
     required IconData icon,
     required Future<void> Function() onPressed,
     String? tooltip,
     String? traceStage,
+    bool compact = false,
   }) {
     return Tooltip(
-      message: tooltip ?? '',
-      child: InkResponse(
-        radius: 22,
-        onTap: () {
+      message: _showTooltips ? (tooltip ?? '') : '',
+      child: IconButton(
+        onPressed: () {
           _showControls(reason: 'button-tap');
           if (traceStage != null) {
             _trace(traceStage);
           }
           unawaited(onPressed());
         },
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: const Color(0x66101822),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-          ),
-          child: Icon(icon, size: 18, color: Colors.white),
+        icon: Icon(icon, size: compact ? 16 : 18),
+        color: Colors.white,
+        padding: EdgeInsets.zero,
+        constraints: BoxConstraints.tightFor(
+          width: compact ? 32 : 36,
+          height: compact ? 32 : 36,
         ),
+        style: IconButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          foregroundColor: Colors.white,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVisibilityShell(Widget child) {
+    final visible = _controlsVisible;
+    return IgnorePointer(
+      ignoring: !visible,
+      child: Opacity(
+        opacity: visible ? 1 : 0,
+        alwaysIncludeSemantics: false,
+        child: child,
       ),
     );
   }
@@ -375,12 +384,12 @@ class _PlayerMpvControlsOverlayState extends State<PlayerMpvControlsOverlay> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (_controlsVisible)
-              Positioned(
-                top: 16,
-                left: 16,
-                right: 16,
-                child: SafeArea(
+            Positioned(
+              top: 16,
+              left: 16,
+              right: 16,
+              child: _buildVisibilityShell(
+                SafeArea(
                   bottom: false,
                   child: Row(
                     children: [
@@ -391,6 +400,7 @@ class _PlayerMpvControlsOverlayState extends State<PlayerMpvControlsOverlay> {
                         tooltip: isFullscreen ? '退出全屏' : '返回',
                         onPressed: widget.onBack,
                         traceStage: 'windows-mpv.overlay.action.back',
+                        compact: _showLightweightChrome,
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -404,32 +414,24 @@ class _PlayerMpvControlsOverlayState extends State<PlayerMpvControlsOverlay> {
                             color: Colors.white,
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            shadows: [
-                              Shadow(
-                                color: Color(0xA6000000),
-                                blurRadius: 12,
-                                offset: Offset(0, 2),
-                              ),
-                            ],
                           ),
                         ),
                       ),
-                      if (widget.onShowAirPlay case final onShowAirPlay?) ...[
+                      if (widget.onShowAirPlay != null) ...[
                         const SizedBox(width: 8),
                         _buildChromeButton(
                           icon: Icons.airplay_rounded,
                           tooltip: '投放',
-                          onPressed: onShowAirPlay,
+                          onPressed: widget.onShowAirPlay!,
                           traceStage: 'windows-mpv.overlay.action.airplay',
                         ),
                       ],
-                      if (widget.onShowPictureInPicture
-                          case final onShowPictureInPicture?) ...[
+                      if (widget.onShowPictureInPicture != null) ...[
                         const SizedBox(width: 8),
                         _buildChromeButton(
                           icon: Icons.picture_in_picture_alt_rounded,
                           tooltip: '画中画',
-                          onPressed: onShowPictureInPicture,
+                          onPressed: widget.onShowPictureInPicture!,
                           traceStage:
                               'windows-mpv.overlay.action.picture-in-picture',
                         ),
@@ -438,251 +440,90 @@ class _PlayerMpvControlsOverlayState extends State<PlayerMpvControlsOverlay> {
                   ),
                 ),
               ),
-            if (_controlsVisible)
-              Positioned(
-                left: 16,
-                right: 16,
-                bottom: 16,
-                child: SafeArea(
+            ),
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 16,
+              child: _buildVisibilityShell(
+                SafeArea(
                   top: false,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: const Color(0xAA0A0F16),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.08),
-                      ),
+                  child: PlayerMpvBottomPanel(
+                    backgroundColor: _showLightweightChrome
+                        ? const Color(0xD610141A)
+                        : const Color(0xC810141A),
+                    borderRadius: _showLightweightChrome ? 14 : 18,
+                    showBorder: false,
+                    padding: EdgeInsets.fromLTRB(
+                      _showLightweightChrome ? 12 : 16,
+                      _showLightweightChrome ? 10 : 12,
+                      _showLightweightChrome ? 12 : 16,
+                      _showLightweightChrome ? 10 : 12,
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                      child: StreamBuilder<Duration>(
-                        stream: widget.player.stream.position,
-                        initialData: widget.player.state.position,
-                        builder: (context, positionSnapshot) {
-                          return StreamBuilder<Duration>(
-                            stream: widget.player.stream.duration,
-                            initialData: widget.player.state.duration,
-                            builder: (context, durationSnapshot) {
-                              return StreamBuilder<double>(
-                                stream:
-                                    widget.player.stream.bufferingPercentage,
-                                initialData:
-                                    widget.player.state.bufferingPercentage,
-                                builder: (context, bufferingSnapshot) {
-                                  return StreamBuilder<bool>(
-                                    stream: widget.player.stream.playing,
-                                    initialData: widget.player.state.playing,
-                                    builder: (context, playingSnapshot) {
-                                      return StreamBuilder<double>(
-                                        stream: widget.player.stream.volume,
-                                        initialData: widget.player.state.volume,
-                                        builder: (context, volumeSnapshot) {
-                                          final duration =
-                                              durationSnapshot.data ??
-                                                  Duration.zero;
-                                          final actualPosition =
-                                              positionSnapshot.data ??
-                                                  Duration.zero;
-                                          final displayPosition =
-                                              _draggingPositionMs == null
-                                                  ? actualPosition
-                                                  : Duration(
-                                                      milliseconds:
-                                                          _draggingPositionMs!
-                                                              .round(),
-                                                    );
-                                          final durationMs =
-                                              duration.inMilliseconds;
-                                          final sliderMax = durationMs <= 0
-                                              ? 1.0
-                                              : durationMs.toDouble();
-                                          final sliderValue =
-                                              (_draggingPositionMs ??
-                                                      actualPosition
-                                                          .inMilliseconds
-                                                          .toDouble())
-                                                  .clamp(0.0, sliderMax);
-                                          final playedProgress = durationMs <= 0
-                                              ? 0.0
-                                              : (actualPosition.inMilliseconds /
-                                                      durationMs)
-                                                  .clamp(0.0, 1.0);
-                                          final bufferedProgress =
-                                              ((bufferingSnapshot.data ?? 0.0) /
-                                                      100.0)
-                                                  .clamp(playedProgress, 1.0);
-                                          final playing =
-                                              playingSnapshot.data ?? false;
-                                          final volume =
-                                              (volumeSnapshot.data ?? 100.0)
-                                                  .clamp(0.0, 100.0);
-
-                                          return Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              _PlayerMpvSeekBar(
-                                                max: sliderMax,
-                                                value: sliderValue,
-                                                bufferedProgress:
-                                                    bufferedProgress,
-                                                enabled: durationMs > 0,
-                                                onChanged: _handleSeekChanged,
-                                                onChangeEnd:
-                                                    _handleSeekChangeEnd,
-                                              ),
-                                              const SizedBox(height: 12),
-                                              Row(
-                                                children: [
-                                                  _buildChromeButton(
-                                                    icon: playing
-                                                        ? Icons.pause_rounded
-                                                        : Icons
-                                                            .play_arrow_rounded,
-                                                    tooltip:
-                                                        playing ? '暂停' : '播放',
-                                                    onPressed:
-                                                        widget.onTogglePlayback,
-                                                    traceStage:
-                                                        'windows-mpv.overlay.action.toggle-playback',
-                                                  ),
-                                                  const SizedBox(width: 12),
-                                                  Text(
-                                                    '${formatPlaybackClockDuration(displayPosition)} / ${formatPlaybackClockDuration(duration)}',
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                    ),
-                                                  ),
-                                                  const Spacer(),
-                                                  if (widget.showVolumeSlider)
-                                                    IconButton(
-                                                      onPressed: () {
-                                                        _showControls(
-                                                          reason:
-                                                              'volume-button',
-                                                        );
-                                                        _trace(
-                                                          'windows-mpv.overlay.action.toggle-mute',
-                                                        );
-                                                        unawaited(
-                                                          _toggleMute(volume),
-                                                        );
-                                                      },
-                                                      splashRadius: 18,
-                                                      icon: Icon(
-                                                        volume <= 0.1
-                                                            ? Icons
-                                                                .volume_off_rounded
-                                                            : volume < 50
-                                                                ? Icons
-                                                                    .volume_down_rounded
-                                                                : Icons
-                                                                    .volume_up_rounded,
-                                                        color: Colors.white,
-                                                        size: 20,
-                                                      ),
-                                                    ),
-                                                  if (widget.showVolumeSlider)
-                                                    SizedBox(
-                                                      width: 110,
-                                                      child: SliderTheme(
-                                                        data: SliderTheme.of(
-                                                          context,
-                                                        ).copyWith(
-                                                          trackHeight: 3,
-                                                          overlayShape:
-                                                              SliderComponentShape
-                                                                  .noOverlay,
-                                                          thumbShape:
-                                                              const RoundSliderThumbShape(
-                                                            enabledThumbRadius:
-                                                                6,
-                                                          ),
-                                                        ),
-                                                        child: Slider(
-                                                          min: 0,
-                                                          max: 100,
-                                                          value: volume,
-                                                          onChanged: (value) {
-                                                            _showControls(
-                                                              reason:
-                                                                  'volume-slider',
-                                                            );
-                                                            unawaited(
-                                                              widget.player
-                                                                  .setVolume(
-                                                                value,
-                                                              ),
-                                                            );
-                                                          },
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  if (widget.showVolumeSlider)
-                                                    const SizedBox(width: 6),
-                                                  _buildChromeButton(
-                                                    icon: Icons
-                                                        .closed_caption_rounded,
-                                                    tooltip: '字幕',
-                                                    onPressed:
-                                                        widget.onOpenSubtitle,
-                                                    traceStage:
-                                                        'windows-mpv.overlay.action.subtitle',
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  _buildChromeButton(
-                                                    icon: Icons
-                                                        .audiotrack_rounded,
-                                                    tooltip: '音轨',
-                                                    onPressed:
-                                                        widget.onOpenAudio,
-                                                    traceStage:
-                                                        'windows-mpv.overlay.action.audio',
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  _buildChromeButton(
-                                                    icon: Icons.tune_rounded,
-                                                    tooltip: '播放设置',
-                                                    onPressed:
-                                                        widget.onOpenOptions,
-                                                    traceStage:
-                                                        'windows-mpv.overlay.action.options',
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  _buildChromeButton(
-                                                    icon: isFullscreen
-                                                        ? Icons
-                                                            .fullscreen_exit_rounded
-                                                        : Icons
-                                                            .fullscreen_rounded,
-                                                    tooltip: isFullscreen
-                                                        ? '退出全屏'
-                                                        : '全屏',
-                                                    onPressed: widget
-                                                        .onToggleFullscreen,
-                                                    traceStage:
-                                                        'windows-mpv.overlay.action.fullscreen',
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          );
-                                        },
-                                      );
-                                    },
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _PlayerMpvSeekSectionBinding(
+                          player: widget.player,
+                          draggingPositionMs: _draggingPositionMs,
+                          onChanged: _handleSeekChanged,
+                          onChangeEnd: _handleSeekChangeEnd,
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _PlayerMpvPlaybackInfoSectionBinding(
+                                player: widget.player,
+                                draggingPositionMs: _draggingPositionMs,
+                                compact: _showLightweightChrome,
+                                showTooltips: _showTooltips,
+                                onTogglePlayback: () {
+                                  _showControls(reason: 'toggle-playback');
+                                  _trace(
+                                    'windows-mpv.overlay.action.toggle-playback',
                                   );
+                                  unawaited(widget.onTogglePlayback());
                                 },
-                              );
-                            },
-                          );
-                        },
-                      ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            PlayerMpvActionButtonsSection(
+                              data: PlayerMpvActionButtonsSectionData(
+                                isFullscreen: isFullscreen,
+                                onOpenSubtitle: null,
+                                onOpenAudio: null,
+                                onOpenOptions: () {
+                                  _showControls(reason: 'options');
+                                  _trace(
+                                    'windows-mpv.overlay.action.options',
+                                  );
+                                  unawaited(widget.onOpenOptions());
+                                },
+                                onToggleFullscreen: () {
+                                  _showControls(reason: 'fullscreen');
+                                  _trace(
+                                    'windows-mpv.overlay.action.fullscreen',
+                                  );
+                                  unawaited(widget.onToggleFullscreen());
+                                },
+                                leanMode: _showLightweightChrome,
+                                showSubtitleButton: false,
+                                showAudioButton: false,
+                                showTooltips: _showTooltips,
+                                compact: _showLightweightChrome,
+                                optionsIcon: Icons.more_horiz_rounded,
+                                optionsTooltip: '更多',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
+            ),
           ],
         ),
       ),
@@ -690,69 +531,116 @@ class _PlayerMpvControlsOverlayState extends State<PlayerMpvControlsOverlay> {
   }
 }
 
-class _PlayerMpvSeekBar extends StatelessWidget {
-  const _PlayerMpvSeekBar({
-    required this.max,
-    required this.value,
-    required this.bufferedProgress,
-    required this.enabled,
+class _PlayerMpvSeekSectionBinding extends StatelessWidget {
+  const _PlayerMpvSeekSectionBinding({
+    required this.player,
+    required this.draggingPositionMs,
     required this.onChanged,
     required this.onChangeEnd,
   });
 
-  final double max;
-  final double value;
-  final double bufferedProgress;
-  final bool enabled;
+  final Player player;
+  final double? draggingPositionMs;
   final ValueChanged<double> onChanged;
   final ValueChanged<double> onChangeEnd;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 20,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: SizedBox(
-              height: 4,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  ColoredBox(
-                    color: Colors.white.withValues(alpha: 0.12),
+    return StreamBuilder<Duration>(
+      stream: player.stream.position,
+      initialData: player.state.position,
+      builder: (context, positionSnapshot) {
+        return StreamBuilder<Duration>(
+          stream: player.stream.duration,
+          initialData: player.state.duration,
+          builder: (context, durationSnapshot) {
+            return StreamBuilder<double>(
+              stream: player.stream.bufferingPercentage,
+              initialData: player.state.bufferingPercentage,
+              builder: (context, bufferingSnapshot) {
+                final duration = durationSnapshot.data ?? Duration.zero;
+                final actualPosition = positionSnapshot.data ?? Duration.zero;
+                final durationMs = duration.inMilliseconds;
+                final sliderMax = durationMs <= 0 ? 1.0 : durationMs.toDouble();
+                final sliderValue = (draggingPositionMs ??
+                        actualPosition.inMilliseconds.toDouble())
+                    .clamp(0.0, sliderMax);
+                final playedProgress = durationMs <= 0
+                    ? 0.0
+                    : (actualPosition.inMilliseconds / durationMs)
+                        .clamp(0.0, 1.0);
+                final bufferedProgress =
+                    ((bufferingSnapshot.data ?? 0.0) / 100.0)
+                        .clamp(playedProgress, 1.0);
+
+                return PlayerMpvSeekSection(
+                  data: PlayerMpvSeekSectionData(
+                    max: sliderMax,
+                    value: sliderValue,
+                    bufferedProgress: bufferedProgress,
+                    enabled: durationMs > 0,
+                    onChanged: onChanged,
+                    onChangeEnd: onChangeEnd,
                   ),
-                  FractionallySizedBox(
-                    alignment: Alignment.centerLeft,
-                    widthFactor: bufferedProgress.clamp(0.0, 1.0),
-                    child: ColoredBox(
-                      color: Colors.white.withValues(alpha: 0.28),
-                    ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _PlayerMpvPlaybackInfoSectionBinding extends StatelessWidget {
+  const _PlayerMpvPlaybackInfoSectionBinding({
+    required this.player,
+    required this.draggingPositionMs,
+    required this.compact,
+    required this.showTooltips,
+    required this.onTogglePlayback,
+  });
+
+  final Player player;
+  final double? draggingPositionMs;
+  final bool compact;
+  final bool showTooltips;
+  final VoidCallback onTogglePlayback;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<bool>(
+      stream: player.stream.playing,
+      initialData: player.state.playing,
+      builder: (context, playingSnapshot) {
+        return StreamBuilder<Duration>(
+          stream: player.stream.position,
+          initialData: player.state.position,
+          builder: (context, positionSnapshot) {
+            return StreamBuilder<Duration>(
+              stream: player.stream.duration,
+              initialData: player.state.duration,
+              builder: (context, durationSnapshot) {
+                final duration = durationSnapshot.data ?? Duration.zero;
+                final actualPosition = positionSnapshot.data ?? Duration.zero;
+                final displayPosition = draggingPositionMs == null
+                    ? actualPosition
+                    : Duration(milliseconds: draggingPositionMs!.round());
+                return PlayerMpvPlaybackInfoSection(
+                  data: PlayerMpvPlaybackInfoSectionData(
+                    isPlaying: playingSnapshot.data ?? false,
+                    positionText:
+                        '${formatPlaybackClockDuration(displayPosition)} / ${formatPlaybackClockDuration(duration)}',
+                    onTogglePlayback: onTogglePlayback,
+                    compact: compact,
+                    showTooltips: showTooltips,
                   ),
-                ],
-              ),
-            ),
-          ),
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 4,
-              inactiveTrackColor: Colors.transparent,
-              activeTrackColor: Colors.white,
-              overlayShape: SliderComponentShape.noOverlay,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-            ),
-            child: Slider(
-              min: 0,
-              max: max,
-              value: value.clamp(0.0, max),
-              onChanged: enabled ? onChanged : null,
-              onChangeEnd: enabled ? onChangeEnd : null,
-            ),
-          ),
-        ],
-      ),
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 }
