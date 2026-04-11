@@ -452,6 +452,92 @@ void main() {
       );
     });
 
+    test('cancels in-flight refresh safely when container is disposed',
+        () async {
+      const source = MediaSourceConfig(
+        id: 'quark-main',
+        name: 'Quark Drive',
+        kind: MediaSourceKind.quark,
+        endpoint: 'root-folder',
+        libraryPath: '/影视',
+        enabled: true,
+        webDavSidecarScrapingEnabled: true,
+      );
+      final gate = Completer<void>();
+      final quarkClient = _BlockingQuarkSaveClient(
+        gate: gate,
+        entriesByParentFid: {
+          'root-folder': [
+            QuarkFileEntry(
+              fid: 'movie-file',
+              name: 'Movie.2024.mkv',
+              path: '/影视/Movie.2024.mkv',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 10, 21),
+              category: 'video',
+              extension: 'mkv',
+            ),
+          ],
+        },
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [source],
+              searchProviders: const [],
+              homeModules: const [],
+              networkStorage: const NetworkStorageConfig(
+                quarkCookie: 'kps=test; sign=test;',
+              ),
+            ),
+          ),
+          embyApiClientProvider.overrideWithValue(
+            EmbyApiClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          webDavNasClientProvider.overrideWithValue(
+            WebDavNasClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          nasMediaIndexStoreProvider.overrideWithValue(
+            SembastNasMediaIndexStore(
+              databaseOpener: () => databaseFactoryMemory.openDatabase(
+                'media-repository-quark-source-test-5',
+              ),
+            ),
+          ),
+          wmdbMetadataClientProvider.overrideWithValue(
+            WmdbMetadataClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          tmdbMetadataClientProvider.overrideWithValue(
+            TmdbMetadataClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          imdbRatingClientProvider.overrideWithValue(
+            ImdbRatingClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          quarkSaveClientProvider.overrideWithValue(quarkClient),
+        ],
+      );
+
+      final repository = container.read(mediaRepositoryProvider);
+      final refreshFuture = repository.refreshSource(sourceId: source.id);
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+
+      container.dispose();
+      gate.complete();
+
+      await expectLater(refreshFuture, completes);
+    });
+
     test('uses shared scan-stage season rules for quark topic folders',
         () async {
       const source = MediaSourceConfig(
@@ -537,6 +623,232 @@ void main() {
         items.every((item) => item.metadataSeed.itemType == 'episode'),
         isTrue,
       );
+    });
+
+    test('routes keyword-matched quark special folders into season zero',
+        () async {
+      const source = MediaSourceConfig(
+        id: 'quark-specials',
+        name: 'Quark Variety Specials',
+        kind: MediaSourceKind.quark,
+        endpoint: 'variety-root',
+        libraryPath: '/综艺',
+        enabled: true,
+        webDavStructureInferenceEnabled: true,
+        webDavSpecialEpisodeKeywords: ['先导片'],
+      );
+      final quarkClient = _FakeQuarkSaveClient(
+        entriesByParentFid: {
+          'variety-root': [
+            QuarkFileEntry(
+              fid: 'regular-dir',
+              name: '正片',
+              path: '/正片',
+              isDirectory: true,
+            ),
+            QuarkFileEntry(
+              fid: 'special-dir',
+              name: '先导片',
+              path: '/先导片',
+              isDirectory: true,
+            ),
+          ],
+          'regular-dir': [
+            QuarkFileEntry(
+              fid: 'regular-episode',
+              name: '节目 第1期.mp4',
+              path: '/节目 第1期.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 10, 9),
+              category: 'video',
+              extension: 'mp4',
+            ),
+          ],
+          'special-dir': [
+            QuarkFileEntry(
+              fid: 'special-episode',
+              name: '节目 开场先导片.mp4',
+              path: '/节目 开场先导片.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 10, 10),
+              category: 'video',
+              extension: 'mp4',
+            ),
+          ],
+        },
+      );
+      final client = QuarkExternalStorageClient(
+        quarkSaveClient: quarkClient,
+        readSettings: () => SeedData.defaultSettings.copyWith(
+          networkStorage: const NetworkStorageConfig(
+            quarkCookie: 'kps=test; sign=test;',
+          ),
+        ),
+      );
+
+      final items = await client.scanLibrary(
+        source,
+        sectionId: 'variety-root',
+        sectionName: '节目',
+        limit: 20,
+      );
+
+      expect(items, hasLength(2));
+      expect(items.every((item) => item.metadataSeed.itemType == 'episode'),
+          isTrue);
+
+      final regularEpisode =
+          items.firstWhere((item) => item.playbackItemId == 'regular-episode');
+      expect(regularEpisode.metadataSeed.seasonNumber, 1);
+
+      final specialEpisode =
+          items.firstWhere((item) => item.playbackItemId == 'special-episode');
+      expect(specialEpisode.metadataSeed.seasonNumber, 0);
+    });
+
+    test('routes built-in quark variety special keywords into season zero',
+        () async {
+      const source = MediaSourceConfig(
+        id: 'quark-builtin-specials',
+        name: 'Quark Builtin Specials',
+        kind: MediaSourceKind.quark,
+        endpoint: 'variety-builtin-root',
+        libraryPath: '/综艺',
+        enabled: true,
+        webDavStructureInferenceEnabled: true,
+      );
+      final quarkClient = _FakeQuarkSaveClient(
+        entriesByParentFid: {
+          'variety-builtin-root': [
+            QuarkFileEntry(
+              fid: 'regular-dir',
+              name: '正片',
+              path: '/正片',
+              isDirectory: true,
+            ),
+            QuarkFileEntry(
+              fid: 'special-dir',
+              name: '训练室',
+              path: '/训练室',
+              isDirectory: true,
+            ),
+          ],
+          'regular-dir': [
+            QuarkFileEntry(
+              fid: 'regular-episode',
+              name: '节目 第1期.mp4',
+              path: '/节目 第1期.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 10, 9),
+              category: 'video',
+              extension: 'mp4',
+            ),
+          ],
+          'special-dir': [
+            QuarkFileEntry(
+              fid: 'special-episode',
+              name: '节目 训练室全纪录.mp4',
+              path: '/节目 训练室全纪录.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 10, 10),
+              category: 'video',
+              extension: 'mp4',
+            ),
+          ],
+        },
+      );
+      final client = QuarkExternalStorageClient(
+        quarkSaveClient: quarkClient,
+        readSettings: () => SeedData.defaultSettings.copyWith(
+          networkStorage: const NetworkStorageConfig(
+            quarkCookie: 'kps=test; sign=test;',
+          ),
+        ),
+      );
+
+      final items = await client.scanLibrary(
+        source,
+        sectionId: 'variety-builtin-root',
+        sectionName: '节目',
+        limit: 20,
+      );
+
+      expect(items, hasLength(2));
+      final specialEpisode =
+          items.firstWhere((item) => item.playbackItemId == 'special-episode');
+      expect(specialEpisode.metadataSeed.seasonNumber, 0);
+    });
+
+    test('filters keyword-matched quark extras from structure inference',
+        () async {
+      const source = MediaSourceConfig(
+        id: 'quark-extras',
+        name: 'Quark Variety Extras',
+        kind: MediaSourceKind.quark,
+        endpoint: 'variety-extra-root',
+        libraryPath: '/综艺',
+        enabled: true,
+        webDavStructureInferenceEnabled: true,
+        webDavExtraKeywords: ['花絮', '采访'],
+      );
+      final quarkClient = _FakeQuarkSaveClient(
+        entriesByParentFid: {
+          'variety-extra-root': [
+            QuarkFileEntry(
+              fid: 'regular-dir',
+              name: '正片',
+              path: '/正片',
+              isDirectory: true,
+            ),
+            QuarkFileEntry(
+              fid: 'extra-dir',
+              name: '花絮',
+              path: '/花絮',
+              isDirectory: true,
+            ),
+          ],
+          'regular-dir': [
+            QuarkFileEntry(
+              fid: 'regular-episode',
+              name: '节目 第1期.mp4',
+              path: '/节目 第1期.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 10, 9),
+              category: 'video',
+              extension: 'mp4',
+            ),
+          ],
+          'extra-dir': [
+            QuarkFileEntry(
+              fid: 'extra-episode',
+              name: '节目 采访.mp4',
+              path: '/节目 采访.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 10, 10),
+              category: 'video',
+              extension: 'mp4',
+            ),
+          ],
+        },
+      );
+      final client = QuarkExternalStorageClient(
+        quarkSaveClient: quarkClient,
+        readSettings: () => SeedData.defaultSettings.copyWith(
+          networkStorage: const NetworkStorageConfig(
+            quarkCookie: 'kps=test; sign=test;',
+          ),
+        ),
+      );
+
+      final items = await client.scanLibrary(
+        source,
+        sectionId: 'variety-extra-root',
+        sectionName: '节目',
+        limit: 20,
+      );
+
+      expect(items, hasLength(1));
+      expect(items.single.playbackItemId, 'regular-episode');
     });
   });
 }

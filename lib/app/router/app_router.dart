@@ -73,9 +73,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             },
           );
         },
-        builder: (context, state, navigationShell) {
-          return AppNavigationShell(navigationShell: navigationShell);
-        },
         branches: [
           StatefulShellBranch(
             routes: [

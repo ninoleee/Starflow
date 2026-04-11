@@ -123,7 +123,7 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
 
   @override
   Widget build(BuildContext context) {
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final backgroundAnimationsSuspended =
         ref.watch(backgroundAnimationsSuspendedProvider);
     final translucentEffectsEnabled =

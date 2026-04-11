@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
+import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -125,6 +126,79 @@ void main() {
       expect(profile.cacheOnDisk, 'no');
       expect(profile.cacheSecs, '30');
       expect(profile.networkTimeoutSeconds, '15');
+      expect(profile.cachePauseInitial, 'yes');
+    });
+
+    test('uses more aggressive buffered tuning profile for quark playback', () {
+      const target = PlaybackTarget(
+        title: 'Quark Movie',
+        sourceId: 'quark-main',
+        streamUrl: 'https://download.example.com/movie.mkv',
+        sourceName: 'Quark',
+        sourceKind: MediaSourceKind.quark,
+      );
+
+      final profile = resolveMpvRemotePlaybackTuningProfile(
+        target: target,
+        aggressiveTuning: false,
+        heavyPlayback: false,
+      );
+
+      expect(profile, isNotNull);
+      expect(isLikelyQuarkPlaybackTarget(target), isTrue);
+      expect(profile!.lowLatency, isFalse);
+      expect(profile.cacheOnDisk, 'no');
+      expect(profile.cacheSecs, '75');
+      expect(profile.demuxerReadaheadSecs, '24');
+      expect(profile.cachePauseWait, '2.5');
+      expect(profile.cachePauseInitial, 'yes');
+      expect(profile.networkTimeoutSeconds, '20');
+    });
+
+    test('uses strongest quark tuning profile for heavy aggressive playback', () {
+      const target = PlaybackTarget(
+        title: 'Quark 4K',
+        sourceId: 'quark-main',
+        streamUrl: 'https://download.example.com/movie-4k.mkv',
+        sourceName: 'Quark',
+        sourceKind: MediaSourceKind.quark,
+      );
+
+      final profile = resolveMpvRemotePlaybackTuningProfile(
+        target: target,
+        aggressiveTuning: true,
+        heavyPlayback: true,
+      );
+
+      expect(profile, isNotNull);
+      expect(profile!.cacheSecs, '120');
+      expect(profile.demuxerReadaheadSecs, '36');
+      expect(profile.demuxerHysteresisSecs, '18');
+      expect(profile.cachePauseWait, '4.0');
+      expect(profile.networkTimeoutSeconds, '25');
+    });
+
+    test('keeps remote quark tuning after stream url is wrapped by relay', () {
+      const target = PlaybackTarget(
+        title: 'Quark Relay',
+        sourceId: 'quark-main',
+        streamUrl: 'http://127.0.0.1:8787/playback-relay/session/video.mkv',
+        actualAddress: 'https://download.example.com/video.mkv',
+        sourceName: 'Quark',
+        sourceKind: MediaSourceKind.quark,
+      );
+
+      final profile = resolveMpvRemotePlaybackTuningProfile(
+        target: target,
+        aggressiveTuning: false,
+        heavyPlayback: false,
+      );
+
+      expect(isLoopbackPlaybackRelayUrl(target.streamUrl), isTrue);
+      expect(isLikelyRemotePlaybackTargetTransport(target), isTrue);
+      expect(isLikelyQuarkPlaybackTarget(target), isTrue);
+      expect(profile, isNotNull);
+      expect(profile!.cacheSecs, '75');
       expect(profile.cachePauseInitial, 'yes');
     });
 

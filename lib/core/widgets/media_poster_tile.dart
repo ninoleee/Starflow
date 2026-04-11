@@ -45,7 +45,7 @@ class MediaPosterTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final trimmedPoster = posterUrl.trim();
     final pixelRatio = MediaQuery.devicePixelRatioOf(context);
     final cacheWidth = (136 * pixelRatio).round();
@@ -57,7 +57,7 @@ class MediaPosterTile extends ConsumerWidget {
         host.endsWith('.doubanio.com') || host == 'img.douban.com';
     final enablePosterFocusOutline = isTelevision && tvPosterFocusOutlineOnly;
 
-    final Widget posterChild;
+    late final Widget posterChild;
     if (trimmedPoster.isEmpty) {
       posterChild = Container(
         color: theme.colorScheme.surfaceContainerHighest,
@@ -175,111 +175,44 @@ class MediaPosterTile extends ConsumerWidget {
       );
     }
 
+    final titleStyle = theme.textTheme.titleSmall?.copyWith(
+      fontWeight: FontWeight.w700,
+      height: 1.22,
+      color: titleColor,
+    );
+    final subtitlePresent = subtitle.trim().isNotEmpty;
+    final subtitleStyle = theme.textTheme.bodySmall?.copyWith(
+      color: subtitleColor ?? theme.colorScheme.onSurfaceVariant,
+      fontWeight: FontWeight.w600,
+    );
     final content = SizedBox(
       width: width,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          if (!constraints.hasBoundedHeight) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AspectRatio(
-                  aspectRatio: 0.7,
-                  child: buildPosterFrame(),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    height: 1.22,
-                    color: titleColor,
-                  ),
-                ),
-                if (subtitle.trim().isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color:
-                          subtitleColor ?? theme.colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ],
-            );
-          }
-
-          const titleAreaHeight = 18.0;
-          final subtitleAreaHeight = subtitle.trim().isNotEmpty ? 18.0 : 0.0;
-          final detailsReservedHeight =
-              6.0 + titleAreaHeight + subtitleAreaHeight;
-          final availablePosterHeight =
-              (constraints.maxHeight - detailsReservedHeight)
-                  .clamp(0.0, constraints.maxHeight)
-                  .toDouble();
-          final naturalPosterHeight =
-              constraints.hasBoundedWidth ? constraints.maxWidth / 0.7 : 0.0;
-          final posterHeight = naturalPosterHeight < availablePosterHeight
-              ? naturalPosterHeight
-              : availablePosterHeight;
-
-          return ClipRect(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  height: posterHeight,
-                  width: double.infinity,
-                  child: SizedBox.expand(child: buildPosterFrame()),
-                ),
-                const SizedBox(height: 4),
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.topLeft,
-                    child: ClipRect(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              height: 1.22,
-                              color: titleColor,
-                            ),
-                          ),
-                          if (subtitle.trim().isNotEmpty) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              subtitle,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: subtitleColor ??
-                                    theme.colorScheme.onSurfaceVariant,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+      child: RepaintBoundary(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: 0.7,
+              child: buildPosterFrame(),
             ),
-          );
-        },
+            const SizedBox(height: 4),
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: titleStyle,
+            ),
+            if (subtitlePresent) ...[
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: subtitleStyle,
+              ),
+            ],
+          ],
+        ),
       ),
     );
 

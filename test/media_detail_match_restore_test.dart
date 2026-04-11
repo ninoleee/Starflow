@@ -1,12 +1,24 @@
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
+import 'package:starflow/core/storage/local_storage_models.dart';
+import 'package:starflow/features/details/application/detail_external_episode_variant_service.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
+import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
+import 'package:starflow/features/library/data/nas_media_index_models.dart';
+import 'package:starflow/features/library/data/nas_media_index_store.dart';
+import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
+import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
+import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
@@ -247,6 +259,123 @@ void main() {
     expect(labels, contains('nas-B · 第 1 集 · 版本B'));
   });
 
+  testWidgets('detail page restores indexed episode file variants',
+      (tester) async {
+    const seedTarget = MediaDetailTarget(
+      title: '第 1 集',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：WebDAV · nas-A',
+      searchQuery: '测试剧 第 1 集',
+      sourceId: 'nas-a',
+      itemId: 'episode-a',
+      itemType: 'episode',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'nas-A',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '第 1 集',
+        sourceId: 'nas-a',
+        streamUrl: 'https://example.com/show-s01e01-a.mkv',
+        sourceName: 'nas-A',
+        sourceKind: MediaSourceKind.nas,
+        actualAddress: '/shows/测试剧/Season 1/第1集-A.mkv',
+        itemId: 'episode-a',
+        itemType: 'episode',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+    const choiceA = seedTarget;
+    const choiceB = MediaDetailTarget(
+      title: '第 1 集',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：WebDAV · nas-A',
+      searchQuery: '测试剧 第 1 集',
+      sourceId: 'nas-a',
+      itemId: 'episode-b',
+      itemType: 'episode',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'nas-A',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '第 1 集',
+        sourceId: 'nas-a',
+        streamUrl: 'https://example.com/show-s01e01-b.mkv',
+        sourceName: 'nas-A',
+        sourceKind: MediaSourceKind.nas,
+        actualAddress: '/shows/测试剧/Season 1/第1集-B.mkv',
+        itemId: 'episode-b',
+        itemType: 'episode',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+    final settings = AppSettings.fromJson({
+      'mediaSources': const [],
+      'searchProviders': const [],
+      'doubanAccount': const {'enabled': false},
+      'homeModules': const [],
+      'tmdbMetadataMatchEnabled': false,
+      'wmdbMetadataMatchEnabled': false,
+      'imdbRatingMatchEnabled': false,
+      'detailAutoLibraryMatchEnabled': false,
+    });
+    final indexer = _buildNoopNasMediaIndexer(settings);
+    addTearDown(indexer.dispose);
+    final cacheRepository = _RecordingRestoreCacheRepository();
+    final service = _FakeDetailExternalEpisodeVariantService(
+      state: const DetailExternalEpisodeVariantState(
+        choices: [choiceA, choiceB],
+        selectedIndex: 1,
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(settings),
+          mediaRepositoryProvider.overrideWithValue(
+            const _NoopMediaRepository(),
+          ),
+          localStorageCacheRepositoryProvider
+              .overrideWithValue(cacheRepository),
+          nasMediaIndexerProvider.overrideWithValue(indexer),
+          detailExternalEpisodeVariantServiceProvider
+              .overrideWithValue(service),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(target: seedTarget),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('资源信息'), findsOneWidget);
+    expect(find.text('播放版本'), findsOneWidget);
+    final dropdown = tester.widget<DropdownButton<int>>(
+      find.byType(DropdownButton<int>),
+    );
+    final labels = dropdown.items!
+        .map((item) => (item.child as Text).data ?? '')
+        .toList(growable: false);
+    expect(dropdown.value, 1);
+    expect(labels, contains('nas-A · 第1集-A.mkv'));
+    expect(labels, contains('nas-A · 第1集-B.mkv'));
+    expect(service.requestedTargets.single.itemId, 'episode-a');
+    expect(cacheRepository.lastSavedState?.selectedLibraryMatchIndex, 1);
+    expect(cacheRepository.lastSavedState?.libraryMatchChoices.length, 2);
+  });
+
   testWidgets(
       'detail page keeps series episode browser after restoring playable library choice',
       (tester) async {
@@ -446,13 +575,13 @@ void main() {
 
     await tester.pump();
     await tester.scrollUntilVisible(
-      find.text('重新匹配资源'),
+      find.text('匹配资源库'),
       200,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.tap(
       find.ancestor(
-        of: find.text('重新匹配资源'),
+        of: find.text('匹配资源库'),
         matching: find.byType(TextButton),
       ),
     );
@@ -694,14 +823,21 @@ class _RecordingRestoreCacheRepository extends LocalStorageCacheRepository {
     List<CachedSubtitleSearchOption>? subtitleSearchChoices,
     int? selectedSubtitleSearchIndex,
   }) async {
+    final existing = lastSavedState;
     lastSavedState = CachedDetailState(
       target: resolvedTarget,
-      libraryMatchChoices: libraryMatchChoices ?? const [],
-      selectedLibraryMatchIndex: selectedLibraryMatchIndex ?? 0,
-      subtitleSearchChoices: subtitleSearchChoices ?? const [],
-      selectedSubtitleSearchIndex: selectedSubtitleSearchIndex ?? -1,
-      metadataRefreshStatus:
-          metadataRefreshStatus ?? DetailMetadataRefreshStatus.never,
+      libraryMatchChoices:
+          libraryMatchChoices ?? existing?.libraryMatchChoices ?? const [],
+      selectedLibraryMatchIndex:
+          selectedLibraryMatchIndex ?? existing?.selectedLibraryMatchIndex ?? 0,
+      subtitleSearchChoices:
+          subtitleSearchChoices ?? existing?.subtitleSearchChoices ?? const [],
+      selectedSubtitleSearchIndex: selectedSubtitleSearchIndex ??
+          existing?.selectedSubtitleSearchIndex ??
+          -1,
+      metadataRefreshStatus: metadataRefreshStatus ??
+          existing?.metadataRefreshStatus ??
+          DetailMetadataRefreshStatus.never,
     );
   }
 }
@@ -730,6 +866,86 @@ class _FakeOnlineSubtitleRepository implements OnlineSubtitleRepository {
     lastMaxResults = maxResults;
     return results;
   }
+}
+
+NasMediaIndexer _buildNoopNasMediaIndexer(AppSettings settings) {
+  return NasMediaIndexer(
+    store: _NoopNasMediaIndexStore(),
+    webDavNasClient: WebDavNasClient(
+      MockClient((request) async => http.Response('', 500)),
+    ),
+    wmdbMetadataClient: WmdbMetadataClient(
+      MockClient((request) async => http.Response('', 500)),
+    ),
+    tmdbMetadataClient: TmdbMetadataClient(
+      MockClient((request) async => http.Response('', 500)),
+    ),
+    imdbRatingClient: ImdbRatingClient(
+      MockClient((request) async => http.Response('', 500)),
+    ),
+    readSettings: () => settings,
+    progressController: WebDavScrapeProgressController(),
+  );
+}
+
+class _FakeDetailExternalEpisodeVariantService
+    extends DetailExternalEpisodeVariantService {
+  _FakeDetailExternalEpisodeVariantService({required this.state});
+
+  final DetailExternalEpisodeVariantState? state;
+  final List<MediaDetailTarget> requestedTargets = <MediaDetailTarget>[];
+
+  @override
+  Future<DetailExternalEpisodeVariantState?> loadChoices({
+    required MediaDetailTarget target,
+    required AppSettings settings,
+    required NasMediaIndexer nasMediaIndexer,
+  }) async {
+    requestedTargets.add(target);
+    return state;
+  }
+}
+
+class _NoopNasMediaIndexStore implements NasMediaIndexStore {
+  @override
+  Future<void> clearAll() async {}
+
+  @override
+  Future<void> clearSource(String sourceId) async {}
+
+  @override
+  Future<LocalStorageCacheSummary> inspectSummary() async {
+    return const LocalStorageCacheSummary(
+      type: LocalStorageCacheType.nasMetadataIndex,
+      entryCount: 0,
+      totalBytes: 0,
+    );
+  }
+
+  @override
+  Future<List<NasMediaIndexRecord>> loadSourceRecords(String sourceId) async {
+    return const [];
+  }
+
+  @override
+  Future<NasMediaIndexSourceState?> loadSourceState(String sourceId) async {
+    return null;
+  }
+
+  @override
+  Future<void> replaceSourceRecords({
+    required String sourceId,
+    required List<NasMediaIndexRecord> records,
+    required NasMediaIndexSourceState state,
+  }) async {}
+
+  @override
+  Future<void> upsertSourceRecords({
+    required String sourceId,
+    required List<NasMediaIndexRecord> records,
+    required NasMediaIndexSourceState state,
+    bool clearMissingRecords = false,
+  }) async {}
 }
 
 class _NoopMediaRepository implements MediaRepository {

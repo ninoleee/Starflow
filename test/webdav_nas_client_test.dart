@@ -140,8 +140,7 @@ void main() {
       final client = WebDavNasClient(
         MockClient((request) async {
           if (request.method == 'PROPFIND' &&
-              request.url.toString() ==
-                  'https://nas.example.com/dav/Movies/') {
+              request.url.toString() == 'https://nas.example.com/dav/Movies/') {
             return http.Response(
               '''<?xml version="1.0" encoding="utf-8"?>
 <d:multistatus xmlns:d="DAV:">
@@ -395,6 +394,350 @@ void main() {
       expect(items.every((item) => item.itemType == 'episode'), isTrue);
       expect(items.every((item) => item.seasonNumber == 1), isTrue);
       expect(items.map((item) => item.episodeNumber), containsAll([1, 2]));
+    });
+
+    test('routes keyword-matched variety specials into season zero', () async {
+      const rootPropfindResponse = '''
+<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/VarietySpecials/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>VarietySpecials</d:displayname>
+        <d:resourcetype><d:collection/></d:resourcetype>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/VarietySpecials/%E8%8A%82%E7%9B%AE%20%E7%AC%AC1%E6%9C%9F.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>节目 第1期.strm</d:displayname>
+        <d:resourcetype/>
+        <d:getcontenttype>text/plain</d:getcontenttype>
+        <d:getcontentlength>0</d:getcontentlength>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/VarietySpecials/%E8%8A%82%E7%9B%AE%20%E5%85%88%E5%AF%BC%E7%89%87.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>节目 先导片.strm</d:displayname>
+        <d:resourcetype/>
+        <d:getcontenttype>text/plain</d:getcontenttype>
+        <d:getcontentlength>0</d:getcontentlength>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>
+''';
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/VarietySpecials/') {
+            return http.Response.bytes(
+              utf8.encode(rootPropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/VarietySpecials/%E8%8A%82%E7%9B%AE%20%E7%AC%AC1%E6%9C%9F.strm') {
+            return http.Response(
+              'https://media.example.com/variety/episode-1.m3u8\n',
+              200,
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/VarietySpecials/%E8%8A%82%E7%9B%AE%20%E5%85%88%E5%AF%BC%E7%89%87.strm') {
+            return http.Response(
+              'https://media.example.com/variety/pilot.m3u8\n',
+              200,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'nas-variety-specials',
+          name: 'Variety Specials NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/Shows/VarietySpecials/',
+          enabled: true,
+          webDavStructureInferenceEnabled: true,
+          webDavSpecialEpisodeKeywords: ['先导片'],
+        ),
+        limit: 20,
+      );
+
+      expect(items, hasLength(2));
+      expect(items.every((item) => item.itemType == 'episode'), isTrue);
+
+      final normalEpisode = items.firstWhere((item) => item.title == '节目 第1期');
+      expect(normalEpisode.seasonNumber, 1);
+      expect(normalEpisode.episodeNumber, 1);
+
+      final specialEpisode = items.firstWhere((item) => item.title == '节目 先导片');
+      expect(specialEpisode.seasonNumber, 0);
+      expect(specialEpisode.episodeNumber, 1);
+    });
+
+    test('routes built-in variety special keywords into season zero', () async {
+      const rootPropfindResponse = '''
+<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/VarietyBuiltinSpecials/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>VarietyBuiltinSpecials</d:displayname>
+        <d:resourcetype><d:collection/></d:resourcetype>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/VarietyBuiltinSpecials/%E8%8A%82%E7%9B%AE%20%E7%AC%AC1%E6%9C%9F.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>节目 第1期.strm</d:displayname>
+        <d:resourcetype/>
+        <d:getcontenttype>text/plain</d:getcontenttype>
+        <d:getcontentlength>0</d:getcontentlength>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/VarietyBuiltinSpecials/%E8%8A%82%E7%9B%AE%20%E8%88%9E%E5%8F%B0%E7%BA%AF%E4%BA%AB%E7%89%88.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>节目 舞台纯享版.strm</d:displayname>
+        <d:resourcetype/>
+        <d:getcontenttype>text/plain</d:getcontenttype>
+        <d:getcontentlength>0</d:getcontentlength>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>
+''';
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/VarietyBuiltinSpecials/') {
+            return http.Response.bytes(
+              utf8.encode(rootPropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/VarietyBuiltinSpecials/%E8%8A%82%E7%9B%AE%20%E7%AC%AC1%E6%9C%9F.strm') {
+            return http.Response(
+              'https://media.example.com/variety/episode-1.m3u8\n',
+              200,
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/VarietyBuiltinSpecials/%E8%8A%82%E7%9B%AE%20%E8%88%9E%E5%8F%B0%E7%BA%AF%E4%BA%AB%E7%89%88.strm') {
+            return http.Response(
+              'https://media.example.com/variety/stage-only.m3u8\n',
+              200,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'nas-variety-builtin-specials',
+          name: 'Variety Builtin Specials NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/Shows/VarietyBuiltinSpecials/',
+          enabled: true,
+          webDavStructureInferenceEnabled: true,
+        ),
+        limit: 20,
+      );
+
+      expect(items, hasLength(2));
+      final specialEpisode =
+          items.firstWhere((item) => item.title == '节目 舞台纯享版');
+      expect(specialEpisode.seasonNumber, 0);
+      expect(specialEpisode.episodeNumber, 1);
+    });
+
+    test('filters keyword-matched variety extras from structure inference',
+        () async {
+      const rootPropfindResponse = '''
+<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/VarietyExtras/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>VarietyExtras</d:displayname>
+        <d:resourcetype><d:collection/></d:resourcetype>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/VarietyExtras/%E6%AD%A3%E7%89%87/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>正片</d:displayname>
+        <d:resourcetype><d:collection/></d:resourcetype>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/VarietyExtras/%E8%8A%B1%E7%B5%AE/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>花絮</d:displayname>
+        <d:resourcetype><d:collection/></d:resourcetype>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>
+''';
+      const regularPropfindResponse = '''
+<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/VarietyExtras/%E6%AD%A3%E7%89%87/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>正片</d:displayname>
+        <d:resourcetype><d:collection/></d:resourcetype>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/VarietyExtras/%E6%AD%A3%E7%89%87/%E8%8A%82%E7%9B%AE%20%E7%AC%AC1%E6%9C%9F.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>节目 第1期.strm</d:displayname>
+        <d:resourcetype/>
+        <d:getcontenttype>text/plain</d:getcontenttype>
+        <d:getcontentlength>0</d:getcontentlength>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>
+''';
+      const extraPropfindResponse = '''
+<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Shows/VarietyExtras/%E8%8A%B1%E7%B5%AE/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>花絮</d:displayname>
+        <d:resourcetype><d:collection/></d:resourcetype>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Shows/VarietyExtras/%E8%8A%B1%E7%B5%AE/%E8%8A%82%E7%9B%AE%20%E9%87%87%E8%AE%BF.strm</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>节目 采访.strm</d:displayname>
+        <d:resourcetype/>
+        <d:getcontenttype>text/plain</d:getcontenttype>
+        <d:getcontentlength>0</d:getcontentlength>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>
+''';
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/VarietyExtras/') {
+            return http.Response.bytes(
+              utf8.encode(rootPropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/VarietyExtras/%E6%AD%A3%E7%89%87/') {
+            return http.Response.bytes(
+              utf8.encode(regularPropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/VarietyExtras/%E8%8A%B1%E7%B5%AE/') {
+            return http.Response.bytes(
+              utf8.encode(extraPropfindResponse),
+              207,
+              headers: const {'content-type': 'application/xml; charset=utf-8'},
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/VarietyExtras/%E6%AD%A3%E7%89%87/%E8%8A%82%E7%9B%AE%20%E7%AC%AC1%E6%9C%9F.strm') {
+            return http.Response(
+              'https://media.example.com/variety/episode-1.m3u8\n',
+              200,
+            );
+          }
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/VarietyExtras/%E8%8A%B1%E7%B5%AE/%E8%8A%82%E7%9B%AE%20%E9%87%87%E8%AE%BF.strm') {
+            return http.Response(
+              'https://media.example.com/variety/interview.m3u8\n',
+              200,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'nas-variety-extras',
+          name: 'Variety Extras NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/Shows/VarietyExtras/',
+          enabled: true,
+          webDavStructureInferenceEnabled: true,
+          webDavExtraKeywords: ['花絮', '采访'],
+        ),
+        limit: 20,
+      );
+
+      expect(items, hasLength(1));
+      expect(items.single.title, '节目 第1期');
+      expect(items.single.seasonNumber, 1);
     });
 
     test('treats plain numeric root files as a single implicit season',

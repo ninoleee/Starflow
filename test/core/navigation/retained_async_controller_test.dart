@@ -16,8 +16,8 @@ void main() {
         fallbackValue: const AsyncLoading<int>(),
       );
 
-      expect(active.valueOrNull, 7);
-      expect(inactive.valueOrNull, 7);
+      expect(active.value, 7);
+      expect(inactive.value, 7);
     });
 
     test('retains error while inactive', () {

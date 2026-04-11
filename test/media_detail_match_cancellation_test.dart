@@ -75,9 +75,13 @@ void main() {
     );
 
     await tester.pump();
-    await tester.ensureVisible(find.text('重新匹配资源'));
+    final matchButton = find.ancestor(
+      of: find.byIcon(Icons.link_rounded),
+      matching: find.byType(TextButton),
+    );
+    await tester.ensureVisible(matchButton);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('重新匹配资源'));
+    await tester.tap(matchButton);
     await tester.pump();
 
     expect(repository.startedSectionIds.length, 4);
@@ -93,8 +97,7 @@ void main() {
 }
 
 class _NoopDetailCacheRepository extends LocalStorageCacheRepository {
-  _NoopDetailCacheRepository()
-      : super(preferences: _MemoryPreferencesStore());
+  _NoopDetailCacheRepository() : super(preferences: _MemoryPreferencesStore());
 }
 
 class _BlockingDetailMatchRepository implements MediaRepository {

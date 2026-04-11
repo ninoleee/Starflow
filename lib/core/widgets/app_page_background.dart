@@ -37,40 +37,7 @@ class AppPageBackground extends ConsumerWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (!reduceDecorationsEnabled)
-            const IgnorePointer(
-              child: Stack(
-                children: [
-                  _GlowBlob(
-                    alignment: Alignment.topLeft,
-                    offset: Offset(-36, -44),
-                    size: 220,
-                    colors: [
-                      Color(0x40215FEE),
-                      Color(0x00215FEE),
-                    ],
-                  ),
-                  _GlowBlob(
-                    alignment: Alignment.topRight,
-                    offset: Offset(42, -24),
-                    size: 196,
-                    colors: [
-                      Color(0x2617B26A),
-                      Color(0x0017B26A),
-                    ],
-                  ),
-                  _GlowBlob(
-                    alignment: Alignment.bottomCenter,
-                    offset: Offset(0, 84),
-                    size: 260,
-                    colors: [
-                      Color(0x18F59E0B),
-                      Color(0x00F59E0B),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+          if (!reduceDecorationsEnabled) const _BackgroundGlows(),
           Padding(
             padding: contentPadding,
             child: child,
@@ -107,6 +74,49 @@ class _GlowBlob extends StatelessWidget {
             shape: BoxShape.circle,
             gradient: RadialGradient(colors: colors),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BackgroundGlows extends StatelessWidget {
+  const _BackgroundGlows();
+
+  @override
+  Widget build(BuildContext context) {
+    return const IgnorePointer(
+      child: RepaintBoundary(
+        child: Stack(
+          children: [
+            _GlowBlob(
+              alignment: Alignment.topLeft,
+              offset: Offset(-36, -44),
+              size: 220,
+              colors: [
+                Color(0x40215FEE),
+                Color(0x00215FEE),
+              ],
+            ),
+            _GlowBlob(
+              alignment: Alignment.topRight,
+              offset: Offset(42, -24),
+              size: 196,
+              colors: [
+                Color(0x2617B26A),
+                Color(0x0017B26A),
+              ],
+            ),
+            _GlowBlob(
+              alignment: Alignment.bottomCenter,
+              offset: Offset(0, 84),
+              size: 260,
+              colors: [
+                Color(0x18F59E0B),
+                Color(0x00F59E0B),
+              ],
+            ),
+          ],
         ),
       ),
     );

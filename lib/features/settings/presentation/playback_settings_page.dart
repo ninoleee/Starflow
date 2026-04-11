@@ -48,6 +48,10 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   late PlaybackEngine _draftPlaybackEngine;
   late PlaybackDecodeMode _draftPlaybackDecodeMode;
   late PlaybackMpvQualityPreset _draftPlaybackMpvQualityPreset;
+  late bool _initialPlaybackTraceEnabled;
+  late bool _initialSubtitleSearchTraceEnabled;
+  late bool _draftPlaybackTraceEnabled;
+  late bool _draftSubtitleSearchTraceEnabled;
   bool _skipAutoSaveOnPop = false;
 
   @override
@@ -65,6 +69,11 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     _draftPlaybackEngine = widget.initialPlaybackEngine;
     _draftPlaybackDecodeMode = widget.initialPlaybackDecodeMode;
     _draftPlaybackMpvQualityPreset = widget.initialPlaybackMpvQualityPreset;
+    final settings = ref.read(appSettingsProvider);
+    _initialPlaybackTraceEnabled = settings.playbackTraceEnabled;
+    _initialSubtitleSearchTraceEnabled = settings.subtitleSearchTraceEnabled;
+    _draftPlaybackTraceEnabled = _initialPlaybackTraceEnabled;
+    _draftSubtitleSearchTraceEnabled = _initialSubtitleSearchTraceEnabled;
   }
 
   @override
@@ -79,7 +88,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   }
 
   Future<void> _saveDraft({bool popAfterSave = true}) async {
-    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     await ref.read(settingsControllerProvider.notifier).savePlaybackPreferences(
           openTimeoutSeconds: _draftSeconds(),
           defaultSpeed: _draftPlaybackSpeed,
@@ -91,6 +100,8 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
           playbackEngine: _draftPlaybackEngine,
           playbackDecodeMode: _draftPlaybackDecodeMode,
           playbackMpvQualityPreset: _draftPlaybackMpvQualityPreset,
+          playbackTraceEnabled: _draftPlaybackTraceEnabled,
+          subtitleSearchTraceEnabled: _draftSubtitleSearchTraceEnabled,
         );
     if (popAfterSave && mounted) {
       _skipAutoSaveOnPop = true;
@@ -112,7 +123,9 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
         _draftPlaybackEngine != widget.initialPlaybackEngine ||
         _draftPlaybackDecodeMode != widget.initialPlaybackDecodeMode ||
         _draftPlaybackMpvQualityPreset !=
-            widget.initialPlaybackMpvQualityPreset;
+            widget.initialPlaybackMpvQualityPreset ||
+        _draftPlaybackTraceEnabled != _initialPlaybackTraceEnabled ||
+        _draftSubtitleSearchTraceEnabled != _initialSubtitleSearchTraceEnabled;
   }
 
   Future<void> _discardAndClose() async {
@@ -140,7 +153,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     return PopScope<void>(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -207,6 +220,28 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
+          ),
+          const SizedBox(height: 18),
+          SettingsToggleTile(
+            title: '播放 trace 日志',
+            subtitle: '默认关闭；开启后输出播放链路调试日志。',
+            value: _draftPlaybackTraceEnabled,
+            onChanged: (value) {
+              setState(() {
+                _draftPlaybackTraceEnabled = value;
+              });
+            },
+          ),
+          const SizedBox(height: 10),
+          SettingsToggleTile(
+            title: '字幕搜索 trace 日志',
+            subtitle: '默认关闭；开启后输出字幕搜索调试日志。',
+            value: _draftSubtitleSearchTraceEnabled,
+            onChanged: (value) {
+              setState(() {
+                _draftSubtitleSearchTraceEnabled = value;
+              });
+            },
           ),
           const SizedBox(height: 18),
           if (isTelevision)

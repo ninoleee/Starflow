@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
+import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
@@ -9,6 +10,7 @@ import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/application/settings_slice_providers.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class MetadataMatchSettingsPage extends ConsumerWidget {
@@ -16,8 +18,8 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final settings = ref.watch(appSettingsProvider);
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final settings = ref.watch(settingsMetadataMatchSliceProvider);
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
 
     return SettingsPageScaffold(
       children: [
@@ -217,7 +219,7 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
     String currentToken,
   ) async {
     final controller = TextEditingController(text: currentToken);
-    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     final inputFocusNode = FocusNode(debugLabel: 'tmdb-token-dialog-field');
     final cancelFocusNode = FocusNode(debugLabel: 'tmdb-token-dialog-cancel');
     final clearFocusNode = FocusNode(debugLabel: 'tmdb-token-dialog-clear');
@@ -295,7 +297,7 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
   ) async {
     final controller = TextEditingController(text: '这个杀手不太冷');
     var preferSeries = false;
-    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     final queryFocusNode = FocusNode(debugLabel: 'tmdb-test-query');
     final preferSeriesFocusNode = FocusNode(debugLabel: 'tmdb-test-series');
     final closeFocusNode = FocusNode(debugLabel: 'tmdb-test-close');
@@ -312,7 +314,7 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
             builder: (context, setState) {
               Future<void> runTest() async {
                 final token =
-                    ref.read(appSettingsProvider).tmdbReadAccessToken.trim();
+                    ref.read(settingsMetadataMatchSliceProvider).tmdbReadAccessToken.trim();
                 final query = controller.text.trim();
                 if (token.isEmpty) {
                   setState(() {
@@ -486,7 +488,7 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
     final actorController = TextEditingController(text: '周润发');
     final yearController = TextEditingController(text: '1986');
     final doubanIdController = TextEditingController(text: '');
-    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     final doubanFocusNode = FocusNode(debugLabel: 'wmdb-test-douban');
     final titleFocusNode = FocusNode(debugLabel: 'wmdb-test-title');
     final actorFocusNode = FocusNode(debugLabel: 'wmdb-test-actor');
@@ -729,7 +731,7 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
     final queryController = TextEditingController(text: 'The Godfather');
     final yearController = TextEditingController(text: '1972');
     var preferSeries = false;
-    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     final queryFocusNode = FocusNode(debugLabel: 'imdb-test-query');
     final yearFocusNode = FocusNode(debugLabel: 'imdb-test-year');
     final preferSeriesFocusNode = FocusNode(debugLabel: 'imdb-test-series');
@@ -983,7 +985,7 @@ class _TestResultCard extends StatelessWidget {
           if (imageUrl.trim().isNotEmpty) ...[
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: Image.network(
+              child: AppNetworkImage(
                 imageUrl,
                 headers: networkImageHeadersForUrl(imageUrl),
                 width: 86,
@@ -992,10 +994,7 @@ class _TestResultCard extends StatelessWidget {
                 errorBuilder: (context, error, stackTrace) {
                   return _TestPosterPlaceholder(title: title);
                 },
-                loadingBuilder: (context, child, progress) {
-                  if (progress == null) {
-                    return child;
-                  }
+                loadingBuilder: (context) {
                   return const SizedBox(
                     width: 86,
                     height: 124,

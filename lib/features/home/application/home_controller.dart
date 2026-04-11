@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod/misc.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
@@ -14,6 +15,8 @@ import 'package:starflow/features/storage/application/local_storage_cache_revisi
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'home_settings_slices.dart';
+
+const int _defaultHomeSectionItemLimit = 20;
 
 enum HomeSectionLayout {
   posterRail,
@@ -85,6 +88,172 @@ class HomeSectionViewModel {
   final HomeSectionViewAllTarget? viewAllTarget;
 }
 
+class HomeFeedRepository {
+  const HomeFeedRepository();
+
+  Future<List<MediaItem>> loadRecentItems({
+    required List<HomeModuleConfig> enabledModules,
+    required MediaRepository mediaRepository,
+  }) async {
+    if (!_needsRecentlyAdded(enabledModules)) {
+      return const [];
+    }
+    return mediaRepository.fetchRecentlyAdded(
+      limit: _defaultHomeSectionItemLimit,
+    );
+  }
+
+  Future<List<PlaybackProgressEntry>> loadRecentPlaybackEntries({
+    required List<HomeModuleConfig> enabledModules,
+    required PlaybackMemoryRepository playbackMemoryRepository,
+  }) async {
+    if (!_needsRecentPlayback(enabledModules)) {
+      return const [];
+    }
+    return playbackMemoryRepository.loadRecentDisplayEntries(
+      limit: _defaultHomeSectionItemLimit,
+    );
+  }
+
+  Future<List<DoubanCarouselEntry>> loadCarouselItems({
+    required List<HomeModuleConfig> enabledModules,
+    required DiscoveryRepository discoveryRepository,
+  }) async {
+    if (!_needsCarousel(enabledModules)) {
+      return const [];
+    }
+    return discoveryRepository.fetchCarouselItems();
+  }
+
+  Future<HomeSectionViewModel?> buildSectionSeed({
+    required HomeModuleConfig module,
+    required MediaRepository mediaRepository,
+    required DiscoveryRepository discoveryRepository,
+    required DoubanAccountConfig doubanAccount,
+    required List<MediaSourceConfig> mediaSources,
+    required Future<List<MediaItem>> recentItems,
+    required Future<List<PlaybackProgressEntry>> recentPlaybackEntries,
+    required Future<List<DoubanCarouselEntry>> carouselItems,
+  }) async {
+    switch (module.type) {
+      case HomeModuleType.hero:
+        return null;
+      case HomeModuleType.recentlyAdded:
+        return _buildLibrarySectionSeed(
+          module: module,
+          items: await recentItems,
+          subtitle: module.description,
+        );
+      case HomeModuleType.recentPlayback:
+        return _buildRecentPlaybackSectionSeed(
+          module: module,
+          entries: await recentPlaybackEntries,
+        );
+      case HomeModuleType.librarySection:
+        final sourceKind = _resolveSourceKind(mediaSources, module.sourceId);
+        final sectionItems = module.isLibrarySection
+            ? await mediaRepository.fetchLibrary(
+                sourceId: module.sourceId,
+                sectionId: module.sectionId,
+                limit: _homeModuleFetchLimit(module, sourceKind: sourceKind),
+              )
+            : const <MediaItem>[];
+        return _buildLibrarySectionSeed(
+          module: module,
+          items: sectionItems,
+          subtitle: module.description,
+          viewAllTarget: module.isLibrarySection
+              ? LibraryCollectionTarget(
+                  title: module.title,
+                  sourceId: module.sourceId,
+                  sourceName: module.sourceName,
+                  sourceKind: sourceKind,
+                  sectionId: module.sectionId,
+                  subtitle: module.sectionName,
+                )
+              : null,
+        );
+      case HomeModuleType.doubanInterest:
+      case HomeModuleType.doubanSuggestion:
+      case HomeModuleType.doubanList:
+        final entries = await discoveryRepository.fetchEntries(module);
+        return _buildDoubanSectionSeed(
+          module: module,
+          entries: entries,
+          emptyMessage: _resolveDoubanEmptyMessage(module, doubanAccount),
+        );
+      case HomeModuleType.doubanCarousel:
+        return _buildCarouselSectionSeed(
+          module: module,
+          items: await carouselItems,
+          emptyMessage: _resolveDoubanEmptyMessage(module, doubanAccount),
+        );
+    }
+  }
+
+  Future<HomeSectionViewModel> applyCachedSection({
+    required HomeSectionViewModel section,
+    required LocalStorageCacheRepository localStorageCacheRepository,
+  }) {
+    return _applyCachedHomeSection(
+      section: section,
+      localStorageCacheRepository: localStorageCacheRepository,
+    );
+  }
+}
+
+class HomePageController {
+  const HomePageController();
+
+  Future<List<HomeSectionViewModel>> resolveSections({
+    required List<HomeModuleConfig> enabledModules,
+    required Future<HomeSectionViewModel?> Function(HomeModuleConfig module)
+        loadSection,
+  }) async {
+    final sections = await Future.wait(
+      enabledModules.map(loadSection),
+    );
+    return sections.whereType<HomeSectionViewModel>().toList(growable: false);
+  }
+
+  void primeModulesWithReader(
+    T Function<T>(ProviderListenable<T> provider) read,
+  ) {
+    if (read(playbackPerformanceModeProvider)) {
+      return;
+    }
+    final modules = read(homeEnabledModulesProvider);
+    read(homeRecentItemsProvider.future);
+    read(homeRecentPlaybackEntriesProvider.future);
+    read(homeCarouselItemsProvider.future);
+    for (final module in modules) {
+      read(homeSectionProvider(module.id).future);
+    }
+  }
+
+  Future<void> refreshModules(WidgetRef ref) async {
+    if (ref.read(playbackPerformanceModeProvider)) {
+      return;
+    }
+    ref.invalidate(homeRecentItemsProvider);
+    ref.invalidate(homeRecentPlaybackEntriesProvider);
+    ref.invalidate(homeCarouselItemsProvider);
+    ref.invalidate(_homeSectionSeedProvider);
+    ref.invalidate(homeSectionProvider);
+    ref.invalidate(homeSectionsProvider);
+    primeModulesWithReader(ref.read);
+    await Future<void>.delayed(const Duration(milliseconds: 140));
+  }
+}
+
+final homeFeedRepositoryProvider = Provider<HomeFeedRepository>((ref) {
+  return const HomeFeedRepository();
+});
+
+final homePageControllerProvider = Provider<HomePageController>((ref) {
+  return const HomePageController();
+});
+
 final homeEnabledModulesProvider = Provider<List<HomeModuleConfig>>((ref) {
   final modules = ref.watch(homeModulesProvider);
   return modules
@@ -130,34 +299,29 @@ final homeModuleByIdProvider =
 final homeRecentItemsProvider = FutureProvider<List<MediaItem>>((ref) async {
   ref.watch(nasMediaIndexRevisionProvider);
   final enabledModules = ref.watch(homeEnabledModulesProvider);
-  if (!_needsRecentlyAdded(enabledModules)) {
-    return const [];
-  }
-
-  return ref.read(mediaRepositoryProvider).fetchRecentlyAdded(limit: 6);
+  return ref.read(homeFeedRepositoryProvider).loadRecentItems(
+        enabledModules: enabledModules,
+        mediaRepository: ref.read(mediaRepositoryProvider),
+      );
 });
 
 final homeRecentPlaybackEntriesProvider =
     FutureProvider<List<PlaybackProgressEntry>>((ref) async {
   ref.watch(playbackHistoryRevisionProvider);
   final enabledModules = ref.watch(homeEnabledModulesProvider);
-  if (!_needsRecentPlayback(enabledModules)) {
-    return const [];
-  }
-
-  return ref
-      .read(playbackMemoryRepositoryProvider)
-      .loadRecentDisplayEntries(limit: 6);
+  return ref.read(homeFeedRepositoryProvider).loadRecentPlaybackEntries(
+        enabledModules: enabledModules,
+        playbackMemoryRepository: ref.read(playbackMemoryRepositoryProvider),
+      );
 });
 
 final homeCarouselItemsProvider =
     FutureProvider<List<DoubanCarouselEntry>>((ref) async {
   final enabledModules = ref.watch(homeEnabledModulesProvider);
-  if (!_needsCarousel(enabledModules)) {
-    return const [];
-  }
-
-  return ref.read(discoveryRepositoryProvider).fetchCarouselItems();
+  return ref.read(homeFeedRepositoryProvider).loadCarouselItems(
+        enabledModules: enabledModules,
+        discoveryRepository: ref.read(discoveryRepositoryProvider),
+      );
 });
 
 final _homeSectionSeedProvider = FutureProvider.autoDispose
@@ -168,70 +332,17 @@ final _homeSectionSeedProvider = FutureProvider.autoDispose
   if (module == null) {
     return null;
   }
-
-  final mediaRepository = ref.read(mediaRepositoryProvider);
-  final discoveryRepository = ref.read(discoveryRepositoryProvider);
-  final doubanAccount = ref.watch(homeDoubanAccountProvider);
-  final mediaSources = ref.watch(homeMediaSourcesProvider);
-
-  switch (module.type) {
-    case HomeModuleType.hero:
-      return null;
-    case HomeModuleType.recentlyAdded:
-      final recentItems = await ref.watch(homeRecentItemsProvider.future);
-      return _buildLibrarySectionSeed(
+  return ref.read(homeFeedRepositoryProvider).buildSectionSeed(
         module: module,
-        items: recentItems,
-        subtitle: module.description,
+        mediaRepository: ref.read(mediaRepositoryProvider),
+        discoveryRepository: ref.read(discoveryRepositoryProvider),
+        doubanAccount: ref.watch(homeDoubanAccountProvider),
+        mediaSources: ref.watch(homeMediaSourcesProvider),
+        recentItems: ref.watch(homeRecentItemsProvider.future),
+        recentPlaybackEntries:
+            ref.watch(homeRecentPlaybackEntriesProvider.future),
+        carouselItems: ref.watch(homeCarouselItemsProvider.future),
       );
-    case HomeModuleType.recentPlayback:
-      final recentEntries =
-          await ref.watch(homeRecentPlaybackEntriesProvider.future);
-      return _buildRecentPlaybackSectionSeed(
-        module: module,
-        entries: recentEntries,
-      );
-    case HomeModuleType.librarySection:
-      final sourceKind = _resolveSourceKind(mediaSources, module.sourceId);
-      final sectionItems = module.isLibrarySection
-          ? await mediaRepository.fetchLibrary(
-              sourceId: module.sourceId,
-              sectionId: module.sectionId,
-              limit: _homeModuleFetchLimit(module, sourceKind: sourceKind),
-            )
-          : const <MediaItem>[];
-      return _buildLibrarySectionSeed(
-        module: module,
-        items: sectionItems,
-        subtitle: module.description,
-        viewAllTarget: module.isLibrarySection
-            ? LibraryCollectionTarget(
-                title: module.title,
-                sourceId: module.sourceId,
-                sourceName: module.sourceName,
-                sourceKind: sourceKind,
-                sectionId: module.sectionId,
-                subtitle: module.sectionName,
-              )
-            : null,
-      );
-    case HomeModuleType.doubanInterest:
-    case HomeModuleType.doubanSuggestion:
-    case HomeModuleType.doubanList:
-      final entries = await discoveryRepository.fetchEntries(module);
-      return _buildDoubanSectionSeed(
-        module: module,
-        entries: entries,
-        emptyMessage: _resolveDoubanEmptyMessage(module, doubanAccount),
-      );
-    case HomeModuleType.doubanCarousel:
-      final carouselItems = await ref.watch(homeCarouselItemsProvider.future);
-      return _buildCarouselSectionSeed(
-        module: module,
-        items: carouselItems,
-        emptyMessage: _resolveDoubanEmptyMessage(module, doubanAccount),
-      );
-  }
 });
 
 final homeSectionProvider =
@@ -242,71 +353,41 @@ final homeSectionProvider =
   if (seedSection == null) {
     return null;
   }
-  return _applyCachedHomeSection(
-    section: seedSection,
-    localStorageCacheRepository: ref.read(localStorageCacheRepositoryProvider),
-  );
+  return ref.read(homeFeedRepositoryProvider).applyCachedSection(
+        section: seedSection,
+        localStorageCacheRepository:
+            ref.read(localStorageCacheRepositoryProvider),
+      );
 });
 
 final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
   ref,
 ) async {
   final enabledModules = ref.watch(homeEnabledModulesProvider);
-  final sections = await Future.wait(
-    enabledModules.map(
-      (module) => ref.watch(homeSectionProvider(module.id).future),
-    ),
-  );
-
-  return sections.whereType<HomeSectionViewModel>().toList();
+  return ref.read(homePageControllerProvider).resolveSections(
+        enabledModules: enabledModules,
+        loadSection: (module) =>
+            ref.watch(homeSectionProvider(module.id).future),
+      );
 });
 
 void primeHomeModules(Ref ref) {
-  _primeHomeModulesWithReader(ref.read);
+  ref.read(homePageControllerProvider).primeModulesWithReader(ref.read);
 }
 
 int _homeModuleFetchLimit(
   HomeModuleConfig module, {
   required MediaSourceKind sourceKind,
 }) {
-  if (module.type == HomeModuleType.librarySection &&
-      sourceKind == MediaSourceKind.emby) {
-    return 20;
-  }
-  return 6;
+  return _defaultHomeSectionItemLimit;
 }
 
 void primeHomeModulesFromWidget(WidgetRef ref) {
-  _primeHomeModulesWithReader(ref.read);
-}
-
-void _primeHomeModulesWithReader(
-  T Function<T>(ProviderListenable<T> provider) read,
-) {
-  if (read(playbackPerformanceModeProvider)) {
-    return;
-  }
-  final modules = read(homeEnabledModulesProvider);
-  read(homeRecentItemsProvider.future);
-  read(homeRecentPlaybackEntriesProvider.future);
-  read(homeCarouselItemsProvider.future);
-  for (final module in modules) {
-    read(homeSectionProvider(module.id).future);
-  }
+  ref.read(homePageControllerProvider).primeModulesWithReader(ref.read);
 }
 
 Future<void> refreshHomeModules(WidgetRef ref) async {
-  if (ref.read(playbackPerformanceModeProvider)) {
-    return;
-  }
-  ref.invalidate(homeRecentItemsProvider);
-  ref.invalidate(homeRecentPlaybackEntriesProvider);
-  ref.invalidate(homeCarouselItemsProvider);
-  ref.invalidate(_homeSectionSeedProvider);
-  ref.invalidate(homeSectionProvider);
-  ref.invalidate(homeSectionsProvider);
-  primeHomeModulesFromWidget(ref);
-  await Future<void>.delayed(const Duration(milliseconds: 140));
+  return ref.read(homePageControllerProvider).refreshModules(ref);
 }
 
 bool _needsRecentlyAdded(List<HomeModuleConfig> modules) {
@@ -543,6 +624,9 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
         : (seed.availabilityLabel.trim().isNotEmpty
             ? seed.availabilityLabel
             : cached.availabilityLabel),
+    searchQuery: seed.searchQuery.trim().isNotEmpty
+        ? seed.searchQuery
+        : cached.searchQuery,
     playbackTarget: seed.playbackTarget ?? cached.playbackTarget,
     itemId: preferCachedSourceContext
         ? (cached.itemId.trim().isNotEmpty ? cached.itemId : seed.itemId)

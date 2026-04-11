@@ -143,7 +143,7 @@ class HomeEditorPage extends ConsumerWidget {
         ref.watch(homeMediaSourcesProvider);
     final collectionsAsync = ref.watch(homeEditorCollectionsProvider);
     final Set<String> visibleSourceIds =
-        (collectionsAsync.valueOrNull ?? const <MediaCollection>[])
+        (collectionsAsync.value ?? const <MediaCollection>[])
             .map((item) => item.sourceId)
             .toSet();
     final enabledSources = mediaSources.where((item) => item.enabled).toList();
@@ -558,7 +558,7 @@ class HomeEditorPage extends ConsumerWidget {
       text: existing?.doubanListUrl ?? initialPreset?.url ?? '',
     );
     var selectedPresetUrl = initialPreset?.url ?? _kCustomDoubanListPresetValue;
-    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     final titleFocusNode = FocusNode(debugLabel: 'home-douban-title');
     final urlFocusNode = FocusNode(debugLabel: 'home-douban-url');
     final cancelFocusNode = FocusNode(debugLabel: 'home-douban-cancel');
@@ -701,7 +701,7 @@ class HomeEditorPage extends ConsumerWidget {
     final titleController = TextEditingController(text: module.title);
     var interestStatus = module.doubanInterestStatus;
     var suggestionType = module.doubanSuggestionType;
-    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     final titleFocusNode = FocusNode(debugLabel: 'home-module-title');
     final cancelFocusNode = FocusNode(debugLabel: 'home-module-cancel');
     final saveFocusNode = FocusNode(debugLabel: 'home-module-save');

@@ -2,8 +2,14 @@ import 'dart:developer' as developer;
 
 import 'package:flutter/foundation.dart';
 
-const bool _playbackTraceEnabled = false;
+bool _playbackTraceEnabled = false;
 const String _playbackTraceName = 'Starflow.Playback';
+
+bool get playbackTraceEnabled => _playbackTraceEnabled;
+
+void setPlaybackTraceEnabled(bool enabled) {
+  _playbackTraceEnabled = enabled;
+}
 
 void playbackTrace(
   String stage, {

@@ -88,7 +88,7 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
       cacheValue: (value) => _cachedItemsAsync = value,
       fallbackValue: const AsyncLoading<List<MediaItem>>(),
     );
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
 
     final headerContent = Column(
       crossAxisAlignment: CrossAxisAlignment.start,

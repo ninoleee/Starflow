@@ -27,6 +27,12 @@ class PlaybackStartupRouteInput {
 PlaybackStartupRouteAction decidePlaybackStartupRoute(
   PlaybackStartupRouteInput input,
 ) {
+  if (_requiresHeaderAwareEmbeddedPlayback(input.target)) {
+    if (input.playbackEngine == PlaybackEngine.nativeContainer) {
+      return PlaybackStartupRouteAction.launchNativeContainer;
+    }
+    return PlaybackStartupRouteAction.openEmbeddedMpv;
+  }
   if (input.playbackEngine == PlaybackEngine.systemPlayer) {
     return PlaybackStartupRouteAction.launchSystemPlayer;
   }
@@ -63,4 +69,8 @@ bool _shouldAutoDowngradeToPerformanceFallback(
   final veryHighBitrate = bitrate >= 25000000;
   final heavyHevc = isHevc && (is4k || bitrate >= 18000000);
   return is4k || veryHighBitrate || heavyHevc;
+}
+
+bool _requiresHeaderAwareEmbeddedPlayback(PlaybackTarget target) {
+  return target.headers.isNotEmpty;
 }

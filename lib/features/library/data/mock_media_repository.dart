@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/core/utils/seed_data.dart';
+import 'package:starflow/features/library/application/app_media_query_service.dart';
 import 'package:starflow/features/library/application/empty_library_auto_rebuild_scheduler.dart';
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
@@ -11,7 +11,6 @@ import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/nas_media_recognition.dart';
-import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -85,7 +84,14 @@ class AppMediaRepository implements MediaRepository {
     this._nasMediaIndexer,
     this._quarkExternalStorageClient,
     this._quarkSaveClient,
-  );
+  )   : _queryService = AppMediaQueryService(
+          ref: ref,
+          embyApiClient: _embyApiClient,
+          webDavNasClient: _webDavNasClient,
+          nasMediaIndexer: _nasMediaIndexer,
+          quarkExternalStorageClient: _quarkExternalStorageClient,
+        ),
+        _emptyLibraryAutoRebuildScheduler = EmptyLibraryAutoRebuildScheduler();
 
   final Ref ref;
   final EmbyApiClient _embyApiClient;
@@ -93,8 +99,8 @@ class AppMediaRepository implements MediaRepository {
   final NasMediaIndexer _nasMediaIndexer;
   final QuarkExternalStorageClient _quarkExternalStorageClient;
   final QuarkSaveClient _quarkSaveClient;
-  final EmptyLibraryAutoRebuildScheduler _emptyLibraryAutoRebuildScheduler =
-      EmptyLibraryAutoRebuildScheduler();
+  final AppMediaQueryService _queryService;
+  final EmptyLibraryAutoRebuildScheduler _emptyLibraryAutoRebuildScheduler;
 
   List<MediaSourceConfig> get _enabledSources {
     return ref
@@ -108,17 +114,9 @@ class AppMediaRepository implements MediaRepository {
     return ref.read(appSettingsProvider).networkStorage.quarkCookie.trim();
   }
 
-  List<MediaItem> get _enabledLibrary {
-    final enabledSourceIds = _enabledSources.map((item) => item.id).toSet();
-    return SeedData.seedLibrary
-        .where((item) => enabledSourceIds.contains(item.sourceId))
-        .toList();
-  }
-
   @override
   Future<List<MediaSourceConfig>> fetchSources() async {
-    await Future<void>.delayed(const Duration(milliseconds: 120));
-    return _enabledSources;
+    return _queryService.fetchSources();
   }
 
   @override
@@ -126,24 +124,10 @@ class AppMediaRepository implements MediaRepository {
     MediaSourceKind? kind,
     String? sourceId,
   }) async {
-    final sources = _enabledSources
-        .where(
-          (item) =>
-              (kind == null || item.kind == kind) &&
-              (sourceId == null || sourceId == item.id),
-        )
-        .toList();
-    final collections = await Future.wait(
-      sources.map((source) async {
-        try {
-          return await _fetchCollectionsForSource(source);
-        } catch (_) {
-          return const <MediaCollection>[];
-        }
-      }),
+    return _queryService.fetchCollections(
+      kind: kind,
+      sourceId: sourceId,
     );
-
-    return collections.expand((item) => item).toList();
   }
 
   @override
@@ -153,39 +137,12 @@ class AppMediaRepository implements MediaRepository {
     String? sectionId,
     int limit = 200,
   }) async {
-    final sources = _enabledSources
-        .where(
-          (item) =>
-              (kind == null || item.kind == kind) &&
-              (sourceId == null || sourceId == item.id),
-        )
-        .toList();
-    final seededLibrary = _enabledLibrary;
-    final sourceResults = await Future.wait(
-      sources.map(
-        (source) => _fetchLibraryForSource(
-          source,
-          sectionId: sectionId,
-          limit: limit,
-          seededLibrary: seededLibrary,
-        ),
-      ),
+    return _queryService.fetchLibrary(
+      kind: kind,
+      sourceId: sourceId,
+      sectionId: sectionId,
+      limit: limit,
     );
-    final items = sourceResults.expand((group) => group.items).toList();
-
-    if (items.isEmpty) {
-      for (final result in sourceResults) {
-        if (result.error != null) {
-          Error.throwWithStackTrace(
-            result.error!,
-            result.stackTrace ?? StackTrace.current,
-          );
-        }
-      }
-    }
-
-    items.sort((left, right) => right.addedAt.compareTo(left.addedAt));
-    return items;
   }
 
   @override
@@ -193,8 +150,10 @@ class AppMediaRepository implements MediaRepository {
     MediaSourceKind? kind,
     int limit = 10,
   }) async {
-    final items = await fetchLibrary(kind: kind, limit: limit);
-    return items.take(limit).toList();
+    return _queryService.fetchRecentlyAdded(
+      kind: kind,
+      limit: limit,
+    );
   }
 
   @override
@@ -432,57 +391,23 @@ class AppMediaRepository implements MediaRepository {
     String sectionName = '',
     int limit = 200,
   }) async {
-    final normalizedSourceId = sourceId.trim();
-    final normalizedParentId = parentId.trim();
-    if (normalizedSourceId.isEmpty || normalizedParentId.isEmpty) {
-      return const [];
-    }
-
-    MediaSourceConfig? source;
-    for (final candidate in _enabledSources) {
-      if (candidate.id == normalizedSourceId) {
-        source = candidate;
-        break;
-      }
-    }
-    if (source == null || !source.enabled) {
-      return const [];
-    }
-
-    if (source.kind == MediaSourceKind.emby) {
-      if (!source.hasActiveSession) {
-        return const [];
-      }
-      return _embyApiClient.fetchChildren(
-        source,
-        parentId: normalizedParentId,
-        sectionId: sectionId,
-        sectionName: sectionName,
-        limit: limit,
-      );
-    }
-    final scopedCollections = _hasScopedSections(source)
-        ? await _selectedCollectionsForSource(source)
-        : null;
-    return _nasMediaIndexer.loadChildren(
-      source,
-      parentId: normalizedParentId,
+    return _queryService.fetchChildren(
+      sourceId: sourceId,
+      parentId: parentId,
       sectionId: sectionId,
-      scopedCollections: scopedCollections,
+      sectionName: sectionName,
       limit: limit,
     );
   }
 
   @override
   Future<MediaItem?> findById(String id) async {
-    final matches = (await fetchLibrary()).where((item) => item.id == id);
-    return matches.isEmpty ? null : matches.first;
+    return _queryService.findById(id);
   }
 
   @override
   Future<MediaItem?> matchTitle(String title) async {
-    final library = await fetchLibrary(limit: 2000);
-    return matchMediaItemByTitles(library, titles: [title]);
+    return _queryService.matchTitle(title);
   }
 
   Future<String> _resolveSectionName(
@@ -527,12 +452,14 @@ class AppMediaRepository implements MediaRepository {
     return '';
   }
 
+  // ignore: unused_element
   Future<_SourceFetchResult> _fetchLibraryForSource(
     MediaSourceConfig source, {
     required String? sectionId,
     required int limit,
     required List<MediaItem> seededLibrary,
   }) async {
+    // Transitional path kept while query responsibilities finish moving out.
     try {
       final hasScopedSections = _hasScopedSections(source);
       if (source.kind == MediaSourceKind.emby) {

@@ -1,4 +1,4 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 
 enum WebDavScrapeStage {
   scanning,
@@ -47,7 +47,8 @@ class WebDavScrapeProgress {
   }
 
   String get summaryLabel {
-    final resolvedLabel = activityLabel.trim().isEmpty ? stage.label : activityLabel;
+    final resolvedLabel =
+        activityLabel.trim().isEmpty ? stage.label : activityLabel;
     if (stage == WebDavScrapeStage.scanning) {
       return resolvedLabel;
     }
@@ -141,8 +142,9 @@ class WebDavScrapeProgressController
         stage: WebDavScrapeStage.indexing,
         current: totalItems > 0 ? 0 : 1,
         total: totalItems > 0 ? totalItems : 1,
-        activityLabel:
-            activityLabel.trim().isEmpty ? WebDavScrapeStage.indexing.label : activityLabel,
+        activityLabel: activityLabel.trim().isEmpty
+            ? WebDavScrapeStage.indexing.label
+            : activityLabel,
         detail: detail,
       ),
     );

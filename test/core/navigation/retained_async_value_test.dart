@@ -12,7 +12,7 @@ void main() {
         fallbackValue: const AsyncLoading<int>(),
       );
 
-      expect(resolved.valueOrNull, 7);
+      expect(resolved.value, 7);
     });
 
     test('returns fallback value when page is inactive and cache is empty', () {
@@ -38,7 +38,7 @@ void main() {
       );
 
       expect(identical(resolved, active), isTrue);
-      expect(cached?.valueOrNull, 42);
+      expect(cached?.value, 42);
     });
 
     test('returns active loading when cache is empty and request is loading',
@@ -96,7 +96,7 @@ void main() {
         fallbackValue: const AsyncLoading<int>(),
       );
 
-      expect(resolved.valueOrNull, 5);
+      expect(resolved.value, 5);
       expect(cacheWriteCount, 0);
     });
   });

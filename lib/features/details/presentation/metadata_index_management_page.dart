@@ -571,7 +571,7 @@ class _MetadataIndexManagementPageState
 
   @override
   Widget build(BuildContext context) {
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     return TvFocusMemoryScope(
       controller: _tvFocusMemoryController,
       scopeId: 'detail:metadata-index',

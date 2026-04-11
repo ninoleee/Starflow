@@ -333,7 +333,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     final request = widget.request;
     final applyMode = request.applyMode;
     final title = request.title.trim().isEmpty ? '在线字幕' : request.title.trim();
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
 
     return PopScope<Object?>(
       canPop: !request.standalone,

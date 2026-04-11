@@ -59,7 +59,7 @@ class _SettingsManagementPageState
   Widget build(BuildContext context) {
     final settings = ref.watch(appSettingsProvider);
     final service = ref.watch(settingsTransferServiceProvider);
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final isIos = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
     final usesWebTransfer = kIsWeb && service.isSupported;
     final usesSystemExport =
@@ -257,7 +257,7 @@ class _SettingsManagementPageState
   }
 
   Future<void> _pickExportPath() async {
-    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     if (isTelevision) {
       if (_exportPathController.text.trim().isEmpty) {
         final suggestedPath = await ref
@@ -289,7 +289,7 @@ class _SettingsManagementPageState
   }
 
   Future<void> _pickImportPath() async {
-    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     if (isTelevision) {
       _showMessage('电视模式暂不打开系统文件选择器，请直接填写要导入的 JSON 文件路径。');
       return;
@@ -551,7 +551,7 @@ class _PathEditor extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     if (isTelevision) {
       return SettingsSelectionTile(
         title: label,

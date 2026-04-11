@@ -25,6 +25,13 @@ abstract class NasMediaIndexStore {
     required NasMediaIndexSourceState state,
   });
 
+  Future<void> upsertSourceRecords({
+    required String sourceId,
+    required List<NasMediaIndexRecord> records,
+    required NasMediaIndexSourceState state,
+    bool clearMissingRecords = false,
+  });
+
   Future<LocalStorageCacheSummary> inspectSummary();
 
   Future<void> clearAll();
@@ -121,20 +128,37 @@ class SembastNasMediaIndexStore implements NasMediaIndexStore {
     required List<NasMediaIndexRecord> records,
     required NasMediaIndexSourceState state,
   }) async {
+    await upsertSourceRecords(
+      sourceId: sourceId,
+      records: records,
+      state: state,
+      clearMissingRecords: true,
+    );
+  }
+
+  @override
+  Future<void> upsertSourceRecords({
+    required String sourceId,
+    required List<NasMediaIndexRecord> records,
+    required NasMediaIndexSourceState state,
+    bool clearMissingRecords = false,
+  }) async {
     final normalizedSourceId = sourceId.trim();
     if (normalizedSourceId.isEmpty) {
       return;
     }
     final database = await _database();
     await database.transaction((transaction) async {
-      final existing = await _recordStore.find(
-        transaction,
-        finder: Finder(
-          filter: Filter.equals('sourceId', normalizedSourceId),
-        ),
-      );
-      for (final record in existing) {
-        await _recordStore.record(record.key).delete(transaction);
+      if (clearMissingRecords) {
+        final toDelete = await _recordStore.find(
+          transaction,
+          finder: Finder(
+            filter: Filter.equals('sourceId', normalizedSourceId),
+          ),
+        );
+        for (final record in toDelete) {
+          await _recordStore.record(record.key).delete(transaction);
+        }
       }
       for (final record in records) {
         await _recordStore.record(record.id).put(transaction, record.toJson());

@@ -66,10 +66,15 @@ Future<void> _handleRequest(HttpRequest request) async {
       return;
     }
 
+    final headerOverrides = _readHeaderOverrides(request);
     final client = HttpClient()..autoUncompress = false;
     try {
       final outbound = await client.openUrl(request.method, targetUri);
-      _copyRequestHeaders(request, outbound);
+      _copyRequestHeaders(
+        request,
+        outbound,
+        headerOverrides: headerOverrides,
+      );
       await request.cast<List<int>>().pipe(outbound);
 
       final inbound = await outbound.close();
@@ -105,7 +110,31 @@ Future<void> _handleRequest(HttpRequest request) async {
   }
 }
 
-void _copyRequestHeaders(HttpRequest source, HttpClientRequest target) {
+Map<String, String> _readHeaderOverrides(HttpRequest request) {
+  final encoded = request.uri.queryParameters['headers']?.trim() ?? '';
+  if (encoded.isEmpty) {
+    return const <String, String>{};
+  }
+
+  try {
+    final decoded = utf8.decode(base64Url.decode(base64Url.normalize(encoded)));
+    final json = jsonDecode(decoded);
+    if (json is! Map) {
+      return const <String, String>{};
+    }
+    return json.map(
+      (key, value) => MapEntry('$key'.trim(), '$value'.trim()),
+    )..removeWhere((key, value) => key.isEmpty || value.isEmpty);
+  } catch (_) {
+    return const <String, String>{};
+  }
+}
+
+void _copyRequestHeaders(
+  HttpRequest source,
+  HttpClientRequest target, {
+  Map<String, String> headerOverrides = const <String, String>{},
+}) {
   source.headers.forEach((name, values) {
     final lowerName = name.toLowerCase();
     if (_isHopByHopHeader(lowerName) ||
@@ -135,6 +164,14 @@ void _copyRequestHeaders(HttpRequest source, HttpClientRequest target) {
   final targetOrigin = source.headers.value('x-starflow-target-origin');
   if (targetOrigin != null && targetOrigin.trim().isNotEmpty) {
     target.headers.set('origin', targetOrigin);
+  }
+
+  for (final entry in headerOverrides.entries) {
+    final lowerName = entry.key.toLowerCase();
+    if (_isHopByHopHeader(lowerName) || lowerName == 'content-length') {
+      continue;
+    }
+    target.headers.set(entry.key, entry.value);
   }
 }
 

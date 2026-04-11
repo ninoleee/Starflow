@@ -93,7 +93,11 @@ class LocalStorageCacheRepository {
         continue;
       }
       final record = payload.records[recordId];
-      if (record != null) {
+      if (record != null &&
+          _canShareDetailCacheRecord(
+            left: seedTarget,
+            right: record.target,
+          )) {
         return CachedDetailState(
           target: record.target,
           libraryMatchChoices: record.libraryMatchChoices,
@@ -135,7 +139,17 @@ class LocalStorageCacheRepository {
     String? recordId;
     for (final lookupKey in lookupKeys) {
       final candidate = payload.lookupKeys[lookupKey];
-      if (candidate != null && payload.records.containsKey(candidate)) {
+      final candidateRecord =
+          candidate == null ? null : payload.records[candidate];
+      if (candidateRecord != null &&
+          _canShareDetailCacheRecord(
+            left: seedTarget,
+            right: candidateRecord.target,
+          ) &&
+          _canShareDetailCacheRecord(
+            left: resolvedTarget,
+            right: candidateRecord.target,
+          )) {
         recordId = candidate;
         break;
       }
@@ -331,6 +345,8 @@ class LocalStorageCacheRepository {
 
   static List<String> buildLookupKeys(MediaDetailTarget target) {
     final keys = <String>{};
+    final detailKind = _detailLookupKind(target);
+    final isNestedEpisodic = _isNestedEpisodicKind(detailKind);
 
     void addKey(String key) {
       final trimmed = key.trim();
@@ -347,52 +363,77 @@ class LocalStorageCacheRepository {
 
     final doubanId = target.doubanId.trim();
     if (doubanId.isNotEmpty) {
-      addKey('douban|$doubanId');
+      if (detailKind.isNotEmpty) {
+        addKey('douban|$detailKind|$doubanId');
+      }
+      if (!isNestedEpisodic) {
+        addKey('douban|$doubanId');
+      }
     }
 
     final imdbId = target.imdbId.trim().toLowerCase();
     if (imdbId.isNotEmpty) {
-      addKey('imdb|$imdbId');
+      if (detailKind.isNotEmpty) {
+        addKey('imdb|$detailKind|$imdbId');
+      }
+      if (!isNestedEpisodic) {
+        addKey('imdb|$imdbId');
+      }
     }
 
     final tmdbId = target.tmdbId.trim();
     if (tmdbId.isNotEmpty) {
-      addKey('tmdb|$tmdbId');
+      if (detailKind.isNotEmpty) {
+        addKey('tmdb|$detailKind|$tmdbId');
+      }
+      if (!isNestedEpisodic) {
+        addKey('tmdb|$tmdbId');
+      }
     }
 
     final tvdbId = target.tvdbId.trim();
     if (tvdbId.isNotEmpty) {
-      addKey('tvdb|$tvdbId');
+      if (detailKind.isNotEmpty) {
+        addKey('tvdb|$detailKind|$tvdbId');
+      }
+      if (!isNestedEpisodic) {
+        addKey('tvdb|$tvdbId');
+      }
     }
 
     final wikidataId = target.wikidataId.trim().toUpperCase();
     if (wikidataId.isNotEmpty) {
-      addKey('wikidata|$wikidataId');
+      if (detailKind.isNotEmpty) {
+        addKey('wikidata|$detailKind|$wikidataId');
+      }
+      if (!isNestedEpisodic) {
+        addKey('wikidata|$wikidataId');
+      }
     }
 
     final normalizedTitle = _normalizeLookupText(target.title);
     if (normalizedTitle.isNotEmpty) {
-      addKey(
-        'title|$normalizedTitle|${target.year}|${target.isSeries ? 'series' : 'movie'}',
+      _addTextLookupKeys(
+        addKey: addKey,
+        prefix: 'title',
+        normalizedValue: normalizedTitle,
+        year: target.year,
+        detailKind: detailKind,
+        includeLooseKeys: !isNestedEpisodic,
       );
-      if (target.year > 0) {
-        addKey('title|$normalizedTitle|${target.year}');
-      }
-      addKey('title|$normalizedTitle|${target.isSeries ? 'series' : 'movie'}');
-      addKey('title|$normalizedTitle');
     }
 
     final query = target.searchQuery.trim();
     final normalizedQuery = _normalizeLookupText(query);
     if (normalizedQuery.isNotEmpty && normalizedQuery != normalizedTitle) {
-      addKey(
-        'query|$normalizedQuery|${target.year}|${target.isSeries ? 'series' : 'movie'}',
+      _addTextLookupKeys(
+        addKey: addKey,
+        prefix: 'query',
+        normalizedValue: normalizedQuery,
+        year: target.year,
+        detailKind: detailKind,
+        includeLooseKeys: !isNestedEpisodic,
       );
-      if (target.year > 0) {
-        addKey('query|$normalizedQuery|${target.year}');
-      }
-      addKey('query|$normalizedQuery|${target.isSeries ? 'series' : 'movie'}');
-      addKey('query|$normalizedQuery');
     }
 
     return keys.toList(growable: false);
@@ -494,6 +535,80 @@ class LocalStorageCacheRepository {
       metadataRefreshStatus: record.metadataRefreshStatus,
     );
   }
+}
+
+String _detailLookupKind(MediaDetailTarget target) {
+  final itemType = target.itemType.trim().toLowerCase();
+  if (itemType.isNotEmpty) {
+    return itemType;
+  }
+  if (target.episodeNumber != null && target.episodeNumber! > 0) {
+    return 'episode';
+  }
+  if (target.seasonNumber != null && target.seasonNumber! > 0) {
+    return 'season';
+  }
+  final playbackTarget = target.playbackTarget;
+  if (playbackTarget?.isEpisode == true) {
+    return 'episode';
+  }
+  if (playbackTarget?.isSeries == true) {
+    return 'series';
+  }
+  if (playbackTarget?.isMovie == true) {
+    return 'movie';
+  }
+  return target.isSeries ? 'series' : 'movie';
+}
+
+bool _isNestedEpisodicKind(String detailKind) {
+  return detailKind == 'episode' || detailKind == 'season';
+}
+
+bool _isTopLevelDetailKind(String detailKind) {
+  return detailKind == 'series' || detailKind == 'movie';
+}
+
+bool _canShareDetailCacheRecord({
+  required MediaDetailTarget left,
+  required MediaDetailTarget right,
+}) {
+  final leftKind = _detailLookupKind(left);
+  final rightKind = _detailLookupKind(right);
+  if (_isTopLevelDetailKind(leftKind) && _isNestedEpisodicKind(rightKind)) {
+    return false;
+  }
+  if (_isNestedEpisodicKind(leftKind) && _isTopLevelDetailKind(rightKind)) {
+    return false;
+  }
+  return true;
+}
+
+void _addTextLookupKeys({
+  required void Function(String key) addKey,
+  required String prefix,
+  required String normalizedValue,
+  required int year,
+  required String detailKind,
+  required bool includeLooseKeys,
+}) {
+  final normalizedKind = detailKind.trim().toLowerCase();
+  if (normalizedValue.isEmpty) {
+    return;
+  }
+  if (normalizedKind.isNotEmpty) {
+    addKey('$prefix|$normalizedValue|$year|$normalizedKind');
+    addKey('$prefix|$normalizedValue|$normalizedKind');
+  } else if (year > 0) {
+    addKey('$prefix|$normalizedValue|$year');
+  }
+  if (!includeLooseKeys) {
+    return;
+  }
+  if (year > 0) {
+    addKey('$prefix|$normalizedValue|$year');
+  }
+  addKey('$prefix|$normalizedValue');
 }
 
 class CachedDetailState {

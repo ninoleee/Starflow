@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 
 final playbackPerformanceModeProvider = StateProvider<bool>((ref) => false);
 
@@ -12,9 +13,6 @@ class BackgroundWorkSuspensionState {
   final bool animationsSuspended;
   final bool imageLoadingSuspended;
   final bool enrichmentSuspended;
-
-  bool get anySuspended =>
-      animationsSuspended || imageLoadingSuspended || enrichmentSuspended;
 }
 
 final backgroundWorkSuspensionStateProvider =
@@ -48,11 +46,5 @@ final backgroundEnrichmentSuspendedProvider = Provider<bool>((ref) {
     backgroundWorkSuspensionStateProvider.select(
       (state) => state.enrichmentSuspended,
     ),
-  );
-});
-
-final backgroundWorkSuspendedProvider = Provider<bool>((ref) {
-  return ref.watch(
-    backgroundWorkSuspensionStateProvider.select((state) => state.anySuspended),
   );
 });

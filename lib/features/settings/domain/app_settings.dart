@@ -759,6 +759,8 @@ class AppSettings {
     this.playbackEngine = PlaybackEngine.embeddedMpv,
     this.playbackDecodeMode = PlaybackDecodeMode.auto,
     this.playbackMpvQualityPreset = PlaybackMpvQualityPreset.balanced,
+    this.playbackTraceEnabled = false,
+    this.subtitleSearchTraceEnabled = false,
   });
 
   final List<MediaSourceConfig> mediaSources;
@@ -801,6 +803,8 @@ class AppSettings {
   final PlaybackEngine playbackEngine;
   final PlaybackDecodeMode playbackDecodeMode;
   final PlaybackMpvQualityPreset playbackMpvQualityPreset;
+  final bool playbackTraceEnabled;
+  final bool subtitleSearchTraceEnabled;
 
   AppSettings copyWith({
     List<MediaSourceConfig>? mediaSources,
@@ -843,6 +847,8 @@ class AppSettings {
     PlaybackEngine? playbackEngine,
     PlaybackDecodeMode? playbackDecodeMode,
     PlaybackMpvQualityPreset? playbackMpvQualityPreset,
+    bool? playbackTraceEnabled,
+    bool? subtitleSearchTraceEnabled,
   }) {
     return AppSettings(
       mediaSources: mediaSources ?? this.mediaSources,
@@ -920,6 +926,9 @@ class AppSettings {
       playbackDecodeMode: playbackDecodeMode ?? this.playbackDecodeMode,
       playbackMpvQualityPreset:
           playbackMpvQualityPreset ?? this.playbackMpvQualityPreset,
+      playbackTraceEnabled: playbackTraceEnabled ?? this.playbackTraceEnabled,
+      subtitleSearchTraceEnabled:
+          subtitleSearchTraceEnabled ?? this.subtitleSearchTraceEnabled,
     );
   }
 
@@ -971,6 +980,8 @@ class AppSettings {
       'playbackEngine': playbackEngine.name,
       'playbackDecodeMode': playbackDecodeMode.name,
       'playbackMpvQualityPreset': playbackMpvQualityPreset.name,
+      'playbackTraceEnabled': playbackTraceEnabled,
+      'subtitleSearchTraceEnabled': subtitleSearchTraceEnabled,
     };
   }
 
@@ -1094,6 +1105,9 @@ class AppSettings {
       playbackMpvQualityPreset: PlaybackMpvQualityPresetX.fromName(
         json['playbackMpvQualityPreset'] as String? ?? '',
       ),
+      playbackTraceEnabled: json['playbackTraceEnabled'] as bool? ?? false,
+      subtitleSearchTraceEnabled:
+          json['subtitleSearchTraceEnabled'] as bool? ?? false,
     );
   }
 }

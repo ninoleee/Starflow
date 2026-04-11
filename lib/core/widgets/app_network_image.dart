@@ -58,6 +58,8 @@ class AppNetworkImage extends ConsumerStatefulWidget {
   ConsumerState<AppNetworkImage> createState() => _AppNetworkImageState();
 }
 
+final Map<String, Future<_ResolvedImageContent>> _resolvedImageFutureCache = {};
+
 class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   Future<_ResolvedImageContent>? _resolvedImageFuture;
 
@@ -97,7 +99,21 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     if (candidates.isEmpty) {
       return null;
     }
-    return _loadAndAnalyze(candidates);
+    final cacheKey = _buildCandidatesCacheKey(candidates);
+    final cachedFuture = _resolvedImageFutureCache[cacheKey];
+    if (cachedFuture != null) {
+      return cachedFuture;
+    }
+    final future = _loadAndAnalyze(candidates);
+    _resolvedImageFutureCache[cacheKey] = future;
+    future.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {
+        _resolvedImageFutureCache.remove(cacheKey);
+        return;
+      },
+    );
+    return future;
   }
 
   Future<_ResolvedImageContent> _loadAndAnalyze(
@@ -230,6 +246,13 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     return candidates;
   }
 
+  String _buildCandidatesCacheKey(List<AppNetworkImageSource> candidates) {
+    return candidates
+        .map((candidate) =>
+            _buildSourceIdentity(candidate.url, candidate.headers))
+        .join('\u0000');
+  }
+
   Widget _buildError(
     BuildContext context,
     Object error, [
@@ -306,10 +329,10 @@ String _buildSourceIdentity(String url, Map<String, String> headers) {
 }
 
 String _fingerprintBytes(Uint8List bytes) {
-  var hash = 0xcbf29ce484222325;
+  var hash = 2166136261;
   for (final value in bytes) {
-    hash ^= value;
-    hash = (hash * 0x100000001b3) & 0x7fffffffffffffff;
+    hash = 0x1fffffff & (hash ^ value);
+    hash = 0x1fffffff & (hash * 16777619);
   }
   return hash.toRadixString(16);
 }

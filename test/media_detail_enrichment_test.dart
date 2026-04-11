@@ -1,10 +1,12 @@
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
@@ -280,6 +282,128 @@ void main() {
       expect(playback.resolutionLabel, '3840x2160');
     });
 
+    test(
+        'recomputes when detail enrichment settings change after initial resolution',
+        () async {
+      final detailSettingsProvider = StateProvider<DetailEnrichmentSettings>(
+        (ref) => const DetailEnrichmentSettings(
+          mediaSources: <MediaSourceConfig>[],
+          quarkCookie: '',
+          wmdbMetadataMatchEnabled: false,
+          tmdbMetadataMatchEnabled: false,
+          tmdbReadAccessToken: '',
+          imdbRatingMatchEnabled: false,
+        ),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          detailEnrichmentSettingsProvider.overrideWith(
+            (ref) => ref.watch(detailSettingsProvider),
+          ),
+          embyApiClientProvider.overrideWithValue(
+            EmbyApiClient(
+              MockClient((request) async {
+                if (request.url.path == '/Items/emby-1/PlaybackInfo') {
+                  return http.Response(
+                    jsonEncode({
+                      'PlaySessionId': 'play-session-1',
+                      'MediaSources': [
+                        {
+                          'Id': 'media-source-2',
+                          'Container': 'mkv',
+                          'Size': 25769803776,
+                          'Bitrate': 28400000,
+                          'Width': 3840,
+                          'Height': 2160,
+                          'DirectStreamUrl':
+                              '/Videos/emby-1/stream.mp4?static=true&MediaSourceId=media-source-2',
+                          'AddApiKeyToDirectStreamUrl': true,
+                          'MediaStreams': [
+                            {
+                              'Type': 'Video',
+                              'Codec': 'hevc',
+                              'Width': 3840,
+                              'Height': 2160,
+                              'BitRate': 25200000,
+                            },
+                            {
+                              'Type': 'Audio',
+                              'Codec': 'truehd',
+                              'BitRate': 3200000,
+                            },
+                          ],
+                        },
+                      ],
+                    }),
+                    200,
+                  );
+                }
+                return http.Response('Not found', 404);
+              }),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final target = MediaDetailTarget.fromMediaItem(
+        MediaItem(
+          id: 'emby-1',
+          title: '美丽人生',
+          overview: '来自 Emby 的条目',
+          posterUrl: 'https://emby.example.com/poster.jpg',
+          year: 1997,
+          durationLabel: '116分钟',
+          genres: const ['剧情'],
+          sourceId: 'emby-main',
+          sourceName: 'Home Emby',
+          sourceKind: MediaSourceKind.emby,
+          streamUrl: '',
+          playbackItemId: 'emby-1',
+          preferredMediaSourceId: 'media-source-2',
+          addedAt: DateTime(2026, 4, 4),
+        ),
+      );
+
+      final provider = enrichedDetailTargetProvider(target);
+      final initial = await container.read(provider.future);
+
+      expect(initial.playbackTarget, isNotNull);
+      expect(initial.playbackTarget!.streamUrl, isEmpty);
+      expect(initial.playbackTarget!.formatLabel, isEmpty);
+
+      container.read(detailSettingsProvider.notifier).state =
+          const DetailEnrichmentSettings(
+        mediaSources: <MediaSourceConfig>[
+          MediaSourceConfig(
+            id: 'emby-main',
+            name: 'Home Emby',
+            kind: MediaSourceKind.emby,
+            endpoint: 'https://media.example.com',
+            enabled: true,
+            username: 'alice',
+            accessToken: 'token-789',
+            userId: 'user-123',
+            deviceId: 'device-456',
+          ),
+        ],
+        quarkCookie: '',
+        wmdbMetadataMatchEnabled: false,
+        tmdbMetadataMatchEnabled: false,
+        tmdbReadAccessToken: '',
+        imdbRatingMatchEnabled: false,
+      );
+
+      final resolved = await container.read(provider.future);
+
+      expect(resolved.playbackTarget, isNotNull);
+      expect(resolved.playbackTarget!.streamUrl,
+          contains('/Videos/emby-1/stream.mp4'));
+      expect(resolved.playbackTarget!.formatLabel, 'MKV · HEVC · TrueHD');
+      expect(resolved.playbackTarget!.fileSizeLabel, '24.0 GB');
+      expect(resolved.playbackTarget!.resolutionLabel, '3840x2160');
+    });
+
     test('resolves Quark playback url for existing matched target', () async {
       final container = ProviderContainer(
         overrides: [
@@ -367,6 +491,141 @@ void main() {
       expect(playback.fileSizeLabel, '3.00 GB');
       expect(playback.headers['Cookie'], contains('kps=test'));
       expect(playback.headers['Cookie'], contains('__puus=abc'));
+    });
+
+    test(
+        'prefers cached playback source identity when cached source context wins',
+        () async {
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': [
+                {
+                  'id': 'emby-main',
+                  'name': 'Home Emby',
+                  'kind': 'emby',
+                  'endpoint': 'https://media.example.com',
+                  'enabled': true,
+                  'username': 'alice',
+                  'accessToken': 'token-789',
+                  'userId': 'user-123',
+                  'deviceId': 'device-456',
+                },
+              ],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+            }),
+          ),
+          embyApiClientProvider.overrideWithValue(
+            EmbyApiClient(
+              MockClient((request) async {
+                if (request.url.path == '/Items/emby-1/PlaybackInfo') {
+                  return http.Response(
+                    jsonEncode({
+                      'PlaySessionId': 'play-session-1',
+                      'MediaSources': [
+                        {
+                          'Id': 'media-source-2',
+                          'Container': 'mkv',
+                          'Size': 25769803776,
+                          'Bitrate': 28400000,
+                          'Width': 3840,
+                          'Height': 2160,
+                          'DirectStreamUrl':
+                              '/Videos/emby-1/stream.mp4?static=true&MediaSourceId=media-source-2',
+                          'AddApiKeyToDirectStreamUrl': true,
+                          'MediaStreams': [
+                            {
+                              'Type': 'Video',
+                              'Codec': 'hevc',
+                              'Width': 3840,
+                              'Height': 2160,
+                              'BitRate': 25200000,
+                            },
+                            {
+                              'Type': 'Audio',
+                              'Codec': 'truehd',
+                              'BitRate': 3200000,
+                            },
+                          ],
+                        },
+                      ],
+                    }),
+                    200,
+                  );
+                }
+                return http.Response('Not found', 404);
+              }),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const seedTarget = MediaDetailTarget(
+        title: '美丽人生',
+        posterUrl: '',
+        overview: '',
+        year: 1997,
+        availabilityLabel: '无',
+        searchQuery: '美丽人生',
+        sourceName: '豆瓣',
+        playbackTarget: PlaybackTarget(
+          title: '美丽人生',
+          sourceId: 'legacy-source',
+          streamUrl: '',
+          sourceName: '旧 Emby',
+          sourceKind: MediaSourceKind.emby,
+          itemId: 'legacy-1',
+          itemType: 'movie',
+          preferredMediaSourceId: 'legacy-media-source',
+        ),
+      );
+      const cachedTarget = MediaDetailTarget(
+        title: '美丽人生',
+        posterUrl: 'https://emby.example.com/poster.jpg',
+        overview: '来自 Emby 的条目',
+        year: 1997,
+        durationLabel: '116分钟',
+        genres: ['剧情'],
+        availabilityLabel: '资源已就绪：Emby · Home Emby',
+        searchQuery: '美丽人生',
+        sourceId: 'emby-main',
+        itemId: 'emby-1',
+        itemType: 'movie',
+        sourceKind: MediaSourceKind.emby,
+        sourceName: 'Home Emby',
+        playbackTarget: PlaybackTarget(
+          title: '美丽人生',
+          sourceId: 'emby-main',
+          streamUrl: '',
+          sourceName: 'Home Emby',
+          sourceKind: MediaSourceKind.emby,
+          itemId: 'emby-1',
+          itemType: 'movie',
+          preferredMediaSourceId: 'media-source-2',
+        ),
+      );
+
+      await container
+          .read(localStorageCacheRepositoryProvider)
+          .saveDetailTarget(
+            seedTarget: seedTarget,
+            resolvedTarget: cachedTarget,
+          );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(seedTarget).future,
+      );
+
+      expect(resolved.sourceId, 'emby-main');
+      expect(resolved.playbackTarget, isNotNull);
+      expect(resolved.playbackTarget!.sourceId, 'emby-main');
+      expect(resolved.playbackTarget!.itemId, 'emby-1');
+      expect(resolved.playbackTarget!.streamUrl,
+          contains('/Videos/emby-1/stream.mp4'));
     });
 
     test('prefers cached local resource state for douban detail target',

@@ -41,13 +41,18 @@
 
 - 首页模块装配现在拆成 `_homeSectionSeedProvider` 抓取层 + `homeSectionProvider` 缓存装饰层；详情缓存 revision 更新时只会重做轻量合并，不会让首页整轮重新抓取来源或豆瓣数据
 - 首页普通模块已经改成按 section 独立订阅；`Hero` 当前项、翻页按钮和指示状态也收敛到局部监听，切换时不再带动整页 `setState`
+- 首页 `Hero` 的后台补数现在增加了列表快照去重与预取协同；同一批条目在首次进入和前后台切换时不会重复排队补数
 - 首页与媒体库读取详情缓存时已经统一切到批量读取接口；豆瓣列表、最近播放、普通海报流和轮播都会复用同一条批量缓存合并链路
 - 页面级异步状态继续统一到 `RetainedAsyncController / resolveRetainedAsyncValue`；详情、媒体库、人物作品等页在 inactive / 回前台 / 播放让路场景下会优先保留最近一次已解析结果
 - 详情页、媒体库、人物作品页与搜索页在页面失活时，现在优先取消当前会话或刷新任务，不再无条件失效成功缓存，返回页面时会减少重复 loading 和重复请求
-- 搜索页增加了空关键词短路和批量 UI 提交；多来源结果仍然并发返回，但不会再每个来源一回来就全量排序并刷新整页
-- 图片缓存 identity 已升级成 `URL + headers`，并增加磁盘 metadata、`30` 天过期、stale fallback 与双阈值内存淘汰，减少重复拉图和重复解码
+- 搜索页增加了空关键词短路、批量 UI 提交，以及 `CustomScrollView + SliverList` 结果懒加载；多来源结果仍然并发返回，但不会再每个来源一回来就全量排序并刷新整页
+- 详情页“资源信息 / 字幕 / 播放版本”这组高频变化区已经改成局部 `ValueListenableBuilder`，搜索字幕、切换字幕和资源匹配进度不再带动整页重建
+- 详情页 presentation 继续拆分成 `detail_page_providers.dart`、`detail_hero_section.dart`、`detail_resource_info_section.dart`、`detail_subtitle_section.dart` 等入口；`media_detail_page.dart` 主要保留页面级会话、回调编排和各 section 装配
+- 图片缓存 identity 已升级成 `URL + headers`，并增加磁盘 metadata、`30` 天过期、stale fallback 与双阈值内存淘汰；同一张候选图的解析与尺寸分析现在也会在组件间共享同一条 future，减少同屏重复拉图和重复解码
+- 页面背景 glow、桌面横向翻页按钮和海报卡片排版都已收口到更轻的重绘边界；滚动和焦点切换时只刷新真正变化的局部区域
 - `AppSettingsPerformanceX` 现在提供统一的 `effective*` 性能派生策略；路由、导航壳、首页 Hero、详情页和播放器都会按同一套有效策略决定是否启用动画、磨砂、自动隐藏和轻量叠层
 - 播放启动链已经拆成“启动前准备 + 路由判定”两步；进入播放器时也会更早切到“播放优先”模式，尽快压住首页 Hero 补数、详情自动补元数据和隐藏页图片加载
+- `TV` 播放页的控制层状态已收口到单一 notifier，减少多层 `StreamBuilder` 套娃造成的重复 rebuild
 
 ## 主导航
 
@@ -675,6 +680,21 @@ C:\anaconda3\python.exe tool\generate_brand_assets.py
 ```bash
 flutter test
 ```
+
+## Performance Baselines
+
+`tool/perf/run_perf_baselines.dart` 现在可以按场景精确定义跑 `flutter test` 的组合命令、收集运行次数、算出 p50/p95，并输出到 `tool/perf/perf_baselines.json`，方便把启动、首页、详情、播放器等关键路径的性能变化记录在同一套基线里。
+
+## Player Open Smoke
+
+新添的 `test/perf/player_open_smoke_test.dart` 从 playback 启动准备、目标解析、路由决策到执行器一条链路穿透，并用内存存储的续播/跳过配置覆盖高码率电视目标，确保 `player_open` 性能场景能真实触发 `PlaybackStartupCoordinator`/`PlaybackTargetResolver`/`PlaybackEngineRouter`/`PlaybackStartupExecutor` 的协作流程。
+
+## 当前优化落地
+
+- P0：首页与媒体库批量缓存、播放设置 slice provider、统一 async retained 模式、空库重建后台化、首页播放链稳定化与启动 probe/图片 lazy 构建；优先把体验收益拿出来。
+- P1：按功能模块收口控制层（`HomePageController`、`DetailPageController`、`PlaybackStartupCoordinator` + 相关 resolver/router/executor、媒体库查询服务拆分），打通播放启动、首页、详情、媒体库敏感区域的架构边界。
+- P2：索引逐源增量查、新索引器隔离到 isolate、刷新链路按 source/collection/enrichment 级别限流、Background Work 细化开关、带并发预算的性能工程。
+- P3：建立启动/首页/详情/播放/索引五条性能基线、在 controller 级补齐 smoke/perf 测试与 smoke validation、控制新增文件体量避免非计划大页。
 
 ## 常用设置路径
 

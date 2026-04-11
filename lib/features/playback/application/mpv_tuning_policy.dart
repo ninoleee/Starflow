@@ -1,3 +1,5 @@
+import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -25,6 +27,17 @@ bool isLikelyRemotePlaybackUrl(String url) {
 
 bool isLikelyLiveRemotePlaybackUrl(String url) {
   return _kLowLatencyRemotePlaybackSchemes.contains(playbackUrlScheme(url));
+}
+
+bool isLikelyRemotePlaybackTargetTransport(PlaybackTarget target) {
+  return isLikelyRemotePlaybackUrl(target.streamUrl) ||
+      (isLoopbackPlaybackRelayUrl(target.streamUrl) &&
+          isLikelyRemotePlaybackUrl(target.actualAddress));
+}
+
+bool isLikelyQuarkPlaybackTarget(PlaybackTarget target) {
+  return target.sourceKind == MediaSourceKind.quark &&
+      isLikelyRemotePlaybackTargetTransport(target);
 }
 
 bool isHeavyPlaybackTargetMetadata(PlaybackTarget target) {
@@ -55,7 +68,7 @@ PlaybackMpvQualityPreset resolveEffectivePlaybackMpvQualityPreset({
   }
 
   final heavyPlayback = isHeavyPlaybackTargetMetadata(target);
-  final remotePlayback = isLikelyRemotePlaybackUrl(target.streamUrl);
+  final remotePlayback = isLikelyRemotePlaybackTargetTransport(target);
   final windowedWindows = isWindowsPlatform && !isTelevision && !isFullscreen;
 
   if (requestedPreset == PlaybackMpvQualityPreset.qualityFirst) {
@@ -107,7 +120,10 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
   required bool aggressiveTuning,
   required bool heavyPlayback,
 }) {
-  final scheme = playbackUrlScheme(target.streamUrl);
+  final transportUrl = isLoopbackPlaybackRelayUrl(target.streamUrl)
+      ? target.actualAddress
+      : target.streamUrl;
+  final scheme = playbackUrlScheme(transportUrl);
   if (_kLowLatencyRemotePlaybackSchemes.contains(scheme)) {
     return MpvRemotePlaybackTuningProfile(
       networkTimeoutSeconds: aggressiveTuning || heavyPlayback ? '8' : '5',
@@ -122,6 +138,30 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
   }
 
   if (_kBufferedRemotePlaybackSchemes.contains(scheme)) {
+    if (isLikelyQuarkPlaybackTarget(target)) {
+      return MpvRemotePlaybackTuningProfile(
+        networkTimeoutSeconds: aggressiveTuning || heavyPlayback ? '25' : '20',
+        cacheOnDisk: 'no',
+        cacheSecs: aggressiveTuning
+            ? '120'
+            : heavyPlayback
+                ? '90'
+                : '75',
+        demuxerReadaheadSecs: aggressiveTuning
+            ? '36'
+            : heavyPlayback
+                ? '28'
+                : '24',
+        demuxerHysteresisSecs: aggressiveTuning ? '18' : '12',
+        cachePauseWait: aggressiveTuning
+            ? '4.0'
+            : heavyPlayback
+                ? '3.0'
+                : '2.5',
+        cachePauseInitial: 'yes',
+        lowLatency: false,
+      );
+    }
     return MpvRemotePlaybackTuningProfile(
       networkTimeoutSeconds: aggressiveTuning || heavyPlayback ? '15' : '10',
       cacheOnDisk: 'no',

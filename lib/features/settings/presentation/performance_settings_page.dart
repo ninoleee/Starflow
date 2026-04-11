@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
-import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/application/settings_slice_providers.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
-String performanceSettingsSummary(AppSettings settings) {
+String performanceSettingsSummary(SettingsPerformanceSlice settings) {
   final enabledItems = <String>[
     if (!settings.translucentEffectsEnabled) '磨砂关闭',
     if (!settings.autoHideNavigationBarEnabled) '菜单常驻',
@@ -31,7 +31,7 @@ class PerformanceSettingsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final settings = ref.watch(appSettingsProvider);
+    final settings = ref.watch(settingsPerformanceSliceProvider);
     final controller = ref.read(settingsControllerProvider.notifier);
     final theme = Theme.of(context);
 

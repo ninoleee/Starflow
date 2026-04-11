@@ -1,0 +1,51 @@
+{
+  "generatedAt": "2026-04-11T02:48:12.520072Z",
+  "runsPerScenario": 1,
+  "results": [
+    {
+      "id": "startup",
+      "description": "启动 smoke",
+      "runsMs": [
+        2931
+      ],
+      "p50Ms": 2931,
+      "p95Ms": 2931
+    },
+    {
+      "id": "home_first_screen",
+      "description": "首页首屏/装配 smoke",
+      "runsMs": [
+        2568
+      ],
+      "p50Ms": 2568,
+      "p95Ms": 2568
+    },
+    {
+      "id": "detail_first_screen",
+      "description": "详情首屏 enrichment smoke",
+      "runsMs": [
+        2988
+      ],
+      "p50Ms": 2988,
+      "p95Ms": 2988
+    },
+    {
+      "id": "player_open",
+      "description": "播放器打开准备与路由 smoke",
+      "runsMs": [
+        2773
+      ],
+      "p50Ms": 2773,
+      "p95Ms": 2773
+    },
+    {
+      "id": "index_refresh",
+      "description": "索引刷新 smoke",
+      "runsMs": [
+        2635
+      ],
+      "p50Ms": 2635,
+      "p95Ms": 2635
+    }
+  ]
+}

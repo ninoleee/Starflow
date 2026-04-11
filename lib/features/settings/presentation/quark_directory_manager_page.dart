@@ -183,7 +183,7 @@ class _QuarkDirectoryManagerPageState
     required String content,
     required String confirmLabel,
   }) async {
-    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     final cancelFocusNode =
         FocusNode(debugLabel: 'quark-delete-dialog-cancel');
     final confirmFocusNode =

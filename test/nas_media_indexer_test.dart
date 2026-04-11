@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -116,6 +117,126 @@ void main() {
     expect(episodes.single.title, 'Man of Science, Man of Faith');
     expect(episodes.single.seasonNumber, 2);
     expect(episodes.single.episodeNumber, 1);
+  });
+
+  test(
+      'NasMediaIndexer merges duplicate same-episode files and exposes playable variants',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-duplicate-episodes',
+      name: 'WebDAV Duplicate Episodes',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Shows/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    const collection = MediaCollection(
+      id: 'https://nas.example.com/dav/Shows/',
+      title: '剧集',
+      sourceId: 'webdav-duplicate-episodes',
+      sourceName: 'WebDAV Duplicate Episodes',
+      sourceKind: MediaSourceKind.nas,
+    );
+
+    final client = _FakeWebDavNasClient(
+      scannedItems: [
+        _episodeItem(
+          id: 'episode-a',
+          path: '食贫道/Season 01/食贫道.S01E01.版本A.mkv',
+          title: '第 1 集',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+        _episodeItem(
+          id: 'episode-b',
+          path: '食贫道/Season 01/食贫道.S01E01.版本B.mkv',
+          title: '第 1 集',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+        _episodeItem(
+          id: 'episode-c',
+          path: '食贫道/Season 01/食贫道.S01E02.mkv',
+          title: '第 2 集',
+          seasonNumber: 1,
+          episodeNumber: 2,
+        ),
+      ],
+    );
+
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(
+      source,
+      scopedCollections: [collection],
+    );
+    final library = await indexer.loadLibrary(
+      source,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(library, hasLength(1));
+
+    final seasons = await indexer.loadChildren(
+      source,
+      parentId: library.single.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(seasons, hasLength(1));
+    expect(seasons.single.itemType, 'season');
+    expect(seasons.single.seasonNumber, 1);
+
+    final episodes = await indexer.loadChildren(
+      source,
+      parentId: seasons.single.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(episodes, hasLength(2));
+    expect(
+      episodes
+          .where((item) => item.seasonNumber == 1 && item.episodeNumber == 1),
+      hasLength(1),
+    );
+
+    final mergedEpisode = episodes.firstWhere(
+      (item) => item.seasonNumber == 1 && item.episodeNumber == 1,
+    );
+    final variants = await indexer.loadEpisodeVariants(
+      source,
+      itemId: mergedEpisode.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+    );
+    expect(variants, hasLength(2));
+    expect(
+      variants.map((item) => item.id),
+      containsAll(<String>['episode-a', 'episode-b']),
+    );
   });
 
   test(
@@ -433,8 +554,19 @@ void main() {
       scopedCollections: [collection],
       limit: 20,
     );
-    expect(children, hasLength(2));
-    expect(children.every((item) => item.itemType == 'episode'), isTrue);
+    expect(children, hasLength(1));
+    expect(children.single.itemType, 'season');
+    expect(children.single.seasonNumber, 1);
+
+    final episodes = await indexer.loadChildren(
+      source,
+      parentId: children.single.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 20,
+    );
+    expect(episodes, hasLength(2));
+    expect(episodes.every((item) => item.itemType == 'episode'), isTrue);
   });
 
   test(
@@ -524,8 +656,19 @@ void main() {
       scopedCollections: [collection],
       limit: 20,
     );
-    expect(children, hasLength(2));
-    expect(children.every((item) => item.itemType == 'episode'), isTrue);
+    expect(children, hasLength(1));
+    expect(children.single.itemType, 'season');
+    expect(children.single.seasonNumber, 9);
+
+    final episodes = await indexer.loadChildren(
+      source,
+      parentId: children.single.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 20,
+    );
+    expect(episodes, hasLength(2));
+    expect(episodes.every((item) => item.itemType == 'episode'), isTrue);
   });
 
   test('NasMediaIndexer writes manual metadata matches back into local index',
@@ -912,9 +1055,20 @@ void main() {
       scopedCollections: [collection],
       limit: 20,
     );
-    expect(refreshedChildren, hasLength(2));
+    expect(refreshedChildren, hasLength(1));
+    expect(refreshedChildren.single.itemType, 'season');
+    expect(refreshedChildren.single.seasonNumber, 1);
+
+    final refreshedEpisodes = await indexer.loadChildren(
+      source,
+      parentId: refreshedChildren.single.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 20,
+    );
+    expect(refreshedEpisodes, hasLength(2));
     expect(
-        refreshedChildren.every((item) => item.itemType == 'episode'), isTrue);
+        refreshedEpisodes.every((item) => item.itemType == 'episode'), isTrue);
   });
 
   test(
@@ -1386,6 +1540,177 @@ void main() {
   });
 
   test(
+      'NasMediaIndexer invalidates cached scope when special episode keywords change',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-scope-special-filter',
+      name: 'WebDAV Scope Special Filter',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/variety/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    const collection = MediaCollection(
+      id: 'https://nas.example.com/variety/',
+      title: 'Variety',
+      sourceId: 'webdav-scope-special-filter',
+      sourceName: 'WebDAV Scope Special Filter',
+      sourceKind: MediaSourceKind.nas,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'scope-special-filter-1',
+          path: '节目/节目 先导片.(mp4).strm',
+          title: '节目 先导片',
+          itemType: 'episode',
+          seasonNumber: 0,
+          episodeNumber: 1,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(
+      source,
+      scopedCollections: [collection],
+    );
+
+    final initialState = await store.loadSourceState(source.id);
+    expect(initialState, isNotNull);
+    expect(initialState!.scopeKey, contains('special-filter:'));
+    expect(initialState.scopeKey, isNot(contains('special-filter:先导片,花絮')));
+
+    final updatedSource = source.copyWith(
+      webDavSpecialEpisodeKeywords: ['先导片', '花絮'],
+    );
+    final staleLibrary = await indexer.loadLibrary(
+      updatedSource,
+      scopedCollections: [collection],
+      limit: 20,
+    );
+    expect(staleLibrary, isEmpty);
+
+    await indexer.refreshSource(
+      updatedSource,
+      scopedCollections: [collection],
+    );
+
+    final refreshedState = await store.loadSourceState(source.id);
+    expect(refreshedState, isNotNull);
+    expect(refreshedState!.scopeKey, contains('special-filter:'));
+    expect(refreshedState.scopeKey, contains('先导片'));
+    expect(refreshedState.scopeKey, contains('花絮'));
+  });
+
+  test('NasMediaIndexer invalidates cached scope when extra keywords change',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-scope-extra-filter',
+      name: 'WebDAV Scope Extra Filter',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/variety/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    const collection = MediaCollection(
+      id: 'https://nas.example.com/variety/',
+      title: 'Variety',
+      sourceId: 'webdav-scope-extra-filter',
+      sourceName: 'WebDAV Scope Extra Filter',
+      sourceKind: MediaSourceKind.nas,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'scope-extra-filter-1',
+          path: '节目/花絮/节目 采访.(mp4).strm',
+          title: '节目 采访',
+          itemType: 'episode',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(
+      source,
+      scopedCollections: [collection],
+    );
+
+    final initialState = await store.loadSourceState(source.id);
+    expect(initialState, isNotNull);
+    expect(initialState!.scopeKey, contains('extra-filter:'));
+    expect(
+      initialState.scopeKey,
+      isNot(contains('extra-filter:花絮,采访')),
+    );
+
+    final updatedSource = source.copyWith(
+      webDavExtraKeywords: ['花絮', '采访'],
+    );
+    final staleLibrary = await indexer.loadLibrary(
+      updatedSource,
+      scopedCollections: [collection],
+      limit: 20,
+    );
+    expect(staleLibrary, isEmpty);
+
+    await indexer.refreshSource(
+      updatedSource,
+      scopedCollections: [collection],
+    );
+
+    final refreshedState = await store.loadSourceState(source.id);
+    expect(refreshedState, isNotNull);
+    expect(
+      refreshedState!.scopeKey,
+      contains('extra-filter:花絮,采访'),
+    );
+  });
+
+  test(
       'NasMediaIndexer resolves series root past wrapper folders for season directories',
       () async {
     final store = _MemoryNasMediaIndexStore();
@@ -1701,6 +2026,114 @@ void main() {
     expect(seasons, hasLength(1));
     expect(seasons.single.title, '第 1 季');
     expect(seasons.single.seasonNumber, 1);
+  });
+
+  test('NasMediaIndexer uses season number from single-season series title',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-single-season-title-hint',
+      name: 'WebDAV Single Season Title Hint',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://webdav.example.com/shows/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      mediaSources: [source],
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexedAt = DateTime.utc(2026, 4, 5, 12);
+    final scopeKey =
+        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v6';
+    final record = NasMediaIndexRecord(
+      id: NasMediaIndexRecord.buildRecordId(
+        sourceId: source.id,
+        resourceId: 'title-season-hint-1',
+      ),
+      sourceId: source.id,
+      sectionId: '',
+      sectionName: '',
+      resourceId: 'title-season-hint-1',
+      resourcePath: '繁城之下 第3季/Episode 01.strm',
+      fingerprint: 'title-season-hint-1',
+      fileSizeBytes: 1024,
+      modifiedAt: indexedAt,
+      indexedAt: indexedAt,
+      scrapedAt: indexedAt,
+      recognizedTitle: '繁城之下 第3季',
+      searchQuery: '繁城之下 第3季',
+      originalFileName: 'Episode 01.strm',
+      parentTitle: '',
+      recognizedYear: 0,
+      recognizedItemType: 'episode',
+      preferSeries: true,
+      recognizedEpisodeNumber: 1,
+      sidecarStatus: NasMetadataFetchStatus.never,
+      wmdbStatus: NasMetadataFetchStatus.never,
+      tmdbStatus: NasMetadataFetchStatus.never,
+      imdbStatus: NasMetadataFetchStatus.never,
+      item: MediaItem(
+        id: 'title-season-hint-1',
+        title: 'Episode 01',
+        overview: '',
+        posterUrl: '',
+        year: 0,
+        durationLabel: '剧集',
+        genres: const [],
+        itemType: 'episode',
+        sectionId: '',
+        sectionName: '',
+        sourceId: source.id,
+        sourceName: source.name,
+        sourceKind: source.kind,
+        streamUrl: 'https://media.example.com/title-season-hint-1.mkv',
+        actualAddress: '繁城之下 第3季/Episode 01.strm',
+        episodeNumber: 1,
+        addedAt: indexedAt,
+      ),
+    );
+    await store.replaceSourceRecords(
+      sourceId: source.id,
+      records: [record],
+      state: NasMediaIndexSourceState(
+        sourceId: 'webdav-single-season-title-hint',
+        lastIndexedAt: DateTime.utc(2026, 4, 5, 12),
+        recordCount: 1,
+        scopeKey: scopeKey,
+      ),
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: _FakeWebDavNasClient(scannedItems: const []),
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+    final library = await indexer.loadLibrary(source, limit: 20);
+    expect(library, hasLength(1));
+    final series = library.single;
+    expect(series.itemType, 'series');
+    expect(series.title, '繁城之下 第3季');
+
+    final seasons = await indexer.loadChildren(
+      source,
+      parentId: series.id,
+      limit: 20,
+    );
+    expect(seasons, hasLength(1));
+    expect(seasons.single.title, '第 3 季');
+    expect(seasons.single.seasonNumber, 3);
   });
 
   test('NasMediaIndexer keeps single-file movie folders as playable movies',
@@ -2245,8 +2678,19 @@ void main() {
       scopedCollections: [collection],
       limit: 20,
     );
-    expect(episodes, hasLength(2));
-    expect(episodes.every((item) => item.itemType == 'episode'), isTrue);
+    expect(episodes, hasLength(1));
+    expect(episodes.single.itemType, 'season');
+    expect(episodes.single.seasonNumber, 1);
+
+    final seasonEpisodes = await indexer.loadChildren(
+      source,
+      parentId: episodes.single.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 20,
+    );
+    expect(seasonEpisodes, hasLength(2));
+    expect(seasonEpisodes.every((item) => item.itemType == 'episode'), isTrue);
   });
 
   test(
@@ -2979,6 +3423,155 @@ void main() {
 
     expect(client.resetCachesCalls, [true, false]);
   });
+
+  test('NasMediaIndexer enforces source refresh concurrency budget', () async {
+    final store = _MemoryNasMediaIndexStore();
+    final gateOne = Completer<void>();
+    final gateTwo = Completer<void>();
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'concurrency-item',
+          path: 'Movie/Example.mkv',
+          title: 'Example',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+        ),
+      ],
+      onScanDelay: (callIndex) async {
+        if (callIndex == 1) {
+          await gateOne.future;
+        } else if (callIndex == 2) {
+          await gateTwo.future;
+        }
+      },
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+    const sourceA = MediaSourceConfig(
+      id: 'webdav-concurrency-source-a',
+      name: 'WebDAV Concurrency Source A',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/concurrency/a/',
+      enabled: true,
+      webDavSidecarScrapingEnabled: false,
+    );
+    const sourceB = MediaSourceConfig(
+      id: 'webdav-concurrency-source-b',
+      name: 'WebDAV Concurrency Source B',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/concurrency/b/',
+      enabled: true,
+      webDavSidecarScrapingEnabled: false,
+    );
+
+    final firstRefresh = indexer.refreshSource(sourceA);
+    await Future<void>.delayed(Duration.zero);
+    final secondRefresh = indexer.refreshSource(sourceB);
+    await Future<void>.delayed(Duration.zero);
+    expect(client.scanCallCount, 1);
+    gateOne.complete();
+    await Future<void>.delayed(Duration.zero);
+    await firstRefresh;
+    await Future<void>.delayed(Duration.zero);
+    expect(client.scanCallCount, 2);
+    gateTwo.complete();
+    await secondRefresh;
+  });
+
+  test('NasMediaIndexer respects collection refresh concurrency budget',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    var currentConcurrent = 0;
+    var maxConcurrent = 0;
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'collection-item',
+          path: 'Series/Season 01/Episode 01.mkv',
+          title: 'Episode 01',
+          itemType: 'episode',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+      ],
+      onScanDelay: (_) async =>
+          Future<void>.delayed(Duration(milliseconds: 30)),
+      onScanEnter: (_) {
+        currentConcurrent += 1;
+        if (currentConcurrent > maxConcurrent) {
+          maxConcurrent = currentConcurrent;
+        }
+      },
+      onScanExit: (_) {
+        currentConcurrent -= 1;
+      },
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+    const source = MediaSourceConfig(
+      id: 'webdav-concurrent-collections',
+      name: 'WebDAV Concurrent Collections',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/concurrent/',
+      enabled: true,
+      webDavSidecarScrapingEnabled: false,
+    );
+    final collections = List.generate(
+      3,
+      (index) => MediaCollection(
+        id: 'https://nas.example.com/dav/concurrent/section-${index + 1}',
+        title: 'Section ${index + 1}',
+        sourceId: source.id,
+        sourceName: source.name,
+        sourceKind: source.kind,
+      ),
+    );
+
+    await indexer.refreshSource(
+      source,
+      scopedCollections: collections,
+    );
+
+    expect(maxConcurrent, 2);
+  });
 }
 
 _PendingTestItem _episodeItem({
@@ -3039,6 +3632,9 @@ class _FakeWebDavNasClient extends WebDavNasClient {
     this.scanResourceDelay = Duration.zero,
     this.scanResourceOverrides = const {},
     this.missingScanResourceIds = const {},
+    this.onScanDelay,
+    this.onScanEnter,
+    this.onScanExit,
   }) : super(MockClient((request) async => http.Response('', 200)));
 
   final List<_PendingTestItem> scannedItems;
@@ -3046,6 +3642,9 @@ class _FakeWebDavNasClient extends WebDavNasClient {
   final Duration scanResourceDelay;
   final Map<String, _PendingTestItem> scanResourceOverrides;
   final Set<String> missingScanResourceIds;
+  final Future<void> Function(int callIndex)? onScanDelay;
+  final void Function(int callIndex)? onScanEnter;
+  final void Function(int callIndex)? onScanExit;
   final List<bool> resetCachesCalls = <bool>[];
   int scanCallCount = 0;
   int scanResourceCallCount = 0;
@@ -3062,22 +3661,30 @@ class _FakeWebDavNasClient extends WebDavNasClient {
     bool Function()? shouldCancel,
   }) async {
     scanCallCount += 1;
+    final callIndex = scanCallCount;
     resetCachesCalls.add(resetCaches);
-    if (scanDelay > Duration.zero) {
-      await Future<void>.delayed(scanDelay);
+    onScanEnter?.call(callIndex);
+    try {
+      if (onScanDelay != null) {
+        await onScanDelay!(callIndex);
+      } else if (scanDelay > Duration.zero) {
+        await Future<void>.delayed(scanDelay);
+      }
+      return scannedItems
+          .take(limit)
+          .map(
+            (item) => _buildScannedItem(
+              source: source,
+              item: item,
+              sectionId: sectionId ?? source.endpoint,
+              sectionName: sectionName.isEmpty ? '剧集' : sectionName,
+              loadSidecarMetadata: loadSidecarMetadata,
+            ),
+          )
+          .toList(growable: false);
+    } finally {
+      onScanExit?.call(callIndex);
     }
-    return scannedItems
-        .take(limit)
-        .map(
-          (item) => _buildScannedItem(
-            source: source,
-            item: item,
-            sectionId: sectionId ?? source.endpoint,
-            sectionName: sectionName.isEmpty ? '剧集' : sectionName,
-            loadSidecarMetadata: loadSidecarMetadata,
-          ),
-        )
-        .toList(growable: false);
   }
 
   @override
@@ -3301,6 +3908,28 @@ class _MemoryNasMediaIndexStore implements NasMediaIndexStore {
     required NasMediaIndexSourceState state,
   }) async {
     _records[sourceId] = records;
+    _states[sourceId] = state;
+  }
+
+  @override
+  Future<void> upsertSourceRecords({
+    required String sourceId,
+    required List<NasMediaIndexRecord> records,
+    required NasMediaIndexSourceState state,
+    bool clearMissingRecords = false,
+  }) async {
+    if (clearMissingRecords) {
+      _records[sourceId] = records;
+    } else {
+      final existing = _records[sourceId] ?? const <NasMediaIndexRecord>[];
+      final merged = <String, NasMediaIndexRecord>{
+        for (final record in existing) record.id: record,
+      };
+      for (final record in records) {
+        merged[record.id] = record;
+      }
+      _records[sourceId] = merged.values.toList(growable: false);
+    }
     _states[sourceId] = state;
   }
 }

@@ -146,21 +146,80 @@ lib/
 
 - 首页拆层：`_homeSectionSeedProvider` 负责来源抓取，`homeSectionProvider` 负责基于详情缓存 revision 的轻量装饰；详情缓存变化不再把首页整轮抓取一起打掉
 - 首页重建范围收口：普通 section 改成各自独立订阅，`Hero` 当前项和分页状态也改成局部 `ValueNotifier` 监听，减少首页根节点重建
+- 首页 `Hero` 后台补数新增快照去重与预取协同；同一批条目在首次进入、返回前台和高频 rebuild 时不会重复排队刷新
 - 详情缓存批量化：`LocalStorageCacheRepository.loadDetailTargetsBatch(...)` 已接入首页和媒体库的卡片装配链，减少同一批条目的重复本地读取
 - 设置粒度收口：`home_settings_slices.dart` 以及设置 / 搜索页里的 slice provider 开始替代整份 `AppSettings` 宽监听，优先只让高频页面订阅自己真正依赖的配置片段
 - 页面级保留态异步模式：媒体库、详情页、人物作品页已经改成 `RetainedAsyncController / resolveRetainedAsyncValue`，避免页面 inactive、路由切换和播放让路时重复闪回 loading
 - 页面 inactive 任务治理：详情、媒体库、人物作品、搜索等页在失活时优先取消当前会话，而不是顺手 `invalidate` 掉已成功 provider，减少返回页时的重复拉取
-- 图片缓存收口：持久化图片缓存 identity 升级成 `URL + headers`，并增加磁盘 metadata、`30` 天 TTL、stale fallback 与更稳定的内存淘汰策略
+- 搜索页渲染收口：结果区切到 `CustomScrollView + SliverList`，让长结果集按需构建，不再一次性把整个列表塞进单个 `Column/ListView`
+- 详情页局部状态收口：本地资源匹配、外挂字幕和播放版本选择改成 `ValueNotifier + ValueListenableBuilder`，高频状态变化只刷新资源信息区，不再带动整页详情重建
+- 图片缓存收口：持久化图片缓存 identity 升级成 `URL + headers`，并增加磁盘 metadata、`30` 天 TTL、stale fallback 与更稳定的内存淘汰策略；同一候选图的解析/尺寸分析 future 也开始在组件间共享，减少同屏重复拉图与重复解码
+- 绘制范围收口：页面背景 glow、桌面横向翻页按钮和海报卡片布局已经分别加上独立重绘边界或局部 notifier，滚动和焦点切换时避免整段区域跟着重建
 - 统一性能派生：`AppSettingsPerformanceX` 新增 `effectiveUiPerformanceTier` 及一组 `effective*` 派生入口，路由、导航壳和播放器统一按同一档位判断动画、磨砂、自动隐藏和轻量播放 UI
 - 读链路与后台任务分离：空索引时的自动重建通过 `EmptyLibraryAutoRebuildScheduler` 后台 best-effort 调度，读链路不再同步阻塞一次重建
 - 播放启动拆分：`playback_startup_preparation.dart` 负责启动前准备，`playback_startup_routing.dart` 负责路线判定，`player_page.dart` 只负责执行对应分支
+- `TV` 播放控制层收口：播放器页把高频控制状态合并成单个 notifier，替代多层 `StreamBuilder` 套娃，减少播放中叠层刷新成本
 - `mpv_tuning_policy.dart` 负责收口 `MPV` 的远程/直播识别、重片源判定、运行期质量预设降档和本地 `ISO` 设备源判断，避免这些策略散落在页面状态里
 
 聚焦验证结果：
 
 - 相关关键文件的 `flutter analyze` 已通过
 - 首页装配、详情缓存批量读取、媒体库缓存合并、播放启动拆分、搜索仓库和空库后台重建相关测试已通过
+- `test/perf/bootstrap_smoke_test.dart`、`test/perf/home_settings_slices_smoke_test.dart`、`test/perf/player_open_smoke_test.dart` 已通过
 - 当前还留有一条非失败开发态 trace：`test/media_repository_quark_source_test.dart` 会打印 `indexer.refresh.background.error ... ProviderContainer already disposed`，说明后台任务链的 dispose 时序后续仍值得继续治理
+
+## 3.2 跨 feature 新结构关系（Home / Detail / Playback / Library / Settings Slices）
+
+这一轮收口后，几条高频链路已经形成明确的“编排层 -> 解析层 -> 数据层”关系：
+
+### Home
+
+- `HomePageController`：负责首页模块 `prime / refresh / sections` 的页面级编排。
+- `HomeFeedRepository`：负责首页模块 seed 数据装配（最近新增、最近播放、分区、豆瓣）和缓存装饰入口。
+- `HomeHeroPrefetchCoordinator`：负责 Hero 后台补全调度（会话隔离、去重、暂停态跳过）。
+- 首页 provider 关系：
+  - `_homeSectionSeedProvider` 负责来源抓取
+  - `homeSectionProvider` 负责详情缓存批量合并（`loadDetailTargetsBatch(...)`）
+  - `homeSectionsProvider` 负责页面聚合
+
+### Detail
+
+- `DetailTargetResolver` 已作为详情解析入口，统一负责：
+  - seed + 详情缓存合并
+  - 自动元数据补全（`WMDB / TMDB / IMDb`）
+  - 播放目标补全（`Emby / Quark`）
+  - 解析结果回写详情缓存
+- `HomeHeroPrefetchCoordinator` 与详情链路复用同一套详情缓存与 enrichment provider，避免首页和详情各自维护一套补全逻辑。
+- 详情页 presentation 入口已经进一步拆成 `detail_page_providers.dart`、`detail_hero_section.dart`、`detail_resource_info_section.dart`、`detail_subtitle_section.dart`，`media_detail_page.dart` 主要保留页面级 session / callback / section wiring。
+
+### Playback
+
+- `PlaybackTargetResolver`：先把播放目标解析到可播地址/headers。
+- `preparePlaybackStartup(...)`：读取续播、跳过配置并生成启动路由输入。
+- `PlaybackEngineRouter`：封装路由判定（系统播放器 / 原生容器 / 性能回退 / 内置 MPV）。
+- `PlaybackStartupCoordinator`：串起“取消刷新 -> 目标解析 -> 启动准备 -> 路由决策”。
+- `PlaybackStartupExecutor`：执行路由动作，并返回是否继续走内置 `MPV` 打开链。
+
+### Library
+
+- `AppMediaRepository` 继续作为统一接口层。
+- 查询职责已下沉到 `AppMediaQueryService`：
+  - `fetchSources / fetchCollections / fetchLibrary / fetchRecentlyAdded / fetchChildren / findById / matchTitle`
+- 刷新、删除、同步删除夸克与缓存清理等副作用仍在 `AppMediaRepository` 收口，避免查询链路混入副作用分支。
+
+### Settings Slices
+
+- 首页 slice：`home_settings_slices.dart`
+  - `homeModulesProvider / homeDoubanAccountProvider / homeMediaSourcesProvider`
+- 通用 settings slice：`settings_slice_providers.dart`
+  - `settingsHeroSliceProvider`
+  - `settingsPlaybackSliceProvider`
+  - `settingsPerformanceSliceProvider`
+  - 以及 media/search/network/match 相关 slice
+- 依赖方向保持单向：
+  - `SettingsController -> AppSettings`
+  - `AppSettings -> 各 feature slice provider`
+  - `Home / Detail / Playback / Library` 仅订阅所需 slice，减少整份 `AppSettings` 宽监听导致的重建。
 
 ## 4. 核心设计取向
 

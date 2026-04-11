@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -11,6 +10,7 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/application/settings_slice_providers.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/media_source_editor_page.dart';
 import 'package:starflow/features/settings/presentation/metadata_match_settings_page.dart';
@@ -21,232 +21,6 @@ import 'package:starflow/features/settings/presentation/playback_settings_page.d
 import 'package:starflow/features/settings/presentation/search_provider_editor_page.dart';
 import 'package:starflow/features/settings/presentation/settings_management_page.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
-import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
-
-final _settingsMediaSourcesProvider =
-    Provider<List<MediaSourceConfig>>((ref) => ref.watch(
-          appSettingsProvider.select((settings) => settings.mediaSources),
-        ));
-
-final _settingsSearchProvidersProvider =
-    Provider<List<SearchProviderConfig>>((ref) => ref.watch(
-          appSettingsProvider.select((settings) => settings.searchProviders),
-        ));
-
-final _settingsSearchSourceIdsProvider =
-    Provider<List<String>>((ref) => ref.watch(
-          appSettingsProvider.select((settings) => settings.searchSourceIds),
-        ));
-
-final _settingsLibraryMatchSourceIdsProvider =
-    Provider<List<String>>((ref) => ref.watch(
-          appSettingsProvider
-              .select((settings) => settings.libraryMatchSourceIds),
-        ));
-
-final _settingsNetworkStorageProvider =
-    Provider<NetworkStorageConfig>((ref) => ref.watch(
-          appSettingsProvider.select((settings) => settings.networkStorage),
-        ));
-
-final _settingsDetailAutoLibraryMatchEnabledProvider =
-    Provider<bool>((ref) => ref.watch(
-          appSettingsProvider
-              .select((settings) => settings.detailAutoLibraryMatchEnabled),
-        ));
-
-final _settingsHeroSliceProvider = Provider<_SettingsHeroSlice>(
-  (ref) => ref.watch(
-    appSettingsProvider.select(
-      (settings) => _SettingsHeroSlice(
-        sourceModuleId: settings.homeHeroSourceModuleId,
-        displayMode: settings.homeHeroDisplayMode,
-        style: settings.homeHeroStyle,
-        logoTitleEnabled: settings.homeHeroLogoTitleEnabled,
-        backgroundEnabled: settings.homeHeroBackgroundEnabled,
-        translucentEffectsEnabled: settings.translucentEffectsEnabled,
-        performanceStaticHomeHeroEnabled:
-            settings.performanceStaticHomeHeroEnabled,
-        performanceLightweightHomeHeroEnabled:
-            settings.performanceLightweightHomeHeroEnabled,
-      ),
-    ),
-  ),
-);
-
-final _settingsPlaybackSliceProvider = Provider<_PlaybackSlice>(
-  (ref) => ref.watch(
-    appSettingsProvider.select(
-      (settings) => _PlaybackSlice(
-        playbackEngine: settings.playbackEngine,
-        playbackDecodeMode: settings.playbackDecodeMode,
-        playbackMpvQualityPreset: settings.playbackMpvQualityPreset,
-        playbackOpenTimeoutSeconds: settings.playbackOpenTimeoutSeconds,
-        playbackDefaultSpeed: settings.playbackDefaultSpeed,
-        playbackSubtitlePreference: settings.playbackSubtitlePreference,
-        playbackSubtitleScale: settings.playbackSubtitleScale,
-        onlineSubtitleSources: settings.onlineSubtitleSources,
-        playbackBackgroundPlaybackEnabled:
-            settings.playbackBackgroundPlaybackEnabled,
-      ),
-    ),
-  ),
-);
-
-final _settingsPerformanceSliceProvider = Provider<_SettingsPerformanceSlice>(
-  (ref) => ref.watch(
-    appSettingsProvider.select(
-      (settings) => _SettingsPerformanceSlice(
-        highPerformanceModeEnabled: settings.highPerformanceModeEnabled,
-        translucentEffectsEnabled: settings.translucentEffectsEnabled,
-        autoHideNavigationBarEnabled: settings.autoHideNavigationBarEnabled,
-        homeHeroBackgroundEnabled: settings.homeHeroBackgroundEnabled,
-      ),
-    ),
-  ),
-);
-
-@immutable
-class _SettingsHeroSlice {
-  const _SettingsHeroSlice({
-    required this.sourceModuleId,
-    required this.displayMode,
-    required this.style,
-    required this.logoTitleEnabled,
-    required this.backgroundEnabled,
-    required this.translucentEffectsEnabled,
-    required this.performanceStaticHomeHeroEnabled,
-    required this.performanceLightweightHomeHeroEnabled,
-  });
-
-  final String sourceModuleId;
-  final HomeHeroDisplayMode displayMode;
-  final HomeHeroStyle style;
-  final bool logoTitleEnabled;
-  final bool backgroundEnabled;
-  final bool translucentEffectsEnabled;
-  final bool performanceStaticHomeHeroEnabled;
-  final bool performanceLightweightHomeHeroEnabled;
-
-  @override
-  bool operator ==(Object other) {
-    return identical(this, other) ||
-        other is _SettingsHeroSlice &&
-            other.sourceModuleId == sourceModuleId &&
-            other.displayMode == displayMode &&
-            other.style == style &&
-            other.logoTitleEnabled == logoTitleEnabled &&
-            other.backgroundEnabled == backgroundEnabled &&
-            other.translucentEffectsEnabled == translucentEffectsEnabled &&
-            other.performanceStaticHomeHeroEnabled ==
-                performanceStaticHomeHeroEnabled &&
-            other.performanceLightweightHomeHeroEnabled ==
-                performanceLightweightHomeHeroEnabled;
-  }
-
-  @override
-  int get hashCode => Object.hash(
-        sourceModuleId,
-        displayMode,
-        style,
-        logoTitleEnabled,
-        backgroundEnabled,
-        translucentEffectsEnabled,
-        performanceStaticHomeHeroEnabled,
-        performanceLightweightHomeHeroEnabled,
-      );
-}
-
-@immutable
-class _PlaybackSlice {
-  const _PlaybackSlice({
-    required this.playbackEngine,
-    required this.playbackDecodeMode,
-    required this.playbackMpvQualityPreset,
-    required this.playbackOpenTimeoutSeconds,
-    required this.playbackDefaultSpeed,
-    required this.playbackSubtitlePreference,
-    required this.playbackSubtitleScale,
-    required this.onlineSubtitleSources,
-    required this.playbackBackgroundPlaybackEnabled,
-  });
-
-  final PlaybackEngine playbackEngine;
-  final PlaybackDecodeMode playbackDecodeMode;
-  final PlaybackMpvQualityPreset playbackMpvQualityPreset;
-  final int playbackOpenTimeoutSeconds;
-  final double playbackDefaultSpeed;
-  final PlaybackSubtitlePreference playbackSubtitlePreference;
-  final PlaybackSubtitleScale playbackSubtitleScale;
-  final List<OnlineSubtitleSource> onlineSubtitleSources;
-  final bool playbackBackgroundPlaybackEnabled;
-
-  @override
-  bool operator ==(Object other) {
-    return identical(this, other) ||
-        other is _PlaybackSlice &&
-            other.playbackEngine == playbackEngine &&
-            other.playbackDecodeMode == playbackDecodeMode &&
-            other.playbackMpvQualityPreset == playbackMpvQualityPreset &&
-            other.playbackOpenTimeoutSeconds == playbackOpenTimeoutSeconds &&
-            other.playbackDefaultSpeed == playbackDefaultSpeed &&
-            other.playbackSubtitlePreference == playbackSubtitlePreference &&
-            other.playbackSubtitleScale == playbackSubtitleScale &&
-            listEquals(
-              other.onlineSubtitleSources,
-              onlineSubtitleSources,
-            ) &&
-            other.playbackBackgroundPlaybackEnabled ==
-                playbackBackgroundPlaybackEnabled;
-  }
-
-  @override
-  int get hashCode => Object.hash(
-        playbackEngine,
-        playbackDecodeMode,
-        playbackMpvQualityPreset,
-        playbackOpenTimeoutSeconds,
-        playbackDefaultSpeed,
-        playbackSubtitlePreference,
-        playbackSubtitleScale,
-        Object.hashAll(onlineSubtitleSources),
-        playbackBackgroundPlaybackEnabled,
-      );
-}
-
-@immutable
-class _SettingsPerformanceSlice {
-  const _SettingsPerformanceSlice({
-    required this.highPerformanceModeEnabled,
-    required this.translucentEffectsEnabled,
-    required this.autoHideNavigationBarEnabled,
-    required this.homeHeroBackgroundEnabled,
-  });
-
-  final bool highPerformanceModeEnabled;
-  final bool translucentEffectsEnabled;
-  final bool autoHideNavigationBarEnabled;
-  final bool homeHeroBackgroundEnabled;
-
-  @override
-  bool operator ==(Object other) {
-    return identical(this, other) ||
-        other is _SettingsPerformanceSlice &&
-            other.highPerformanceModeEnabled == highPerformanceModeEnabled &&
-            other.translucentEffectsEnabled == translucentEffectsEnabled &&
-            other.autoHideNavigationBarEnabled ==
-                autoHideNavigationBarEnabled &&
-            other.homeHeroBackgroundEnabled == homeHeroBackgroundEnabled;
-  }
-
-  @override
-  int get hashCode => Object.hash(
-        highPerformanceModeEnabled,
-        translucentEffectsEnabled,
-        autoHideNavigationBarEnabled,
-        homeHeroBackgroundEnabled,
-      );
-}
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -261,21 +35,21 @@ class SettingsPage extends ConsumerStatefulWidget {
     required FocusNode headerFocusNode,
     required TvFocusMemoryController tvFocusMemoryController,
   }) {
-    final mediaSources = ref.watch(_settingsMediaSourcesProvider);
-    final searchProviders = ref.watch(_settingsSearchProvidersProvider);
-    final searchSourceIds = ref.watch(_settingsSearchSourceIdsProvider);
+    final mediaSources = ref.watch(settingsMediaSourcesProvider);
+    final searchProviders = ref.watch(settingsSearchProvidersProvider);
+    final searchSourceIds = ref.watch(settingsSearchSourceIdsProvider);
     final libraryMatchSourceIds =
-        ref.watch(_settingsLibraryMatchSourceIdsProvider);
+        ref.watch(settingsLibraryMatchSourceIdsProvider);
     final detailAutoLibraryMatchEnabled =
-        ref.watch(_settingsDetailAutoLibraryMatchEnabledProvider);
-    final networkStorage = ref.watch(_settingsNetworkStorageProvider);
-    final heroSlice = ref.watch(_settingsHeroSliceProvider);
-    final playbackSlice = ref.watch(_settingsPlaybackSliceProvider);
-    final performanceSlice = ref.watch(_settingsPerformanceSliceProvider);
+        ref.watch(settingsDetailAutoLibraryMatchEnabledProvider);
+    final networkStorage = ref.watch(settingsNetworkStorageProvider);
+    final heroSlice = ref.watch(settingsHeroSliceProvider);
+    final playbackSlice = ref.watch(settingsPlaybackSliceProvider);
+    final performanceSlice = ref.watch(settingsPerformanceSliceProvider);
     final loading = ref.watch(settingsControllerProvider).isLoading;
     final heroCandidates = ref.watch(homeHeroModuleCandidatesProvider);
     final heroModule = ref.watch(homeHeroModuleProvider);
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final heroEnabled = heroModule?.enabled ?? false;
 
     return TvPageFocusScope(
@@ -723,7 +497,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openPlaybackSettings(
     BuildContext context,
-    _PlaybackSlice playbackSlice,
+    SettingsPlaybackSlice playbackSlice,
   ) {
     return Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
@@ -771,7 +545,7 @@ class SettingsPage extends ConsumerStatefulWidget {
   Future<void> _openHeroSourcePicker(
     BuildContext context,
     WidgetRef ref, {
-    required _SettingsHeroSlice heroSlice,
+    required SettingsHeroSlice heroSlice,
     required List<HomeModuleConfig> heroCandidates,
   }) async {
     final selection = await showDialog<String>(
@@ -835,7 +609,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 }
 
 String _resolveHeroModuleSelectionValue({
-  required _SettingsHeroSlice heroSlice,
+  required SettingsHeroSlice heroSlice,
   required List<HomeModuleConfig> heroCandidates,
 }) {
   final selectedId = heroSlice.sourceModuleId.trim();
@@ -851,7 +625,7 @@ String _resolveHeroModuleSelectionValue({
 }
 
 String _heroSourceLabel({
-  required _SettingsHeroSlice heroSlice,
+  required SettingsHeroSlice heroSlice,
   required List<HomeModuleConfig> heroCandidates,
 }) {
   final selectedId = _resolveHeroModuleSelectionValue(
@@ -870,7 +644,7 @@ String _heroSourceLabel({
 }
 
 String _playbackSettingsSummary(
-  _PlaybackSlice playbackSlice, {
+  SettingsPlaybackSlice playbackSlice, {
   bool isTelevision = false,
 }) {
   return [
@@ -963,7 +737,7 @@ String _libraryMatchSourceSummary({
   return '${selectedNames.take(2).join('、')} 等 ${selectedNames.length} 个来源';
 }
 
-String _performanceSettingsSummary(_SettingsPerformanceSlice performanceSlice) {
+String _performanceSettingsSummary(SettingsPerformanceSlice performanceSlice) {
   final enabledItems = <String>[
     if (!performanceSlice.translucentEffectsEnabled) '磨砂关闭',
     if (!performanceSlice.autoHideNavigationBarEnabled) '菜单常驻',

@@ -21,7 +21,6 @@ import 'package:starflow/features/library/domain/library_collection_models.dart'
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/presentation/widgets/library_paged_grid.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
-import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
@@ -211,8 +210,8 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
 
   @override
   Widget build(BuildContext context) {
-    final settings = ref.watch(appSettingsProvider);
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final mediaSources = ref.watch(libraryMediaSourcesSettingsSliceProvider);
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final itemsAsync = resolveRetainedAsyncValue(
       activeValue:
           isPageVisible ? ref.watch(libraryItemsProvider(_filter)) : null,
@@ -227,7 +226,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       cacheValue: (value) => _cachedCollectionsByFilter[_filter] = value,
       fallbackValue: const AsyncLoading<List<MediaCollection>>(),
     );
-    final refreshScope = _currentRefreshScope(settings);
+    final refreshScope = _currentRefreshScope(mediaSources);
     final scrapeProgress = isPageVisible
         ? ref.watch(webDavScrapeProgressProvider)
         : _cachedScrapeProgress;
@@ -236,7 +235,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     }
     final visibleProgress = _visibleScrapeProgress(
       scrapeProgress.values,
-      settings,
+      mediaSources,
     );
 
     return TvPageFocusScope(
@@ -486,11 +485,13 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     );
   }
 
-  _LibraryRefreshScope? _currentRefreshScope(AppSettings settings) {
+  _LibraryRefreshScope? _currentRefreshScope(
+    List<MediaSourceConfig> mediaSources,
+  ) {
     switch (_filter) {
       case LibraryFilter.nas:
         final sourceIds = _refreshableSourceIds(
-          settings,
+          mediaSources,
           kind: MediaSourceKind.nas,
         );
         if (sourceIds.isEmpty) {
@@ -502,7 +503,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
         );
       case LibraryFilter.quark:
         final sourceIds = _refreshableSourceIds(
-          settings,
+          mediaSources,
           kind: MediaSourceKind.quark,
         );
         if (sourceIds.isEmpty) {
@@ -519,10 +520,10 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   }
 
   List<String> _refreshableSourceIds(
-    AppSettings settings, {
+    List<MediaSourceConfig> mediaSources, {
     required MediaSourceKind kind,
   }) {
-    return settings.mediaSources
+    return mediaSources
         .where(
           (source) =>
               source.enabled &&
@@ -538,7 +539,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
 
   List<WebDavScrapeProgress> _visibleScrapeProgress(
     Iterable<WebDavScrapeProgress> progressEntries,
-    AppSettings settings,
+    List<MediaSourceConfig> mediaSources,
   ) {
     late final MediaSourceKind scopedKind;
     switch (_filter) {
@@ -550,7 +551,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       case LibraryFilter.emby:
         return const [];
     }
-    final enabledVisibleSourceIds = settings.mediaSources
+    final enabledVisibleSourceIds = mediaSources
         .where(
           (source) =>
               source.enabled &&

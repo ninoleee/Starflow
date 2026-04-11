@@ -93,6 +93,7 @@ void main() {
       expect(resolved.headers['Cookie'], contains('__kp=xyz'));
       expect(resolved.headers['User-Agent'], isNotEmpty);
       expect(resolved.headers['Referer'], 'https://drive-pc.quark.cn');
+      expect(resolved.headers['Origin'], 'https://drive-pc.quark.cn');
     });
 
     test('saves a quark share link to root directory', () async {

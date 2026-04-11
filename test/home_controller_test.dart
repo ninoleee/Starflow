@@ -17,6 +17,73 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   SharedPreferences.setMockInitialValues(const {});
 
+  group('home controller abstractions', () {
+    test('exposes home feed repository and page controller providers', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      expect(container.read(homeFeedRepositoryProvider),
+          isA<HomeFeedRepository>());
+      expect(container.read(homePageControllerProvider),
+          isA<HomePageController>());
+    });
+
+    test('HomePageController resolveSections keeps order and filters null',
+        () async {
+      const controller = HomePageController();
+      final modules = [
+        const HomeModuleConfig(
+          id: 'module-a',
+          type: HomeModuleType.recentlyAdded,
+          title: '最近新增',
+          enabled: true,
+        ),
+        const HomeModuleConfig(
+          id: 'module-b',
+          type: HomeModuleType.recentPlayback,
+          title: '最近播放',
+          enabled: true,
+        ),
+        const HomeModuleConfig(
+          id: 'module-c',
+          type: HomeModuleType.doubanInterest,
+          title: '想看',
+          enabled: true,
+        ),
+      ];
+      const sectionA = HomeSectionViewModel(
+        id: 'module-a',
+        title: 'A',
+        subtitle: '',
+        emptyMessage: '无',
+        layout: HomeSectionLayout.posterRail,
+      );
+      const sectionC = HomeSectionViewModel(
+        id: 'module-c',
+        title: 'C',
+        subtitle: '',
+        emptyMessage: '无',
+        layout: HomeSectionLayout.posterRail,
+      );
+
+      final sections = await controller.resolveSections(
+        enabledModules: modules,
+        loadSection: (module) async {
+          return switch (module.id) {
+            'module-a' => sectionA,
+            'module-c' => sectionC,
+            _ => null,
+          };
+        },
+      );
+
+      expect(sections.map((item) => item.id).toList(growable: false), [
+        'module-a',
+        'module-c',
+      ]);
+    });
+  });
+
   group('homeSectionsProvider', () {
     test('does not auto match Douban posters or resources on home', () async {
       final mediaRepository = _FakeMediaRepository(

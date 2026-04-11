@@ -553,7 +553,7 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
 
   @override
   Widget build(BuildContext context) {
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final lightweightTvFocusEnabled =
         ref.watch(_tvFocusLightweightEnabledProvider);
     final enabled = widget.onPressed != null;

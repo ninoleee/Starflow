@@ -39,7 +39,7 @@ class SettingsTextInputField extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     if (!isTelevision) {
       return TextField(
         controller: controller,

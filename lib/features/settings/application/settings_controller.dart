@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/utils/playback_trace.dart';
+import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
@@ -18,7 +20,7 @@ final settingsControllerProvider =
 );
 
 final appSettingsProvider = Provider<AppSettings>((ref) {
-  return ref.watch(settingsControllerProvider).valueOrNull ??
+  return ref.watch(settingsControllerProvider).value ??
       SeedData.defaultSettings;
 });
 
@@ -28,11 +30,13 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   @override
   FutureOr<AppSettings> build() async {
-    return _repository.load();
+    final settings = await _repository.load();
+    _syncRuntimeTraceSettings(settings);
+    return settings;
   }
 
   Future<void> toggleMediaSource(String id, bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     final next = current.copyWith(
       mediaSources: [
         for (final source in current.mediaSources)
@@ -43,7 +47,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> saveMediaSource(MediaSourceConfig config) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     final exists = current.mediaSources.any((item) => item.id == config.id);
     final next = current.copyWith(
       mediaSources: exists
@@ -57,7 +61,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> removeMediaSource(String id) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     final next = current.copyWith(
       mediaSources:
           current.mediaSources.where((item) => item.id != id).toList(),
@@ -86,7 +90,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> toggleSearchProvider(String id, bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     final next = current.copyWith(
       searchProviders: [
         for (final provider in current.searchProviders)
@@ -97,7 +101,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> saveSearchProvider(SearchProviderConfig config) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     final exists = current.searchProviders.any((item) => item.id == config.id);
     final next = current.copyWith(
       searchProviders: exists
@@ -111,7 +115,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> removeSearchProvider(String id) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     final next = current.copyWith(
       searchProviders:
           current.searchProviders.where((item) => item.id != id).toList(),
@@ -120,42 +124,42 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> saveDoubanAccount(DoubanAccountConfig config) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(doubanAccount: config));
   }
 
   Future<void> saveNetworkStorage(NetworkStorageConfig config) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(networkStorage: config));
   }
 
   Future<void> setTmdbMetadataMatchEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(tmdbMetadataMatchEnabled: enabled));
   }
 
   Future<void> setWmdbMetadataMatchEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(wmdbMetadataMatchEnabled: enabled));
   }
 
   Future<void> setMetadataMatchPriority(MetadataMatchProvider provider) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(metadataMatchPriority: provider));
   }
 
   Future<void> setImdbRatingMatchEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(imdbRatingMatchEnabled: enabled));
   }
 
   Future<void> setDetailAutoLibraryMatchEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(detailAutoLibraryMatchEnabled: enabled));
   }
 
   Future<void> setLibraryMatchSourceIds(List<String> sourceIds) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(
       current.copyWith(
         libraryMatchSourceIds: sourceIds
@@ -168,7 +172,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> setSearchSourceIds(List<String> sourceIds) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(
       current.copyWith(
         searchSourceIds: sourceIds
@@ -181,26 +185,26 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> setTmdbReadAccessToken(String token) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(tmdbReadAccessToken: token.trim()));
   }
 
   Future<void> setPlaybackOpenTimeoutSeconds(int seconds) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(
       current.copyWith(playbackOpenTimeoutSeconds: seconds.clamp(1, 600)),
     );
   }
 
   Future<void> setPlaybackEngine(PlaybackEngine playbackEngine) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(playbackEngine: playbackEngine));
   }
 
   Future<void> setPlaybackMpvQualityPreset(
     PlaybackMpvQualityPreset playbackMpvQualityPreset,
   ) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(
       current.copyWith(playbackMpvQualityPreset: playbackMpvQualityPreset),
     );
@@ -216,8 +220,10 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     required PlaybackEngine playbackEngine,
     required PlaybackDecodeMode playbackDecodeMode,
     required PlaybackMpvQualityPreset playbackMpvQualityPreset,
+    required bool playbackTraceEnabled,
+    required bool subtitleSearchTraceEnabled,
   }) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     if (current.playbackBackgroundPlaybackEnabled &&
         !backgroundPlaybackEnabled) {
       await ActivePlaybackCleanupCoordinator.cleanupAll(
@@ -236,6 +242,8 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         playbackEngine: playbackEngine,
         playbackDecodeMode: playbackDecodeMode,
         playbackMpvQualityPreset: playbackMpvQualityPreset,
+        playbackTraceEnabled: playbackTraceEnabled,
+        subtitleSearchTraceEnabled: subtitleSearchTraceEnabled,
       ),
     );
   }
@@ -245,44 +253,44 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> setHomeHeroDisplayMode(HomeHeroDisplayMode mode) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(homeHeroDisplayMode: mode));
   }
 
   Future<void> setHomeHeroEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await saveHomeModule(
       _resolveHeroModule(current).copyWith(enabled: enabled),
     );
   }
 
   Future<void> setHomeHeroSourceModuleId(String moduleId) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(homeHeroSourceModuleId: moduleId.trim()));
   }
 
   Future<void> setHomeHeroBackgroundEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(homeHeroBackgroundEnabled: enabled));
   }
 
   Future<void> setHomeHeroLogoTitleEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(homeHeroLogoTitleEnabled: enabled));
   }
 
   Future<void> setTranslucentEffectsEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(translucentEffectsEnabled: enabled));
   }
 
   Future<void> setAutoHideNavigationBarEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(autoHideNavigationBarEnabled: enabled));
   }
 
   Future<void> setHighPerformanceModeEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     final next = enabled && !current.highPerformanceModeEnabled
         ? current.copyWith(
             highPerformanceModeEnabled: true,
@@ -319,57 +327,57 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> setPerformanceReduceDecorationsEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(
       current.copyWith(performanceReduceDecorationsEnabled: enabled),
     );
   }
 
   Future<void> setPerformanceReduceMotionEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(performanceReduceMotionEnabled: enabled));
   }
 
   Future<void> setPerformanceStaticNavigationEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(
       current.copyWith(performanceStaticNavigationEnabled: enabled),
     );
   }
 
   Future<void> setPerformanceLightweightTvFocusEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(
       current.copyWith(performanceLightweightTvFocusEnabled: enabled),
     );
   }
 
   Future<void> setPerformanceStaticHomeHeroEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(performanceStaticHomeHeroEnabled: enabled));
   }
 
   Future<void> setPerformanceLightweightHomeHeroEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(
       current.copyWith(performanceLightweightHomeHeroEnabled: enabled),
     );
   }
 
   Future<void> setPerformanceSlimDetailHeroEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(performanceSlimDetailHeroEnabled: enabled));
   }
 
   Future<void> setPerformanceLeanPlaybackUiEnabled(bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(performanceLeanPlaybackUiEnabled: enabled));
   }
 
   Future<void> setPerformanceAggressivePlaybackTuningEnabled(
     bool enabled,
   ) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(
       current.copyWith(performanceAggressivePlaybackTuningEnabled: enabled),
     );
@@ -378,7 +386,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   Future<void> setPerformanceAutoDowngradeHeavyPlaybackEnabled(
     bool enabled,
   ) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     await _persist(
       current.copyWith(
         performanceAutoDowngradeHeavyPlaybackEnabled: enabled,
@@ -387,7 +395,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> toggleHomeModule(String id, bool enabled) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     final next = current.copyWith(
       homeModules: [
         for (final module in current.homeModules)
@@ -398,7 +406,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> saveHomeModule(HomeModuleConfig config) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     final exists = current.homeModules.any((item) => item.id == config.id);
     final next = current.copyWith(
       homeModules: exists
@@ -412,7 +420,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> removeHomeModule(String id) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     final next = current.copyWith(
       homeModules: current.homeModules.where((item) => item.id != id).toList(),
     );
@@ -420,7 +428,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> reorderHomeModules(int oldIndex, int newIndex) async {
-    final current = state.valueOrNull ?? await _repository.load();
+    final current = state.value ?? await _repository.load();
     final modules = [...current.homeModules];
     if (newIndex > oldIndex) {
       newIndex -= 1;
@@ -432,7 +440,13 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   Future<void> _persist(AppSettings next) async {
     state = AsyncData(next);
+    _syncRuntimeTraceSettings(next);
     await _repository.save(next);
+  }
+
+  void _syncRuntimeTraceSettings(AppSettings settings) {
+    setPlaybackTraceEnabled(settings.playbackTraceEnabled);
+    setSubtitleSearchTraceEnabled(settings.subtitleSearchTraceEnabled);
   }
 
   HomeModuleConfig _resolveHeroModule(AppSettings settings) {

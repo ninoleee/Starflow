@@ -20,7 +20,7 @@ class OverlayToolbar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final color = leadingColor ?? Theme.of(context).colorScheme.onSurface;
     final topInset = MediaQuery.paddingOf(context).top;
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final backAction = onBack ?? () => Navigator.maybePop(context);
     final showBackButton = !isTelevision;
     return Material(

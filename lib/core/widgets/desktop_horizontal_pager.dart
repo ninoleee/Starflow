@@ -28,8 +28,8 @@ class DesktopHorizontalPager extends StatefulWidget {
 
 class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
   late final ScrollController _controller;
-  bool _canScrollBackward = false;
-  bool _canScrollForward = false;
+  late final ValueNotifier<_DesktopPagerButtonVisibility>
+      _buttonVisibilityNotifier;
   bool _visibilityUpdateScheduled = false;
 
   bool get _showsDesktopButtons {
@@ -50,6 +50,13 @@ class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
   @override
   void initState() {
     super.initState();
+    _buttonVisibilityNotifier =
+        ValueNotifier<_DesktopPagerButtonVisibility>(
+      const _DesktopPagerButtonVisibility(
+        canScrollBackward: false,
+        canScrollForward: false,
+      ),
+    );
     _controller = ScrollController()..addListener(_handleScrollMetricsChanged);
     _scheduleButtonVisibilityUpdate();
   }
@@ -65,6 +72,7 @@ class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
 
   @override
   void dispose() {
+    _buttonVisibilityNotifier.dispose();
     _controller
       ..removeListener(_handleScrollMetricsChanged)
       ..dispose();
@@ -87,15 +95,14 @@ class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
   }
 
   void _updateButtonVisibility() {
-    if (!mounted) {
-      return;
-    }
+    final currentVisibility = _buttonVisibilityNotifier.value;
     if (!_showsDesktopButtons) {
-      if (_canScrollBackward || _canScrollForward) {
-        setState(() {
-          _canScrollBackward = false;
-          _canScrollForward = false;
-        });
+      if (currentVisibility.canScrollBackward ||
+          currentVisibility.canScrollForward) {
+        _buttonVisibilityNotifier.value = const _DesktopPagerButtonVisibility(
+          canScrollBackward: false,
+          canScrollForward: false,
+        );
       }
       return;
     }
@@ -106,14 +113,14 @@ class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
     final canScrollForward = hasClients &&
         _controller.position.pixels <
             _controller.position.maxScrollExtent - 0.5;
-    if (_canScrollBackward == canScrollBackward &&
-        _canScrollForward == canScrollForward) {
+    if (currentVisibility.canScrollBackward == canScrollBackward &&
+        currentVisibility.canScrollForward == canScrollForward) {
       return;
     }
-    setState(() {
-      _canScrollBackward = canScrollBackward;
-      _canScrollForward = canScrollForward;
-    });
+    _buttonVisibilityNotifier.value = _DesktopPagerButtonVisibility(
+      canScrollBackward: canScrollBackward,
+      canScrollForward: canScrollForward,
+    );
   }
 
   Future<void> _scrollBy(double direction) async {
@@ -137,53 +144,71 @@ class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
 
   @override
   Widget build(BuildContext context) {
-    final child = NotificationListener<ScrollMetricsNotification>(
-      onNotification: (notification) {
-        _updateButtonVisibility();
-        return false;
-      },
-      child: widget.builder(context, _controller),
+    final child = RepaintBoundary(
+      child: NotificationListener<ScrollMetricsNotification>(
+        onNotification: (notification) {
+          _updateButtonVisibility();
+          return false;
+        },
+        child: widget.builder(context, _controller),
+      ),
     );
     if (!_showsDesktopButtons) {
       return child;
     }
 
-    return Stack(
-      fit: StackFit.expand,
-      clipBehavior: Clip.none,
-      children: [
-        child,
-        if (_canScrollBackward)
-          Positioned(
-            left: widget.leftInset,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: _DesktopHorizontalPagerButton(
-                size: widget.buttonSize,
-                iconSize: widget.iconSize,
-                icon: Icons.chevron_left_rounded,
-                onPressed: () => _scrollBy(-1),
+    return ValueListenableBuilder<_DesktopPagerButtonVisibility>(
+      valueListenable: _buttonVisibilityNotifier,
+      child: child,
+      builder: (context, visibility, content) {
+        return Stack(
+          fit: StackFit.expand,
+          clipBehavior: Clip.none,
+          children: [
+            content!,
+            if (visibility.canScrollBackward)
+              Positioned(
+                left: widget.leftInset,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: _DesktopHorizontalPagerButton(
+                    size: widget.buttonSize,
+                    iconSize: widget.iconSize,
+                    icon: Icons.chevron_left_rounded,
+                    onPressed: () => _scrollBy(-1),
+                  ),
+                ),
               ),
-            ),
-          ),
-        if (_canScrollForward)
-          Positioned(
-            right: widget.rightInset,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: _DesktopHorizontalPagerButton(
-                size: widget.buttonSize,
-                iconSize: widget.iconSize,
-                icon: Icons.chevron_right_rounded,
-                onPressed: () => _scrollBy(1),
+            if (visibility.canScrollForward)
+              Positioned(
+                right: widget.rightInset,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: _DesktopHorizontalPagerButton(
+                    size: widget.buttonSize,
+                    iconSize: widget.iconSize,
+                    icon: Icons.chevron_right_rounded,
+                    onPressed: () => _scrollBy(1),
+                  ),
+                ),
               ),
-            ),
-          ),
-      ],
+          ],
+        );
+      },
     );
   }
+}
+
+class _DesktopPagerButtonVisibility {
+  const _DesktopPagerButtonVisibility({
+    required this.canScrollBackward,
+    required this.canScrollForward,
+  });
+
+  final bool canScrollBackward;
+  final bool canScrollForward;
 }
 
 class _DesktopHorizontalPagerButton extends StatelessWidget {

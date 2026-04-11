@@ -31,6 +31,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   late final TextEditingController _tokenController;
   late final TextEditingController _webDavExcludedKeywordsController;
   late final TextEditingController _webDavSeriesTitleFilterKeywordsController;
+  late final TextEditingController _webDavSpecialEpisodeKeywordsController;
+  late final TextEditingController _webDavExtraKeywordsController;
 
   late MediaSourceKind _kind;
   late bool _enabled;
@@ -77,6 +79,12 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _webDavSeriesTitleFilterKeywordsController = TextEditingController(
       text: (e?.webDavSeriesTitleFilterKeywords ?? const []).join('\n'),
     );
+    _webDavSpecialEpisodeKeywordsController = TextEditingController(
+      text: (e?.webDavSpecialEpisodeKeywords ?? const []).join('\n'),
+    );
+    _webDavExtraKeywordsController = TextEditingController(
+      text: (e?.webDavExtraKeywords ?? const []).join('\n'),
+    );
     _kind = e?.kind ?? MediaSourceKind.emby;
     _enabled = e?.enabled ?? true;
     _resolvedUserId = e?.userId ?? '';
@@ -112,6 +120,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _tokenController.dispose();
     _webDavExcludedKeywordsController.dispose();
     _webDavSeriesTitleFilterKeywordsController.dispose();
+    _webDavSpecialEpisodeKeywordsController.dispose();
+    _webDavExtraKeywordsController.dispose();
     super.dispose();
   }
 
@@ -166,6 +176,14 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
           (_kind == MediaSourceKind.nas || _kind == MediaSourceKind.quark)
               ? _parsedWebDavSeriesTitleFilterKeywords()
               : const [],
+      webDavSpecialEpisodeKeywords:
+          (_kind == MediaSourceKind.nas || _kind == MediaSourceKind.quark)
+              ? _parsedWebDavSpecialEpisodeKeywords()
+              : const [],
+      webDavExtraKeywords:
+          (_kind == MediaSourceKind.nas || _kind == MediaSourceKind.quark)
+              ? _parsedWebDavExtraKeywords()
+              : const [],
     );
   }
 
@@ -187,6 +205,36 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     final seen = <String>{};
     final values = <String>[];
     for (final chunk in _webDavSeriesTitleFilterKeywordsController.text.split(
+      RegExp(r'[\n,，;；]+'),
+    )) {
+      final normalized = chunk.trim();
+      if (normalized.isEmpty || !seen.add(normalized.toLowerCase())) {
+        continue;
+      }
+      values.add(normalized);
+    }
+    return values;
+  }
+
+  List<String> _parsedWebDavSpecialEpisodeKeywords() {
+    final seen = <String>{};
+    final values = <String>[];
+    for (final chunk in _webDavSpecialEpisodeKeywordsController.text.split(
+      RegExp(r'[\n,，;；]+'),
+    )) {
+      final normalized = chunk.trim();
+      if (normalized.isEmpty || !seen.add(normalized.toLowerCase())) {
+        continue;
+      }
+      values.add(normalized);
+    }
+    return values;
+  }
+
+  List<String> _parsedWebDavExtraKeywords() {
+    final seen = <String>{};
+    final values = <String>[];
+    for (final chunk in _webDavExtraKeywordsController.text.split(
       RegExp(r'[\n,，;；]+'),
     )) {
       final normalized = chunk.trim();
@@ -221,6 +269,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         _hasConfiguredQuarkFolderDraft ||
         _webDavExcludedKeywordsController.text.trim().isNotEmpty ||
         _webDavSeriesTitleFilterKeywordsController.text.trim().isNotEmpty ||
+        _webDavSpecialEpisodeKeywordsController.text.trim().isNotEmpty ||
+        _webDavExtraKeywordsController.text.trim().isNotEmpty ||
         widget.initial != null;
   }
 
@@ -1094,6 +1144,70 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
               padding: const EdgeInsets.only(top: 6),
               child: Text(
                 '只在目录结构推断里生效。识别到剧文件或季目录后向上推断剧名时，命中这里填写的顶层目录名会立刻停止继续向上，改用下一级已推断目录；如果没有目录则退回文件名。',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SettingsTextInputField(
+              controller: _webDavSpecialEpisodeKeywordsController,
+              labelText: '综艺特别集关键词',
+              minLines: 2,
+              maxLines: 5,
+              hintText: '比如：先导片、加更、纯享、直拍、训练室',
+              alignLabelWithHint: true,
+              summaryBuilder: (value) {
+                if (value.isEmpty) {
+                  return '未填写';
+                }
+                final keywords = value
+                    .split(RegExp(r'[\n,，;；]+'))
+                    .map((item) => item.trim())
+                    .where((item) => item.isNotEmpty)
+                    .toList(growable: false);
+                if (keywords.isEmpty) {
+                  return '未填写';
+                }
+                return '已填写 ${keywords.length} 项';
+              },
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                '只在目录结构推断里生效。文件名或子目录命中这里的关键词后，会强制归到特别季（第 0 季）；WebDAV 和夸克共用这套规则。未填写时也会启用一组内置综艺关键词（如先导、加更、纯享、直拍、训练室）。',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SettingsTextInputField(
+              controller: _webDavExtraKeywordsController,
+              labelText: '综艺 Extras/过滤关键词',
+              minLines: 2,
+              maxLines: 5,
+              hintText: '比如：预告、花絮、采访、trailer、sample',
+              alignLabelWithHint: true,
+              summaryBuilder: (value) {
+                if (value.isEmpty) {
+                  return '未填写';
+                }
+                final keywords = value
+                    .split(RegExp(r'[\n,，;；]+'))
+                    .map((item) => item.trim())
+                    .where((item) => item.isNotEmpty)
+                    .toList(growable: false);
+                if (keywords.isEmpty) {
+                  return '未填写';
+                }
+                return '已填写 ${keywords.length} 项';
+              },
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                '只在目录结构推断里生效。文件名或子目录命中这里的关键词后，该资源会被当作 Extras 过滤掉，不参与正片分组、剧名推断和刮削；WebDAV 和夸克共用。',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),

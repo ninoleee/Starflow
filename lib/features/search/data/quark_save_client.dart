@@ -396,6 +396,7 @@ class QuarkSaveClient {
         if (mergedCookie.isNotEmpty) 'Cookie': mergedCookie,
         'User-Agent': _userAgent,
         'Referer': _baseUrl,
+        'Origin': _baseUrl,
       },
       fileSizeBytes: _tryParseInt(
         '${(matched ?? const {})['size'] ?? (matched ?? const {})['file_size'] ?? ''}',

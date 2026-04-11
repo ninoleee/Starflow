@@ -467,7 +467,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
 
   @override
   Widget build(BuildContext context) {
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final networkStorage = ref.watch(_searchPageNetworkStorageProvider);
     final headerTopInset = kToolbarHeight;
     final enabledProviders =
@@ -492,208 +492,220 @@ class _SearchPageState extends ConsumerState<SearchPage>
               ),
               child: FocusTraversalGroup(
                 policy: OrderedTraversalPolicy(),
-                child: ListView(
+                child: CustomScrollView(
                   controller: _scrollController,
-                  padding: EdgeInsets.zero,
-                  children: [
-                    Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        kAppPageHorizontalPadding,
-                        headerTopInset,
-                        kAppPageHorizontalPadding,
-                        0,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(1),
-                            child: isTelevision
-                                ? _TelevisionSearchInput(
-                                    query: _controller.text.trim(),
-                                    focusNode: _queryFocusNode,
-                                    onEditQuery: _openTelevisionQueryDialog,
-                                    onSearch: _performSearch,
-                                  )
-                                : TextField(
-                                    controller: _controller,
-                                    textInputAction: TextInputAction.search,
-                                    onSubmitted: (_) => _performSearch(),
-                                    decoration: InputDecoration(
-                                      hintText: '搜索电影、剧集或番剧资源',
-                                      suffixIcon: Padding(
-                                        padding: const EdgeInsets.all(6),
-                                        child: StarflowIconButton(
-                                          icon: Icons.search_rounded,
-                                          tooltip: '搜索',
-                                          onPressed: _performSearch,
-                                          variant: StarflowButtonVariant.ghost,
-                                          size: 40,
+                  physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics(),
+                  ),
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          kAppPageHorizontalPadding,
+                          headerTopInset,
+                          kAppPageHorizontalPadding,
+                          0,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            FocusTraversalOrder(
+                              order: const NumericFocusOrder(1),
+                              child: isTelevision
+                                  ? _TelevisionSearchInput(
+                                      query: _controller.text.trim(),
+                                      focusNode: _queryFocusNode,
+                                      onEditQuery: _openTelevisionQueryDialog,
+                                      onSearch: _performSearch,
+                                    )
+                                  : TextField(
+                                      controller: _controller,
+                                      textInputAction: TextInputAction.search,
+                                      onSubmitted: (_) => _performSearch(),
+                                      decoration: InputDecoration(
+                                        hintText: '搜索电影、剧集或番剧资源',
+                                        suffixIcon: Padding(
+                                          padding: const EdgeInsets.all(6),
+                                          child: StarflowIconButton(
+                                            icon: Icons.search_rounded,
+                                            tooltip: '搜索',
+                                            onPressed: _performSearch,
+                                            variant:
+                                                StarflowButtonVariant.ghost,
+                                            size: 40,
+                                          ),
                                         ),
                                       ),
                                     ),
-                                  ),
-                          ),
-                          if (isTelevision && _recentQueries.isNotEmpty) ...[
-                            const SizedBox(height: 14),
-                            Text(
-                              '最近搜索',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelLarge
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                  ),
                             ),
-                            const SizedBox(height: 10),
-                            Wrap(
-                              spacing: 10,
-                              runSpacing: 10,
-                              children: [
-                                for (var index = 0;
-                                    index < _recentQueries.length;
-                                    index++)
-                                  _SearchHistoryChip(
-                                    label: _recentQueries[index],
-                                    autofocus: index == 0,
-                                    focusId: 'search:recent:$index',
-                                    onPressed: () =>
-                                        _runRecentQuery(_recentQueries[index]),
-                                  ),
-                              ],
-                            ),
-                          ],
-                          const SizedBox(height: 10),
-                          if (targets.length == 1)
-                            const Text(
-                              '还没有启用可搜索的来源，请先去设置页添加媒体源或搜索服务。',
-                            )
-                          else
-                            FocusTraversalOrder(
-                              order: const NumericFocusOrder(2),
-                              child: isTelevision
-                                  ? Wrap(
-                                      spacing: 10,
-                                      runSpacing: 10,
-                                      children: [
-                                        for (var index = 0;
-                                            index < targets.length;
-                                            index++)
-                                          _SearchTargetChip(
-                                            target: targets[index],
-                                            selected: _selectedTargetIds
-                                                .contains(targets[index].id),
-                                            isTelevision: true,
-                                            focusId:
-                                                'search:target:${targets[index].id}',
-                                            autofocus: index == 0 &&
-                                                _recentQueries.isEmpty,
-                                            onPressed: () {
-                                              _toggleTargetSelection(
-                                                targets[index],
-                                                targets,
-                                              );
-                                              if (_controller.text
-                                                  .trim()
-                                                  .isNotEmpty) {
-                                                _performSearch();
-                                              }
-                                            },
-                                          ),
-                                      ],
-                                    )
-                                  : SizedBox(
-                                      height: 52,
-                                      child: ListView.separated(
-                                        scrollDirection: Axis.horizontal,
-                                        itemCount: targets.length,
-                                        separatorBuilder: (context, index) =>
-                                            const SizedBox(width: 8),
-                                        itemBuilder: (context, index) {
-                                          final target = targets[index];
-                                          return _SearchTargetChip(
-                                            target: target,
-                                            selected: _selectedTargetIds
-                                                .contains(target.id),
-                                            isTelevision: false,
-                                            onPressed: () {
-                                              _toggleTargetSelection(
-                                                target,
-                                                targets,
-                                              );
-                                              if (_controller.text
-                                                  .trim()
-                                                  .isNotEmpty) {
-                                                _performSearch();
-                                              }
-                                            },
-                                          );
-                                        },
-                                      ),
+                            if (isTelevision && _recentQueries.isNotEmpty) ...[
+                              const SizedBox(height: 14),
+                              Text(
+                                '最近搜索',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelLarge
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w800,
                                     ),
-                            ),
-                          const SizedBox(height: 12),
-                          if (_isSearching) ...[
-                            LinearProgressIndicator(
-                              value: _totalSearchTaskCount > 0
-                                  ? _completedSearchTaskCount /
-                                      _totalSearchTaskCount
-                                  : null,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              _results.isEmpty
-                                  ? '正在搜索...'
-                                  : '正在继续搜索 $_completedSearchTaskCount/$_totalSearchTaskCount',
-                            ),
+                              ),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 10,
+                                runSpacing: 10,
+                                children: [
+                                  for (var index = 0;
+                                      index < _recentQueries.length;
+                                      index++)
+                                    _SearchHistoryChip(
+                                      label: _recentQueries[index],
+                                      autofocus: index == 0,
+                                      focusId: 'search:recent:$index',
+                                      onPressed: () =>
+                                          _runRecentQuery(_recentQueries[index]),
+                                    ),
+                                ],
+                              ),
+                            ],
                             const SizedBox(height: 10),
+                            if (targets.length == 1)
+                              const Text(
+                                '还没有启用可搜索的来源，请先去设置页添加媒体源或搜索服务。',
+                              )
+                            else
+                              FocusTraversalOrder(
+                                order: const NumericFocusOrder(2),
+                                child: isTelevision
+                                    ? Wrap(
+                                        spacing: 10,
+                                        runSpacing: 10,
+                                        children: [
+                                          for (var index = 0;
+                                              index < targets.length;
+                                              index++)
+                                            _SearchTargetChip(
+                                              target: targets[index],
+                                              selected: _selectedTargetIds
+                                                  .contains(targets[index].id),
+                                              isTelevision: true,
+                                              focusId:
+                                                  'search:target:${targets[index].id}',
+                                              autofocus: index == 0 &&
+                                                  _recentQueries.isEmpty,
+                                              onPressed: () {
+                                                _toggleTargetSelection(
+                                                  targets[index],
+                                                  targets,
+                                                );
+                                                if (_controller.text
+                                                    .trim()
+                                                    .isNotEmpty) {
+                                                  _performSearch();
+                                                }
+                                              },
+                                            ),
+                                        ],
+                                      )
+                                    : SizedBox(
+                                        height: 52,
+                                        child: ListView.separated(
+                                          scrollDirection: Axis.horizontal,
+                                          itemCount: targets.length,
+                                          separatorBuilder: (context, index) =>
+                                              const SizedBox(width: 8),
+                                          itemBuilder: (context, index) {
+                                            final target = targets[index];
+                                            return _SearchTargetChip(
+                                              target: target,
+                                              selected: _selectedTargetIds
+                                                  .contains(target.id),
+                                              isTelevision: false,
+                                              onPressed: () {
+                                                _toggleTargetSelection(
+                                                  target,
+                                                  targets,
+                                                );
+                                                if (_controller.text
+                                                    .trim()
+                                                    .isNotEmpty) {
+                                                  _performSearch();
+                                                }
+                                              },
+                                            );
+                                          },
+                                        ),
+                                      ),
+                              ),
+                            const SizedBox(height: 12),
+                            if (_isSearching) ...[
+                              LinearProgressIndicator(
+                                value: _totalSearchTaskCount > 0
+                                    ? _completedSearchTaskCount /
+                                        _totalSearchTaskCount
+                                    : null,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _results.isEmpty
+                                    ? '正在搜索...'
+                                    : '正在继续搜索 $_completedSearchTaskCount/$_totalSearchTaskCount',
+                              ),
+                              const SizedBox(height: 10),
+                            ],
+                            if (_controller.text.trim().isNotEmpty &&
+                                (_results.isNotEmpty ||
+                                    _filteredResultCount > 0))
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Text(
+                                  '结果 ${_results.length} 条 · 过滤 $_filteredResultCount 条',
+                                ),
+                              ),
+                            if (_errorMessage != null)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Text('搜索失败：$_errorMessage'),
+                              )
+                            else if (_results.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Text(
+                                  _controller.text.trim().isEmpty
+                                      ? '输入关键字后开始搜索。'
+                                      : _filteredResultCount > 0
+                                          ? '没有可用结果，已过滤 $_filteredResultCount 条结果。'
+                                          : '没有找到结果。',
+                                ),
+                              ),
                           ],
-                          if (_controller.text.trim().isNotEmpty &&
-                              (_results.isNotEmpty || _filteredResultCount > 0))
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Text(
-                                '结果 ${_results.length} 条 · 过滤 $_filteredResultCount 条',
-                              ),
-                            ),
-                          if (_errorMessage != null)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Text('搜索失败：$_errorMessage'),
-                            )
-                          else if (_results.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Text(
-                                _controller.text.trim().isEmpty
-                                    ? '输入关键字后开始搜索。'
-                                    : _filteredResultCount > 0
-                                        ? '没有可用结果，已过滤 $_filteredResultCount 条结果。'
-                                        : '没有找到结果。',
-                              ),
-                            ),
-                        ],
+                        ),
                       ),
                     ),
                     if (_results.isNotEmpty)
-                      ..._results.asMap().entries.map(
-                            (entry) => _SearchResultCard(
-                              result: entry.value,
-                              focusId: 'search:result:${entry.value.id}',
-                              autofocus: entry.key == 0,
+                      SliverList(
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            final result = _results[index];
+                            return _SearchResultCard(
+                              result: result,
+                              focusId: 'search:result:${result.id}',
+                              autofocus: index == 0,
                               isSaving:
-                                  _savingResultIds.contains(entry.value.id),
+                                  _savingResultIds.contains(result.id),
                               showSaveAction: _canSaveResultToQuark(
-                                result: entry.value,
+                                result: result,
                                 networkStorage: networkStorage,
                               ),
                               onSave: () => _saveResultToQuark(
-                                result: entry.value,
+                                result: result,
                                 networkStorage: networkStorage,
                               ),
-                            ),
-                          ),
-                    const SizedBox(height: 8),
+                            );
+                          },
+                          childCount: _results.length,
+                        ),
+                      ),
+                    const SliverToBoxAdapter(child: SizedBox(height: 8)),
                   ],
                 ),
               ),
@@ -714,7 +726,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
 
   Future<void> _openTelevisionQueryDialog() async {
     final controller = TextEditingController(text: _controller.text);
-    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     final queryFocusNode = FocusNode(debugLabel: 'search-query-dialog-field');
     final cancelFocusNode = FocusNode(debugLabel: 'search-query-dialog-cancel');
     final confirmFocusNode =
@@ -1154,7 +1166,7 @@ class _SearchResultCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final posterUrl = result.posterUrl.trim();
     final resourceUri = _parseLaunchUri(result.resourceUrl);
     void onOpen() {

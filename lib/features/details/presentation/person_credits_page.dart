@@ -51,6 +51,12 @@ class PersonCreditsPageTarget {
   final PersonCreditsRole role;
 }
 
+enum _PersonCreditsSortMode {
+  newest,
+  oldest,
+  tmdbRating,
+}
+
 class PersonCreditsPage extends ConsumerStatefulWidget {
   const PersonCreditsPage({super.key, required this.target});
 
@@ -74,7 +80,7 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
       TvFocusMemoryController();
   final RetainedAsyncController<_PersonCreditsPageResult> _retainedResultAsync =
       RetainedAsyncController<_PersonCreditsPageResult>();
-  bool _sortNewestFirst = true;
+  _PersonCreditsSortMode _sortMode = _PersonCreditsSortMode.newest;
   String _selectedPrimaryCategory = _allCategoryLabel;
   String _selectedMovieGenre = _allCategoryLabel;
 
@@ -84,7 +90,7 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
     if (oldWidget.target.role != widget.target.role ||
         oldWidget.target.person.name != widget.target.person.name ||
         oldWidget.target.person.avatarUrl != widget.target.person.avatarUrl) {
-      _sortNewestFirst = true;
+      _sortMode = _PersonCreditsSortMode.newest;
       _selectedPrimaryCategory = _allCategoryLabel;
       _selectedMovieGenre = _allCategoryLabel;
       _retainedResultAsync.clear();
@@ -101,7 +107,7 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
 
   @override
   Widget build(BuildContext context) {
-    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final target = widget.target;
     final watchedResultAsync =
         isPageVisible ? ref.watch(_personCreditsPageProvider(target)) : null;
@@ -136,41 +142,39 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
                       }
                       final availablePrimaryCategories =
                           _collectAvailablePrimaryCategories(result.items);
-                      final selectedPrimaryCategory =
-                          availablePrimaryCategories
-                                  .contains(_selectedPrimaryCategory)
-                              ? _selectedPrimaryCategory
-                              : _allCategoryLabel;
+                      final selectedPrimaryCategory = availablePrimaryCategories
+                              .contains(_selectedPrimaryCategory)
+                          ? _selectedPrimaryCategory
+                          : _allCategoryLabel;
                       final availableMovieGenres =
                           _collectAvailableMovieGenres(result.items);
-                      final selectedMovieGenre =
-                          selectedPrimaryCategory == _movieCategoryLabel &&
-                                  availableMovieGenres
-                                      .contains(_selectedMovieGenre)
-                              ? _selectedMovieGenre
-                              : _allCategoryLabel;
+                      final selectedMovieGenre = selectedPrimaryCategory ==
+                                  _movieCategoryLabel &&
+                              availableMovieGenres.contains(_selectedMovieGenre)
+                          ? _selectedMovieGenre
+                          : _allCategoryLabel;
                       final visibleItems = _sortAndFilterPersonCredits(
                         items: result.items,
                         selectedPrimaryCategory: selectedPrimaryCategory,
                         selectedMovieGenre: selectedMovieGenre,
-                        newestFirst: _sortNewestFirst,
+                        sortMode: _sortMode,
                       );
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _PersonCreditsControls(
-                            sortNewestFirst: _sortNewestFirst,
+                            sortMode: _sortMode,
                             selectedPrimaryCategory: selectedPrimaryCategory,
                             availablePrimaryCategories:
                                 availablePrimaryCategories,
                             selectedMovieGenre: selectedMovieGenre,
                             availableMovieGenres: availableMovieGenres,
                             onSortChanged: (value) {
-                              if (_sortNewestFirst == value) {
+                              if (_sortMode == value) {
                                 return;
                               }
                               setState(() {
-                                _sortNewestFirst = value;
+                                _sortMode = value;
                               });
                             },
                             onPrimaryCategoryChanged: (value) {
@@ -277,6 +281,7 @@ class _PersonCreditCardData {
     required this.title,
     required this.subtitle,
     required this.year,
+    required this.tmdbRating,
     required this.typeLabel,
     required this.primaryCategoryLabel,
     required this.genreLabels,
@@ -287,6 +292,7 @@ class _PersonCreditCardData {
   final String title;
   final String subtitle;
   final int year;
+  final double? tmdbRating;
   final String typeLabel;
   final String primaryCategoryLabel;
   final List<String> genreLabels;
@@ -319,12 +325,28 @@ _PersonCreditCardData _toPersonCreditCard(TmdbPersonCredit credit) {
     title: credit.title,
     subtitle: subtitleParts.join(' · '),
     year: credit.year,
+    tmdbRating: _extractTmdbRatingValue(credit.ratingLabels),
     typeLabel: preferredType,
     primaryCategoryLabel: _resolvePersonCreditPrimaryCategory(credit),
     genreLabels: _resolvePersonCreditGenres(credit),
     ratingLabel: preferredRating,
     detailTarget: detailTarget,
   );
+}
+
+double? _extractTmdbRatingValue(Iterable<String> labels) {
+  for (final label in labels) {
+    final trimmed = label.trim();
+    if (trimmed.isEmpty || !trimmed.toLowerCase().contains('tmdb')) {
+      continue;
+    }
+    final match = RegExp(r'(\d+(?:\.\d+)?)').firstMatch(trimmed);
+    if (match == null) {
+      continue;
+    }
+    return double.tryParse(match.group(1)!);
+  }
+  return null;
 }
 
 String _preferredRatingLabel(Iterable<String> labels) {
@@ -422,39 +444,60 @@ List<_PersonCreditCardData> _sortAndFilterPersonCredits({
   required List<_PersonCreditCardData> items,
   required String selectedPrimaryCategory,
   required String selectedMovieGenre,
-  required bool newestFirst,
+  required _PersonCreditsSortMode sortMode,
 }) {
-  final filtered = items
-      .where(
-        (item) {
-          if (selectedPrimaryCategory ==
-              _PersonCreditsPageState._allCategoryLabel) {
-            return true;
-          }
-          if (selectedPrimaryCategory ==
-              _PersonCreditsPageState._movieCategoryLabel) {
-            if (item.primaryCategoryLabel !=
-                _PersonCreditsPageState._movieCategoryLabel) {
-              return false;
-            }
-            if (selectedMovieGenre ==
-                _PersonCreditsPageState._allCategoryLabel) {
-              return true;
-            }
-            return item.genreLabels.contains(selectedMovieGenre);
-          }
-          return item.primaryCategoryLabel == selectedPrimaryCategory;
-        },
-      )
-      .toList();
+  final filtered = items.where(
+    (item) {
+      if (selectedPrimaryCategory ==
+          _PersonCreditsPageState._allCategoryLabel) {
+        return true;
+      }
+      if (selectedPrimaryCategory ==
+          _PersonCreditsPageState._movieCategoryLabel) {
+        if (item.primaryCategoryLabel !=
+            _PersonCreditsPageState._movieCategoryLabel) {
+          return false;
+        }
+        if (selectedMovieGenre == _PersonCreditsPageState._allCategoryLabel) {
+          return true;
+        }
+        return item.genreLabels.contains(selectedMovieGenre);
+      }
+      return item.primaryCategoryLabel == selectedPrimaryCategory;
+    },
+  ).toList();
   filtered.sort((a, b) {
+    if (sortMode == _PersonCreditsSortMode.tmdbRating) {
+      final aRating = a.tmdbRating;
+      final bRating = b.tmdbRating;
+      if (aRating == null && bRating != null) {
+        return 1;
+      }
+      if (aRating != null && bRating == null) {
+        return -1;
+      }
+      if (aRating != null && bRating != null) {
+        final ratingCompare = bRating.compareTo(aRating);
+        if (ratingCompare != 0) {
+          return ratingCompare;
+        }
+      }
+      final yearCompare = b.year.compareTo(a.year);
+      if (yearCompare != 0) {
+        return yearCompare;
+      }
+      return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+    }
     final aUnknownYear = a.year <= 0;
     final bUnknownYear = b.year <= 0;
     if (aUnknownYear != bUnknownYear) {
       return aUnknownYear ? 1 : -1;
     }
-    final yearCompare =
-        newestFirst ? b.year.compareTo(a.year) : a.year.compareTo(b.year);
+    final yearCompare = switch (sortMode) {
+      _PersonCreditsSortMode.newest => b.year.compareTo(a.year),
+      _PersonCreditsSortMode.oldest => a.year.compareTo(b.year),
+      _PersonCreditsSortMode.tmdbRating => 0,
+    };
     if (yearCompare != 0) {
       return yearCompare;
     }
@@ -705,7 +748,7 @@ class _PersonCreditsGrid extends StatelessWidget {
 
 class _PersonCreditsControls extends StatelessWidget {
   const _PersonCreditsControls({
-    required this.sortNewestFirst,
+    required this.sortMode,
     required this.selectedPrimaryCategory,
     required this.availablePrimaryCategories,
     required this.selectedMovieGenre,
@@ -715,12 +758,12 @@ class _PersonCreditsControls extends StatelessWidget {
     required this.onMovieGenreChanged,
   });
 
-  final bool sortNewestFirst;
+  final _PersonCreditsSortMode sortMode;
   final String selectedPrimaryCategory;
   final List<String> availablePrimaryCategories;
   final String selectedMovieGenre;
   final List<String> availableMovieGenres;
-  final ValueChanged<bool> onSortChanged;
+  final ValueChanged<_PersonCreditsSortMode> onSortChanged;
   final ValueChanged<String> onPrimaryCategoryChanged;
   final ValueChanged<String> onMovieGenreChanged;
 
@@ -740,16 +783,24 @@ class _PersonCreditsControls extends StatelessWidget {
                 StarflowChipButton(
                   label: '最新',
                   icon: Icons.south_rounded,
-                  selected: sortNewestFirst,
-                  onPressed: () => onSortChanged(true),
+                  selected: sortMode == _PersonCreditsSortMode.newest,
+                  onPressed: () => onSortChanged(_PersonCreditsSortMode.newest),
                   focusId: 'person-credits:sort:newest',
                 ),
                 StarflowChipButton(
                   label: '最旧',
                   icon: Icons.north_rounded,
-                  selected: !sortNewestFirst,
-                  onPressed: () => onSortChanged(false),
+                  selected: sortMode == _PersonCreditsSortMode.oldest,
+                  onPressed: () => onSortChanged(_PersonCreditsSortMode.oldest),
                   focusId: 'person-credits:sort:oldest',
+                ),
+                StarflowChipButton(
+                  label: 'TMDB评分',
+                  icon: Icons.star_rounded,
+                  selected: sortMode == _PersonCreditsSortMode.tmdbRating,
+                  onPressed: () =>
+                      onSortChanged(_PersonCreditsSortMode.tmdbRating),
+                  focusId: 'person-credits:sort:tmdb-rating',
                 ),
               ],
             ),

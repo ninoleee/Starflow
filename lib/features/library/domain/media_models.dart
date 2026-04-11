@@ -5,6 +5,34 @@ enum MediaSourceKind {
 }
 
 const kNoSectionsSelectedSentinel = '__none__';
+const List<String> kDefaultVarietySpecialEpisodeKeywords = <String>[
+  '先导片',
+  '先导篇',
+  '先导',
+  '特别篇',
+  '特辑',
+  '番外',
+  '彩蛋',
+  '加更',
+  '加更版',
+  '超前',
+  '超前营业',
+  '纯享',
+  '纯享版',
+  '舞台纯享',
+  '舞台纯享版',
+  '直拍',
+  '直拍版',
+  'reaction',
+  '训练室',
+  '训练室全纪录',
+  '练习室',
+  '见面会',
+  '未播',
+  '幕后',
+  '幕后花絮',
+  '直播回顾',
+];
 
 extension MediaSourceKindX on MediaSourceKind {
   String get label {
@@ -46,6 +74,8 @@ class MediaSourceConfig {
     this.webDavSeriesScrapeUsesDirectoryTitleOnly = false,
     this.webDavExcludedPathKeywords = const [],
     this.webDavSeriesTitleFilterKeywords = const [],
+    this.webDavSpecialEpisodeKeywords = const [],
+    this.webDavExtraKeywords = const [],
   });
 
   final String id;
@@ -66,6 +96,8 @@ class MediaSourceConfig {
   final bool webDavSeriesScrapeUsesDirectoryTitleOnly;
   final List<String> webDavExcludedPathKeywords;
   final List<String> webDavSeriesTitleFilterKeywords;
+  final List<String> webDavSpecialEpisodeKeywords;
+  final List<String> webDavExtraKeywords;
 
   bool get hasAccessToken => accessToken.trim().isNotEmpty;
 
@@ -106,6 +138,8 @@ class MediaSourceConfig {
     bool? webDavSeriesScrapeUsesDirectoryTitleOnly,
     List<String>? webDavExcludedPathKeywords,
     List<String>? webDavSeriesTitleFilterKeywords,
+    List<String>? webDavSpecialEpisodeKeywords,
+    List<String>? webDavExtraKeywords,
   }) {
     return MediaSourceConfig(
       id: id ?? this.id,
@@ -132,6 +166,9 @@ class MediaSourceConfig {
           webDavExcludedPathKeywords ?? this.webDavExcludedPathKeywords,
       webDavSeriesTitleFilterKeywords: webDavSeriesTitleFilterKeywords ??
           this.webDavSeriesTitleFilterKeywords,
+      webDavSpecialEpisodeKeywords:
+          webDavSpecialEpisodeKeywords ?? this.webDavSpecialEpisodeKeywords,
+      webDavExtraKeywords: webDavExtraKeywords ?? this.webDavExtraKeywords,
     );
   }
 
@@ -156,6 +193,8 @@ class MediaSourceConfig {
           webDavSeriesScrapeUsesDirectoryTitleOnly,
       'webDavExcludedPathKeywords': webDavExcludedPathKeywords,
       'webDavSeriesTitleFilterKeywords': webDavSeriesTitleFilterKeywords,
+      'webDavSpecialEpisodeKeywords': webDavSpecialEpisodeKeywords,
+      'webDavExtraKeywords': webDavExtraKeywords,
     };
   }
 
@@ -192,6 +231,16 @@ class MediaSourceConfig {
       webDavSeriesTitleFilterKeywords:
           (json['webDavSeriesTitleFilterKeywords'] as List<dynamic>? ??
                   const [])
+              .map((item) => '$item')
+              .where((item) => item.trim().isNotEmpty)
+              .toList(),
+      webDavSpecialEpisodeKeywords:
+          (json['webDavSpecialEpisodeKeywords'] as List<dynamic>? ?? const [])
+              .map((item) => '$item')
+              .where((item) => item.trim().isNotEmpty)
+              .toList(),
+      webDavExtraKeywords:
+          (json['webDavExtraKeywords'] as List<dynamic>? ?? const [])
               .map((item) => '$item')
               .where((item) => item.trim().isNotEmpty)
               .toList(),
@@ -280,6 +329,37 @@ extension MediaSourceConfigWebDavFilterX on MediaSourceConfig {
     return values;
   }
 
+  List<String> get normalizedWebDavSpecialEpisodeKeywords {
+    final seen = <String>{};
+    final values = <String>[];
+    for (final source in [
+      kDefaultVarietySpecialEpisodeKeywords,
+      webDavSpecialEpisodeKeywords,
+    ]) {
+      for (final item in source) {
+        final normalized = item.trim().toLowerCase();
+        if (normalized.isEmpty || !seen.add(normalized)) {
+          continue;
+        }
+        values.add(normalized);
+      }
+    }
+    return values;
+  }
+
+  List<String> get normalizedWebDavExtraKeywords {
+    final seen = <String>{};
+    final values = <String>[];
+    for (final item in webDavExtraKeywords) {
+      final normalized = item.trim().toLowerCase();
+      if (normalized.isEmpty || !seen.add(normalized)) {
+        continue;
+      }
+      values.add(normalized);
+    }
+    return values;
+  }
+
   bool matchesWebDavExcludedPath(String rawPath) {
     if (kind != MediaSourceKind.nas && kind != MediaSourceKind.quark) {
       return false;
@@ -313,6 +393,36 @@ extension MediaSourceConfigWebDavFilterX on MediaSourceConfig {
       return false;
     }
     final keywords = normalizedWebDavSeriesTitleFilterKeywords;
+    if (keywords.isEmpty) {
+      return false;
+    }
+    final normalized = rawValue.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return false;
+    }
+    return keywords.any(normalized.contains);
+  }
+
+  bool matchesWebDavSpecialEpisodeKeyword(String rawValue) {
+    if (kind != MediaSourceKind.nas && kind != MediaSourceKind.quark) {
+      return false;
+    }
+    final keywords = normalizedWebDavSpecialEpisodeKeywords;
+    if (keywords.isEmpty) {
+      return false;
+    }
+    final normalized = rawValue.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return false;
+    }
+    return keywords.any(normalized.contains);
+  }
+
+  bool matchesWebDavExtraKeyword(String rawValue) {
+    if (kind != MediaSourceKind.nas && kind != MediaSourceKind.quark) {
+      return false;
+    }
+    final keywords = normalizedWebDavExtraKeywords;
     if (keywords.isEmpty) {
       return false;
     }

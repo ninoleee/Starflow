@@ -28,6 +28,47 @@ void main() {
       expect(route, PlaybackStartupRouteAction.launchSystemPlayer);
     });
 
+    test('stays on embedded mpv for header-protected target even if system player is selected', () {
+      final route = decidePlaybackStartupRoute(
+        PlaybackStartupRouteInput(
+          playbackEngine: PlaybackEngine.systemPlayer,
+          performanceAutoDowngradeHeavyPlaybackEnabled: true,
+          isTelevision: true,
+          isWeb: false,
+          target: baseTarget.copyWith(
+            headers: const {
+              'Cookie': 'kps=test; sign=test;',
+              'Referer': 'https://drive-pc.quark.cn',
+            },
+          ),
+        ),
+      );
+
+      expect(route, PlaybackStartupRouteAction.openEmbeddedMpv);
+    });
+
+    test('allows system player for relay-backed quark target without headers', () {
+      final route = decidePlaybackStartupRoute(
+        PlaybackStartupRouteInput(
+          playbackEngine: PlaybackEngine.systemPlayer,
+          performanceAutoDowngradeHeavyPlaybackEnabled: true,
+          isTelevision: true,
+          isWeb: false,
+          target: baseTarget.copyWith(
+            sourceId: 'quark-main',
+            sourceName: 'Quark',
+            sourceKind: MediaSourceKind.quark,
+            streamUrl:
+                'http://127.0.0.1:8787/playback-relay/session/video.mkv',
+            actualAddress: 'https://download.example.com/video.mkv',
+            headers: const <String, String>{},
+          ),
+        ),
+      );
+
+      expect(route, PlaybackStartupRouteAction.launchSystemPlayer);
+    });
+
     test('routes to native container when engine is native container', () {
       final route = decidePlaybackStartupRoute(
         const PlaybackStartupRouteInput(
@@ -59,6 +100,28 @@ void main() {
       );
 
       expect(route, PlaybackStartupRouteAction.launchPerformanceFallback);
+    });
+
+    test('stays on embedded mpv for heavy header-protected target', () {
+      final route = decidePlaybackStartupRoute(
+        PlaybackStartupRouteInput(
+          playbackEngine: PlaybackEngine.embeddedMpv,
+          performanceAutoDowngradeHeavyPlaybackEnabled: true,
+          isTelevision: true,
+          isWeb: false,
+          target: baseTarget.copyWith(
+            width: 3840,
+            height: 2160,
+            bitrate: 30000000,
+            videoCodec: 'hevc',
+            headers: const {
+              'Cookie': 'kps=test; sign=test;',
+            },
+          ),
+        ),
+      );
+
+      expect(route, PlaybackStartupRouteAction.openEmbeddedMpv);
     });
 
     test('stays on embedded mpv for heavy target when device is not television',

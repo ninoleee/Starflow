@@ -1,3 +1,6 @@
+import 'dart:collection';
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/webdav_trace.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -17,8 +20,11 @@ import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
+part 'nas_media_indexer_refresh_support.dart';
+part 'nas_media_indexer_grouping.dart';
+
 final nasMediaIndexerProvider = Provider<NasMediaIndexer>((ref) {
-  return NasMediaIndexer(
+  final indexer = NasMediaIndexer(
     store: ref.read(nasMediaIndexStoreProvider),
     webDavNasClient: ref.read(webDavNasClientProvider),
     quarkExternalStorageClient: ref.read(quarkExternalStorageClientProvider),
@@ -31,6 +37,10 @@ final nasMediaIndexerProvider = Provider<NasMediaIndexer>((ref) {
       ref.read(nasMediaIndexRevisionProvider.notifier).state++;
     },
   );
+  ref.onDispose(() {
+    unawaited(indexer.dispose());
+  });
+  return indexer;
 });
 
 class NasMediaIndexer {
@@ -44,6 +54,8 @@ class NasMediaIndexer {
     required AppSettings Function() readSettings,
     required WebDavScrapeProgressController progressController,
     void Function()? notifyIndexChanged,
+    NasMediaIndexerConcurrencyLimits concurrencyLimits =
+        const NasMediaIndexerConcurrencyLimits(),
   })  : _store = store,
         _webDavNasClient = webDavNasClient,
         _quarkExternalStorageClient = quarkExternalStorageClient,
@@ -52,13 +64,21 @@ class NasMediaIndexer {
         _imdbRatingClient = imdbRatingClient,
         _readSettings = readSettings,
         _progressController = progressController,
-        _notifyIndexChanged = notifyIndexChanged;
+        _notifyIndexChanged = notifyIndexChanged,
+        _sourceBudget = _ConcurrencyBudget(
+          concurrencyLimits.normalizedSourceRefreshConcurrency,
+        ),
+        _collectionBudget = _ConcurrencyBudget(
+          concurrencyLimits.normalizedCollectionRefreshConcurrency,
+        ),
+        _enrichmentBudget = _ConcurrencyBudget(
+          concurrencyLimits.normalizedEnrichmentConcurrency,
+        );
 
   static const int _defaultRefreshLimitPerCollection = 1200;
   static const String _seriesGroupPrefix = 'webdav-series';
   static const String _seasonGroupPrefix = 'webdav-season';
   static const String _webDavMetadataSchemaVersion = 'webdav-v6';
-
   final NasMediaIndexStore _store;
   final WebDavNasClient _webDavNasClient;
   final QuarkExternalStorageClient? _quarkExternalStorageClient;
@@ -74,6 +94,18 @@ class NasMediaIndexer {
       <String, _RefreshTaskHandle>{};
   final Map<String, _NasLibraryMatchCache> _libraryMatchCaches =
       <String, _NasLibraryMatchCache>{};
+  bool _isDisposed = false;
+  final _ConcurrencyBudget _sourceBudget;
+  final _ConcurrencyBudget _collectionBudget;
+  final _ConcurrencyBudget _enrichmentBudget;
+
+  Future<void> dispose() async {
+    if (_isDisposed) {
+      return;
+    }
+    _isDisposed = true;
+    await cancelAllRefreshTasks(includeForceFull: true);
+  }
 
   Future<void> cancelAllRefreshTasks({
     bool includeForceFull = false,
@@ -298,7 +330,7 @@ class NasMediaIndexer {
             : (existingState?.emptyAutoRebuildAttempted ?? false),
       ),
     );
-    _notifyIndexChanged?.call();
+    _notifyIndexChangedSafely();
   }
 
   Future<NasMediaIndexRecord?> loadRecord({
@@ -361,7 +393,7 @@ class NasMediaIndexer {
       return null;
     }
 
-    final settings = _readSettings();
+    final settings = _readSettingsForRefresh();
     MediaSourceConfig? source;
     for (final candidate in settings.mediaSources) {
       if (candidate.id == sourceId) {
@@ -474,11 +506,6 @@ class NasMediaIndexer {
       }
       final group = targetGroup.first;
       final seasonGroups = group.seasonGroups;
-      if (_shouldFlattenSingleSeasonGroup(group, seasonGroups)) {
-        return _materializeEpisodeItems(seasonGroups.values.expand((e) => e))
-            .take(limit)
-            .toList(growable: false);
-      }
       return seasonGroups.entries
           .map((entry) => _buildSeasonItem(group, entry.key, entry.value))
           .toList(growable: false)
@@ -511,6 +538,59 @@ class NasMediaIndexer {
     }
 
     return const [];
+  }
+
+  Future<List<MediaItem>> loadEpisodeVariants(
+    MediaSourceConfig source, {
+    required String itemId,
+    String sectionId = '',
+    List<MediaCollection>? scopedCollections,
+  }) async {
+    final normalizedItemId = itemId.trim();
+    if (normalizedItemId.isEmpty) {
+      return const [];
+    }
+
+    final records = await _loadScopedRecords(
+      source,
+      sectionId: sectionId,
+      scopedCollections: scopedCollections,
+    );
+    if (records.isEmpty) {
+      return const [];
+    }
+
+    final exactRecord = records
+        .where((record) => record.resourceId == normalizedItemId)
+        .firstOrNull;
+    if (exactRecord == null) {
+      return const [];
+    }
+
+    final seasonNumber = _resolvedRecordSeasonNumber(exactRecord);
+    final episodeNumber = _resolvedRecordEpisodeNumber(exactRecord);
+    if (seasonNumber == null || episodeNumber == null) {
+      return [exactRecord.item];
+    }
+
+    final group = _groupSeriesRecords(records)
+        .where(
+          (candidate) => candidate.records.any(
+            (record) => record.resourceId == normalizedItemId,
+          ),
+        )
+        .firstOrNull;
+    final variantRecords = (group?.records ?? [exactRecord])
+        .where(
+          (record) =>
+              _resolvedRecordSeasonNumber(record) == seasonNumber &&
+              _resolvedRecordEpisodeNumber(record) == episodeNumber,
+        )
+        .toList(growable: false);
+    final sortedRecords = _sortEpisodeRecordsForDisplay(
+      variantRecords.isEmpty ? [exactRecord] : variantRecords,
+    );
+    return sortedRecords.map((record) => record.item).toList(growable: false);
   }
 
   Future<List<MediaItem>> loadCachedLibraryMatchItems(
@@ -587,7 +667,7 @@ class NasMediaIndexer {
     }
 
     final controller = _RefreshTaskController();
-    final task = Future<void>(() async {
+    final future = _sourceBudget.withPermit(() async {
       try {
         webDavTrace(
           'indexer.refresh.start',
@@ -608,7 +688,7 @@ class NasMediaIndexer {
           _imdbRatingClient.clearCache();
         }
 
-        final settings = _readSettings();
+        final settings = _readSettingsForRefresh();
         final shouldStageMetadata = source.webDavSidecarScrapingEnabled ||
             _hasOnlineMetadataEnabled(settings);
         final requiresSidecarMetadata = source.webDavSidecarScrapingEnabled;
@@ -644,21 +724,24 @@ class NasMediaIndexer {
         }
       } on _RefreshCancelledException {
         _clearProgressSafely(normalizedSourceId);
-      } catch (_) {
+      } catch (error, stackTrace) {
         _clearProgressSafely(normalizedSourceId);
-        rethrow;
+        if (_isProviderContainerDisposedError(error)) {
+          return;
+        }
+        Error.throwWithStackTrace(error, stackTrace);
       } finally {
         _activeRefreshTasks.remove(taskKey);
       }
     });
     _activeRefreshTasks[taskKey] = _RefreshTaskHandle(
-      future: task,
+      future: future,
       mode: forceFullRescan
           ? _RefreshTaskMode.forceFull
           : _RefreshTaskMode.incremental,
       controller: controller,
     );
-    await task;
+    await future;
   }
 
   Future<MediaDetailTarget?> applyManualMetadata({
@@ -675,6 +758,8 @@ class NasMediaIndexer {
     if (metadataMatch == null && imdbRatingMatch == null) {
       return null;
     }
+
+    await _cancelRefreshTasksForSource(sourceId);
 
     final records = await _loadSourceRecordsCached(sourceId);
     if (records.isEmpty) {
@@ -793,6 +878,33 @@ class NasMediaIndexer {
     return metadataMatch?.mediaType.toItemType ?? '';
   }
 
+  Future<void> _cancelRefreshTasksForSource(String sourceId) async {
+    final normalizedSourceId = sourceId.trim();
+    if (normalizedSourceId.isEmpty) {
+      return;
+    }
+    final taskPrefix = '$normalizedSourceId|';
+    final handles = <_RefreshTaskHandle>{
+      for (final entry in _activeRefreshTasks.entries)
+        if (entry.key.startsWith(taskPrefix)) entry.value,
+      for (final entry in _backgroundEnrichmentTasks.entries)
+        if (entry.key.startsWith(taskPrefix)) entry.value,
+    }.toList(growable: false);
+    if (handles.isEmpty) {
+      return;
+    }
+    for (final handle in handles) {
+      handle.cancel();
+    }
+    await Future.wait(
+      handles.map(
+        (handle) => handle.future.catchError((_) {
+          // Manual metadata writes are authoritative; cancelled refreshes are expected.
+        }),
+      ),
+    );
+  }
+
   Future<List<WebDavScannedItem>> _scanSource(
     MediaSourceConfig source, {
     required List<MediaCollection>? scopedCollections,
@@ -818,43 +930,45 @@ class NasMediaIndexer {
       var completedCollections = 0;
       final groups = await Future.wait(
         scopedCollections.asMap().entries.map((entry) async {
-          final collectionIndex = entry.key;
-          final collection = entry.value;
-          controller.throwIfCancelled();
-          late final List<WebDavScannedItem> result;
-          try {
-            result = await _scanLibraryFromExternalSource(
-              source,
-              sectionId: collection.id,
-              sectionName: collection.title,
-              limit: limitPerCollection,
-              includeSidecarMetadata: includeSidecarMetadata,
-              resetScanCaches: resetScanCaches && collectionIndex == 0,
-              shouldCancel: controller.isCancelled,
-            );
-          } catch (_) {
-            if (controller.cancelled) {
-              throw const _RefreshCancelledException();
+          return _collectionBudget.withPermit(() async {
+            final collectionIndex = entry.key;
+            final collection = entry.value;
+            controller.throwIfCancelled();
+            late final List<WebDavScannedItem> result;
+            try {
+              result = await _scanLibraryFromExternalSource(
+                source,
+                sectionId: collection.id,
+                sectionName: collection.title,
+                limit: limitPerCollection,
+                includeSidecarMetadata: includeSidecarMetadata,
+                resetScanCaches: resetScanCaches && collectionIndex == 0,
+                shouldCancel: controller.isCancelled,
+              );
+            } catch (_) {
+              if (controller.cancelled) {
+                throw const _RefreshCancelledException();
+              }
+              rethrow;
             }
-            rethrow;
-          }
-          controller.throwIfCancelled();
-          completedCollections += 1;
-          _progressController.updateScanning(
-            sourceId: source.id,
-            current: completedCollections,
-            total: scopedCollections.length,
-            detail: collection.title,
-          );
-          webDavTrace(
-            'indexer.scanSource.collection.done',
-            fields: {
-              'sourceId': source.id,
-              'collection': collection.title,
-              'count': result.length,
-            },
-          );
-          return result;
+            controller.throwIfCancelled();
+            completedCollections += 1;
+            _progressController.updateScanning(
+              sourceId: source.id,
+              current: completedCollections,
+              total: scopedCollections.length,
+              detail: collection.title,
+            );
+            webDavTrace(
+              'indexer.scanSource.collection.done',
+              fields: {
+                'sourceId': source.id,
+                'collection': collection.title,
+                'count': result.length,
+              },
+            );
+            return result;
+          });
         }),
       );
       final deduped = <String, WebDavScannedItem>{};
@@ -931,7 +1045,7 @@ class NasMediaIndexer {
   }) async {
     final now = DateTime.now();
     final normalizedSourceId = source.id.trim();
-    final settings = _readSettings();
+    final settings = _readSettingsForRefresh();
     final scannedItems = await _scanSource(
       source,
       scopedCollections: scopedCollections,
@@ -1048,7 +1162,7 @@ class NasMediaIndexer {
             : (existingState?.emptyAutoRebuildAttempted ?? false),
       ),
     );
-    _notifyIndexChanged?.call();
+    _notifyIndexChangedSafely();
     webDavTrace(
       'indexer.refresh.done',
       fields: {
@@ -1078,7 +1192,7 @@ class NasMediaIndexer {
     if (_backgroundEnrichmentTasks.containsKey(taskKey)) {
       return;
     }
-    final future = Future<void>(() async {
+    final future = _enrichmentBudget.withPermit(() async {
       try {
         await _refreshSelectedItemsPhase(
           source,
@@ -1095,6 +1209,10 @@ class NasMediaIndexer {
       } on _RefreshCancelledException {
         _clearProgressSafely(source.id);
       } catch (error) {
+        if (_isProviderContainerDisposedError(error)) {
+          _clearProgressSafely(source.id);
+          return;
+        }
         webDavTrace(
           'indexer.refresh.background.error',
           fields: {
@@ -1126,7 +1244,7 @@ class NasMediaIndexer {
   }) async {
     final normalizedSourceId = source.id.trim();
     final now = DateTime.now();
-    final settings = _readSettings();
+    final settings = _readSettingsForRefresh();
     controller.throwIfCancelled();
     final records = await _loadSourceRecordsCached(source.id);
     if (records.isEmpty || scannedItems.isEmpty) {
@@ -1244,7 +1362,7 @@ class NasMediaIndexer {
             : (existingState?.emptyAutoRebuildAttempted ?? false),
       ),
     );
-    _notifyIndexChanged?.call();
+    _notifyIndexChangedSafely();
     _clearProgressSafely(normalizedSourceId);
   }
 
@@ -1358,623 +1476,123 @@ class NasMediaIndexer {
   }
 
   List<MediaItem> _materializeLibraryItems(List<NasMediaIndexRecord> records) {
-    final nonSeriesItems = <MediaItem>[];
-    final groups = _groupSeriesRecords(records);
-    final groupedResourceIds = groups
-        .expand((group) => group.records.map((record) => record.resourceId))
-        .toSet();
-
-    for (final record in records) {
-      if (!groupedResourceIds.contains(record.resourceId)) {
-        nonSeriesItems.add(record.item);
-      }
-    }
-
-    final seriesItems = groups.map(_buildSeriesItem);
-    final allItems = [...nonSeriesItems, ...seriesItems];
-    allItems.sort((left, right) => right.addedAt.compareTo(left.addedAt));
-    return allItems;
+    return _NasMediaIndexerGroupingSupportX(this)
+        .materializeLibraryItems(records);
   }
 
   List<_SeriesRecordGroup> _groupSeriesRecords(
-      List<NasMediaIndexRecord> records) {
-    final seriesTitleFilterKeywords =
-        _webDavSeriesTitleFilterKeywordsForRecords(records);
-    final grouped = <String, List<NasMediaIndexRecord>>{};
-    for (final record in records) {
-      if (!_shouldGroupAsSeries(record)) {
-        continue;
-      }
-      final title = _seriesTitleForRecord(
-        record,
-        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-      );
-      if (title.isEmpty) {
-        continue;
-      }
-      final key = _buildSeriesGroupKey(
-        record,
-        title,
-        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-      );
-      grouped.putIfAbsent(key, () => <NasMediaIndexRecord>[]).add(record);
-      webDavTrace(
-        'indexer.groupSeries.record',
-        fields: {
-          'resourceId': record.resourceId,
-          'path': record.resourcePath,
-          'title': record.item.title,
-          'seriesTitle': title,
-          'groupKey': key,
-          'season': record.item.seasonNumber ?? record.recognizedSeasonNumber,
-          'episode':
-              record.item.episodeNumber ?? record.recognizedEpisodeNumber,
-        },
-      );
-    }
-    final groups = grouped.entries
-        .map(
-          (entry) => _SeriesRecordGroup(
-            seriesKey: entry.key,
-            records: entry.value,
-            title: _seriesTitleForRecord(
-              entry.value.first,
-              seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-            ),
-          ),
-        )
-        .toList(growable: false);
-    _logSeriesGroupingDiagnostics(
-      groups,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    );
-    webDavTrace(
-      'indexer.groupSeries.done',
-      fields: {
-        'groupCount': groups.length,
-        'groups': groups
-            .map((group) => '${group.title}:${group.records.length}')
-            .toList(),
-      },
-    );
-    return groups;
-  }
-
-  void _logSeriesGroupingDiagnostics(
-    List<_SeriesRecordGroup> groups, {
-    required List<String> seriesTitleFilterKeywords,
-  }) {
-    if (groups.isEmpty) {
-      return;
-    }
-
-    final groupsByNormalizedTitle = <String, List<_SeriesRecordGroup>>{};
-    for (final group in groups) {
-      final normalizedTitle = _normalizeMetadataQueryToken(group.title);
-      if (normalizedTitle.isEmpty) {
-        continue;
-      }
-      groupsByNormalizedTitle
-          .putIfAbsent(normalizedTitle, () => <_SeriesRecordGroup>[])
-          .add(group);
-    }
-
-    for (final entry in groupsByNormalizedTitle.entries) {
-      final splitGroups = entry.value;
-      if (splitGroups.length < 2) {
-        continue;
-      }
-      webDavTrace(
-        'indexer.groupSeries.split',
-        fields: {
-          'normalizedTitle': entry.key,
-          'titles': splitGroups.map((group) => group.title).toList(),
-          'groupKeys': splitGroups.map((group) => group.seriesKey).toList(),
-          'groups': splitGroups
-              .map(
-                (group) => _describeSeriesRecordGroupForDebug(
-                  group,
-                  seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-                ),
-              )
-              .toList(),
-        },
-      );
-    }
-  }
-
-  String _describeSeriesRecordGroupForDebug(
-    _SeriesRecordGroup group, {
-    required List<String> seriesTitleFilterKeywords,
-  }) {
-    final firstRecord = group.records.first;
-    final structureTitle = _seriesTitleFromStructurePath(
-      firstRecord,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    );
-    final structureRoot = _seriesStructureRootSegments(
-      firstRecord,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    ).join('/');
-    final recordSummaries = group.records
-        .take(8)
-        .map(
-          (record) => [
-            'path=${record.resourcePath}',
-            'item=${_cleanIndexedTitleLabel(record.item.title)}',
-            'parent=${_cleanIndexedTitleLabel(record.parentTitle)}',
-            'recognized=${_cleanIndexedTitleLabel(record.recognizedTitle)}',
-            'series=${_seriesTitleForRecord(record, seriesTitleFilterKeywords: seriesTitleFilterKeywords)}',
-            'season=${record.item.seasonNumber ?? record.recognizedSeasonNumber ?? 0}',
-            'episode=${record.item.episodeNumber ?? record.recognizedEpisodeNumber ?? 0}',
-          ].join(' | '),
-        )
-        .join(' || ');
-    return [
-      'title=${group.title}',
-      'key=${group.seriesKey}',
-      'count=${group.records.length}',
-      'structureTitle=$structureTitle',
-      'structureRoot=$structureRoot',
-      'sample=$recordSummaries',
-    ].join(' || ');
-  }
-
-  bool _shouldGroupAsSeries(NasMediaIndexRecord record) {
-    final itemType = record.item.itemType.trim().toLowerCase();
-    final recognizedItemType = record.recognizedItemType.trim().toLowerCase();
-    if (itemType == 'series' || itemType == 'season' || itemType == 'movie') {
-      return false;
-    }
-    if (recognizedItemType == 'movie' &&
-        record.item.seasonNumber == null &&
-        record.item.episodeNumber == null &&
-        record.recognizedSeasonNumber == null &&
-        record.recognizedEpisodeNumber == null) {
-      return false;
-    }
-    return itemType == 'episode' ||
-        recognizedItemType == 'episode' ||
-        record.preferSeries ||
-        record.recognizedSeasonNumber != null ||
-        record.recognizedEpisodeNumber != null;
-  }
-
-  String _seriesTitleForRecord(
-    NasMediaIndexRecord record, {
-    List<String> seriesTitleFilterKeywords = const [],
-  }) {
-    final itemTitle = _cleanIndexedTitleLabel(record.item.title);
-    final parentTitle = _cleanIndexedTitleLabel(record.parentTitle);
-    final recognizedTitle = _cleanIndexedTitleLabel(record.recognizedTitle);
-    final itemType = record.item.itemType.trim().toLowerCase();
-    final structureSeriesTitle = _seriesTitleFromStructurePath(
-      record,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    );
-    final parentLooksLikeSeason =
-        _looksLikeSeasonFolderLabel(record.parentTitle.trim());
-    final parentMatchesFilter = _matchesSeriesTitleFilterKeyword(
-      record.parentTitle,
-      cleanedValue: parentTitle,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    );
-    final canUseParentTitle = parentTitle.isNotEmpty &&
-        !parentLooksLikeSeason &&
-        !parentMatchesFilter;
-    final prefersStructureGrouping =
-        _prefersStructureRootSeriesGrouping(record, structureSeriesTitle);
-    final filteredStructureStopTriggered =
-        _hasFilteredSeriesStopInStructurePath(
-      record,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    );
-    final normalizedParentTitle = _normalizeMetadataQueryToken(parentTitle);
-    final normalizedRecognizedTitle =
-        _normalizeMetadataQueryToken(recognizedTitle);
-    final normalizedStructureTitle =
-        _normalizeMetadataQueryToken(structureSeriesTitle);
-    final hasCanonicalIds = record.item.imdbId.trim().isNotEmpty ||
-        record.item.tmdbId.trim().isNotEmpty ||
-        record.item.doubanId.trim().isNotEmpty;
-    final parentAlignsWithStructure = normalizedParentTitle.isEmpty ||
-        normalizedStructureTitle.isEmpty ||
-        normalizedParentTitle == normalizedStructureTitle;
-    final parentWasExplicitlyPromoted = hasCanonicalIds &&
-        canUseParentTitle &&
-        normalizedParentTitle.isNotEmpty &&
-        normalizedParentTitle == normalizedRecognizedTitle;
-    final parentConflictsWithFilteredStructure =
-        filteredStructureStopTriggered &&
-            normalizedParentTitle.isNotEmpty &&
-            normalizedStructureTitle.isNotEmpty &&
-            normalizedParentTitle != normalizedStructureTitle;
-    if (prefersStructureGrouping && structureSeriesTitle.isNotEmpty) {
-      if (parentWasExplicitlyPromoted) {
-        return parentTitle;
-      }
-      if (itemType == 'episode' &&
-          canUseParentTitle &&
-          parentAlignsWithStructure &&
-          !parentConflictsWithFilteredStructure) {
-        return parentTitle;
-      }
-      if (record.preferSeries &&
-          canUseParentTitle &&
-          parentAlignsWithStructure) {
-        return parentTitle;
-      }
-      return structureSeriesTitle;
-    }
-    if (itemType == 'episode' && hasCanonicalIds && canUseParentTitle) {
-      return parentTitle;
-    }
-    if (itemType == 'episode') {
-      if (canUseParentTitle) {
-        return parentTitle;
-      }
-      if (structureSeriesTitle.isNotEmpty) {
-        return structureSeriesTitle;
-      }
-      if (recognizedTitle.isNotEmpty) {
-        return recognizedTitle;
-      }
-    }
-    if (record.preferSeries && canUseParentTitle) {
-      return parentTitle;
-    }
-    if (record.preferSeries && recognizedTitle.isNotEmpty) {
-      return recognizedTitle;
-    }
-    if (structureSeriesTitle.isNotEmpty &&
-        (itemType == 'episode' ||
-            record.preferSeries ||
-            record.item.seasonNumber != null ||
-            record.recognizedSeasonNumber != null)) {
-      return structureSeriesTitle;
-    }
-    return itemTitle;
-  }
-
-  bool _prefersStructureRootSeriesGrouping(
-    NasMediaIndexRecord record, [
-    String? resolvedStructureTitle,
-  ]) {
-    if (record.item.sourceKind != MediaSourceKind.nas &&
-        record.item.sourceKind != MediaSourceKind.quark) {
-      return false;
-    }
-    final structureTitle =
-        (resolvedStructureTitle ?? _seriesTitleFromStructurePath(record))
-            .trim();
-    if (structureTitle.isEmpty) {
-      return false;
-    }
-    final itemType = record.item.itemType.trim().toLowerCase();
-    final recognizedItemType = record.recognizedItemType.trim().toLowerCase();
-    return itemType == 'episode' ||
-        recognizedItemType == 'episode' ||
-        record.preferSeries ||
-        record.item.seasonNumber != null ||
-        record.recognizedSeasonNumber != null ||
-        record.item.episodeNumber != null ||
-        record.recognizedEpisodeNumber != null;
-  }
-
-  String _seriesTitleFromStructurePath(
-    NasMediaIndexRecord record, {
-    List<String> seriesTitleFilterKeywords = const [],
-  }) {
-    final resourceSegments = _pathSegments(record.resourcePath);
-    if (resourceSegments.isEmpty) {
-      return '';
-    }
-
-    final hasSeasonHint = record.item.seasonNumber != null ||
-        record.recognizedSeasonNumber != null;
-    final itemType = record.item.itemType.trim().toLowerCase();
-    final sectionSegments = _pathSegments(_uriPath(record.sectionId));
-    final fileFallbackTitle = _cleanIndexedTitleLabel(
-      record.recognizedTitle.trim().isNotEmpty
-          ? record.recognizedTitle
-          : record.originalFileName,
-    );
-
-    var commonLength = 0;
-    while (commonLength < sectionSegments.length &&
-        commonLength < resourceSegments.length &&
-        sectionSegments[commonLength] == resourceSegments[commonLength]) {
-      commonLength += 1;
-    }
-
-    final relativeDirectories = resourceSegments.length <= commonLength + 1
-        ? <String>[]
-        : resourceSegments.sublist(commonLength, resourceSegments.length - 1);
-    if (relativeDirectories.isEmpty) {
-      if (hasSeasonHint && sectionSegments.isNotEmpty) {
-        final filteredSectionFallback = _fallbackTitleFromFilteredSectionRoot(
-          sectionSegments: sectionSegments,
-          relativeDirectories: relativeDirectories,
-          fileFallbackTitle: fileFallbackTitle,
-          seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-        );
-        if (filteredSectionFallback != null) {
-          return filteredSectionFallback;
-        }
-        return _cleanIndexedTitleLabel(sectionSegments.last);
-      }
-      return '';
-    }
-
-    final stoppedTitle = _stoppedSeriesTitleByFilteredDirectory(
-      relativeDirectories: relativeDirectories,
-      fileFallbackTitle: fileFallbackTitle,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    );
-    if (stoppedTitle != null &&
-        (hasSeasonHint || record.preferSeries || itemType == 'episode')) {
-      return stoppedTitle;
-    }
-
-    final seasonDirectoryIndex =
-        relativeDirectories.indexWhere(_looksLikeSeasonFolderLabel);
-    if (seasonDirectoryIndex >= 0 &&
-        _canUseSeasonDirectoryAsSeriesRoot(
-          relativeDirectories[seasonDirectoryIndex],
-          parentMatchesFilter: _parentDirectoryMatchesSeriesTitleFilterKeyword(
-                relativeDirectories: relativeDirectories,
-                childIndex: seasonDirectoryIndex,
-                seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-              ) ||
-              (seasonDirectoryIndex == 0 &&
-                  _isFilteredSectionRoot(
-                    sectionSegments: sectionSegments,
-                    seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-                  )),
-        )) {
-      return _cleanIndexedTitleLabel(relativeDirectories[seasonDirectoryIndex]);
-    }
-    if (seasonDirectoryIndex > 0) {
-      return _cleanIndexedTitleLabel(
-        relativeDirectories[seasonDirectoryIndex - 1],
-      );
-    }
-    if (seasonDirectoryIndex == 0 && sectionSegments.isNotEmpty) {
-      final filteredSectionFallback = _fallbackTitleFromFilteredSectionRoot(
-        sectionSegments: sectionSegments,
-        relativeDirectories: relativeDirectories,
-        fileFallbackTitle: fileFallbackTitle,
-        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-      );
-      if (filteredSectionFallback != null) {
-        return filteredSectionFallback;
-      }
-      return _cleanIndexedTitleLabel(sectionSegments.last);
-    }
-
-    final trailingStructureRoot =
-        _nearestNonSeasonDirectory(relativeDirectories);
-    if (trailingStructureRoot.isNotEmpty &&
-        (hasSeasonHint || record.preferSeries || itemType == 'episode')) {
-      return _cleanIndexedTitleLabel(trailingStructureRoot);
-    }
-
-    if (relativeDirectories.isNotEmpty) {
-      return _cleanIndexedTitleLabel(relativeDirectories.first);
-    }
-
-    if (hasSeasonHint && sectionSegments.isNotEmpty) {
-      return _cleanIndexedTitleLabel(sectionSegments.last);
-    }
-    return '';
-  }
-
-  List<String> _seriesStructureRootSegments(
-    NasMediaIndexRecord record, {
-    List<String> seriesTitleFilterKeywords = const [],
-  }) {
-    final resourceSegments = _pathSegments(record.resourcePath);
-    if (resourceSegments.isEmpty) {
-      return const [];
-    }
-
-    final hasSeasonHint = record.item.seasonNumber != null ||
-        record.recognizedSeasonNumber != null;
-    final itemType = record.item.itemType.trim().toLowerCase();
-    final sectionSegments = _pathSegments(_uriPath(record.sectionId));
-
-    var commonLength = 0;
-    while (commonLength < sectionSegments.length &&
-        commonLength < resourceSegments.length &&
-        sectionSegments[commonLength] == resourceSegments[commonLength]) {
-      commonLength += 1;
-    }
-
-    final relativeDirectories = resourceSegments.length <= commonLength + 1
-        ? <String>[]
-        : resourceSegments.sublist(commonLength, resourceSegments.length - 1);
-    if (relativeDirectories.isEmpty) {
-      return const [];
-    }
-
-    final stoppedRootSegments = _stoppedSeriesRootSegmentsByFilteredDirectory(
-      relativeDirectories: relativeDirectories,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    );
-    if (stoppedRootSegments != null &&
-        (hasSeasonHint || record.preferSeries || itemType == 'episode')) {
-      return stoppedRootSegments;
-    }
-
-    final seasonDirectoryIndex =
-        relativeDirectories.indexWhere(_looksLikeSeasonFolderLabel);
-    if (seasonDirectoryIndex >= 0 &&
-        _canUseSeasonDirectoryAsSeriesRoot(
-          relativeDirectories[seasonDirectoryIndex],
-          parentMatchesFilter: _parentDirectoryMatchesSeriesTitleFilterKeyword(
-                relativeDirectories: relativeDirectories,
-                childIndex: seasonDirectoryIndex,
-                seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-              ) ||
-              (seasonDirectoryIndex == 0 &&
-                  _isFilteredSectionRoot(
-                    sectionSegments: sectionSegments,
-                    seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-                  )),
-        )) {
-      return relativeDirectories.sublist(
-        seasonDirectoryIndex,
-        seasonDirectoryIndex + 1,
-      );
-    }
-    if (seasonDirectoryIndex > 0) {
-      return relativeDirectories.sublist(0, seasonDirectoryIndex);
-    }
-    if (seasonDirectoryIndex == 0) {
-      return const [];
-    }
-
-    final trailingRootIndex = _lastNonSeasonDirectoryIndex(relativeDirectories);
-    if (trailingRootIndex >= 0 &&
-        (hasSeasonHint || record.preferSeries || itemType == 'episode')) {
-      return relativeDirectories.sublist(0, trailingRootIndex + 1);
-    }
-    return const [];
-  }
-
-  bool _shouldFlattenSingleSeasonGroup(
-    _SeriesRecordGroup group,
-    Map<int, List<NasMediaIndexRecord>> seasonGroups,
+    List<NasMediaIndexRecord> records,
   ) {
-    if (seasonGroups.length != 1) {
-      return false;
-    }
-    final onlySeasonRecords = seasonGroups.values.first;
-    return !_hasExplicitSeasonDirectory(onlySeasonRecords);
+    return _NasMediaIndexerGroupingSupportX(this).groupSeriesRecords(records);
   }
 
-  bool _hasExplicitSeasonDirectory(Iterable<NasMediaIndexRecord> records) {
-    for (final record in records) {
-      if (_recordHasExplicitSeasonDirectory(record)) {
-        return true;
-      }
-    }
-    return false;
+  MediaItem _buildSeriesItem(_SeriesRecordGroup group) {
+    return _NasMediaIndexerGroupingSupportX(this).buildSeriesItem(group);
   }
 
-  bool _recordHasExplicitSeasonDirectory(NasMediaIndexRecord record) {
-    final resourceSegments = _pathSegments(record.resourcePath);
-    if (resourceSegments.isEmpty) {
-      return false;
+  MediaItem _buildSeasonItem(
+    _SeriesRecordGroup group,
+    int seasonNumber,
+    List<NasMediaIndexRecord> records,
+  ) {
+    return _NasMediaIndexerGroupingSupportX(
+      this,
+    ).buildSeasonItem(group, seasonNumber, records);
+  }
+
+  List<MediaItem> _materializeEpisodeItems(
+    Iterable<NasMediaIndexRecord> records,
+  ) {
+    return _NasMediaIndexerGroupingSupportX(this)
+        .materializeEpisodeItems(records);
+  }
+
+  int? _resolvedRecordSeasonNumber(NasMediaIndexRecord record) {
+    return record.item.seasonNumber ?? record.recognizedSeasonNumber;
+  }
+
+  int? _resolvedRecordEpisodeNumber(NasMediaIndexRecord record) {
+    return record.item.episodeNumber ?? record.recognizedEpisodeNumber;
+  }
+
+  List<NasMediaIndexRecord> _sortEpisodeRecordsForDisplay(
+    Iterable<NasMediaIndexRecord> records,
+  ) {
+    final sorted = records.toList(growable: false)
+      ..sort(_compareEpisodeRecordsForDisplay);
+    return sorted;
+  }
+
+  int _compareEpisodeRecordsForDisplay(
+    NasMediaIndexRecord left,
+    NasMediaIndexRecord right,
+  ) {
+    final seasonComparison = (_resolvedRecordSeasonNumber(left) ?? 0)
+        .compareTo(_resolvedRecordSeasonNumber(right) ?? 0);
+    if (seasonComparison != 0) {
+      return seasonComparison;
     }
 
-    final sectionSegments = _pathSegments(_uriPath(record.sectionId));
-    var commonLength = 0;
-    while (commonLength < sectionSegments.length &&
-        commonLength < resourceSegments.length &&
-        sectionSegments[commonLength] == resourceSegments[commonLength]) {
-      commonLength += 1;
+    final episodeComparison = (_resolvedRecordEpisodeNumber(left) ?? 0)
+        .compareTo(_resolvedRecordEpisodeNumber(right) ?? 0);
+    if (episodeComparison != 0) {
+      return episodeComparison;
     }
 
-    final relativeDirectories = resourceSegments.length <= commonLength + 1
-        ? const <String>[]
-        : resourceSegments.sublist(commonLength, resourceSegments.length - 1);
-    final seriesTitleFilterKeywords =
-        _webDavSeriesTitleFilterKeywordsForSourceId(record.sourceId);
-    final firstSeasonDirectoryIndex =
-        relativeDirectories.indexWhere(_looksLikeSeasonFolderLabel);
-    if (firstSeasonDirectoryIndex == 0 &&
-        _canUseSeasonDirectoryAsSeriesRoot(
-          relativeDirectories.first,
-          parentMatchesFilter: _isFilteredSectionRoot(
-            sectionSegments: sectionSegments,
-            seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-          ),
-        )) {
-      return false;
+    final resolutionComparison = _compareNullableIntsDescending(
+      _resolvedPixelCount(left.item),
+      _resolvedPixelCount(right.item),
+    );
+    if (resolutionComparison != 0) {
+      return resolutionComparison;
     }
-    return firstSeasonDirectoryIndex == 0;
+
+    final bitrateComparison = _compareNullableIntsDescending(
+      left.item.bitrate,
+      right.item.bitrate,
+    );
+    if (bitrateComparison != 0) {
+      return bitrateComparison;
+    }
+
+    final fileSizeComparison = _compareNullableIntsDescending(
+      left.fileSizeBytes,
+      right.fileSizeBytes,
+    );
+    if (fileSizeComparison != 0) {
+      return fileSizeComparison;
+    }
+
+    final addedAtComparison = right.item.addedAt.compareTo(left.item.addedAt);
+    if (addedAtComparison != 0) {
+      return addedAtComparison;
+    }
+
+    final titleComparison =
+        left.item.title.toLowerCase().compareTo(right.item.title.toLowerCase());
+    if (titleComparison != 0) {
+      return titleComparison;
+    }
+
+    return left.resourcePath.compareTo(right.resourcePath);
+  }
+
+  int _compareNullableIntsDescending(int? left, int? right) {
+    return (right ?? 0).compareTo(left ?? 0);
+  }
+
+  int _resolvedPixelCount(MediaItem item) {
+    final width = item.width ?? 0;
+    final height = item.height ?? 0;
+    if (width <= 0 || height <= 0) {
+      return 0;
+    }
+    return width * height;
   }
 
   String _nearestNonSeasonDirectory(Iterable<String> directories) {
-    final normalized = directories
-        .map((item) => item.trim())
-        .where((item) => item.isNotEmpty)
-        .toList(growable: false);
-    for (var index = normalized.length - 1; index >= 0; index--) {
-      final candidate = normalized[index];
-      if (_looksLikeSeasonFolderLabel(candidate)) {
-        continue;
-      }
-      return candidate;
-    }
-    return '';
-  }
-
-  int _lastNonSeasonDirectoryIndex(List<String> directories) {
-    for (var index = directories.length - 1; index >= 0; index--) {
-      if (_looksLikeSeasonFolderLabel(directories[index])) {
-        continue;
-      }
-      return index;
-    }
-    return -1;
-  }
-
-  List<String> _webDavSeriesTitleFilterKeywordsForRecords(
-    List<NasMediaIndexRecord> records,
-  ) {
-    if (records.isEmpty) {
-      return const [];
-    }
-    return _webDavSeriesTitleFilterKeywordsForSourceId(records.first.sourceId);
-  }
-
-  List<String> _webDavSeriesTitleFilterKeywordsForSourceId(String sourceId) {
-    final normalizedSourceId = sourceId.trim();
-    if (normalizedSourceId.isEmpty) {
-      return const [];
-    }
-    final settings = _readSettings();
-    for (final candidate in settings.mediaSources) {
-      if (candidate.id == normalizedSourceId &&
-          (candidate.kind == MediaSourceKind.nas ||
-              candidate.kind == MediaSourceKind.quark)) {
-        return candidate.normalizedWebDavSeriesTitleFilterKeywords;
-      }
-    }
-    return const [];
-  }
-
-  bool _hasFilteredSeriesStopInStructurePath(
-    NasMediaIndexRecord record, {
-    required List<String> seriesTitleFilterKeywords,
-  }) {
-    if (seriesTitleFilterKeywords.isEmpty) {
-      return false;
-    }
-    final resourceSegments = _pathSegments(record.resourcePath);
-    if (resourceSegments.isEmpty) {
-      return false;
-    }
-    final sectionSegments = _pathSegments(_uriPath(record.sectionId));
-    var commonLength = 0;
-    while (commonLength < sectionSegments.length &&
-        commonLength < resourceSegments.length &&
-        sectionSegments[commonLength] == resourceSegments[commonLength]) {
-      commonLength += 1;
-    }
-    final relativeDirectories = resourceSegments.length <= commonLength + 1
-        ? const <String>[]
-        : resourceSegments.sublist(commonLength, resourceSegments.length - 1);
-    return relativeDirectories.any((directory) {
-      final cleanedDirectory = _cleanIndexedTitleLabel(directory);
-      return _matchesSeriesTitleFilterKeyword(
-        directory,
-        cleanedValue: cleanedDirectory,
-        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-      );
-    });
+    return _NasMediaIndexerGroupingSupportX(this)
+        .nearestNonSeasonDirectoryForMain(directories);
   }
 
   String? _stoppedSeriesTitleByFilteredDirectory({
@@ -1982,102 +1600,12 @@ class NasMediaIndexer {
     required String fileFallbackTitle,
     required List<String> seriesTitleFilterKeywords,
   }) {
-    if (seriesTitleFilterKeywords.isEmpty || relativeDirectories.isEmpty) {
-      return null;
-    }
-    var lastInferredTitle = '';
-    var hitFilteredDirectory = false;
-    for (var index = relativeDirectories.length - 1; index >= 0; index--) {
-      final rawDirectory = relativeDirectories[index].trim();
-      if (rawDirectory.isEmpty) {
-        continue;
-      }
-      final cleanedDirectory = _cleanIndexedTitleLabel(rawDirectory);
-      final parentMatchesFilter =
-          _parentDirectoryMatchesSeriesTitleFilterKeyword(
-        relativeDirectories: relativeDirectories,
-        childIndex: index,
-        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-      );
-      if (_matchesSeriesTitleFilterKeyword(
-        rawDirectory,
-        cleanedValue: cleanedDirectory,
-        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-      )) {
-        hitFilteredDirectory = true;
-        break;
-      }
-      if (_looksLikeSeasonFolderLabel(rawDirectory) &&
-          !_canUseSeasonDirectoryAsSeriesRoot(
-            rawDirectory,
-            parentMatchesFilter: parentMatchesFilter,
-          )) {
-        continue;
-      }
-      if (cleanedDirectory.isEmpty) {
-        continue;
-      }
-      if (lastInferredTitle.isEmpty) {
-        lastInferredTitle = cleanedDirectory;
-      }
-    }
-    if (lastInferredTitle.isEmpty) {
-      lastInferredTitle = fileFallbackTitle.trim();
-    }
-    if (!hitFilteredDirectory || lastInferredTitle.isEmpty) {
-      return null;
-    }
-    return lastInferredTitle;
-  }
-
-  List<String>? _stoppedSeriesRootSegmentsByFilteredDirectory({
-    required List<String> relativeDirectories,
-    required List<String> seriesTitleFilterKeywords,
-  }) {
-    if (seriesTitleFilterKeywords.isEmpty || relativeDirectories.isEmpty) {
-      return null;
-    }
-    int? filteredIndex;
-    int? lastUsableIndex;
-    for (var index = relativeDirectories.length - 1; index >= 0; index--) {
-      final rawDirectory = relativeDirectories[index].trim();
-      if (rawDirectory.isEmpty) {
-        continue;
-      }
-      final cleanedDirectory = _cleanIndexedTitleLabel(rawDirectory);
-      final parentMatchesFilter =
-          _parentDirectoryMatchesSeriesTitleFilterKeyword(
-        relativeDirectories: relativeDirectories,
-        childIndex: index,
-        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-      );
-      if (_matchesSeriesTitleFilterKeyword(
-        rawDirectory,
-        cleanedValue: cleanedDirectory,
-        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-      )) {
-        filteredIndex = index;
-        break;
-      }
-      if (_looksLikeSeasonFolderLabel(rawDirectory) &&
-          !_canUseSeasonDirectoryAsSeriesRoot(
-            rawDirectory,
-            parentMatchesFilter: parentMatchesFilter,
-          )) {
-        continue;
-      }
-      if (cleanedDirectory.isEmpty) {
-        continue;
-      }
-      lastUsableIndex ??= index;
-    }
-    if (filteredIndex == null) {
-      return null;
-    }
-    if (lastUsableIndex == null || lastUsableIndex <= filteredIndex) {
-      return const [];
-    }
-    return relativeDirectories.sublist(lastUsableIndex, lastUsableIndex + 1);
+    return _NasMediaIndexerGroupingSupportX(this)
+        .stoppedSeriesTitleByFilteredDirectoryForMain(
+      relativeDirectories: relativeDirectories,
+      fileFallbackTitle: fileFallbackTitle,
+      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+    );
   }
 
   bool _matchesSeriesTitleFilterKeyword(
@@ -2085,53 +1613,10 @@ class NasMediaIndexer {
     required String cleanedValue,
     required List<String> seriesTitleFilterKeywords,
   }) {
-    if (seriesTitleFilterKeywords.isEmpty) {
-      return false;
-    }
-    final haystacks = <String>{
-      rawValue.trim().toLowerCase(),
-      cleanedValue.trim().toLowerCase(),
-    }..removeWhere((value) => value.isEmpty);
-    return seriesTitleFilterKeywords.any(
-      (keyword) => haystacks.any((value) => value.contains(keyword)),
-    );
-  }
-
-  bool _isFilteredSectionRoot({
-    required List<String> sectionSegments,
-    required List<String> seriesTitleFilterKeywords,
-  }) {
-    if (sectionSegments.isEmpty || seriesTitleFilterKeywords.isEmpty) {
-      return false;
-    }
-    final rawSectionRoot = sectionSegments.last.trim();
-    if (rawSectionRoot.isEmpty) {
-      return false;
-    }
-    final cleanedSectionRoot = _cleanIndexedTitleLabel(rawSectionRoot);
-    return _matchesSeriesTitleFilterKeyword(
-      rawSectionRoot,
-      cleanedValue: cleanedSectionRoot,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    );
-  }
-
-  bool _parentDirectoryMatchesSeriesTitleFilterKeyword({
-    required List<String> relativeDirectories,
-    required int childIndex,
-    required List<String> seriesTitleFilterKeywords,
-  }) {
-    if (seriesTitleFilterKeywords.isEmpty || childIndex <= 0) {
-      return false;
-    }
-    final rawParent = relativeDirectories[childIndex - 1].trim();
-    if (rawParent.isEmpty) {
-      return false;
-    }
-    final cleanedParent = _cleanIndexedTitleLabel(rawParent);
-    return _matchesSeriesTitleFilterKeyword(
-      rawParent,
-      cleanedValue: cleanedParent,
+    return _NasMediaIndexerGroupingSupportX(this)
+        .matchesSeriesTitleFilterKeywordForMain(
+      rawValue,
+      cleanedValue: cleanedValue,
       seriesTitleFilterKeywords: seriesTitleFilterKeywords,
     );
   }
@@ -2140,10 +1625,11 @@ class NasMediaIndexer {
     String rawDirectory, {
     required bool parentMatchesFilter,
   }) {
-    if (!parentMatchesFilter || !_looksLikeSeasonFolderLabel(rawDirectory)) {
-      return false;
-    }
-    return !looksLikeStrictSeasonFolderLabel(rawDirectory);
+    return _NasMediaIndexerGroupingSupportX(this)
+        .canUseSeasonDirectoryAsSeriesRootForMain(
+      rawDirectory,
+      parentMatchesFilter: parentMatchesFilter,
+    );
   }
 
   String _uriPath(String value) {
@@ -2172,375 +1658,6 @@ class NasMediaIndexer {
     }).toList(growable: false);
   }
 
-  String _buildSeriesGroupKey(
-    NasMediaIndexRecord record,
-    String title, {
-    List<String> seriesTitleFilterKeywords = const [],
-  }) {
-    final structureGroupKey = _structureSeriesGroupKey(
-      record,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    );
-    if (structureGroupKey.isNotEmpty) {
-      return structureGroupKey;
-    }
-    final imdbId = record.item.imdbId.trim();
-    if (imdbId.isNotEmpty) {
-      return 'imdb:$imdbId';
-    }
-    final tmdbId = record.item.tmdbId.trim();
-    if (tmdbId.isNotEmpty) {
-      return 'tmdb:$tmdbId';
-    }
-    return 'title:${record.sectionId.trim()}|${title.toLowerCase()}';
-  }
-
-  String _structureSeriesGroupKey(
-    NasMediaIndexRecord record, {
-    List<String> seriesTitleFilterKeywords = const [],
-  }) {
-    final structureTitle = _seriesTitleFromStructurePath(
-      record,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    ).trim();
-    if (!_prefersStructureRootSeriesGrouping(record, structureTitle)) {
-      return '';
-    }
-    final rootSegments = _seriesStructureRootSegments(
-      record,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    );
-    if (rootSegments.isEmpty) {
-      return '';
-    }
-    final normalizedPath =
-        rootSegments.map((segment) => segment.toLowerCase()).join('/');
-    return 'structure:${record.sectionId.trim()}|$normalizedPath';
-  }
-
-  MediaItem _buildSeriesItem(_SeriesRecordGroup group) {
-    final records = [...group.records]
-      ..sort((left, right) => right.item.addedAt.compareTo(left.item.addedAt));
-    final base = records.first;
-    final bestOverview = records
-        .map((record) => record.item.overview.trim())
-        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
-    final bestPoster = records
-        .map((record) => record.item.posterUrl.trim())
-        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
-    final posterHeaders = records
-        .map((record) => record.item.posterHeaders)
-        .firstWhere((value) => value.isNotEmpty, orElse: () => const {});
-    final bestBackdrop = records
-        .map((record) => record.item.backdropUrl.trim())
-        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
-    final backdropHeaders = records
-        .map((record) => record.item.backdropHeaders)
-        .firstWhere((value) => value.isNotEmpty, orElse: () => const {});
-    final bestLogo = records
-        .map((record) => record.item.logoUrl.trim())
-        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
-    final logoHeaders = records
-        .map((record) => record.item.logoHeaders)
-        .firstWhere((value) => value.isNotEmpty, orElse: () => const {});
-    final bestBanner = records
-        .map((record) => record.item.bannerUrl.trim())
-        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
-    final bannerHeaders = records
-        .map((record) => record.item.bannerHeaders)
-        .firstWhere((value) => value.isNotEmpty, orElse: () => const {});
-    final extraBackdropUrls = records
-        .map((record) => record.item.extraBackdropUrls)
-        .firstWhere((value) => value.isNotEmpty, orElse: () => const []);
-    final extraBackdropHeaders = records
-        .map((record) => record.item.extraBackdropHeaders)
-        .firstWhere((value) => value.isNotEmpty, orElse: () => const {});
-    final bestYear = records
-        .map((record) => record.item.year)
-        .firstWhere((value) => value > 0, orElse: () => 0);
-    final ratingLabels = _mergeLabels(
-      const [],
-      records.expand((record) => record.item.ratingLabels).toList(),
-    );
-    final genres =
-        _dedupe(records.expand((record) => record.item.genres).toList());
-    final directors =
-        _dedupe(records.expand((record) => record.item.directors).toList());
-    final actors =
-        _dedupe(records.expand((record) => record.item.actors).toList());
-    final imdbId = records
-        .map((record) => record.item.imdbId.trim())
-        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
-    final tmdbId = records
-        .map((record) => record.item.tmdbId.trim())
-        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
-    final doubanId = records
-        .map((record) => record.item.doubanId.trim())
-        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
-    final tvdbId = records
-        .map((record) => _resolveLibraryMatchTvdbId(record.item))
-        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
-    final wikidataId = records
-        .map((record) => _resolveLibraryMatchWikidataId(record.item))
-        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
-    final providerIds = _mergeProviderIdMaps(
-      records.map((record) => record.item.providerIds),
-    );
-    final lastAddedAt = records
-        .map((record) => record.item.addedAt)
-        .reduce((left, right) => left.isAfter(right) ? left : right);
-
-    final seriesItem = MediaItem(
-      id: _buildSeriesItemId(group.seriesKey),
-      title: group.title,
-      overview: bestOverview,
-      posterUrl: bestPoster,
-      posterHeaders: posterHeaders,
-      backdropUrl: bestBackdrop,
-      backdropHeaders: backdropHeaders,
-      logoUrl: bestLogo,
-      logoHeaders: logoHeaders,
-      bannerUrl: bestBanner,
-      bannerHeaders: bannerHeaders,
-      extraBackdropUrls: extraBackdropUrls,
-      extraBackdropHeaders: extraBackdropHeaders,
-      year: bestYear,
-      durationLabel: '剧集',
-      genres: genres,
-      directors: directors,
-      actors: actors,
-      itemType: 'series',
-      sectionId: base.sectionId,
-      sectionName: base.sectionName,
-      sourceId: base.sourceId,
-      sourceName: base.item.sourceName,
-      sourceKind: base.item.sourceKind,
-      streamUrl: '',
-      actualAddress: _commonDirectoryPath(
-        records.map((record) => record.resourcePath),
-      ),
-      streamHeaders: const {},
-      imdbId: imdbId,
-      tmdbId: tmdbId,
-      tvdbId: tvdbId,
-      wikidataId: wikidataId,
-      doubanId: doubanId,
-      providerIds: providerIds,
-      ratingLabels: ratingLabels,
-      addedAt: lastAddedAt,
-    );
-    webDavTrace(
-      'indexer.buildSeriesItem',
-      fields: {
-        'title': seriesItem.title,
-        'id': seriesItem.id,
-        'recordCount': records.length,
-        'actualAddress': seriesItem.actualAddress,
-      },
-    );
-    return seriesItem;
-  }
-
-  MediaItem _buildSeasonItem(
-    _SeriesRecordGroup group,
-    int seasonNumber,
-    List<NasMediaIndexRecord> records,
-  ) {
-    final sorted = [...records]
-      ..sort((left, right) => right.item.addedAt.compareTo(left.item.addedAt));
-    final base = sorted.first;
-    final label = _seasonLabel(
-      group: group,
-      seasonNumber: seasonNumber,
-      records: records,
-    );
-    final seasonItem = MediaItem(
-      id: _buildSeasonItemId(group.seriesKey, seasonNumber),
-      title: label,
-      overview: base.item.overview,
-      posterUrl: base.item.posterUrl,
-      posterHeaders: base.item.posterHeaders,
-      backdropUrl: base.item.backdropUrl,
-      backdropHeaders: base.item.backdropHeaders,
-      logoUrl: base.item.logoUrl,
-      logoHeaders: base.item.logoHeaders,
-      bannerUrl: base.item.bannerUrl,
-      bannerHeaders: base.item.bannerHeaders,
-      extraBackdropUrls: base.item.extraBackdropUrls,
-      extraBackdropHeaders: base.item.extraBackdropHeaders,
-      year: base.item.year,
-      durationLabel: '剧集',
-      genres: _dedupe(records.expand((record) => record.item.genres).toList()),
-      directors:
-          _dedupe(records.expand((record) => record.item.directors).toList()),
-      actors: _dedupe(records.expand((record) => record.item.actors).toList()),
-      itemType: 'season',
-      sectionId: base.sectionId,
-      sectionName: base.sectionName,
-      sourceId: base.sourceId,
-      sourceName: base.item.sourceName,
-      sourceKind: base.item.sourceKind,
-      streamUrl: '',
-      actualAddress: _commonDirectoryPath(
-        records.map((record) => record.resourcePath),
-      ),
-      streamHeaders: const {},
-      seasonNumber: seasonNumber,
-      imdbId: base.item.imdbId,
-      tmdbId: base.item.tmdbId,
-      tvdbId: _resolveLibraryMatchTvdbId(base.item),
-      wikidataId: _resolveLibraryMatchWikidataId(base.item),
-      doubanId: base.item.doubanId,
-      providerIds: base.item.providerIds,
-      ratingLabels: _mergeLabels(
-          const [], records.expand((e) => e.item.ratingLabels).toList()),
-      addedAt: sorted.first.item.addedAt,
-    );
-    webDavTrace(
-      'indexer.buildSeasonItem',
-      fields: {
-        'seriesTitle': group.title,
-        'seasonTitle': seasonItem.title,
-        'seasonNumber': seasonNumber,
-        'recordCount': records.length,
-        'actualAddress': seasonItem.actualAddress,
-      },
-    );
-    return seasonItem;
-  }
-
-  List<MediaItem> _materializeEpisodeItems(
-      Iterable<NasMediaIndexRecord> records) {
-    final items = records.map((record) => record.item).toList(growable: false)
-      ..sort((left, right) {
-        final seasonComparison =
-            (left.seasonNumber ?? 0).compareTo(right.seasonNumber ?? 0);
-        if (seasonComparison != 0) {
-          return seasonComparison;
-        }
-        final episodeComparison =
-            (left.episodeNumber ?? 0).compareTo(right.episodeNumber ?? 0);
-        if (episodeComparison != 0) {
-          return episodeComparison;
-        }
-        return left.title.compareTo(right.title);
-      });
-    return items;
-  }
-
-  String _seasonLabel({
-    required _SeriesRecordGroup group,
-    required int seasonNumber,
-    required List<NasMediaIndexRecord> records,
-  }) {
-    if (seasonNumber == 0) {
-      return '特别篇';
-    }
-    final commonPath = _commonDirectoryPath(
-      records.map((record) => record.resourcePath),
-    );
-    final commonSegments = _pathSegments(commonPath);
-    final explicitSeasonLabel = commonSegments.firstWhere(
-      _looksLikeSeasonFolderLabel,
-      orElse: () => '',
-    );
-    if (explicitSeasonLabel.isNotEmpty) {
-      if (_looksLikeNumericTopicSeason(explicitSeasonLabel)) {
-        return explicitSeasonLabel;
-      }
-      if (_parseSeasonNumberFromLabel(explicitSeasonLabel) != null) {
-        return '第 $seasonNumber 季';
-      }
-    }
-    final lastSegment = _lastPathSegment(commonPath);
-    if (lastSegment.isEmpty) {
-      return '第 $seasonNumber 季';
-    }
-    if (_looksLikeNumericTopicSeason(lastSegment)) {
-      return lastSegment;
-    }
-    if (_parseSeasonNumberFromLabel(lastSegment) != null) {
-      return '第 $seasonNumber 季';
-    }
-    if (lastSegment == group.title) {
-      return '第 $seasonNumber 季';
-    }
-    return lastSegment;
-  }
-
-  String _buildSeriesItemId(String seriesKey) {
-    return '$_seriesGroupPrefix|${Uri.encodeComponent(seriesKey)}';
-  }
-
-  String _commonDirectoryPath(Iterable<String> paths) {
-    final directories = paths
-        .map(_directoryPath)
-        .where((value) => value.trim().isNotEmpty)
-        .toList(growable: false);
-    if (directories.isEmpty) {
-      return '';
-    }
-    if (directories.length == 1) {
-      return directories.first;
-    }
-
-    final splitDirectories =
-        directories.map((value) => value.split('/')).toList(growable: false);
-    final first = splitDirectories.first;
-    var maxLength = first.length;
-    for (final segments in splitDirectories.skip(1)) {
-      if (segments.length < maxLength) {
-        maxLength = segments.length;
-      }
-    }
-
-    var commonLength = 0;
-    while (commonLength < maxLength) {
-      final candidate = first[commonLength];
-      final matchesAll = splitDirectories.every(
-        (segments) => segments[commonLength] == candidate,
-      );
-      if (!matchesAll) {
-        break;
-      }
-      commonLength += 1;
-    }
-
-    if (commonLength == 0) {
-      return directories.first;
-    }
-    final joined = first.take(commonLength).join('/');
-    return joined.isEmpty ? '/' : joined;
-  }
-
-  String _directoryPath(String path) {
-    final normalized = path.trim().replaceAll('\\', '/');
-    if (normalized.isEmpty) {
-      return '';
-    }
-    final trimmed = normalized.endsWith('/')
-        ? normalized.substring(0, normalized.length - 1)
-        : normalized;
-    final lastSlash = trimmed.lastIndexOf('/');
-    if (lastSlash <= 0) {
-      return trimmed;
-    }
-    return trimmed.substring(0, lastSlash);
-  }
-
-  String _lastPathSegment(String path) {
-    final normalized = path.trim().replaceAll('\\', '/');
-    if (normalized.isEmpty) {
-      return '';
-    }
-    final segments = normalized
-        .split('/')
-        .map((segment) => segment.trim())
-        .where((segment) => segment.isNotEmpty)
-        .toList(growable: false);
-    return segments.isEmpty ? '' : segments.last;
-  }
-
   bool _looksLikeSeasonFolderLabel(String value) {
     return looksLikeSeasonFolderLabel(value);
   }
@@ -2551,10 +1668,6 @@ class NasMediaIndexer {
 
   bool _looksLikeNumericTopicSeason(String value) {
     return looksLikeNumericTopicSeason(value);
-  }
-
-  String _buildSeasonItemId(String seriesKey, int seasonNumber) {
-    return '$_seasonGroupPrefix|${Uri.encodeComponent(seriesKey)}|$seasonNumber';
   }
 
   List<int> _resolveWritableRecordIndices(
@@ -2976,7 +2089,7 @@ class NasMediaIndexer {
     bool applyOnlineMetadata = true,
     bool markSidecarAttempt = false,
   }) async {
-    final settings = _readSettings();
+    final settings = _readSettingsForRefresh();
     final recognition = NasMediaRecognizer.recognize(
       scannedItem.actualAddress,
       seriesTitleFilterKeywords:
@@ -3844,6 +2957,9 @@ class NasMediaIndexer {
         source.normalizedWebDavExcludedPathKeywords.join(',');
     final seriesTitleFilterKeywords =
         source.normalizedWebDavSeriesTitleFilterKeywords.join(',');
+    final specialEpisodeKeywords =
+        source.normalizedWebDavSpecialEpisodeKeywords.join(',');
+    final extraKeywords = source.normalizedWebDavExtraKeywords.join(',');
     final quarkPathNormalizationVersion =
         source.kind == MediaSourceKind.quark ? '|quark-paths:v2' : '';
     if (scopedCollections != null && scopedCollections.isNotEmpty) {
@@ -3855,7 +2971,7 @@ class NasMediaIndexer {
       final seriesLevelScrape = source.webDavSeriesScrapeUsesDirectoryTitleOnly
           ? '|series-level-scrape:true'
           : '';
-      return 'collections|${ids.join(',')}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}$seriesLevelScrape|exclude:$excludedKeywords|title-filter:$seriesTitleFilterKeywords$quarkPathNormalizationVersion|schema:$_webDavMetadataSchemaVersion';
+      return 'collections|${ids.join(',')}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}$seriesLevelScrape|exclude:$excludedKeywords|title-filter:$seriesTitleFilterKeywords|special-filter:$specialEpisodeKeywords|extra-filter:$extraKeywords$quarkPathNormalizationVersion|schema:$_webDavMetadataSchemaVersion';
     }
     final root = source.libraryPath.trim().isNotEmpty
         ? source.libraryPath.trim()
@@ -3863,7 +2979,7 @@ class NasMediaIndexer {
     final seriesLevelScrape = source.webDavSeriesScrapeUsesDirectoryTitleOnly
         ? '|series-level-scrape:true'
         : '';
-    return 'root|$root|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}$seriesLevelScrape|exclude:$excludedKeywords|title-filter:$seriesTitleFilterKeywords$quarkPathNormalizationVersion|schema:$_webDavMetadataSchemaVersion';
+    return 'root|$root|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}$seriesLevelScrape|exclude:$excludedKeywords|title-filter:$seriesTitleFilterKeywords|special-filter:$specialEpisodeKeywords|extra-filter:$extraKeywords$quarkPathNormalizationVersion|schema:$_webDavMetadataSchemaVersion';
   }
 
   String _buildFingerprint({
@@ -3955,6 +3071,47 @@ class NasMediaIndexer {
     } catch (_) {
       // The provider may already be disposed in tests or after page teardown.
     }
+  }
+
+  AppSettings _readSettingsForRefresh() {
+    if (_isDisposed) {
+      throw const _RefreshCancelledException();
+    }
+    try {
+      return _readSettings();
+    } catch (error, stackTrace) {
+      if (_isProviderContainerDisposedError(error)) {
+        throw const _RefreshCancelledException();
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
+  void _notifyIndexChangedSafely() {
+    final notifyIndexChanged = _notifyIndexChanged;
+    if (notifyIndexChanged == null || _isDisposed) {
+      return;
+    }
+    try {
+      notifyIndexChanged();
+    } catch (error, stackTrace) {
+      if (_isProviderContainerDisposedError(error)) {
+        return;
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
+  bool _isProviderContainerDisposedError(Object error) {
+    if (_isDisposed) {
+      return true;
+    }
+    final message = error.toString().toLowerCase();
+    if (!message.contains('providercontainer')) {
+      return false;
+    }
+    return message.contains('disposed') ||
+        message.contains('dispose was called');
   }
 
   static bool _hasRatingLabelKeyword(
@@ -4334,93 +3491,4 @@ class _NasLibraryMatchCache {
     collect('wikidata', wikidataId.toUpperCase());
     return matchesById.values.toList(growable: false);
   }
-}
-
-class _SeriesRecordGroup {
-  const _SeriesRecordGroup({
-    required this.seriesKey,
-    required this.records,
-    required this.title,
-  });
-
-  final String seriesKey;
-  final List<NasMediaIndexRecord> records;
-  final String title;
-
-  String get seriesItemId {
-    return '${NasMediaIndexer._seriesGroupPrefix}|${Uri.encodeComponent(seriesKey)}';
-  }
-
-  Map<int, List<NasMediaIndexRecord>> get seasonGroups {
-    final grouped = <int, List<NasMediaIndexRecord>>{};
-    for (final record in records) {
-      final seasonNumber =
-          record.item.seasonNumber ?? record.recognizedSeasonNumber ?? 1;
-      grouped
-          .putIfAbsent(seasonNumber, () => <NasMediaIndexRecord>[])
-          .add(record);
-    }
-    return grouped;
-  }
-}
-
-class _ParsedSeasonGroupId {
-  const _ParsedSeasonGroupId({
-    required this.seriesKey,
-    required this.seasonNumber,
-  });
-
-  final String seriesKey;
-  final int seasonNumber;
-}
-
-class _RefreshPhaseResult {
-  const _RefreshPhaseResult({
-    required this.enrichmentCandidates,
-  });
-
-  final List<WebDavScannedItem> enrichmentCandidates;
-}
-
-enum _RefreshTaskMode {
-  incremental,
-  forceFull,
-}
-
-class _RefreshTaskHandle {
-  const _RefreshTaskHandle({
-    required this.future,
-    required this.mode,
-    required this.controller,
-  });
-
-  final Future<void> future;
-  final _RefreshTaskMode mode;
-  final _RefreshTaskController controller;
-
-  void cancel() {
-    controller.cancel();
-  }
-}
-
-class _RefreshTaskController {
-  bool _isCancelled = false;
-
-  bool get cancelled => _isCancelled;
-
-  bool Function() get isCancelled => () => _isCancelled;
-
-  void cancel() {
-    _isCancelled = true;
-  }
-
-  void throwIfCancelled() {
-    if (_isCancelled) {
-      throw const _RefreshCancelledException();
-    }
-  }
-}
-
-class _RefreshCancelledException implements Exception {
-  const _RefreshCancelledException();
 }
