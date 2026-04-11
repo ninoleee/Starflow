@@ -54,6 +54,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   late String _boundWebDavEndpoint;
   late bool _webDavStructureInferenceEnabled;
   late bool _webDavSidecarScrapingEnabled;
+  late bool _webDavSeriesScrapeUsesDirectoryTitleOnly;
   bool _didDelete = false;
   bool _skipAutoSaveOnPop = false;
 
@@ -96,6 +97,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _webDavStructureInferenceEnabled =
         e?.webDavStructureInferenceEnabled ?? false;
     _webDavSidecarScrapingEnabled = e?.webDavSidecarScrapingEnabled ?? true;
+    _webDavSeriesScrapeUsesDirectoryTitleOnly =
+        e?.webDavSeriesScrapeUsesDirectoryTitleOnly ?? false;
     _endpointController.addListener(_handleEndpointChanged);
   }
 
@@ -152,6 +155,9 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       webDavSidecarScrapingEnabled:
           (_kind == MediaSourceKind.nas || _kind == MediaSourceKind.quark) &&
               _webDavSidecarScrapingEnabled,
+      webDavSeriesScrapeUsesDirectoryTitleOnly:
+          (_kind == MediaSourceKind.nas || _kind == MediaSourceKind.quark) &&
+              _webDavSeriesScrapeUsesDirectoryTitleOnly,
       webDavExcludedPathKeywords:
           (_kind == MediaSourceKind.nas || _kind == MediaSourceKind.quark)
               ? _parsedWebDavExcludedPathKeywords()
@@ -675,6 +681,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       _isLoadingSections = false;
       _webDavStructureInferenceEnabled = false;
       _webDavSidecarScrapingEnabled = true;
+      _webDavSeriesScrapeUsesDirectoryTitleOnly = false;
       _webDavExcludedKeywordsController.clear();
       _connectionMessage = _defaultConnectionMessage(value);
     });
@@ -778,12 +785,11 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     final isNas = _kind == MediaSourceKind.nas;
     final isQuark = _kind == MediaSourceKind.quark;
     final supportsNasInferenceOptions = isNas || isQuark;
-    final quarkCookieConfigured = ref
-        .watch(appSettingsProvider)
-        .networkStorage
-        .quarkCookie
-        .trim()
-        .isNotEmpty;
+    final quarkCookieConfigured = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.networkStorage.quarkCookie.trim().isNotEmpty,
+      ),
+    );
 
     return PopScope<void>(
       canPop: false,
@@ -1017,6 +1023,17 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                   });
                 },
               ),
+            if (supportsNasInferenceOptions)
+              SettingsToggleTile(
+                title: '剧集只按剧名层级搜刮',
+                subtitle: '仅目录结构推断开启时生效。开启后，在线搜刮只用目录推导出的剧名，不再把集标题拼进查询。',
+                value: _webDavSeriesScrapeUsesDirectoryTitleOnly,
+                onChanged: (value) {
+                  setState(() {
+                    _webDavSeriesScrapeUsesDirectoryTitleOnly = value;
+                  });
+                },
+              ),
           ], spacing: 12),
           if (supportsNasInferenceOptions) ...[
             SettingsTextInputField(
@@ -1053,7 +1070,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
             const SizedBox(height: 12),
             SettingsTextInputField(
               controller: _webDavSeriesTitleFilterKeywordsController,
-              labelText: '剧名过滤项',
+              labelText: '顶层推断目录',
               minLines: 2,
               maxLines: 5,
               hintText: '比如：电视剧、2160p、合集',
@@ -1076,7 +1093,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
-                '只在目录结构推断里生效。识别到剧文件或季目录后向上推断剧名时，命中过滤项会立刻停止，改用上一个已推断目录；如果没有目录则退回文件名。',
+                '只在目录结构推断里生效。识别到剧文件或季目录后向上推断剧名时，命中这里填写的顶层目录名会立刻停止继续向上，改用下一级已推断目录；如果没有目录则退回文件名。',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
@@ -1205,6 +1222,9 @@ class _WebDavPathPickerPage extends ConsumerStatefulWidget {
 class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
   late String _currentPath;
   late String _rootPath;
+  late Future<List<MediaCollection>> _foldersFuture;
+  final Map<String, Future<List<MediaCollection>>> _folderFutureCache =
+      <String, Future<List<MediaCollection>>>{};
   bool _skipAutoSaveOnPop = false;
 
   @override
@@ -1214,13 +1234,29 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
     _currentPath = widget.source.libraryPath.trim().isNotEmpty
         ? widget.source.libraryPath.trim()
         : _rootPath;
+    _foldersFuture = _resolveFoldersFuture(_currentPath);
   }
 
-  Future<List<MediaCollection>> _loadFolders() {
-    return ref.read(webDavNasClientProvider).fetchCollections(
-          widget.source,
-          directoryId: _currentPath,
-        );
+  Future<List<MediaCollection>> _resolveFoldersFuture(String directoryId) {
+    final normalizedDirectoryId = directoryId.trim();
+    return _folderFutureCache.putIfAbsent(
+      normalizedDirectoryId,
+      () => ref.read(webDavNasClientProvider).fetchCollections(
+            widget.source,
+            directoryId: normalizedDirectoryId,
+          ),
+    );
+  }
+
+  void _setCurrentPath(String nextPath) {
+    final normalizedNextPath = nextPath.trim();
+    if (normalizedNextPath.isEmpty || normalizedNextPath == _currentPath) {
+      return;
+    }
+    setState(() {
+      _currentPath = normalizedNextPath;
+      _foldersFuture = _resolveFoldersFuture(normalizedNextPath);
+    });
   }
 
   String _pathLabel(String raw) {
@@ -1304,16 +1340,12 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
             SettingsActionButton(
               label: '返回上一级目录',
               icon: Icons.arrow_upward_rounded,
-              onPressed: () {
-                setState(() {
-                  _currentPath = parentPath;
-                });
-              },
+              onPressed: () => _setCurrentPath(parentPath),
             ),
           ],
           const SettingsSectionTitle(label: '子文件夹'),
           FutureBuilder<List<MediaCollection>>(
-            future: _loadFolders(),
+            future: _foldersFuture,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Padding(
@@ -1344,11 +1376,7 @@ class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
                         subtitle: folder.id,
                         value: '进入',
                         leading: const Icon(Icons.folder_open_rounded),
-                        onPressed: () {
-                          setState(() {
-                            _currentPath = folder.id;
-                          });
-                        },
+                        onPressed: () => _setCurrentPath(folder.id),
                       ),
                     ),
                 ],

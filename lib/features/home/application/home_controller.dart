@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
+import 'package:starflow/features/library/application/library_refresh_revision.dart';
 import 'package:starflow/features/library/application/nas_media_index_revision.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
@@ -11,8 +12,8 @@ import 'package:starflow/features/playback/data/playback_memory_repository.dart'
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
-import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'home_settings_slices.dart';
 
 enum HomeSectionLayout {
   posterRail,
@@ -85,8 +86,8 @@ class HomeSectionViewModel {
 }
 
 final homeEnabledModulesProvider = Provider<List<HomeModuleConfig>>((ref) {
-  final settings = ref.watch(appSettingsProvider);
-  return settings.homeModules
+  final modules = ref.watch(homeModulesProvider);
+  return modules
       .where(
         (item) =>
             item.enabled &&
@@ -97,8 +98,7 @@ final homeEnabledModulesProvider = Provider<List<HomeModuleConfig>>((ref) {
 });
 
 final homeHeroModuleProvider = Provider<HomeModuleConfig?>((ref) {
-  final settings = ref.watch(appSettingsProvider);
-  for (final module in settings.homeModules) {
+  for (final module in ref.watch(homeModulesProvider)) {
     if (module.type == HomeModuleType.hero ||
         module.id == HomeModuleConfig.heroModuleId) {
       return module;
@@ -160,42 +160,39 @@ final homeCarouselItemsProvider =
   return ref.read(discoveryRepositoryProvider).fetchCarouselItems();
 });
 
-final homeSectionProvider =
-    FutureProvider.family<HomeSectionViewModel?, String>((ref, moduleId) async {
+final _homeSectionSeedProvider = FutureProvider.autoDispose
+    .family<HomeSectionViewModel?, String>((ref, moduleId) async {
   ref.watch(nasMediaIndexRevisionProvider);
-  ref.watch(localStorageDetailCacheRevisionProvider);
+  ref.watch(libraryRefreshRevisionProvider);
   final module = ref.watch(homeModuleByIdProvider(moduleId));
   if (module == null) {
     return null;
   }
 
-  final settings = ref.watch(appSettingsProvider);
   final mediaRepository = ref.read(mediaRepositoryProvider);
   final discoveryRepository = ref.read(discoveryRepositoryProvider);
-  final localStorageCacheRepository =
-      ref.read(localStorageCacheRepositoryProvider);
+  final doubanAccount = ref.watch(homeDoubanAccountProvider);
+  final mediaSources = ref.watch(homeMediaSourcesProvider);
 
   switch (module.type) {
     case HomeModuleType.hero:
       return null;
     case HomeModuleType.recentlyAdded:
       final recentItems = await ref.watch(homeRecentItemsProvider.future);
-      return _buildLibrarySection(
+      return _buildLibrarySectionSeed(
         module: module,
         items: recentItems,
         subtitle: module.description,
-        localStorageCacheRepository: localStorageCacheRepository,
       );
     case HomeModuleType.recentPlayback:
       final recentEntries =
           await ref.watch(homeRecentPlaybackEntriesProvider.future);
-      return _buildRecentPlaybackSection(
+      return _buildRecentPlaybackSectionSeed(
         module: module,
         entries: recentEntries,
-        localStorageCacheRepository: localStorageCacheRepository,
       );
     case HomeModuleType.librarySection:
-      final sourceKind = _resolveSourceKind(settings, module.sourceId);
+      final sourceKind = _resolveSourceKind(mediaSources, module.sourceId);
       final sectionItems = module.isLibrarySection
           ? await mediaRepository.fetchLibrary(
               sourceId: module.sourceId,
@@ -203,17 +200,16 @@ final homeSectionProvider =
               limit: _homeModuleFetchLimit(module, sourceKind: sourceKind),
             )
           : const <MediaItem>[];
-      return _buildLibrarySection(
+      return _buildLibrarySectionSeed(
         module: module,
         items: sectionItems,
         subtitle: module.description,
-        localStorageCacheRepository: localStorageCacheRepository,
         viewAllTarget: module.isLibrarySection
             ? LibraryCollectionTarget(
                 title: module.title,
                 sourceId: module.sourceId,
                 sourceName: module.sourceName,
-                sourceKind: _resolveSourceKind(settings, module.sourceId),
+                sourceKind: sourceKind,
                 sectionId: module.sectionId,
                 subtitle: module.sectionName,
               )
@@ -223,23 +219,33 @@ final homeSectionProvider =
     case HomeModuleType.doubanSuggestion:
     case HomeModuleType.doubanList:
       final entries = await discoveryRepository.fetchEntries(module);
-      return _buildDoubanSection(
+      return _buildDoubanSectionSeed(
         module: module,
         entries: entries,
-        emptyMessage:
-            _resolveDoubanEmptyMessage(module, settings.doubanAccount),
-        localStorageCacheRepository: localStorageCacheRepository,
+        emptyMessage: _resolveDoubanEmptyMessage(module, doubanAccount),
       );
     case HomeModuleType.doubanCarousel:
       final carouselItems = await ref.watch(homeCarouselItemsProvider.future);
-      return _buildCarouselSection(
+      return _buildCarouselSectionSeed(
         module: module,
         items: carouselItems,
-        emptyMessage:
-            _resolveDoubanEmptyMessage(module, settings.doubanAccount),
-        localStorageCacheRepository: localStorageCacheRepository,
+        emptyMessage: _resolveDoubanEmptyMessage(module, doubanAccount),
       );
   }
+});
+
+final homeSectionProvider =
+    FutureProvider.family<HomeSectionViewModel?, String>((ref, moduleId) async {
+  ref.watch(localStorageDetailCacheRevisionProvider);
+  final seedSection =
+      await ref.watch(_homeSectionSeedProvider(moduleId).future);
+  if (seedSection == null) {
+    return null;
+  }
+  return _applyCachedHomeSection(
+    section: seedSection,
+    localStorageCacheRepository: ref.read(localStorageCacheRepositoryProvider),
+  );
 });
 
 final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
@@ -296,6 +302,7 @@ Future<void> refreshHomeModules(WidgetRef ref) async {
   ref.invalidate(homeRecentItemsProvider);
   ref.invalidate(homeRecentPlaybackEntriesProvider);
   ref.invalidate(homeCarouselItemsProvider);
+  ref.invalidate(_homeSectionSeedProvider);
   ref.invalidate(homeSectionProvider);
   ref.invalidate(homeSectionsProvider);
   primeHomeModulesFromWidget(ref);
@@ -314,19 +321,19 @@ bool _needsCarousel(List<HomeModuleConfig> modules) {
   return modules.any((item) => item.type == HomeModuleType.doubanCarousel);
 }
 
-Future<HomeSectionViewModel> _buildLibrarySection({
+Future<HomeSectionViewModel> _buildLibrarySectionSeed({
   required HomeModuleConfig module,
   required List<MediaItem> items,
   required String subtitle,
-  required LocalStorageCacheRepository localStorageCacheRepository,
   LibraryCollectionTarget? viewAllTarget,
 }) async {
+  final seedTargets =
+      items.map(MediaDetailTarget.fromMediaItem).toList(growable: false);
+  final detailTargets = seedTargets;
   final viewModels = <HomeCardViewModel>[];
-  for (final item in items) {
-    final detailTarget = await _resolveCachedHomeDetailTarget(
-      seedTarget: MediaDetailTarget.fromMediaItem(item),
-      localStorageCacheRepository: localStorageCacheRepository,
-    );
+  for (var index = 0; index < items.length; index += 1) {
+    final item = items[index];
+    final detailTarget = detailTargets[index];
     viewModels.add(
       HomeCardViewModel(
         id: item.id,
@@ -355,16 +362,110 @@ Future<HomeSectionViewModel> _buildLibrarySection({
   );
 }
 
-Future<MediaDetailTarget> _resolveCachedHomeDetailTarget({
-  required MediaDetailTarget seedTarget,
+Future<HomeSectionViewModel> _applyCachedHomeSection({
+  required HomeSectionViewModel section,
   required LocalStorageCacheRepository localStorageCacheRepository,
 }) async {
-  final cachedTarget =
-      await localStorageCacheRepository.loadDetailTarget(seedTarget);
-  if (cachedTarget == null) {
-    return seedTarget;
+  if (section.layout == HomeSectionLayout.posterRail) {
+    final items = section.items;
+    if (items.isEmpty) {
+      return section;
+    }
+    final mergedTargets = await _resolveCachedHomeDetailTargetsBatch(
+      seedTargets:
+          items.map((item) => item.detailTarget).toList(growable: false),
+      localStorageCacheRepository: localStorageCacheRepository,
+    );
+    final mergedItems = <HomeCardViewModel>[];
+    for (var index = 0; index < items.length; index += 1) {
+      final item = items[index];
+      final mergedTarget = mergedTargets[index];
+      mergedItems.add(
+        HomeCardViewModel(
+          id: item.id,
+          title: mergedTarget.title.trim().isNotEmpty
+              ? mergedTarget.title
+              : item.title,
+          subtitle: item.subtitle,
+          posterUrl: mergedTarget.posterUrl.trim().isNotEmpty
+              ? mergedTarget.posterUrl
+              : item.posterUrl,
+          detailTarget: mergedTarget,
+        ),
+      );
+    }
+    return HomeSectionViewModel(
+      id: section.id,
+      title: section.title,
+      subtitle: section.subtitle,
+      emptyMessage: section.emptyMessage,
+      layout: section.layout,
+      items: mergedItems,
+      carouselItems: section.carouselItems,
+      viewAllTarget: section.viewAllTarget,
+    );
   }
-  return _mergeCachedHomeDetailTarget(seedTarget, cachedTarget);
+
+  final carouselItems = section.carouselItems;
+  if (carouselItems.isEmpty) {
+    return section;
+  }
+  final mergedTargets = await _resolveCachedHomeDetailTargetsBatch(
+    seedTargets:
+        carouselItems.map((item) => item.detailTarget).toList(growable: false),
+    localStorageCacheRepository: localStorageCacheRepository,
+  );
+  final mergedCarouselItems = <HomeCarouselItemViewModel>[];
+  for (var index = 0; index < carouselItems.length; index += 1) {
+    final item = carouselItems[index];
+    final mergedTarget = mergedTargets[index];
+    final imageUrl = item.imageUrl.trim().isNotEmpty
+        ? item.imageUrl
+        : (mergedTarget.posterUrl.trim().isNotEmpty
+            ? mergedTarget.posterUrl
+            : item.imageUrl);
+    mergedCarouselItems.add(
+      HomeCarouselItemViewModel(
+        id: item.id,
+        title: mergedTarget.title.trim().isNotEmpty
+            ? mergedTarget.title
+            : item.title,
+        subtitle: item.subtitle,
+        imageUrl: imageUrl,
+        detailTarget: mergedTarget,
+      ),
+    );
+  }
+  return HomeSectionViewModel(
+    id: section.id,
+    title: section.title,
+    subtitle: section.subtitle,
+    emptyMessage: section.emptyMessage,
+    layout: section.layout,
+    items: section.items,
+    carouselItems: mergedCarouselItems,
+    viewAllTarget: section.viewAllTarget,
+  );
+}
+
+Future<List<MediaDetailTarget>> _resolveCachedHomeDetailTargetsBatch({
+  required List<MediaDetailTarget> seedTargets,
+  required LocalStorageCacheRepository localStorageCacheRepository,
+}) async {
+  if (seedTargets.isEmpty) {
+    return const <MediaDetailTarget>[];
+  }
+  final cachedTargets =
+      await localStorageCacheRepository.loadDetailTargetsBatch(seedTargets);
+  return List<MediaDetailTarget>.generate(seedTargets.length, (index) {
+    final seedTarget = seedTargets[index];
+    final cachedTarget =
+        index < cachedTargets.length ? cachedTargets[index] : null;
+    if (cachedTarget == null) {
+      return seedTarget;
+    }
+    return _mergeCachedHomeDetailTarget(seedTarget, cachedTarget);
+  }, growable: false);
 }
 
 MediaDetailTarget _mergeCachedHomeDetailTarget(
@@ -492,17 +593,17 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
   );
 }
 
-Future<HomeSectionViewModel> _buildRecentPlaybackSection({
+Future<HomeSectionViewModel> _buildRecentPlaybackSectionSeed({
   required HomeModuleConfig module,
   required List<PlaybackProgressEntry> entries,
-  required LocalStorageCacheRepository localStorageCacheRepository,
 }) async {
+  final seedTargets =
+      entries.map(_buildRecentPlaybackDetailTarget).toList(growable: false);
+  final detailTargets = seedTargets;
   final items = <HomeCardViewModel>[];
-  for (final entry in entries) {
-    final detailTarget = await _resolveCachedHomeDetailTarget(
-      seedTarget: _buildRecentPlaybackDetailTarget(entry),
-      localStorageCacheRepository: localStorageCacheRepository,
-    );
+  for (var index = 0; index < entries.length; index += 1) {
+    final entry = entries[index];
+    final detailTarget = detailTargets[index];
     items.add(
       HomeCardViewModel(
         id: entry.key,
@@ -690,39 +791,42 @@ bool _homeShouldPreferCachedSourceContext(
   return false;
 }
 
-Future<HomeSectionViewModel> _buildDoubanSection({
+Future<HomeSectionViewModel> _buildDoubanSectionSeed({
   required HomeModuleConfig module,
   required List<DoubanEntry> entries,
   required String emptyMessage,
-  required LocalStorageCacheRepository localStorageCacheRepository,
 }) async {
+  final seedTargets = entries
+      .map(
+        (entry) => MediaDetailTarget(
+          title: entry.title,
+          posterUrl: entry.posterUrl.trim(),
+          overview: entry.note,
+          year: entry.year,
+          durationLabel: entry.durationLabel,
+          ratingLabels:
+              entry.ratingLabel.trim().isEmpty ? const [] : [entry.ratingLabel],
+          genres: entry.genres.isNotEmpty
+              ? entry.genres
+              : (entry.subjectType.trim().isEmpty
+                  ? const []
+                  : [entry.subjectType]),
+          directors: entry.directors,
+          actors: entry.actors,
+          availabilityLabel: '无',
+          searchQuery: entry.title,
+          itemType: resolveDoubanItemType(entry.subjectType),
+          doubanId: entry.id,
+          sourceName: '豆瓣',
+        ),
+      )
+      .toList(growable: false);
+  final detailTargets = seedTargets;
   final items = <HomeCardViewModel>[];
-  for (final entry in entries) {
+  for (var index = 0; index < entries.length; index += 1) {
+    final entry = entries[index];
+    final detailTarget = detailTargets[index];
     final posterUrl = entry.posterUrl.trim();
-    final detailTarget = await _resolveCachedHomeDetailTarget(
-      seedTarget: MediaDetailTarget(
-        title: entry.title,
-        posterUrl: posterUrl,
-        overview: entry.note,
-        year: entry.year,
-        durationLabel: entry.durationLabel,
-        ratingLabels:
-            entry.ratingLabel.trim().isEmpty ? const [] : [entry.ratingLabel],
-        genres: entry.genres.isNotEmpty
-            ? entry.genres
-            : (entry.subjectType.trim().isEmpty
-                ? const []
-                : [entry.subjectType]),
-        directors: entry.directors,
-        actors: entry.actors,
-        availabilityLabel: '无',
-        searchQuery: entry.title,
-        itemType: resolveDoubanItemType(entry.subjectType),
-        doubanId: entry.id,
-        sourceName: '豆瓣',
-      ),
-      localStorageCacheRepository: localStorageCacheRepository,
-    );
     items.add(HomeCardViewModel(
       id: entry.id,
       title: detailTarget.title.trim().isNotEmpty
@@ -747,31 +851,34 @@ Future<HomeSectionViewModel> _buildDoubanSection({
   );
 }
 
-Future<HomeSectionViewModel> _buildCarouselSection({
+Future<HomeSectionViewModel> _buildCarouselSectionSeed({
   required HomeModuleConfig module,
   required List<DoubanCarouselEntry> items,
   required String emptyMessage,
-  required LocalStorageCacheRepository localStorageCacheRepository,
 }) async {
+  final seedTargets = items
+      .map(
+        (item) => MediaDetailTarget(
+          title: item.title,
+          posterUrl: item.posterUrl.trim(),
+          overview: item.overview,
+          year: item.year,
+          ratingLabels:
+              item.ratingLabel.trim().isEmpty ? const [] : [item.ratingLabel],
+          availabilityLabel: '无',
+          searchQuery: item.title,
+          itemType: resolveDoubanItemType(item.mediaType),
+          doubanId: item.id,
+          sourceName: '豆瓣',
+        ),
+      )
+      .toList(growable: false);
+  final detailTargets = seedTargets;
   final carouselItems = <HomeCarouselItemViewModel>[];
-  for (final item in items) {
+  for (var index = 0; index < items.length; index += 1) {
+    final item = items[index];
     final posterUrl = item.posterUrl.trim();
-    final detailTarget = await _resolveCachedHomeDetailTarget(
-      seedTarget: MediaDetailTarget(
-        title: item.title,
-        posterUrl: posterUrl,
-        overview: item.overview,
-        year: item.year,
-        ratingLabels:
-            item.ratingLabel.trim().isEmpty ? const [] : [item.ratingLabel],
-        availabilityLabel: '无',
-        searchQuery: item.title,
-        itemType: resolveDoubanItemType(item.mediaType),
-        doubanId: item.id,
-        sourceName: '豆瓣',
-      ),
-      localStorageCacheRepository: localStorageCacheRepository,
-    );
+    final detailTarget = detailTargets[index];
     final imageUrl = item.imageUrl.trim().isNotEmpty
         ? item.imageUrl
         : (detailTarget.posterUrl.trim().isNotEmpty
@@ -834,8 +941,11 @@ String _formatClockDuration(Duration value) {
   return '$minutes:${seconds.toString().padLeft(2, '0')}';
 }
 
-MediaSourceKind _resolveSourceKind(AppSettings settings, String sourceId) {
-  final source = settings.mediaSources.cast<MediaSourceConfig?>().firstWhere(
+MediaSourceKind _resolveSourceKind(
+  List<MediaSourceConfig> sources,
+  String sourceId,
+) {
+  final source = sources.cast<MediaSourceConfig?>().firstWhere(
         (item) => item?.id == sourceId,
         orElse: () => null,
       );

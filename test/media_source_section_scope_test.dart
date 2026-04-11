@@ -130,7 +130,7 @@ void main() {
 
       final repository = container.read(mediaRepositoryProvider);
       final collections = await repository.fetchCollections();
-      final items = await repository.fetchLibrary();
+      final initialItems = await repository.fetchLibrary();
 
       expect(
         collections.map((item) => item.id),
@@ -139,12 +139,9 @@ void main() {
           'https://nas.example.com/dav/Media/Anime/',
         ]),
       );
+      expect(initialItems.map((item) => item.title), contains('Interstellar'));
       expect(
-        items.map((item) => item.title),
-        containsAll(<String>['Interstellar', 'One Piece']),
-      );
-      expect(
-        items.map((item) => item.title),
+        initialItems.map((item) => item.title),
         isNot(containsAll(<String>['Dark', 'Planet Earth'])),
       );
     });
@@ -216,7 +213,8 @@ void main() {
       expect(await repository.fetchLibrary(kind: MediaSourceKind.nas), isEmpty);
     });
 
-    test('rebuilds WebDAV index once when library is empty on first load',
+    test(
+        'returns current result immediately and rebuilds WebDAV index in background',
         () async {
       final webDavClient = _FakeWebDavNasClient(
         collections: const [
@@ -276,13 +274,23 @@ void main() {
       addTearDown(container.dispose);
 
       final repository = container.read(mediaRepositoryProvider);
-      final items = await repository.fetchLibrary(kind: MediaSourceKind.nas);
+      final initialItems =
+          await repository.fetchLibrary(kind: MediaSourceKind.nas);
+      expect(
+        initialItems,
+        isEmpty,
+        reason: 'Read path should not block on empty-library auto rebuild.',
+      );
 
-      expect(items.map((item) => item.title), contains('One Piece'));
+      await _waitForCondition(() async {
+        return webDavClient.scanLibraryCallCount >= 1;
+      });
+
       expect(webDavClient.scanLibraryCallCount, 1);
     });
 
-    test('does not rebuild WebDAV index again after one empty auto attempt',
+    test(
+        'does not schedule duplicate WebDAV rebuild tasks during repeated empty reads',
         () async {
       final webDavClient = _FakeWebDavNasClient(
         collections: const [
@@ -298,6 +306,7 @@ void main() {
         itemsBySection: const {
           'https://nas.example.com/dav/Media/Anime/': <MediaItem>[],
         },
+        scanLibraryDelay: const Duration(milliseconds: 40),
       );
       final container = ProviderContainer(
         overrides: [
@@ -333,8 +342,15 @@ void main() {
       addTearDown(container.dispose);
 
       final repository = container.read(mediaRepositoryProvider);
-      expect(await repository.fetchLibrary(kind: MediaSourceKind.nas), isEmpty);
-      expect(webDavClient.scanLibraryCallCount, 1);
+      final results = await Future.wait([
+        repository.fetchLibrary(kind: MediaSourceKind.nas),
+        repository.fetchLibrary(kind: MediaSourceKind.nas),
+        repository.fetchLibrary(kind: MediaSourceKind.nas),
+      ]);
+      for (final items in results) {
+        expect(items, isEmpty);
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 120));
 
       expect(await repository.fetchLibrary(kind: MediaSourceKind.nas), isEmpty);
       expect(
@@ -405,10 +421,12 @@ class _FakeWebDavNasClient extends WebDavNasClient {
   _FakeWebDavNasClient({
     required this.collections,
     required this.itemsBySection,
+    this.scanLibraryDelay = Duration.zero,
   }) : super(MockClient((request) async => http.Response('', 200)));
 
   final List<MediaCollection> collections;
   final Map<String, List<MediaItem>> itemsBySection;
+  final Duration scanLibraryDelay;
   int scanLibraryCallCount = 0;
 
   @override
@@ -444,6 +462,9 @@ class _FakeWebDavNasClient extends WebDavNasClient {
     bool Function()? shouldCancel,
   }) async {
     scanLibraryCallCount += 1;
+    if (scanLibraryDelay > Duration.zero) {
+      await Future<void>.delayed(scanLibraryDelay);
+    }
     final items = sectionId?.trim().isNotEmpty == true
         ? (itemsBySection[sectionId] ?? const <MediaItem>[])
         : itemsBySection.values.expand((entries) => entries).toList();
@@ -501,4 +522,19 @@ class _FakeWebDavNasClient extends WebDavNasClient {
         )
         .toList(growable: false);
   }
+}
+
+Future<void> _waitForCondition(
+  Future<bool> Function() condition, {
+  Duration timeout = const Duration(seconds: 2),
+  Duration interval = const Duration(milliseconds: 20),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(deadline)) {
+    if (await condition()) {
+      return;
+    }
+    await Future<void>.delayed(interval);
+  }
+  fail('Condition not met within $timeout');
 }

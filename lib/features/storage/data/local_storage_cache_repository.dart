@@ -61,6 +61,32 @@ class LocalStorageCacheRepository {
     MediaDetailTarget seedTarget,
   ) async {
     final payload = await _loadDetailPayload();
+    return _loadDetailStateFromPayload(payload, seedTarget);
+  }
+
+  Future<MediaDetailTarget?> loadDetailTarget(
+      MediaDetailTarget seedTarget) async {
+    return (await loadDetailState(seedTarget))?.target;
+  }
+
+  Future<List<MediaDetailTarget?>> loadDetailTargetsBatch(
+    Iterable<MediaDetailTarget> seedTargets,
+  ) async {
+    final targets = seedTargets.toList(growable: false);
+    if (targets.isEmpty) {
+      return const <MediaDetailTarget?>[];
+    }
+
+    final payload = await _loadDetailPayload();
+    return targets
+        .map((target) => _loadDetailStateFromPayload(payload, target)?.target)
+        .toList(growable: false);
+  }
+
+  CachedDetailState? _loadDetailStateFromPayload(
+    _DetailCachePayload payload,
+    MediaDetailTarget seedTarget,
+  ) {
     for (final lookupKey in buildLookupKeys(seedTarget)) {
       final recordId = payload.lookupKeys[lookupKey];
       if (recordId == null) {
@@ -79,11 +105,6 @@ class LocalStorageCacheRepository {
       }
     }
     return null;
-  }
-
-  Future<MediaDetailTarget?> loadDetailTarget(
-      MediaDetailTarget seedTarget) async {
-    return (await loadDetailState(seedTarget))?.target;
   }
 
   Future<DetailMetadataRefreshStatus> loadDetailMetadataRefreshStatus(

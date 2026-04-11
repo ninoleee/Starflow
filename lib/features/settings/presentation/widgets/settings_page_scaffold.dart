@@ -275,6 +275,53 @@ class SettingsSectionTitle extends StatelessWidget {
   }
 }
 
+class SettingsInfoCard extends StatelessWidget {
+  const SettingsInfoCard({
+    super.key,
+    required this.title,
+    required this.description,
+  });
+
+  final String title;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            description,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+              height: 1.45,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 List<Widget> buildSettingsTileGroup(
   List<Widget> children, {
   double spacing = 18,
@@ -291,6 +338,28 @@ List<Widget> buildSettingsTileGroup(
     result.add(children[index]);
   }
   return result;
+}
+
+class SettingsCheckboxDialogOption<T> {
+  const SettingsCheckboxDialogOption({
+    required this.value,
+    required this.title,
+    this.subtitle = '',
+  });
+
+  final T value;
+  final String title;
+  final String subtitle;
+}
+
+class SettingsCheckboxDialogSection<T> {
+  const SettingsCheckboxDialogSection({
+    required this.options,
+    this.title = '',
+  });
+
+  final String title;
+  final List<SettingsCheckboxDialogOption<T>> options;
 }
 
 Future<SettingsCloseAction> showSettingsCloseConfirmDialog(
@@ -353,6 +422,106 @@ Future<T?> showSettingsOptionDialog<T>({
               ),
             ),
         ],
+      );
+    },
+  );
+}
+
+Future<Set<T>?> showSettingsCheckboxSelectionDialog<T>({
+  required BuildContext context,
+  required String title,
+  required Set<T> initialSelection,
+  required List<SettingsCheckboxDialogSection<T>> sections,
+  required String allLabel,
+  required String allSubtitle,
+  String cancelLabel = '取消',
+  String clearLabel = '全部来源',
+  String confirmLabel = '保存',
+}) {
+  return showDialog<Set<T>>(
+    context: context,
+    builder: (dialogContext) {
+      var draft = <T>{...initialSelection};
+      return StatefulBuilder(
+        builder: (context, setState) {
+          final visibleSections = sections
+              .where((section) => section.options.isNotEmpty)
+              .toList(growable: false);
+          final theme = Theme.of(context);
+          return AlertDialog(
+            title: Text(title),
+            content: SizedBox(
+              width: 420,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    StarflowCheckboxTile(
+                      title: allLabel,
+                      subtitle: allSubtitle,
+                      value: draft.isEmpty,
+                      onChanged: (_) {
+                        setState(() {
+                          draft = <T>{};
+                        });
+                      },
+                    ),
+                    for (var index = 0;
+                        index < visibleSections.length;
+                        index++) ...[
+                      const Divider(height: 16),
+                      if (visibleSections[index].title.trim().isNotEmpty) ...[
+                        Text(
+                          visibleSections[index].title,
+                          style: theme.textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      for (final option in visibleSections[index].options)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: StarflowCheckboxTile(
+                            title: option.title,
+                            subtitle: option.subtitle,
+                            value: draft.contains(option.value),
+                            onChanged: (checked) {
+                              setState(() {
+                                if (checked) {
+                                  draft.add(option.value);
+                                } else {
+                                  draft.remove(option.value);
+                                }
+                              });
+                            },
+                          ),
+                        ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              StarflowButton(
+                label: cancelLabel,
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                variant: StarflowButtonVariant.ghost,
+                compact: true,
+              ),
+              StarflowButton(
+                label: clearLabel,
+                onPressed: () => Navigator.of(dialogContext).pop(<T>{}),
+                variant: StarflowButtonVariant.secondary,
+                compact: true,
+              ),
+              StarflowButton(
+                label: confirmLabel,
+                onPressed: () => Navigator.of(dialogContext).pop(draft),
+                compact: true,
+              ),
+            ],
+          );
+        },
       );
     },
   );

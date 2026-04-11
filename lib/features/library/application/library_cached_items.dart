@@ -6,11 +6,18 @@ Future<List<MediaItem>> resolveLibraryItemsWithCachedDetails({
   required List<MediaItem> items,
   required LocalStorageCacheRepository localStorageCacheRepository,
 }) async {
+  if (items.isEmpty) {
+    return const <MediaItem>[];
+  }
+
+  final seedTargets =
+      items.map(MediaDetailTarget.fromMediaItem).toList(growable: false);
+  final cachedTargets =
+      await localStorageCacheRepository.loadDetailTargetsBatch(seedTargets);
   final resolved = <MediaItem>[];
-  for (final item in items) {
-    final seedTarget = MediaDetailTarget.fromMediaItem(item);
-    final cachedTarget =
-        await localStorageCacheRepository.loadDetailTarget(seedTarget);
+  for (var index = 0; index < items.length; index++) {
+    final item = items[index];
+    final cachedTarget = cachedTargets[index];
     if (cachedTarget == null) {
       resolved.add(item);
       continue;

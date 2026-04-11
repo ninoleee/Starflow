@@ -3,6 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 
+final _sectionPanelReduceDecorationsProvider = Provider<bool>((ref) {
+  return ref.watch(appSettingsProvider.select(
+    (settings) => settings.performanceReduceDecorationsEnabled,
+  ));
+});
+
 class SectionPanel extends ConsumerWidget {
   const SectionPanel({
     super.key,
@@ -25,11 +31,8 @@ class SectionPanel extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final hasSubtitle = subtitle.trim().isNotEmpty;
-    final reduceDecorationsEnabled = ref.watch(
-      appSettingsProvider.select(
-        (settings) => settings.performanceReduceDecorationsEnabled,
-      ),
-    );
+    final reduceDecorationsEnabled =
+        ref.watch(_sectionPanelReduceDecorationsProvider);
     return Container(
       width: double.infinity,
       padding: padding,

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/navigation/page_activity_mixin.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
@@ -20,6 +21,100 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+final _searchPageAllowedSourceIdsProvider = Provider<List<String>>((ref) {
+  return ref.watch(
+      appSettingsProvider.select((settings) => settings.searchSourceIds));
+});
+
+final _searchPageMediaSourcesProvider =
+    Provider<List<MediaSourceConfig>>((ref) {
+  return ref
+      .watch(appSettingsProvider.select((settings) => settings.mediaSources));
+});
+
+final _searchPageSearchProvidersProvider =
+    Provider<List<SearchProviderConfig>>((ref) {
+  return ref.watch(
+    appSettingsProvider.select((settings) => settings.searchProviders),
+  );
+});
+
+final _searchPageNetworkStorageProvider = Provider<NetworkStorageConfig>((ref) {
+  return ref
+      .watch(appSettingsProvider.select((settings) => settings.networkStorage));
+});
+
+final _searchPageVisibleLocalSourcesProvider =
+    Provider<List<MediaSourceConfig>>((
+  ref,
+) {
+  final searchSourceIds = ref.watch(_searchPageAllowedSourceIdsProvider);
+  final mediaSources = ref.watch(_searchPageMediaSourcesProvider);
+  return _resolveVisibleLocalSources(
+    searchSourceIds: searchSourceIds,
+    mediaSources: mediaSources,
+  );
+});
+
+final _searchPageVisibleSearchProvidersProvider =
+    Provider<List<SearchProviderConfig>>((ref) {
+  final searchSourceIds = ref.watch(_searchPageAllowedSourceIdsProvider);
+  final searchProviders = ref.watch(_searchPageSearchProvidersProvider);
+  return _resolveVisibleSearchProviders(
+    searchSourceIds: searchSourceIds,
+    searchProviders: searchProviders,
+  );
+});
+
+List<MediaSourceConfig> _resolveVisibleLocalSources({
+  required List<String> searchSourceIds,
+  required List<MediaSourceConfig> mediaSources,
+}) {
+  final allowedIds = searchSourceIds.toSet();
+  final availableSources = mediaSources
+      .where(
+        (source) =>
+            source.enabled &&
+            (source.kind == MediaSourceKind.emby ||
+                source.kind == MediaSourceKind.nas ||
+                (source.kind == MediaSourceKind.quark &&
+                    source.hasConfiguredQuarkFolder)),
+      )
+      .toList(growable: false);
+  if (allowedIds.isEmpty) {
+    return availableSources;
+  }
+  final filteredSources = availableSources
+      .where(
+        (source) => allowedIds.contains(
+          searchSourceSettingIdForMediaSource(source.id),
+        ),
+      )
+      .toList(growable: false);
+  return filteredSources.isEmpty ? availableSources : filteredSources;
+}
+
+List<SearchProviderConfig> _resolveVisibleSearchProviders({
+  required List<String> searchSourceIds,
+  required List<SearchProviderConfig> searchProviders,
+}) {
+  final allowedIds = searchSourceIds.toSet();
+  final availableProviders = searchProviders
+      .where((provider) => provider.enabled)
+      .toList(growable: false);
+  if (allowedIds.isEmpty) {
+    return availableProviders;
+  }
+  final filteredProviders = availableProviders
+      .where(
+        (provider) => allowedIds.contains(
+          searchSourceSettingIdForProvider(provider.id),
+        ),
+      )
+      .toList(growable: false);
+  return filteredProviders.isEmpty ? availableProviders : filteredProviders;
+}
+
 class SearchPage extends ConsumerStatefulWidget {
   const SearchPage({
     super.key,
@@ -34,7 +129,10 @@ class SearchPage extends ConsumerStatefulWidget {
   ConsumerState<SearchPage> createState() => _SearchPageState();
 }
 
-class _SearchPageState extends ConsumerState<SearchPage> {
+class _SearchPageState extends ConsumerState<SearchPage>
+    with PageActivityMixin<SearchPage> {
+  static const Duration _searchUiCommitInterval = Duration(milliseconds: 120);
+
   late final TextEditingController _controller;
   final ScrollController _scrollController = ScrollController();
   final FocusNode _queryFocusNode = FocusNode(debugLabel: 'search-query');
@@ -50,31 +148,39 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   int _completedSearchTaskCount = 0;
   int _filteredResultCount = 0;
   final Set<String> _savingResultIds = <String>{};
+  String? _pendingAutoSearchQuery;
+  Timer? _searchUiCommitTimer;
+  int _pendingSearchRequestId = 0;
+  List<SearchResult>? _pendingSearchResults;
+  List<String>? _pendingSearchErrors;
+  int _pendingSearchTotalCount = 0;
+  int _pendingSearchCompletedCount = 0;
+  int _pendingSearchFilteredCount = 0;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialQuery ?? '');
     unawaited(_loadTelevisionPreferences());
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if ((widget.initialQuery ?? '').trim().isNotEmpty) {
-        _performSearch();
-      }
-    });
+    _scheduleAutoSearch(widget.initialQuery);
   }
 
   @override
   void didUpdateWidget(covariant SearchPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.initialQuery != widget.initialQuery &&
-        (widget.initialQuery ?? '').trim().isNotEmpty) {
-      _controller.text = widget.initialQuery!;
-      _performSearch();
+    if (oldWidget.initialQuery != widget.initialQuery) {
+      final nextQuery = (widget.initialQuery ?? '').trim();
+      if (nextQuery.isEmpty) {
+        return;
+      }
+      _controller.text = nextQuery;
+      _scheduleAutoSearch(nextQuery);
     }
   }
 
   @override
   void dispose() {
+    _cancelPendingSearchUiCommit(clearState: true);
     _queryFocusNode.dispose();
     _scrollController.dispose();
     _tvFocusMemoryController.dispose();
@@ -88,6 +194,16 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       return;
     }
     context.goNamed('home');
+  }
+
+  @override
+  void onPageBecameActive() {
+    _runPendingAutoSearchIfNeeded();
+  }
+
+  @override
+  void onPageBecameInactive() {
+    _cancelSearchTasks();
   }
 
   Future<void> _loadTelevisionPreferences() async {
@@ -148,25 +264,147 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     await _performSearch();
   }
 
+  void _scheduleAutoSearch(String? query) {
+    final normalizedQuery = query?.trim() ?? '';
+    if (normalizedQuery.isEmpty) {
+      return;
+    }
+    _pendingAutoSearchQuery = normalizedQuery;
+    _runPendingAutoSearchIfNeeded();
+  }
+
+  void _runPendingAutoSearchIfNeeded() {
+    final pendingQuery = _pendingAutoSearchQuery?.trim() ?? '';
+    if (pendingQuery.isEmpty || !isPageVisible) {
+      return;
+    }
+    _pendingAutoSearchQuery = null;
+    if (_controller.text.trim() != pendingQuery) {
+      _controller.text = pendingQuery;
+    }
+    unawaited(_performSearch());
+  }
+
+  void _cancelPendingSearchUiCommit({bool clearState = false}) {
+    _searchUiCommitTimer?.cancel();
+    _searchUiCommitTimer = null;
+    if (!clearState) {
+      return;
+    }
+    _pendingSearchRequestId = 0;
+    _pendingSearchResults = null;
+    _pendingSearchErrors = null;
+    _pendingSearchTotalCount = 0;
+    _pendingSearchCompletedCount = 0;
+    _pendingSearchFilteredCount = 0;
+  }
+
+  void _flushPendingSearchUiCommit() {
+    _searchUiCommitTimer = null;
+    if (!mounted || _pendingSearchRequestId != _activeSearchRequestId) {
+      return;
+    }
+    final aggregated = _pendingSearchResults;
+    final errors = _pendingSearchErrors;
+    if (aggregated == null || errors == null) {
+      return;
+    }
+    final completed = _pendingSearchCompletedCount;
+    final totalCount = _pendingSearchTotalCount;
+    final hasFinished = completed >= totalCount;
+    final sortedResults = _sortResults(aggregated);
+    setState(() {
+      _completedSearchTaskCount = completed;
+      _filteredResultCount = _pendingSearchFilteredCount;
+      _results = sortedResults;
+      _isSearching = !hasFinished;
+      _errorMessage = sortedResults.isEmpty && errors.isNotEmpty && hasFinished
+          ? errors.join('\n')
+          : null;
+    });
+  }
+
+  void _scheduleSearchUiCommit({
+    required int requestId,
+    required List<SearchResult> aggregated,
+    required List<String> errors,
+    required int totalCount,
+    required int completedCount,
+    required int filteredCount,
+    bool force = false,
+  }) {
+    if (!mounted || requestId != _activeSearchRequestId) {
+      return;
+    }
+    _pendingSearchRequestId = requestId;
+    _pendingSearchResults = aggregated;
+    _pendingSearchErrors = errors;
+    _pendingSearchTotalCount = totalCount;
+    _pendingSearchCompletedCount = completedCount;
+    _pendingSearchFilteredCount = filteredCount;
+    if (force) {
+      _cancelPendingSearchUiCommit();
+      _flushPendingSearchUiCommit();
+      return;
+    }
+    if (_searchUiCommitTimer != null) {
+      return;
+    }
+    _searchUiCommitTimer = Timer(
+      _searchUiCommitInterval,
+      _flushPendingSearchUiCommit,
+    );
+  }
+
+  void _cancelSearchTasks({bool clearResults = false}) {
+    _activeSearchRequestId += 1;
+    _cancelPendingSearchUiCommit(clearState: true);
+    if (!mounted) {
+      return;
+    }
+    final shouldUpdateState = _isSearching ||
+        _totalSearchTaskCount > 0 ||
+        _completedSearchTaskCount > 0 ||
+        (clearResults &&
+            (_results.isNotEmpty ||
+                _errorMessage != null ||
+                _filteredResultCount > 0));
+    if (!shouldUpdateState) {
+      return;
+    }
+    setState(() {
+      _isSearching = false;
+      _totalSearchTaskCount = 0;
+      _completedSearchTaskCount = 0;
+      if (clearResults) {
+        _results = const [];
+        _errorMessage = null;
+        _filteredResultCount = 0;
+      }
+    });
+  }
+
   Future<void> _performSearch() async {
     final keyword = _controller.text.trim();
+    if (keyword.isEmpty) {
+      _cancelSearchTasks(clearResults: true);
+      return;
+    }
     await _rememberQuery(keyword);
-    final settings = ref.read(appSettingsProvider);
-    final enabledProviders = _visibleSearchProviders(settings);
-    final localSources = _visibleLocalSources(settings: settings);
+    final enabledProviders =
+        ref.read(_searchPageVisibleSearchProvidersProvider);
+    final localSources = ref.read(_searchPageVisibleLocalSourcesProvider);
     final targets = _buildTargets(
       localSources: localSources,
       providers: enabledProviders,
     );
     if (targets.length == 1) {
-      setState(() {
-        _results = const [];
-        _errorMessage = null;
-      });
+      _cancelSearchTasks(clearResults: true);
       return;
     }
 
     final selectedTargets = _resolveSelectedTargets(targets);
+    _cancelPendingSearchUiCommit(clearState: true);
 
     setState(() {
       _selectedTargetIds = selectedTargets.map((item) => item.id).toSet();
@@ -229,11 +467,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   @override
   Widget build(BuildContext context) {
-    final settings = ref.watch(appSettingsProvider);
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final networkStorage = ref.watch(_searchPageNetworkStorageProvider);
     final headerTopInset = kToolbarHeight;
-    final enabledProviders = _visibleSearchProviders(settings);
-    final localSources = _visibleLocalSources(settings: settings);
+    final enabledProviders =
+        ref.watch(_searchPageVisibleSearchProvidersProvider);
+    final localSources = ref.watch(_searchPageVisibleLocalSourcesProvider);
     final targets = _buildTargets(
       localSources: localSources,
       providers: enabledProviders,
@@ -446,11 +685,11 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                                   _savingResultIds.contains(entry.value.id),
                               showSaveAction: _canSaveResultToQuark(
                                 result: entry.value,
-                                settings: settings,
+                                networkStorage: networkStorage,
                               ),
                               onSave: () => _saveResultToQuark(
                                 result: entry.value,
-                                settings: settings,
+                                networkStorage: networkStorage,
                               ),
                             ),
                           ),
@@ -656,15 +895,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         onCompleted();
         final completed = getCompleted();
         final hasFinished = completed >= totalCount;
-        setState(() {
-          _completedSearchTaskCount = completed;
-          _filteredResultCount = getFiltered();
-          _results = _sortResults(aggregated);
-          _isSearching = !hasFinished;
-          _errorMessage = aggregated.isEmpty && errors.isNotEmpty && hasFinished
-              ? errors.join('\n')
-              : null;
-        });
+        _scheduleSearchUiCommit(
+          requestId: requestId,
+          aggregated: aggregated,
+          errors: errors,
+          totalCount: totalCount,
+          completedCount: completed,
+          filteredCount: getFiltered(),
+          force: hasFinished,
+        );
       }
     }
   }
@@ -678,51 +917,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       ...localSources.map(_SearchTarget.mediaSource),
       ...providers.map(_SearchTarget.provider),
     ];
-  }
-
-  List<MediaSourceConfig> _visibleLocalSources({
-    required AppSettings settings,
-  }) {
-    final allowedIds = settings.searchSourceIds.toSet();
-    final availableSources = settings.mediaSources
-        .where(
-          (source) =>
-              source.enabled &&
-              (source.kind == MediaSourceKind.emby ||
-                  source.kind == MediaSourceKind.nas ||
-                  (source.kind == MediaSourceKind.quark &&
-                      source.hasConfiguredQuarkFolder)),
-        )
-        .toList(growable: false);
-    if (allowedIds.isEmpty) {
-      return availableSources;
-    }
-    final filteredSources = availableSources
-        .where(
-          (source) => allowedIds.contains(
-            searchSourceSettingIdForMediaSource(source.id),
-          ),
-        )
-        .toList(growable: false);
-    return filteredSources.isEmpty ? availableSources : filteredSources;
-  }
-
-  List<SearchProviderConfig> _visibleSearchProviders(AppSettings settings) {
-    final allowedIds = settings.searchSourceIds.toSet();
-    final availableProviders = settings.searchProviders
-        .where((provider) => provider.enabled)
-        .toList(growable: false);
-    if (allowedIds.isEmpty) {
-      return availableProviders;
-    }
-    final filteredProviders = availableProviders
-        .where(
-          (provider) => allowedIds.contains(
-            searchSourceSettingIdForProvider(provider.id),
-          ),
-        )
-        .toList(growable: false);
-    return filteredProviders.isEmpty ? availableProviders : filteredProviders;
   }
 
   List<_SearchTarget> _resolveSelectedTargets(List<_SearchTarget> targets) {
@@ -783,7 +977,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   bool _canSaveResultToQuark({
     required SearchResult result,
-    required AppSettings settings,
+    required NetworkStorageConfig networkStorage,
   }) {
     if (result.detailTarget != null) {
       return false;
@@ -792,14 +986,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     if (cloudType != SearchCloudType.quark) {
       return false;
     }
-    return settings.networkStorage.quarkCookie.trim().isNotEmpty;
+    return networkStorage.quarkCookie.trim().isNotEmpty;
   }
 
   Future<void> _saveResultToQuark({
     required SearchResult result,
-    required AppSettings settings,
+    required NetworkStorageConfig networkStorage,
   }) async {
-    final storage = settings.networkStorage;
+    final storage = networkStorage;
     final cookie = storage.quarkCookie.trim();
     if (cookie.isEmpty) {
       if (!mounted) {

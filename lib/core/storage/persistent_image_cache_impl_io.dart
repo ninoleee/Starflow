@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -12,16 +13,21 @@ PersistentImageCache createPersistentImageCache() => _IoPersistentImageCache();
 class _IoPersistentImageCache implements PersistentImageCache {
   _IoPersistentImageCache() : _client = http.Client();
 
-  static const int _maxMemoryEntries = 48;
+  static const int _maxMemoryEntries = 256;
+  static const int _maxMemoryBytes = 72 * 1024 * 1024;
+  static const Duration _diskEntryMaxAge = Duration(days: 30);
 
   final http.Client _client;
-  final LinkedHashMap<String, Uint8List> _memoryCache = LinkedHashMap();
-  final Map<String, Future<Uint8List>> _inflight = <String, Future<Uint8List>>{};
+  final LinkedHashMap<String, _MemoryImageEntry> _memoryCache = LinkedHashMap();
+  final Map<String, Future<Uint8List>> _inflight =
+      <String, Future<Uint8List>>{};
   Future<Directory>? _directoryFuture;
+  int _memoryBytes = 0;
 
   @override
   Future<void> clear() async {
     _memoryCache.clear();
+    _memoryBytes = 0;
     final directory = await _cacheDirectory();
     if (await directory.exists()) {
       await directory.delete(recursive: true);
@@ -46,6 +52,9 @@ class _IoPersistentImageCache implements PersistentImageCache {
       if (entity is! File) {
         continue;
       }
+      if (!entity.path.toLowerCase().endsWith('.bin')) {
+        continue;
+      }
       count += 1;
       bytes += await entity.length();
     }
@@ -63,71 +72,123 @@ class _IoPersistentImageCache implements PersistentImageCache {
     Map<String, String>? headers,
   }) async {
     final trimmedUrl = url.trim();
-    final memoryCached = _memoryCache.remove(trimmedUrl);
+    if (trimmedUrl.isEmpty) {
+      throw StateError('Image URL is empty.');
+    }
+    final cacheKey = _cacheIdentity(trimmedUrl, headers);
+    final memoryCached = _memoryCache.remove(cacheKey);
     if (memoryCached != null) {
-      _memoryCache[trimmedUrl] = memoryCached;
-      return SynchronousFuture<Uint8List>(memoryCached);
+      _memoryCache[cacheKey] = memoryCached;
+      return SynchronousFuture<Uint8List>(memoryCached.bytes);
     }
 
-    final inflight = _inflight[trimmedUrl];
+    final inflight = _inflight[cacheKey];
     if (inflight != null) {
       return inflight;
     }
 
-    final future = _loadOrFetch(trimmedUrl, headers);
-    _inflight[trimmedUrl] = future;
+    final future = _loadOrFetch(
+      cacheKey: cacheKey,
+      url: trimmedUrl,
+      headers: headers,
+    );
+    _inflight[cacheKey] = future;
     future.whenComplete(() {
-      _inflight.remove(trimmedUrl);
+      _inflight.remove(cacheKey);
     });
     return future;
   }
 
-  Future<Uint8List> _loadOrFetch(
-    String url,
-    Map<String, String>? headers,
-  ) async {
-    final file = await _cacheFile(url);
+  Future<Uint8List> _loadOrFetch({
+    required String cacheKey,
+    required String url,
+    required Map<String, String>? headers,
+  }) async {
+    final file = await _cacheFile(cacheKey);
+    final metadataFile = await _cacheMetadataFile(cacheKey);
+    final metadata = await _loadMetadata(metadataFile);
+    final diskBytes = await _readDiskImage(file);
+    final isFresh = _isDiskEntryFresh(metadata, file);
+
+    if (diskBytes != null && isFresh) {
+      _remember(cacheKey, diskBytes);
+      return diskBytes;
+    }
+
+    final staleBytes = diskBytes;
     if (await file.exists()) {
-      final bytes = await file.readAsBytes();
-      if (bytes.isNotEmpty && _looksLikeImageBytes(bytes)) {
-        _remember(url, bytes);
-        return bytes;
+      await _deleteIfExists(file);
+      await _deleteIfExists(metadataFile);
+    }
+
+    try {
+      final response = await _client.get(Uri.parse(url), headers: headers);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError(
+          'HTTP request failed, statusCode: ${response.statusCode}, $url',
+        );
       }
-      await file.delete();
-    }
 
-    final response = await _client.get(Uri.parse(url), headers: headers);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError(
-        'HTTP request failed, statusCode: ${response.statusCode}, $url',
-      );
-    }
+      final bytes = response.bodyBytes;
+      if (bytes.isEmpty) {
+        throw StateError('Image response body is empty: $url');
+      }
+      final contentType = response.headers['content-type'] ?? '';
+      if (!_looksLikeImageResponse(contentType, bytes)) {
+        throw StateError('Image response is not a decodable image: $url');
+      }
 
-    final bytes = response.bodyBytes;
-    if (bytes.isEmpty) {
-      throw StateError('Image response body is empty: $url');
+      await file.writeAsBytes(bytes, flush: false);
+      await _saveMetadata(metadataFile, _buildMetadata());
+      _remember(cacheKey, bytes);
+      return bytes;
+    } catch (_) {
+      if (staleBytes != null && staleBytes.isNotEmpty) {
+        _remember(cacheKey, staleBytes);
+        return staleBytes;
+      }
+      rethrow;
     }
-    final contentType = response.headers['content-type'] ?? '';
-    if (!_looksLikeImageResponse(contentType, bytes)) {
-      throw StateError('Image response is not a decodable image: $url');
-    }
+  }
 
-    await file.writeAsBytes(bytes, flush: false);
-    _remember(url, bytes);
+  Future<Uint8List?> _readDiskImage(File file) async {
+    if (!await file.exists()) {
+      return null;
+    }
+    final bytes = await file.readAsBytes();
+    if (bytes.isEmpty || !_looksLikeImageBytes(bytes)) {
+      await _deleteIfExists(file);
+      return null;
+    }
     return bytes;
   }
 
-  void _remember(String url, Uint8List bytes) {
-    _memoryCache.remove(url);
-    _memoryCache[url] = bytes;
-    if (_memoryCache.length > _maxMemoryEntries) {
-      _memoryCache.remove(_memoryCache.keys.first);
+  void _remember(String cacheKey, Uint8List bytes) {
+    final existing = _memoryCache.remove(cacheKey);
+    if (existing != null) {
+      _memoryBytes -= existing.bytes.lengthInBytes;
+    }
+    final entry = _MemoryImageEntry(bytes);
+    _memoryCache[cacheKey] = entry;
+    _memoryBytes += entry.bytes.lengthInBytes;
+    while (_memoryCache.length > _maxMemoryEntries ||
+        _memoryBytes > _maxMemoryBytes) {
+      final oldestKey = _memoryCache.keys.first;
+      final removed = _memoryCache.remove(oldestKey);
+      if (removed != null) {
+        _memoryBytes -= removed.bytes.lengthInBytes;
+      }
     }
   }
 
-  Future<File> _cacheFile(String url) async {
+  Future<File> _cacheFile(String cacheKey) async {
     final directory = await _cacheDirectory();
-    return File('${directory.path}/${_stableHash(url)}.bin');
+    return File('${directory.path}/${_stableHash(cacheKey)}.bin');
+  }
+
+  Future<File> _cacheMetadataFile(String cacheKey) async {
+    final directory = await _cacheDirectory();
+    return File('${directory.path}/${_stableHash(cacheKey)}.json');
   }
 
   Future<Directory> _cacheDirectory() {
@@ -140,6 +201,101 @@ class _IoPersistentImageCache implements PersistentImageCache {
       return directory;
     }();
   }
+
+  String _cacheIdentity(String url, Map<String, String>? headers) {
+    final normalizedHeaders = _normalizeHeaders(headers);
+    if (normalizedHeaders.isEmpty) {
+      return url;
+    }
+    final buffer = StringBuffer(url);
+    for (final entry in normalizedHeaders.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key))) {
+      buffer
+        ..write('\n')
+        ..write(entry.key)
+        ..write(':')
+        ..write(entry.value);
+    }
+    return buffer.toString();
+  }
+
+  Map<String, String> _normalizeHeaders(Map<String, String>? headers) {
+    if (headers == null || headers.isEmpty) {
+      return const <String, String>{};
+    }
+    final normalized = <String, String>{};
+    for (final entry in headers.entries) {
+      final key = entry.key.trim().toLowerCase();
+      final value = entry.value.trim();
+      if (key.isEmpty || value.isEmpty) {
+        continue;
+      }
+      normalized[key] = value;
+    }
+    return normalized;
+  }
+
+  Future<Map<String, dynamic>?> _loadMetadata(File metadataFile) async {
+    if (!await metadataFile.exists()) {
+      return null;
+    }
+    try {
+      final raw = await metadataFile.readAsString();
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+    } catch (_) {
+      await _deleteIfExists(metadataFile);
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _buildMetadata() {
+    return <String, dynamic>{
+      'updatedAt': DateTime.now().toUtc().millisecondsSinceEpoch,
+    };
+  }
+
+  Future<void> _saveMetadata(
+    File metadataFile,
+    Map<String, dynamic> metadata,
+  ) async {
+    await metadataFile.writeAsString(
+      jsonEncode(metadata),
+      flush: false,
+    );
+  }
+
+  bool _isDiskEntryFresh(Map<String, dynamic>? metadata, File file) {
+    final now = DateTime.now().toUtc();
+    final updatedAt = _resolveEntryUpdatedAt(metadata, file);
+    return now.difference(updatedAt) <= _diskEntryMaxAge;
+  }
+
+  DateTime _resolveEntryUpdatedAt(Map<String, dynamic>? metadata, File file) {
+    final updatedAtMillis = (metadata?['updatedAt'] as num?)?.toInt() ?? 0;
+    if (updatedAtMillis > 0) {
+      return DateTime.fromMillisecondsSinceEpoch(
+        updatedAtMillis,
+        isUtc: true,
+      );
+    }
+    final stat = file.statSync();
+    return stat.modified.toUtc();
+  }
+
+  Future<void> _deleteIfExists(File file) async {
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }
+}
+
+class _MemoryImageEntry {
+  const _MemoryImageEntry(this.bytes);
+
+  final Uint8List bytes;
 }
 
 bool _looksLikeImageResponse(String contentType, Uint8List bytes) {
@@ -155,8 +311,7 @@ bool _looksLikeImageBytes(Uint8List bytes) {
     return false;
   }
 
-  final isJpeg =
-      bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF;
+  final isJpeg = bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF;
   final isPng = bytes[0] == 0x89 &&
       bytes[1] == 0x50 &&
       bytes[2] == 0x4E &&

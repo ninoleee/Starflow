@@ -2,8 +2,11 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/seed_data.dart';
+import 'package:starflow/features/library/application/empty_library_auto_rebuild_scheduler.dart';
+import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
+import 'package:starflow/features/library/data/quark_external_storage_client.dart';
 import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -40,7 +43,9 @@ abstract class MediaRepository {
     bool forceFullRescan = false,
   });
 
-  Future<void> cancelActiveWebDavRefreshes();
+  Future<void> cancelActiveWebDavRefreshes({
+    bool includeForceFull = false,
+  });
 
   Future<void> deleteResource({
     required String sourceId,
@@ -67,6 +72,7 @@ final mediaRepositoryProvider = Provider<MediaRepository>(
     ref.read(embyApiClientProvider),
     ref.read(webDavNasClientProvider),
     ref.read(nasMediaIndexerProvider),
+    ref.read(quarkExternalStorageClientProvider),
     ref.read(quarkSaveClientProvider),
   ),
 );
@@ -77,6 +83,7 @@ class AppMediaRepository implements MediaRepository {
     this._embyApiClient,
     this._webDavNasClient,
     this._nasMediaIndexer,
+    this._quarkExternalStorageClient,
     this._quarkSaveClient,
   );
 
@@ -84,7 +91,10 @@ class AppMediaRepository implements MediaRepository {
   final EmbyApiClient _embyApiClient;
   final WebDavNasClient _webDavNasClient;
   final NasMediaIndexer _nasMediaIndexer;
+  final QuarkExternalStorageClient _quarkExternalStorageClient;
   final QuarkSaveClient _quarkSaveClient;
+  final EmptyLibraryAutoRebuildScheduler _emptyLibraryAutoRebuildScheduler =
+      EmptyLibraryAutoRebuildScheduler();
 
   List<MediaSourceConfig> get _enabledSources {
     return ref
@@ -207,14 +217,6 @@ class AppMediaRepository implements MediaRepository {
       return;
     }
 
-    if (source.kind == MediaSourceKind.quark) {
-      await _refreshQuarkSource(
-        source,
-        forceFullRescan: forceFullRescan,
-      );
-      return;
-    }
-
     if (source.kind == MediaSourceKind.emby) {
       if (!source.hasActiveSession) {
         return;
@@ -259,6 +261,7 @@ class AppMediaRepository implements MediaRepository {
     );
   }
 
+  // ignore: unused_element
   Future<void> _refreshQuarkSource(
     MediaSourceConfig source, {
     required bool forceFullRescan,
@@ -279,29 +282,53 @@ class AppMediaRepository implements MediaRepository {
       return;
     }
     final selectedCollections = await _selectedCollectionsForSource(source);
-    if (_hasScopedSections(source)) {
-      if (selectedCollections.isEmpty) {
+    try {
+      if (_hasScopedSections(source)) {
+        if (selectedCollections.isEmpty) {
+          return;
+        }
+        await _loadQuarkLibraryFromRoots(
+          source,
+          cookie: cookie,
+          roots: selectedCollections
+              .map(
+                (collection) => _QuarkDirectoryCursor(
+                  fid: collection.id,
+                  path: collection.subtitle,
+                  sectionId: collection.id,
+                  sectionName: collection.title,
+                ),
+              )
+              .toList(growable: false),
+          limit: 200 * selectedCollections.length,
+          reportRefreshProgress: true,
+        );
         return;
       }
-      await _fetchLibraryFromCollections(
+      await _loadQuarkLibraryFromRoots(
         source,
-        selectedCollections,
+        cookie: cookie,
+        roots: [
+          _QuarkDirectoryCursor(
+            fid: source.quarkFolderId,
+            path: source.quarkFolderPath,
+          ),
+        ],
         limit: 200,
+        reportRefreshProgress: true,
       );
-      return;
+    } finally {
+      _clearQuarkRefreshProgress(source.id);
     }
-    await _loadQuarkLibrary(
-      source,
-      cookie: cookie,
-      parentFid: source.quarkFolderId,
-      parentPath: source.quarkFolderPath,
-      limit: 200,
-    );
   }
 
   @override
-  Future<void> cancelActiveWebDavRefreshes() {
-    return _nasMediaIndexer.cancelAllRefreshTasks();
+  Future<void> cancelActiveWebDavRefreshes({
+    bool includeForceFull = false,
+  }) {
+    return _nasMediaIndexer.cancelAllRefreshTasks(
+      includeForceFull: includeForceFull,
+    );
   }
 
   @override
@@ -419,10 +446,6 @@ class AppMediaRepository implements MediaRepository {
       }
     }
     if (source == null || !source.enabled) {
-      return const [];
-    }
-
-    if (source.kind == MediaSourceKind.quark) {
       return const [];
     }
 
@@ -553,21 +576,26 @@ class AppMediaRepository implements MediaRepository {
         if (!source.hasConfiguredQuarkFolder) {
           return const _SourceFetchResult(items: <MediaItem>[]);
         }
-        final cookie = _quarkCookie;
-        if (cookie.isEmpty) {
-          return const _SourceFetchResult(items: <MediaItem>[]);
-        }
         if (sectionId?.trim().isNotEmpty == true) {
           final resolvedSectionId = sectionId!.trim();
+          final resolvedSectionName =
+              await _resolveSectionName(source, sectionId);
           return _SourceFetchResult(
-            items: await _loadQuarkLibrary(
+            items: await _loadNasLibraryWithAutoRebuild(
               source,
-              cookie: cookie,
-              parentFid: resolvedSectionId,
-              parentPath: await _resolveSectionPath(source, sectionId),
               sectionId: resolvedSectionId,
-              sectionName: await _resolveSectionName(source, sectionId),
+              scopedCollections: [
+                MediaCollection(
+                  id: resolvedSectionId,
+                  title: resolvedSectionName,
+                  sourceId: source.id,
+                  sourceName: source.name,
+                  sourceKind: source.kind,
+                  subtitle: await _resolveSectionPath(source, sectionId),
+                ),
+              ],
               limit: limit,
+              autoRebuildInBackground: false,
             ),
           );
         }
@@ -578,21 +606,20 @@ class AppMediaRepository implements MediaRepository {
             return const _SourceFetchResult(items: <MediaItem>[]);
           }
           return _SourceFetchResult(
-            items: await _fetchLibraryFromCollections(
+            items: await _loadNasLibraryWithAutoRebuild(
               source,
-              selectedCollections,
+              scopedCollections: selectedCollections,
               limit: limit,
+              autoRebuildInBackground: false,
             ),
           );
         }
 
         return _SourceFetchResult(
-          items: await _loadQuarkLibrary(
+          items: await _loadNasLibraryWithAutoRebuild(
             source,
-            cookie: cookie,
-            parentFid: source.quarkFolderId,
-            parentPath: source.quarkFolderPath,
             limit: limit,
+            autoRebuildInBackground: false,
           ),
         );
       }
@@ -689,14 +716,12 @@ class AppMediaRepository implements MediaRepository {
           );
         }
         if (source.kind == MediaSourceKind.quark) {
-          return _loadQuarkLibrary(
+          return _loadNasLibraryWithAutoRebuild(
             source,
-            cookie: _quarkCookie,
-            parentFid: collection.id,
-            parentPath: collection.subtitle,
             sectionId: collection.id,
-            sectionName: collection.title,
+            scopedCollections: [collection],
             limit: limit,
+            autoRebuildInBackground: false,
           );
         }
         return _nasMediaIndexer.loadLibrary(
@@ -715,7 +740,13 @@ class AppMediaRepository implements MediaRepository {
     String? sectionId,
     List<MediaCollection>? scopedCollections,
     required int limit,
+    bool autoRebuildInBackground = true,
   }) async {
+    final scopeKey = _buildEmptyLibraryAutoRebuildScopeKey(
+      source: source,
+      sectionId: sectionId,
+      scopedCollections: scopedCollections,
+    );
     var items = await _nasMediaIndexer.loadLibrary(
       source,
       sectionId: sectionId,
@@ -723,24 +754,67 @@ class AppMediaRepository implements MediaRepository {
       limit: limit,
     );
     if (items.isNotEmpty) {
+      _emptyLibraryAutoRebuildScheduler.markScopeHealthy(scopeKey);
       return items;
     }
 
-    final rebuilt = await _nasMediaIndexer.tryAutoRebuildOnEmpty(
-      source,
-      scopedCollections: scopedCollections,
-    );
-    if (!rebuilt) {
+    if (!autoRebuildInBackground) {
+      final rebuilt = await _nasMediaIndexer.tryAutoRebuildOnEmpty(
+        source,
+        scopedCollections: scopedCollections,
+      );
+      if (!rebuilt) {
+        return items;
+      }
+      items = await _nasMediaIndexer.loadLibrary(
+        source,
+        sectionId: sectionId,
+        scopedCollections: scopedCollections,
+        limit: limit,
+      );
+      if (items.isNotEmpty) {
+        _emptyLibraryAutoRebuildScheduler.markScopeHealthy(scopeKey);
+      }
       return items;
     }
 
-    items = await _nasMediaIndexer.loadLibrary(
-      source,
-      sectionId: sectionId,
+    _scheduleEmptyLibraryAutoRebuild(
+      source: source,
       scopedCollections: scopedCollections,
-      limit: limit,
+      scopeKey: scopeKey,
     );
     return items;
+  }
+
+  void _scheduleEmptyLibraryAutoRebuild({
+    required MediaSourceConfig source,
+    List<MediaCollection>? scopedCollections,
+    required String scopeKey,
+  }) {
+    _emptyLibraryAutoRebuildScheduler.schedule(
+      scopeKey: scopeKey,
+      task: () async {
+        await _nasMediaIndexer.tryAutoRebuildOnEmpty(
+          source,
+          scopedCollections: scopedCollections,
+        );
+      },
+    );
+  }
+
+  String _buildEmptyLibraryAutoRebuildScopeKey({
+    required MediaSourceConfig source,
+    String? sectionId,
+    List<MediaCollection>? scopedCollections,
+  }) {
+    final normalizedSourceId = source.id.trim();
+    final normalizedScopeIds = <String>{
+      for (final collection in scopedCollections ?? const <MediaCollection>[])
+        if (collection.id.trim().isNotEmpty) collection.id.trim(),
+      if (sectionId?.trim().isNotEmpty == true) sectionId!.trim(),
+    }.toList(growable: false)
+      ..sort();
+    return '$normalizedSourceId::${normalizedScopeIds.join("|")}';
   }
 
   Future<List<MediaCollection>> _selectedCollectionsForSource(
@@ -767,29 +841,7 @@ class AppMediaRepository implements MediaRepository {
       }
       collections = await _embyApiClient.fetchCollections(source);
     } else if (source.kind == MediaSourceKind.quark) {
-      if (!source.hasConfiguredQuarkFolder) {
-        return const [];
-      }
-      final cookie = _quarkCookie;
-      if (cookie.isEmpty) {
-        return const [];
-      }
-      final directories = await _quarkSaveClient.listDirectories(
-        cookie: cookie,
-        parentFid: source.quarkFolderId,
-      );
-      collections = directories
-          .map(
-            (entry) => MediaCollection(
-              id: entry.fid,
-              title: entry.name,
-              sourceId: source.id,
-              sourceName: source.name,
-              sourceKind: source.kind,
-              subtitle: entry.path,
-            ),
-          )
-          .toList(growable: false);
+      collections = await _quarkExternalStorageClient.fetchCollections(source);
     } else {
       if (source.endpoint.trim().isEmpty) {
         return const [];
@@ -812,6 +864,7 @@ class AppMediaRepository implements MediaRepository {
         .toList();
   }
 
+  // ignore: unused_element
   Future<List<MediaItem>> _loadQuarkLibrary(
     MediaSourceConfig source, {
     required String cookie,
@@ -821,40 +874,137 @@ class AppMediaRepository implements MediaRepository {
     String sectionName = '',
     required int limit,
   }) async {
+    return _loadQuarkLibraryFromRoots(
+      source,
+      cookie: cookie,
+      roots: [
+        _QuarkDirectoryCursor(
+          fid: parentFid,
+          path: parentPath,
+          sectionId: sectionId,
+          sectionName: sectionName,
+        ),
+      ],
+      limit: limit,
+    );
+  }
+
+  Future<List<MediaItem>> _loadQuarkLibraryFromRoots(
+    MediaSourceConfig source, {
+    required String cookie,
+    required List<_QuarkDirectoryCursor> roots,
+    required int limit,
+    bool reportRefreshProgress = false,
+  }) async {
     final normalizedCookie = cookie.trim();
     if (normalizedCookie.isEmpty) {
       return const [];
     }
-    final normalizedParentFid =
-        parentFid.trim().isEmpty ? source.quarkFolderId : parentFid.trim();
-    final normalizedParentPath = _normalizeQuarkDirectoryPath(
-      parentPath.trim().isNotEmpty
-          ? parentPath.trim()
-          : normalizedParentFid == source.quarkFolderId
-              ? source.quarkFolderPath
-              : '/',
+    final scanResult = await _scanQuarkLibrary(
+      source,
+      cookie: normalizedCookie,
+      roots: roots,
+      limit: limit,
+      reportRefreshProgress: reportRefreshProgress,
     );
-    if (source.matchesWebDavExcludedPath(normalizedParentPath)) {
+    if (scanResult.mediaEntries.isEmpty) {
+      if (reportRefreshProgress) {
+        _quarkRefreshProgressController.startIndexing(
+          sourceId: source.id,
+          totalItems: 0,
+          detail: '没有发现媒体文件',
+        );
+      }
       return const [];
     }
-    final items = <MediaItem>[];
-    final directoryEntriesByPath = <String, List<QuarkFileEntry>>{};
     final textFileCache = <String, Future<String>>{};
     final downloadCache = <String, Future<QuarkResolvedDownload>>{};
-    final queue = <_QuarkDirectoryCursor>[
-      _QuarkDirectoryCursor(
-        fid: normalizedParentFid,
-        path: normalizedParentPath,
-      ),
-    ];
+    if (reportRefreshProgress) {
+      _quarkRefreshProgressController.startIndexing(
+        sourceId: source.id,
+        totalItems: scanResult.mediaEntries.length,
+      );
+    }
+    final items = <MediaItem>[];
+    for (var index = 0; index < scanResult.mediaEntries.length; index++) {
+      final queuedEntry = scanResult.mediaEntries[index];
+      items.add(
+        await _buildQuarkMediaItem(
+          source: source,
+          entry: queuedEntry.entry,
+          cookie: normalizedCookie,
+          sectionId: queuedEntry.sectionId,
+          sectionName: queuedEntry.sectionName,
+          directoryEntriesByPath: scanResult.directoryEntriesByPath,
+          textFileCache: textFileCache,
+          downloadCache: downloadCache,
+        ),
+      );
+      if (reportRefreshProgress) {
+        _quarkRefreshProgressController.updateIndexing(
+          sourceId: source.id,
+          current: index + 1,
+          total: scanResult.mediaEntries.length,
+          detail: queuedEntry.entry.name,
+        );
+      }
+    }
 
-    for (var index = 0; index < queue.length && items.length < limit; index++) {
-      final cursor = queue[index];
-      if (source.matchesWebDavExcludedPath(cursor.path)) {
+    return items;
+  }
+
+  Future<_QuarkLibraryScanResult> _scanQuarkLibrary(
+    MediaSourceConfig source, {
+    required String cookie,
+    required List<_QuarkDirectoryCursor> roots,
+    required int limit,
+    required bool reportRefreshProgress,
+  }) async {
+    final normalizedRoots = <_QuarkDirectoryCursor>[];
+    for (final root in roots) {
+      final normalizedParentFid =
+          root.fid.trim().isEmpty ? source.quarkFolderId : root.fid.trim();
+      final normalizedParentPath = _normalizeQuarkDirectoryPath(
+        root.path.trim().isNotEmpty
+            ? root.path.trim()
+            : normalizedParentFid == source.quarkFolderId
+                ? source.quarkFolderPath
+                : '/',
+      );
+      if (source.matchesWebDavExcludedPath(normalizedParentPath)) {
         continue;
       }
+      normalizedRoots.add(
+        _QuarkDirectoryCursor(
+          fid: normalizedParentFid,
+          path: normalizedParentPath,
+          sectionId: root.sectionId,
+          sectionName: root.sectionName,
+        ),
+      );
+    }
+    if (normalizedRoots.isEmpty) {
+      return const _QuarkLibraryScanResult();
+    }
+
+    if (reportRefreshProgress) {
+      _quarkRefreshProgressController.startScanning(
+        sourceId: source.id,
+        sourceName: source.name,
+        totalCollections: normalizedRoots.length,
+        detail: normalizedRoots.first.path,
+      );
+    }
+
+    final directoryEntriesByPath = <String, List<QuarkFileEntry>>{};
+    final mediaEntries = <_QuarkQueuedMediaEntry>[];
+    final queue = [...normalizedRoots];
+    for (var index = 0;
+        index < queue.length && mediaEntries.length < limit;
+        index++) {
+      final cursor = queue[index];
       final entries = await _quarkSaveClient.listEntries(
-        cookie: normalizedCookie,
+        cookie: cookie,
         parentFid: cursor.fid,
       );
       directoryEntriesByPath[cursor.path] = entries;
@@ -867,6 +1017,8 @@ class AppMediaRepository implements MediaRepository {
             _QuarkDirectoryCursor(
               fid: entry.fid,
               path: _normalizeQuarkDirectoryPath(entry.path),
+              sectionId: cursor.sectionId,
+              sectionName: cursor.sectionName,
             ),
           );
           continue;
@@ -874,25 +1026,43 @@ class AppMediaRepository implements MediaRepository {
         if (!entry.isVideo) {
           continue;
         }
-        items.add(
-          await _buildQuarkMediaItem(
-            source: source,
+        mediaEntries.add(
+          _QuarkQueuedMediaEntry(
             entry: entry,
-            cookie: normalizedCookie,
-            sectionId: sectionId,
-            sectionName: sectionName,
-            directoryEntriesByPath: directoryEntriesByPath,
-            textFileCache: textFileCache,
-            downloadCache: downloadCache,
+            sectionId: cursor.sectionId,
+            sectionName: cursor.sectionName,
           ),
         );
-        if (items.length >= limit) {
+        if (mediaEntries.length >= limit) {
           break;
         }
       }
+      if (reportRefreshProgress) {
+        _quarkRefreshProgressController.updateScanning(
+          sourceId: source.id,
+          current: index + 1,
+          total: queue.length,
+          detail: cursor.path,
+        );
+      }
     }
 
-    return items;
+    return _QuarkLibraryScanResult(
+      directoryEntriesByPath: directoryEntriesByPath,
+      mediaEntries: mediaEntries,
+    );
+  }
+
+  WebDavScrapeProgressController get _quarkRefreshProgressController {
+    return ref.read(webDavScrapeProgressProvider.notifier);
+  }
+
+  void _clearQuarkRefreshProgress(String sourceId) {
+    try {
+      _quarkRefreshProgressController.clear(sourceId);
+    } catch (_) {
+      // The provider may already be disposed after page teardown or in tests.
+    }
   }
 
   Future<MediaItem> _buildQuarkMediaItem({
@@ -2467,10 +2637,36 @@ class _QuarkDirectoryCursor {
   const _QuarkDirectoryCursor({
     required this.fid,
     required this.path,
+    this.sectionId = '',
+    this.sectionName = '',
   });
 
   final String fid;
   final String path;
+  final String sectionId;
+  final String sectionName;
+}
+
+class _QuarkQueuedMediaEntry {
+  const _QuarkQueuedMediaEntry({
+    required this.entry,
+    required this.sectionId,
+    required this.sectionName,
+  });
+
+  final QuarkFileEntry entry;
+  final String sectionId;
+  final String sectionName;
+}
+
+class _QuarkLibraryScanResult {
+  const _QuarkLibraryScanResult({
+    this.directoryEntriesByPath = const <String, List<QuarkFileEntry>>{},
+    this.mediaEntries = const <_QuarkQueuedMediaEntry>[],
+  });
+
+  final Map<String, List<QuarkFileEntry>> directoryEntriesByPath;
+  final List<_QuarkQueuedMediaEntry> mediaEntries;
 }
 
 class _QuarkParsedNfoMetadata {

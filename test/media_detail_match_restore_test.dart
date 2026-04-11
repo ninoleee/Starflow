@@ -736,7 +736,9 @@ class _NoopMediaRepository implements MediaRepository {
   const _NoopMediaRepository();
 
   @override
-  Future<void> cancelActiveWebDavRefreshes() async {}
+  Future<void> cancelActiveWebDavRefreshes({
+    bool includeForceFull = false,
+  }) async {}
 
   @override
   Future<void> deleteResource({
@@ -808,7 +810,9 @@ class _SingleMatchMediaRepository implements MediaRepository {
   const _SingleMatchMediaRepository();
 
   @override
-  Future<void> cancelActiveWebDavRefreshes() async {}
+  Future<void> cancelActiveWebDavRefreshes({
+    bool includeForceFull = false,
+  }) async {}
 
   @override
   Future<void> deleteResource({

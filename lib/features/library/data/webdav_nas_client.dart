@@ -456,7 +456,7 @@ class WebDavNasClient {
     _throwIfCancelled(shouldCancel);
     final pendingItems = walkResult.items;
     final items = (source.webDavStructureInferenceEnabled
-            ? _applyDirectoryStructureInference(
+            ? applyExternalDirectoryStructureInference(
                 pendingItems,
                 source: source,
               )

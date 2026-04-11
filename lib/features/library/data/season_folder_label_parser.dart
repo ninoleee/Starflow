@@ -58,6 +58,38 @@ bool looksLikeSeasonFolderLabel(String value) {
       looksLikeNumericTopicSeason(value);
 }
 
+bool looksLikeStrictSeasonFolderLabel(String value) {
+  final normalized = _normalizeFullWidthDigits(value).trim();
+  if (normalized.isEmpty) {
+    return false;
+  }
+  if (_looksLikeSpecialSeasonLabel(normalized)) {
+    return true;
+  }
+  if (looksLikeNumericTopicSeason(normalized)) {
+    return true;
+  }
+
+  if (RegExp(
+    r'^\s*(?:s\d{1,2}|season[ ._\-]?\d{1,2}|series[ ._\-]?\d{1,2})\s*$',
+    caseSensitive: false,
+  ).hasMatch(normalized)) {
+    return true;
+  }
+
+  final chineseSeasonMatch = RegExp(
+    r'^\s*第([零〇一二三四五六七八九十百千两\d]{1,6})季\s*$',
+  ).firstMatch(normalized);
+  if (_parseFlexibleSeasonNumber(chineseSeasonMatch?.group(1)) != null) {
+    return true;
+  }
+
+  final anchoredPartMatch = RegExp(
+    r'^\s*第([零〇一二三四五六七八九十百千两\d]{1,6})(?:部|篇|章)\s*$',
+  ).firstMatch(normalized);
+  return _parseFlexibleSeasonNumber(anchoredPartMatch?.group(1)) != null;
+}
+
 bool looksLikeNumericTopicSeason(String value) {
   return RegExp(r'^\s*\d{1,2}(?:[ ._\-]|$)').hasMatch(
     _normalizeFullWidthDigits(value),

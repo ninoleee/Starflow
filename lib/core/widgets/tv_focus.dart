@@ -4,6 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
+final _tvFocusLightweightEnabledProvider = Provider<bool>((ref) {
+  return ref.watch(appSettingsProvider.select(
+    (settings) => settings.performanceLightweightTvFocusEnabled,
+  ));
+});
+
 enum TvButtonVariant {
   filled,
   outlined,
@@ -14,6 +20,7 @@ enum TvFocusVisualStyle {
   prominent,
   subtle,
   floating,
+  none,
 }
 
 enum StarflowButtonVariant {
@@ -48,7 +55,6 @@ class TvFocusMemoryController extends ChangeNotifier {
       return;
     }
     _rememberedFocusIds[normalizedScopeId] = normalizedFocusId;
-    notifyListeners();
   }
 
   void clear(String scopeId) {
@@ -56,20 +62,18 @@ class TvFocusMemoryController extends ChangeNotifier {
     if (normalizedScopeId.isEmpty) {
       return;
     }
-    if (_rememberedFocusIds.remove(normalizedScopeId) != null) {
-      notifyListeners();
-    }
+    _rememberedFocusIds.remove(normalizedScopeId);
   }
 }
 
-class TvFocusMemoryScope extends InheritedNotifier<TvFocusMemoryController> {
+class TvFocusMemoryScope extends InheritedWidget {
   const TvFocusMemoryScope({
     super.key,
     required this.controller,
     required this.scopeId,
     this.enabled = true,
     required super.child,
-  }) : super(notifier: controller);
+  });
 
   final TvFocusMemoryController controller;
   final String scopeId;
@@ -334,7 +338,7 @@ class TvFocusableAction extends ConsumerStatefulWidget {
 }
 
 class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
-  bool _isFocused = false;
+  final ValueNotifier<bool> _isFocusedNotifier = ValueNotifier<bool>(false);
   FocusNode? _ownedFocusNode;
   String? _queuedRestoreFocusId;
   bool _didAttemptFocusRestore = false;
@@ -360,6 +364,7 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
 
   @override
   void dispose() {
+    _isFocusedNotifier.dispose();
     _ownedFocusNode?.dispose();
     super.dispose();
   }
@@ -398,26 +403,159 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
     required bool memoryEnabled,
     required TvFocusMemoryScope? memoryScope,
     required String focusId,
+    required bool trackVisualFocus,
   }) {
     if (value && memoryEnabled && memoryScope != null && focusId.isNotEmpty) {
       memoryScope.controller.remember(memoryScope.scopeId, focusId);
     }
-    if (_isFocused == value) {
+    if (!trackVisualFocus || _isFocusedNotifier.value == value) {
       return;
     }
-    setState(() {
-      _isFocused = value;
-    });
+    _isFocusedNotifier.value = value;
+  }
+
+  Map<Type, Action<Intent>> _buildTelevisionActions(BuildContext context) {
+    return <Type, Action<Intent>>{
+      ActivateIntent: CallbackAction<ActivateIntent>(
+        onInvoke: (_) {
+          widget.onPressed?.call();
+          return null;
+        },
+      ),
+      TvContextMenuIntent: CallbackAction<TvContextMenuIntent>(
+        onInvoke: (_) {
+          final contextAction = widget.onContextAction;
+          if (contextAction != null) {
+            contextAction();
+          } else {
+            TvMenuButtonScope.maybeOf(context)?.onMenuButtonPressed();
+          }
+          return null;
+        },
+      ),
+    };
+  }
+
+  Widget _buildFocusVisualFrame({
+    required bool isFocused,
+    required bool lightweightTvFocusEnabled,
+    required bool hasContextAction,
+    required Widget child,
+  }) {
+    final useSubtleVisualStyle =
+        widget.visualStyle == TvFocusVisualStyle.subtle;
+    final useFloatingVisualStyle =
+        widget.visualStyle == TvFocusVisualStyle.floating;
+
+    if (widget.visualStyle == TvFocusVisualStyle.none) {
+      return child;
+    }
+
+    if (lightweightTvFocusEnabled) {
+      if (useFloatingVisualStyle) {
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: widget.borderRadius,
+            boxShadow: isFocused
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.24),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Transform.translate(
+            offset: Offset(0, isFocused ? -5 : 0),
+            child: child,
+          ),
+        );
+      }
+      return Container(
+        padding: EdgeInsets.all(useSubtleVisualStyle ? 1 : 2),
+        decoration: BoxDecoration(
+          borderRadius: widget.borderRadius,
+          border: Border.all(
+            color: isFocused
+                ? Colors.white
+                : hasContextAction
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : Colors.white.withValues(alpha: 0),
+            width: isFocused ? (useSubtleVisualStyle ? 1.8 : 2.2) : 1,
+          ),
+          color: isFocused
+              ? Colors.white.withValues(
+                  alpha: useSubtleVisualStyle ? 0.02 : 0.035,
+                )
+              : Colors.transparent,
+        ),
+        child: child,
+      );
+    }
+
+    if (useFloatingVisualStyle) {
+      return AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
+        transform: Matrix4.translationValues(0, isFocused ? -6 : 0, 0),
+        decoration: BoxDecoration(
+          borderRadius: widget.borderRadius,
+          boxShadow: isFocused
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.22),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  ),
+                ]
+              : null,
+        ),
+        child: child,
+      );
+    }
+
+    return AnimatedScale(
+      scale: isFocused ? (useSubtleVisualStyle ? 1.008 : 1.03) : 1,
+      duration: const Duration(milliseconds: 140),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          borderRadius: widget.borderRadius,
+          border: Border.all(
+            color: isFocused
+                ? Colors.white
+                : hasContextAction
+                    ? Colors.white.withValues(alpha: 0.04)
+                    : Colors.white.withValues(alpha: 0),
+            width: useSubtleVisualStyle ? 1.6 : 2,
+          ),
+          boxShadow: isFocused
+              ? [
+                  BoxShadow(
+                    color: useSubtleVisualStyle
+                        ? Colors.black.withValues(alpha: 0.18)
+                        : Colors.white.withValues(alpha: 0.18),
+                    blurRadius: useSubtleVisualStyle ? 12 : 28,
+                    spreadRadius: useSubtleVisualStyle ? 0 : 2,
+                  ),
+                ]
+              : null,
+          color: isFocused && useSubtleVisualStyle
+              ? Colors.white.withValues(alpha: 0.018)
+              : Colors.transparent,
+        ),
+        child: child,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
-    final lightweightTvFocusEnabled = ref.watch(
-      appSettingsProvider.select(
-        (settings) => settings.performanceLightweightTvFocusEnabled,
-      ),
-    );
+    final lightweightTvFocusEnabled =
+        ref.watch(_tvFocusLightweightEnabledProvider);
     final enabled = widget.onPressed != null;
     final hasContextAction = widget.onContextAction != null;
     final memoryScope = TvFocusMemoryScope.maybeOf(context);
@@ -458,163 +596,7 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
       _scheduleFocusRestore(effectiveFocusNode, focusId);
     }
 
-    final useHighPerformanceFocusStyle =
-        isTelevision && lightweightTvFocusEnabled;
-    final useSubtleVisualStyle =
-        widget.visualStyle == TvFocusVisualStyle.subtle;
-    final useFloatingVisualStyle =
-        widget.visualStyle == TvFocusVisualStyle.floating;
-
-    if (useHighPerformanceFocusStyle) {
-      final highPerformanceChild = useFloatingVisualStyle
-          ? DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: widget.borderRadius,
-                boxShadow: _isFocused
-                    ? [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.24),
-                          blurRadius: 20,
-                          offset: const Offset(0, 10),
-                        ),
-                      ]
-                    : null,
-              ),
-              child: Transform.translate(
-                offset: Offset(0, _isFocused ? -5 : 0),
-                child: widget.child,
-              ),
-            )
-          : Container(
-              padding: EdgeInsets.all(useSubtleVisualStyle ? 1 : 2),
-              decoration: BoxDecoration(
-                borderRadius: widget.borderRadius,
-                border: Border.all(
-                  color: _isFocused
-                      ? Colors.white
-                      : hasContextAction
-                          ? Colors.white.withValues(alpha: 0.08)
-                          : Colors.white.withValues(alpha: 0),
-                  width: _isFocused ? (useSubtleVisualStyle ? 1.8 : 2.2) : 1,
-                ),
-                color: _isFocused
-                    ? Colors.white.withValues(
-                        alpha: useSubtleVisualStyle ? 0.02 : 0.035,
-                      )
-                    : Colors.transparent,
-              ),
-              child: widget.child,
-            );
-      return FocusableActionDetector(
-        focusNode: effectiveFocusNode,
-        autofocus: shouldAutofocus,
-        enabled: enabled,
-        onShowFocusHighlight: (value) {
-          _handleFocusHighlightChange(
-            value: value,
-            memoryEnabled: memoryEnabled,
-            memoryScope: memoryScope,
-            focusId: focusId,
-          );
-        },
-        shortcuts: const <ShortcutActivator, Intent>{
-          SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.gameButtonA): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.contextMenu):
-              TvContextMenuIntent(),
-          SingleActivator(LogicalKeyboardKey.gameButtonY):
-              TvContextMenuIntent(),
-        },
-        actions: <Type, Action<Intent>>{
-          ActivateIntent: CallbackAction<ActivateIntent>(
-            onInvoke: (_) {
-              widget.onPressed?.call();
-              return null;
-            },
-          ),
-          TvContextMenuIntent: CallbackAction<TvContextMenuIntent>(
-            onInvoke: (_) {
-              final contextAction = widget.onContextAction;
-              if (contextAction != null) {
-                contextAction();
-              } else {
-                TvMenuButtonScope.maybeOf(context)?.onMenuButtonPressed();
-              }
-              return null;
-            },
-          ),
-        },
-        child: highPerformanceChild,
-      );
-    }
-
-    if (useFloatingVisualStyle) {
-      return FocusableActionDetector(
-        focusNode: effectiveFocusNode,
-        autofocus: shouldAutofocus,
-        enabled: enabled,
-        onShowFocusHighlight: (value) {
-          _handleFocusHighlightChange(
-            value: value,
-            memoryEnabled: memoryEnabled,
-            memoryScope: memoryScope,
-            focusId: focusId,
-          );
-        },
-        shortcuts: const <ShortcutActivator, Intent>{
-          SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.gameButtonA): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.contextMenu):
-              TvContextMenuIntent(),
-          SingleActivator(LogicalKeyboardKey.gameButtonY):
-              TvContextMenuIntent(),
-        },
-        actions: <Type, Action<Intent>>{
-          ActivateIntent: CallbackAction<ActivateIntent>(
-            onInvoke: (_) {
-              widget.onPressed?.call();
-              return null;
-            },
-          ),
-          TvContextMenuIntent: CallbackAction<TvContextMenuIntent>(
-            onInvoke: (_) {
-              final contextAction = widget.onContextAction;
-              if (contextAction != null) {
-                contextAction();
-              } else {
-                TvMenuButtonScope.maybeOf(context)?.onMenuButtonPressed();
-              }
-              return null;
-            },
-          ),
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          curve: Curves.easeOutCubic,
-          transform: Matrix4.translationValues(0, _isFocused ? -6 : 0, 0),
-          decoration: BoxDecoration(
-            borderRadius: widget.borderRadius,
-            boxShadow: _isFocused
-                ? [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.22),
-                      blurRadius: 20,
-                      offset: const Offset(0, 10),
-                    ),
-                  ]
-                : null,
-          ),
-          child: widget.child,
-        ),
-      );
-    }
-
+    final trackVisualFocus = widget.visualStyle != TvFocusVisualStyle.none;
     return FocusableActionDetector(
       focusNode: effectiveFocusNode,
       autofocus: shouldAutofocus,
@@ -625,6 +607,7 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
           memoryEnabled: memoryEnabled,
           memoryScope: memoryScope,
           focusId: focusId,
+          trackVisualFocus: trackVisualFocus,
         );
       },
       shortcuts: const <ShortcutActivator, Intent>{
@@ -636,58 +619,18 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
         SingleActivator(LogicalKeyboardKey.contextMenu): TvContextMenuIntent(),
         SingleActivator(LogicalKeyboardKey.gameButtonY): TvContextMenuIntent(),
       },
-      actions: <Type, Action<Intent>>{
-        ActivateIntent: CallbackAction<ActivateIntent>(
-          onInvoke: (_) {
-            widget.onPressed?.call();
-            return null;
-          },
-        ),
-        TvContextMenuIntent: CallbackAction<TvContextMenuIntent>(
-          onInvoke: (_) {
-            final contextAction = widget.onContextAction;
-            if (contextAction != null) {
-              contextAction();
-            } else {
-              TvMenuButtonScope.maybeOf(context)?.onMenuButtonPressed();
-            }
-            return null;
-          },
-        ),
-      },
-      child: AnimatedScale(
-        scale: _isFocused ? (useSubtleVisualStyle ? 1.008 : 1.03) : 1,
-        duration: const Duration(milliseconds: 140),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          curve: Curves.easeOutCubic,
-          decoration: BoxDecoration(
-            borderRadius: widget.borderRadius,
-            border: Border.all(
-              color: _isFocused
-                  ? Colors.white
-                  : hasContextAction
-                      ? Colors.white.withValues(alpha: 0.04)
-                      : Colors.white.withValues(alpha: 0),
-              width: useSubtleVisualStyle ? 1.6 : 2,
-            ),
-            boxShadow: _isFocused
-                ? [
-                    BoxShadow(
-                      color: useSubtleVisualStyle
-                          ? Colors.black.withValues(alpha: 0.18)
-                          : Colors.white.withValues(alpha: 0.18),
-                      blurRadius: useSubtleVisualStyle ? 12 : 28,
-                      spreadRadius: useSubtleVisualStyle ? 0 : 2,
-                    ),
-                  ]
-                : null,
-            color: _isFocused && useSubtleVisualStyle
-                ? Colors.white.withValues(alpha: 0.018)
-                : Colors.transparent,
-          ),
-          child: widget.child,
-        ),
+      actions: _buildTelevisionActions(context),
+      child: ValueListenableBuilder<bool>(
+        valueListenable: _isFocusedNotifier,
+        child: widget.child,
+        builder: (context, isFocused, child) {
+          return _buildFocusVisualFrame(
+            isFocused: isFocused,
+            lightweightTvFocusEnabled: lightweightTvFocusEnabled,
+            hasContextAction: hasContextAction,
+            child: child!,
+          );
+        },
       ),
     );
   }
@@ -1303,6 +1246,15 @@ Widget wrapTelevisionDialogBackHandling({
     return child;
   }
 
+  final shortcuts = <ShortcutActivator, Intent>{
+    const SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
+    const SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
+  };
+  if (inputFocusNodes.isEmpty) {
+    shortcuts[const SingleActivator(LogicalKeyboardKey.backspace)] =
+        DismissIntent();
+  }
+
   void handleDismiss() {
     if (_hasFocusedTvDialogNode(inputFocusNodes)) {
       FocusManager.instance.primaryFocus?.unfocus();
@@ -1321,11 +1273,7 @@ Widget wrapTelevisionDialogBackHandling({
   }
 
   return Shortcuts(
-    shortcuts: const <ShortcutActivator, Intent>{
-      SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
-      SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
-      SingleActivator(LogicalKeyboardKey.backspace): DismissIntent(),
-    },
+    shortcuts: shortcuts,
     child: Actions(
       actions: <Type, Action<Intent>>{
         DismissIntent: CallbackAction<DismissIntent>(

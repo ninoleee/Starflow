@@ -1,12 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/navigation/page_activity_mixin.dart';
+import 'package:starflow/core/navigation/retained_async_value.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/application/library_cached_items.dart';
+import 'package:starflow/features/library/application/library_refresh_revision.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/application/nas_media_index_revision.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
@@ -23,6 +28,7 @@ final libraryCollectionItemsProvider =
   target,
 ) async {
   ref.watch(nasMediaIndexRevisionProvider);
+  ref.watch(libraryRefreshRevisionProvider);
   ref.watch(localStorageDetailCacheRevisionProvider);
   final items = await ref.read(mediaRepositoryProvider).fetchLibrary(
         sourceId: target.sourceId,
@@ -44,13 +50,15 @@ class LibraryCollectionPage extends ConsumerStatefulWidget {
       _LibraryCollectionPageState();
 }
 
-class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage> {
+class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
+    with PageActivityMixin<LibraryCollectionPage> {
   int _currentPage = 0;
   final ScrollController _scrollController = ScrollController();
   final FocusNode _headerFocusNode =
       FocusNode(debugLabel: 'library-collection-header');
   final TvFocusMemoryController _tvFocusMemoryController =
       TvFocusMemoryController();
+  AsyncValue<List<MediaItem>>? _cachedItemsAsync;
 
   @override
   void dispose() {
@@ -61,9 +69,25 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage> {
   }
 
   @override
+  void onPageBecameInactive() {
+    unawaited(
+      ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes(
+            includeForceFull: false,
+          ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final target = widget.target;
-    final itemsAsync = ref.watch(libraryCollectionItemsProvider(target));
+    final itemsAsync = resolveRetainedAsyncValue(
+      activeValue: isPageVisible
+          ? ref.watch(libraryCollectionItemsProvider(target))
+          : null,
+      cachedValue: _cachedItemsAsync,
+      cacheValue: (value) => _cachedItemsAsync = value,
+      fallbackValue: const AsyncLoading<List<MediaItem>>(),
+    );
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
 
     final headerContent = Column(

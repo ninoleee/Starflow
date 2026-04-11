@@ -22,6 +22,9 @@ import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
+import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
+import 'package:starflow/features/playback/application/playback_startup_preparation.dart';
+import 'package:starflow/features/playback/application/playback_startup_routing.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
@@ -87,6 +90,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   double _subtitleDelaySeconds = 0;
   bool _tvPlaybackChromeVisible = false;
   bool _tvExitDialogVisible = false;
+  bool _isEmbeddedMpvFullscreen = false;
   bool _introSkipApplied = false;
   bool _outroSkipApplied = false;
   Duration _latestPosition = Duration.zero;
@@ -141,23 +145,47 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     Future<void>(() {
       _playbackPerformanceModeController.state = false;
     });
-    unawaited(_persistPlaybackProgress(force: true));
-    unawaited(_teardownPictureInPicture());
-    unawaited(_teardownPlaybackSystemSession());
-    unawaited(_cancelPlayerSubscriptions());
+    final player = _detachActivePlayerState();
+    unawaited(
+      _shutdownDetachedPlayer(
+        player,
+        reason: 'player-page-dispose',
+        persistProgress: true,
+        teardownPlatformState: true,
+      ),
+    );
+    super.dispose();
+  }
+
+  Player? _detachActivePlayerState() {
     final player = _player;
     _player = null;
     _videoController = null;
     _isReady = false;
-    if (player != null) {
-      unawaited(
-        _enqueuePlayerShutdown(
-          player,
-          reason: 'player-page-dispose',
-        ),
+    _isEmbeddedMpvFullscreen = false;
+    return player;
+  }
+
+  Future<void> _shutdownDetachedPlayer(
+    Player? player, {
+    required String reason,
+    required bool persistProgress,
+    required bool teardownPlatformState,
+  }) async {
+    if (persistProgress) {
+      await _persistPlaybackProgress(
+        force: true,
+        playerOverride: player,
       );
     }
-    super.dispose();
+    await _cancelPlayerSubscriptions();
+    if (teardownPlatformState) {
+      await _teardownPictureInPicture();
+      await _teardownPlaybackSystemSession();
+    }
+    if (player != null) {
+      await _enqueuePlayerShutdown(player, reason: reason);
+    }
   }
 
   Future<void> _cancelPlayerSubscriptions() async {
@@ -227,16 +255,21 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 
   bool get _backgroundPlaybackEnabled =>
+      !_isTelevisionPlaybackDevice &&
       ref.read(appSettingsProvider).playbackBackgroundPlaybackEnabled;
 
+  AppSettings get _playbackSettings => ref.read(appSettingsProvider);
+
   bool get _leanPlaybackUiEnabled =>
-      ref.read(appSettingsProvider).performanceLeanPlaybackUiEnabled;
+      _playbackSettings.effectiveLeanPlaybackUiEnabled(
+        isTelevision: _isTelevisionPlaybackDevice,
+      );
 
   bool get _isLeanPlaybackMode =>
       _leanPlaybackUiEnabled && !_isInPictureInPictureMode;
 
   bool get _aggressivePlaybackTuningEnabled =>
-      ref.read(appSettingsProvider).performanceAggressivePlaybackTuningEnabled;
+      _playbackSettings.performanceAggressivePlaybackTuningEnabled;
 
   bool get _prefersAggressiveHardwareDecoding =>
       _aggressivePlaybackTuningEnabled;
@@ -244,10 +277,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool get _preferLeanPlaybackRendering => _leanPlaybackUiEnabled;
 
   PlaybackDecodeMode get _playbackDecodeMode =>
-      ref.read(appSettingsProvider).playbackDecodeMode;
+      _playbackSettings.playbackDecodeMode;
 
   PlaybackMpvQualityPreset get _playbackMpvQualityPreset =>
-      ref.read(appSettingsProvider).playbackMpvQualityPreset;
+      _playbackSettings.playbackMpvQualityPreset;
+
+  bool get _autoDowngradePlaybackQualityEnabled =>
+      _playbackSettings.performanceAutoDowngradeHeavyPlaybackEnabled;
+
+  bool get _startupProbeEnabled =>
+      _playbackSettings.effectiveStartupProbeEnabled;
 
   bool get _shouldTraceWindowsMpv {
     if (kIsWeb) {
@@ -256,8 +295,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (defaultTargetPlatform != TargetPlatform.windows) {
       return false;
     }
-    return ref.read(appSettingsProvider).playbackEngine ==
-        PlaybackEngine.embeddedMpv;
+    return _playbackSettings.playbackEngine == PlaybackEngine.embeddedMpv;
   }
 
   void _traceWindowsMpv(
@@ -360,17 +398,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       'windows-mpv.exit.stop-before-pop',
       fields: {'reason': reason},
     );
-    await _persistPlaybackProgress(force: true);
-    await _cancelPlayerSubscriptions();
-    final player = _player;
-    _player = null;
-    _videoController = null;
-    _isReady = false;
-    await _teardownPictureInPicture();
-    await _teardownPlaybackSystemSession();
-    if (player != null) {
-      await _enqueuePlayerShutdown(player, reason: reason);
-    }
+    final player = _detachActivePlayerState();
+    await _shutdownDetachedPlayer(
+      player,
+      reason: reason,
+      persistProgress: true,
+      teardownPlatformState: true,
+    );
   }
 
   Future<void> _requestExitPlayer({
@@ -624,7 +658,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         'canPlay': widget.target.canPlay,
         'needsResolution': widget.target.needsResolution,
         'decodeMode': _playbackDecodeMode.name,
-        'qualityPreset': _playbackMpvQualityPreset.name,
+        'qualityPresetRequested': _playbackMpvQualityPreset.name,
+        'qualityAutoDowngrade': _autoDowngradePlaybackQualityEnabled,
         'leanUi': _leanPlaybackUiEnabled,
         'aggressiveTuning': _aggressivePlaybackTuningEnabled,
       },
@@ -639,7 +674,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     try {
       final settings = ref.read(appSettingsProvider);
-      await ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes();
+      await ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes(
+            includeForceFull: false,
+          );
       final resolvedTarget = await _resolveTarget(widget.target);
       final resolvedUri = Uri.tryParse(resolvedTarget.streamUrl.trim());
       _traceWindowsMpv(
@@ -655,41 +692,53 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           'headers': resolvedTarget.headers.length,
         },
       );
-      final playbackMemoryRepository =
-          ref.read(playbackMemoryRepositoryProvider);
-      final resumeEntry = await playbackMemoryRepository.loadEntryForTarget(
-        resolvedTarget,
+      final startupPreparation = await preparePlaybackStartup(
+        PlaybackStartupPreparationInput(
+          resolvedTarget: resolvedTarget,
+          settings: settings,
+          isTelevision: ref.read(isTelevisionProvider).valueOrNull ?? false,
+          isWeb: kIsWeb,
+        ),
+        playbackMemoryRepository: ref.read(playbackMemoryRepositoryProvider),
       );
-      final skipPreference = await playbackMemoryRepository.loadSkipPreference(
-        resolvedTarget,
-      );
+      final resumeEntry = startupPreparation.resumeEntry;
+      final skipPreference = startupPreparation.skipPreference;
       if (mounted) {
         setState(() {
           _resolvedTarget = resolvedTarget;
           _seriesSkipPreference = skipPreference;
         });
       }
-      if (settings.playbackEngine == PlaybackEngine.systemPlayer) {
-        _traceWindowsMpv('windows-mpv.initialize.redirect-system-player');
-        await _launchWithSystemPlayer(resolvedTarget);
-        return;
-      }
-      if (settings.playbackEngine == PlaybackEngine.nativeContainer) {
-        _traceWindowsMpv('windows-mpv.initialize.redirect-native-container');
-        await _launchWithNativeContainer(resolvedTarget);
-        return;
-      }
-      if (_shouldAutoDowngradeToSystemPlayer(resolvedTarget)) {
-        _traceWindowsMpv('windows-mpv.initialize.performance-fallback-check');
-        final launched = await _tryLaunchWithPerformanceFallback(
-          resolvedTarget,
-        );
-        if (launched) {
-          _traceWindowsMpv('windows-mpv.initialize.performance-fallback-used');
+      final startupRoute = startupPreparation.startupRoute;
+      switch (startupRoute) {
+        case PlaybackStartupRouteAction.launchSystemPlayer:
+          _traceWindowsMpv('windows-mpv.initialize.redirect-system-player');
+          await _launchWithSystemPlayer(resolvedTarget);
           return;
-        }
+        case PlaybackStartupRouteAction.launchNativeContainer:
+          _traceWindowsMpv('windows-mpv.initialize.redirect-native-container');
+          await _launchWithNativeContainer(resolvedTarget);
+          return;
+        case PlaybackStartupRouteAction.launchPerformanceFallback:
+          _traceWindowsMpv('windows-mpv.initialize.performance-fallback-check');
+          final launched = await _tryLaunchWithPerformanceFallback(
+            resolvedTarget,
+          );
+          if (launched) {
+            _traceWindowsMpv(
+                'windows-mpv.initialize.performance-fallback-used');
+            return;
+          }
+        case PlaybackStartupRouteAction.openEmbeddedMpv:
+          break;
       }
-      unawaited(_runStartupProbe(resolvedTarget));
+      if (_startupProbeEnabled) {
+        unawaited(_runStartupProbe(resolvedTarget));
+      } else if (_startupProbe.estimatedSpeedBytesPerSecond != null) {
+        setState(() {
+          _startupProbe = const _StartupProbeResult();
+        });
+      }
       final timeoutSeconds = settings.playbackOpenTimeoutSeconds.clamp(1, 600);
       _traceWindowsMpv(
         'windows-mpv.initialize.open-start',
@@ -846,7 +895,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final player = Player(
       configuration: PlayerConfiguration(
         title: 'Starflow',
-        logLevel: MPVLogLevel.warn,
+        logLevel: MPVLogLevel.error,
         bufferSize: bufferSizeBytes,
       ),
     );
@@ -868,8 +917,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             _playbackDecodeMode != PlaybackDecodeMode.softwarePreferred,
       },
     );
-    final startupError = Completer<String>();
-    var awaitingStartup = true;
+    Completer<String>? startupError;
+    var awaitingStartup = false;
     late final StreamSubscription<String> errorSubscription;
     errorSubscription = player.stream.error.listen((message) {
       final normalized = message.trim();
@@ -883,8 +932,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           'message': normalized,
         },
       );
-      if (awaitingStartup && !startupError.isCompleted) {
-        startupError.complete(normalized);
+      final pendingStartupError = startupError;
+      if (awaitingStartup &&
+          pendingStartupError != null &&
+          !pendingStartupError.isCompleted) {
+        pendingStartupError.complete(normalized);
         return;
       }
       if (!mounted || _player != player) {
@@ -898,25 +950,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     try {
       await _applyMpvPerformanceTuning(player, resolvedTarget);
       _traceWindowsMpv('windows-mpv.open.tuning-applied');
-      _traceWindowsMpv(
-        'windows-mpv.open.dispatch',
-        fields: {
-          'urlScheme': Uri.tryParse(resolvedTarget.streamUrl)?.scheme ?? ''
-        },
+      final deadline = DateTime.now().add(timeout);
+      Completer<String> beginStartupWait() {
+        final completer = Completer<String>();
+        startupError = completer;
+        awaitingStartup = true;
+        return completer;
+      }
+
+      await _openResolvedTargetWithMpv(
+        player,
+        resolvedTarget,
+        deadline: deadline,
+        beginStartupWait: beginStartupWait,
       );
-      await Future.any<void>([
-        player.open(
-          Media(
-            resolvedTarget.streamUrl,
-            httpHeaders: resolvedTarget.headers,
-          ),
-          play: true,
-        ),
-        startupError.future.then<void>((message) {
-          throw _PlayerOpenException(message);
-        }),
-      ]).timeout(timeout);
       awaitingStartup = false;
+      startupError = null;
       _traceWindowsMpv(
         'windows-mpv.open.ready',
         fields: {
@@ -1005,6 +1054,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   String _resolveMpvHardwareDecodeMode() {
     switch (_playbackDecodeMode) {
       case PlaybackDecodeMode.auto:
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+          return 'auto-safe';
+        }
         return _prefersAggressiveHardwareDecoding ? 'auto' : 'auto-safe';
       case PlaybackDecodeMode.hardwarePreferred:
         return 'auto';
@@ -1026,6 +1078,319 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     } catch (_) {
       // Keep playback available even if a tuning hint is unsupported.
     }
+  }
+
+  Future<void> _openResolvedTargetWithMpv(
+    Player player,
+    PlaybackTarget target, {
+    required DateTime deadline,
+    required Completer<String> Function() beginStartupWait,
+  }) async {
+    final regularMedia = _buildRegularMpvMedia(target);
+    if (!target.isIsoLike) {
+      _traceWindowsMpv(
+        'windows-mpv.open.dispatch',
+        fields: {
+          'urlScheme': Uri.tryParse(target.streamUrl)?.scheme ?? '',
+          'openMode': 'direct',
+        },
+      );
+      await _awaitMpvMediaOpen(
+        player,
+        regularMedia,
+        timeout: _remainingMpvOpenTimeout(deadline),
+        startupError: beginStartupWait(),
+      );
+      return;
+    }
+
+    final isoPlans = _buildMpvIsoOpenPlans(target);
+    _traceWindowsMpv(
+      'windows-mpv.iso.plan',
+      fields: {
+        'candidateCount': isoPlans.length,
+        'discKinds':
+            _inferMpvIsoDiscKinds(target).map((kind) => kind.name).join(','),
+        'hasHeaders': target.headers.isNotEmpty,
+      },
+    );
+    if (isoPlans.isEmpty) {
+      _traceWindowsMpv(
+        'windows-mpv.iso.skip-device-mode',
+        fields: {
+          'urlScheme': Uri.tryParse(target.streamUrl)?.scheme ?? '',
+        },
+      );
+      await _awaitMpvMediaOpen(
+        player,
+        regularMedia,
+        timeout: _remainingMpvOpenTimeout(deadline),
+        startupError: beginStartupWait(),
+      );
+      return;
+    }
+
+    Object? lastError;
+    for (final plan in isoPlans) {
+      try {
+        await _applyMpvIsoOpenPlan(player, target, plan);
+        _traceWindowsMpv(
+          'windows-mpv.open.dispatch',
+          fields: {
+            'urlScheme': Uri.tryParse(target.streamUrl)?.scheme ??
+                Uri.tryParse(plan.deviceSource)?.scheme ??
+                '',
+            'openMode': 'iso',
+            'discKind': plan.discKind.name,
+            'deviceProperty': plan.deviceProperty,
+            'deviceSourceKind': _describeMpvIsoDeviceSource(plan.deviceSource),
+          },
+        );
+        await _awaitMpvMediaOpen(
+          player,
+          Media(plan.mediaUri),
+          timeout: _remainingMpvOpenTimeout(deadline),
+          startupError: beginStartupWait(),
+        );
+        return;
+      } catch (error, stackTrace) {
+        lastError = error;
+        _traceWindowsMpv(
+          'windows-mpv.iso.open-attempt-failed',
+          fields: {
+            'discKind': plan.discKind.name,
+            'deviceProperty': plan.deviceProperty,
+            'deviceSourceKind': _describeMpvIsoDeviceSource(plan.deviceSource),
+          },
+          error: error,
+          stackTrace: stackTrace,
+        );
+        try {
+          await player.stop();
+        } catch (_) {
+          // Ignore stop failures and allow the next ISO fallback to continue.
+        }
+      }
+    }
+
+    _traceWindowsMpv(
+      'windows-mpv.iso.fallback-direct',
+      fields: {
+        'urlScheme': Uri.tryParse(target.streamUrl)?.scheme ?? '',
+      },
+    );
+    try {
+      await _resetMpvIsoOpenState(player);
+      await _awaitMpvMediaOpen(
+        player,
+        regularMedia,
+        timeout: _remainingMpvOpenTimeout(deadline),
+        startupError: beginStartupWait(),
+      );
+      return;
+    } catch (error, stackTrace) {
+      if (lastError != null) {
+        _traceWindowsMpv(
+          'windows-mpv.iso.fallback-direct-failed',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _awaitMpvMediaOpen(
+    Player player,
+    Media media, {
+    required Duration timeout,
+    required Completer<String> startupError,
+  }) async {
+    await Future.any<void>([
+      player.open(media, play: true),
+      startupError.future.then<void>((message) {
+        throw _PlayerOpenException(message);
+      }),
+    ]).timeout(timeout);
+  }
+
+  Media _buildRegularMpvMedia(PlaybackTarget target) {
+    final resource = target.streamUrl.trim().isNotEmpty
+        ? target.streamUrl.trim()
+        : target.actualAddress.trim();
+    return Media(
+      resource,
+      httpHeaders: target.headers.isEmpty ? null : target.headers,
+    );
+  }
+
+  Duration _remainingMpvOpenTimeout(DateTime deadline) {
+    final remaining = deadline.difference(DateTime.now());
+    if (remaining <= Duration.zero) {
+      throw TimeoutException('超过最大等待时间，已停止尝试播放');
+    }
+    return remaining;
+  }
+
+  List<_MpvIsoOpenPlan> _buildMpvIsoOpenPlans(PlaybackTarget target) {
+    final deviceSources = <String>[];
+    final seen = <String>{};
+
+    void addDeviceSource(String raw) {
+      final normalized = _normalizeMpvIsoDeviceSource(raw);
+      if (normalized.isEmpty) {
+        return;
+      }
+      final dedupeKey = normalized.toLowerCase();
+      if (!seen.add(dedupeKey)) {
+        return;
+      }
+      deviceSources.add(normalized);
+    }
+
+    final actualAddress = _normalizeMpvIsoDeviceSource(target.actualAddress);
+    final streamUrl = _normalizeMpvIsoDeviceSource(target.streamUrl);
+    if (_isLikelyLocalMpvIsoDeviceSource(actualAddress)) {
+      addDeviceSource(actualAddress);
+    }
+    if (_isLikelyLocalMpvIsoDeviceSource(streamUrl)) {
+      addDeviceSource(streamUrl);
+    }
+
+    final discKinds = _inferMpvIsoDiscKinds(target);
+    return [
+      for (final deviceSource in deviceSources)
+        for (final discKind in discKinds)
+          _MpvIsoOpenPlan(
+            discKind: discKind,
+            deviceSource: deviceSource,
+          ),
+    ];
+  }
+
+  List<_MpvIsoDiscKind> _inferMpvIsoDiscKinds(PlaybackTarget target) {
+    final hint = [
+      target.container,
+      target.streamUrl,
+      target.actualAddress,
+      target.title,
+      target.sourceName,
+    ].join(' ').toLowerCase();
+    final looksLikeBluray = hint.contains('bluray') ||
+        hint.contains('blu-ray') ||
+        hint.contains('bdmv') ||
+        hint.contains('bdrom');
+    final looksLikeDvd = hint.contains('dvd') ||
+        hint.contains('video_ts') ||
+        hint.contains('vts_');
+    if (looksLikeDvd && !looksLikeBluray) {
+      return const [_MpvIsoDiscKind.dvd, _MpvIsoDiscKind.bluray];
+    }
+    return const [_MpvIsoDiscKind.bluray, _MpvIsoDiscKind.dvd];
+  }
+
+  String _normalizeMpvIsoDeviceSource(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return '';
+    }
+    if (_looksLikeWindowsAbsolutePath(trimmed) || _looksLikeUncPath(trimmed)) {
+      return trimmed;
+    }
+    final uri = Uri.tryParse(trimmed);
+    if (uri != null && uri.scheme.toLowerCase() == 'file') {
+      try {
+        return uri.toFilePath(
+          windows: defaultTargetPlatform == TargetPlatform.windows,
+        );
+      } catch (_) {
+        return trimmed;
+      }
+    }
+    if (uri != null && uri.hasScheme) {
+      return uri.toString();
+    }
+    return trimmed;
+  }
+
+  bool _isLikelyLocalMpvIsoDeviceSource(String value) {
+    return isLikelyLocalMpvIsoDeviceSource(
+      value,
+      windowsPlatform: defaultTargetPlatform == TargetPlatform.windows,
+      posixPlatform: defaultTargetPlatform == TargetPlatform.linux ||
+          defaultTargetPlatform == TargetPlatform.macOS,
+    );
+  }
+
+  bool _isLikelyRemoteMpvIsoDeviceSource(String value) {
+    final uri = Uri.tryParse(value.trim());
+    final scheme = uri?.scheme.toLowerCase() ?? '';
+    return switch (scheme) {
+      'http' || 'https' || 'rtsp' || 'rtmp' || 'ftp' || 'ftps' => true,
+      _ => false,
+    };
+  }
+
+  bool _looksLikeWindowsAbsolutePath(String value) {
+    return RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(value);
+  }
+
+  bool _looksLikeUncPath(String value) {
+    return value.startsWith(r'\\') || value.startsWith('//');
+  }
+
+  Future<void> _applyMpvIsoOpenPlan(
+    Player player,
+    PlaybackTarget target,
+    _MpvIsoOpenPlan plan,
+  ) async {
+    await _setMpvOption(player, plan.deviceProperty, plan.deviceSource);
+    await _setMpvOption(player, plan.otherDeviceProperty, '');
+    final headerFields = _isLikelyRemoteMpvIsoDeviceSource(plan.deviceSource)
+        ? _encodeMpvHttpHeaderFields(target.headers)
+        : '';
+    await _setMpvOption(player, 'http-header-fields', headerFields);
+  }
+
+  Future<void> _resetMpvIsoOpenState(Player player) async {
+    await _setMpvOption(player, 'dvd-device', '');
+    await _setMpvOption(player, 'bluray-device', '');
+    await _setMpvOption(player, 'http-header-fields', '');
+  }
+
+  String _encodeMpvHttpHeaderFields(Map<String, String> headers) {
+    return headers.entries
+        .where(
+          (entry) =>
+              entry.key.trim().isNotEmpty && entry.value.trim().isNotEmpty,
+        )
+        .map(
+          (entry) =>
+              '${_escapeMpvListValue(entry.key.trim())}: ${_escapeMpvListValue(entry.value.trim().replaceAll(RegExp(r'[\r\n]+'), ' '))}',
+        )
+        .join(',');
+  }
+
+  String _escapeMpvListValue(String value) {
+    return value.replaceAll('\\', r'\\').replaceAll(',', r'\,');
+  }
+
+  String _describeMpvIsoDeviceSource(String value) {
+    final trimmed = value.trim();
+    if (_looksLikeWindowsAbsolutePath(trimmed)) {
+      return 'windows-path';
+    }
+    if (_looksLikeUncPath(trimmed)) {
+      return 'unc-path';
+    }
+    final uri = Uri.tryParse(trimmed);
+    if (uri != null && uri.hasScheme) {
+      return uri.scheme.toLowerCase();
+    }
+    if (trimmed.startsWith('/')) {
+      return 'posix-path';
+    }
+    return 'plain-path';
   }
 
   Future<void> _applyMpvVisualQualityPreset(
@@ -1083,26 +1448,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 
   bool _isLikelyRemotePlaybackTarget(PlaybackTarget target) {
-    final uri = Uri.tryParse(target.streamUrl.trim());
-    final scheme = uri?.scheme.toLowerCase() ?? '';
-    return switch (scheme) {
-      'http' || 'https' || 'rtsp' || 'rtmp' || 'ftp' || 'ftps' => true,
-      _ => false,
-    };
+    return isLikelyRemotePlaybackUrl(target.streamUrl);
   }
 
   bool _isHeavyPlaybackTarget(PlaybackTarget target) {
-    final width = target.width ?? 0;
-    final height = target.height ?? 0;
-    final bitrate = target.bitrate ?? 0;
-    final codec = target.videoCodec.trim().toLowerCase();
-    final is4k = width >= 3840 || height >= 2160;
-    final isHevc = codec == 'hevc' || codec == 'h265' || codec == 'x265';
-    final isAv1 = codec == 'av1';
-    final veryHighBitrate = bitrate >= 24000000;
-    final heavyHevc = isHevc && (is4k || bitrate >= 14000000);
-    final heavyAv1 = isAv1 && bitrate >= 10000000;
-    return is4k || veryHighBitrate || heavyHevc || heavyAv1;
+    return isHeavyPlaybackTargetMetadata(target);
   }
 
   bool _shouldUseAggressiveMpvTuning(PlaybackTarget target) {
@@ -1114,6 +1464,37 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     }
     return _isTelevisionPlaybackDevice ||
         _playbackDecodeMode == PlaybackDecodeMode.softwarePreferred;
+  }
+
+  PlaybackMpvQualityPreset _resolveEffectiveMpvQualityPreset(
+    PlaybackTarget target,
+  ) {
+    final requestedPreset = _playbackMpvQualityPreset;
+    if (!_autoDowngradePlaybackQualityEnabled) {
+      return requestedPreset;
+    }
+    return resolveEffectivePlaybackMpvQualityPreset(
+      requestedPreset: requestedPreset,
+      target: target,
+      isWindowsPlatform:
+          !kIsWeb && defaultTargetPlatform == TargetPlatform.windows,
+      isTelevision: _isTelevisionPlaybackDevice,
+      isFullscreen: _isEmbeddedMpvFullscreen,
+      aggressiveTuningEnabled: _aggressivePlaybackTuningEnabled,
+      decodeMode: _playbackDecodeMode,
+    );
+  }
+
+  Future<void> _syncEmbeddedMpvFullscreen(bool isFullscreen) async {
+    if (_isEmbeddedMpvFullscreen == isFullscreen) {
+      return;
+    }
+    _isEmbeddedMpvFullscreen = isFullscreen;
+    final player = _player;
+    if (player == null) {
+      return;
+    }
+    await _applyMpvPerformanceTuning(player, _resolvedTarget ?? widget.target);
   }
 
   Future<void> _applyMpvPerformanceTuning(
@@ -1128,8 +1509,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final heavyPlayback = _isHeavyPlaybackTarget(target);
     final aggressiveTuning = _shouldUseAggressiveMpvTuning(target);
     final leanPlayback = _preferLeanPlaybackRendering;
-    final qualityPreset = _playbackMpvQualityPreset;
+    final requestedQualityPreset = _playbackMpvQualityPreset;
+    final qualityPreset = _resolveEffectiveMpvQualityPreset(target);
     final bufferSizeBytes = _resolveMpvBufferSizeBytes(target);
+    final remoteProfile = resolveMpvRemotePlaybackTuningProfile(
+      target: target,
+      aggressiveTuning: aggressiveTuning,
+      heavyPlayback: heavyPlayback,
+    );
     var backBufferBytes = bufferSizeBytes ~/ 4;
     if (backBufferBytes < _kMinMpvBackBufferSizeBytes) {
       backBufferBytes = _kMinMpvBackBufferSizeBytes;
@@ -1139,7 +1526,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     await _setMpvOption(player, 'demuxer-thread', 'yes');
     await _setMpvOption(
-        player, 'demuxer-max-bytes', bufferSizeBytes.toString());
+      player,
+      'demuxer-max-bytes',
+      bufferSizeBytes.toString(),
+    );
     await _setMpvOption(
       player,
       'demuxer-max-back-bytes',
@@ -1152,34 +1542,36 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       await _setMpvOption(player, 'osd-bar', 'no');
     }
 
-    if (remotePlayback) {
+    if (remotePlayback && remoteProfile != null) {
+      await _setMpvOption(
+        player,
+        'network-timeout',
+        remoteProfile.networkTimeoutSeconds,
+      );
+      await _setMpvOption(player, 'cache', 'yes');
+      await _setMpvOption(player, 'cache-on-disk', remoteProfile.cacheOnDisk);
+      if (remoteProfile.cacheSecs.isNotEmpty) {
+        await _setMpvOption(player, 'cache-secs', remoteProfile.cacheSecs);
+      }
       await _setMpvOption(
         player,
         'demuxer-readahead-secs',
-        aggressiveTuning
-            ? '16'
-            : heavyPlayback
-                ? '10'
-                : '6',
+        remoteProfile.demuxerReadaheadSecs,
       );
       await _setMpvOption(
         player,
         'demuxer-hysteresis-secs',
-        aggressiveTuning ? '8' : '4',
+        remoteProfile.demuxerHysteresisSecs,
       );
       await _setMpvOption(
         player,
         'cache-pause-wait',
-        aggressiveTuning
-            ? '1.5'
-            : heavyPlayback
-                ? '1.0'
-                : '0.6',
+        remoteProfile.cachePauseWait,
       );
       await _setMpvOption(
         player,
         'cache-pause-initial',
-        (aggressiveTuning || heavyPlayback) ? 'yes' : 'no',
+        remoteProfile.cachePauseInitial,
       );
     }
 
@@ -1211,9 +1603,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         'heavyPlayback': heavyPlayback,
         'aggressiveTuning': aggressiveTuning,
         'leanPlayback': leanPlayback,
-        'qualityPreset': qualityPreset.name,
+        'qualityPresetRequested': requestedQualityPreset.name,
+        'qualityPresetApplied': qualityPreset.name,
         'bufferSizeBytes': bufferSizeBytes,
         'backBufferBytes': backBufferBytes,
+        'remoteProfile': remoteProfile == null
+            ? ''
+            : remoteProfile.lowLatency
+                ? 'low-latency'
+                : 'buffered',
         'skipLoopFilter': shouldSkipLoopFilter ? 'nonref' : 'none',
       },
     );
@@ -1239,10 +1637,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     }
   }
 
-  Future<void> _persistPlaybackProgress({bool force = false}) async {
-    final player = _player;
+  Future<void> _persistPlaybackProgress({
+    bool force = false,
+    Player? playerOverride,
+  }) async {
+    final player = playerOverride ?? _player;
     final target = _resolvedTarget ?? widget.target;
-    if (!_isReady || player == null) {
+    final canPersistDetachedPlayer = playerOverride != null;
+    if (((!_isReady && !canPersistDetachedPlayer) || player == null)) {
       return;
     }
 
@@ -1863,6 +2265,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 
   Future<_StartupProbeResult> _probeStartup(PlaybackTarget target) async {
+    if (!_startupProbeEnabled) {
+      return const _StartupProbeResult();
+    }
     final streamUrl = target.streamUrl.trim();
     if (streamUrl.isEmpty) {
       return const _StartupProbeResult();
@@ -1952,7 +2357,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final expandEmbeddedMpvSurfaceInPortrait =
         !isTelevision && viewportSize.height > viewportSize.width;
     final showMinimalPlayerChrome = _isInPictureInPictureMode ||
-        (!isTelevision && playbackSettings.performanceLeanPlaybackUiEnabled);
+        playbackSettings.effectiveLeanPlaybackUiEnabled(
+          isTelevision: isTelevision,
+        );
 
     return PopScope<Object?>(
       canPop: false,
@@ -2575,12 +2982,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 showVolumeSlider: _showDesktopVolumeSliderForMpv,
                 traceEnabled: _shouldTraceWindowsMpv,
                 onBack: () async {
+                  final wasFullscreen = state.isFullscreen();
                   _traceWindowsMpv(
                     'windows-mpv.overlay.back-request',
-                    fields: {'fullscreen': state.isFullscreen()},
+                    fields: {'fullscreen': wasFullscreen},
                   );
-                  if (state.isFullscreen()) {
+                  if (wasFullscreen) {
                     await state.exitFullscreen();
+                    await _syncEmbeddedMpvFullscreen(false);
                     return;
                   }
                   if (mounted) {
@@ -2596,11 +3005,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   settings: settings,
                 ),
                 onToggleFullscreen: () async {
+                  final fullscreenBefore = state.isFullscreen();
                   _traceWindowsMpv(
                     'windows-mpv.overlay.fullscreen-toggle-request',
-                    fields: {'fullscreenBefore': state.isFullscreen()},
+                    fields: {'fullscreenBefore': fullscreenBefore},
                   );
                   await state.toggleFullscreen();
+                  await _syncEmbeddedMpvFullscreen(!fullscreenBefore);
                 },
                 onShowPictureInPicture:
                     _pictureInPictureSupported && !_isInPictureInPictureMode
@@ -2755,7 +3166,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     AppSettings settings, {
     required bool isTelevision,
   }) {
-    final simplifyForPerformance = settings.performanceLeanPlaybackUiEnabled;
+    final simplifyForPerformance = settings.effectiveLeanPlaybackUiEnabled(
+      isTelevision: isTelevision,
+    );
     return SubtitleViewConfiguration(
       style: TextStyle(
         height: 1.35,
@@ -2782,35 +3195,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             : 28,
       ),
     );
-  }
-
-  bool _shouldAutoDowngradeToSystemPlayer(PlaybackTarget target) {
-    if (!ref
-        .read(appSettingsProvider)
-        .performanceAutoDowngradeHeavyPlaybackEnabled) {
-      return false;
-    }
-    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
-    if (!isTelevision) {
-      return false;
-    }
-    if (ref.read(appSettingsProvider).playbackEngine !=
-        PlaybackEngine.embeddedMpv) {
-      return false;
-    }
-    if (kIsWeb) {
-      return false;
-    }
-
-    final width = target.width ?? 0;
-    final height = target.height ?? 0;
-    final bitrate = target.bitrate ?? 0;
-    final codec = target.videoCodec.trim().toLowerCase();
-    final is4k = width >= 3840 || height >= 2160;
-    final isHevc = codec == 'hevc' || codec == 'h265' || codec == 'x265';
-    final veryHighBitrate = bitrate >= 25000000;
-    final heavyHevc = isHevc && (is4k || bitrate >= 18000000);
-    return is4k || veryHighBitrate || heavyHevc;
   }
 
   Future<void> _showPlaybackOptions({
@@ -3089,6 +3473,7 @@ class _MpvControlsOverlayState extends State<_MpvControlsOverlay> {
   void dispose() {
     _isDisposed = true;
     _cancelHideTimer();
+    _resetPointerWakeState();
     unawaited(_playingSubscription?.cancel());
     _trace(
       'windows-mpv.overlay.dispose',
@@ -3106,16 +3491,45 @@ class _MpvControlsOverlayState extends State<_MpvControlsOverlay> {
     final wasFullscreen = oldWidget.isFullscreen;
     final isFullscreen = widget.isFullscreen;
     if (wasFullscreen != isFullscreen) {
+      _cancelHideTimer();
+      _resetPointerWakeState();
       _trace(
         'windows-mpv.overlay.fullscreen-state',
         fields: {'fullscreen': isFullscreen},
       );
+      _syncAutoHide(forceShow: true, reason: 'fullscreen-changed');
     }
   }
 
   void _cancelHideTimer() {
     _hideTimer?.cancel();
     _hideTimer = null;
+  }
+
+  void _resetPointerWakeState() {
+    _lastHoverPosition = null;
+    _lastHoverAt = null;
+  }
+
+  bool _shouldWakeControlsFromPointer(
+    Offset position,
+    DateTime now, {
+    required Offset? previousPosition,
+    required DateTime? previousAt,
+  }) {
+    if (widget.isFullscreen) {
+      return true;
+    }
+    if (previousPosition == null) {
+      return false;
+    }
+    final movedDistance = (position - previousPosition).distance;
+    final isThrottled =
+        previousAt != null && now.difference(previousAt) < _kHoverWakeThrottle;
+    if (isThrottled || movedDistance < _kHoverWakeDistance) {
+      return false;
+    }
+    return true;
   }
 
   void _trace(
@@ -3194,14 +3608,28 @@ class _MpvControlsOverlayState extends State<_MpvControlsOverlay> {
   }
 
   void _handlePointerEnter(PointerEnterEvent event) {
+    final previousPosition = _lastHoverPosition;
+    final previousAt = _lastHoverAt;
+    final now = DateTime.now();
     _lastHoverPosition = event.position;
-    _lastHoverAt = DateTime.now();
-    _showControls(reason: 'pointer-enter');
+    _lastHoverAt = now;
+    if (_controlsVisible) {
+      _syncAutoHide(reason: 'pointer-enter');
+      return;
+    }
+    if (_shouldWakeControlsFromPointer(
+      event.position,
+      now,
+      previousPosition: previousPosition,
+      previousAt: previousAt,
+    )) {
+      _showControls(reason: 'pointer-enter');
+    }
   }
 
   void _handlePointerExit(PointerExitEvent event) {
-    _lastHoverPosition = null;
-    _lastHoverAt = null;
+    _lastHoverPosition = event.position;
+    _lastHoverAt = DateTime.now();
   }
 
   void _handlePointerHover(PointerHoverEvent event) {
@@ -3217,13 +3645,12 @@ class _MpvControlsOverlayState extends State<_MpvControlsOverlay> {
     }
 
     if (!widget.isFullscreen) {
-      if (previousPosition == null) {
-        return;
-      }
-      final movedDistance = (event.position - previousPosition).distance;
-      final isThrottled = previousAt != null &&
-          now.difference(previousAt) < _kHoverWakeThrottle;
-      if (isThrottled || movedDistance < _kHoverWakeDistance) {
+      if (!_shouldWakeControlsFromPointer(
+        event.position,
+        now,
+        previousPosition: previousPosition,
+        previousAt: previousAt,
+      )) {
         return;
       }
     }
@@ -3930,6 +4357,42 @@ class _OpenedPlayback {
   final Player player;
   final VideoController videoController;
   final StreamSubscription<String> errorSubscription;
+}
+
+enum _MpvIsoDiscKind {
+  bluray,
+  dvd,
+}
+
+class _MpvIsoOpenPlan {
+  const _MpvIsoOpenPlan({
+    required this.discKind,
+    required this.deviceSource,
+  });
+
+  final _MpvIsoDiscKind discKind;
+  final String deviceSource;
+
+  String get mediaUri {
+    return switch (discKind) {
+      _MpvIsoDiscKind.bluray => 'bd://longest',
+      _MpvIsoDiscKind.dvd => 'dvd://',
+    };
+  }
+
+  String get deviceProperty {
+    return switch (discKind) {
+      _MpvIsoDiscKind.bluray => 'bluray-device',
+      _MpvIsoDiscKind.dvd => 'dvd-device',
+    };
+  }
+
+  String get otherDeviceProperty {
+    return switch (discKind) {
+      _MpvIsoDiscKind.bluray => 'dvd-device',
+      _MpvIsoDiscKind.dvd => 'bluray-device',
+    };
+  }
 }
 
 class _PlaybackOptionsDialog extends ConsumerWidget {

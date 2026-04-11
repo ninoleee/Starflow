@@ -155,6 +155,9 @@ class QuarkSaveClient {
           'pr': 'ucpro',
           'fr': 'pc',
           'uc_param_str': '',
+          // Quark folder listings can otherwise lag behind recent saves.
+          '__dt': '${(math.Random().nextDouble() * 4 + 1).round() * 60 * 1000}',
+          '__t': '${DateTime.now().millisecondsSinceEpoch ~/ 1000}',
           'pdir_fid': parentFid,
           '_page': '1',
           '_size': '200',

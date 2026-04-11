@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -20,6 +21,232 @@ import 'package:starflow/features/settings/presentation/playback_settings_page.d
 import 'package:starflow/features/settings/presentation/search_provider_editor_page.dart';
 import 'package:starflow/features/settings/presentation/settings_management_page.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
+import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
+
+final _settingsMediaSourcesProvider =
+    Provider<List<MediaSourceConfig>>((ref) => ref.watch(
+          appSettingsProvider.select((settings) => settings.mediaSources),
+        ));
+
+final _settingsSearchProvidersProvider =
+    Provider<List<SearchProviderConfig>>((ref) => ref.watch(
+          appSettingsProvider.select((settings) => settings.searchProviders),
+        ));
+
+final _settingsSearchSourceIdsProvider =
+    Provider<List<String>>((ref) => ref.watch(
+          appSettingsProvider.select((settings) => settings.searchSourceIds),
+        ));
+
+final _settingsLibraryMatchSourceIdsProvider =
+    Provider<List<String>>((ref) => ref.watch(
+          appSettingsProvider
+              .select((settings) => settings.libraryMatchSourceIds),
+        ));
+
+final _settingsNetworkStorageProvider =
+    Provider<NetworkStorageConfig>((ref) => ref.watch(
+          appSettingsProvider.select((settings) => settings.networkStorage),
+        ));
+
+final _settingsDetailAutoLibraryMatchEnabledProvider =
+    Provider<bool>((ref) => ref.watch(
+          appSettingsProvider
+              .select((settings) => settings.detailAutoLibraryMatchEnabled),
+        ));
+
+final _settingsHeroSliceProvider = Provider<_SettingsHeroSlice>(
+  (ref) => ref.watch(
+    appSettingsProvider.select(
+      (settings) => _SettingsHeroSlice(
+        sourceModuleId: settings.homeHeroSourceModuleId,
+        displayMode: settings.homeHeroDisplayMode,
+        style: settings.homeHeroStyle,
+        logoTitleEnabled: settings.homeHeroLogoTitleEnabled,
+        backgroundEnabled: settings.homeHeroBackgroundEnabled,
+        translucentEffectsEnabled: settings.translucentEffectsEnabled,
+        performanceStaticHomeHeroEnabled:
+            settings.performanceStaticHomeHeroEnabled,
+        performanceLightweightHomeHeroEnabled:
+            settings.performanceLightweightHomeHeroEnabled,
+      ),
+    ),
+  ),
+);
+
+final _settingsPlaybackSliceProvider = Provider<_PlaybackSlice>(
+  (ref) => ref.watch(
+    appSettingsProvider.select(
+      (settings) => _PlaybackSlice(
+        playbackEngine: settings.playbackEngine,
+        playbackDecodeMode: settings.playbackDecodeMode,
+        playbackMpvQualityPreset: settings.playbackMpvQualityPreset,
+        playbackOpenTimeoutSeconds: settings.playbackOpenTimeoutSeconds,
+        playbackDefaultSpeed: settings.playbackDefaultSpeed,
+        playbackSubtitlePreference: settings.playbackSubtitlePreference,
+        playbackSubtitleScale: settings.playbackSubtitleScale,
+        onlineSubtitleSources: settings.onlineSubtitleSources,
+        playbackBackgroundPlaybackEnabled:
+            settings.playbackBackgroundPlaybackEnabled,
+      ),
+    ),
+  ),
+);
+
+final _settingsPerformanceSliceProvider = Provider<_SettingsPerformanceSlice>(
+  (ref) => ref.watch(
+    appSettingsProvider.select(
+      (settings) => _SettingsPerformanceSlice(
+        highPerformanceModeEnabled: settings.highPerformanceModeEnabled,
+        translucentEffectsEnabled: settings.translucentEffectsEnabled,
+        autoHideNavigationBarEnabled: settings.autoHideNavigationBarEnabled,
+        homeHeroBackgroundEnabled: settings.homeHeroBackgroundEnabled,
+      ),
+    ),
+  ),
+);
+
+@immutable
+class _SettingsHeroSlice {
+  const _SettingsHeroSlice({
+    required this.sourceModuleId,
+    required this.displayMode,
+    required this.style,
+    required this.logoTitleEnabled,
+    required this.backgroundEnabled,
+    required this.translucentEffectsEnabled,
+    required this.performanceStaticHomeHeroEnabled,
+    required this.performanceLightweightHomeHeroEnabled,
+  });
+
+  final String sourceModuleId;
+  final HomeHeroDisplayMode displayMode;
+  final HomeHeroStyle style;
+  final bool logoTitleEnabled;
+  final bool backgroundEnabled;
+  final bool translucentEffectsEnabled;
+  final bool performanceStaticHomeHeroEnabled;
+  final bool performanceLightweightHomeHeroEnabled;
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is _SettingsHeroSlice &&
+            other.sourceModuleId == sourceModuleId &&
+            other.displayMode == displayMode &&
+            other.style == style &&
+            other.logoTitleEnabled == logoTitleEnabled &&
+            other.backgroundEnabled == backgroundEnabled &&
+            other.translucentEffectsEnabled == translucentEffectsEnabled &&
+            other.performanceStaticHomeHeroEnabled ==
+                performanceStaticHomeHeroEnabled &&
+            other.performanceLightweightHomeHeroEnabled ==
+                performanceLightweightHomeHeroEnabled;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        sourceModuleId,
+        displayMode,
+        style,
+        logoTitleEnabled,
+        backgroundEnabled,
+        translucentEffectsEnabled,
+        performanceStaticHomeHeroEnabled,
+        performanceLightweightHomeHeroEnabled,
+      );
+}
+
+@immutable
+class _PlaybackSlice {
+  const _PlaybackSlice({
+    required this.playbackEngine,
+    required this.playbackDecodeMode,
+    required this.playbackMpvQualityPreset,
+    required this.playbackOpenTimeoutSeconds,
+    required this.playbackDefaultSpeed,
+    required this.playbackSubtitlePreference,
+    required this.playbackSubtitleScale,
+    required this.onlineSubtitleSources,
+    required this.playbackBackgroundPlaybackEnabled,
+  });
+
+  final PlaybackEngine playbackEngine;
+  final PlaybackDecodeMode playbackDecodeMode;
+  final PlaybackMpvQualityPreset playbackMpvQualityPreset;
+  final int playbackOpenTimeoutSeconds;
+  final double playbackDefaultSpeed;
+  final PlaybackSubtitlePreference playbackSubtitlePreference;
+  final PlaybackSubtitleScale playbackSubtitleScale;
+  final List<OnlineSubtitleSource> onlineSubtitleSources;
+  final bool playbackBackgroundPlaybackEnabled;
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is _PlaybackSlice &&
+            other.playbackEngine == playbackEngine &&
+            other.playbackDecodeMode == playbackDecodeMode &&
+            other.playbackMpvQualityPreset == playbackMpvQualityPreset &&
+            other.playbackOpenTimeoutSeconds == playbackOpenTimeoutSeconds &&
+            other.playbackDefaultSpeed == playbackDefaultSpeed &&
+            other.playbackSubtitlePreference == playbackSubtitlePreference &&
+            other.playbackSubtitleScale == playbackSubtitleScale &&
+            listEquals(
+              other.onlineSubtitleSources,
+              onlineSubtitleSources,
+            ) &&
+            other.playbackBackgroundPlaybackEnabled ==
+                playbackBackgroundPlaybackEnabled;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        playbackEngine,
+        playbackDecodeMode,
+        playbackMpvQualityPreset,
+        playbackOpenTimeoutSeconds,
+        playbackDefaultSpeed,
+        playbackSubtitlePreference,
+        playbackSubtitleScale,
+        Object.hashAll(onlineSubtitleSources),
+        playbackBackgroundPlaybackEnabled,
+      );
+}
+
+@immutable
+class _SettingsPerformanceSlice {
+  const _SettingsPerformanceSlice({
+    required this.highPerformanceModeEnabled,
+    required this.translucentEffectsEnabled,
+    required this.autoHideNavigationBarEnabled,
+    required this.homeHeroBackgroundEnabled,
+  });
+
+  final bool highPerformanceModeEnabled;
+  final bool translucentEffectsEnabled;
+  final bool autoHideNavigationBarEnabled;
+  final bool homeHeroBackgroundEnabled;
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is _SettingsPerformanceSlice &&
+            other.highPerformanceModeEnabled == highPerformanceModeEnabled &&
+            other.translucentEffectsEnabled == translucentEffectsEnabled &&
+            other.autoHideNavigationBarEnabled ==
+                autoHideNavigationBarEnabled &&
+            other.homeHeroBackgroundEnabled == homeHeroBackgroundEnabled;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        highPerformanceModeEnabled,
+        translucentEffectsEnabled,
+        autoHideNavigationBarEnabled,
+        homeHeroBackgroundEnabled,
+      );
+}
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -34,7 +261,17 @@ class SettingsPage extends ConsumerStatefulWidget {
     required FocusNode headerFocusNode,
     required TvFocusMemoryController tvFocusMemoryController,
   }) {
-    final settings = ref.watch(appSettingsProvider);
+    final mediaSources = ref.watch(_settingsMediaSourcesProvider);
+    final searchProviders = ref.watch(_settingsSearchProvidersProvider);
+    final searchSourceIds = ref.watch(_settingsSearchSourceIdsProvider);
+    final libraryMatchSourceIds =
+        ref.watch(_settingsLibraryMatchSourceIdsProvider);
+    final detailAutoLibraryMatchEnabled =
+        ref.watch(_settingsDetailAutoLibraryMatchEnabledProvider);
+    final networkStorage = ref.watch(_settingsNetworkStorageProvider);
+    final heroSlice = ref.watch(_settingsHeroSliceProvider);
+    final playbackSlice = ref.watch(_settingsPlaybackSliceProvider);
+    final performanceSlice = ref.watch(_settingsPerformanceSliceProvider);
     final loading = ref.watch(settingsControllerProvider).isLoading;
     final heroCandidates = ref.watch(homeHeroModuleCandidatesProvider);
     final heroModule = ref.watch(homeHeroModuleProvider);
@@ -67,7 +304,7 @@ class SettingsPage extends ConsumerStatefulWidget {
                   title: '媒体源',
                   child: Column(
                     children: [
-                      ...settings.mediaSources.map(
+                      ...mediaSources.map(
                         (source) => Padding(
                           padding: const EdgeInsets.only(bottom: 10),
                           child: _SettingsTile(
@@ -103,7 +340,7 @@ class SettingsPage extends ConsumerStatefulWidget {
                   title: '搜索服务',
                   child: Column(
                     children: [
-                      ...settings.searchProviders.map(
+                      ...searchProviders.map(
                         (provider) => Padding(
                           padding: const EdgeInsets.only(bottom: 10),
                           child: _SettingsTile(
@@ -134,9 +371,18 @@ class SettingsPage extends ConsumerStatefulWidget {
                       const SizedBox(height: 10),
                       _SettingsNavigationTile(
                         title: '搜索来源',
-                        subtitle: _searchSourceSummary(settings),
-                        onTap: () =>
-                            _openSearchSourcePicker(context, ref, settings),
+                        subtitle: _searchSourceSummary(
+                          mediaSources: mediaSources,
+                          searchProviders: searchProviders,
+                          searchSourceIds: searchSourceIds,
+                        ),
+                        onTap: () => _openSearchSourcePicker(
+                          context,
+                          ref,
+                          mediaSources: mediaSources,
+                          searchProviders: searchProviders,
+                          searchSourceIds: searchSourceIds,
+                        ),
                       ),
                     ],
                   ),
@@ -148,7 +394,7 @@ class SettingsPage extends ConsumerStatefulWidget {
                     children: [
                       _SettingsNavigationTile(
                         title: '打开匹配与评分设置',
-                        subtitle: settings.detailAutoLibraryMatchEnabled
+                        subtitle: detailAutoLibraryMatchEnabled
                             ? '详情页自动匹配资源：已开启'
                             : '详情页自动匹配资源：已关闭',
                         onTap: () => _openMetadataMatchSettings(context),
@@ -156,9 +402,16 @@ class SettingsPage extends ConsumerStatefulWidget {
                       const SizedBox(height: 10),
                       _SettingsNavigationTile(
                         title: '匹配来源',
-                        subtitle: _libraryMatchSourceSummary(settings),
+                        subtitle: _libraryMatchSourceSummary(
+                          mediaSources: mediaSources,
+                          selectedIds: libraryMatchSourceIds,
+                        ),
                         onTap: () => _openLibraryMatchSourcePicker(
-                            context, ref, settings),
+                          context,
+                          ref,
+                          mediaSources: mediaSources,
+                          selectedIds: libraryMatchSourceIds,
+                        ),
                       ),
                     ],
                   ),
@@ -170,7 +423,7 @@ class SettingsPage extends ConsumerStatefulWidget {
                     title: '夸克与 STRM',
                     onTap: () => _openNetworkStorageSettings(
                       context,
-                      settings.networkStorage,
+                      networkStorage,
                     ),
                   ),
                 ),
@@ -197,10 +450,13 @@ class SettingsPage extends ConsumerStatefulWidget {
                     children: [
                       _SettingsNavigationTile(
                         title: '播放器与字幕',
-                        subtitle: _playbackSettingsSummary(settings),
+                        subtitle: _playbackSettingsSummary(
+                          playbackSlice,
+                          isTelevision: isTelevision,
+                        ),
                         onTap: () => _openPlaybackSettings(
                           context,
-                          settings,
+                          playbackSlice,
                         ),
                       ),
                     ],
@@ -214,7 +470,7 @@ class SettingsPage extends ConsumerStatefulWidget {
                     children: [
                       _SettingsNavigationTile(
                         title: '高性能与轻量模式',
-                        subtitle: performanceSettingsSummary(settings),
+                        subtitle: _performanceSettingsSummary(performanceSlice),
                         onTap: () => _openPerformanceSettings(context),
                       ),
                       const SizedBox(height: 18),
@@ -239,7 +495,7 @@ class SettingsPage extends ConsumerStatefulWidget {
                           for (final mode in HomeHeroDisplayMode.values)
                             StarflowChipButton(
                               label: mode.label,
-                              selected: mode == settings.homeHeroDisplayMode,
+                              selected: mode == heroSlice.displayMode,
                               onPressed: heroEnabled
                                   ? () {
                                       ref
@@ -254,7 +510,7 @@ class SettingsPage extends ConsumerStatefulWidget {
                       const SizedBox(height: 14),
                       StarflowToggleTile(
                         title: '标题优先展示 Logo',
-                        value: settings.homeHeroLogoTitleEnabled,
+                        value: heroSlice.logoTitleEnabled,
                         onChanged: heroEnabled
                             ? (value) {
                                 ref
@@ -292,15 +548,15 @@ class SettingsPage extends ConsumerStatefulWidget {
                         StarflowSelectionTile(
                           title: 'Hero 数据来源',
                           value: _heroSourceLabel(
-                            settings: settings,
+                            heroSlice: heroSlice,
                             heroCandidates: heroCandidates,
                           ),
                           onPressed: heroEnabled
                               ? () => _openHeroSourcePicker(
                                     context,
                                     ref,
-                                    settings,
-                                    heroCandidates,
+                                    heroSlice: heroSlice,
+                                    heroCandidates: heroCandidates,
                                   )
                               : null,
                         ),
@@ -353,135 +609,56 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openSearchSourcePicker(
     BuildContext context,
-    WidgetRef ref,
-    AppSettings settings,
-  ) async {
-    final availableLocalSources = settings.mediaSources
+    WidgetRef ref, {
+    required List<MediaSourceConfig> mediaSources,
+    required List<SearchProviderConfig> searchProviders,
+    required List<String> searchSourceIds,
+  }) async {
+    final availableLocalSources = mediaSources
         .where(_isSelectableLocalMediaSource)
         .toList(growable: false);
-    final availableProviders = settings.searchProviders
+    final availableProviders = searchProviders
         .where((provider) => provider.enabled)
         .toList(growable: false);
     if (availableLocalSources.isEmpty && availableProviders.isEmpty) {
       return;
     }
 
-    final initialSelection = settings.searchSourceIds.toSet();
-    final selected = await showDialog<Set<String>>(
+    final initialSelection = searchSourceIds.toSet();
+    final selected = await showSettingsCheckboxSelectionDialog<String>(
       context: context,
-      builder: (dialogContext) {
-        var draft = <String>{...initialSelection};
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('选择搜索来源'),
-              content: SizedBox(
-                width: 420,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      StarflowCheckboxTile(
-                        title: '全部已启用来源',
-                        subtitle: '清空单独选择，搜索时使用全部已启用本地源和搜索服务',
-                        value: draft.isEmpty,
-                        onChanged: (_) {
-                          setState(() {
-                            draft = <String>{};
-                          });
-                        },
-                      ),
-                      if (availableLocalSources.isNotEmpty) ...[
-                        const Divider(height: 16),
-                        Text(
-                          '本地媒体源',
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 8),
-                        for (final source in availableLocalSources)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: StarflowCheckboxTile(
-                              title: source.name,
-                              subtitle: source.kind.label,
-                              value: draft.contains(
-                                searchSourceSettingIdForMediaSource(source.id),
-                              ),
-                              onChanged: (checked) {
-                                setState(() {
-                                  final id =
-                                      searchSourceSettingIdForMediaSource(
-                                    source.id,
-                                  );
-                                  if (checked) {
-                                    draft.add(id);
-                                  } else {
-                                    draft.remove(id);
-                                  }
-                                });
-                              },
-                            ),
-                          ),
-                      ],
-                      if (availableProviders.isNotEmpty) ...[
-                        const Divider(height: 16),
-                        Text(
-                          '搜索服务',
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 8),
-                        for (final provider in availableProviders)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: StarflowCheckboxTile(
-                              title: provider.name,
-                              subtitle: provider.kind.label,
-                              value: draft.contains(
-                                searchSourceSettingIdForProvider(provider.id),
-                              ),
-                              onChanged: (checked) {
-                                setState(() {
-                                  final id = searchSourceSettingIdForProvider(
-                                    provider.id,
-                                  );
-                                  if (checked) {
-                                    draft.add(id);
-                                  } else {
-                                    draft.remove(id);
-                                  }
-                                });
-                              },
-                            ),
-                          ),
-                      ],
-                    ],
+      title: '选择搜索来源',
+      initialSelection: initialSelection,
+      allLabel: '全部已启用来源',
+      allSubtitle: '清空单独选择，搜索时使用全部已启用本地源和搜索服务',
+      sections: [
+        if (availableLocalSources.isNotEmpty)
+          SettingsCheckboxDialogSection<String>(
+            title: '本地媒体源',
+            options: availableLocalSources
+                .map(
+                  (source) => SettingsCheckboxDialogOption<String>(
+                    value: searchSourceSettingIdForMediaSource(source.id),
+                    title: source.name,
+                    subtitle: source.kind.label,
                   ),
-                ),
-              ),
-              actions: [
-                StarflowButton(
-                  label: '取消',
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  variant: StarflowButtonVariant.ghost,
-                  compact: true,
-                ),
-                StarflowButton(
-                  label: '全部来源',
-                  onPressed: () => Navigator.of(dialogContext).pop(<String>{}),
-                  variant: StarflowButtonVariant.secondary,
-                  compact: true,
-                ),
-                StarflowButton(
-                  label: '保存',
-                  onPressed: () => Navigator.of(dialogContext).pop(draft),
-                  compact: true,
-                ),
-              ],
-            );
-          },
-        );
-      },
+                )
+                .toList(growable: false),
+          ),
+        if (availableProviders.isNotEmpty)
+          SettingsCheckboxDialogSection<String>(
+            title: '搜索服务',
+            options: availableProviders
+                .map(
+                  (provider) => SettingsCheckboxDialogOption<String>(
+                    value: searchSourceSettingIdForProvider(provider.id),
+                    title: provider.name,
+                    subtitle: provider.kind.label,
+                  ),
+                )
+                .toList(growable: false),
+          ),
+      ],
     );
     if (selected == null) {
       return;
@@ -493,87 +670,37 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openLibraryMatchSourcePicker(
     BuildContext context,
-    WidgetRef ref,
-    AppSettings settings,
-  ) async {
-    final availableSources = settings.mediaSources
+    WidgetRef ref, {
+    required List<MediaSourceConfig> mediaSources,
+    required List<String> selectedIds,
+  }) async {
+    final availableSources = mediaSources
         .where(_isSelectableLocalMediaSource)
         .toList(growable: false);
     if (availableSources.isEmpty) {
       return;
     }
 
-    final initialSelection = settings.libraryMatchSourceIds.toSet();
-    final selected = await showDialog<Set<String>>(
+    final initialSelection = selectedIds.toSet();
+    final selected = await showSettingsCheckboxSelectionDialog<String>(
       context: context,
-      builder: (dialogContext) {
-        var draft = <String>{...initialSelection};
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('选择匹配来源'),
-              content: SizedBox(
-                width: 420,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      StarflowCheckboxTile(
-                        title: '全部已启用来源',
-                        subtitle: '清空单独选择，匹配时扫描全部已启用媒体源',
-                        value: draft.isEmpty,
-                        onChanged: (_) {
-                          setState(() {
-                            draft = <String>{};
-                          });
-                        },
-                      ),
-                      const Divider(height: 16),
-                      for (final source in availableSources)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: StarflowCheckboxTile(
-                            title: source.name,
-                            subtitle: source.kind.label,
-                            value: draft.contains(source.id),
-                            onChanged: (checked) {
-                              setState(() {
-                                if (checked) {
-                                  draft.add(source.id);
-                                } else {
-                                  draft.remove(source.id);
-                                }
-                              });
-                            },
-                          ),
-                        ),
-                    ],
-                  ),
+      title: '选择匹配来源',
+      initialSelection: initialSelection,
+      allLabel: '全部已启用来源',
+      allSubtitle: '清空单独选择，匹配时扫描全部已启用媒体源',
+      sections: [
+        SettingsCheckboxDialogSection<String>(
+          options: availableSources
+              .map(
+                (source) => SettingsCheckboxDialogOption<String>(
+                  value: source.id,
+                  title: source.name,
+                  subtitle: source.kind.label,
                 ),
-              ),
-              actions: [
-                StarflowButton(
-                  label: '取消',
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  variant: StarflowButtonVariant.ghost,
-                  compact: true,
-                ),
-                StarflowButton(
-                  label: '全部来源',
-                  onPressed: () => Navigator.of(dialogContext).pop(<String>{}),
-                  variant: StarflowButtonVariant.secondary,
-                  compact: true,
-                ),
-                StarflowButton(
-                  label: '保存',
-                  onPressed: () => Navigator.of(dialogContext).pop(draft),
-                  compact: true,
-                ),
-              ],
-            );
-          },
-        );
-      },
+              )
+              .toList(growable: false),
+        ),
+      ],
     );
     if (selected == null) {
       return;
@@ -596,21 +723,22 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openPlaybackSettings(
     BuildContext context,
-    AppSettings settings,
+    _PlaybackSlice playbackSlice,
   ) {
     return Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
         builder: (context) => PlaybackSettingsPage(
-          initialTimeoutSeconds: settings.playbackOpenTimeoutSeconds,
-          initialDefaultSpeed: settings.playbackDefaultSpeed,
-          initialSubtitlePreference: settings.playbackSubtitlePreference,
-          initialSubtitleScale: settings.playbackSubtitleScale,
-          initialOnlineSubtitleSources: settings.onlineSubtitleSources,
+          initialTimeoutSeconds: playbackSlice.playbackOpenTimeoutSeconds,
+          initialDefaultSpeed: playbackSlice.playbackDefaultSpeed,
+          initialSubtitlePreference: playbackSlice.playbackSubtitlePreference,
+          initialSubtitleScale: playbackSlice.playbackSubtitleScale,
+          initialOnlineSubtitleSources: playbackSlice.onlineSubtitleSources,
           initialBackgroundPlaybackEnabled:
-              settings.playbackBackgroundPlaybackEnabled,
-          initialPlaybackEngine: settings.playbackEngine,
-          initialPlaybackDecodeMode: settings.playbackDecodeMode,
-          initialPlaybackMpvQualityPreset: settings.playbackMpvQualityPreset,
+              playbackSlice.playbackBackgroundPlaybackEnabled,
+          initialPlaybackEngine: playbackSlice.playbackEngine,
+          initialPlaybackDecodeMode: playbackSlice.playbackDecodeMode,
+          initialPlaybackMpvQualityPreset:
+              playbackSlice.playbackMpvQualityPreset,
         ),
       ),
     );
@@ -642,10 +770,10 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openHeroSourcePicker(
     BuildContext context,
-    WidgetRef ref,
-    AppSettings settings,
-    List<HomeModuleConfig> heroCandidates,
-  ) async {
+    WidgetRef ref, {
+    required _SettingsHeroSlice heroSlice,
+    required List<HomeModuleConfig> heroCandidates,
+  }) async {
     final selection = await showDialog<String>(
       context: context,
       builder: (context) {
@@ -655,16 +783,14 @@ class SettingsPage extends ConsumerStatefulWidget {
             SimpleDialogOption(
               onPressed: () => Navigator.of(context).pop(''),
               child: Text(
-                settings.homeHeroSourceModuleId.trim().isEmpty
-                    ? '自动选择  当前'
-                    : '自动选择',
+                heroSlice.sourceModuleId.trim().isEmpty ? '自动选择  当前' : '自动选择',
               ),
             ),
             for (final module in heroCandidates)
               SimpleDialogOption(
                 onPressed: () => Navigator.of(context).pop(module.id),
                 child: Text(
-                  module.id == settings.homeHeroSourceModuleId
+                  module.id == heroSlice.sourceModuleId
                       ? '${module.title}  当前'
                       : module.title,
                 ),
@@ -709,10 +835,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 }
 
 String _resolveHeroModuleSelectionValue({
-  required AppSettings settings,
+  required _SettingsHeroSlice heroSlice,
   required List<HomeModuleConfig> heroCandidates,
 }) {
-  final selectedId = settings.homeHeroSourceModuleId.trim();
+  final selectedId = heroSlice.sourceModuleId.trim();
   if (selectedId.isEmpty) {
     return '';
   }
@@ -725,11 +851,11 @@ String _resolveHeroModuleSelectionValue({
 }
 
 String _heroSourceLabel({
-  required AppSettings settings,
+  required _SettingsHeroSlice heroSlice,
   required List<HomeModuleConfig> heroCandidates,
 }) {
   final selectedId = _resolveHeroModuleSelectionValue(
-    settings: settings,
+    heroSlice: heroSlice,
     heroCandidates: heroCandidates,
   );
   if (selectedId.isEmpty) {
@@ -743,24 +869,34 @@ String _heroSourceLabel({
   return '自动选择';
 }
 
-String _playbackSettingsSummary(AppSettings settings) {
+String _playbackSettingsSummary(
+  _PlaybackSlice playbackSlice, {
+  bool isTelevision = false,
+}) {
   return [
-    settings.playbackEngine.label,
-    settings.playbackDecodeMode.label,
-    'MPV ${settings.playbackMpvQualityPreset.label}',
-    '${settings.playbackOpenTimeoutSeconds}s 超时',
-    '${_formatPlaybackSpeedLabel(settings.playbackDefaultSpeed)} 默认倍速',
-    '字幕 ${settings.playbackSubtitlePreference.label}',
-    settings.playbackSubtitleScale.label,
-    settings.playbackBackgroundPlaybackEnabled ? '后台播放开' : '后台播放关',
+    playbackSlice.playbackEngine.label,
+    playbackSlice.playbackDecodeMode.label,
+    'MPV ${playbackSlice.playbackMpvQualityPreset.label}',
+    '${playbackSlice.playbackOpenTimeoutSeconds}s 超时',
+    '${_formatPlaybackSpeedLabel(playbackSlice.playbackDefaultSpeed)} 默认倍速',
+    '字幕 ${playbackSlice.playbackSubtitlePreference.label}',
+    playbackSlice.playbackSubtitleScale.label,
+    isTelevision
+        ? 'TV 端后台播放禁用'
+        : playbackSlice.playbackBackgroundPlaybackEnabled
+            ? '后台播放开'
+            : '后台播放关',
   ].join(' · ');
 }
 
-String _searchSourceSummary(AppSettings settings) {
-  final availableLocalSources = settings.mediaSources
-      .where(_isSelectableLocalMediaSource)
-      .toList(growable: false);
-  final availableProviders = settings.searchProviders
+String _searchSourceSummary({
+  required List<MediaSourceConfig> mediaSources,
+  required List<SearchProviderConfig> searchProviders,
+  required List<String> searchSourceIds,
+}) {
+  final availableLocalSources =
+      mediaSources.where(_isSelectableLocalMediaSource).toList(growable: false);
+  final availableProviders = searchProviders
       .where((provider) => provider.enabled)
       .toList(growable: false);
   final totalCount = availableLocalSources.length + availableProviders.length;
@@ -768,7 +904,7 @@ String _searchSourceSummary(AppSettings settings) {
     return '暂无可选来源';
   }
 
-  final selectedIds = settings.searchSourceIds.toSet();
+  final selectedIds = searchSourceIds.toSet();
   if (selectedIds.isEmpty) {
     return '全部已启用来源';
   }
@@ -798,21 +934,23 @@ String _searchSourceSummary(AppSettings settings) {
   return '${selectedLabels.take(2).join('、')} 等 ${selectedLabels.length} 个来源';
 }
 
-String _libraryMatchSourceSummary(AppSettings settings) {
-  final availableSources = settings.mediaSources
-      .where(_isSelectableLocalMediaSource)
-      .toList(growable: false);
+String _libraryMatchSourceSummary({
+  required List<MediaSourceConfig> mediaSources,
+  required List<String> selectedIds,
+}) {
+  final availableSources =
+      mediaSources.where(_isSelectableLocalMediaSource).toList(growable: false);
   if (availableSources.isEmpty) {
     return '暂无可选来源';
   }
 
-  final selectedIds = settings.libraryMatchSourceIds.toSet();
-  if (selectedIds.isEmpty) {
+  final selectedIdsSet = selectedIds.toSet();
+  if (selectedIdsSet.isEmpty) {
     return '全部已启用来源';
   }
 
   final selectedNames = availableSources
-      .where((source) => selectedIds.contains(source.id))
+      .where((source) => selectedIdsSet.contains(source.id))
       .map((source) => source.name)
       .toList(growable: false);
   if (selectedNames.isEmpty ||
@@ -823,6 +961,28 @@ String _libraryMatchSourceSummary(AppSettings settings) {
     return selectedNames.join('、');
   }
   return '${selectedNames.take(2).join('、')} 等 ${selectedNames.length} 个来源';
+}
+
+String _performanceSettingsSummary(_SettingsPerformanceSlice performanceSlice) {
+  final enabledItems = <String>[
+    if (!performanceSlice.translucentEffectsEnabled) '磨砂关闭',
+    if (!performanceSlice.autoHideNavigationBarEnabled) '菜单常驻',
+    if (!performanceSlice.homeHeroBackgroundEnabled) 'Hero 背景关闭',
+  ];
+
+  if (enabledItems.isEmpty) {
+    return performanceSlice.highPerformanceModeEnabled
+        ? '预设已开，当前轻量项已手动调回'
+        : '按需管理界面与 Hero 基础轻量模式';
+  }
+
+  final itemsLabel = enabledItems.length <= 2
+      ? enabledItems.join('、')
+      : '${enabledItems.take(2).join('、')} 等 ${enabledItems.length} 项';
+  if (!performanceSlice.highPerformanceModeEnabled) {
+    return itemsLabel;
+  }
+  return '预设已开 · $itemsLabel';
 }
 
 bool _isSelectableLocalMediaSource(MediaSourceConfig source) {

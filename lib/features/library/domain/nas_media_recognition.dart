@@ -1,4 +1,5 @@
 import 'package:starflow/core/utils/webdav_trace.dart';
+import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 
 String stripEmbeddedExternalIdTags(String input) {
   final trimmed = input.trim();
@@ -466,7 +467,7 @@ class NasMediaRecognizer {
     if (seriesTitleFilterKeywords.isEmpty || pathSegments.length < 2) {
       return null;
     }
-    var lastInferredTitle = _fallbackSeriesTitleFromFile(fileBaseName);
+    var lastInferredTitle = '';
     var hitFilteredDirectory = false;
     for (var index = pathSegments.length - 2; index >= 0; index--) {
       final rawSegment = pathSegments[index].trim();
@@ -474,6 +475,12 @@ class NasMediaRecognizer {
         continue;
       }
       final cleanedSegment = _cleanTitle(rawSegment);
+      final parentMatchesFilter = index > 0 &&
+          _matchesSeriesTitleFilter(
+            pathSegments[index - 1],
+            cleanedSegment: _cleanTitle(pathSegments[index - 1]),
+            seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+          );
       if (_matchesSeriesTitleFilter(
         rawSegment,
         cleanedSegment: cleanedSegment,
@@ -482,19 +489,38 @@ class NasMediaRecognizer {
         hitFilteredDirectory = true;
         break;
       }
-      if (_looksLikeSeasonFolder(rawSegment) ||
+      if ((_looksLikeSeasonFolder(rawSegment) &&
+              !_canUseSeasonDirectoryAsSeriesTitle(
+                rawSegment,
+                parentMatchesFilter: parentMatchesFilter,
+              )) ||
           _looksLikeWrapperFolder(rawSegment)) {
         continue;
       }
       if (cleanedSegment.isEmpty) {
         continue;
       }
-      lastInferredTitle = cleanedSegment;
+      if (lastInferredTitle.isEmpty) {
+        lastInferredTitle = cleanedSegment;
+      }
+    }
+    if (lastInferredTitle.isEmpty) {
+      lastInferredTitle = _fallbackSeriesTitleFromFile(fileBaseName);
     }
     if (!hitFilteredDirectory || lastInferredTitle.trim().isEmpty) {
       return null;
     }
     return lastInferredTitle.trim();
+  }
+
+  static bool _canUseSeasonDirectoryAsSeriesTitle(
+    String rawSegment, {
+    required bool parentMatchesFilter,
+  }) {
+    if (!parentMatchesFilter || !_looksLikeSeasonFolder(rawSegment)) {
+      return false;
+    }
+    return !looksLikeStrictSeasonFolderLabel(rawSegment);
   }
 
   static String _fallbackSeriesTitleFromFile(String fileBaseName) {

@@ -2,6 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
+final _appPageBackgroundReduceDecorationsProvider = Provider<bool>((ref) {
+  return ref.watch(appSettingsProvider.select(
+    (settings) => settings.performanceReduceDecorationsEnabled,
+  ));
+});
+
 class AppPageBackground extends ConsumerWidget {
   const AppPageBackground({
     super.key,
@@ -11,15 +17,11 @@ class AppPageBackground extends ConsumerWidget {
 
   final Widget child;
   final EdgeInsets contentPadding;
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final reduceDecorationsEnabled = ref.watch(
-      appSettingsProvider.select(
-        (settings) => settings.performanceReduceDecorationsEnabled,
-      ),
-    );
+    final reduceDecorationsEnabled =
+        ref.watch(_appPageBackgroundReduceDecorationsProvider);
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(

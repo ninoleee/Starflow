@@ -119,6 +119,64 @@ void main() {
     expect(summary.entryCount, 0);
   });
 
+  test('loads multiple cached detail targets from a single payload read',
+      () async {
+    final prefs = await SharedPreferences.getInstance();
+    final repository = LocalStorageCacheRepository(sharedPreferences: prefs);
+
+    const firstSeed = MediaDetailTarget(
+      title: 'First Movie',
+      posterUrl: '',
+      overview: '',
+      year: 2024,
+      tmdbId: '100',
+    );
+    const secondSeed = MediaDetailTarget(
+      title: 'Second Movie',
+      posterUrl: '',
+      overview: '',
+      year: 2025,
+      tmdbId: '200',
+    );
+
+    await repository.saveDetailTarget(
+      seedTarget: firstSeed,
+      resolvedTarget: firstSeed.copyWith(
+        posterUrl: 'https://image.example.com/first.jpg',
+        sourceId: 'emby-main',
+        itemId: 'first-1',
+        sourceName: 'Living Room',
+        sourceKind: MediaSourceKind.emby,
+      ),
+    );
+    await repository.saveDetailTarget(
+      seedTarget: secondSeed,
+      resolvedTarget: secondSeed.copyWith(
+        posterUrl: 'https://image.example.com/second.jpg',
+        sourceId: 'emby-main',
+        itemId: 'second-1',
+        sourceName: 'Living Room',
+        sourceKind: MediaSourceKind.emby,
+      ),
+    );
+
+    final results = await repository.loadDetailTargetsBatch(const [
+      firstSeed,
+      secondSeed,
+      MediaDetailTarget(
+        title: 'Missing',
+        posterUrl: '',
+        overview: '',
+        tmdbId: '404',
+      ),
+    ]);
+
+    expect(results, hasLength(3));
+    expect(results[0]?.posterUrl, 'https://image.example.com/first.jpg');
+    expect(results[1]?.posterUrl, 'https://image.example.com/second.jpg');
+    expect(results[2], isNull);
+  });
+
   test('removes only the deleted resource from cached match choices', () async {
     final prefs = await SharedPreferences.getInstance();
     final repository = LocalStorageCacheRepository(sharedPreferences: prefs);

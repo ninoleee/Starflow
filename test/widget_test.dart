@@ -74,4 +74,49 @@ void main() {
     expect(find.text('IMDb 8.7'), findsOneWidget);
     expect(find.text('立即播放'), findsOneWidget);
   });
+
+  testWidgets('episode detail overview heading prefers episode title',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          home: MediaDetailPage(
+            target: const MediaDetailTarget(
+              title: '第1集 风暴前夜',
+              posterUrl: '',
+              overview: '这一集讲述主角行动前夜的准备与冲突。',
+              year: 2026,
+              durationLabel: '48m',
+              availabilityLabel: '资源已就绪：WebDAV · NAS',
+              searchQuery: '测试剧',
+              playbackTarget: PlaybackTarget(
+                title: '第1集 风暴前夜',
+                sourceId: 'nas-main',
+                streamUrl: 'https://example.com/show-s01e01.mp4',
+                sourceName: 'NAS',
+                sourceKind: MediaSourceKind.nas,
+                itemType: 'episode',
+                seriesTitle: '测试剧',
+                seasonNumber: 1,
+                episodeNumber: 1,
+              ),
+              itemId: 'episode-1',
+              sourceId: 'nas-main',
+              itemType: 'episode',
+              seasonNumber: 1,
+              episodeNumber: 1,
+              sourceKind: MediaSourceKind.nas,
+              sourceName: 'NAS',
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+
+    expect(find.text('测试剧'), findsNothing);
+    expect(find.text('第1集 风暴前夜'), findsAtLeastNWidgets(2));
+    expect(find.text('这一集讲述主角行动前夜的准备与冲突。'), findsOneWidget);
+  });
 }

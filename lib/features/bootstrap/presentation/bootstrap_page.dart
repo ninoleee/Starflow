@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/app/router/app_routes.dart';
 import 'package:starflow/features/bootstrap/application/bootstrap_controller.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+
+final _bootstrapReduceMotionProvider = Provider<bool>((ref) {
+  return ref.watch(appSettingsProvider.select(
+    (settings) => settings.performanceReduceMotionEnabled,
+  ));
+});
 
 class BootstrapPage extends ConsumerStatefulWidget {
   const BootstrapPage({super.key});
@@ -23,7 +30,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
         if (next.isComplete && previous?.isComplete != true) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
-              context.goNamed('home');
+              context.goNamed(AppRoutes.home.name);
             }
           });
         }
@@ -44,11 +51,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
   Widget build(BuildContext context) {
     final state = ref.watch(bootstrapControllerProvider);
     final progress = state.progress.clamp(0.0, 1.0).toDouble();
-    final reduceMotionEnabled = ref.watch(
-      appSettingsProvider.select(
-        (settings) => settings.performanceReduceMotionEnabled,
-      ),
-    );
+    final reduceMotionEnabled = ref.watch(_bootstrapReduceMotionProvider);
 
     return Scaffold(
       body: DecoratedBox(

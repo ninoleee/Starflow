@@ -1098,6 +1098,76 @@ class AppSettings {
   }
 }
 
+enum AppUiPerformanceTier {
+  rich,
+  balanced,
+  performance,
+}
+
+extension AppSettingsPerformanceX on AppSettings {
+  AppUiPerformanceTier get effectiveUiPerformanceTier {
+    if (highPerformanceModeEnabled) {
+      return AppUiPerformanceTier.performance;
+    }
+
+    final enabledPerformanceToggles = <bool>[
+      performanceReduceDecorationsEnabled,
+      performanceReduceMotionEnabled,
+      performanceStaticNavigationEnabled,
+      performanceLightweightTvFocusEnabled,
+      performanceStaticHomeHeroEnabled,
+      performanceLightweightHomeHeroEnabled,
+      performanceSlimDetailHeroEnabled,
+      performanceLeanPlaybackUiEnabled,
+    ].where((enabled) => enabled).length;
+
+    if (enabledPerformanceToggles >= 3) {
+      return AppUiPerformanceTier.performance;
+    }
+    if (enabledPerformanceToggles > 0) {
+      return AppUiPerformanceTier.balanced;
+    }
+    return AppUiPerformanceTier.rich;
+  }
+
+  bool get effectiveReduceMotionEnabled {
+    return performanceReduceMotionEnabled ||
+        effectiveUiPerformanceTier == AppUiPerformanceTier.performance;
+  }
+
+  bool get effectiveStaticNavigationEnabled {
+    return performanceStaticNavigationEnabled ||
+        effectiveUiPerformanceTier == AppUiPerformanceTier.performance;
+  }
+
+  bool get effectiveNavigationAnimationEnabled {
+    return !effectiveStaticNavigationEnabled && !effectiveReduceMotionEnabled;
+  }
+
+  bool get effectiveTranslucentEffectsEnabled {
+    return translucentEffectsEnabled &&
+        effectiveUiPerformanceTier != AppUiPerformanceTier.performance;
+  }
+
+  bool get effectiveNavigationAutoHideEnabled {
+    return autoHideNavigationBarEnabled && !effectiveStaticNavigationEnabled;
+  }
+
+  bool effectiveLeanPlaybackUiEnabled({required bool isTelevision}) {
+    return isTelevision ||
+        performanceLeanPlaybackUiEnabled ||
+        effectiveUiPerformanceTier == AppUiPerformanceTier.performance;
+  }
+
+  bool get effectiveStartupProbeEnabled {
+    return effectiveUiPerformanceTier != AppUiPerformanceTier.performance;
+  }
+
+  bool get effectiveFullscreenRouteAnimationEnabled {
+    return !effectiveReduceMotionEnabled;
+  }
+}
+
 HomeHeroDisplayMode _parseLegacyHomeHeroDisplayMode(String raw) {
   return switch (raw) {
     'borderless' => HomeHeroDisplayMode.borderless,

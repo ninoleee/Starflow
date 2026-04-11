@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -8,7 +10,7 @@ import 'package:starflow/features/library/application/webdav_scrape_progress.dar
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
-import 'package:starflow/features/library/data/nas_media_indexer.dart';
+import 'package:starflow/features/library/data/quark_external_storage_client.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
@@ -19,6 +21,8 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('AppMediaRepository Quark source', () {
     test('lists collections and video items from a configured quark source',
         () async {
@@ -36,13 +40,13 @@ void main() {
             QuarkFileEntry(
               fid: 'series-dir',
               name: 'Series',
-              path: '/影视/Series',
+              path: '/Series',
               isDirectory: true,
             ),
             QuarkFileEntry(
               fid: 'movie-file',
               name: 'Movie.2024.mkv',
-              path: '/影视/Movie.2024.mkv',
+              path: '/Movie.2024.mkv',
               isDirectory: false,
               sizeBytes: 2147483648,
               updatedAt: DateTime(2026, 4, 9, 10),
@@ -63,7 +67,7 @@ void main() {
             QuarkFileEntry(
               fid: 'episode-file',
               name: 'The.Show.S01E01.mkv',
-              path: '/影视/Series/The.Show.S01E01.mkv',
+              path: '/The.Show.S01E01.mkv',
               isDirectory: false,
               sizeBytes: 1073741824,
               updatedAt: DateTime(2026, 4, 8, 20),
@@ -95,8 +99,28 @@ void main() {
               MockClient((request) async => http.Response('', 200)),
             ),
           ),
-          nasMediaIndexerProvider
-              .overrideWithValue(_buildNoopNasMediaIndexer()),
+          nasMediaIndexStoreProvider.overrideWithValue(
+            SembastNasMediaIndexStore(
+              databaseOpener: () => databaseFactoryMemory.openDatabase(
+                'media-repository-quark-source-test-1',
+              ),
+            ),
+          ),
+          wmdbMetadataClientProvider.overrideWithValue(
+            WmdbMetadataClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          tmdbMetadataClientProvider.overrideWithValue(
+            TmdbMetadataClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          imdbRatingClientProvider.overrideWithValue(
+            ImdbRatingClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
           quarkSaveClientProvider.overrideWithValue(quarkClient),
         ],
       );
@@ -119,12 +143,137 @@ void main() {
       expect(items.first.fileSizeBytes, 2147483648);
       expect(items.first.title, contains('Movie'));
 
+      final series = items.singleWhere((item) => item.itemType == 'series');
+      final children = await repository.fetchChildren(
+        sourceId: source.id,
+        parentId: series.id,
+        limit: 10,
+      );
       final episode =
-          items.singleWhere((item) => item.playbackItemId == 'episode-file');
+          children.singleWhere((item) => item.playbackItemId == 'episode-file');
       expect(episode.itemType, 'episode');
       expect(episode.seasonNumber, 1);
       expect(episode.episodeNumber, 1);
       expect(episode.actualAddress, '/影视/Series/The.Show.S01E01.mkv');
+    });
+
+    test('rebuilds quark series from flattened child paths', () async {
+      const source = MediaSourceConfig(
+        id: 'quark-main',
+        name: 'Quark Drive',
+        kind: MediaSourceKind.quark,
+        endpoint: 'root-folder',
+        libraryPath: '/影视',
+        enabled: true,
+        webDavStructureInferenceEnabled: true,
+      );
+      final quarkClient = _FakeQuarkSaveClient(
+        entriesByParentFid: {
+          'root-folder': [
+            QuarkFileEntry(
+              fid: 'round-table-dir',
+              name: '圆桌派',
+              path: '/圆桌派',
+              isDirectory: true,
+            ),
+          ],
+          'round-table-dir': [
+            QuarkFileEntry(
+              fid: 'round-table-episode-1',
+              name: '圆桌派.S01E01.师徒.mp4',
+              path: '/圆桌派.S01E01.师徒.mp4',
+              isDirectory: false,
+              sizeBytes: 1024,
+              updatedAt: DateTime(2026, 4, 10, 9),
+              category: 'video',
+              extension: 'mp4',
+            ),
+            QuarkFileEntry(
+              fid: 'round-table-episode-2',
+              name: '圆桌派.S01E02.离谱.mp4',
+              path: '/圆桌派.S01E02.离谱.mp4',
+              isDirectory: false,
+              sizeBytes: 1024,
+              updatedAt: DateTime(2026, 4, 10, 8),
+              category: 'video',
+              extension: 'mp4',
+            ),
+          ],
+        },
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [source],
+              searchProviders: const [],
+              homeModules: const [],
+              networkStorage: const NetworkStorageConfig(
+                quarkCookie: 'kps=test; sign=test;',
+              ),
+            ),
+          ),
+          embyApiClientProvider.overrideWithValue(
+            EmbyApiClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          webDavNasClientProvider.overrideWithValue(
+            WebDavNasClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          nasMediaIndexStoreProvider.overrideWithValue(
+            SembastNasMediaIndexStore(
+              databaseOpener: () => databaseFactoryMemory.openDatabase(
+                'media-repository-quark-source-test-4',
+              ),
+            ),
+          ),
+          wmdbMetadataClientProvider.overrideWithValue(
+            WmdbMetadataClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          tmdbMetadataClientProvider.overrideWithValue(
+            TmdbMetadataClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          imdbRatingClientProvider.overrideWithValue(
+            ImdbRatingClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          quarkSaveClientProvider.overrideWithValue(quarkClient),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final repository = container.read(mediaRepositoryProvider);
+      var library =
+          await repository.fetchLibrary(sourceId: source.id, limit: 10);
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (library.isEmpty && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        library = await repository.fetchLibrary(sourceId: source.id, limit: 10);
+      }
+
+      expect(library, hasLength(1));
+      expect(library.single.itemType, 'series');
+      expect(library.single.title, '圆桌派');
+
+      final children = await repository.fetchChildren(
+        sourceId: source.id,
+        parentId: library.single.id,
+        limit: 10,
+      );
+      expect(children, hasLength(2));
+      expect(children.every((item) => item.itemType == 'episode'), isTrue);
+      expect(
+        children.map((item) => item.actualAddress),
+        everyElement(startsWith('/影视/圆桌派/')),
+      );
     });
 
     test('does not scan an unconfigured quark source', () async {
@@ -173,8 +322,28 @@ void main() {
               MockClient((request) async => http.Response('', 200)),
             ),
           ),
-          nasMediaIndexerProvider
-              .overrideWithValue(_buildNoopNasMediaIndexer()),
+          nasMediaIndexStoreProvider.overrideWithValue(
+            SembastNasMediaIndexStore(
+              databaseOpener: () => databaseFactoryMemory.openDatabase(
+                'media-repository-quark-source-test-2',
+              ),
+            ),
+          ),
+          wmdbMetadataClientProvider.overrideWithValue(
+            WmdbMetadataClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          tmdbMetadataClientProvider.overrideWithValue(
+            TmdbMetadataClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          imdbRatingClientProvider.overrideWithValue(
+            ImdbRatingClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
           quarkSaveClientProvider.overrideWithValue(quarkClient),
         ],
       );
@@ -190,30 +359,203 @@ void main() {
       expect(items, isEmpty);
       expect(quarkClient.listedParentFids, isEmpty);
     });
+
+    test('reports progress while refreshing a quark source', () async {
+      const source = MediaSourceConfig(
+        id: 'quark-main',
+        name: 'Quark Drive',
+        kind: MediaSourceKind.quark,
+        endpoint: 'root-folder',
+        libraryPath: '/影视',
+        enabled: true,
+      );
+      final gate = Completer<void>();
+      final quarkClient = _BlockingQuarkSaveClient(
+        gate: gate,
+        entriesByParentFid: {
+          'root-folder': [
+            QuarkFileEntry(
+              fid: 'movie-file',
+              name: 'Movie.2024.mkv',
+              path: '/影视/Movie.2024.mkv',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 10, 21),
+              category: 'video',
+              extension: 'mkv',
+            ),
+          ],
+        },
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [source],
+              searchProviders: const [],
+              homeModules: const [],
+              networkStorage: const NetworkStorageConfig(
+                quarkCookie: 'kps=test; sign=test;',
+              ),
+            ),
+          ),
+          embyApiClientProvider.overrideWithValue(
+            EmbyApiClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          webDavNasClientProvider.overrideWithValue(
+            WebDavNasClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          nasMediaIndexStoreProvider.overrideWithValue(
+            SembastNasMediaIndexStore(
+              databaseOpener: () => databaseFactoryMemory.openDatabase(
+                'media-repository-quark-source-test-3',
+              ),
+            ),
+          ),
+          wmdbMetadataClientProvider.overrideWithValue(
+            WmdbMetadataClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          tmdbMetadataClientProvider.overrideWithValue(
+            TmdbMetadataClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          imdbRatingClientProvider.overrideWithValue(
+            ImdbRatingClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          quarkSaveClientProvider.overrideWithValue(quarkClient),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final repository = container.read(mediaRepositoryProvider);
+      final refreshFuture = repository.refreshSource(sourceId: source.id);
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+
+      final progressState = container.read(webDavScrapeProgressProvider);
+      expect(progressState.containsKey(source.id), isTrue);
+      expect(progressState[source.id]?.stage, WebDavScrapeStage.scanning);
+
+      gate.complete();
+      await refreshFuture;
+      await _waitUntil(
+        () => !container.read(webDavScrapeProgressProvider).containsKey(
+              source.id,
+            ),
+      );
+    });
+
+    test('uses shared scan-stage season rules for quark topic folders',
+        () async {
+      const source = MediaSourceConfig(
+        id: 'quark-main',
+        name: 'Quark Drive',
+        kind: MediaSourceKind.quark,
+        endpoint: 'root-folder',
+        libraryPath: '/影视',
+        enabled: true,
+        webDavStructureInferenceEnabled: true,
+      );
+      final quarkClient = _FakeQuarkSaveClient(
+        entriesByParentFid: {
+          'food-dao-dir': [
+            QuarkFileEntry(
+              fid: 'food-special',
+              name: '《电诈 摇滚 吴哥窟》.mp4',
+              path: '/《电诈 摇滚 吴哥窟》.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 10, 10),
+              category: 'video',
+              extension: 'mp4',
+            ),
+            QuarkFileEntry(
+              fid: 'food-season-1-dir',
+              name: '1.日本',
+              path: '/1.日本',
+              isDirectory: true,
+            ),
+            QuarkFileEntry(
+              fid: 'food-season-2-dir',
+              name: '2.巴以',
+              path: '/2.巴以',
+              isDirectory: true,
+            ),
+          ],
+          'food-season-1-dir': [
+            QuarkFileEntry(
+              fid: 'food-season-1-ep-1',
+              name: '食贫道 东瀛大宝荐 迷失东京.mp4',
+              path: '/食贫道 东瀛大宝荐 迷失东京.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 10, 9),
+              category: 'video',
+              extension: 'mp4',
+            ),
+          ],
+          'food-season-2-dir': [
+            QuarkFileEntry(
+              fid: 'food-season-2-ep-1',
+              name: '食贫道 巴以观察.mp4',
+              path: '/食贫道 巴以观察.mp4',
+              isDirectory: false,
+              updatedAt: DateTime(2026, 4, 10, 8),
+              category: 'video',
+              extension: 'mp4',
+            ),
+          ],
+        },
+      );
+      final client = QuarkExternalStorageClient(
+        quarkSaveClient: quarkClient,
+        readSettings: () => SeedData.defaultSettings.copyWith(
+          networkStorage: const NetworkStorageConfig(
+            quarkCookie: 'kps=test; sign=test;',
+          ),
+        ),
+      );
+
+      final items = await client.scanLibrary(
+        source,
+        sectionId: 'food-dao-dir',
+        sectionName: '食贫道',
+        limit: 20,
+      );
+
+      expect(items, hasLength(3));
+      expect(
+        items.map((item) => item.metadataSeed.seasonNumber),
+        containsAll([0, 1, 2]),
+      );
+      expect(
+        items.every((item) => item.metadataSeed.itemType == 'episode'),
+        isTrue,
+      );
+    });
   });
 }
 
-NasMediaIndexer _buildNoopNasMediaIndexer() {
-  return NasMediaIndexer(
-    store: SembastNasMediaIndexStore(
-      databaseOpener: () => databaseFactoryMemory
-          .openDatabase('media-repository-quark-source-test'),
-    ),
-    webDavNasClient: WebDavNasClient(
-      MockClient((request) async => http.Response('', 200)),
-    ),
-    wmdbMetadataClient: WmdbMetadataClient(
-      MockClient((request) async => http.Response('', 200)),
-    ),
-    tmdbMetadataClient: TmdbMetadataClient(
-      MockClient((request) async => http.Response('', 200)),
-    ),
-    imdbRatingClient: ImdbRatingClient(
-      MockClient((request) async => http.Response('', 200)),
-    ),
-    readSettings: () => SeedData.defaultSettings,
-    progressController: WebDavScrapeProgressController(),
-  );
+Future<void> _waitUntil(
+  bool Function() condition, {
+  Duration timeout = const Duration(seconds: 5),
+  Duration step = const Duration(milliseconds: 20),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(deadline)) {
+    if (condition()) {
+      return;
+    }
+    await Future<void>.delayed(step);
+  }
+  if (!condition()) {
+    throw TimeoutException('Condition not satisfied within $timeout.');
+  }
 }
 
 class _FakeQuarkSaveClient extends QuarkSaveClient {
@@ -247,5 +589,28 @@ class _FakeQuarkSaveClient extends QuarkSaveClient {
         .map(QuarkDirectoryEntry.fromFileEntry)
         .whereType<QuarkDirectoryEntry>()
         .toList(growable: false);
+  }
+}
+
+class _BlockingQuarkSaveClient extends _FakeQuarkSaveClient {
+  _BlockingQuarkSaveClient({
+    required super.entriesByParentFid,
+    required this.gate,
+  });
+
+  final Completer<void> gate;
+
+  @override
+  Future<List<QuarkFileEntry>> listEntries({
+    required String cookie,
+    String parentFid = '0',
+  }) async {
+    if (!gate.isCompleted) {
+      await gate.future;
+    }
+    return super.listEntries(
+      cookie: cookie,
+      parentFid: parentFid,
+    );
   }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -78,13 +79,15 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   }
 
   Future<void> _saveDraft({bool popAfterSave = true}) async {
+    final isTelevision = ref.read(isTelevisionProvider).valueOrNull ?? false;
     await ref.read(settingsControllerProvider.notifier).savePlaybackPreferences(
           openTimeoutSeconds: _draftSeconds(),
           defaultSpeed: _draftPlaybackSpeed,
           subtitlePreference: _draftSubtitlePreference,
           subtitleScale: _draftSubtitleScale,
           onlineSubtitleSources: _draftOnlineSubtitleSources,
-          backgroundPlaybackEnabled: _draftBackgroundPlaybackEnabled,
+          backgroundPlaybackEnabled:
+              isTelevision ? false : _draftBackgroundPlaybackEnabled,
           playbackEngine: _draftPlaybackEngine,
           playbackDecodeMode: _draftPlaybackDecodeMode,
           playbackMpvQualityPreset: _draftPlaybackMpvQualityPreset,
@@ -137,6 +140,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     return PopScope<void>(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -205,16 +209,22 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
                 ),
           ),
           const SizedBox(height: 18),
-          SettingsToggleTile(
-            title: '后台播放',
-            subtitle: 'Android 切后台会进入小窗继续播放；iOS 会继续后台播放音频。',
-            value: _draftBackgroundPlaybackEnabled,
-            onChanged: (value) {
-              setState(() {
-                _draftBackgroundPlaybackEnabled = value;
-              });
-            },
-          ),
+          if (isTelevision)
+            _PlaybackSettingsInfoBox(
+              title: '后台播放',
+              description: 'TV 端已固定禁用后台播放，不提供小窗或后台音频继续播放。',
+            )
+          else
+            SettingsToggleTile(
+              title: '后台播放',
+              subtitle: 'Android 切后台会进入小窗继续播放；iOS 会继续后台播放音频。',
+              value: _draftBackgroundPlaybackEnabled,
+              onChanged: (value) {
+                setState(() {
+                  _draftBackgroundPlaybackEnabled = value;
+                });
+              },
+            ),
           const SizedBox(height: 18),
           SettingsSelectionTile(
             title: '默认倍速',
@@ -373,6 +383,52 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
       buffer.write(' 也可以在播放器内的“播放设置”里临时切换。');
     }
     return buffer.toString();
+  }
+}
+
+class _PlaybackSettingsInfoBox extends StatelessWidget {
+  const _PlaybackSettingsInfoBox({
+    required this.title,
+    required this.description,
+  });
+
+  final String title;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              description,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                height: 1.45,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

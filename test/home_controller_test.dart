@@ -115,6 +115,7 @@ void main() {
           ),
         ],
       );
+      final cacheRepository = _FakeLocalStorageCacheRepository();
       final container = ProviderContainer(
         overrides: [
           appSettingsProvider.overrideWithValue(
@@ -145,6 +146,8 @@ void main() {
               ],
             ),
           ),
+          localStorageCacheRepositoryProvider
+              .overrideWithValue(cacheRepository),
         ],
       );
       addTearDown(container.dispose);
@@ -154,6 +157,8 @@ void main() {
       expect(mediaRepository.fetchLibraryCallCount, 0);
       expect(mediaRepository.fetchRecentlyAddedCallCount, 1);
       expect(sections.first.items.first.title, '最近新增影片');
+      expect(cacheRepository.loadDetailTargetsBatchCallCount, greaterThan(0));
+      expect(cacheRepository.loadDetailTargetCallCount, 0);
     });
 
     test('douban section exposes view-all target for title tap', () async {
@@ -502,6 +507,8 @@ void main() {
       );
       expect(sections.first.items.first.detailTarget.itemType, 'series');
       expect(sections.first.items.first.detailTarget.itemId, 'series-1');
+      expect(cacheRepository.loadDetailTargetsBatchCallCount, greaterThan(0));
+      expect(cacheRepository.loadDetailTargetCallCount, 0);
     });
 
     test('douban section prefers cached poster from detail cache', () async {
@@ -588,6 +595,8 @@ void main() {
           sections.first.items.first.detailTarget.sourceId, 'media-source-1');
       expect(sections.first.items.first.detailTarget.itemId, 'nas-item-1');
       expect(sections.first.items.first.detailTarget.playbackTarget, isNotNull);
+      expect(cacheRepository.loadDetailTargetsBatchCallCount, greaterThan(0));
+      expect(cacheRepository.loadDetailTargetCallCount, 0);
     });
   });
 }
@@ -648,7 +657,9 @@ class _FakeMediaRepository implements MediaRepository {
   }
 
   @override
-  Future<void> cancelActiveWebDavRefreshes() async {}
+  Future<void> cancelActiveWebDavRefreshes({
+    bool includeForceFull = false,
+  }) async {}
 
   @override
   Future<void> refreshSource({
@@ -698,11 +709,28 @@ class _FakeLocalStorageCacheRepository extends LocalStorageCacheRepository {
   _FakeLocalStorageCacheRepository({this.target});
 
   final MediaDetailTarget? target;
+  int loadDetailTargetCallCount = 0;
+  int loadDetailTargetsBatchCallCount = 0;
+  List<MediaDetailTarget> lastBatchSeedTargets = const [];
 
   @override
   Future<MediaDetailTarget?> loadDetailTarget(
     MediaDetailTarget seedTarget,
   ) async {
+    loadDetailTargetCallCount += 1;
     return target;
+  }
+
+  @override
+  Future<List<MediaDetailTarget?>> loadDetailTargetsBatch(
+    Iterable<MediaDetailTarget> seedTargets,
+  ) async {
+    loadDetailTargetsBatchCallCount += 1;
+    lastBatchSeedTargets = seedTargets.toList(growable: false);
+    return List<MediaDetailTarget?>.filled(
+      lastBatchSeedTargets.length,
+      target,
+      growable: false,
+    );
   }
 }

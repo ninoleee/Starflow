@@ -2,7 +2,7 @@ import 'dart:developer' as developer;
 
 import 'package:flutter/foundation.dart';
 
-const bool _subtitleSearchTraceEnabled = true;
+const bool _subtitleSearchTraceEnabled = false;
 const String _subtitleSearchTraceName = 'Starflow.SubtitleSearch';
 
 void subtitleSearchTrace(

@@ -151,22 +151,20 @@ class MediaPosterTile extends ConsumerWidget {
           final focusState = Focus.of(context);
           final isPosterFocused =
               focusState.hasFocus || focusState.hasPrimaryFocus;
+          if (!isPosterFocused) {
+            return posterFrame;
+          }
           return Stack(
             fit: StackFit.expand,
             children: [
               posterFrame,
               IgnorePointer(
-                child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 110),
-                  curve: Curves.easeOut,
-                  opacity: isPosterFocused ? 1 : 0,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.34),
-                        width: 1.35,
-                      ),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.34),
+                      width: 1.35,
                     ),
                   ),
                 ),
@@ -293,7 +291,9 @@ class MediaPosterTile extends ConsumerWidget {
         focusNode: focusNode,
         autofocus: autofocus,
         borderRadius: BorderRadius.circular(16),
-        visualStyle: TvFocusVisualStyle.floating,
+        visualStyle: enablePosterFocusOutline
+            ? TvFocusVisualStyle.none
+            : TvFocusVisualStyle.floating,
         child: content,
       );
     }

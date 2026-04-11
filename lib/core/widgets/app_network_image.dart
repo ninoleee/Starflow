@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -79,8 +81,9 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   }
 
   void _refreshResolvedImageFuture({bool force = false}) {
-    final backgroundWorkSuspended = ref.read(backgroundWorkSuspendedProvider);
-    if (backgroundWorkSuspended) {
+    final backgroundImageLoadingSuspended =
+        ref.read(backgroundImageLoadingSuspendedProvider);
+    if (backgroundImageLoadingSuspended) {
       if (force) {
         _resolvedImageFuture = null;
       }
@@ -112,6 +115,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
           bytes: bytes,
           isSvg: _looksLikeSvg(candidate.url, bytes),
           sourceUrl: candidate.url,
+          sourceHeaders: candidate.headers,
         );
       } catch (error, stackTrace) {
         lastError = error;
@@ -126,7 +130,8 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
 
   @override
   Widget build(BuildContext context) {
-    final backgroundWorkSuspended = ref.watch(backgroundWorkSuspendedProvider);
+    final backgroundImageLoadingSuspended =
+        ref.watch(backgroundImageLoadingSuspendedProvider);
     final trimmedUrl = widget.url.trim();
     if (trimmedUrl.isEmpty) {
       return _buildError(
@@ -135,7 +140,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
       );
     }
 
-    if (backgroundWorkSuspended) {
+    if (backgroundImageLoadingSuspended) {
       return _buildLoading(context);
     }
 
@@ -164,14 +169,17 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
             placeholderBuilder: (context) => _buildLoading(context),
           );
         }
-        return Image.memory(
-          bytes,
+        final rasterImageProvider = ResizeImage.resizeIfNeeded(
+          widget.cacheWidth,
+          widget.cacheHeight,
+          resolved.rasterProvider,
+        );
+        return Image(
+          image: rasterImageProvider,
           width: widget.width,
           height: widget.height,
           fit: widget.fit,
           alignment: widget.alignment,
-          cacheWidth: widget.cacheWidth,
-          cacheHeight: widget.cacheHeight,
           filterQuality: widget.filterQuality,
           gaplessPlayback: true,
           errorBuilder: (context, error, stackTrace) {
@@ -200,16 +208,17 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
 
     void add(String url, Map<String, String>? headers) {
       final trimmedUrl = url.trim();
-      if (trimmedUrl.isEmpty || !seen.add(trimmedUrl)) {
+      final resolvedHeaders = (headers?.isNotEmpty ?? false)
+          ? headers!
+          : (networkImageHeadersForUrl(trimmedUrl) ?? const <String, String>{});
+      final sourceIdentity = _buildSourceIdentity(trimmedUrl, resolvedHeaders);
+      if (trimmedUrl.isEmpty || !seen.add(sourceIdentity)) {
         return;
       }
       candidates.add(
         AppNetworkImageSource(
           url: trimmedUrl,
-          headers: (headers?.isNotEmpty ?? false)
-              ? headers!
-              : (networkImageHeadersForUrl(trimmedUrl) ??
-                  const <String, String>{}),
+          headers: resolvedHeaders,
         ),
       );
     }
@@ -236,11 +245,21 @@ class _ResolvedImageContent {
     required this.bytes,
     required this.isSvg,
     required this.sourceUrl,
+    required this.sourceHeaders,
   });
 
   final Uint8List bytes;
   final bool isSvg;
   final String sourceUrl;
+  final Map<String, String> sourceHeaders;
+
+  ImageProvider<Object> get rasterProvider {
+    return _PersistentMemoryImageProvider(
+      bytes: bytes,
+      sourceKey: _buildSourceIdentity(sourceUrl, sourceHeaders),
+      bytesFingerprint: _fingerprintBytes(bytes),
+    );
+  }
 }
 
 bool _sameImageSources(
@@ -259,4 +278,95 @@ bool _sameImageSources(
     }
   }
   return true;
+}
+
+String _buildSourceIdentity(String url, Map<String, String> headers) {
+  final normalizedUrl = url.trim();
+  if (headers.isEmpty) {
+    return normalizedUrl;
+  }
+  final normalizedHeaders = headers.entries
+      .map((entry) =>
+          MapEntry(entry.key.trim().toLowerCase(), entry.value.trim()))
+      .where((entry) => entry.key.isNotEmpty && entry.value.isNotEmpty)
+      .toList(growable: false)
+    ..sort((a, b) => a.key.compareTo(b.key));
+  if (normalizedHeaders.isEmpty) {
+    return normalizedUrl;
+  }
+  final buffer = StringBuffer(normalizedUrl);
+  for (final entry in normalizedHeaders) {
+    buffer
+      ..write('\n')
+      ..write(entry.key)
+      ..write(':')
+      ..write(entry.value);
+  }
+  return buffer.toString();
+}
+
+String _fingerprintBytes(Uint8List bytes) {
+  var hash = 0xcbf29ce484222325;
+  for (final value in bytes) {
+    hash ^= value;
+    hash = (hash * 0x100000001b3) & 0x7fffffffffffffff;
+  }
+  return hash.toRadixString(16);
+}
+
+@immutable
+class _PersistentMemoryImageProvider
+    extends ImageProvider<_PersistentMemoryImageProvider> {
+  const _PersistentMemoryImageProvider({
+    required this.bytes,
+    required this.sourceKey,
+    required this.bytesFingerprint,
+  });
+
+  final Uint8List bytes;
+  final String sourceKey;
+  final String bytesFingerprint;
+
+  @override
+  Future<_PersistentMemoryImageProvider> obtainKey(
+      ImageConfiguration configuration) {
+    return SynchronousFuture<_PersistentMemoryImageProvider>(this);
+  }
+
+  @override
+  ImageStreamCompleter loadImage(
+    _PersistentMemoryImageProvider key,
+    ImageDecoderCallback decode,
+  ) {
+    return MultiFrameImageStreamCompleter(
+      codec: _loadAsync(key, decode),
+      scale: 1.0,
+      debugLabel: key.sourceKey,
+      informationCollector: () => <DiagnosticsNode>[
+        DiagnosticsProperty<ImageProvider>('Image provider', this),
+        StringProperty('Source', sourceKey),
+      ],
+    );
+  }
+
+  Future<ui.Codec> _loadAsync(
+    _PersistentMemoryImageProvider key,
+    ImageDecoderCallback decode,
+  ) async {
+    final buffer = await ui.ImmutableBuffer.fromUint8List(key.bytes);
+    return decode(buffer);
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is _PersistentMemoryImageProvider &&
+        other.sourceKey == sourceKey &&
+        other.bytesFingerprint == bytesFingerprint;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        sourceKey,
+        bytesFingerprint,
+      );
 }

@@ -170,6 +170,7 @@ class WebDavScannedItem {
     required this.sectionName,
     required this.streamUrl,
     required this.streamHeaders,
+    this.playbackItemId = '',
     required this.addedAt,
     required this.modifiedAt,
     required this.fileSizeBytes,
@@ -183,6 +184,7 @@ class WebDavScannedItem {
   final String sectionName;
   final String streamUrl;
   final Map<String, String> streamHeaders;
+  final String playbackItemId;
   final DateTime addedAt;
   final DateTime? modifiedAt;
   final int fileSizeBytes;
@@ -219,6 +221,7 @@ class WebDavScannedItem {
       streamUrl: streamUrl,
       actualAddress: actualAddress,
       streamHeaders: streamHeaders,
+      playbackItemId: playbackItemId,
       seasonNumber: metadataSeed.seasonNumber,
       episodeNumber: metadataSeed.episodeNumber,
       imdbId: metadataSeed.imdbId,
@@ -362,8 +365,10 @@ class _InferredMediaInfo {
 const String _directSeasonGroupKey = '__root__';
 const String _implicitSeasonGroupKey = '__implicit__';
 
-class _PendingWebDavScannedItem {
-  const _PendingWebDavScannedItem({
+typedef _PendingWebDavScannedItem = ExternalScanPendingItem;
+
+class ExternalScanPendingItem {
+  const ExternalScanPendingItem({
     required this.resourceId,
     required this.fileName,
     required this.actualAddress,
@@ -371,6 +376,7 @@ class _PendingWebDavScannedItem {
     required this.sectionName,
     required this.streamUrl,
     required this.streamHeaders,
+    this.playbackItemId = '',
     required this.addedAt,
     required this.modifiedAt,
     required this.fileSizeBytes,
@@ -385,19 +391,20 @@ class _PendingWebDavScannedItem {
   final String sectionName;
   final String streamUrl;
   final Map<String, String> streamHeaders;
+  final String playbackItemId;
   final DateTime addedAt;
   final DateTime? modifiedAt;
   final int fileSizeBytes;
   final WebDavMetadataSeed metadataSeed;
   final List<String> relativeDirectories;
 
-  _PendingWebDavScannedItem copyWith({
+  ExternalScanPendingItem copyWith({
     WebDavMetadataSeed? metadataSeed,
     String? sectionId,
     String? sectionName,
     List<String>? relativeDirectories,
   }) {
-    return _PendingWebDavScannedItem(
+    return ExternalScanPendingItem(
       resourceId: resourceId,
       fileName: fileName,
       actualAddress: actualAddress,
@@ -405,6 +412,7 @@ class _PendingWebDavScannedItem {
       sectionName: sectionName ?? this.sectionName,
       streamUrl: streamUrl,
       streamHeaders: streamHeaders,
+      playbackItemId: playbackItemId,
       addedAt: addedAt,
       modifiedAt: modifiedAt,
       fileSizeBytes: fileSizeBytes,
@@ -422,6 +430,7 @@ class _PendingWebDavScannedItem {
       sectionName: sectionName,
       streamUrl: streamUrl,
       streamHeaders: streamHeaders,
+      playbackItemId: playbackItemId,
       addedAt: addedAt,
       modifiedAt: modifiedAt,
       fileSizeBytes: fileSizeBytes,
@@ -436,7 +445,7 @@ class _DirectoryWalkResult {
     this.truncated = false,
   });
 
-  final List<_PendingWebDavScannedItem> items;
+  final List<ExternalScanPendingItem> items;
   final bool truncated;
 }
 
@@ -447,7 +456,7 @@ class _DirectorySubtreeCacheEntry {
   });
 
   final DateTime directoryModifiedAt;
-  final List<_PendingWebDavScannedItem> items;
+  final List<ExternalScanPendingItem> items;
 }
 
 class _ResolvedPlayableSource {

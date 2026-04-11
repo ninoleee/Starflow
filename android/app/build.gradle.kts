@@ -1,3 +1,5 @@
+import java.util.Calendar
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -14,7 +16,7 @@ fun computeStarflowVersionCode(versionName: String): Int {
     val major = match.groupValues[1].toInt()
     val month = match.groupValues[2].toInt()
     val sequence = match.groupValues[3].toInt()
-    val yearOffset = java.time.LocalDate.now().year - 2000
+    val yearOffset = Calendar.getInstance().get(Calendar.YEAR) - 2000
     return (yearOffset * 1_000_000) + (major * 10_000) + (month * 100) + sequence
 }
 

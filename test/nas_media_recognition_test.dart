@@ -49,4 +49,16 @@ void main() {
     expect(result.parentTitle, 'Stranger Things');
     expect(result.title, 'Stranger Things');
   });
+
+  test('NasMediaRecognizer keeps composite season folders under filtered roots',
+      () {
+    final result = NasMediaRecognizer.recognize(
+      'strm/quark/十三邀 第九季/十三邀 第01集.strm',
+      seriesTitleFilterKeywords: const ['strm', 'quark'],
+    );
+
+    expect(result.itemType, 'episode');
+    expect(result.parentTitle, '十三邀 第九季');
+    expect(result.title, '十三邀 第九季');
+  });
 }

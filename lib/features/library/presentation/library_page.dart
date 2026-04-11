@@ -1,13 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/navigation/page_activity_mixin.dart';
+import 'package:starflow/core/navigation/retained_async_value.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/application/library_cached_items.dart';
+import 'package:starflow/features/library/application/library_refresh_revision.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/application/nas_media_index_revision.dart';
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
@@ -115,10 +120,18 @@ class _LibraryRefreshScope {
   String get rebuildButtonLabel => '重建 ${kind.label} 索引';
 }
 
+final libraryMediaSourcesSettingsSliceProvider =
+    Provider<List<MediaSourceConfig>>((ref) {
+  return ref.watch(
+    appSettingsProvider.select((settings) => settings.mediaSources),
+  );
+});
+
 final libraryItemsProvider =
     FutureProvider.family<List<MediaItem>, LibraryFilter>((ref, filter) async {
   ref.watch(nasMediaIndexRevisionProvider);
-  ref.watch(appSettingsProvider);
+  ref.watch(libraryRefreshRevisionProvider);
+  ref.watch(libraryMediaSourcesSettingsSliceProvider);
   ref.watch(localStorageDetailCacheRevisionProvider);
   final items =
       await ref.read(mediaRepositoryProvider).fetchLibrary(kind: filter.kind);
@@ -131,7 +144,8 @@ final libraryItemsProvider =
 final libraryCollectionsProvider =
     FutureProvider.family<List<MediaCollection>, LibraryFilter>((ref, filter) {
   ref.watch(nasMediaIndexRevisionProvider);
-  ref.watch(appSettingsProvider);
+  ref.watch(libraryRefreshRevisionProvider);
+  ref.watch(libraryMediaSourcesSettingsSliceProvider);
   return ref.read(mediaRepositoryProvider).fetchCollections(kind: filter.kind);
 });
 
@@ -142,7 +156,8 @@ class LibraryPage extends ConsumerStatefulWidget {
   ConsumerState<LibraryPage> createState() => _LibraryPageState();
 }
 
-class _LibraryPageState extends ConsumerState<LibraryPage> {
+class _LibraryPageState extends ConsumerState<LibraryPage>
+    with PageActivityMixin<LibraryPage> {
   LibraryFilter _filter = LibraryFilter.all;
   int _currentPage = 0;
   bool _isIncrementalRefreshing = false;
@@ -153,6 +168,13 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
       FocusNode(debugLabel: 'library-filter-top');
   final TvFocusMemoryController _tvFocusMemoryController =
       TvFocusMemoryController();
+  final Map<LibraryFilter, AsyncValue<List<MediaItem>>> _cachedItemsByFilter =
+      <LibraryFilter, AsyncValue<List<MediaItem>>>{};
+  final Map<LibraryFilter, AsyncValue<List<MediaCollection>>>
+      _cachedCollectionsByFilter =
+      <LibraryFilter, AsyncValue<List<MediaCollection>>>{};
+  Map<String, WebDavScrapeProgress> _cachedScrapeProgress =
+      <String, WebDavScrapeProgress>{};
 
   @override
   void dispose() {
@@ -160,6 +182,23 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     _scrollController.dispose();
     _tvFocusMemoryController.dispose();
     super.dispose();
+  }
+
+  @override
+  void onPageBecameInactive() {
+    _refreshIntentSerial += 1;
+    unawaited(
+      ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes(
+            includeForceFull: false,
+          ),
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isIncrementalRefreshing = false;
+      _isForceRescanning = false;
+    });
   }
 
   void _handleBack() {
@@ -174,11 +213,28 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
   Widget build(BuildContext context) {
     final settings = ref.watch(appSettingsProvider);
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
-    final itemsAsync = ref.watch(libraryItemsProvider(_filter));
-    final collectionsAsync = ref.watch(libraryCollectionsProvider(_filter));
+    final itemsAsync = resolveRetainedAsyncValue(
+      activeValue:
+          isPageVisible ? ref.watch(libraryItemsProvider(_filter)) : null,
+      cachedValue: _cachedItemsByFilter[_filter],
+      cacheValue: (value) => _cachedItemsByFilter[_filter] = value,
+      fallbackValue: const AsyncLoading<List<MediaItem>>(),
+    );
+    final collectionsAsync = resolveRetainedAsyncValue(
+      activeValue:
+          isPageVisible ? ref.watch(libraryCollectionsProvider(_filter)) : null,
+      cachedValue: _cachedCollectionsByFilter[_filter],
+      cacheValue: (value) => _cachedCollectionsByFilter[_filter] = value,
+      fallbackValue: const AsyncLoading<List<MediaCollection>>(),
+    );
     final refreshScope = _currentRefreshScope(settings);
-    final scrapeProgress = ref.watch(webDavScrapeProgressProvider);
-    final visibleProgress = _visibleWebDavProgress(
+    final scrapeProgress = isPageVisible
+        ? ref.watch(webDavScrapeProgressProvider)
+        : _cachedScrapeProgress;
+    if (isPageVisible) {
+      _cachedScrapeProgress = scrapeProgress;
+    }
+    final visibleProgress = _visibleScrapeProgress(
       scrapeProgress.values,
       settings,
     );
@@ -480,20 +536,33 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
         .toList(growable: false);
   }
 
-  List<WebDavScrapeProgress> _visibleWebDavProgress(
+  List<WebDavScrapeProgress> _visibleScrapeProgress(
     Iterable<WebDavScrapeProgress> progressEntries,
     AppSettings settings,
   ) {
-    if (_filter != LibraryFilter.nas) {
-      return const [];
+    late final MediaSourceKind scopedKind;
+    switch (_filter) {
+      case LibraryFilter.nas:
+        scopedKind = MediaSourceKind.nas;
+      case LibraryFilter.quark:
+        scopedKind = MediaSourceKind.quark;
+      case LibraryFilter.all:
+      case LibraryFilter.emby:
+        return const [];
     }
-    final enabledWebDavSourceIds = settings.mediaSources
-        .where((source) => source.enabled && source.kind == MediaSourceKind.nas)
+    final enabledVisibleSourceIds = settings.mediaSources
+        .where(
+          (source) =>
+              source.enabled &&
+              source.kind == scopedKind &&
+              (scopedKind != MediaSourceKind.quark ||
+                  source.hasConfiguredQuarkFolder),
+        )
         .map((source) => source.id.trim())
         .where((sourceId) => sourceId.isNotEmpty)
         .toSet();
     final visible = progressEntries
-        .where((entry) => enabledWebDavSourceIds.contains(entry.sourceId))
+        .where((entry) => enabledVisibleSourceIds.contains(entry.sourceId))
         .toList(growable: false)
       ..sort((left, right) => left.sourceName.compareTo(right.sourceName));
     return visible;

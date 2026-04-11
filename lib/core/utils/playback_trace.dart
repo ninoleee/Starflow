@@ -2,7 +2,7 @@ import 'dart:developer' as developer;
 
 import 'package:flutter/foundation.dart';
 
-const bool _playbackTraceEnabled = true;
+const bool _playbackTraceEnabled = false;
 const String _playbackTraceName = 'Starflow.Playback';
 
 void playbackTrace(

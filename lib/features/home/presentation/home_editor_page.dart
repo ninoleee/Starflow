@@ -13,11 +13,12 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/douban_account_editor_page.dart';
+import 'package:starflow/features/home/application/home_settings_slices.dart';
 
 final homeEditorCollectionsProvider = FutureProvider<List<MediaCollection>>((
   ref,
 ) {
-  ref.watch(appSettingsProvider);
+  ref.watch(homeMediaSourcesProvider);
   return ref.read(mediaRepositoryProvider).fetchCollections();
 });
 
@@ -137,14 +138,15 @@ class HomeEditorPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final settings = ref.watch(appSettingsProvider);
+    final List<HomeModuleConfig> modules = ref.watch(homeModulesProvider);
+    final List<MediaSourceConfig> mediaSources =
+        ref.watch(homeMediaSourcesProvider);
     final collectionsAsync = ref.watch(homeEditorCollectionsProvider);
-    final visibleSourceIds =
+    final Set<String> visibleSourceIds =
         (collectionsAsync.valueOrNull ?? const <MediaCollection>[])
             .map((item) => item.sourceId)
             .toSet();
-    final enabledSources =
-        settings.mediaSources.where((item) => item.enabled).toList();
+    final enabledSources = mediaSources.where((item) => item.enabled).toList();
     final scopedSources = enabledSources
         .where((item) => visibleSourceIds.contains(item.id))
         .toList();
@@ -163,20 +165,20 @@ class HomeEditorPage extends ConsumerWidget {
               children: [
                 SectionPanel(
                   title: '当前模块',
-                  child: settings.homeModules.isEmpty
+                  child: modules.isEmpty
                       ? const Text('还没有首页模块。')
                       : ReorderableListView.builder(
                           shrinkWrap: true,
                           buildDefaultDragHandles: false,
                           physics: const NeverScrollableScrollPhysics(),
-                          itemCount: settings.homeModules.length,
+                          itemCount: modules.length,
                           onReorder: (oldIndex, newIndex) {
                             ref
                                 .read(settingsControllerProvider.notifier)
                                 .reorderHomeModules(oldIndex, newIndex);
                           },
                           itemBuilder: (context, index) {
-                            final module = settings.homeModules[index];
+                            final module = modules[index];
                             return Container(
                               key: ValueKey(module.id),
                               margin: const EdgeInsets.only(bottom: 10),
@@ -318,8 +320,7 @@ class HomeEditorPage extends ConsumerWidget {
 
   Future<void> _showAddModuleSheet(BuildContext context, WidgetRef ref) {
     final enabledSources = ref
-        .read(appSettingsProvider)
-        .mediaSources
+        .read(homeMediaSourcesProvider)
         .where((item) => item.enabled)
         .toList();
     return ref.read(homeEditorCollectionsProvider.future).then((collections) {
@@ -413,7 +414,7 @@ class HomeEditorPage extends ConsumerWidget {
   }
 
   Future<void> _showDoubanModuleSheet(BuildContext context, WidgetRef ref) {
-    final doubanAccount = ref.read(appSettingsProvider).doubanAccount;
+    final doubanAccount = ref.read(homeDoubanAccountProvider);
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/navigation/page_activity_mixin.dart';
+import 'package:starflow/core/navigation/retained_async_controller.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
@@ -58,12 +60,36 @@ class PersonCreditsPage extends ConsumerStatefulWidget {
   ConsumerState<PersonCreditsPage> createState() => _PersonCreditsPageState();
 }
 
-class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage> {
+class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
+    with PageActivityMixin<PersonCreditsPage> {
+  static const String _allCategoryLabel = '全部';
+  static const String _movieCategoryLabel = '电影';
+  static const String _varietyCategoryLabel = '综艺';
+  static const String _seriesCategoryLabel = '剧集';
+
   final ScrollController _scrollController = ScrollController();
   final FocusNode _headerFocusNode =
       FocusNode(debugLabel: 'person-credits-header');
   final TvFocusMemoryController _tvFocusMemoryController =
       TvFocusMemoryController();
+  final RetainedAsyncController<_PersonCreditsPageResult> _retainedResultAsync =
+      RetainedAsyncController<_PersonCreditsPageResult>();
+  bool _sortNewestFirst = true;
+  String _selectedPrimaryCategory = _allCategoryLabel;
+  String _selectedMovieGenre = _allCategoryLabel;
+
+  @override
+  void didUpdateWidget(covariant PersonCreditsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.target.role != widget.target.role ||
+        oldWidget.target.person.name != widget.target.person.name ||
+        oldWidget.target.person.avatarUrl != widget.target.person.avatarUrl) {
+      _sortNewestFirst = true;
+      _selectedPrimaryCategory = _allCategoryLabel;
+      _selectedMovieGenre = _allCategoryLabel;
+      _retainedResultAsync.clear();
+    }
+  }
 
   @override
   void dispose() {
@@ -77,7 +103,12 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage> {
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final target = widget.target;
-    final resultAsync = ref.watch(_personCreditsPageProvider(target));
+    final watchedResultAsync =
+        isPageVisible ? ref.watch(_personCreditsPageProvider(target)) : null;
+    final resultAsync = _retainedResultAsync.resolve(
+      activeValue: watchedResultAsync,
+      fallbackValue: const AsyncLoading<_PersonCreditsPageResult>(),
+    );
 
     return TvPageFocusScope(
       controller: _tvFocusMemoryController,
@@ -103,7 +134,71 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage> {
                       if (result.items.isEmpty) {
                         return _EmptyState(message: result.message);
                       }
-                      return _PersonCreditsGrid(items: result.items);
+                      final availablePrimaryCategories =
+                          _collectAvailablePrimaryCategories(result.items);
+                      final selectedPrimaryCategory =
+                          availablePrimaryCategories
+                                  .contains(_selectedPrimaryCategory)
+                              ? _selectedPrimaryCategory
+                              : _allCategoryLabel;
+                      final availableMovieGenres =
+                          _collectAvailableMovieGenres(result.items);
+                      final selectedMovieGenre =
+                          selectedPrimaryCategory == _movieCategoryLabel &&
+                                  availableMovieGenres
+                                      .contains(_selectedMovieGenre)
+                              ? _selectedMovieGenre
+                              : _allCategoryLabel;
+                      final visibleItems = _sortAndFilterPersonCredits(
+                        items: result.items,
+                        selectedPrimaryCategory: selectedPrimaryCategory,
+                        selectedMovieGenre: selectedMovieGenre,
+                        newestFirst: _sortNewestFirst,
+                      );
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _PersonCreditsControls(
+                            sortNewestFirst: _sortNewestFirst,
+                            selectedPrimaryCategory: selectedPrimaryCategory,
+                            availablePrimaryCategories:
+                                availablePrimaryCategories,
+                            selectedMovieGenre: selectedMovieGenre,
+                            availableMovieGenres: availableMovieGenres,
+                            onSortChanged: (value) {
+                              if (_sortNewestFirst == value) {
+                                return;
+                              }
+                              setState(() {
+                                _sortNewestFirst = value;
+                              });
+                            },
+                            onPrimaryCategoryChanged: (value) {
+                              if (_selectedPrimaryCategory == value) {
+                                return;
+                              }
+                              setState(() {
+                                _selectedPrimaryCategory = value;
+                                if (value != _movieCategoryLabel) {
+                                  _selectedMovieGenre = _allCategoryLabel;
+                                }
+                              });
+                            },
+                            onMovieGenreChanged: (value) {
+                              if (_selectedMovieGenre == value) {
+                                return;
+                              }
+                              setState(() {
+                                _selectedMovieGenre = value;
+                              });
+                            },
+                          ),
+                          if (visibleItems.isEmpty)
+                            const _EmptyState(message: '当前筛选下没有结果')
+                          else
+                            _PersonCreditsGrid(items: visibleItems),
+                        ],
+                      );
                     },
                     loading: () => const Padding(
                       padding: EdgeInsets.symmetric(vertical: 48),
@@ -134,9 +229,14 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage> {
 final _personCreditsPageProvider = FutureProvider.autoDispose
     .family<_PersonCreditsPageResult, PersonCreditsPageTarget>(
         (ref, target) async {
-  final settings = ref.read(appSettingsProvider);
-  final token = settings.tmdbReadAccessToken.trim();
-  if (!settings.tmdbMetadataMatchEnabled || token.isEmpty) {
+  final tmdbMetadataMatchEnabled = ref.read(
+    appSettingsProvider.select((settings) => settings.tmdbMetadataMatchEnabled),
+  );
+  final token = ref
+      .read(appSettingsProvider
+          .select((settings) => settings.tmdbReadAccessToken))
+      .trim();
+  if (!tmdbMetadataMatchEnabled || token.isEmpty) {
     return const _PersonCreditsPageResult(
       items: [],
       message: '未配置 TMDB Read Access Token。',
@@ -176,14 +276,20 @@ class _PersonCreditCardData {
   const _PersonCreditCardData({
     required this.title,
     required this.subtitle,
+    required this.year,
     required this.typeLabel,
+    required this.primaryCategoryLabel,
+    required this.genreLabels,
     required this.ratingLabel,
     required this.detailTarget,
   });
 
   final String title;
   final String subtitle;
+  final int year;
   final String typeLabel;
+  final String primaryCategoryLabel;
+  final List<String> genreLabels;
   final String ratingLabel;
   final MediaDetailTarget detailTarget;
 }
@@ -212,7 +318,10 @@ _PersonCreditCardData _toPersonCreditCard(TmdbPersonCredit credit) {
   return _PersonCreditCardData(
     title: credit.title,
     subtitle: subtitleParts.join(' · '),
+    year: credit.year,
     typeLabel: preferredType,
+    primaryCategoryLabel: _resolvePersonCreditPrimaryCategory(credit),
+    genreLabels: _resolvePersonCreditGenres(credit),
     ratingLabel: preferredRating,
     detailTarget: detailTarget,
   );
@@ -245,6 +354,140 @@ String _preferredTypeLabel(TmdbPersonCredit credit) {
   }
   return credit.isSeries ? '剧集' : '电影';
 }
+
+List<String> _resolvePersonCreditGenres(TmdbPersonCredit credit) {
+  final labels = <String>[];
+  final seen = <String>{};
+
+  void add(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty || !seen.add(trimmed)) {
+      return;
+    }
+    labels.add(trimmed);
+  }
+
+  for (final genre in credit.genres) {
+    add(genre);
+  }
+  return labels;
+}
+
+String _resolvePersonCreditPrimaryCategory(TmdbPersonCredit credit) {
+  final genreSignals = credit.genres.join(' ').toLowerCase();
+  if (_containsAnyKeyword(genreSignals, _varietyCategoryKeywords)) {
+    return _PersonCreditsPageState._varietyCategoryLabel;
+  }
+  if (!credit.isSeries) {
+    return _PersonCreditsPageState._movieCategoryLabel;
+  }
+  return _PersonCreditsPageState._seriesCategoryLabel;
+}
+
+List<String> _collectAvailablePrimaryCategories(
+    Iterable<_PersonCreditCardData> items) {
+  final categories = items
+      .map((item) => item.primaryCategoryLabel.trim())
+      .where((label) => label.isNotEmpty)
+      .toSet();
+  return <String>[
+    _PersonCreditsPageState._allCategoryLabel,
+    if (categories.contains(_PersonCreditsPageState._movieCategoryLabel))
+      _PersonCreditsPageState._movieCategoryLabel,
+    if (categories.contains(_PersonCreditsPageState._varietyCategoryLabel))
+      _PersonCreditsPageState._varietyCategoryLabel,
+    if (categories.contains(_PersonCreditsPageState._seriesCategoryLabel))
+      _PersonCreditsPageState._seriesCategoryLabel,
+  ];
+}
+
+List<String> _collectAvailableMovieGenres(
+    Iterable<_PersonCreditCardData> items) {
+  final genres = <String>{};
+  for (final item in items) {
+    if (item.primaryCategoryLabel !=
+        _PersonCreditsPageState._movieCategoryLabel) {
+      continue;
+    }
+    genres.addAll(item.genreLabels.where((label) => label.trim().isNotEmpty));
+  }
+  final orderedGenres = genres.toList()..sort();
+  return <String>[
+    _PersonCreditsPageState._allCategoryLabel,
+    ...orderedGenres,
+  ];
+}
+
+List<_PersonCreditCardData> _sortAndFilterPersonCredits({
+  required List<_PersonCreditCardData> items,
+  required String selectedPrimaryCategory,
+  required String selectedMovieGenre,
+  required bool newestFirst,
+}) {
+  final filtered = items
+      .where(
+        (item) {
+          if (selectedPrimaryCategory ==
+              _PersonCreditsPageState._allCategoryLabel) {
+            return true;
+          }
+          if (selectedPrimaryCategory ==
+              _PersonCreditsPageState._movieCategoryLabel) {
+            if (item.primaryCategoryLabel !=
+                _PersonCreditsPageState._movieCategoryLabel) {
+              return false;
+            }
+            if (selectedMovieGenre ==
+                _PersonCreditsPageState._allCategoryLabel) {
+              return true;
+            }
+            return item.genreLabels.contains(selectedMovieGenre);
+          }
+          return item.primaryCategoryLabel == selectedPrimaryCategory;
+        },
+      )
+      .toList();
+  filtered.sort((a, b) {
+    final aUnknownYear = a.year <= 0;
+    final bUnknownYear = b.year <= 0;
+    if (aUnknownYear != bUnknownYear) {
+      return aUnknownYear ? 1 : -1;
+    }
+    final yearCompare =
+        newestFirst ? b.year.compareTo(a.year) : a.year.compareTo(b.year);
+    if (yearCompare != 0) {
+      return yearCompare;
+    }
+    return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+  });
+  return filtered;
+}
+
+bool _containsAnyKeyword(String value, List<String> keywords) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized.isEmpty) {
+    return false;
+  }
+  for (final keyword in keywords) {
+    if (normalized.contains(keyword)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const List<String> _varietyCategoryKeywords = [
+  '综艺',
+  '音乐',
+  '真人秀',
+  '脱口秀',
+  '选秀',
+  'variety',
+  'music',
+  'musical',
+  'concert',
+  'talk show',
+];
 
 String _personCreditsFocusScopeId(PersonCreditsPageTarget target) {
   return buildTvFocusScopeId(
@@ -456,6 +699,132 @@ class _PersonCreditsGrid extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+class _PersonCreditsControls extends StatelessWidget {
+  const _PersonCreditsControls({
+    required this.sortNewestFirst,
+    required this.selectedPrimaryCategory,
+    required this.availablePrimaryCategories,
+    required this.selectedMovieGenre,
+    required this.availableMovieGenres,
+    required this.onSortChanged,
+    required this.onPrimaryCategoryChanged,
+    required this.onMovieGenreChanged,
+  });
+
+  final bool sortNewestFirst;
+  final String selectedPrimaryCategory;
+  final List<String> availablePrimaryCategories;
+  final String selectedMovieGenre;
+  final List<String> availableMovieGenres;
+  final ValueChanged<bool> onSortChanged;
+  final ValueChanged<String> onPrimaryCategoryChanged;
+  final ValueChanged<String> onMovieGenreChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _PersonCreditsControlSection(
+            title: '排序',
+            child: Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                StarflowChipButton(
+                  label: '最新',
+                  icon: Icons.south_rounded,
+                  selected: sortNewestFirst,
+                  onPressed: () => onSortChanged(true),
+                  focusId: 'person-credits:sort:newest',
+                ),
+                StarflowChipButton(
+                  label: '最旧',
+                  icon: Icons.north_rounded,
+                  selected: !sortNewestFirst,
+                  onPressed: () => onSortChanged(false),
+                  focusId: 'person-credits:sort:oldest',
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          _PersonCreditsControlSection(
+            title: '类别',
+            child: Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: availablePrimaryCategories
+                  .map(
+                    (category) => StarflowChipButton(
+                      label: category,
+                      selected: selectedPrimaryCategory == category,
+                      onPressed: () => onPrimaryCategoryChanged(category),
+                      focusId: 'person-credits:category:$category',
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+          ),
+          if (selectedPrimaryCategory ==
+                  _PersonCreditsPageState._movieCategoryLabel &&
+              availableMovieGenres.length > 1) ...[
+            const SizedBox(height: 14),
+            _PersonCreditsControlSection(
+              title: '电影类型',
+              child: Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: availableMovieGenres
+                    .map(
+                      (genre) => StarflowChipButton(
+                        label: genre,
+                        selected: selectedMovieGenre == genre,
+                        onPressed: () => onMovieGenreChanged(genre),
+                        focusId: 'person-credits:movie-genre:$genre',
+                      ),
+                    )
+                    .toList(growable: false),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PersonCreditsControlSection extends StatelessWidget {
+  const _PersonCreditsControlSection({
+    required this.title,
+    required this.child,
+  });
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: const Color(0xFF90A0BD),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 10),
+        child,
+      ],
     );
   }
 }

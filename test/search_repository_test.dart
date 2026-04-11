@@ -539,7 +539,9 @@ class _FakeMediaRepository implements MediaRepository {
   }
 
   @override
-  Future<void> cancelActiveWebDavRefreshes() async {}
+  Future<void> cancelActiveWebDavRefreshes({
+    bool includeForceFull = false,
+  }) async {}
 
   @override
   Future<void> refreshSource({

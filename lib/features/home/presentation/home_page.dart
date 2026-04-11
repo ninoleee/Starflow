@@ -3,11 +3,12 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/navigation/page_activity_mixin.dart';
+import 'package:starflow/core/navigation/retained_async_value.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/desktop_horizontal_pager.dart';
@@ -31,19 +32,25 @@ class HomePage extends ConsumerStatefulWidget {
   ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends ConsumerState<HomePage> {
-  String _focusedHeroId = '';
+class _HomePageState extends ConsumerState<HomePage>
+    with PageActivityMixin<HomePage> {
   String _pinnedHeroSectionId = '';
   String _lastHeroSourceModuleId = '';
   final ScrollController _scrollController = ScrollController();
   final TvFocusMemoryController _tvFocusMemoryController =
       TvFocusMemoryController();
+  final ValueNotifier<_HomeHeroSelection> _heroSelectionNotifier =
+      ValueNotifier<_HomeHeroSelection>(const _HomeHeroSelection.empty());
   final Set<String> _heroMetadataRefreshScheduledKeys = <String>{};
   final GlobalKey<_FeaturedHeroState> _featuredHeroKey =
       GlobalKey<_FeaturedHeroState>();
   final FocusNode _heroNextSectionFocusNode =
       FocusNode(debugLabel: 'home-hero-next-section');
   int _heroFocusBelowRequestVersion = 0;
+  HomeModuleConfig? _cachedHeroModule;
+  List<HomeModuleConfig> _cachedEnabledModules = const [];
+  AsyncValue<List<HomeSectionViewModel>>? _cachedResolvedSectionsAsync;
+  int _heroMetadataRefreshSessionId = 0;
 
   bool get _showHeroPagerButtons {
     if (kIsWeb) {
@@ -62,27 +69,60 @@ class _HomePageState extends ConsumerState<HomePage> {
     _scrollController.dispose();
     _heroNextSectionFocusNode.dispose();
     _tvFocusMemoryController.dispose();
+    _heroSelectionNotifier.dispose();
     super.dispose();
+  }
+
+  @override
+  void onPageBecameInactive() {
+    _heroMetadataRefreshSessionId += 1;
+    _heroMetadataRefreshScheduledKeys.clear();
+    ref.invalidate(homeRecentItemsProvider);
+    ref.invalidate(homeRecentPlaybackEntriesProvider);
+    ref.invalidate(homeCarouselItemsProvider);
+    ref.invalidate(homeSectionProvider);
+    ref.invalidate(homeSectionsProvider);
   }
 
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
-    final heroModule = ref.watch(homeHeroModuleProvider);
-    final enabledModules = ref.watch(homeEnabledModulesProvider);
-    final sectionStates = <String, AsyncValue<HomeSectionViewModel?>>{
-      for (final module in enabledModules)
-        module.id: ref.watch(homeSectionProvider(module.id)),
-    };
+    final heroModule =
+        isPageVisible ? ref.watch(homeHeroModuleProvider) : _cachedHeroModule;
+    if (isPageVisible) {
+      _cachedHeroModule = heroModule;
+    }
+    final enabledModules = isPageVisible
+        ? ref.watch(homeEnabledModulesProvider)
+        : _cachedEnabledModules;
+    if (isPageVisible) {
+      _cachedEnabledModules = enabledModules;
+    }
+    final watchedResolvedSectionsAsync =
+        isPageVisible ? ref.watch(homeSectionsProvider) : null;
+    final resolvedSectionsAsync = resolveRetainedAsyncValue(
+      activeValue: watchedResolvedSectionsAsync,
+      cachedValue: _cachedResolvedSectionsAsync,
+      cacheValue: (value) => _cachedResolvedSectionsAsync = value,
+      fallbackValue: const AsyncLoading<List<HomeSectionViewModel>>(),
+    );
     final heroDisplayMode = ref.watch(
       appSettingsProvider.select((settings) => settings.homeHeroDisplayMode),
-    );
-    final heroStyle = ref.watch(
-      appSettingsProvider.select((settings) => settings.homeHeroStyle),
     );
     final heroSourceModuleId = ref.watch(
       appSettingsProvider.select((settings) => settings.homeHeroSourceModuleId),
     );
+    final preferredHeroModuleId = heroSourceModuleId.trim();
+    final preferredHeroSectionState = preferredHeroModuleId.isEmpty
+        ? null
+        : resolveRetainedAsyncValue(
+            activeValue: isPageVisible
+                ? ref.watch(homeSectionProvider(preferredHeroModuleId))
+                : null,
+            cachedValue: null,
+            cacheValue: (_) {},
+            fallbackValue: const AsyncLoading<HomeSectionViewModel?>(),
+          );
     final heroBackgroundEnabled = ref.watch(
       appSettingsProvider.select(
         (settings) => settings.homeHeroBackgroundEnabled,
@@ -109,19 +149,8 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
     final effectiveTranslucentEffectsEnabled = translucentEffectsEnabled;
     final effectiveHeroBackgroundEnabled = heroBackgroundEnabled;
-    final resolvedSections = <HomeSectionViewModel>[];
-    var hasPendingSections = false;
-
-    for (final module in enabledModules) {
-      final state = sectionStates[module.id];
-      final section = state?.valueOrNull;
-      if (section != null) {
-        resolvedSections.add(section);
-      }
-      if (state?.isLoading ?? false) {
-        hasPendingSections = true;
-      }
-    }
+    final resolvedSections = resolvedSectionsAsync.valueOrNull ?? const [];
+    final hasPendingSections = resolvedSectionsAsync.isLoading;
 
     return TvPageFocusScope(
       controller: _tvFocusMemoryController,
@@ -138,12 +167,12 @@ class _HomePageState extends ConsumerState<HomePage> {
             : _buildLoadedHome(
                 context: context,
                 enabledModules: enabledModules,
-                sectionStates: sectionStates,
                 resolvedSections: resolvedSections,
                 hasPendingSections: hasPendingSections,
+                preferredHeroSectionLoading:
+                    preferredHeroSectionState?.isLoading ?? false,
                 heroEnabled: heroModule?.enabled ?? false,
                 heroSourceModuleId: heroSourceModuleId,
-                heroStyle: heroStyle,
                 heroLogoTitleEnabled: heroLogoTitleEnabled,
                 heroBackgroundEnabled: effectiveHeroBackgroundEnabled,
                 translucentEffectsEnabled: effectiveTranslucentEffectsEnabled,
@@ -160,12 +189,11 @@ class _HomePageState extends ConsumerState<HomePage> {
   Widget _buildLoadedHome({
     required BuildContext context,
     required List<HomeModuleConfig> enabledModules,
-    required Map<String, AsyncValue<HomeSectionViewModel?>> sectionStates,
     required List<HomeSectionViewModel> resolvedSections,
     required bool hasPendingSections,
+    required bool preferredHeroSectionLoading,
     required bool heroEnabled,
     required String heroSourceModuleId,
-    required HomeHeroStyle heroStyle,
     required bool heroLogoTitleEnabled,
     required bool heroBackgroundEnabled,
     required bool translucentEffectsEnabled,
@@ -177,8 +205,8 @@ class _HomePageState extends ConsumerState<HomePage> {
     final featuredSection = heroEnabled
         ? _resolveStableHeroSection(
             resolvedSections: resolvedSections,
-            sectionStates: sectionStates,
             preferredModuleId: heroSourceModuleId,
+            preferredModuleLoading: preferredHeroSectionLoading,
           )
         : null;
 
@@ -191,215 +219,98 @@ class _HomePageState extends ConsumerState<HomePage> {
           );
     _scheduleHeroMetadataRefresh(featuredItems);
     final activeHero = _resolveActiveHeroItem(featuredItems);
+    _scheduleHeroSelectionSync(activeHero);
     final featuredSectionId = featuredSection?.id;
     final firstFocusableSectionId = _resolveFirstFocusableSectionId(
       enabledModules: enabledModules,
-      sectionStates: sectionStates,
       featuredSectionId: featuredSectionId,
     );
 
-    return _HomeShell(
-      backgroundImageUrl:
-          heroBackgroundEnabled ? activeHero?.backgroundImage.url ?? '' : '',
-      backgroundImageHeaders: heroBackgroundEnabled
-          ? activeHero?.backgroundImage.headers ?? const {}
-          : const {},
-      translucentEffectsEnabled: translucentEffectsEnabled,
-      child: RefreshIndicator(
-        color: Colors.white,
-        backgroundColor: const Color(0xFF102033),
-        onRefresh: () => refreshHomeModules(ref),
-        child: ListView(
-          controller: _scrollController,
-          physics: const BouncingScrollPhysics(
-            parent: AlwaysScrollableScrollPhysics(),
-          ),
-          padding: EdgeInsets.zero,
-          children: [
-            if (heroEnabled && featuredItems.isNotEmpty)
-              Padding(
-                padding: heroDisplayMode.heroPadding(context),
-                child: _FeaturedHero(
-                  key: _featuredHeroKey,
-                  items: featuredItems,
-                  style: heroStyle,
-                  isTelevision: isTelevision,
-                  staticModeEnabled: staticHomeHeroEnabled,
-                  lightweightVisualEnabled: lightweightHomeHeroEnabled,
-                  showPagerButtons: _showHeroPagerButtons || isTelevision,
-                  logoTitleEnabled: heroLogoTitleEnabled,
-                  translucentEffectsEnabled: translucentEffectsEnabled,
-                  displayMode: heroDisplayMode,
-                  focusScopePrefix: 'home:hero',
-                  onFocusBelowControl: _focusBelowHeroContent,
-                  onFocusedItemChanged: _handleFocusedHeroChanged,
-                ),
-              )
-            else if (heroEnabled && hasPendingSections)
-              Padding(
-                padding: heroDisplayMode.heroPadding(context),
-                child: _HomeHeroPlaceholder(displayMode: heroDisplayMode),
-              ),
-            ...enabledModules.asMap().entries.map((entry) {
-              final index = entry.key;
-              final module = entry.value;
-              final state = sectionStates[module.id] ??
-                  const AsyncLoading<HomeSectionViewModel?>();
-              return Padding(
-                padding: EdgeInsets.only(
-                  top: !heroEnabled && index == 0 ? 20 : 0,
-                  bottom: 26,
-                ),
-                child: _buildSectionSlot(
-                  context: context,
-                  module: module,
-                  state: state,
-                  featuredSectionId: featuredSectionId,
-                  firstFocusableSectionId: firstFocusableSectionId,
-                ),
-              );
-            }),
-            const SizedBox(height: 6),
-            const _HomeEditButton(),
-          ],
+    final content = RefreshIndicator(
+      color: Colors.white,
+      backgroundColor: const Color(0xFF102033),
+      onRefresh: () => refreshHomeModules(ref),
+      child: ListView(
+        controller: _scrollController,
+        physics: const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
         ),
+        padding: EdgeInsets.zero,
+        children: [
+          if (heroEnabled && featuredItems.isNotEmpty)
+            Padding(
+              padding: heroDisplayMode.heroPadding(context),
+              child: _FeaturedHero(
+                key: _featuredHeroKey,
+                items: featuredItems,
+                isTelevision: isTelevision,
+                staticModeEnabled: staticHomeHeroEnabled,
+                lightweightVisualEnabled: lightweightHomeHeroEnabled,
+                showPagerButtons: _showHeroPagerButtons || isTelevision,
+                logoTitleEnabled: heroLogoTitleEnabled,
+                translucentEffectsEnabled: translucentEffectsEnabled,
+                displayMode: heroDisplayMode,
+                focusScopePrefix: 'home:hero',
+                onFocusBelowControl: _focusBelowHeroContent,
+                onFocusedItemChanged: _handleFocusedHeroChanged,
+              ),
+            )
+          else if (heroEnabled && hasPendingSections)
+            Padding(
+              padding: heroDisplayMode.heroPadding(context),
+              child: _HomeHeroPlaceholder(displayMode: heroDisplayMode),
+            ),
+          ...enabledModules.asMap().entries.map((entry) {
+            final index = entry.key;
+            final module = entry.value;
+            return Padding(
+              padding: EdgeInsets.only(
+                top: !heroEnabled && index == 0 ? 20 : 0,
+                bottom: 26,
+              ),
+              child: _HomeSectionSlot(
+                key: ValueKey<String>('home:section-slot:${module.id}'),
+                module: module,
+                isPageVisible: isPageVisible,
+                featuredSectionId: featuredSectionId,
+                useHeroNextSectionFocusNode:
+                    module.id == firstFocusableSectionId,
+                heroNextSectionFocusNode: _heroNextSectionFocusNode,
+              ),
+            );
+          }),
+          const SizedBox(height: 6),
+          const _HomeEditButton(),
+        ],
       ),
     );
-  }
 
-  Widget _buildSectionSlot({
-    required BuildContext context,
-    required HomeModuleConfig module,
-    required AsyncValue<HomeSectionViewModel?> state,
-    required String? featuredSectionId,
-    required String? firstFocusableSectionId,
-  }) {
-    final section = state.valueOrNull;
-    if (section != null) {
-      if (section.id == featuredSectionId) {
-        return const SizedBox.shrink();
-      }
-      return _buildResolvedSection(
-        context,
-        section,
-        useHeroNextSectionFocusNode: section.id == firstFocusableSectionId,
-      );
-    }
-
-    if (state.hasError) {
-      return _HomeSection(
-        title: module.title,
-        child: const _SectionEmptyState(message: '加载失败'),
-      );
-    }
-
-    return _HomeSectionLoading(
-      title: module.title,
-      layout: module.type == HomeModuleType.doubanCarousel
-          ? HomeSectionLayout.carousel
-          : HomeSectionLayout.posterRail,
-    );
-  }
-
-  Widget _buildResolvedSection(
-    BuildContext context,
-    HomeSectionViewModel section, {
-    required bool useHeroNextSectionFocusNode,
-  }) {
-    final viewAllTarget = section.viewAllTarget;
-    final openViewAll = viewAllTarget == null
-        ? null
-        : () {
-            context.pushNamed(
-              viewAllTarget.routeName,
-              extra: viewAllTarget.extra,
-            );
-          };
-    return _HomeSection(
-      title: section.title,
-      child: section.layout == HomeSectionLayout.carousel
-          ? _HomeCarousel(
-              items: section.carouselItems,
-              focusScopePrefix: 'home:carousel:${section.id}',
-              firstItemFocusNode: useHeroNextSectionFocusNode
-                  ? _heroNextSectionFocusNode
-                  : null,
-            )
-          : section.items.isEmpty
-              ? _SectionEmptyState(message: section.emptyMessage)
-              : SizedBox(
-                  height: 246,
-                  child: DesktopHorizontalPager(
-                    builder: (context, controller) => ListView.separated(
-                      controller: controller,
-                      primary: false,
-                      physics: const BouncingScrollPhysics(),
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      scrollDirection: Axis.horizontal,
-                      itemCount:
-                          section.items.length + (openViewAll == null ? 0 : 1),
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(width: 10),
-                      itemBuilder: (context, index) {
-                        if (index >= section.items.length) {
-                          return _HomeSectionViewAllTile(
-                            focusId: 'home:section:${section.id}:view-all',
-                            onTap: openViewAll!,
-                          );
-                        }
-                        final item = section.items[index];
-                        return MediaPosterTile(
-                          title: item.title,
-                          subtitle: item.subtitle,
-                          posterUrl: item.posterUrl,
-                          tvPosterFocusOutlineOnly: true,
-                          focusNode: useHeroNextSectionFocusNode && index == 0
-                              ? _heroNextSectionFocusNode
-                              : null,
-                          focusId:
-                              'home:section:${section.id}:item:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
-                          autofocus: index == 0,
-                          posterHeaders: item.detailTarget.posterHeaders,
-                          posterFallbackSources:
-                              _buildPosterFallbackSources(item.detailTarget),
-                          titleColor: Colors.white,
-                          subtitleColor: const Color(0xFF98A7C2),
-                          onTap: () {
-                            context.pushNamed(
-                              'detail',
-                              extra: item.detailTarget,
-                            );
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ),
+    return ValueListenableBuilder<_HomeHeroSelection>(
+      valueListenable: _heroSelectionNotifier,
+      child: content,
+      builder: (context, selection, child) {
+        return _HomeShell(
+          backgroundImageUrl: heroBackgroundEnabled ? selection.imageUrl : '',
+          backgroundImageHeaders:
+              heroBackgroundEnabled ? selection.imageHeaders : const {},
+          translucentEffectsEnabled: translucentEffectsEnabled,
+          child: child!,
+        );
+      },
     );
   }
 
   String? _resolveFirstFocusableSectionId({
     required List<HomeModuleConfig> enabledModules,
-    required Map<String, AsyncValue<HomeSectionViewModel?>> sectionStates,
     required String? featuredSectionId,
   }) {
     for (final module in enabledModules) {
-      final section = sectionStates[module.id]?.valueOrNull;
-      if (section == null ||
-          section.id == featuredSectionId ||
-          !_sectionHasFocusableContent(section)) {
+      if (module.id == featuredSectionId) {
         continue;
       }
-      return section.id;
+      return module.id;
     }
     return null;
-  }
-
-  bool _sectionHasFocusableContent(HomeSectionViewModel section) {
-    return switch (section.layout) {
-      HomeSectionLayout.carousel => section.carouselItems.isNotEmpty,
-      HomeSectionLayout.posterRail => section.items.isNotEmpty,
-    };
   }
 
   void _focusBelowHeroContent() {
@@ -454,27 +365,57 @@ class _HomePageState extends ConsumerState<HomePage> {
     if (items.isEmpty) {
       return null;
     }
+    final selectedHeroId = _heroSelectionNotifier.value.heroId;
     for (final item in items) {
-      if (item.id == _focusedHeroId) {
+      if (item.id == selectedHeroId) {
         return item;
       }
     }
     return items.first;
   }
 
-  void _handleFocusedHeroChanged(_FeaturedHeroItem item) {
-    if (_focusedHeroId == item.id) {
+  void _scheduleHeroSelectionSync(_FeaturedHeroItem? activeHero) {
+    final nextSelection = activeHero == null
+        ? const _HomeHeroSelection.empty()
+        : _HomeHeroSelection(
+            heroId: activeHero.id,
+            imageUrl: activeHero.backgroundImage.url,
+            imageHeaders: activeHero.backgroundImage.headers,
+          );
+    final current = _heroSelectionNotifier.value;
+    if (current.matches(nextSelection)) {
       return;
     }
-    setState(() {
-      _focusedHeroId = item.id;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      final latest = _heroSelectionNotifier.value;
+      if (latest.matches(nextSelection)) {
+        return;
+      }
+      _heroSelectionNotifier.value = nextSelection;
     });
   }
 
+  void _handleFocusedHeroChanged(_FeaturedHeroItem item) {
+    _scheduleHeroSelectionSync(item);
+  }
+
+  bool _isHeroRefreshSessionActive(int sessionId) {
+    return mounted &&
+        isPageVisible &&
+        _heroMetadataRefreshSessionId == sessionId &&
+        !ref.read(backgroundEnrichmentSuspendedProvider);
+  }
+
   void _scheduleHeroMetadataRefresh(List<_FeaturedHeroItem> items) {
-    if (items.isEmpty || ref.read(backgroundWorkSuspendedProvider)) {
+    if (items.isEmpty ||
+        !isPageVisible ||
+        ref.read(backgroundEnrichmentSuspendedProvider)) {
       return;
     }
+    final sessionId = _heroMetadataRefreshSessionId;
 
     final candidates = <MediaDetailTarget>[];
     for (final item in items) {
@@ -494,22 +435,33 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || ref.read(backgroundWorkSuspendedProvider)) {
+      if (!_isHeroRefreshSessionActive(sessionId)) {
         return;
       }
-      unawaited(_refreshHeroMetadataInBackground(candidates));
+      unawaited(
+        _refreshHeroMetadataInBackground(
+          candidates,
+          sessionId: sessionId,
+        ),
+      );
     });
   }
 
   Future<void> _refreshHeroMetadataInBackground(
-    List<MediaDetailTarget> targets,
-  ) async {
-    if (ref.read(backgroundWorkSuspendedProvider)) {
+    List<MediaDetailTarget> targets, {
+    required int sessionId,
+  }) async {
+    if (!_isHeroRefreshSessionActive(sessionId)) {
       return;
     }
     try {
       await Future.wait(
-        targets.map(_refreshSingleHeroMetadataIfNeeded),
+        targets.map(
+          (target) => _refreshSingleHeroMetadataIfNeeded(
+            target,
+            sessionId: sessionId,
+          ),
+        ),
         eagerError: false,
       );
     } catch (_) {
@@ -518,9 +470,10 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Future<void> _refreshSingleHeroMetadataIfNeeded(
-    MediaDetailTarget target,
-  ) async {
-    if (ref.read(backgroundWorkSuspendedProvider)) {
+    MediaDetailTarget target, {
+    required int sessionId,
+  }) async {
+    if (!_isHeroRefreshSessionActive(sessionId)) {
       return;
     }
     try {
@@ -534,6 +487,9 @@ class _HomePageState extends ConsumerState<HomePage> {
         final updatedTarget = await ref
             .read(nasMediaIndexerProvider)
             .enrichDetailTargetMetadataIfNeeded(target);
+        if (!_isHeroRefreshSessionActive(sessionId)) {
+          return;
+        }
         if (updatedTarget == null ||
             !_heroMetadataRefreshProducedUpdate(target, updatedTarget)) {
           return;
@@ -550,13 +506,16 @@ class _HomePageState extends ConsumerState<HomePage> {
         return;
       }
 
-      if (ref.read(backgroundWorkSuspendedProvider)) {
+      if (!_isHeroRefreshSessionActive(sessionId)) {
         return;
       }
 
       final cacheRepository = ref.read(localStorageCacheRepositoryProvider);
       final refreshStatus =
           await cacheRepository.loadDetailMetadataRefreshStatus(target);
+      if (!_isHeroRefreshSessionActive(sessionId)) {
+        return;
+      }
       if (refreshStatus != DetailMetadataRefreshStatus.never) {
         return;
       }
@@ -564,6 +523,9 @@ class _HomePageState extends ConsumerState<HomePage> {
       try {
         final updatedTarget =
             await ref.read(enrichedDetailTargetProvider(target).future);
+        if (!_isHeroRefreshSessionActive(sessionId)) {
+          return;
+        }
         await cacheRepository.saveDetailTarget(
           seedTarget: target,
           resolvedTarget: updatedTarget,
@@ -573,6 +535,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                   : DetailMetadataRefreshStatus.failed,
         );
       } catch (_) {
+        if (!_isHeroRefreshSessionActive(sessionId)) {
+          return;
+        }
         await cacheRepository.saveDetailTarget(
           seedTarget: target,
           resolvedTarget: target,
@@ -676,8 +641,8 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   HomeSectionViewModel? _resolveStableHeroSection({
     required List<HomeSectionViewModel> resolvedSections,
-    required Map<String, AsyncValue<HomeSectionViewModel?>> sectionStates,
     required String preferredModuleId,
+    required bool preferredModuleLoading,
   }) {
     final normalizedPreferredModuleId = preferredModuleId.trim();
     if (_lastHeroSourceModuleId != normalizedPreferredModuleId) {
@@ -704,10 +669,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         return preferredSection;
       }
 
-      final preferredState = sectionStates[normalizedPreferredModuleId];
-      final preferredStillLoading =
-          preferredState == null || preferredState.isLoading;
-      if (preferredStillLoading) {
+      if (preferredModuleLoading) {
         // When a source is explicitly configured, keep startup stable and wait
         // for that source instead of flashing through fallback sections first.
         final pinnedSection = resolvePinnedSection();
@@ -802,6 +764,164 @@ List<_FeaturedHeroItem> _buildFeaturedItems({
     );
   }
   return _fallbackFeaturedItems(resolvedSections);
+}
+
+class _HomeHeroSelection {
+  const _HomeHeroSelection({
+    required this.heroId,
+    required this.imageUrl,
+    required this.imageHeaders,
+  });
+
+  const _HomeHeroSelection.empty()
+      : heroId = '',
+        imageUrl = '',
+        imageHeaders = const {};
+
+  final String heroId;
+  final String imageUrl;
+  final Map<String, String> imageHeaders;
+
+  bool matches(_HomeHeroSelection other) {
+    return heroId == other.heroId &&
+        imageUrl == other.imageUrl &&
+        mapEquals(imageHeaders, other.imageHeaders);
+  }
+}
+
+class _HomeSectionSlot extends ConsumerStatefulWidget {
+  const _HomeSectionSlot({
+    super.key,
+    required this.module,
+    required this.isPageVisible,
+    required this.featuredSectionId,
+    required this.useHeroNextSectionFocusNode,
+    required this.heroNextSectionFocusNode,
+  });
+
+  final HomeModuleConfig module;
+  final bool isPageVisible;
+  final String? featuredSectionId;
+  final bool useHeroNextSectionFocusNode;
+  final FocusNode heroNextSectionFocusNode;
+
+  @override
+  ConsumerState<_HomeSectionSlot> createState() => _HomeSectionSlotState();
+}
+
+class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot> {
+  AsyncValue<HomeSectionViewModel?>? _cachedState;
+
+  @override
+  Widget build(BuildContext context) {
+    final activeState = widget.isPageVisible
+        ? ref.watch(homeSectionProvider(widget.module.id))
+        : null;
+    final state = resolveRetainedAsyncValue(
+      activeValue: activeState,
+      cachedValue: _cachedState,
+      cacheValue: (value) => _cachedState = value,
+      fallbackValue: const AsyncLoading<HomeSectionViewModel?>(),
+    );
+    final section = state.valueOrNull;
+    if (section != null) {
+      if (section.id == widget.featuredSectionId) {
+        return const SizedBox.shrink();
+      }
+      return _buildResolvedSection(context, section);
+    }
+
+    if (state.hasError) {
+      return _HomeSection(
+        title: widget.module.title,
+        child: const _SectionEmptyState(message: '加载失败'),
+      );
+    }
+
+    return _HomeSectionLoading(
+      title: widget.module.title,
+      layout: widget.module.type == HomeModuleType.doubanCarousel
+          ? HomeSectionLayout.carousel
+          : HomeSectionLayout.posterRail,
+    );
+  }
+
+  Widget _buildResolvedSection(
+    BuildContext context,
+    HomeSectionViewModel section,
+  ) {
+    final viewAllTarget = section.viewAllTarget;
+    final openViewAll = viewAllTarget == null
+        ? null
+        : () {
+            context.pushNamed(
+              viewAllTarget.routeName,
+              extra: viewAllTarget.extra,
+            );
+          };
+    return _HomeSection(
+      title: section.title,
+      child: section.layout == HomeSectionLayout.carousel
+          ? _HomeCarousel(
+              items: section.carouselItems,
+              focusScopePrefix: 'home:carousel:${section.id}',
+              firstItemFocusNode: widget.useHeroNextSectionFocusNode
+                  ? widget.heroNextSectionFocusNode
+                  : null,
+            )
+          : section.items.isEmpty
+              ? _SectionEmptyState(message: section.emptyMessage)
+              : SizedBox(
+                  height: 246,
+                  child: DesktopHorizontalPager(
+                    builder: (context, controller) => ListView.separated(
+                      controller: controller,
+                      primary: false,
+                      physics: const BouncingScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      scrollDirection: Axis.horizontal,
+                      itemCount:
+                          section.items.length + (openViewAll == null ? 0 : 1),
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(width: 10),
+                      itemBuilder: (context, index) {
+                        if (index >= section.items.length) {
+                          return _HomeSectionViewAllTile(
+                            focusId: 'home:section:${section.id}:view-all',
+                            onTap: openViewAll!,
+                          );
+                        }
+                        final item = section.items[index];
+                        return MediaPosterTile(
+                          title: item.title,
+                          subtitle: item.subtitle,
+                          posterUrl: item.posterUrl,
+                          tvPosterFocusOutlineOnly: true,
+                          focusNode:
+                              widget.useHeroNextSectionFocusNode && index == 0
+                                  ? widget.heroNextSectionFocusNode
+                                  : null,
+                          focusId:
+                              'home:section:${section.id}:item:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
+                          autofocus: index == 0,
+                          posterHeaders: item.detailTarget.posterHeaders,
+                          posterFallbackSources:
+                              _buildPosterFallbackSources(item.detailTarget),
+                          titleColor: Colors.white,
+                          subtitleColor: const Color(0xFF98A7C2),
+                          onTap: () {
+                            context.pushNamed(
+                              'detail',
+                              extra: item.detailTarget,
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ),
+    );
+  }
 }
 
 extension _HomeHeroDisplayModeLayoutX on HomeHeroDisplayMode {
@@ -982,6 +1102,20 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final viewportSize = MediaQuery.sizeOf(context);
+    final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final cacheWidth = _resolveCacheDimension(
+      viewportSize.width,
+      devicePixelRatio,
+      scale: 1.16,
+      max: 1920,
+    );
+    final cacheHeight = _resolveCacheDimension(
+      viewportSize.height,
+      devicePixelRatio,
+      scale: 1.16,
+      max: 1200,
+    );
     return DecoratedBox(
       decoration: const BoxDecoration(color: Color(0xFF030914)),
       child: Stack(
@@ -1000,6 +1134,8 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
                           headers: imageHeaders,
                           fit: BoxFit.cover,
                           alignment: Alignment.topCenter,
+                          cacheWidth: cacheWidth,
+                          cacheHeight: cacheHeight,
                         ),
                       ),
                     )
@@ -1010,6 +1146,8 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
                         headers: imageHeaders,
                         fit: BoxFit.cover,
                         alignment: Alignment.topCenter,
+                        cacheWidth: cacheWidth,
+                        cacheHeight: cacheHeight,
                       ),
                     ),
             ),
@@ -1576,7 +1714,6 @@ class _FeaturedHero extends StatefulWidget {
     super.key,
     required this.items,
     required this.displayMode,
-    required this.style,
     required this.isTelevision,
     required this.staticModeEnabled,
     required this.lightweightVisualEnabled,
@@ -1590,7 +1727,6 @@ class _FeaturedHero extends StatefulWidget {
 
   final List<_FeaturedHeroItem> items;
   final HomeHeroDisplayMode displayMode;
-  final HomeHeroStyle style;
   final bool isTelevision;
   final bool staticModeEnabled;
   final bool lightweightVisualEnabled;
@@ -1607,6 +1743,7 @@ class _FeaturedHero extends StatefulWidget {
 
 class _FeaturedHeroState extends State<_FeaturedHero> {
   late PageController _controller;
+  final ValueNotifier<double> _pageNotifier = ValueNotifier<double>(0);
   final Map<String, FocusNode> _cardFocusNodes = <String, FocusNode>{};
   final FocusNode _previousPagerButtonFocusNode =
       FocusNode(debugLabel: 'home-hero-prev');
@@ -1614,8 +1751,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
       FocusNode(debugLabel: 'home-hero-next');
   double _page = 0;
   int _lastReportedIndex = -1;
-  double? _pendingPage;
-  bool _pageUpdateScheduled = false;
+  String _lastReportedItemId = '';
 
   @override
   void initState() {
@@ -1631,6 +1767,8 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
   void didUpdateWidget(covariant _FeaturedHero oldWidget) {
     super.didUpdateWidget(oldWidget);
     _syncCardFocusNodes();
+    final oldLength = oldWidget.items.length;
+    final newLength = widget.items.length;
     if (oldWidget.displayMode != widget.displayMode) {
       final int nextPage = widget.items.isEmpty
           ? 0
@@ -1640,12 +1778,29 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
         ..dispose();
       _controller = _buildController(initialPage: nextPage);
       _page = nextPage.toDouble();
+      _pageNotifier.value = _page;
       _lastReportedIndex = -1;
+      _lastReportedItemId = '';
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) {
           return;
         }
         _notifyFocusedItem(nextPage);
+      });
+      return;
+    }
+
+    if (oldLength != newLength) {
+      _syncCurrentPageToVisibleItems();
+      return;
+    }
+
+    if (newLength > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || widget.items.isEmpty) {
+          return;
+        }
+        _notifyFocusedItem(_currentPageIndex);
       });
     }
   }
@@ -1660,6 +1815,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     _controller
       ..removeListener(_handlePageChange)
       ..dispose();
+    _pageNotifier.dispose();
     super.dispose();
   }
 
@@ -1699,34 +1855,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
       return;
     }
     final double page = _controller.hasClients ? _controller.page ?? 0.0 : 0.0;
-    _applyPageChange(page);
-  }
-
-  void _applyPageChange(double page) {
-    final binding = WidgetsBinding.instance;
-    final schedulerPhase = binding.schedulerPhase;
-    final canUpdateNow = schedulerPhase == SchedulerPhase.idle ||
-        schedulerPhase == SchedulerPhase.postFrameCallbacks;
-
-    if (canUpdateNow) {
-      _commitPageChange(page);
-      return;
-    }
-
-    _pendingPage = page;
-    if (_pageUpdateScheduled) {
-      return;
-    }
-    _pageUpdateScheduled = true;
-    binding.addPostFrameCallback((_) {
-      _pageUpdateScheduled = false;
-      final pendingPage = _pendingPage;
-      _pendingPage = null;
-      if (!mounted || pendingPage == null) {
-        return;
-      }
-      _commitPageChange(pendingPage);
-    });
+    _commitPageChange(page);
   }
 
   void _commitPageChange(double page) {
@@ -1737,20 +1866,57 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     if ((_page - page).abs() < 0.0001) {
       return;
     }
-    setState(() {
-      _page = page;
-    });
+    _page = page;
+    _pageNotifier.value = page;
   }
 
   void _notifyFocusedItem(int index) {
     if (index < 0 || index >= widget.items.length) {
       return;
     }
-    if (_lastReportedIndex == index) {
+    final currentItem = widget.items[index];
+    if (_lastReportedIndex == index && _lastReportedItemId == currentItem.id) {
       return;
     }
     _lastReportedIndex = index;
-    widget.onFocusedItemChanged?.call(widget.items[index]);
+    _lastReportedItemId = currentItem.id;
+    widget.onFocusedItemChanged?.call(currentItem);
+  }
+
+  void _syncCurrentPageToVisibleItems() {
+    if (widget.items.isEmpty) {
+      _page = 0;
+      _pageNotifier.value = _page;
+      _lastReportedIndex = -1;
+      _lastReportedItemId = '';
+      return;
+    }
+    final maxPage = (widget.items.length - 1).toDouble();
+    _page = _page.clamp(0.0, maxPage);
+    _pageNotifier.value = _page;
+    if (!_controller.hasClients) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_controller.hasClients || widget.items.isEmpty) {
+          return;
+        }
+        _controller.jumpToPage(_currentPageIndex);
+        _notifyFocusedItem(_currentPageIndex);
+      });
+      return;
+    }
+    final currentControllerPage = _controller.page ?? _page;
+    final boundedControllerPage = currentControllerPage.clamp(0.0, maxPage);
+    if ((boundedControllerPage - currentControllerPage).abs() >= 0.0001) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_controller.hasClients || widget.items.isEmpty) {
+          return;
+        }
+        _controller.jumpToPage(_currentPageIndex);
+        _notifyFocusedItem(_currentPageIndex);
+      });
+      return;
+    }
+    _notifyFocusedItem(_currentPageIndex);
   }
 
   Future<void> _moveToIndex(int index) async {
@@ -1788,7 +1954,6 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
 
   @override
   Widget build(BuildContext context) {
-    final currentIndex = _currentPageIndex;
     final simplifyVisualEffects = widget.lightweightVisualEnabled;
 
     return Column(
@@ -1825,7 +1990,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                         simplifyVisualEffects: simplifyVisualEffects,
                         focusNode: _focusNodeForItem(item.id),
                         focusId: '${widget.focusScopePrefix}:${item.id}',
-                        autofocus: index == currentIndex,
+                        autofocus: index == _currentPageIndex,
                         onFocusPreviousControl: () =>
                             _focusPagerButton(_previousPagerButtonFocusNode),
                         onFocusNextControl: () =>
@@ -1836,83 +2001,98 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                   },
                 ),
               ),
-              if (widget.showPagerButtons && widget.items.length > 1) ...[
-                Positioned(
-                  left: 16,
-                  top: 0,
-                  bottom: 0,
-                  child: Center(
-                    child: _HeroPagerButton(
-                      isTelevision: widget.isTelevision,
-                      staticModeEnabled: widget.staticModeEnabled,
-                      icon: Icons.chevron_left_rounded,
-                      focusNode: _previousPagerButtonFocusNode,
-                      focusId: '${widget.focusScopePrefix}:pager-prev',
-                      enabled: currentIndex > 0,
-                      onMoveRight: _focusCurrentCard,
-                      onFocusBelowControl: widget.onFocusBelowControl,
-                      onPressed: currentIndex > 0
-                          ? () => _moveToIndex(currentIndex - 1)
-                          : null,
-                    ),
-                  ),
+              if (widget.showPagerButtons && widget.items.length > 1)
+                ValueListenableBuilder<double>(
+                  valueListenable: _pageNotifier,
+                  builder: (context, page, child) {
+                    final currentIndex =
+                        page.round().clamp(0, widget.items.length - 1);
+                    return Stack(
+                      children: [
+                        Positioned(
+                          left: 16,
+                          top: 0,
+                          bottom: 0,
+                          child: Center(
+                            child: _HeroPagerButton(
+                              isTelevision: widget.isTelevision,
+                              staticModeEnabled: widget.staticModeEnabled,
+                              icon: Icons.chevron_left_rounded,
+                              focusNode: _previousPagerButtonFocusNode,
+                              focusId: '${widget.focusScopePrefix}:pager-prev',
+                              enabled: currentIndex > 0,
+                              onMoveRight: _focusCurrentCard,
+                              onFocusBelowControl: widget.onFocusBelowControl,
+                              onPressed: currentIndex > 0
+                                  ? () => _moveToIndex(currentIndex - 1)
+                                  : null,
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: 16,
+                          top: 0,
+                          bottom: 0,
+                          child: Center(
+                            child: _HeroPagerButton(
+                              isTelevision: widget.isTelevision,
+                              staticModeEnabled: widget.staticModeEnabled,
+                              icon: Icons.chevron_right_rounded,
+                              focusNode: _nextPagerButtonFocusNode,
+                              focusId: '${widget.focusScopePrefix}:pager-next',
+                              enabled: currentIndex < widget.items.length - 1,
+                              onMoveLeft: _focusCurrentCard,
+                              onFocusBelowControl: widget.onFocusBelowControl,
+                              onPressed: currentIndex < widget.items.length - 1
+                                  ? () => _moveToIndex(currentIndex + 1)
+                                  : null,
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
-                Positioned(
-                  right: 16,
-                  top: 0,
-                  bottom: 0,
-                  child: Center(
-                    child: _HeroPagerButton(
-                      isTelevision: widget.isTelevision,
-                      staticModeEnabled: widget.staticModeEnabled,
-                      icon: Icons.chevron_right_rounded,
-                      focusNode: _nextPagerButtonFocusNode,
-                      focusId: '${widget.focusScopePrefix}:pager-next',
-                      enabled: currentIndex < widget.items.length - 1,
-                      onMoveLeft: _focusCurrentCard,
-                      onFocusBelowControl: widget.onFocusBelowControl,
-                      onPressed: currentIndex < widget.items.length - 1
-                          ? () => _moveToIndex(currentIndex + 1)
-                          : null,
-                    ),
-                  ),
-                ),
-              ],
             ],
           ),
         ),
         if (widget.items.length > 1) ...[
           const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(widget.items.length, (index) {
-              final isActive = (_page.round() == index);
-              if (widget.staticModeEnabled) {
-                return Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  width: isActive ? 18 : 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: isActive
-                        ? Colors.white
-                        : Colors.white.withValues(alpha: 0.35),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                );
-              }
-              return AnimatedContainer(
-                duration: const Duration(milliseconds: 220),
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                width: isActive ? 18 : 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: isActive
-                      ? Colors.white
-                      : Colors.white.withValues(alpha: 0.35),
-                  borderRadius: BorderRadius.circular(999),
-                ),
+          ValueListenableBuilder<double>(
+            valueListenable: _pageNotifier,
+            builder: (context, page, child) {
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(widget.items.length, (index) {
+                  final isActive = (page.round() == index);
+                  if (widget.staticModeEnabled) {
+                    return Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      width: isActive ? 18 : 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: isActive
+                            ? Colors.white
+                            : Colors.white.withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    );
+                  }
+                  return AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    width: isActive ? 18 : 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: isActive
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  );
+                }),
               );
-            }),
+            },
           ),
         ],
       ],
@@ -2248,57 +2428,79 @@ class _FeaturedHeroArtwork extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenSize = MediaQuery.sizeOf(context);
-    final isPortraitScreen = screenSize.height > screenSize.width;
-    final selectedImage = isPortraitScreen
-        ? (item.portraitImage.url.trim().isNotEmpty
-            ? item.portraitImage
-            : item.landscapeImage)
-        : (item.landscapeImage.url.trim().isNotEmpty
-            ? item.landscapeImage
-            : item.portraitImage);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final screenSize = MediaQuery.sizeOf(context);
+        final isPortraitScreen = screenSize.height > screenSize.width;
+        final selectedImage = isPortraitScreen
+            ? (item.portraitImage.url.trim().isNotEmpty
+                ? item.portraitImage
+                : item.landscapeImage)
+            : (item.landscapeImage.url.trim().isNotEmpty
+                ? item.landscapeImage
+                : item.portraitImage);
 
-    if (selectedImage.url.trim().isEmpty) {
-      return const SizedBox.shrink();
-    }
+        if (selectedImage.url.trim().isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+        final cacheWidth = _resolveCacheDimension(
+          constraints.maxWidth,
+          devicePixelRatio,
+          max: 1920,
+        );
+        final cacheHeight = _resolveCacheDimension(
+          constraints.maxHeight,
+          devicePixelRatio,
+          max: 1200,
+        );
 
-    if (!selectedImage.preferContain) {
-      return AppNetworkImage(
-        selectedImage.url,
-        headers: selectedImage.headers,
-        fit: BoxFit.cover,
-        alignment: Alignment.center,
-      );
-    }
-
-    if (isPortraitScreen) {
-      return AppNetworkImage(
-        selectedImage.url,
-        headers: selectedImage.headers,
-        fit: BoxFit.cover,
-        alignment: Alignment.center,
-      );
-    }
-
-    return Align(
-      alignment: Alignment.centerRight,
-      child: FractionallySizedBox(
-        widthFactor: displayMode == HomeHeroDisplayMode.normal ? 0.54 : 0.42,
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            0,
-            displayMode == HomeHeroDisplayMode.normal ? 22 : 28,
-            displayMode == HomeHeroDisplayMode.normal ? 18 : 24,
-            displayMode == HomeHeroDisplayMode.normal ? 22 : 28,
-          ),
-          child: AppNetworkImage(
+        if (!selectedImage.preferContain) {
+          return AppNetworkImage(
             selectedImage.url,
             headers: selectedImage.headers,
-            fit: BoxFit.contain,
-            alignment: Alignment.centerRight,
+            fit: BoxFit.cover,
+            alignment: Alignment.center,
+            cacheWidth: cacheWidth,
+            cacheHeight: cacheHeight,
+          );
+        }
+
+        if (isPortraitScreen) {
+          return AppNetworkImage(
+            selectedImage.url,
+            headers: selectedImage.headers,
+            fit: BoxFit.cover,
+            alignment: Alignment.center,
+            cacheWidth: cacheWidth,
+            cacheHeight: cacheHeight,
+          );
+        }
+
+        return Align(
+          alignment: Alignment.centerRight,
+          child: FractionallySizedBox(
+            widthFactor:
+                displayMode == HomeHeroDisplayMode.normal ? 0.54 : 0.42,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                0,
+                displayMode == HomeHeroDisplayMode.normal ? 22 : 28,
+                displayMode == HomeHeroDisplayMode.normal ? 18 : 24,
+                displayMode == HomeHeroDisplayMode.normal ? 22 : 28,
+              ),
+              child: AppNetworkImage(
+                selectedImage.url,
+                headers: selectedImage.headers,
+                fit: BoxFit.contain,
+                alignment: Alignment.centerRight,
+                cacheWidth: cacheWidth,
+                cacheHeight: cacheHeight,
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -2382,7 +2584,7 @@ class _HeroTitleText extends StatelessWidget {
   }
 }
 
-class _HomeCarousel extends ConsumerWidget {
+class _HomeCarousel extends ConsumerStatefulWidget {
   const _HomeCarousel({
     required this.items,
     required this.focusScopePrefix,
@@ -2394,8 +2596,45 @@ class _HomeCarousel extends ConsumerWidget {
   final FocusNode? firstItemFocusNode;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_HomeCarousel> createState() => _HomeCarouselState();
+}
+
+class _HomeCarouselState extends ConsumerState<_HomeCarousel> {
+  late final PageController _mobilePageController =
+      PageController(viewportFraction: 0.96);
+
+  @override
+  void didUpdateWidget(covariant _HomeCarousel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.items.length == widget.items.length) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !_mobilePageController.hasClients ||
+          widget.items.isEmpty) {
+        return;
+      }
+      final currentPage = _mobilePageController.page ?? 0;
+      final maxPage = (widget.items.length - 1).toDouble();
+      final boundedPage = currentPage.clamp(0.0, maxPage);
+      if ((boundedPage - currentPage).abs() < 0.0001) {
+        return;
+      }
+      _mobilePageController.jumpToPage(boundedPage.round());
+    });
+  }
+
+  @override
+  void dispose() {
+    _mobilePageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
+    final items = widget.items;
     if (items.isEmpty) {
       return const _SectionEmptyState(message: '无');
     }
@@ -2413,8 +2652,8 @@ class _HomeCarousel extends ConsumerWidget {
               width: 320,
               child: TvFocusableAction(
                 focusId:
-                    '$focusScopePrefix:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
-                focusNode: index == 0 ? firstItemFocusNode : null,
+                    '${widget.focusScopePrefix}:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
+                focusNode: index == 0 ? widget.firstItemFocusNode : null,
                 autofocus: index == 0,
                 onPressed: () {
                   context.pushNamed('detail', extra: item.detailTarget);
@@ -2431,7 +2670,7 @@ class _HomeCarousel extends ConsumerWidget {
     return SizedBox(
       height: 184,
       child: PageView.builder(
-        controller: PageController(viewportFraction: 0.96),
+        controller: _mobilePageController,
         itemCount: items.length,
         itemBuilder: (context, index) {
           final item = items[index];
@@ -2458,62 +2697,79 @@ class _HomeCarouselCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: const Color(0xFF0B1631),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (item.imageUrl.trim().isNotEmpty)
-            AppNetworkImage(
-              item.imageUrl,
-              fit: BoxFit.cover,
-            ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Colors.black.withValues(alpha: 0.18),
-                  Colors.black.withValues(alpha: 0.72),
-                ],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ),
-            ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+        final cacheWidth = _resolveCacheDimension(
+          constraints.maxWidth,
+          devicePixelRatio,
+          max: 1400,
+        );
+        final cacheHeight = _resolveCacheDimension(
+          constraints.maxHeight,
+          devicePixelRatio,
+          max: 900,
+        );
+        return Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            color: const Color(0xFF0B1631),
           ),
-          Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Spacer(),
-                Text(
-                  item.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                      ),
+          clipBehavior: Clip.antiAlias,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (item.imageUrl.trim().isNotEmpty)
+                AppNetworkImage(
+                  item.imageUrl,
+                  fit: BoxFit.cover,
+                  cacheWidth: cacheWidth,
+                  cacheHeight: cacheHeight,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  item.subtitle.trim().isEmpty ? '点击查看详情' : item.subtitle,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFFE5EDFF),
-                    height: 1.45,
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.black.withValues(alpha: 0.18),
+                      Colors.black.withValues(alpha: 0.72),
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
                   ),
                 ),
-              ],
-            ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Spacer(),
+                    Text(
+                      item.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      item.subtitle.trim().isEmpty ? '点击查看详情' : item.subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFE5EDFF),
+                        height: 1.45,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -2616,6 +2872,25 @@ List<AppNetworkImageSource> _buildPosterFallbackSources(
     add(url, target.extraBackdropHeaders);
   }
   return sources;
+}
+
+int? _resolveCacheDimension(
+  double logicalSize,
+  double devicePixelRatio, {
+  double scale = 1,
+  int max = 2048,
+}) {
+  if (!logicalSize.isFinite || logicalSize <= 0) {
+    return null;
+  }
+  final pixelSize = (logicalSize * devicePixelRatio * scale).round();
+  if (pixelSize <= 0) {
+    return null;
+  }
+  if (pixelSize > max) {
+    return max;
+  }
+  return pixelSize;
 }
 
 class _SectionEmptyState extends StatelessWidget {

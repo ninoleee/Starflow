@@ -136,6 +136,11 @@ class PlaybackTarget {
 
   bool get isMovie => normalizedItemType == 'movie';
 
+  bool get isIsoLike =>
+      _looksLikeIsoResource(container) ||
+      _looksLikeIsoResource(streamUrl) ||
+      _looksLikeIsoResource(actualAddress);
+
   String get resolvedSeriesTitle {
     final trimmed = seriesTitle.trim();
     if (trimmed.isNotEmpty) {
@@ -323,6 +328,19 @@ bool _looksLikeStrmReference(String value) {
   final uri = Uri.tryParse(normalized);
   final path = (uri?.path ?? normalized).trim().toLowerCase();
   return path.endsWith('.strm');
+}
+
+bool _looksLikeIsoResource(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized.isEmpty) {
+    return false;
+  }
+  if (normalized == 'iso') {
+    return true;
+  }
+  final uri = Uri.tryParse(normalized);
+  final path = (uri?.path ?? normalized).trim().toLowerCase();
+  return path.endsWith('.iso');
 }
 
 String _prettyMediaToken(String value) {

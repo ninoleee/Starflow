@@ -1,7 +1,55 @@
 part of 'webdav_nas_client.dart';
 
-extension _WebDavNasClientStructure on WebDavNasClient {
-  List<_PendingWebDavScannedItem> _applyDirectoryStructureInference(
+List<ExternalScanPendingItem> applyExternalDirectoryStructureInference(
+  List<ExternalScanPendingItem> items, {
+  required MediaSourceConfig source,
+}) {
+  return _ExternalScanStructureModule().apply(
+    items,
+    source: source,
+  );
+}
+
+List<String> _relativeDirectorySegmentsFromRoot({
+  required Uri fileUri,
+  required Uri rootUri,
+}) {
+  final rootSegments = rootUri.pathSegments
+      .where((segment) => segment.isNotEmpty)
+      .toList(growable: false);
+  final fileSegments = fileUri.pathSegments
+      .where((segment) => segment.isNotEmpty)
+      .toList(growable: false);
+
+  var index = 0;
+  while (index < rootSegments.length &&
+      index < fileSegments.length &&
+      rootSegments[index] == fileSegments[index]) {
+    index += 1;
+  }
+  if (index >= fileSegments.length) {
+    return const [];
+  }
+  final relativeSegments = fileSegments.skip(index).toList(growable: false);
+  if (relativeSegments.length <= 1) {
+    return const [];
+  }
+  return relativeSegments
+      .take(relativeSegments.length - 1)
+      .map(_decodePathSegment)
+      .toList(growable: false);
+}
+
+String _decodePathSegment(String raw) {
+  try {
+    return Uri.decodeComponent(raw);
+  } catch (_) {
+    return raw;
+  }
+}
+
+class _ExternalScanStructureModule {
+  List<_PendingWebDavScannedItem> apply(
     List<_PendingWebDavScannedItem> items, {
     required MediaSourceConfig source,
   }) {
@@ -771,44 +819,6 @@ extension _WebDavNasClientStructure on WebDavNasClient {
       return null;
     }
     return int.tryParse(value.substring('__season__:'.length));
-  }
-
-  List<String> _relativeDirectorySegmentsFromRoot({
-    required Uri fileUri,
-    required Uri rootUri,
-  }) {
-    final rootSegments = rootUri.pathSegments
-        .where((segment) => segment.isNotEmpty)
-        .toList(growable: false);
-    final fileSegments = fileUri.pathSegments
-        .where((segment) => segment.isNotEmpty)
-        .toList(growable: false);
-
-    var index = 0;
-    while (index < rootSegments.length &&
-        index < fileSegments.length &&
-        rootSegments[index] == fileSegments[index]) {
-      index += 1;
-    }
-    if (index >= fileSegments.length) {
-      return const [];
-    }
-    final relativeSegments = fileSegments.skip(index).toList(growable: false);
-    if (relativeSegments.length <= 1) {
-      return const [];
-    }
-    return relativeSegments
-        .take(relativeSegments.length - 1)
-        .map(_decodePathSegment)
-        .toList(growable: false);
-  }
-
-  String _decodePathSegment(String raw) {
-    try {
-      return Uri.decodeComponent(raw);
-    } catch (_) {
-      return raw;
-    }
   }
 
   String _segmentsKey(Iterable<String> segments) {

@@ -30,6 +30,7 @@ class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
   late final ScrollController _controller;
   bool _canScrollBackward = false;
   bool _canScrollForward = false;
+  bool _visibilityUpdateScheduled = false;
 
   bool get _showsDesktopButtons {
     if (!widget.enabled) {
@@ -50,17 +51,16 @@ class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
   void initState() {
     super.initState();
     _controller = ScrollController()..addListener(_handleScrollMetricsChanged);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _updateButtonVisibility();
-    });
+    _scheduleButtonVisibilityUpdate();
   }
 
   @override
   void didUpdateWidget(covariant DesktopHorizontalPager oldWidget) {
     super.didUpdateWidget(oldWidget);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _updateButtonVisibility();
-    });
+    if (oldWidget.enabled != widget.enabled ||
+        oldWidget.scrollStep != widget.scrollStep) {
+      _scheduleButtonVisibilityUpdate();
+    }
   }
 
   @override
@@ -75,8 +75,28 @@ class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
     _updateButtonVisibility();
   }
 
+  void _scheduleButtonVisibilityUpdate() {
+    if (_visibilityUpdateScheduled) {
+      return;
+    }
+    _visibilityUpdateScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _visibilityUpdateScheduled = false;
+      _updateButtonVisibility();
+    });
+  }
+
   void _updateButtonVisibility() {
     if (!mounted) {
+      return;
+    }
+    if (!_showsDesktopButtons) {
+      if (_canScrollBackward || _canScrollForward) {
+        setState(() {
+          _canScrollBackward = false;
+          _canScrollForward = false;
+        });
+      }
       return;
     }
     final hasClients = _controller.hasClients;
@@ -117,7 +137,13 @@ class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
 
   @override
   Widget build(BuildContext context) {
-    final child = widget.builder(context, _controller);
+    final child = NotificationListener<ScrollMetricsNotification>(
+      onNotification: (notification) {
+        _updateButtonVisibility();
+        return false;
+      },
+      child: widget.builder(context, _controller),
+    );
     if (!_showsDesktopButtons) {
       return child;
     }

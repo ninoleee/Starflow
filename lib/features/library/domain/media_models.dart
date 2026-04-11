@@ -43,6 +43,7 @@ class MediaSourceConfig {
     this.featuredSectionIds = const [],
     this.webDavStructureInferenceEnabled = false,
     this.webDavSidecarScrapingEnabled = true,
+    this.webDavSeriesScrapeUsesDirectoryTitleOnly = false,
     this.webDavExcludedPathKeywords = const [],
     this.webDavSeriesTitleFilterKeywords = const [],
   });
@@ -62,6 +63,7 @@ class MediaSourceConfig {
   final List<String> featuredSectionIds;
   final bool webDavStructureInferenceEnabled;
   final bool webDavSidecarScrapingEnabled;
+  final bool webDavSeriesScrapeUsesDirectoryTitleOnly;
   final List<String> webDavExcludedPathKeywords;
   final List<String> webDavSeriesTitleFilterKeywords;
 
@@ -101,6 +103,7 @@ class MediaSourceConfig {
     List<String>? featuredSectionIds,
     bool? webDavStructureInferenceEnabled,
     bool? webDavSidecarScrapingEnabled,
+    bool? webDavSeriesScrapeUsesDirectoryTitleOnly,
     List<String>? webDavExcludedPathKeywords,
     List<String>? webDavSeriesTitleFilterKeywords,
   }) {
@@ -122,6 +125,9 @@ class MediaSourceConfig {
           this.webDavStructureInferenceEnabled,
       webDavSidecarScrapingEnabled:
           webDavSidecarScrapingEnabled ?? this.webDavSidecarScrapingEnabled,
+      webDavSeriesScrapeUsesDirectoryTitleOnly:
+          webDavSeriesScrapeUsesDirectoryTitleOnly ??
+              this.webDavSeriesScrapeUsesDirectoryTitleOnly,
       webDavExcludedPathKeywords:
           webDavExcludedPathKeywords ?? this.webDavExcludedPathKeywords,
       webDavSeriesTitleFilterKeywords: webDavSeriesTitleFilterKeywords ??
@@ -146,6 +152,8 @@ class MediaSourceConfig {
       'featuredSectionIds': featuredSectionIds,
       'webDavStructureInferenceEnabled': webDavStructureInferenceEnabled,
       'webDavSidecarScrapingEnabled': webDavSidecarScrapingEnabled,
+      'webDavSeriesScrapeUsesDirectoryTitleOnly':
+          webDavSeriesScrapeUsesDirectoryTitleOnly,
       'webDavExcludedPathKeywords': webDavExcludedPathKeywords,
       'webDavSeriesTitleFilterKeywords': webDavSeriesTitleFilterKeywords,
     };
@@ -174,6 +182,8 @@ class MediaSourceConfig {
           json['webDavStructureInferenceEnabled'] as bool? ?? false,
       webDavSidecarScrapingEnabled:
           json['webDavSidecarScrapingEnabled'] as bool? ?? true,
+      webDavSeriesScrapeUsesDirectoryTitleOnly:
+          json['webDavSeriesScrapeUsesDirectoryTitleOnly'] as bool? ?? false,
       webDavExcludedPathKeywords:
           (json['webDavExcludedPathKeywords'] as List<dynamic>? ?? const [])
               .map((item) => '$item')

@@ -4,6 +4,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/core/navigation/page_activity_mixin.dart';
+import 'package:starflow/core/navigation/retained_async_controller.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
@@ -36,14 +38,61 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
+final _detailEnrichmentSettingsProvider = Provider<_DetailEnrichmentSettings>((
+  ref,
+) {
+  return _DetailEnrichmentSettings(
+    mediaSources: ref.watch(
+      appSettingsProvider.select((settings) => settings.mediaSources),
+    ),
+    quarkCookie: ref.watch(
+      appSettingsProvider
+          .select((settings) => settings.networkStorage.quarkCookie),
+    ),
+    wmdbMetadataMatchEnabled: ref.watch(
+      appSettingsProvider
+          .select((settings) => settings.wmdbMetadataMatchEnabled),
+    ),
+    tmdbMetadataMatchEnabled: ref.watch(
+      appSettingsProvider
+          .select((settings) => settings.tmdbMetadataMatchEnabled),
+    ),
+    tmdbReadAccessToken: ref.watch(
+      appSettingsProvider.select((settings) => settings.tmdbReadAccessToken),
+    ),
+    imdbRatingMatchEnabled: ref.watch(
+      appSettingsProvider.select((settings) => settings.imdbRatingMatchEnabled),
+    ),
+  );
+});
+
+class _DetailEnrichmentSettings {
+  const _DetailEnrichmentSettings({
+    required this.mediaSources,
+    required this.quarkCookie,
+    required this.wmdbMetadataMatchEnabled,
+    required this.tmdbMetadataMatchEnabled,
+    required this.tmdbReadAccessToken,
+    required this.imdbRatingMatchEnabled,
+  });
+
+  final List<MediaSourceConfig> mediaSources;
+  final String quarkCookie;
+  final bool wmdbMetadataMatchEnabled;
+  final bool tmdbMetadataMatchEnabled;
+  final String tmdbReadAccessToken;
+  final bool imdbRatingMatchEnabled;
+}
+
 final enrichedDetailTargetProvider =
     FutureProvider.autoDispose.family<MediaDetailTarget, MediaDetailTarget>((
   ref,
   target,
 ) async {
-  final backgroundWorkSuspended = ref.watch(backgroundWorkSuspendedProvider);
-  final settings = ref.watch(appSettingsProvider);
-  if (backgroundWorkSuspended) {
+  final backgroundEnrichmentSuspended =
+      ref.watch(backgroundEnrichmentSuspendedProvider);
+  final settings = ref.watch(_detailEnrichmentSettingsProvider);
+  if (backgroundEnrichmentSuspended) {
     final localStorageCacheRepository =
         ref.read(localStorageCacheRepositoryProvider);
     final cachedTarget =
@@ -66,7 +115,7 @@ final enrichedDetailTargetProvider =
 
 Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
   required Ref ref,
-  required AppSettings settings,
+  required _DetailEnrichmentSettings settings,
   required MediaDetailTarget target,
 }) async {
   final traceKey = _detailTraceKey(target);
@@ -196,7 +245,7 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
                 target: playback,
               );
     } else {
-      final cookie = settings.networkStorage.quarkCookie.trim();
+      final cookie = settings.quarkCookie.trim();
       if (cookie.isEmpty) {
         DebugTraceOnce.logMetadata(
           traceKey,
@@ -249,7 +298,7 @@ Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
 }
 
 bool _shouldAutoEnrichMetadataTarget({
-  required AppSettings settings,
+  required _DetailEnrichmentSettings settings,
   required MediaDetailTarget target,
 }) {
   if (target.sourceKind == MediaSourceKind.nas &&
@@ -302,7 +351,7 @@ bool _hasRatingLabelKeyword(Iterable<String> labels, String keyword) {
   );
 }
 
-bool _shouldUseStandaloneImdbRating(AppSettings settings) {
+bool _shouldUseStandaloneImdbRating(_DetailEnrichmentSettings settings) {
   return settings.imdbRatingMatchEnabled &&
       (!settings.tmdbMetadataMatchEnabled ||
           settings.tmdbReadAccessToken.trim().isEmpty);
@@ -317,7 +366,7 @@ bool _isEpisodeLikeTarget(MediaDetailTarget target) {
 }
 
 Future<String> _resolveTmdbBackdropForTarget({
-  required AppSettings settings,
+  required _DetailEnrichmentSettings settings,
   required TmdbMetadataClient tmdbMetadataClient,
   required MediaDetailTarget target,
   required TmdbMetadataMatch match,
@@ -377,7 +426,7 @@ List<String> _resolveTmdbExtraBackdropUrlsForTarget({
 }
 
 Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
-  required AppSettings settings,
+  required _DetailEnrichmentSettings settings,
   required MediaDetailTarget target,
   required WmdbMetadataClient wmdbMetadataClient,
   required TmdbMetadataClient tmdbMetadataClient,
@@ -2213,7 +2262,8 @@ class MediaDetailPage extends ConsumerStatefulWidget {
   ConsumerState<MediaDetailPage> createState() => _MediaDetailPageState();
 }
 
-class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
+class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
+    with PageActivityMixin<MediaDetailPage> {
   String _selectedSeasonId = '';
   MediaDetailTarget? _manualOverrideTarget;
   bool _isMatchingLocalResource = false;
@@ -2234,12 +2284,15 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       FocusNode(debugLabel: 'detail-hero-play');
   final TvFocusMemoryController _tvFocusMemoryController =
       TvFocusMemoryController();
+  final RetainedAsyncController<MediaDetailTarget> _retainedTargetAsync =
+      RetainedAsyncController<MediaDetailTarget>();
+  final RetainedAsyncController<_SeriesBrowserState?> _retainedSeriesAsync =
+      RetainedAsyncController<_SeriesBrowserState?>();
 
   @override
   void initState() {
     super.initState();
     _heroArtworkFocusNode.addListener(_handleHeroArtworkFocusChanged);
-    _startDetailTasks();
   }
 
   @override
@@ -2248,7 +2301,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     if (oldWidget.target.itemId != widget.target.itemId ||
         oldWidget.target.title != widget.target.title ||
         oldWidget.target.searchQuery != widget.target.searchQuery) {
-      _cancelActiveLibraryMatch();
+      _cancelDetailTasks(additionalTargets: [oldWidget.target]);
       _selectedSeasonId = '';
       _manualOverrideTarget = null;
       _isMatchingLocalResource = false;
@@ -2260,14 +2313,17 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       _isSearchingSubtitles = false;
       _busySubtitleResultId = null;
       _subtitleSearchStatusMessage = null;
-      _startDetailTasks();
+      _retainedTargetAsync.clear();
+      _retainedSeriesAsync.clear();
+      if (isPageVisible) {
+        _startDetailTasks();
+      }
     }
   }
 
   @override
   void dispose() {
-    _cancelActiveLibraryMatch();
-    _detailSessionId += 1;
+    _cancelDetailTasks(invalidateProviders: false);
     _heroArtworkFocusNode.removeListener(_handleHeroArtworkFocusChanged);
     _heroArtworkFocusNode.dispose();
     _heroPlayFocusNode.dispose();
@@ -2276,9 +2332,67 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     super.dispose();
   }
 
+  @override
+  void onPageBecameActive() {
+    _startDetailTasks();
+  }
+
+  @override
+  void onPageBecameInactive() {
+    _cancelDetailTasks(invalidateProviders: false);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isMatchingLocalResource = false;
+      _isRefreshingMetadata = false;
+      _isSearchingSubtitles = false;
+      _busySubtitleResultId = null;
+    });
+  }
+
   void _cancelActiveLibraryMatch() {
     _activeLibraryMatchController?.cancel();
     _activeLibraryMatchController = null;
+  }
+
+  void _cancelDetailTasks({
+    bool invalidateProviders = true,
+    Iterable<MediaDetailTarget> additionalTargets = const [],
+  }) {
+    _cancelActiveLibraryMatch();
+    _detailSessionId += 1;
+    if (!invalidateProviders) {
+      return;
+    }
+    _invalidateDetailProviders(additionalTargets: additionalTargets);
+  }
+
+  void _invalidateDetailProviders({
+    Iterable<MediaDetailTarget> additionalTargets = const [],
+  }) {
+    final seenKeys = <String>{};
+    final targets = <MediaDetailTarget>[
+      widget.target,
+      if (_manualOverrideTarget != null) _manualOverrideTarget!,
+      ...additionalTargets,
+    ];
+    for (final target in targets) {
+      final providerKey = [
+        target.sourceId.trim(),
+        target.itemId.trim(),
+        target.title.trim(),
+        target.searchQuery.trim(),
+        target.itemType.trim(),
+      ].join('|');
+      if (!seenKeys.add(providerKey)) {
+        continue;
+      }
+      ref.invalidate(enrichedDetailTargetProvider(target));
+      if (target.isSeries) {
+        ref.invalidate(seriesBrowserProvider(target));
+      }
+    }
   }
 
   void _handleHeroArtworkFocusChanged() {
@@ -2310,9 +2424,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   }
 
   void _startDetailTasks() {
+    if (!isPageVisible) {
+      return;
+    }
     final sessionId = ++_detailSessionId;
     Future<void>.microtask(() async {
-      if (ref.read(backgroundWorkSuspendedProvider)) {
+      if (ref.read(backgroundEnrichmentSuspendedProvider)) {
         return;
       }
       if (!_isSessionActive(sessionId)) {
@@ -2330,9 +2447,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
         unawaited(ref.read(seriesBrowserProvider(currentTarget).future));
       }
 
-      final settings = ref.read(appSettingsProvider);
-      if (!settings.detailAutoLibraryMatchEnabled ||
-          ref.read(backgroundWorkSuspendedProvider)) {
+      final detailAutoLibraryMatchEnabled = ref.read(
+        appSettingsProvider.select(
+          (settings) => settings.detailAutoLibraryMatchEnabled,
+        ),
+      );
+      if (!detailAutoLibraryMatchEnabled ||
+          ref.read(backgroundEnrichmentSuspendedProvider)) {
         return;
       }
 
@@ -2340,7 +2461,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
           await ref.read(enrichedDetailTargetProvider(widget.target).future);
       if (!_isSessionActive(sessionId) ||
           _manualOverrideTarget != null ||
-          ref.read(backgroundWorkSuspendedProvider)) {
+          ref.read(backgroundEnrichmentSuspendedProvider)) {
         return;
       }
       if (!_shouldAutoMatchLocalResource(resolved)) {
@@ -2355,7 +2476,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   }
 
   bool _isSessionActive(int sessionId) {
-    return mounted && _detailSessionId == sessionId;
+    return mounted && isPageVisible && _detailSessionId == sessionId;
   }
 
   bool _isLibraryMatchActive(
@@ -2576,43 +2697,55 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       _isRefreshingMetadata = true;
     });
 
-    final settings = ref.read(appSettingsProvider);
-    final nextTarget = await _resolveAutomaticMetadataIfNeeded(
-      settings: settings,
-      target: currentTarget,
-      wmdbMetadataClient: ref.read(wmdbMetadataClientProvider),
-      tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
-      imdbRatingClient: ref.read(imdbRatingClientProvider),
-      forceSearch: true,
-      forceReplace: true,
-    );
-    final changed = _hasMetadataChanged(currentTarget, nextTarget);
-
-    if (!_isSessionActive(activeSessionId)) {
-      return;
-    }
-
-    setState(() {
-      _isRefreshingMetadata = false;
-      if (changed) {
-        _manualOverrideTarget = nextTarget;
-      }
-    });
-
-    if (changed) {
-      unawaited(
-        ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
-              seedTarget: currentTarget,
-              resolvedTarget: nextTarget,
-            ),
+    var changed = false;
+    try {
+      final settings = ref.read(_detailEnrichmentSettingsProvider);
+      final nextTarget = await _resolveAutomaticMetadataIfNeeded(
+        settings: settings,
+        target: currentTarget,
+        wmdbMetadataClient: ref.read(wmdbMetadataClientProvider),
+        tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
+        imdbRatingClient: ref.read(imdbRatingClientProvider),
+        forceSearch: true,
+        forceReplace: true,
       );
-    }
+      changed = _hasMetadataChanged(currentTarget, nextTarget);
 
-    if (!showFeedback) {
+      if (!_isSessionActive(activeSessionId)) {
+        return;
+      }
+
+      setState(() {
+        if (changed) {
+          _manualOverrideTarget = nextTarget;
+        }
+      });
+
+      if (changed) {
+        unawaited(
+          ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+                seedTarget: currentTarget,
+                resolvedTarget: nextTarget,
+              ),
+        );
+      }
+    } catch (error) {
+      if (!_isSessionActive(activeSessionId) || !showFeedback || !mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('更新影片信息失败：$error')),
+      );
       return;
+    } finally {
+      if (_isSessionActive(activeSessionId) && _isRefreshingMetadata) {
+        setState(() {
+          _isRefreshingMetadata = false;
+        });
+      }
     }
 
-    if (!mounted) {
+    if (!_isSessionActive(activeSessionId) || !showFeedback || !mounted) {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
@@ -3012,6 +3145,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     MediaDetailTarget target, {
     bool showFeedback = true,
   }) async {
+    final activeSessionId = _detailSessionId;
+    final messenger = ScaffoldMessenger.maybeOf(context);
     final playbackTarget = target.playbackTarget;
     final query = playbackTarget == null
         ? ''
@@ -3038,10 +3173,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
         },
       );
       if (showFeedback && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger?.showSnackBar(
           const SnackBar(content: Text('当前资源还不能直接播放，暂时无法搜索字幕')),
         );
       }
+      return;
+    }
+    if (!_isSessionActive(activeSessionId)) {
       return;
     }
     if (_isSearchingSubtitles) {
@@ -3049,16 +3187,18 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       return;
     }
 
-    final sources = ref.read(appSettingsProvider).onlineSubtitleSources;
+    final sources = ref.read(
+      appSettingsProvider.select((settings) => settings.onlineSubtitleSources),
+    );
     if (sources.isEmpty) {
       subtitleSearchTrace('detail.search.skip-empty-sources');
-      if (mounted) {
+      if (_isSessionActive(activeSessionId)) {
         setState(() {
           _subtitleSearchStatusMessage = '请先在设置里启用至少一个在线字幕来源';
         });
       }
-      if (showFeedback && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (showFeedback && _isSessionActive(activeSessionId)) {
+        messenger?.showSnackBar(
           const SnackBar(content: Text('请先在设置里启用至少一个在线字幕来源')),
         );
       }
@@ -3073,13 +3213,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
           'seriesTitle': playbackTarget.seriesTitle.trim(),
         },
       );
-      if (mounted) {
+      if (_isSessionActive(activeSessionId)) {
         setState(() {
           _subtitleSearchStatusMessage = '缺少片名信息，暂时无法搜索字幕';
         });
       }
-      if (showFeedback && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (showFeedback && _isSessionActive(activeSessionId)) {
+        messenger?.showSnackBar(
           const SnackBar(content: Text('缺少片名信息，暂时无法搜索字幕')),
         );
       }
@@ -3089,7 +3229,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     final previousChoices = _subtitleSearchChoices;
     final previousSelectedId = _selectedSubtitleSearchChoice?.result.id;
 
-    if (mounted) {
+    if (_isSessionActive(activeSessionId)) {
       setState(() {
         _isSearchingSubtitles = true;
         _subtitleSearchStatusMessage = null;
@@ -3137,7 +3277,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
           ? -1
           : nextChoices
               .indexWhere((item) => item.result.id == previousSelectedId);
-      if (!mounted) {
+      if (!_isSessionActive(activeSessionId)) {
         return;
       }
       setState(() {
@@ -3155,10 +3295,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
             subtitleSearchChoices: nextChoices,
             selectedSubtitleSearchIndex: _selectedSubtitleSearchIndex,
           );
-      if (!showFeedback || !mounted) {
+      if (!showFeedback || !_isSessionActive(activeSessionId)) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger?.showSnackBar(
         SnackBar(
           content: Text(
             nextChoices.isEmpty
@@ -3177,7 +3317,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
         error: error,
         stackTrace: stackTrace,
       );
-      if (!mounted) {
+      if (!_isSessionActive(activeSessionId)) {
         return;
       }
       setState(() {
@@ -3185,7 +3325,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
         _subtitleSearchStatusMessage = '$error';
       });
       if (showFeedback) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger?.showSnackBar(
           SnackBar(content: Text('字幕搜索失败：$error')),
         );
       }
@@ -3240,12 +3380,17 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     MediaDetailTarget target,
     int index,
   ) async {
+    final activeSessionId = _detailSessionId;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (!_isSessionActive(activeSessionId)) {
+      return;
+    }
     if (_isSearchingSubtitles || _subtitleSearchChoices.isEmpty) {
       return;
     }
     final resolvedIndex = _normalizeSubtitleSearchIndex(index);
     if (resolvedIndex < 0) {
-      if (!mounted) {
+      if (!_isSessionActive(activeSessionId)) {
         return;
       }
       setState(() {
@@ -3262,7 +3407,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
 
     final choice = _subtitleSearchChoices[resolvedIndex];
     if (choice.selection?.canApply == true) {
-      if (!mounted) {
+      if (!_isSessionActive(activeSessionId)) {
         return;
       }
       setState(() {
@@ -3274,8 +3419,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
             subtitleSearchChoices: _subtitleSearchChoices,
             selectedSubtitleSearchIndex: resolvedIndex,
           );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (_isSessionActive(activeSessionId)) {
+        messenger?.showSnackBar(
           const SnackBar(content: Text('播放时会自动加载这条外挂字幕')),
         );
       }
@@ -3293,7 +3438,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
       return;
     }
 
-    if (mounted) {
+    if (_isSessionActive(activeSessionId)) {
       setState(() {
         _busySubtitleResultId = choice.result.id;
         _subtitleSearchStatusMessage = null;
@@ -3328,7 +3473,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
           else
             _subtitleSearchChoices[i],
       ];
-      if (!mounted) {
+      if (!_isSessionActive(activeSessionId)) {
         return;
       }
       setState(() {
@@ -3342,8 +3487,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
             subtitleSearchChoices: nextChoices,
             selectedSubtitleSearchIndex: resolvedIndex,
           );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (_isSessionActive(activeSessionId)) {
+        messenger?.showSnackBar(
           const SnackBar(content: Text('字幕已缓存，播放时会自动加载')),
         );
       }
@@ -3364,14 +3509,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
         error: error,
         stackTrace: stackTrace,
       );
-      if (!mounted) {
+      if (!_isSessionActive(activeSessionId)) {
         return;
       }
       setState(() {
         _busySubtitleResultId = null;
         _subtitleSearchStatusMessage = '$error';
       });
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger?.showSnackBar(
         SnackBar(content: Text('加载字幕失败：$error')),
       );
     }
@@ -3568,10 +3713,29 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   @override
   Widget build(BuildContext context) {
     final seedTarget = _manualOverrideTarget ?? widget.target;
-    final targetAsync = ref.watch(enrichedDetailTargetProvider(seedTarget));
+    final watchedTargetAsync = isPageVisible
+        ? ref.watch(enrichedDetailTargetProvider(seedTarget))
+        : null;
+    final targetAsync = _retainedTargetAsync.resolve(
+      activeValue: watchedTargetAsync,
+      fallbackValue: AsyncValue.data(seedTarget),
+    );
     final target = targetAsync.valueOrNull ?? seedTarget;
     final playbackTargetDecorated = _decorateTargetWithSelectedSubtitle(target);
-    final seriesAsync = ref.watch(seriesBrowserProvider(target));
+    if (!target.isSeries) {
+      _retainedSeriesAsync.clear();
+    }
+    final watchedSeriesAsync = target.isSeries && isPageVisible
+        ? ref.watch(seriesBrowserProvider(target))
+        : null;
+    final seriesAsync = target.isSeries
+        ? _retainedSeriesAsync.resolve(
+            activeValue: watchedSeriesAsync,
+            fallbackValue: const AsyncLoading<_SeriesBrowserState?>(),
+          )
+        : const AsyncData<_SeriesBrowserState?>(
+            null,
+          );
     final isTelevision = ref.watch(isTelevisionProvider).valueOrNull ?? false;
     final performanceSlimDetailHeroEnabled = ref.watch(
       appSettingsProvider.select(
@@ -4030,7 +4194,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                         ? TvAdaptiveButton(
                                             label: _isMatchingLocalResource
                                                 ? '匹配中...'
-                                                : '重新匹配资源',
+                                                : '匹配资源库',
                                             icon: Icons.link_rounded,
                                             focusId:
                                                 'detail:resource:match-library',
@@ -4061,7 +4225,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                                             label: Text(
                                               _isMatchingLocalResource
                                                   ? '匹配中...'
-                                                  : '重新匹配资源',
+                                                  : '匹配资源库',
                                             ),
                                             style: TextButton.styleFrom(
                                               foregroundColor: Colors.white,
@@ -4347,9 +4511,11 @@ bool _isMeaningfulDurationLabel(String label) {
 
 String _overviewSectionTitle(MediaDetailTarget target) {
   if (target.itemType.trim().toLowerCase() == 'episode') {
-    final seriesTitle = target.playbackTarget?.seriesTitle.trim() ?? '';
-    if (seriesTitle.isNotEmpty) {
-      return seriesTitle;
+    final episodeTitle = target.title.trim().isNotEmpty
+        ? target.title.trim()
+        : (target.playbackTarget?.title.trim() ?? '');
+    if (episodeTitle.isNotEmpty) {
+      return episodeTitle;
     }
   }
   final title = target.title.trim();
@@ -4908,8 +5074,7 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
       _episodeCardWidth + _episodeCardSpacing;
 
   final Map<String, FocusNode> _seasonFocusNodes = <String, FocusNode>{};
-  final Map<String, FocusNode> _episodePlayFocusNodes = <String, FocusNode>{};
-  final Map<String, FocusNode> _episodeDetailFocusNodes = <String, FocusNode>{};
+  final Map<String, FocusNode> _episodeFocusNodes = <String, FocusNode>{};
 
   @override
   void initState() {
@@ -4928,10 +5093,7 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
     for (final node in _seasonFocusNodes.values) {
       node.dispose();
     }
-    for (final node in _episodePlayFocusNodes.values) {
-      node.dispose();
-    }
-    for (final node in _episodeDetailFocusNodes.values) {
+    for (final node in _episodeFocusNodes.values) {
       node.dispose();
     }
     super.dispose();
@@ -4952,22 +5114,14 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
       for (var index = 0; index < group.episodes.length; index++) {
         final key = _episodeNodeKey(group, group.episodes[index], index);
         episodeKeys.add(key);
-        _episodePlayFocusNodes.putIfAbsent(
+        _episodeFocusNodes.putIfAbsent(
           key,
-          () => FocusNode(debugLabel: 'detail-episode-play-$key'),
-        );
-        _episodeDetailFocusNodes.putIfAbsent(
-          key,
-          () => FocusNode(debugLabel: 'detail-episode-detail-$key'),
+          () => FocusNode(debugLabel: 'detail-episode-$key'),
         );
       }
     }
     _disposeRemovedFocusNodes(
-      _episodePlayFocusNodes,
-      activeKeys: episodeKeys,
-    );
-    _disposeRemovedFocusNodes(
-      _episodeDetailFocusNodes,
+      _episodeFocusNodes,
       activeKeys: episodeKeys,
     );
   }
@@ -5020,12 +5174,7 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
   bool _focusFirstEpisodeSlot(_EpisodeGroup selectedGroup) {
     final keys = _episodeNodeKeysForGroup(selectedGroup);
     for (final key in keys) {
-      if (_requestDetailFocus([_episodePlayFocusNodes[key]])) {
-        return true;
-      }
-    }
-    for (final key in keys) {
-      if (_requestDetailFocus([_episodeDetailFocusNodes[key]])) {
+      if (_requestDetailFocus([_episodeFocusNodes[key]])) {
         return true;
       }
     }
@@ -5202,23 +5351,21 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
               itemBuilder: (context, index) {
                 final episode = selectedGroup.episodes[index];
                 final nodeKey = episodeNodeKeys[index];
-                final playFocusNode = _episodePlayFocusNodes[nodeKey];
-                final detailFocusNode = _episodeDetailFocusNodes[nodeKey];
+                final episodeFocusNode = _episodeFocusNodes[nodeKey];
                 return SizedBox(
                   width: _episodeCardWidth,
                   child: _EpisodeCard(
                     item: episode,
                     seriesTarget: widget.seriesTarget,
-                    autoplayFocusNode: playFocusNode,
-                    detailFocusNode: detailFocusNode,
-                    autoplayDirectionalHandler: (direction) {
+                    focusNode: episodeFocusNode,
+                    directionalHandler: (direction) {
                       switch (direction) {
                         case TraversalDirection.left:
                           return _moveEpisodeRow(
                             keys: episodeNodeKeys,
                             currentIndex: index,
                             step: -1,
-                            nodes: _episodePlayFocusNodes,
+                            nodes: _episodeFocusNodes,
                             scrollController: controller,
                           );
                         case TraversalDirection.right:
@@ -5226,39 +5373,13 @@ class _EpisodeBrowserState extends State<_EpisodeBrowser> {
                             keys: episodeNodeKeys,
                             currentIndex: index,
                             step: 1,
-                            nodes: _episodePlayFocusNodes,
-                            scrollController: controller,
-                          );
-                        case TraversalDirection.down:
-                          return _requestDetailFocus([detailFocusNode]);
-                        case TraversalDirection.up:
-                          return selectedSeasonFocusNode != null &&
-                              _requestDetailFocus([selectedSeasonFocusNode]);
-                      }
-                    },
-                    detailDirectionalHandler: (direction) {
-                      switch (direction) {
-                        case TraversalDirection.left:
-                          return _moveEpisodeRow(
-                            keys: episodeNodeKeys,
-                            currentIndex: index,
-                            step: -1,
-                            nodes: _episodeDetailFocusNodes,
-                            scrollController: controller,
-                          );
-                        case TraversalDirection.right:
-                          return _moveEpisodeRow(
-                            keys: episodeNodeKeys,
-                            currentIndex: index,
-                            step: 1,
-                            nodes: _episodeDetailFocusNodes,
+                            nodes: _episodeFocusNodes,
                             scrollController: controller,
                           );
                         case TraversalDirection.up:
-                          return _requestDetailFocus([
-                            playFocusNode,
-                            selectedSeasonFocusNode,
-                          ]);
+                          return selectedSeasonFocusNode != null
+                              ? _requestDetailFocus([selectedSeasonFocusNode])
+                              : false;
                         case TraversalDirection.down:
                           return false;
                       }
@@ -5310,20 +5431,16 @@ class _EpisodeCard extends ConsumerWidget {
   const _EpisodeCard({
     required this.item,
     required this.seriesTarget,
-    this.autoplayFocusNode,
-    this.detailFocusNode,
-    this.autoplayDirectionalHandler,
-    this.detailDirectionalHandler,
+    this.focusNode,
+    this.directionalHandler,
     this.focusId,
     this.autofocus = false,
   });
 
   final MediaItem item;
   final MediaDetailTarget seriesTarget;
-  final FocusNode? autoplayFocusNode;
-  final FocusNode? detailFocusNode;
-  final bool Function(TraversalDirection direction)? autoplayDirectionalHandler;
-  final bool Function(TraversalDirection direction)? detailDirectionalHandler;
+  final FocusNode? focusNode;
+  final bool Function(TraversalDirection direction)? directionalHandler;
   final String? focusId;
   final bool autofocus;
 
@@ -5333,19 +5450,6 @@ class _EpisodeCard extends ConsumerWidget {
         ref.watch(playbackEntryForMediaItemProvider(item)).valueOrNull;
     final badgeText = _episodeBadgeText(item, playbackEntry);
     final summary = _episodeSummary(item);
-    final onPlay = item.isPlayable
-        ? () {
-            context.pushNamed(
-              'player',
-              extra: item.isPlayable
-                  ? _itemToPlaybackTarget(
-                      item,
-                      seriesTarget: seriesTarget,
-                    )
-                  : null,
-            );
-          }
-        : null;
     void onOpenDetail() {
       context.pushNamed(
         'detail',
@@ -5357,28 +5461,27 @@ class _EpisodeCard extends ConsumerWidget {
     }
 
     final effectiveFocusId = focusId?.trim() ?? '';
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
+    return TvDirectionalActionPanel(
+      onDirection: directionalHandler ?? (direction) => false,
+      child: TvFocusableAction(
+        onPressed: onOpenDetail,
+        focusNode: focusNode,
+        focusId: effectiveFocusId.isEmpty ? null : effectiveFocusId,
+        autofocus: autofocus,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.06),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TvDirectionalActionPanel(
-            onDirection: autoplayDirectionalHandler ?? (direction) => false,
-            child: TvFocusableAction(
-              onPressed: onPlay,
-              focusNode: autoplayFocusNode,
-              focusId:
-                  effectiveFocusId.isEmpty ? null : '$effectiveFocusId:play',
-              autofocus: autofocus && onPlay != null,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
-              child: ClipRRect(
+        visualStyle: TvFocusVisualStyle.floating,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.06),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(24),
                 ),
@@ -5453,16 +5556,12 @@ class _EpisodeCard extends ConsumerWidget {
                           ),
                         ),
                       ),
-                      Positioned(
+                      const Positioned(
                         right: 12,
                         bottom: 12,
                         child: Icon(
-                          item.isPlayable
-                              ? Icons.play_circle_fill_rounded
-                              : Icons.lock_outline_rounded,
-                          color: item.isPlayable
-                              ? Colors.white
-                              : Colors.white.withValues(alpha: 0.42),
+                          Icons.chevron_right_rounded,
+                          color: Colors.white,
                           size: 28,
                         ),
                       ),
@@ -5470,22 +5569,7 @@ class _EpisodeCard extends ConsumerWidget {
                   ),
                 ),
               ),
-            ),
-          ),
-          Expanded(
-            child: TvDirectionalActionPanel(
-              onDirection: detailDirectionalHandler ?? (direction) => false,
-              child: TvFocusableAction(
-                onPressed: onOpenDetail,
-                focusNode: detailFocusNode,
-                focusId: effectiveFocusId.isEmpty
-                    ? null
-                    : '$effectiveFocusId:detail',
-                autofocus: autofocus && onPlay == null,
-                borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(24),
-                ),
-                visualStyle: TvFocusVisualStyle.subtle,
+              Expanded(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
                   child: Text(
@@ -5500,9 +5584,9 @@ class _EpisodeCard extends ConsumerWidget {
                   ),
                 ),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
