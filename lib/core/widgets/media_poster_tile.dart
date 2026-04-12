@@ -22,7 +22,7 @@ class MediaPosterTile extends ConsumerWidget {
     this.focusId,
     this.focusNode,
     this.autofocus = false,
-    this.tvPosterFocusOutlineOnly = false,
+    this.tvPosterFocusOutlineOnly = true,
   });
 
   final String title;
@@ -92,41 +92,43 @@ class MediaPosterTile extends ConsumerWidget {
     }
 
     Widget buildPosterFrame() {
-      final posterFrame = ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(child: posterChild),
-            if (imageBadgeText.trim().isNotEmpty)
-              Positioned(
-                left: 10,
-                bottom: 10,
-                child: _PosterImageBadge(
-                  text: imageBadgeText,
-                  textStyle: theme.textTheme.labelSmall?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0,
-                    fontSize: 10,
+      final posterFrame = RepaintBoundary(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(child: posterChild),
+              if (imageBadgeText.trim().isNotEmpty)
+                Positioned(
+                  left: 10,
+                  bottom: 10,
+                  child: _PosterImageBadge(
+                    text: imageBadgeText,
+                    textStyle: theme.textTheme.labelSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0,
+                      fontSize: 10,
+                    ),
                   ),
                 ),
-              ),
-            if (imageTopRightBadgeText.trim().isNotEmpty)
-              Positioned(
-                top: 10,
-                right: 10,
-                child: _PosterImageBadge(
-                  text: imageTopRightBadgeText,
-                  textStyle: theme.textTheme.labelSmall?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0,
-                    fontSize: 10,
+              if (imageTopRightBadgeText.trim().isNotEmpty)
+                Positioned(
+                  top: 10,
+                  right: 10,
+                  child: _PosterImageBadge(
+                    text: imageTopRightBadgeText,
+                    textStyle: theme.textTheme.labelSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0,
+                      fontSize: 10,
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       );
       if (!enablePosterFocusOutline) {
@@ -149,8 +151,8 @@ class MediaPosterTile extends ConsumerWidget {
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.34),
-                      width: 1.35,
+                      color: Colors.white,
+                      width: 2.4,
                     ),
                   ),
                 ),

@@ -723,6 +723,7 @@ class _PersonCreditsGrid extends StatelessWidget {
               focusId:
                   'person-credits:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
               autofocus: index == 0,
+              tvPosterFocusOutlineOnly: true,
               title: item.title,
               subtitle: item.subtitle,
               imageBadgeText: item.ratingLabel,

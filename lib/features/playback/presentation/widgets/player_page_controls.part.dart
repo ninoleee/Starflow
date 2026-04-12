@@ -413,31 +413,137 @@ extension _PlayerPageStateControls on _PlayerPageState {
     VideoState state, {
     required AppSettings settings,
   }) {
+    final materialThemeData = _buildAdaptiveMaterialControlsThemeData(
+      state.context,
+      settings: settings,
+      fullscreen: false,
+      state: state,
+    );
+    final materialFullscreenThemeData = _buildAdaptiveMaterialControlsThemeData(
+      state.context,
+      settings: settings,
+      fullscreen: true,
+      state: state,
+    );
+    final desktopThemeData = _buildAdaptiveDesktopControlsThemeData(
+      state.context,
+      settings: settings,
+      fullscreen: false,
+      state: state,
+    );
+    final desktopFullscreenThemeData = _buildAdaptiveDesktopControlsThemeData(
+      state.context,
+      settings: settings,
+      fullscreen: true,
+      state: state,
+    );
+    return MaterialVideoControlsTheme(
+      normal: materialThemeData,
+      fullscreen: materialFullscreenThemeData,
+      child: MaterialDesktopVideoControlsTheme(
+        normal: desktopThemeData,
+        fullscreen: desktopFullscreenThemeData,
+        child: AdaptiveVideoControls(state),
+      ),
+    );
+  }
+
+  MaterialVideoControlsThemeData _buildAdaptiveMaterialControlsThemeData(
+    BuildContext context, {
+    required AppSettings settings,
+    required bool fullscreen,
+    required VideoState state,
+  }) {
     final materialTopButtonBar = _buildAdaptiveMaterialTopButtonBar(
       state,
       settings: settings,
     );
+    final isPortrait = _shouldInsetAdaptivePortraitControls(context);
+    final viewPadding = MediaQuery.viewPaddingOf(context);
+    const portraitTopInset = 18.0;
+    const portraitBottomInset = 28.0;
+    const portraitFullscreenBottomInset = 64.0;
+    final controlsPadding = isPortrait
+        ? EdgeInsets.fromLTRB(
+            viewPadding.left,
+            viewPadding.top + portraitTopInset,
+            viewPadding.right,
+            viewPadding.bottom + portraitBottomInset,
+          )
+        : null;
+    final bottomInset = isPortrait
+        ? fullscreen
+            ? portraitFullscreenBottomInset
+            : portraitBottomInset
+        : fullscreen
+            ? 42.0
+            : 0.0;
+    final seekBarMargin = isPortrait
+        ? EdgeInsets.only(
+            left: 16,
+            right: 16,
+            bottom: bottomInset,
+          )
+        : fullscreen
+            ? const EdgeInsets.only(
+                left: 16,
+                right: 16,
+                bottom: 42,
+              )
+            : EdgeInsets.zero;
+    return MaterialVideoControlsThemeData(
+      padding: controlsPadding,
+      topButtonBar: materialTopButtonBar,
+      topButtonBarMargin: EdgeInsets.fromLTRB(16, isPortrait ? 12 : 0, 16, 0),
+      bottomButtonBarMargin: EdgeInsets.only(
+        left: 16,
+        right: 8,
+        bottom: bottomInset,
+      ),
+      seekBarMargin: seekBarMargin,
+    );
+  }
+
+  MaterialDesktopVideoControlsThemeData _buildAdaptiveDesktopControlsThemeData(
+    BuildContext context, {
+    required AppSettings settings,
+    required bool fullscreen,
+    required VideoState state,
+  }) {
     final desktopTopButtonBar = _buildAdaptiveDesktopTopButtonBar(
       state,
       settings: settings,
     );
-    return MaterialVideoControlsTheme(
-      normal: MaterialVideoControlsThemeData(
-        topButtonBar: materialTopButtonBar,
-      ),
-      fullscreen: MaterialVideoControlsThemeData(
-        topButtonBar: materialTopButtonBar,
-      ),
-      child: MaterialDesktopVideoControlsTheme(
-        normal: MaterialDesktopVideoControlsThemeData(
-          topButtonBar: desktopTopButtonBar,
-        ),
-        fullscreen: MaterialDesktopVideoControlsThemeData(
-          topButtonBar: desktopTopButtonBar,
-        ),
-        child: AdaptiveVideoControls(state),
+    final isPortrait = _shouldInsetAdaptivePortraitControls(context);
+    final viewPadding = MediaQuery.viewPaddingOf(context);
+    const portraitTopInset = 18.0;
+    const portraitBottomInset = 28.0;
+    final controlsPadding = isPortrait
+        ? EdgeInsets.fromLTRB(
+            viewPadding.left,
+            viewPadding.top + portraitTopInset,
+            viewPadding.right,
+            viewPadding.bottom + portraitBottomInset,
+          )
+        : null;
+    final bottomInset = isPortrait ? portraitBottomInset : 0.0;
+    return MaterialDesktopVideoControlsThemeData(
+      padding: controlsPadding,
+      topButtonBar: desktopTopButtonBar,
+      topButtonBarMargin: EdgeInsets.fromLTRB(16, isPortrait ? 12 : 0, 16, 0),
+      bottomButtonBarMargin: EdgeInsets.fromLTRB(16, 0, 16, bottomInset),
+      seekBarMargin: EdgeInsets.fromLTRB(
+        16,
+        0,
+        16,
+        bottomInset,
       ),
     );
+  }
+
+  bool _shouldInsetAdaptivePortraitControls(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    return size.height > size.width;
   }
 
   List<Widget> _buildAdaptiveMaterialTopButtonBar(

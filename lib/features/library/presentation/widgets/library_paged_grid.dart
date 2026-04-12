@@ -117,6 +117,7 @@ class LibraryPagedGrid extends ConsumerWidget {
                     item: item,
                   ),
                   autofocus: index == 0,
+                  tvPosterFocusOutlineOnly: true,
                   title: item.title,
                   subtitle: item.year > 0 ? '${item.year}' : '',
                   posterUrl: posterAsset.url,
