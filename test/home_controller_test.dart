@@ -666,6 +666,78 @@ void main() {
       expect(cacheRepository.loadDetailTargetCallCount, 0);
     });
   });
+
+  group('HomeFeedRepository applyCachedSection', () {
+    test('reuses poster rail section when cache overlay is unchanged',
+        () async {
+      const section = HomeSectionViewModel(
+        id: 'module-a',
+        title: '最近新增',
+        subtitle: '',
+        emptyMessage: '无',
+        layout: HomeSectionLayout.posterRail,
+        items: [
+          HomeCardViewModel(
+            id: 'movie-1',
+            title: 'Original Title',
+            subtitle: '2024',
+            posterUrl: '',
+            detailTarget: MediaDetailTarget(
+              title: 'Original Title',
+              posterUrl: '',
+              overview: '',
+              sourceId: 'emby-main',
+              itemId: 'movie-1',
+              itemType: 'movie',
+            ),
+          ),
+        ],
+      );
+      final cacheRepository = _FakeLocalStorageCacheRepository();
+
+      final resolved = await const HomeFeedRepository().applyCachedSection(
+        section: section,
+        localStorageCacheRepository: cacheRepository,
+      );
+
+      expect(identical(resolved, section), isTrue);
+      expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
+    });
+
+    test('reuses carousel section when cache overlay is unchanged', () async {
+      const section = HomeSectionViewModel(
+        id: 'module-b',
+        title: '豆瓣轮播',
+        subtitle: '',
+        emptyMessage: '无',
+        layout: HomeSectionLayout.carousel,
+        carouselItems: [
+          HomeCarouselItemViewModel(
+            id: 'douban-1',
+            title: 'Movie',
+            subtitle: '2024',
+            imageUrl: '',
+            detailTarget: MediaDetailTarget(
+              title: 'Movie',
+              posterUrl: '',
+              overview: '',
+              doubanId: '1292052',
+              itemType: 'movie',
+            ),
+          ),
+        ],
+      );
+      final cacheRepository = _FakeLocalStorageCacheRepository();
+
+      final resolved = await const HomeFeedRepository().applyCachedSection(
+        section: section,
+        localStorageCacheRepository: cacheRepository,
+      );
+
+      expect(identical(resolved, section), isTrue);
+      expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
+    });
+  });
 }
 
 class _FakeMediaRepository implements MediaRepository {

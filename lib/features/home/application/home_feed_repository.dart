@@ -188,23 +188,19 @@ Future<HomeSectionViewModel> _applyCachedHomeSection({
           items.map((item) => item.detailTarget).toList(growable: false),
       localStorageCacheRepository: localStorageCacheRepository,
     );
-    final mergedItems = <HomeCardViewModel>[];
+    List<HomeCardViewModel>? mergedItems;
     for (var index = 0; index < items.length; index += 1) {
       final item = items[index];
       final mergedTarget = mergedTargets[index];
-      mergedItems.add(
-        HomeCardViewModel(
-          id: item.id,
-          title: mergedTarget.title.trim().isNotEmpty
-              ? mergedTarget.title
-              : item.title,
-          subtitle: item.subtitle,
-          posterUrl: mergedTarget.posterUrl.trim().isNotEmpty
-              ? mergedTarget.posterUrl
-              : item.posterUrl,
-          detailTarget: mergedTarget,
-        ),
-      );
+      final mergedItem = _mergeCachedHomeCardItem(item, mergedTarget);
+      if (mergedItems == null && identical(mergedItem, item)) {
+        continue;
+      }
+      mergedItems ??= items.take(index).toList(growable: true);
+      mergedItems.add(mergedItem);
+    }
+    if (mergedItems == null) {
+      return section;
     }
     return HomeSectionViewModel(
       id: section.id,
@@ -212,7 +208,7 @@ Future<HomeSectionViewModel> _applyCachedHomeSection({
       subtitle: section.subtitle,
       emptyMessage: section.emptyMessage,
       layout: section.layout,
-      items: mergedItems,
+      items: List<HomeCardViewModel>.unmodifiable(mergedItems),
       carouselItems: section.carouselItems,
       viewAllTarget: section.viewAllTarget,
     );
@@ -227,26 +223,19 @@ Future<HomeSectionViewModel> _applyCachedHomeSection({
         carouselItems.map((item) => item.detailTarget).toList(growable: false),
     localStorageCacheRepository: localStorageCacheRepository,
   );
-  final mergedCarouselItems = <HomeCarouselItemViewModel>[];
+  List<HomeCarouselItemViewModel>? mergedCarouselItems;
   for (var index = 0; index < carouselItems.length; index += 1) {
     final item = carouselItems[index];
     final mergedTarget = mergedTargets[index];
-    final imageUrl = item.imageUrl.trim().isNotEmpty
-        ? item.imageUrl
-        : (mergedTarget.posterUrl.trim().isNotEmpty
-            ? mergedTarget.posterUrl
-            : item.imageUrl);
-    mergedCarouselItems.add(
-      HomeCarouselItemViewModel(
-        id: item.id,
-        title: mergedTarget.title.trim().isNotEmpty
-            ? mergedTarget.title
-            : item.title,
-        subtitle: item.subtitle,
-        imageUrl: imageUrl,
-        detailTarget: mergedTarget,
-      ),
-    );
+    final mergedItem = _mergeCachedHomeCarouselItem(item, mergedTarget);
+    if (mergedCarouselItems == null && identical(mergedItem, item)) {
+      continue;
+    }
+    mergedCarouselItems ??= carouselItems.take(index).toList(growable: true);
+    mergedCarouselItems.add(mergedItem);
+  }
+  if (mergedCarouselItems == null) {
+    return section;
   }
   return HomeSectionViewModel(
     id: section.id,
@@ -255,7 +244,9 @@ Future<HomeSectionViewModel> _applyCachedHomeSection({
     emptyMessage: section.emptyMessage,
     layout: section.layout,
     items: section.items,
-    carouselItems: mergedCarouselItems,
+    carouselItems: List<HomeCarouselItemViewModel>.unmodifiable(
+      mergedCarouselItems,
+    ),
     viewAllTarget: section.viewAllTarget,
   );
 }
@@ -269,15 +260,23 @@ Future<List<MediaDetailTarget>> _resolveCachedHomeDetailTargetsBatch({
   }
   final cachedTargets =
       await localStorageCacheRepository.loadDetailTargetsBatch(seedTargets);
-  return List<MediaDetailTarget>.generate(seedTargets.length, (index) {
+  List<MediaDetailTarget>? resolved;
+  for (var index = 0; index < seedTargets.length; index += 1) {
     final seedTarget = seedTargets[index];
     final cachedTarget =
         index < cachedTargets.length ? cachedTargets[index] : null;
-    if (cachedTarget == null) {
-      return seedTarget;
+    final mergedTarget = cachedTarget == null
+        ? seedTarget
+        : _mergeCachedHomeDetailTarget(seedTarget, cachedTarget);
+    if (resolved == null && identical(mergedTarget, seedTarget)) {
+      continue;
     }
-    return _mergeCachedHomeDetailTarget(seedTarget, cachedTarget);
-  }, growable: false);
+    resolved ??= seedTargets.take(index).toList(growable: true);
+    resolved.add(mergedTarget);
+  }
+  return resolved == null
+      ? seedTargets
+      : List<MediaDetailTarget>.unmodifiable(resolved);
 }
 
 MediaDetailTarget _mergeCachedHomeDetailTarget(
@@ -302,110 +301,334 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
       : (seed.posterHeaders.isNotEmpty
           ? seed.posterHeaders
           : cached.posterHeaders);
+  final resolvedTitle =
+      cached.title.trim().isNotEmpty ? cached.title : seed.title;
+  final resolvedBackdropUrl = seed.backdropUrl.trim().isNotEmpty
+      ? seed.backdropUrl
+      : cached.backdropUrl;
+  final resolvedBackdropHeaders = seed.backdropHeaders.isNotEmpty
+      ? seed.backdropHeaders
+      : cached.backdropHeaders;
+  final resolvedLogoUrl =
+      seed.logoUrl.trim().isNotEmpty ? seed.logoUrl : cached.logoUrl;
+  final resolvedLogoHeaders =
+      seed.logoHeaders.isNotEmpty ? seed.logoHeaders : cached.logoHeaders;
+  final resolvedBannerUrl =
+      seed.bannerUrl.trim().isNotEmpty ? seed.bannerUrl : cached.bannerUrl;
+  final resolvedBannerHeaders =
+      seed.bannerHeaders.isNotEmpty ? seed.bannerHeaders : cached.bannerHeaders;
+  final resolvedExtraBackdropUrls = seed.extraBackdropUrls.isNotEmpty
+      ? seed.extraBackdropUrls
+      : cached.extraBackdropUrls;
+  final resolvedExtraBackdropHeaders = seed.extraBackdropHeaders.isNotEmpty
+      ? seed.extraBackdropHeaders
+      : cached.extraBackdropHeaders;
+  final resolvedOverview =
+      seed.hasUsefulOverview ? seed.overview : cached.overview;
+  final resolvedDurationLabel = seed.durationLabel.trim().isNotEmpty
+      ? seed.durationLabel
+      : cached.durationLabel;
+  final resolvedRatingLabels =
+      mergeDistinctRatingLabels(cached.ratingLabels, seed.ratingLabels);
+  final resolvedGenres = seed.genres.isNotEmpty ? seed.genres : cached.genres;
+  final resolvedDirectors =
+      seed.directors.isNotEmpty ? seed.directors : cached.directors;
+  final resolvedDirectorProfiles = seed.directorProfiles.isNotEmpty
+      ? seed.directorProfiles
+      : cached.directorProfiles;
+  final resolvedActors = seed.actors.isNotEmpty ? seed.actors : cached.actors;
+  final resolvedActorProfiles =
+      seed.actorProfiles.isNotEmpty ? seed.actorProfiles : cached.actorProfiles;
+  final resolvedPlatforms =
+      seed.platforms.isNotEmpty ? seed.platforms : cached.platforms;
+  final resolvedPlatformProfiles = seed.platformProfiles.isNotEmpty
+      ? seed.platformProfiles
+      : cached.platformProfiles;
+  final resolvedDoubanId =
+      seed.doubanId.trim().isNotEmpty ? seed.doubanId : cached.doubanId;
+  final resolvedImdbId =
+      seed.imdbId.trim().isNotEmpty ? seed.imdbId : cached.imdbId;
+  final resolvedTmdbId =
+      seed.tmdbId.trim().isNotEmpty ? seed.tmdbId : cached.tmdbId;
+  final resolvedAvailabilityLabel = preferCachedAvailability
+      ? (cached.availabilityLabel.trim().isNotEmpty
+          ? cached.availabilityLabel
+          : seed.availabilityLabel)
+      : (seed.availabilityLabel.trim().isNotEmpty
+          ? seed.availabilityLabel
+          : cached.availabilityLabel);
+  final resolvedSearchQuery = seed.searchQuery.trim().isNotEmpty
+      ? seed.searchQuery
+      : cached.searchQuery;
+  final resolvedPlaybackTarget = seed.playbackTarget ?? cached.playbackTarget;
+  final resolvedItemId = preferCachedSourceContext
+      ? (cached.itemId.trim().isNotEmpty ? cached.itemId : seed.itemId)
+      : (seed.itemId.trim().isNotEmpty ? seed.itemId : cached.itemId);
+  final resolvedSourceId = preferCachedSourceContext
+      ? (cached.sourceId.trim().isNotEmpty ? cached.sourceId : seed.sourceId)
+      : (seed.sourceId.trim().isNotEmpty ? seed.sourceId : cached.sourceId);
+  final resolvedItemType = preferCachedSourceContext
+      ? (cached.itemType.trim().isNotEmpty ? cached.itemType : seed.itemType)
+      : (seed.itemType.trim().isNotEmpty ? seed.itemType : cached.itemType);
+  final resolvedSeasonNumber = preferCachedSourceContext
+      ? (cached.seasonNumber ?? seed.seasonNumber)
+      : (seed.seasonNumber ?? cached.seasonNumber);
+  final resolvedEpisodeNumber = preferCachedSourceContext
+      ? (cached.episodeNumber ?? seed.episodeNumber)
+      : (seed.episodeNumber ?? cached.episodeNumber);
+  final resolvedSectionId = preferCachedSourceContext
+      ? (cached.sectionId.trim().isNotEmpty ? cached.sectionId : seed.sectionId)
+      : (seed.sectionId.trim().isNotEmpty ? seed.sectionId : cached.sectionId);
+  final resolvedSectionName = preferCachedSourceContext
+      ? (cached.sectionName.trim().isNotEmpty
+          ? cached.sectionName
+          : seed.sectionName)
+      : (seed.sectionName.trim().isNotEmpty
+          ? seed.sectionName
+          : cached.sectionName);
+  final resolvedResourcePath = preferCachedSourceContext
+      ? (cached.resourcePath.trim().isNotEmpty
+          ? cached.resourcePath
+          : seed.resourcePath)
+      : (seed.resourcePath.trim().isNotEmpty
+          ? seed.resourcePath
+          : cached.resourcePath);
+  final resolvedSourceKind = preferCachedSourceContext
+      ? (cached.sourceKind ?? seed.sourceKind)
+      : (seed.sourceKind ?? cached.sourceKind);
+  final resolvedSourceName = preferCachedSourceContext
+      ? (cached.sourceName.trim().isNotEmpty
+          ? cached.sourceName
+          : seed.sourceName)
+      : (seed.sourceName.trim().isNotEmpty
+          ? seed.sourceName
+          : cached.sourceName);
+
+  final hasChanges = resolvedTitle != seed.title ||
+      resolvedPosterUrl != seed.posterUrl ||
+      !_sameStringMap(resolvedPosterHeaders, seed.posterHeaders) ||
+      resolvedBackdropUrl != seed.backdropUrl ||
+      !_sameStringMap(resolvedBackdropHeaders, seed.backdropHeaders) ||
+      resolvedLogoUrl != seed.logoUrl ||
+      !_sameStringMap(resolvedLogoHeaders, seed.logoHeaders) ||
+      resolvedBannerUrl != seed.bannerUrl ||
+      !_sameStringMap(resolvedBannerHeaders, seed.bannerHeaders) ||
+      !_sameStringList(resolvedExtraBackdropUrls, seed.extraBackdropUrls) ||
+      !_sameStringMap(
+        resolvedExtraBackdropHeaders,
+        seed.extraBackdropHeaders,
+      ) ||
+      resolvedOverview != seed.overview ||
+      resolvedDurationLabel != seed.durationLabel ||
+      !_sameStringList(resolvedRatingLabels, seed.ratingLabels) ||
+      !_sameStringList(resolvedGenres, seed.genres) ||
+      !_sameStringList(resolvedDirectors, seed.directors) ||
+      !_sameMediaPersonProfileList(
+        resolvedDirectorProfiles,
+        seed.directorProfiles,
+      ) ||
+      !_sameStringList(resolvedActors, seed.actors) ||
+      !_sameMediaPersonProfileList(resolvedActorProfiles, seed.actorProfiles) ||
+      !_sameStringList(resolvedPlatforms, seed.platforms) ||
+      !_sameMediaPersonProfileList(
+        resolvedPlatformProfiles,
+        seed.platformProfiles,
+      ) ||
+      resolvedDoubanId != seed.doubanId ||
+      resolvedImdbId != seed.imdbId ||
+      resolvedTmdbId != seed.tmdbId ||
+      resolvedAvailabilityLabel != seed.availabilityLabel ||
+      resolvedSearchQuery != seed.searchQuery ||
+      !_samePlaybackTarget(resolvedPlaybackTarget, seed.playbackTarget) ||
+      resolvedItemId != seed.itemId ||
+      resolvedSourceId != seed.sourceId ||
+      resolvedItemType != seed.itemType ||
+      resolvedSeasonNumber != seed.seasonNumber ||
+      resolvedEpisodeNumber != seed.episodeNumber ||
+      resolvedSectionId != seed.sectionId ||
+      resolvedSectionName != seed.sectionName ||
+      resolvedResourcePath != seed.resourcePath ||
+      resolvedSourceKind != seed.sourceKind ||
+      resolvedSourceName != seed.sourceName;
+  if (!hasChanges) {
+    return seed;
+  }
+
   return seed.copyWith(
-    title: cached.title.trim().isNotEmpty ? cached.title : seed.title,
+    title: resolvedTitle,
     posterUrl: resolvedPosterUrl,
     posterHeaders: resolvedPosterHeaders,
-    backdropUrl: seed.backdropUrl.trim().isNotEmpty
-        ? seed.backdropUrl
-        : cached.backdropUrl,
-    backdropHeaders: seed.backdropHeaders.isNotEmpty
-        ? seed.backdropHeaders
-        : cached.backdropHeaders,
-    logoUrl: seed.logoUrl.trim().isNotEmpty ? seed.logoUrl : cached.logoUrl,
-    logoHeaders:
-        seed.logoHeaders.isNotEmpty ? seed.logoHeaders : cached.logoHeaders,
-    bannerUrl:
-        seed.bannerUrl.trim().isNotEmpty ? seed.bannerUrl : cached.bannerUrl,
-    bannerHeaders: seed.bannerHeaders.isNotEmpty
-        ? seed.bannerHeaders
-        : cached.bannerHeaders,
-    extraBackdropUrls: seed.extraBackdropUrls.isNotEmpty
-        ? seed.extraBackdropUrls
-        : cached.extraBackdropUrls,
-    extraBackdropHeaders: seed.extraBackdropHeaders.isNotEmpty
-        ? seed.extraBackdropHeaders
-        : cached.extraBackdropHeaders,
-    overview: seed.hasUsefulOverview ? seed.overview : cached.overview,
-    durationLabel: seed.durationLabel.trim().isNotEmpty
-        ? seed.durationLabel
-        : cached.durationLabel,
-    ratingLabels:
-        mergeDistinctRatingLabels(cached.ratingLabels, seed.ratingLabels),
-    genres: seed.genres.isNotEmpty ? seed.genres : cached.genres,
-    directors: seed.directors.isNotEmpty ? seed.directors : cached.directors,
-    directorProfiles: seed.directorProfiles.isNotEmpty
-        ? seed.directorProfiles
-        : cached.directorProfiles,
-    actors: seed.actors.isNotEmpty ? seed.actors : cached.actors,
-    actorProfiles: seed.actorProfiles.isNotEmpty
-        ? seed.actorProfiles
-        : cached.actorProfiles,
-    platforms: seed.platforms.isNotEmpty ? seed.platforms : cached.platforms,
-    platformProfiles: seed.platformProfiles.isNotEmpty
-        ? seed.platformProfiles
-        : cached.platformProfiles,
-    doubanId: seed.doubanId.trim().isNotEmpty ? seed.doubanId : cached.doubanId,
-    imdbId: seed.imdbId.trim().isNotEmpty ? seed.imdbId : cached.imdbId,
-    tmdbId: seed.tmdbId.trim().isNotEmpty ? seed.tmdbId : cached.tmdbId,
-    availabilityLabel: preferCachedAvailability
-        ? (cached.availabilityLabel.trim().isNotEmpty
-            ? cached.availabilityLabel
-            : seed.availabilityLabel)
-        : (seed.availabilityLabel.trim().isNotEmpty
-            ? seed.availabilityLabel
-            : cached.availabilityLabel),
-    searchQuery: seed.searchQuery.trim().isNotEmpty
-        ? seed.searchQuery
-        : cached.searchQuery,
-    playbackTarget: seed.playbackTarget ?? cached.playbackTarget,
-    itemId: preferCachedSourceContext
-        ? (cached.itemId.trim().isNotEmpty ? cached.itemId : seed.itemId)
-        : (seed.itemId.trim().isNotEmpty ? seed.itemId : cached.itemId),
-    sourceId: preferCachedSourceContext
-        ? (cached.sourceId.trim().isNotEmpty ? cached.sourceId : seed.sourceId)
-        : (seed.sourceId.trim().isNotEmpty ? seed.sourceId : cached.sourceId),
-    itemType: preferCachedSourceContext
-        ? (cached.itemType.trim().isNotEmpty ? cached.itemType : seed.itemType)
-        : (seed.itemType.trim().isNotEmpty ? seed.itemType : cached.itemType),
-    seasonNumber: preferCachedSourceContext
-        ? (cached.seasonNumber ?? seed.seasonNumber)
-        : (seed.seasonNumber ?? cached.seasonNumber),
-    episodeNumber: preferCachedSourceContext
-        ? (cached.episodeNumber ?? seed.episodeNumber)
-        : (seed.episodeNumber ?? cached.episodeNumber),
-    sectionId: preferCachedSourceContext
-        ? (cached.sectionId.trim().isNotEmpty
-            ? cached.sectionId
-            : seed.sectionId)
-        : (seed.sectionId.trim().isNotEmpty
-            ? seed.sectionId
-            : cached.sectionId),
-    sectionName: preferCachedSourceContext
-        ? (cached.sectionName.trim().isNotEmpty
-            ? cached.sectionName
-            : seed.sectionName)
-        : (seed.sectionName.trim().isNotEmpty
-            ? seed.sectionName
-            : cached.sectionName),
-    resourcePath: preferCachedSourceContext
-        ? (cached.resourcePath.trim().isNotEmpty
-            ? cached.resourcePath
-            : seed.resourcePath)
-        : (seed.resourcePath.trim().isNotEmpty
-            ? seed.resourcePath
-            : cached.resourcePath),
-    sourceKind: preferCachedSourceContext
-        ? (cached.sourceKind ?? seed.sourceKind)
-        : (seed.sourceKind ?? cached.sourceKind),
-    sourceName: preferCachedSourceContext
-        ? (cached.sourceName.trim().isNotEmpty
-            ? cached.sourceName
-            : seed.sourceName)
-        : (seed.sourceName.trim().isNotEmpty
-            ? seed.sourceName
-            : cached.sourceName),
+    backdropUrl: resolvedBackdropUrl,
+    backdropHeaders: resolvedBackdropHeaders,
+    logoUrl: resolvedLogoUrl,
+    logoHeaders: resolvedLogoHeaders,
+    bannerUrl: resolvedBannerUrl,
+    bannerHeaders: resolvedBannerHeaders,
+    extraBackdropUrls: resolvedExtraBackdropUrls,
+    extraBackdropHeaders: resolvedExtraBackdropHeaders,
+    overview: resolvedOverview,
+    durationLabel: resolvedDurationLabel,
+    ratingLabels: resolvedRatingLabels,
+    genres: resolvedGenres,
+    directors: resolvedDirectors,
+    directorProfiles: resolvedDirectorProfiles,
+    actors: resolvedActors,
+    actorProfiles: resolvedActorProfiles,
+    platforms: resolvedPlatforms,
+    platformProfiles: resolvedPlatformProfiles,
+    doubanId: resolvedDoubanId,
+    imdbId: resolvedImdbId,
+    tmdbId: resolvedTmdbId,
+    availabilityLabel: resolvedAvailabilityLabel,
+    searchQuery: resolvedSearchQuery,
+    playbackTarget: resolvedPlaybackTarget,
+    itemId: resolvedItemId,
+    sourceId: resolvedSourceId,
+    itemType: resolvedItemType,
+    seasonNumber: resolvedSeasonNumber,
+    episodeNumber: resolvedEpisodeNumber,
+    sectionId: resolvedSectionId,
+    sectionName: resolvedSectionName,
+    resourcePath: resolvedResourcePath,
+    sourceKind: resolvedSourceKind,
+    sourceName: resolvedSourceName,
   );
+}
+
+HomeCardViewModel _mergeCachedHomeCardItem(
+  HomeCardViewModel item,
+  MediaDetailTarget mergedTarget,
+) {
+  final resolvedTitle =
+      mergedTarget.title.trim().isNotEmpty ? mergedTarget.title : item.title;
+  final resolvedPosterUrl = mergedTarget.posterUrl.trim().isNotEmpty
+      ? mergedTarget.posterUrl
+      : item.posterUrl;
+  if (identical(mergedTarget, item.detailTarget) &&
+      resolvedTitle == item.title &&
+      resolvedPosterUrl == item.posterUrl) {
+    return item;
+  }
+  return HomeCardViewModel(
+    id: item.id,
+    title: resolvedTitle,
+    subtitle: item.subtitle,
+    posterUrl: resolvedPosterUrl,
+    detailTarget: mergedTarget,
+  );
+}
+
+HomeCarouselItemViewModel _mergeCachedHomeCarouselItem(
+  HomeCarouselItemViewModel item,
+  MediaDetailTarget mergedTarget,
+) {
+  final resolvedTitle =
+      mergedTarget.title.trim().isNotEmpty ? mergedTarget.title : item.title;
+  final resolvedImageUrl = item.imageUrl.trim().isNotEmpty
+      ? item.imageUrl
+      : (mergedTarget.posterUrl.trim().isNotEmpty
+          ? mergedTarget.posterUrl
+          : item.imageUrl);
+  if (identical(mergedTarget, item.detailTarget) &&
+      resolvedTitle == item.title &&
+      resolvedImageUrl == item.imageUrl) {
+    return item;
+  }
+  return HomeCarouselItemViewModel(
+    id: item.id,
+    title: resolvedTitle,
+    subtitle: item.subtitle,
+    imageUrl: resolvedImageUrl,
+    detailTarget: mergedTarget,
+  );
+}
+
+bool _sameStringList(Iterable<String> left, Iterable<String> right) {
+  if (identical(left, right)) {
+    return true;
+  }
+  final leftList = left is List<String> ? left : left.toList(growable: false);
+  final rightList =
+      right is List<String> ? right : right.toList(growable: false);
+  if (leftList.length != rightList.length) {
+    return false;
+  }
+  for (var index = 0; index < leftList.length; index += 1) {
+    if (leftList[index] != rightList[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _sameStringMap(Map<String, String> left, Map<String, String> right) {
+  if (identical(left, right)) {
+    return true;
+  }
+  if (left.length != right.length) {
+    return false;
+  }
+  for (final entry in left.entries) {
+    if (right[entry.key] != entry.value) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _sameMediaPersonProfileList(
+  List<MediaPersonProfile> left,
+  List<MediaPersonProfile> right,
+) {
+  if (identical(left, right)) {
+    return true;
+  }
+  if (left.length != right.length) {
+    return false;
+  }
+  for (var index = 0; index < left.length; index += 1) {
+    final leftItem = left[index];
+    final rightItem = right[index];
+    if (leftItem.name != rightItem.name ||
+        leftItem.avatarUrl != rightItem.avatarUrl) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _samePlaybackTarget(PlaybackTarget? left, PlaybackTarget? right) {
+  if (identical(left, right)) {
+    return true;
+  }
+  if (left == null || right == null) {
+    return false;
+  }
+  return left.title == right.title &&
+      left.sourceId == right.sourceId &&
+      left.streamUrl == right.streamUrl &&
+      left.sourceName == right.sourceName &&
+      left.sourceKind == right.sourceKind &&
+      left.actualAddress == right.actualAddress &&
+      left.itemId == right.itemId &&
+      left.itemType == right.itemType &&
+      left.year == right.year &&
+      left.seriesId == right.seriesId &&
+      left.seriesTitle == right.seriesTitle &&
+      left.preferredMediaSourceId == right.preferredMediaSourceId &&
+      left.subtitle == right.subtitle &&
+      left.externalSubtitleFilePath == right.externalSubtitleFilePath &&
+      left.externalSubtitleDisplayName == right.externalSubtitleDisplayName &&
+      _sameStringMap(left.headers, right.headers) &&
+      left.container == right.container &&
+      left.videoCodec == right.videoCodec &&
+      left.audioCodec == right.audioCodec &&
+      left.seasonNumber == right.seasonNumber &&
+      left.episodeNumber == right.episodeNumber &&
+      left.width == right.width &&
+      left.height == right.height &&
+      left.bitrate == right.bitrate &&
+      left.fileSizeBytes == right.fileSizeBytes;
 }
 
 Future<HomeSectionViewModel> _buildRecentPlaybackSectionSeed({

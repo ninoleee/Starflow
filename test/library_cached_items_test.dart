@@ -59,6 +59,44 @@ void main() {
     expect(resolved[0].posterUrl, 'https://cache.example.com/poster.jpg');
     expect(resolved[0].ratingLabels, ['豆瓣 9.0']);
     expect(resolved[1].title, 'Untouched');
+    expect(identical(resolved[1], items[1]), isTrue);
+  });
+
+  test('library cache merge reuses original list when overlay is unchanged',
+      () async {
+    final repository = _TrackingLocalStorageCacheRepository(
+      batchResults: const [
+        MediaDetailTarget(
+          title: '',
+          posterUrl: '',
+          overview: '',
+        ),
+      ],
+    );
+    final items = [
+      MediaItem(
+        id: 'movie-1',
+        title: 'Original Title',
+        overview: '',
+        posterUrl: '',
+        year: 2024,
+        durationLabel: '',
+        genres: const [],
+        sourceId: 'emby-main',
+        sourceName: 'Living Room',
+        sourceKind: MediaSourceKind.emby,
+        streamUrl: '',
+        addedAt: DateTime(2026, 4, 10),
+      ),
+    ];
+
+    final resolved = await resolveLibraryItemsWithCachedDetails(
+      items: items,
+      localStorageCacheRepository: repository,
+    );
+
+    expect(identical(resolved, items), isTrue);
+    expect(identical(resolved.single, items.single), isTrue);
   });
 }
 

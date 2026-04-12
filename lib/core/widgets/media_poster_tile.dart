@@ -59,15 +59,7 @@ class MediaPosterTile extends ConsumerWidget {
 
     late final Widget posterChild;
     if (trimmedPoster.isEmpty) {
-      posterChild = Container(
-        color: theme.colorScheme.surfaceContainerHighest,
-        alignment: Alignment.center,
-        child: Icon(
-          Icons.movie_creation_outlined,
-          size: 32,
-          color: theme.colorScheme.primary,
-        ),
-      );
+      posterChild = _buildPosterPlaceholder(theme);
     } else {
       posterChild = AppNetworkImage(
         trimmedPoster,
@@ -78,29 +70,10 @@ class MediaPosterTile extends ConsumerWidget {
         cacheHeight: skipResizeForDecode ? null : cacheHeight,
         filterQuality: FilterQuality.low,
         loadingBuilder: (context) {
-          return Container(
-            color: theme.colorScheme.surfaceContainerHighest,
-            alignment: Alignment.center,
-            child: SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.1,
-                color: theme.colorScheme.primary,
-              ),
-            ),
-          );
+          return _buildPosterPlaceholder(theme);
         },
         errorBuilder: (context, error, stackTrace) {
-          return Container(
-            color: theme.colorScheme.surfaceContainerHighest,
-            alignment: Alignment.center,
-            child: Icon(
-              Icons.movie_creation_outlined,
-              size: 32,
-              color: theme.colorScheme.primary,
-            ),
-          );
+          return _buildPosterPlaceholder(theme);
         },
       );
     }
@@ -237,6 +210,29 @@ class MediaPosterTile extends ConsumerWidget {
       onLongPress: onContextAction,
       onSecondaryTap: onContextAction,
       child: content,
+    );
+  }
+
+  Widget _buildPosterPlaceholder(ThemeData theme) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        gradient: LinearGradient(
+          colors: [
+            theme.colorScheme.surfaceContainerHighest,
+            theme.colorScheme.surfaceContainer,
+          ],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
+      child: Center(
+        child: Icon(
+          Icons.movie_creation_outlined,
+          size: 32,
+          color: theme.colorScheme.primary,
+        ),
+      ),
     );
   }
 }
