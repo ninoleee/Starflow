@@ -36,6 +36,9 @@ void main() {
           isTelevision: true,
           isWeb: false,
           target: baseTarget.copyWith(
+            sourceId: 'quark-main',
+            sourceName: 'Quark',
+            sourceKind: MediaSourceKind.quark,
             headers: const {
               'Cookie': 'kps=test; sign=test;',
               'Referer': 'https://drive-pc.quark.cn',
@@ -45,6 +48,46 @@ void main() {
       );
 
       expect(route, PlaybackStartupRouteAction.openEmbeddedMpv);
+    });
+
+    test('allows system player for emby target even when headers are present', () {
+      final route = decidePlaybackStartupRoute(
+        PlaybackStartupRouteInput(
+          playbackEngine: PlaybackEngine.systemPlayer,
+          performanceAutoDowngradeHeavyPlaybackEnabled: true,
+          isTelevision: true,
+          isWeb: false,
+          target: baseTarget.copyWith(
+            headers: const {
+              'X-Emby-Token': 'token',
+              'X-Emby-Authorization': 'MediaBrowser Client="Starflow"',
+            },
+          ),
+        ),
+      );
+
+      expect(route, PlaybackStartupRouteAction.launchSystemPlayer);
+    });
+
+    test('allows system player for webdav target even when headers are present', () {
+      final route = decidePlaybackStartupRoute(
+        PlaybackStartupRouteInput(
+          playbackEngine: PlaybackEngine.systemPlayer,
+          performanceAutoDowngradeHeavyPlaybackEnabled: true,
+          isTelevision: true,
+          isWeb: false,
+          target: baseTarget.copyWith(
+            sourceId: 'nas-main',
+            sourceName: 'WebDAV',
+            sourceKind: MediaSourceKind.nas,
+            headers: const {
+              'Authorization': 'Basic abc123',
+            },
+          ),
+        ),
+      );
+
+      expect(route, PlaybackStartupRouteAction.launchSystemPlayer);
     });
 
     test('allows system player for relay-backed quark target without headers', () {
@@ -110,6 +153,9 @@ void main() {
           isTelevision: true,
           isWeb: false,
           target: baseTarget.copyWith(
+            sourceId: 'quark-main',
+            sourceName: 'Quark',
+            sourceKind: MediaSourceKind.quark,
             width: 3840,
             height: 2160,
             bitrate: 30000000,

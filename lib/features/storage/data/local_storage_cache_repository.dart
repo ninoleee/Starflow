@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,11 +11,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 final localStorageCacheRepositoryProvider =
     Provider<LocalStorageCacheRepository>(
-  (ref) => LocalStorageCacheRepository(
-    notifyDetailCacheChanged: () {
-      ref.read(localStorageDetailCacheRevisionProvider.notifier).state++;
-    },
-  ),
+  (ref) {
+    final repository = LocalStorageCacheRepository(
+      notifyDetailCacheChanged: (event) {
+        ref.read(localStorageDetailCacheChangeProvider.notifier).apply(event);
+      },
+      detailCacheChangeNotificationDelay: const Duration(milliseconds: 180),
+    );
+    ref.onDispose(repository.dispose);
+    return repository;
+  },
 );
 
 enum DetailMetadataRefreshStatus {
@@ -44,7 +50,9 @@ class LocalStorageCacheRepository {
   LocalStorageCacheRepository({
     PreferencesStore? preferences,
     SharedPreferences? sharedPreferences,
-    void Function()? notifyDetailCacheChanged,
+    void Function(LocalStorageDetailCacheChangeEvent event)?
+        notifyDetailCacheChanged,
+    this.detailCacheChangeNotificationDelay = Duration.zero,
   })  : assert(preferences == null || sharedPreferences == null),
         _preferences = preferences ??
             (sharedPreferences == null
@@ -55,7 +63,21 @@ class LocalStorageCacheRepository {
   static const _detailCacheKey = 'starflow.local_storage.detail_cache.v1';
 
   final PreferencesStore _preferences;
-  final void Function()? _notifyDetailCacheChanged;
+  final void Function(LocalStorageDetailCacheChangeEvent event)?
+      _notifyDetailCacheChanged;
+  final Duration detailCacheChangeNotificationDelay;
+  Timer? _detailCacheChangeNotificationTimer;
+  final Set<String> _pendingDetailCacheChangedSourceIds = <String>{};
+  final Set<String> _pendingDetailCacheChangedLookupKeys = <String>{};
+  bool _pendingDetailCacheInvalidateAll = false;
+
+  void dispose() {
+    _detailCacheChangeNotificationTimer?.cancel();
+    _detailCacheChangeNotificationTimer = null;
+    _pendingDetailCacheChangedSourceIds.clear();
+    _pendingDetailCacheChangedLookupKeys.clear();
+    _pendingDetailCacheInvalidateAll = false;
+  }
 
   Future<CachedDetailState?> loadDetailState(
     MediaDetailTarget seedTarget, {
@@ -86,6 +108,24 @@ class LocalStorageCacheRepository {
     return targets
         .map((target) => _loadDetailStateFromPayload(payload, target)?.target)
         .toList(growable: false);
+  }
+
+  static LocalStorageDetailCacheScope buildScopeForTargets(
+    Iterable<MediaDetailTarget> targets,
+  ) {
+    final sourceIds = <String>{};
+    final lookupKeys = <String>{};
+    for (final target in targets) {
+      final sourceId = target.sourceId.trim();
+      if (sourceId.isNotEmpty) {
+        sourceIds.add(sourceId);
+      }
+      lookupKeys.addAll(buildLookupKeys(target));
+    }
+    return LocalStorageDetailCacheScope(
+      sourceIds: sourceIds,
+      lookupKeys: lookupKeys,
+    );
   }
 
   CachedDetailState? _loadDetailStateFromPayload(
@@ -226,7 +266,18 @@ class LocalStorageCacheRepository {
         lookupKeys: nextLookupKeys,
       ),
     );
-    _notifyDetailCacheChanged?.call();
+    _scheduleDetailCacheChangedNotification(
+      LocalStorageDetailCacheChangeEvent(
+        scope: LocalStorageDetailCacheScope(
+          sourceIds: {
+            seedTarget.sourceId.trim(),
+            resolvedTarget.sourceId.trim(),
+            nextRecord.target.sourceId.trim(),
+          }.where((item) => item.isNotEmpty).toSet(),
+          lookupKeys: mergedLookupKeys.toSet(),
+        ),
+      ),
+    );
   }
 
   Future<LocalStorageCacheSummary> inspectDetailCache() async {
@@ -241,7 +292,9 @@ class LocalStorageCacheRepository {
 
   Future<void> clearDetailCache() async {
     await _preferences.remove(_detailCacheKey);
-    _notifyDetailCacheChanged?.call();
+    _scheduleDetailCacheChangedNotification(
+      const LocalStorageDetailCacheChangeEvent(invalidateAll: true),
+    );
   }
 
   Future<void> clearDetailCacheForSource(String sourceId) async {
@@ -264,6 +317,11 @@ class LocalStorageCacheRepository {
     if (recordIdsToRemove.isEmpty) {
       return;
     }
+    final removedLookupKeys = payload.records.values
+        .where((record) => recordIdsToRemove.contains(record.id))
+        .expand((record) => record.lookupKeys)
+        .where((item) => item.trim().isNotEmpty)
+        .toSet();
 
     final nextRecords = Map<String, _CachedDetailRecord>.from(payload.records)
       ..removeWhere((key, _) => recordIdsToRemove.contains(key));
@@ -276,7 +334,14 @@ class LocalStorageCacheRepository {
         lookupKeys: nextLookupKeys,
       ),
     );
-    _notifyDetailCacheChanged?.call();
+    _scheduleDetailCacheChangedNotification(
+      LocalStorageDetailCacheChangeEvent(
+        scope: LocalStorageDetailCacheScope(
+          sourceIds: {normalizedSourceId},
+          lookupKeys: removedLookupKeys,
+        ),
+      ),
+    );
   }
 
   Future<void> clearDetailCacheForResource({
@@ -299,6 +364,8 @@ class LocalStorageCacheRepository {
     }
 
     var changed = false;
+    final changedSourceIds = <String>{normalizedSourceId};
+    final changedLookupKeys = <String>{};
     final nextRecords = <String, _CachedDetailRecord>{};
     for (final record in payload.records.values) {
       final nextRecord = _removeResourceRelationsFromRecord(
@@ -310,6 +377,16 @@ class LocalStorageCacheRepository {
       );
       if (!identical(nextRecord, record)) {
         changed = true;
+        changedLookupKeys.addAll(record.lookupKeys);
+        changedLookupKeys.addAll(nextRecord.lookupKeys);
+        final currentSourceId = record.target.sourceId.trim();
+        if (currentSourceId.isNotEmpty) {
+          changedSourceIds.add(currentSourceId);
+        }
+        final nextSourceId = nextRecord.target.sourceId.trim();
+        if (nextSourceId.isNotEmpty) {
+          changedSourceIds.add(nextSourceId);
+        }
       }
       if (nextRecord.lookupKeys.isNotEmpty) {
         nextRecords[nextRecord.id] = nextRecord;
@@ -338,7 +415,14 @@ class LocalStorageCacheRepository {
         lookupKeys: nextLookupKeys,
       ),
     );
-    _notifyDetailCacheChanged?.call();
+    _scheduleDetailCacheChangedNotification(
+      LocalStorageDetailCacheChangeEvent(
+        scope: LocalStorageDetailCacheScope(
+          sourceIds: changedSourceIds,
+          lookupKeys: changedLookupKeys,
+        ),
+      ),
+    );
   }
 
   Future<void> clearCache(LocalStorageCacheType type) async {
@@ -468,6 +552,65 @@ class LocalStorageCacheRepository {
 
   Future<void> _saveDetailPayload(_DetailCachePayload payload) async {
     await _preferences.setString(_detailCacheKey, jsonEncode(payload.toJson()));
+  }
+
+  void _scheduleDetailCacheChangedNotification(
+    LocalStorageDetailCacheChangeEvent event,
+  ) {
+    final notifyDetailCacheChanged = _notifyDetailCacheChanged;
+    if (notifyDetailCacheChanged == null) {
+      return;
+    }
+    if (event.invalidateAll) {
+      _pendingDetailCacheInvalidateAll = true;
+      _pendingDetailCacheChangedSourceIds.clear();
+      _pendingDetailCacheChangedLookupKeys.clear();
+    } else if (!_pendingDetailCacheInvalidateAll) {
+      _pendingDetailCacheChangedSourceIds.addAll(
+        event.scope.sourceIds
+            .map((item) => item.trim())
+            .where((item) => item.isNotEmpty),
+      );
+      _pendingDetailCacheChangedLookupKeys.addAll(
+        event.scope.lookupKeys
+            .map((item) => item.trim())
+            .where((item) => item.isNotEmpty),
+      );
+    }
+    if (detailCacheChangeNotificationDelay <= Duration.zero) {
+      _detailCacheChangeNotificationTimer?.cancel();
+      _detailCacheChangeNotificationTimer = null;
+      notifyDetailCacheChanged(_consumePendingDetailCacheChangeEvent(event));
+      return;
+    }
+    _detailCacheChangeNotificationTimer?.cancel();
+    _detailCacheChangeNotificationTimer = Timer(
+      detailCacheChangeNotificationDelay,
+      () {
+        notifyDetailCacheChanged(_consumePendingDetailCacheChangeEvent(event));
+      },
+    );
+  }
+
+  LocalStorageDetailCacheChangeEvent _consumePendingDetailCacheChangeEvent(
+    LocalStorageDetailCacheChangeEvent fallback,
+  ) {
+    final event = _pendingDetailCacheInvalidateAll ||
+            _pendingDetailCacheChangedSourceIds.isNotEmpty ||
+            _pendingDetailCacheChangedLookupKeys.isNotEmpty
+        ? LocalStorageDetailCacheChangeEvent(
+            scope: LocalStorageDetailCacheScope(
+              sourceIds: Set<String>.from(_pendingDetailCacheChangedSourceIds),
+              lookupKeys:
+                  Set<String>.from(_pendingDetailCacheChangedLookupKeys),
+            ),
+            invalidateAll: _pendingDetailCacheInvalidateAll,
+          )
+        : fallback;
+    _pendingDetailCacheChangedSourceIds.clear();
+    _pendingDetailCacheChangedLookupKeys.clear();
+    _pendingDetailCacheInvalidateAll = false;
+    return event;
   }
 
   _CachedDetailRecord _removeResourceRelationsFromRecord(

@@ -54,9 +54,6 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         'applyMode': widget.request.applyMode.name,
       },
     );
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_performSearch());
-    });
   }
 
   @override

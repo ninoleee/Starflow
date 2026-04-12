@@ -1210,6 +1210,64 @@ void main() {
     expect(client.scanCallCount, 1);
   });
 
+  test(
+      'NasMediaIndexer falls back to cached library items when external ids miss',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-match-cache-fallback',
+      name: 'WebDAV Match Cache Fallback',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Movies/',
+      enabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'movie-cache-fallback-1',
+          path: 'Movies/Ma.Teng.Ni.Bie.Zou.2026.mkv',
+          title: '马腾你别走',
+          itemType: 'movie',
+          seasonNumber: 0,
+          episodeNumber: 0,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    expect(client.scanCallCount, 1);
+
+    final matches = await indexer.loadCachedLibraryMatchItems(
+      source,
+      imdbId: 'tt38820860',
+    );
+
+    expect(matches, hasLength(1));
+    expect(matches.single.id, 'movie-cache-fallback-1');
+    expect(matches.single.title, '马腾你别走');
+    expect(client.scanCallCount, 1);
+  });
+
   test('NasMediaIndexer manual metadata overwrites existing movie metadata',
       () async {
     final store = _MemoryNasMediaIndexStore();

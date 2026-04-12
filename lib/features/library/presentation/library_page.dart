@@ -158,17 +158,32 @@ final libraryMediaSourcesSettingsSliceProvider =
   );
 });
 
-final libraryItemsProvider =
+final _librarySeedItemsProvider =
     FutureProvider.family<List<MediaItem>, LibraryFilter>((ref, filter) async {
   ref.watch(nasMediaIndexRevisionProvider);
   ref.watch(libraryRefreshRevisionProvider);
   ref.watch(libraryMediaSourcesSettingsSliceProvider);
-  ref.watch(localStorageDetailCacheRevisionProvider);
-  final items =
-      await ref.read(mediaRepositoryProvider).fetchLibrary(kind: filter.kind);
+  return ref.read(mediaRepositoryProvider).fetchLibrary(kind: filter.kind);
+});
+
+final libraryItemsProvider =
+    FutureProvider.family<List<MediaItem>, LibraryFilter>((ref, filter) async {
+  final items = await ref.watch(_librarySeedItemsProvider(filter).future);
+  final seedTargets =
+      items.map(MediaDetailTarget.fromMediaItem).toList(growable: false);
+  final cacheScope =
+      LocalStorageCacheRepository.buildScopeForTargets(seedTargets);
+  if (!cacheScope.isEmpty) {
+    ref.watch(
+      localStorageDetailCacheChangeProvider.select(
+        (state) => state.revisionForScope(cacheScope),
+      ),
+    );
+  }
   return resolveLibraryItemsWithCachedDetails(
     items: items,
     localStorageCacheRepository: ref.read(localStorageCacheRepositoryProvider),
+    seedTargets: seedTargets,
   );
 });
 
@@ -207,8 +222,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   final Map<LibraryFilter, AsyncValue<List<MediaCollection>>>
       _cachedCollectionsByFilter =
       <LibraryFilter, AsyncValue<List<MediaCollection>>>{};
-  Map<String, WebDavScrapeProgress> _cachedScrapeProgress =
-      <String, WebDavScrapeProgress>{};
 
   @override
   void dispose() {
@@ -263,16 +276,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       fallbackValue: const AsyncLoading<List<MediaCollection>>(),
     );
     final refreshScope = _currentRefreshScope(mediaSources);
-    final scrapeProgress = isPageVisible
-        ? ref.watch(webDavScrapeProgressProvider)
-        : _cachedScrapeProgress;
-    if (isPageVisible) {
-      _cachedScrapeProgress = scrapeProgress;
-    }
-    final visibleProgress = _visibleScrapeProgress(
-      scrapeProgress.values,
-      mediaSources,
-    );
 
     return TvPageFocusScope(
       controller: _tvFocusMemoryController,
@@ -419,15 +422,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
                     ),
                     const SizedBox(height: 16),
                   ],
-                  if (visibleProgress.isNotEmpty) ...[
-                    ...visibleProgress.map(
-                      (progress) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _WebDavScrapeProgressCard(progress: progress),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                  ],
+                  _buildScrapeProgressSection(mediaSources),
                   collectionsAsync.when(
                     data: (collections) {
                       if (collections.isEmpty) {
@@ -637,6 +632,39 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
         .toList(growable: false)
       ..sort((left, right) => left.sourceName.compareTo(right.sourceName));
     return visible;
+  }
+
+  Widget _buildScrapeProgressSection(
+    List<MediaSourceConfig> mediaSources,
+  ) {
+    if (!isPageVisible) {
+      return const SizedBox.shrink();
+    }
+    return Consumer(
+      builder: (context, ref, child) {
+        final scrapeProgress = ref.watch(webDavScrapeProgressProvider);
+        final visibleProgress = _visibleScrapeProgress(
+          scrapeProgress.values,
+          mediaSources,
+        );
+        if (visibleProgress.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return RepaintBoundary(
+          child: Column(
+            children: [
+              ...visibleProgress.map(
+                (progress) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _WebDavScrapeProgressCard(progress: progress),
+                ),
+              ),
+              const SizedBox(height: 6),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _confirmForceRescan(_LibraryRefreshScope scope) async {

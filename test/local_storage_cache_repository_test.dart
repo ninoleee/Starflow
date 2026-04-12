@@ -4,6 +4,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
+import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 void main() {
@@ -175,6 +176,72 @@ void main() {
     expect(results[0]?.posterUrl, 'https://image.example.com/first.jpg');
     expect(results[1]?.posterUrl, 'https://image.example.com/second.jpg');
     expect(results[2], isNull);
+  });
+
+  test('batches scoped detail cache change notifications', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final notifications = <LocalStorageDetailCacheChangeEvent>[];
+    final repository = LocalStorageCacheRepository(
+      sharedPreferences: prefs,
+      detailCacheChangeNotificationDelay: const Duration(milliseconds: 20),
+      notifyDetailCacheChanged: notifications.add,
+    );
+    addTearDown(repository.dispose);
+
+    await repository.saveDetailTarget(
+      seedTarget: const MediaDetailTarget(
+        title: 'First Movie',
+        posterUrl: '',
+        overview: '',
+        sourceId: 'emby-main',
+        itemId: 'movie-1',
+        itemType: 'movie',
+      ),
+      resolvedTarget: const MediaDetailTarget(
+        title: 'First Movie',
+        posterUrl: 'https://image.example.com/first.jpg',
+        overview: 'cached',
+        sourceId: 'emby-main',
+        itemId: 'movie-1',
+        itemType: 'movie',
+        sourceKind: MediaSourceKind.emby,
+        sourceName: 'Living Room',
+      ),
+    );
+    await repository.saveDetailTarget(
+      seedTarget: const MediaDetailTarget(
+        title: 'Second Movie',
+        posterUrl: '',
+        overview: '',
+        sourceId: 'emby-main',
+        itemId: 'movie-2',
+        itemType: 'movie',
+      ),
+      resolvedTarget: const MediaDetailTarget(
+        title: 'Second Movie',
+        posterUrl: 'https://image.example.com/second.jpg',
+        overview: 'cached',
+        sourceId: 'emby-main',
+        itemId: 'movie-2',
+        itemType: 'movie',
+        sourceKind: MediaSourceKind.emby,
+        sourceName: 'Living Room',
+      ),
+    );
+
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+
+    expect(notifications, hasLength(1));
+    expect(notifications.single.invalidateAll, isFalse);
+    expect(notifications.single.scope.sourceIds, contains('emby-main'));
+    expect(
+      notifications.single.scope.lookupKeys,
+      contains('library|emby-main|movie-1'),
+    );
+    expect(
+      notifications.single.scope.lookupKeys,
+      contains('library|emby-main|movie-2'),
+    );
   });
 
   test(

@@ -139,9 +139,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       ValueNotifier(const _TvPlaybackState());
   final PlayerAdaptiveTopChromeController _adaptiveTopChromeController =
       PlayerAdaptiveTopChromeController(
-        visible: true,
-        autoHideEnabled: true,
-      );
+    visible: true,
+    autoHideEnabled: true,
+  );
   final PlaybackRemotePreflight _playbackRemotePreflight =
       PlaybackRemotePreflight();
   PlaybackRemotePreflightResult? _lastRemotePreflight;
@@ -153,12 +153,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     double? bufferingPercentage,
   }) {
     final current = _tvPlaybackStateNotifier.value;
-    _tvPlaybackStateNotifier.value = current.copyWith(
+    final next = current.copyWith(
       position: position,
       duration: duration,
       playing: playing,
       bufferingPercentage: bufferingPercentage,
     );
+    if (current.position == next.position &&
+        current.duration == next.duration &&
+        current.playing == next.playing &&
+        current.bufferingPercentage == next.bufferingPercentage) {
+      return;
+    }
+    _tvPlaybackStateNotifier.value = next;
   }
 
   bool _tvExitDialogVisible = false;

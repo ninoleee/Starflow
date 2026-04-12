@@ -1522,8 +1522,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       backgroundWorkSuspended: ref.read(backgroundEnrichmentSuspendedProvider),
       pageSeedTarget: widget.target,
       manualOverrideTarget: _manualOverrideTarget,
-      hasSubtitleChoices: _subtitleSearchChoices.isNotEmpty,
-      hasOnlineSubtitleSources: false,
       detailAutoLibraryMatchEnabled: false,
     );
     if (!initialPlan.shouldStart) {
@@ -1535,25 +1533,28 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         return;
       }
 
-      final restoredMetadataRefreshStatus =
-          await _restoreCachedDetailState(sessionId);
-      if (!_isSessionActive(sessionId)) {
-        return;
+      final hasInMemoryDetailState = _manualOverrideTarget != null ||
+          _libraryMatchChoices.isNotEmpty ||
+          _subtitleSearchChoices.isNotEmpty;
+      var restoredMetadataRefreshStatus = DetailMetadataRefreshStatus.never;
+      if (!hasInMemoryDetailState) {
+        restoredMetadataRefreshStatus = await _restoreCachedDetailState(
+          sessionId,
+        );
+        if (!_isSessionActive(sessionId)) {
+          return;
+        }
+
+        final restoredTarget = _manualOverrideTarget ?? widget.target;
+        await _restoreIndexedEpisodeVariantChoices(
+          sessionId,
+          restoredTarget,
+        );
+        if (!_isSessionActive(sessionId)) {
+          return;
+        }
       }
 
-      final restoredTarget = _manualOverrideTarget ?? widget.target;
-      await _restoreIndexedEpisodeVariantChoices(
-        sessionId,
-        restoredTarget,
-      );
-      if (!_isSessionActive(sessionId)) {
-        return;
-      }
-
-      final onlineSubtitleSources = ref.read(
-        appSettingsProvider
-            .select((settings) => settings.onlineSubtitleSources),
-      );
       final detailAutoLibraryMatchEnabled = ref.read(
         appSettingsProvider.select(
           (settings) => settings.detailAutoLibraryMatchEnabled,
@@ -1565,8 +1566,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
             ref.read(backgroundEnrichmentSuspendedProvider),
         pageSeedTarget: widget.target,
         manualOverrideTarget: _manualOverrideTarget,
-        hasSubtitleChoices: _subtitleSearchChoices.isNotEmpty,
-        hasOnlineSubtitleSources: onlineSubtitleSources.isNotEmpty,
         detailAutoLibraryMatchEnabled: detailAutoLibraryMatchEnabled,
       );
       var currentTarget = runtimePlan.effectiveTarget;
@@ -1596,16 +1595,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           return;
         }
         currentTarget = _manualOverrideTarget ?? currentTarget;
-      }
-
-      if (runtimePlan.shouldRunInitialSubtitleSearch) {
-        await _searchSubtitlesForDetail(
-          currentTarget,
-          showFeedback: false,
-        );
-        if (!_isSessionActive(sessionId)) {
-          return;
-        }
       }
 
       if (runtimePlan.shouldWarmEnrichedTarget) {

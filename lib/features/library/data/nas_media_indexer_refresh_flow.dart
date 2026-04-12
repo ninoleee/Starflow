@@ -568,13 +568,20 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       return cache.libraryItems;
     }
 
-    return cache.findByExternalIds(
+    final exactMatches = cache.findByExternalIds(
       doubanId: doubanId,
       imdbId: imdbId,
       tmdbId: tmdbId,
       tvdbId: tvdbId,
       wikidataId: wikidataId,
     );
+    if (exactMatches.isNotEmpty) {
+      return exactMatches;
+    }
+
+    // Allow the detail matcher to fall back to title/year matching when this
+    // source has indexed items but has not persisted the requested external IDs.
+    return cache.libraryItems;
   }
 
   Future<void> refreshSource(

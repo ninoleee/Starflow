@@ -72,5 +72,5 @@ bool _shouldAutoDowngradeToPerformanceFallback(
 }
 
 bool _requiresHeaderAwareEmbeddedPlayback(PlaybackTarget target) {
-  return target.headers.isNotEmpty;
+  return target.requiresHeaderRestrictedPlayback;
 }

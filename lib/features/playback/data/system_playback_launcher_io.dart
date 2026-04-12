@@ -185,13 +185,7 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
   }
 
   bool _requiresExternalPlaybackHeaders(PlaybackTarget target) {
-    if (target.headers.isEmpty) {
-      return false;
-    }
-    return target.headers.entries.any(
-      (entry) =>
-          entry.key.trim().isNotEmpty && entry.value.trim().isNotEmpty,
-    );
+    return target.requiresHeaderRestrictedPlayback;
   }
 }
 

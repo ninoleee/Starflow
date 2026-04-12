@@ -142,6 +142,118 @@ void main() {
   });
 
   testWidgets(
+      'detail page restores cached multiple choices and prefers the entry source',
+      (tester) async {
+    const seedTarget = MediaDetailTarget(
+      title: '测试影片',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：Emby · 客厅 Emby',
+      searchQuery: '测试影片',
+      sourceId: 'emby-main',
+      itemId: 'movie-seed',
+      itemType: 'movie',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+    );
+    const embyChoice = MediaDetailTarget(
+      title: '测试影片',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：Emby · 客厅 Emby',
+      searchQuery: '测试影片',
+      sourceId: 'emby-main',
+      itemId: 'movie-emby',
+      itemType: 'movie',
+      sectionName: 'Emby 版本',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+      playbackTarget: PlaybackTarget(
+        title: '测试影片',
+        sourceId: 'emby-main',
+        streamUrl: 'https://emby.example/movie-emby.mkv',
+        sourceName: '客厅 Emby',
+        sourceKind: MediaSourceKind.emby,
+        itemId: 'movie-emby',
+        itemType: 'movie',
+      ),
+    );
+    const quarkChoice = MediaDetailTarget(
+      title: '测试影片',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：Quark · 夸克',
+      searchQuery: '测试影片',
+      sourceId: 'quark-main',
+      itemId: 'movie-quark',
+      itemType: 'movie',
+      sectionName: 'Quark 版本',
+      sourceKind: MediaSourceKind.quark,
+      sourceName: '夸克',
+      playbackTarget: PlaybackTarget(
+        title: '测试影片',
+        sourceId: 'quark-main',
+        streamUrl: 'https://quark.example/movie-quark.mkv',
+        sourceName: '夸克',
+        sourceKind: MediaSourceKind.quark,
+        itemId: 'movie-quark',
+        itemType: 'movie',
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'tmdbMetadataMatchEnabled': false,
+              'wmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+              'detailAutoLibraryMatchEnabled': false,
+            }),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            const _NoopMediaRepository(),
+          ),
+          localStorageCacheRepositoryProvider.overrideWithValue(
+            _FakeRestoreCacheRepository(
+              cachedState: const CachedDetailState(
+                target: quarkChoice,
+                libraryMatchChoices: [embyChoice, quarkChoice],
+                selectedLibraryMatchIndex: 1,
+              ),
+            ),
+          ),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(target: seedTarget),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('播放版本'), findsOneWidget);
+    final dropdown = tester.widget<DropdownButton<int>>(
+      find.byType(DropdownButton<int>),
+    );
+    final labels = dropdown.items!
+        .map((item) => (item.child as Text).data ?? '')
+        .toList(growable: false);
+    expect(dropdown.value, 0);
+    expect(labels.first, '客厅 Emby · 测试影片 · Emby 版本');
+    expect(labels.last, '夸克 · 测试影片 · Quark 版本');
+  });
+
+  testWidgets(
       'detail page restores cached episode file variants as playable versions',
       (tester) async {
     const seedTarget = MediaDetailTarget(
@@ -1088,7 +1200,7 @@ void main() {
     expect(find.textContaining('Planet Earth II S01E01'), findsOneWidget);
   });
 
-  testWidgets('detail page auto searches subtitles for playable target',
+  testWidgets('detail page does not auto search subtitles for playable target',
       (tester) async {
     const playableTarget = MediaDetailTarget(
       title: 'Planet Earth II',
@@ -1171,13 +1283,11 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(subtitleRepository.searchQueries, ['Planet Earth II S01E01']);
-    expect(subtitleRepository.lastMaxResults, 10);
-    expect(subtitleRepository.lastSources, [OnlineSubtitleSource.assrt]);
-    expect(find.text('外挂字幕'), findsOneWidget);
-    expect(find.text('不加载外挂字幕'), findsOneWidget);
-    expect(cacheRepository.lastSavedState?.subtitleSearchChoices.length, 1);
+    expect(subtitleRepository.searchQueries, isEmpty);
+    expect(cacheRepository.lastSavedState, isNotNull);
+    expect(cacheRepository.lastSavedState?.subtitleSearchChoices, isEmpty);
     expect(cacheRepository.lastSavedState?.selectedSubtitleSearchIndex, -1);
+    expect(find.text('搜索字幕'), findsOneWidget);
   });
 
   testWidgets(

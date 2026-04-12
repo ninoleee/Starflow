@@ -167,11 +167,18 @@ final _homeSectionSeedProvider = FutureProvider.autoDispose
 
 final homeSectionProvider =
     FutureProvider.family<HomeSectionViewModel?, String>((ref, moduleId) async {
-  ref.watch(localStorageDetailCacheRevisionProvider);
   final seedSection =
       await ref.watch(_homeSectionSeedProvider(moduleId).future);
   if (seedSection == null) {
     return null;
+  }
+  final cacheScope = _homeSectionDetailCacheScope(seedSection);
+  if (!cacheScope.isEmpty) {
+    ref.watch(
+      localStorageDetailCacheChangeProvider.select(
+        (state) => state.revisionForScope(cacheScope),
+      ),
+    );
   }
   return ref.read(homeFeedRepositoryProvider).applyCachedSection(
         section: seedSection,
@@ -201,4 +208,17 @@ void primeHomeModulesFromWidget(WidgetRef ref) {
 
 Future<void> refreshHomeModules(WidgetRef ref) async {
   return ref.read(homePageControllerProvider).refreshModules(ref);
+}
+
+LocalStorageDetailCacheScope _homeSectionDetailCacheScope(
+  HomeSectionViewModel section,
+) {
+  if (section.layout == HomeSectionLayout.posterRail) {
+    return LocalStorageCacheRepository.buildScopeForTargets(
+      section.items.map((item) => item.detailTarget),
+    );
+  }
+  return LocalStorageCacheRepository.buildScopeForTargets(
+    section.carouselItems.map((item) => item.detailTarget),
+  );
 }

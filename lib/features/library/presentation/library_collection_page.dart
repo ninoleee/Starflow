@@ -23,21 +23,41 @@ import 'package:starflow/features/library/presentation/widgets/library_paged_gri
 import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
-final libraryCollectionItemsProvider =
+final _libraryCollectionSeedItemsProvider =
     FutureProvider.family<List<MediaItem>, LibraryCollectionTarget>((
   ref,
   target,
 ) async {
   ref.watch(nasMediaIndexRevisionProvider);
   ref.watch(libraryRefreshRevisionProvider);
-  ref.watch(localStorageDetailCacheRevisionProvider);
-  final items = await ref.read(mediaRepositoryProvider).fetchLibrary(
+  return ref.read(mediaRepositoryProvider).fetchLibrary(
         sourceId: target.sourceId,
         sectionId: target.sectionId,
       );
+});
+
+final libraryCollectionItemsProvider =
+    FutureProvider.family<List<MediaItem>, LibraryCollectionTarget>((
+  ref,
+  target,
+) async {
+  final items =
+      await ref.watch(_libraryCollectionSeedItemsProvider(target).future);
+  final seedTargets =
+      items.map(MediaDetailTarget.fromMediaItem).toList(growable: false);
+  final cacheScope =
+      LocalStorageCacheRepository.buildScopeForTargets(seedTargets);
+  if (!cacheScope.isEmpty) {
+    ref.watch(
+      localStorageDetailCacheChangeProvider.select(
+        (state) => state.revisionForScope(cacheScope),
+      ),
+    );
+  }
   return resolveLibraryItemsWithCachedDetails(
     items: items,
     localStorageCacheRepository: ref.read(localStorageCacheRepositoryProvider),
+    seedTargets: seedTargets,
   );
 });
 

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/legacy.dart';
+import 'package:starflow/features/playback/application/playback_session.dart';
 
 enum WebDavScrapeStage {
   scanning,
@@ -81,12 +84,56 @@ class WebDavScrapeProgress {
 
 final webDavScrapeProgressProvider = StateNotifierProvider<
     WebDavScrapeProgressController, Map<String, WebDavScrapeProgress>>((ref) {
-  return WebDavScrapeProgressController();
+  final controller = WebDavScrapeProgressController(
+    updateMode: ref.read(playbackPerformanceModeProvider)
+        ? WebDavScrapeProgressUpdateMode.prioritizePlayback
+        : WebDavScrapeProgressUpdateMode.prioritizeUi,
+  );
+  ref.listen<bool>(playbackPerformanceModeProvider, (previous, next) {
+    controller.setUpdateMode(
+      next
+          ? WebDavScrapeProgressUpdateMode.prioritizePlayback
+          : WebDavScrapeProgressUpdateMode.prioritizeUi,
+    );
+  });
+  return controller;
 });
+
+enum WebDavScrapeProgressUpdateMode {
+  prioritizeUi,
+  prioritizePlayback,
+}
 
 class WebDavScrapeProgressController
     extends StateNotifier<Map<String, WebDavScrapeProgress>> {
-  WebDavScrapeProgressController() : super(const {});
+  WebDavScrapeProgressController({
+    this.updateMode = WebDavScrapeProgressUpdateMode.prioritizeUi,
+    this.normalModeMinUpdateInterval = const Duration(milliseconds: 120),
+    this.playbackModeMinUpdateInterval = const Duration(milliseconds: 480),
+  }) : super(const {});
+
+  WebDavScrapeProgressUpdateMode updateMode;
+  final Duration normalModeMinUpdateInterval;
+  final Duration playbackModeMinUpdateInterval;
+  final Map<String, WebDavScrapeProgress> _pendingProgressBySourceId =
+      <String, WebDavScrapeProgress>{};
+  DateTime? _lastProgressEmissionAt;
+  Timer? _pendingFlushTimer;
+
+  Duration get _effectiveMinUpdateInterval => switch (updateMode) {
+        WebDavScrapeProgressUpdateMode.prioritizeUi =>
+          normalModeMinUpdateInterval,
+        WebDavScrapeProgressUpdateMode.prioritizePlayback =>
+          playbackModeMinUpdateInterval,
+      };
+
+  void setUpdateMode(WebDavScrapeProgressUpdateMode nextMode) {
+    if (updateMode == nextMode) {
+      return;
+    }
+    updateMode = nextMode;
+    _reschedulePendingFlush();
+  }
 
   void startScanning({
     required String sourceId,
@@ -104,6 +151,7 @@ class WebDavScrapeProgressController
         activityLabel: WebDavScrapeStage.scanning.label,
         detail: detail,
       ),
+      allowThrottle: false,
     );
   }
 
@@ -124,6 +172,8 @@ class WebDavScrapeProgressController
         total: total > 0 ? total : 1,
         detail: detail,
       ),
+      allowThrottle: true,
+      forceEmit: current >= (total > 0 ? total : 1),
     );
   }
 
@@ -147,6 +197,7 @@ class WebDavScrapeProgressController
             : activityLabel,
         detail: detail,
       ),
+      allowThrottle: false,
     );
   }
 
@@ -167,12 +218,19 @@ class WebDavScrapeProgressController
         total: total > 0 ? total : 1,
         detail: detail,
       ),
+      allowThrottle: true,
+      forceEmit: current >= (total > 0 ? total : 1),
     );
   }
 
   void clear(String sourceId) {
     final normalized = sourceId.trim();
-    if (normalized.isEmpty || !state.containsKey(normalized)) {
+    if (normalized.isEmpty) {
+      return;
+    }
+    _pendingProgressBySourceId.remove(normalized);
+    _cleanupPendingFlushIfIdle();
+    if (!state.containsKey(normalized)) {
       return;
     }
     final next = {...state};
@@ -180,10 +238,100 @@ class WebDavScrapeProgressController
     state = next;
   }
 
-  void _upsert(WebDavScrapeProgress progress) {
+  @override
+  void dispose() {
+    _pendingFlushTimer?.cancel();
+    super.dispose();
+  }
+
+  void _upsert(
+    WebDavScrapeProgress progress, {
+    required bool allowThrottle,
+    bool forceEmit = false,
+  }) {
+    final normalizedSourceId = progress.sourceId.trim();
+    if (normalizedSourceId.isEmpty) {
+      return;
+    }
+    final normalizedProgress = progress.copyWith(sourceId: normalizedSourceId);
+    if (!allowThrottle || forceEmit || !_shouldThrottleProgressUpdates()) {
+      _pendingProgressBySourceId.remove(normalizedSourceId);
+      _emitProgress(normalizedProgress);
+      return;
+    }
+    _pendingProgressBySourceId[normalizedSourceId] = normalizedProgress;
+    _schedulePendingFlush();
+  }
+
+  bool _shouldThrottleProgressUpdates() {
+    final lastProgressEmissionAt = _lastProgressEmissionAt;
+    if (lastProgressEmissionAt == null) {
+      return false;
+    }
+    return DateTime.now().difference(lastProgressEmissionAt) <
+        _effectiveMinUpdateInterval;
+  }
+
+  Duration _remainingThrottleWindow() {
+    final lastProgressEmissionAt = _lastProgressEmissionAt;
+    if (lastProgressEmissionAt == null) {
+      return Duration.zero;
+    }
+    final remaining = _effectiveMinUpdateInterval -
+        DateTime.now().difference(lastProgressEmissionAt);
+    if (remaining <= Duration.zero) {
+      return Duration.zero;
+    }
+    return remaining;
+  }
+
+  void _schedulePendingFlush() {
+    if (_pendingProgressBySourceId.isEmpty) {
+      _cleanupPendingFlushIfIdle();
+      return;
+    }
+    final remaining = _remainingThrottleWindow();
+    if (remaining <= Duration.zero) {
+      _flushPendingProgress();
+      return;
+    }
+    _pendingFlushTimer ??= Timer(remaining, _flushPendingProgress);
+  }
+
+  void _reschedulePendingFlush() {
+    _pendingFlushTimer?.cancel();
+    _pendingFlushTimer = null;
+    _schedulePendingFlush();
+  }
+
+  void _cleanupPendingFlushIfIdle() {
+    if (_pendingProgressBySourceId.isNotEmpty) {
+      return;
+    }
+    _pendingFlushTimer?.cancel();
+    _pendingFlushTimer = null;
+  }
+
+  void _emitProgress(WebDavScrapeProgress progress) {
+    _lastProgressEmissionAt = DateTime.now();
     state = {
       ...state,
       progress.sourceId: progress,
     };
+  }
+
+  void _flushPendingProgress() {
+    _pendingFlushTimer?.cancel();
+    _pendingFlushTimer = null;
+    if (_pendingProgressBySourceId.isEmpty) {
+      return;
+    }
+    _lastProgressEmissionAt = DateTime.now();
+    final nextState = {...state};
+    for (final progress in _pendingProgressBySourceId.values) {
+      nextState[progress.sourceId] = progress;
+    }
+    _pendingProgressBySourceId.clear();
+    state = nextState;
   }
 }

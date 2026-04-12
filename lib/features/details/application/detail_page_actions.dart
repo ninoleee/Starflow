@@ -95,14 +95,15 @@ class DetailCachedStateRestorer {
             )
             .toList(growable: false)
         : cachedState.libraryMatchChoices;
+    final preferredChoices = prioritizeDetailLibraryMatchChoices(
+      pageSeedTarget: pageSeedTarget,
+      choices: preservedChoices,
+      fallbackSelectedIndex: cachedState.selectedLibraryMatchIndex,
+    );
 
-    final hasMultiChoices = preservedChoices.length > 1;
-    final selectedLibraryMatchIndex = hasMultiChoices
-        ? cachedState.selectedLibraryMatchIndex.clamp(
-            0,
-            preservedChoices.length - 1,
-          )
-        : 0;
+    final hasMultiChoices = preferredChoices.choices.length > 1;
+    final selectedLibraryMatchIndex =
+        hasMultiChoices ? preferredChoices.selectedIndex : 0;
     final shouldRestoreSingleResolvedTarget = !hasMultiChoices &&
         structuralSeed.isSeries &&
         _hasResolvedStructuralResourceState(preservedResolvedTarget) &&
@@ -117,13 +118,14 @@ class DetailCachedStateRestorer {
     );
 
     return DetailCachedStateRestorePlan(
-      libraryMatchChoices:
-          hasMultiChoices ? preservedChoices : const <MediaDetailTarget>[],
+      libraryMatchChoices: hasMultiChoices
+          ? preferredChoices.choices
+          : const <MediaDetailTarget>[],
       selectedLibraryMatchIndex: selectedLibraryMatchIndex,
       subtitleSearchChoices: cachedState.subtitleSearchChoices,
       selectedSubtitleSearchIndex: normalizedSubtitleIndex,
       manualOverrideTarget: hasMultiChoices
-          ? preservedChoices[selectedLibraryMatchIndex]
+          ? preferredChoices.choices[selectedLibraryMatchIndex]
           : (shouldRestoreSingleResolvedTarget
               ? preservedResolvedTarget
               : null),
@@ -374,7 +376,6 @@ class DetailStartupPlan {
     required this.shouldStart,
     required this.shouldRestoreCachedState,
     required this.shouldRestoreIndexedEpisodeVariants,
-    required this.shouldRunInitialSubtitleSearch,
     required this.shouldWarmEnrichedTarget,
     required this.shouldWarmSeriesBrowser,
     required this.shouldAttemptAutoLibraryMatch,
@@ -385,7 +386,6 @@ class DetailStartupPlan {
   final bool shouldStart;
   final bool shouldRestoreCachedState;
   final bool shouldRestoreIndexedEpisodeVariants;
-  final bool shouldRunInitialSubtitleSearch;
   final bool shouldWarmEnrichedTarget;
   final bool shouldWarmSeriesBrowser;
   final bool shouldAttemptAutoLibraryMatch;
@@ -398,23 +398,15 @@ DetailStartupPlan buildDetailStartupPlan({
   required bool backgroundWorkSuspended,
   required MediaDetailTarget pageSeedTarget,
   required MediaDetailTarget? manualOverrideTarget,
-  required bool hasSubtitleChoices,
-  required bool hasOnlineSubtitleSources,
   required bool detailAutoLibraryMatchEnabled,
 }) {
   final effectiveTarget = manualOverrideTarget ?? pageSeedTarget;
   final canStart = isPageVisible && !backgroundWorkSuspended;
-  final shouldRunInitialSubtitleSearch = canStart &&
-      !hasSubtitleChoices &&
-      hasOnlineSubtitleSources &&
-      effectiveTarget.isPlayable &&
-      effectiveTarget.playbackTarget != null;
 
   return DetailStartupPlan(
     shouldStart: canStart,
     shouldRestoreCachedState: canStart,
     shouldRestoreIndexedEpisodeVariants: canStart,
-    shouldRunInitialSubtitleSearch: shouldRunInitialSubtitleSearch,
     shouldWarmEnrichedTarget: canStart,
     shouldWarmSeriesBrowser: canStart && effectiveTarget.isSeries,
     shouldAttemptAutoLibraryMatch: canStart && detailAutoLibraryMatchEnabled,

@@ -1,6 +1,10 @@
-bool get playbackTraceEnabled => false;
+bool _playbackTraceEnabled = false;
 
-void setPlaybackTraceEnabled(bool enabled) {}
+bool get playbackTraceEnabled => _playbackTraceEnabled;
+
+void setPlaybackTraceEnabled(bool enabled) {
+  _playbackTraceEnabled = enabled;
+}
 
 void playbackTrace(
   String stage, {

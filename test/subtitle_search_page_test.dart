@@ -8,7 +8,7 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
-  testWidgets('subtitle search page prefers title as initial auto-search text',
+  testWidgets('subtitle search page prefills title without auto searching',
       (tester) async {
     final repository = _FakeOnlineSubtitleRepository();
 
@@ -40,11 +40,9 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(repository.searchQueries, ['Planet Earth II']);
-    expect(
-      repository.searchSources.single,
-      [OnlineSubtitleSource.assrt],
-    );
+    final searchField = tester.widget<TextField>(find.byType(TextField));
+    expect(searchField.controller?.text, 'Planet Earth II');
+    expect(repository.searchQueries, isEmpty);
   });
 
   testWidgets('subtitle search page prefers explicit initial input text',
@@ -80,9 +78,9 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(repository.searchQueries, ['Planet Earth II']);
     final searchField = tester.widget<TextField>(find.byType(TextField));
     expect(searchField.controller?.text, 'Planet Earth II');
+    expect(repository.searchQueries, isEmpty);
   });
 
   testWidgets('subtitle search page can narrow selected subtitle sources',
@@ -116,11 +114,6 @@ void main() {
 
     await tester.pump();
     await tester.pump();
-
-    expect(
-      repository.searchSources.first,
-      [OnlineSubtitleSource.assrt, OnlineSubtitleSource.subhd],
-    );
 
     await tester.tap(find.text('SubHD'));
     await tester.pumpAndSettle();

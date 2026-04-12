@@ -132,7 +132,9 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
           'windows-mpv.player.playing',
           fields: {'playing': playing},
         );
-        _updateTvPlaybackState(playing: playing);
+        if (_isTelevisionPlaybackDevice) {
+          _updateTvPlaybackState(playing: playing);
+        }
         unawaited(_syncBackgroundPlayback(enabled: playing));
         unawaited(_syncPlaybackSystemSession(force: true));
         if (_isTelevisionPlaybackDevice) {
@@ -150,14 +152,18 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         duration,
       ) {
         _latestDuration = duration;
-        _updateTvPlaybackState(duration: duration);
+        if (_isTelevisionPlaybackDevice) {
+          _updateTvPlaybackState(duration: duration);
+        }
         unawaited(_syncPlaybackSystemSession());
       });
       _playerPositionSubscription = playback.player.stream.position.listen((
         position,
       ) {
         _latestPosition = position;
-        _updateTvPlaybackState(position: position);
+        if (_isTelevisionPlaybackDevice) {
+          _updateTvPlaybackState(position: position);
+        }
         _maybeApplyAutoSkip(playback.player, position);
         unawaited(_persistPlaybackProgress());
         unawaited(_syncPlaybackSystemSession());
@@ -406,8 +412,11 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     return playback;
   }
 
-  Future<({PlaybackRemotePreflightResult? preflight, _StartupProbeResult probe})>
-  _prepareStartupDiagnostics(PlaybackTarget target) async {
+  Future<
+      ({
+        PlaybackRemotePreflightResult? preflight,
+        _StartupProbeResult probe
+      })> _prepareStartupDiagnostics(PlaybackTarget target) async {
     final preflightFuture = _shouldRunRemotePreflight(target)
         ? _playbackRemotePreflight.probe(target)
         : Future<PlaybackRemotePreflightResult?>.value(null);
@@ -471,10 +480,10 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     required _StartupProbeResult probe,
   }) {
     var resolved = baseSeconds;
-    final startupProbeMegabitsPerSecond = probe.estimatedSpeedBytesPerSecond ==
-            null
-        ? null
-        : (probe.estimatedSpeedBytesPerSecond! * 8) / 1000000;
+    final startupProbeMegabitsPerSecond =
+        probe.estimatedSpeedBytesPerSecond == null
+            ? null
+            : (probe.estimatedSpeedBytesPerSecond! * 8) / 1000000;
     final lowStartupSpeed = startupProbeMegabitsPerSecond != null &&
         startupProbeMegabitsPerSecond > 0 &&
         startupProbeMegabitsPerSecond < 12;
@@ -505,18 +514,14 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       PlaybackRemotePreflightFailureReason.emptyUrl => '播放地址为空',
       PlaybackRemotePreflightFailureReason.unsupportedScheme =>
         '当前播放地址协议暂不支持预检',
-      PlaybackRemotePreflightFailureReason.timeout =>
-        '播放链接预检超时，远端响应过慢',
+      PlaybackRemotePreflightFailureReason.timeout => '播放链接预检超时，远端响应过慢',
       PlaybackRemotePreflightFailureReason.unauthorized =>
         '播放链接鉴权失败，请重新登录或刷新授权',
       PlaybackRemotePreflightFailureReason.forbidden =>
         '播放链接已被拒绝，请检查会员/VIP 或权限状态',
-      PlaybackRemotePreflightFailureReason.notFound =>
-        '播放链接已失效或文件不存在',
-      PlaybackRemotePreflightFailureReason.linkExpired =>
-        '播放链接已过期，请重新获取播放地址',
-      PlaybackRemotePreflightFailureReason.serverError =>
-        '远端服务暂时不可用，请稍后重试',
+      PlaybackRemotePreflightFailureReason.notFound => '播放链接已失效或文件不存在',
+      PlaybackRemotePreflightFailureReason.linkExpired => '播放链接已过期，请重新获取播放地址',
+      PlaybackRemotePreflightFailureReason.serverError => '远端服务暂时不可用，请稍后重试',
       PlaybackRemotePreflightFailureReason.networkError =>
         '播放链接预检失败，请检查网络或远端连接',
       PlaybackRemotePreflightFailureReason.none => '远程流预检失败',
@@ -833,8 +838,8 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     );
     final result =
         await _providerContainer.read(systemPlaybackLauncherProvider).launch(
-          target,
-        );
+              target,
+            );
     _traceQuarkPlaybackStartup(
       'quark.launch.system.result',
       target: target,
@@ -864,12 +869,11 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         'decodeMode': _playbackDecodeMode.name,
       },
     );
-    final result = await _providerContainer
-        .read(nativePlaybackLauncherProvider)
-        .launch(
-          target,
-          decodeMode: _playbackDecodeMode,
-        );
+    final result =
+        await _providerContainer.read(nativePlaybackLauncherProvider).launch(
+              target,
+              decodeMode: _playbackDecodeMode,
+            );
     _traceQuarkPlaybackStartup(
       'quark.launch.native.result',
       target: target,
@@ -898,12 +902,11 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       target: target,
       fields: {'decodeMode': _playbackDecodeMode.name},
     );
-    final nativeResult = await _providerContainer
-        .read(nativePlaybackLauncherProvider)
-        .launch(
-          target,
-          decodeMode: _playbackDecodeMode,
-        );
+    final nativeResult =
+        await _providerContainer.read(nativePlaybackLauncherProvider).launch(
+              target,
+              decodeMode: _playbackDecodeMode,
+            );
     _traceQuarkPlaybackStartup(
       'quark.launch.fallback.native-result',
       target: target,
@@ -921,8 +924,8 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
 
     final result =
         await _providerContainer.read(systemPlaybackLauncherProvider).launch(
-          target,
-        );
+              target,
+            );
     _traceQuarkPlaybackStartup(
       'quark.launch.fallback.system-result',
       target: target,
@@ -1413,8 +1416,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       aggressiveTuningEnabled: _aggressivePlaybackTuningEnabled,
       decodeMode: _playbackDecodeMode,
       remotePlaybackOverride: _isLikelyRemotePlaybackTarget(target),
-      highRiskContainerOverride:
-          isHighRiskRemotePlaybackContainer(target) ||
+      highRiskContainerOverride: isHighRiskRemotePlaybackContainer(target) ||
           _remotePreflightIndicatesRangeRisk,
       startupProbeMegabitsPerSecond: _startupProbeMegabitsPerSecond,
     );

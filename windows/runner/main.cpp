@@ -12,7 +12,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
     CreateAndAttachConsole();
   }
-  InstallStderrFilter();
 
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
@@ -31,6 +30,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (!window.Create(L"starflow", origin, size)) {
     return EXIT_FAILURE;
   }
+  // Show the native window immediately so debug runs don't appear hung
+  // if Flutter's first frame is delayed.
+  window.Show();
   window.SetQuitOnClose(true);
 
   ::MSG msg;

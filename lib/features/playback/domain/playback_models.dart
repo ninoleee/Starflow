@@ -128,6 +128,16 @@ class PlaybackTarget {
 
   bool get canPlay => streamUrl.trim().isNotEmpty || needsResolution;
 
+  bool get hasEffectiveHeaders {
+    return headers.entries.any(
+      (entry) =>
+          entry.key.trim().isNotEmpty && entry.value.trim().isNotEmpty,
+    );
+  }
+
+  bool get requiresHeaderRestrictedPlayback =>
+      sourceKind == MediaSourceKind.quark && hasEffectiveHeaders;
+
   String get normalizedItemType => itemType.trim().toLowerCase();
 
   bool get isEpisode => normalizedItemType == 'episode';

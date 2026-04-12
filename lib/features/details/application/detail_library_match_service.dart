@@ -745,22 +745,30 @@ class DetailLibraryMatchService {
     required MediaDetailTarget current,
     required MediaDetailTarget resolved,
   }) {
-    if (!current.isSeries || resolved.isSeries) {
-      return resolved;
+    final normalizedCurrent = normalizePlayableTargetResourceContext(current);
+    final normalizedResolved = normalizePlayableTargetResourceContext(resolved);
+
+    if (!normalizedCurrent.isSeries ||
+        normalizedResolved.isSeries ||
+        !_targetsSharePreservedSeriesSource(
+          current: normalizedCurrent,
+          resolved: normalizedResolved,
+        )) {
+      return normalizedResolved;
     }
 
-    final resolvedPlayback = resolved.playbackTarget;
-    final currentPlayback = current.playbackTarget;
-    final currentSectionName = current.sectionName.trim();
-    final resolvedSectionName = resolved.sectionName.trim();
+    final resolvedPlayback = normalizedResolved.playbackTarget;
+    final currentPlayback = normalizedCurrent.playbackTarget;
+    final currentSectionName = normalizedCurrent.sectionName.trim();
+    final resolvedSectionName = normalizedResolved.sectionName.trim();
     final preferredSectionName = resolvedSectionName.isNotEmpty &&
             (currentSectionName.isEmpty ||
                 currentSectionName == '剧集' ||
                 currentSectionName == '全部剧集')
-        ? resolved.sectionName
-        : current.sectionName;
-    final resolvedSeriesItemId = current.itemId.trim().isNotEmpty
-        ? current.itemId
+        ? normalizedResolved.sectionName
+        : normalizedCurrent.sectionName;
+    final resolvedSeriesItemId = normalizedCurrent.itemId.trim().isNotEmpty
+        ? normalizedCurrent.itemId
         : (resolvedPlayback?.seriesId.trim().isNotEmpty == true
             ? resolvedPlayback!.seriesId.trim()
             : '');
@@ -768,75 +776,164 @@ class DetailLibraryMatchService {
       seriesId: resolvedSeriesItemId.isNotEmpty
           ? resolvedSeriesItemId
           : resolvedPlayback.seriesId,
-      seriesTitle: current.title.trim().isNotEmpty
-          ? current.title
+      seriesTitle: normalizedCurrent.title.trim().isNotEmpty
+          ? normalizedCurrent.title
           : (resolvedPlayback.seriesTitle.trim().isNotEmpty
               ? resolvedPlayback.seriesTitle
-              : currentPlayback?.resolvedSeriesTitle ?? resolved.title),
+              : currentPlayback?.resolvedSeriesTitle ??
+                  normalizedResolved.title),
     );
 
-    return current.copyWith(
-      title: current.title.trim().isNotEmpty ? current.title : resolved.title,
-      posterUrl: resolved.posterUrl,
-      posterHeaders: resolved.posterHeaders,
-      backdropUrl: resolved.backdropUrl,
-      backdropHeaders: resolved.backdropHeaders,
-      logoUrl: resolved.logoUrl,
-      logoHeaders: resolved.logoHeaders,
-      bannerUrl: resolved.bannerUrl,
-      bannerHeaders: resolved.bannerHeaders,
-      extraBackdropUrls: resolved.extraBackdropUrls,
-      extraBackdropHeaders: resolved.extraBackdropHeaders,
-      overview: resolved.overview,
-      year: resolved.year,
-      durationLabel: resolved.durationLabel,
-      ratingLabels: resolved.ratingLabels,
-      genres: resolved.genres,
-      directors: resolved.directors,
-      directorProfiles: resolved.directorProfiles,
-      actors: resolved.actors,
-      actorProfiles: resolved.actorProfiles,
-      platforms: resolved.platforms,
-      platformProfiles: resolved.platformProfiles,
-      availabilityLabel: resolved.availabilityLabel,
-      searchQuery: resolved.searchQuery,
+    return normalizedCurrent.copyWith(
+      title: normalizedCurrent.title.trim().isNotEmpty
+          ? normalizedCurrent.title
+          : normalizedResolved.title,
+      posterUrl: normalizedResolved.posterUrl,
+      posterHeaders: normalizedResolved.posterHeaders,
+      backdropUrl: normalizedResolved.backdropUrl,
+      backdropHeaders: normalizedResolved.backdropHeaders,
+      logoUrl: normalizedResolved.logoUrl,
+      logoHeaders: normalizedResolved.logoHeaders,
+      bannerUrl: normalizedResolved.bannerUrl,
+      bannerHeaders: normalizedResolved.bannerHeaders,
+      extraBackdropUrls: normalizedResolved.extraBackdropUrls,
+      extraBackdropHeaders: normalizedResolved.extraBackdropHeaders,
+      overview: normalizedResolved.overview,
+      year: normalizedResolved.year,
+      durationLabel: normalizedResolved.durationLabel,
+      ratingLabels: normalizedResolved.ratingLabels,
+      genres: normalizedResolved.genres,
+      directors: normalizedResolved.directors,
+      directorProfiles: normalizedResolved.directorProfiles,
+      actors: normalizedResolved.actors,
+      actorProfiles: normalizedResolved.actorProfiles,
+      platforms: normalizedResolved.platforms,
+      platformProfiles: normalizedResolved.platformProfiles,
+      availabilityLabel: normalizedResolved.availabilityLabel,
+      searchQuery: normalizedResolved.searchQuery,
       playbackTarget: normalizedPlayback,
       itemId: resolvedSeriesItemId.isNotEmpty
           ? resolvedSeriesItemId
-          : resolved.itemId,
-      sourceId: current.sourceId.trim().isNotEmpty
-          ? current.sourceId
-          : resolved.sourceId,
-      itemType:
-          current.itemType.trim().isNotEmpty ? current.itemType : 'series',
-      sectionId: current.sectionId.trim().isNotEmpty
-          ? current.sectionId
-          : resolved.sectionId,
+          : normalizedResolved.itemId,
+      sourceId: normalizedCurrent.sourceId.trim().isNotEmpty
+          ? normalizedCurrent.sourceId
+          : normalizedResolved.sourceId,
+      itemType: normalizedCurrent.itemType.trim().isNotEmpty
+          ? normalizedCurrent.itemType
+          : 'series',
+      sectionId: normalizedCurrent.sectionId.trim().isNotEmpty
+          ? normalizedCurrent.sectionId
+          : normalizedResolved.sectionId,
       sectionName: preferredSectionName,
-      resourcePath: resolved.resourcePath,
-      doubanId: current.doubanId.trim().isNotEmpty
-          ? current.doubanId
-          : resolved.doubanId,
-      imdbId:
-          current.imdbId.trim().isNotEmpty ? current.imdbId : resolved.imdbId,
-      tmdbId:
-          current.tmdbId.trim().isNotEmpty ? current.tmdbId : resolved.tmdbId,
-      tvdbId:
-          current.tvdbId.trim().isNotEmpty ? current.tvdbId : resolved.tvdbId,
-      wikidataId: current.wikidataId.trim().isNotEmpty
-          ? current.wikidataId
-          : resolved.wikidataId,
-      tmdbSetId: current.tmdbSetId.trim().isNotEmpty
-          ? current.tmdbSetId
-          : resolved.tmdbSetId,
-      providerIds: current.providerIds.isNotEmpty
-          ? current.providerIds
-          : resolved.providerIds,
-      sourceKind: resolved.sourceKind ?? current.sourceKind,
-      sourceName: resolved.sourceName.trim().isNotEmpty
-          ? resolved.sourceName
-          : current.sourceName,
+      resourcePath: normalizedResolved.resourcePath,
+      doubanId: normalizedCurrent.doubanId.trim().isNotEmpty
+          ? normalizedCurrent.doubanId
+          : normalizedResolved.doubanId,
+      imdbId: normalizedCurrent.imdbId.trim().isNotEmpty
+          ? normalizedCurrent.imdbId
+          : normalizedResolved.imdbId,
+      tmdbId: normalizedCurrent.tmdbId.trim().isNotEmpty
+          ? normalizedCurrent.tmdbId
+          : normalizedResolved.tmdbId,
+      tvdbId: normalizedCurrent.tvdbId.trim().isNotEmpty
+          ? normalizedCurrent.tvdbId
+          : normalizedResolved.tvdbId,
+      wikidataId: normalizedCurrent.wikidataId.trim().isNotEmpty
+          ? normalizedCurrent.wikidataId
+          : normalizedResolved.wikidataId,
+      tmdbSetId: normalizedCurrent.tmdbSetId.trim().isNotEmpty
+          ? normalizedCurrent.tmdbSetId
+          : normalizedResolved.tmdbSetId,
+      providerIds: normalizedCurrent.providerIds.isNotEmpty
+          ? normalizedCurrent.providerIds
+          : normalizedResolved.providerIds,
+      sourceKind: normalizedResolved.sourceKind ?? normalizedCurrent.sourceKind,
+      sourceName: normalizedResolved.sourceName.trim().isNotEmpty
+          ? normalizedResolved.sourceName
+          : normalizedCurrent.sourceName,
     );
+  }
+
+  MediaDetailTarget normalizePlayableTargetResourceContext(
+    MediaDetailTarget target,
+  ) {
+    final playback = target.playbackTarget;
+    if (playback == null) {
+      return target;
+    }
+
+    final targetSourceId = target.sourceId.trim();
+    final playbackSourceId = playback.sourceId.trim();
+    if (targetSourceId.isEmpty ||
+        playbackSourceId.isEmpty ||
+        targetSourceId == playbackSourceId) {
+      return target;
+    }
+
+    return target.copyWith(
+      sourceId: playbackSourceId,
+      itemId:
+          playback.itemId.trim().isNotEmpty ? playback.itemId : target.itemId,
+      itemType: playback.itemType.trim().isNotEmpty
+          ? playback.itemType
+          : target.itemType,
+      sourceKind: playback.sourceKind,
+      sourceName: playback.sourceName.trim().isNotEmpty
+          ? playback.sourceName
+          : target.sourceName,
+    );
+  }
+
+  bool _targetsSharePreservedSeriesSource({
+    required MediaDetailTarget current,
+    required MediaDetailTarget resolved,
+  }) {
+    final currentSourceId = _effectiveSourceId(current);
+    final resolvedSourceId = _effectiveSourceId(resolved);
+    if (currentSourceId.isNotEmpty || resolvedSourceId.isNotEmpty) {
+      return currentSourceId.isNotEmpty &&
+          resolvedSourceId.isNotEmpty &&
+          currentSourceId == resolvedSourceId;
+    }
+
+    final currentKind =
+        current.sourceKind ?? current.playbackTarget?.sourceKind;
+    final resolvedKind =
+        resolved.sourceKind ?? resolved.playbackTarget?.sourceKind;
+    if (currentKind != null || resolvedKind != null) {
+      if (currentKind == null || resolvedKind == null) {
+        return false;
+      }
+      if (currentKind != resolvedKind) {
+        return false;
+      }
+    }
+
+    final currentSourceName = _effectiveSourceName(current);
+    final resolvedSourceName = _effectiveSourceName(resolved);
+    if (currentSourceName.isNotEmpty || resolvedSourceName.isNotEmpty) {
+      return currentSourceName.isNotEmpty &&
+          resolvedSourceName.isNotEmpty &&
+          currentSourceName == resolvedSourceName;
+    }
+
+    return false;
+  }
+
+  String _effectiveSourceId(MediaDetailTarget target) {
+    final sourceId = target.sourceId.trim();
+    if (sourceId.isNotEmpty) {
+      return sourceId;
+    }
+    return target.playbackTarget?.sourceId.trim() ?? '';
+  }
+
+  String _effectiveSourceName(MediaDetailTarget target) {
+    final sourceName = target.sourceName.trim();
+    if (sourceName.isNotEmpty) {
+      return sourceName;
+    }
+    return target.playbackTarget?.sourceName.trim() ?? '';
   }
 
   MediaDetailTarget normalizeRatingLabelsInTarget(MediaDetailTarget target) {
