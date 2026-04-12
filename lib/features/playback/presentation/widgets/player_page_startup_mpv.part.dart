@@ -161,7 +161,6 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         position,
       ) {
         _latestPosition = position;
-        _maybeClearIosEmbeddedMpvStartupPauseGuard(position: position);
         if (_isTelevisionPlaybackDevice) {
           _updateTvPlaybackState(position: position);
         }
@@ -193,9 +192,6 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       if (!mounted || _player != playback.player) {
         return;
       }
-      _armIosEmbeddedMpvStartupPauseGuard(
-        baselinePosition: playback.player.state.position,
-      );
       setState(() {
         _isReady = true;
       });

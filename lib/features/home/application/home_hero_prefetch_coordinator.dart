@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/features/details/application/detail_target_resolver.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
@@ -16,14 +17,9 @@ class HomeHeroPrefetchCoordinator {
   int _refreshSessionId = 0;
   final Set<String> _scheduledRefreshKeys = <String>{};
 
-  void _log(String message) {
-    debugPrint('[HomeHeroPrefetch] $message');
-  }
-
   void reset() {
     _refreshSessionId += 1;
     _scheduledRefreshKeys.clear();
-    _log('coordinator.reset session=$_refreshSessionId');
   }
 
   void clearScheduled() {
@@ -36,58 +32,24 @@ class HomeHeroPrefetchCoordinator {
     required bool Function() isPageActive,
     bool forceMetadataRefresh = false,
   }) {
-    final pageActive = isPageActive();
-    final enrichmentSuspended = ref.read(backgroundEnrichmentSuspendedProvider);
-    if (!pageActive || enrichmentSuspended) {
-      _log(
-        'schedule.skip pageActive=$pageActive '
-        'enrichmentSuspended=$enrichmentSuspended '
-        'force=$forceMetadataRefresh',
-      );
+    if (!isPageActive() || ref.read(backgroundEnrichmentSuspendedProvider)) {
       return;
     }
     final sessionId = _refreshSessionId;
     final candidates = <MediaDetailTarget>[];
     for (final target in targets) {
-      final refreshKey = _heroMetadataRefreshKey(target);
-      final needsRefresh = _needsHeroMetadataRefresh(target);
-      _log(
-        'schedule.inspect session=$sessionId '
-        'title=${target.title} '
-        'key=$refreshKey '
-        'force=$forceMetadataRefresh '
-        'needsRefresh=$needsRefresh '
-        'backdrop=${target.backdropUrl.trim().isNotEmpty} '
-        'logo=${target.logoUrl.trim().isNotEmpty} '
-        'overview=${target.overview.trim().isNotEmpty} '
-        'query=${target.searchQuery.trim().isNotEmpty} '
-        'metadataMatch=${target.needsMetadataMatch} '
-        'imdbMatch=${target.needsImdbRatingMatch}',
-      );
       if (!_needsHeroMetadataRefresh(target)) {
-        _log(
-          'schedule.filtered title=${target.title} reason=no-missing-hero-metadata',
-        );
         continue;
       }
+      final refreshKey = _heroMetadataRefreshKey(target);
       if (refreshKey.isEmpty || !_scheduledRefreshKeys.add(refreshKey)) {
-        _log(
-          'schedule.filtered title=${target.title} '
-          'reason=${refreshKey.isEmpty ? 'empty-key' : 'already-scheduled'}',
-        );
         continue;
       }
       candidates.add(target);
     }
     if (candidates.isEmpty) {
-      _log('schedule.skip session=$sessionId reason=no-candidates');
       return;
     }
-    _log(
-      'schedule.ready session=$sessionId '
-      'candidates=${candidates.length} '
-      'force=$forceMetadataRefresh',
-    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_isRefreshSessionActive(
@@ -95,7 +57,6 @@ class HomeHeroPrefetchCoordinator {
         sessionId: sessionId,
         isPageActive: isPageActive,
       )) {
-        _log('schedule.cancelled session=$sessionId reason=session-inactive');
         return;
       }
       unawaited(
@@ -132,12 +93,8 @@ class HomeHeroPrefetchCoordinator {
       sessionId: sessionId,
       isPageActive: isPageActive,
     )) {
-      _log('refresh.skip session=$sessionId reason=session-inactive');
       return;
     }
-    _log(
-      'refresh.start session=$sessionId targets=${targets.length} force=$forceMetadataRefresh',
-    );
     try {
       await Future.wait(
         targets.map(
@@ -153,7 +110,6 @@ class HomeHeroPrefetchCoordinator {
       );
     } catch (_) {
       // Hero metadata refresh is best-effort and should never block home UI.
-      _log('refresh.failed session=$sessionId reason=unexpected-error');
     }
   }
 
@@ -169,33 +125,18 @@ class HomeHeroPrefetchCoordinator {
       sessionId: sessionId,
       isPageActive: isPageActive,
     )) {
-      _log(
-        'target.skip title=${target.title} session=$sessionId reason=session-inactive',
-      );
       return;
     }
     try {
       if (!_needsHeroMetadataRefresh(target)) {
-        _log(
-          'target.skip title=${target.title} session=$sessionId reason=no-missing-hero-metadata',
-        );
         return;
       }
       final workingTarget = _ensureHeroSearchQuery(target);
       final cacheRepository = ref.read(localStorageCacheRepositoryProvider);
-      _log(
-        'target.start title=${target.title} session=$sessionId '
-        'force=$forceMetadataRefresh '
-        'query=${workingTarget.searchQuery} '
-        'sourceKind=${workingTarget.sourceKind?.name ?? 'unknown'} '
-        'sourceId=${workingTarget.sourceId} '
-        'itemId=${workingTarget.itemId}',
-      );
 
       if (workingTarget.sourceKind == MediaSourceKind.nas &&
           workingTarget.sourceId.trim().isNotEmpty &&
           workingTarget.itemId.trim().isNotEmpty) {
-        _log('target.nas.start title=${target.title} session=$sessionId');
         final updatedTarget = await ref
             .read(nasMediaIndexerProvider)
             .enrichDetailTargetMetadataIfNeeded(workingTarget);
@@ -204,49 +145,25 @@ class HomeHeroPrefetchCoordinator {
           sessionId: sessionId,
           isPageActive: isPageActive,
         )) {
-          _log(
-            'target.nas.skip title=${target.title} session=$sessionId reason=session-inactive-after-enrich',
-          );
           return;
         }
         final resolvedTarget = updatedTarget ?? workingTarget;
         if (!_heroMetadataRefreshProducedUpdate(target, resolvedTarget)) {
-          _log(
-            'target.nas.skip title=${target.title} session=$sessionId reason=no-visible-update',
-          );
           return;
         }
         await cacheRepository.saveDetailTarget(
           seedTarget: target,
           resolvedTarget: resolvedTarget,
         );
-        _log(
-          'target.nas.saved title=${target.title} session=$sessionId '
-          'backdrop=${resolvedTarget.backdropUrl.trim().isNotEmpty} '
-          'logo=${resolvedTarget.logoUrl.trim().isNotEmpty} '
-          'overview=${resolvedTarget.overview.trim().isNotEmpty}',
-        );
         return;
       }
 
       final settings = ref.read(appSettingsProvider);
       if (!_canAttemptHeroMetadataRefresh(settings, workingTarget)) {
-        _log(
-          'target.skip title=${target.title} session=$sessionId '
-          'reason=settings-or-query-blocked '
-          'wmdb=${settings.wmdbMetadataMatchEnabled} '
-          'tmdb=${settings.tmdbMetadataMatchEnabled} '
-          'tmdbToken=${settings.tmdbReadAccessToken.trim().isNotEmpty} '
-          'query=${workingTarget.searchQuery.isNotEmpty} '
-          'douban=${workingTarget.doubanId.trim().isNotEmpty}',
-        );
         if (target.searchQuery.trim() != workingTarget.searchQuery.trim()) {
           await cacheRepository.saveDetailTarget(
             seedTarget: target,
             resolvedTarget: workingTarget,
-          );
-          _log(
-            'target.saved-derived-query title=${target.title} session=$sessionId query=${workingTarget.searchQuery}',
           );
         }
         return;
@@ -257,48 +174,40 @@ class HomeHeroPrefetchCoordinator {
         sessionId: sessionId,
         isPageActive: isPageActive,
       )) {
-        _log(
-          'target.skip title=${target.title} session=$sessionId reason=session-inactive-before-status',
-        );
         return;
       }
 
       if (!forceMetadataRefresh) {
         final refreshStatus =
             await cacheRepository.loadDetailMetadataRefreshStatus(target);
-        _log(
-          'target.status title=${target.title} session=$sessionId status=${refreshStatus.name}',
-        );
         if (!_isRefreshSessionActive(
           ref: ref,
           sessionId: sessionId,
           isPageActive: isPageActive,
         )) {
-          _log(
-            'target.skip title=${target.title} session=$sessionId reason=session-inactive-after-status',
-          );
           return;
         }
         if (refreshStatus != DetailMetadataRefreshStatus.never) {
-          _log(
-            'target.skip title=${target.title} session=$sessionId reason=status-blocked status=${refreshStatus.name}',
-          );
           return;
         }
       }
 
       try {
-        _log('target.enrich.start title=${target.title} session=$sessionId');
-        final updatedTarget =
-            await ref.read(enrichedDetailTargetProvider(workingTarget).future);
+        final updatedTarget = forceMetadataRefresh
+            ? await ref.read(detailTargetResolverProvider).resolveMetadataOnly(
+                  target: workingTarget,
+                  backgroundWorkSuspended: ref.read(
+                    backgroundEnrichmentSuspendedProvider,
+                  ),
+                  forceMetadataRefresh: true,
+                )
+            : await ref
+                .read(enrichedDetailTargetProvider(workingTarget).future);
         if (!_isRefreshSessionActive(
           ref: ref,
           sessionId: sessionId,
           isPageActive: isPageActive,
         )) {
-          _log(
-            'target.skip title=${target.title} session=$sessionId reason=session-inactive-after-enrich',
-          );
           return;
         }
         final producedUpdate =
@@ -310,23 +219,12 @@ class HomeHeroPrefetchCoordinator {
               ? DetailMetadataRefreshStatus.succeeded
               : DetailMetadataRefreshStatus.failed,
         );
-        _log(
-          'target.enrich.saved title=${target.title} session=$sessionId '
-          'producedUpdate=$producedUpdate '
-          'backdrop=${updatedTarget.backdropUrl.trim().isNotEmpty} '
-          'logo=${updatedTarget.logoUrl.trim().isNotEmpty} '
-          'overview=${updatedTarget.overview.trim().isNotEmpty} '
-          'searchQuery=${updatedTarget.searchQuery}',
-        );
       } catch (_) {
         if (!_isRefreshSessionActive(
           ref: ref,
           sessionId: sessionId,
           isPageActive: isPageActive,
         )) {
-          _log(
-            'target.skip title=${target.title} session=$sessionId reason=session-inactive-after-enrich-error',
-          );
           return;
         }
         await cacheRepository.saveDetailTarget(
@@ -334,15 +232,9 @@ class HomeHeroPrefetchCoordinator {
           resolvedTarget: target,
           metadataRefreshStatus: DetailMetadataRefreshStatus.failed,
         );
-        _log(
-          'target.enrich.failed title=${target.title} session=$sessionId reason=provider-threw',
-        );
       }
     } catch (_) {
       // Background hero refresh is best-effort.
-      _log(
-        'target.failed title=${target.title} session=$sessionId reason=unexpected-error',
-      );
     }
   }
 

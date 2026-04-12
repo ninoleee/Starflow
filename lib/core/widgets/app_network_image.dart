@@ -148,8 +148,8 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   Widget build(BuildContext context) {
     final backgroundImageLoadingSuspended =
         ref.watch(backgroundImageLoadingSuspendedProvider);
-    final trimmedUrl = widget.url.trim();
-    if (trimmedUrl.isEmpty) {
+    final hasCandidates = _buildCandidateSources().isNotEmpty;
+    if (!hasCandidates) {
       return _buildError(
         context,
         StateError('Image URL is empty.'),
@@ -161,9 +161,16 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     }
 
     _resolvedImageFuture ??= _resolveImageFuture();
+    final resolvedImageFuture = _resolvedImageFuture;
+    if (resolvedImageFuture == null) {
+      return _buildError(
+        context,
+        StateError('Image URL is empty.'),
+      );
+    }
 
     return FutureBuilder<_ResolvedImageContent>(
-      future: _resolvedImageFuture,
+      future: resolvedImageFuture,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return _buildError(context, snapshot.error!, snapshot.stackTrace);

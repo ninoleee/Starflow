@@ -3,83 +3,6 @@
 part of '../player_page.dart';
 
 extension _PlayerPageStatePlatformSession on _PlayerPageState {
-  bool _isGuardedIosEmbeddedMpvRemotePauseCommand(
-    PlaybackRemoteCommandType type,
-  ) {
-    switch (type) {
-      case PlaybackRemoteCommandType.pause:
-      case PlaybackRemoteCommandType.becomingNoisy:
-      case PlaybackRemoteCommandType.interruptionPause:
-        return true;
-      case PlaybackRemoteCommandType.play:
-      case PlaybackRemoteCommandType.stop:
-      case PlaybackRemoteCommandType.toggle:
-      case PlaybackRemoteCommandType.seekForward:
-      case PlaybackRemoteCommandType.seekBackward:
-      case PlaybackRemoteCommandType.next:
-      case PlaybackRemoteCommandType.previous:
-      case PlaybackRemoteCommandType.seekTo:
-      case PlaybackRemoteCommandType.interruptionResume:
-        return false;
-    }
-  }
-
-  void _armIosEmbeddedMpvStartupPauseGuard({
-    Duration? baselinePosition,
-  }) {
-    if (!_isIosEmbeddedMpvPlayback) {
-      _clearIosEmbeddedMpvStartupPauseGuard();
-      return;
-    }
-    final baseline = baselinePosition ?? _latestPosition;
-    _iosEmbeddedMpvStartupPauseGuardBaseline =
-        baseline < Duration.zero ? Duration.zero : baseline;
-    _iosEmbeddedMpvStartupPauseGuardUntil = DateTime.now().add(
-      _PlayerPageState._kIosEmbeddedMpvStartupPauseGuardWindow,
-    );
-  }
-
-  void _clearIosEmbeddedMpvStartupPauseGuard() {
-    _iosEmbeddedMpvStartupPauseGuardUntil = null;
-    _iosEmbeddedMpvStartupPauseGuardBaseline = Duration.zero;
-  }
-
-  void _maybeClearIosEmbeddedMpvStartupPauseGuard({
-    Duration? position,
-    bool userInitiated = false,
-  }) {
-    final until = _iosEmbeddedMpvStartupPauseGuardUntil;
-    if (until == null) {
-      return;
-    }
-    if (userInitiated || !_isIosEmbeddedMpvPlayback) {
-      _clearIosEmbeddedMpvStartupPauseGuard();
-      return;
-    }
-    if (!DateTime.now().isBefore(until)) {
-      _clearIosEmbeddedMpvStartupPauseGuard();
-      return;
-    }
-    final currentPosition =
-        position ?? _player?.state.position ?? _latestPosition;
-    final progressed =
-        currentPosition - _iosEmbeddedMpvStartupPauseGuardBaseline;
-    if (progressed >=
-        _PlayerPageState._kIosEmbeddedMpvStartupPauseGuardProgress) {
-      _clearIosEmbeddedMpvStartupPauseGuard();
-    }
-  }
-
-  bool _shouldIgnorePlaybackRemoteCommand(
-    PlaybackRemoteCommand command,
-  ) {
-    if (!_isGuardedIosEmbeddedMpvRemotePauseCommand(command.type)) {
-      return false;
-    }
-    _maybeClearIosEmbeddedMpvStartupPauseGuard();
-    return _iosEmbeddedMpvStartupPauseGuardUntil != null;
-  }
-
   Future<void> _bindPictureInPictureSupport() async {
     if (!AndroidPictureInPictureController.isSupportedPlatform) {
       return;
@@ -132,8 +55,7 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
   }
 
   Future<void> _bindPlaybackSystemSession() async {
-    if (!PlaybackSystemSessionController.isSupportedPlatform ||
-        _playbackSystemSessionBound) {
+    if (!_shouldUsePlaybackSystemSession || _playbackSystemSessionBound) {
       return;
     }
     await PlaybackSystemSessionController.attach(_handlePlaybackRemoteCommand);
@@ -149,6 +71,13 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
   }
 
   Future<void> _syncPlaybackSystemSession({bool force = false}) async {
+    if (!_shouldUsePlaybackSystemSession) {
+      if (_playbackSystemSessionBound || force) {
+        await _teardownPlaybackSystemSession();
+      }
+      return;
+    }
+
     if (!PlaybackSystemSessionController.isSupportedPlatform) {
       return;
     }
@@ -209,9 +138,6 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
   Future<void> _handlePlaybackRemoteCommand(
     PlaybackRemoteCommand command,
   ) async {
-    if (_shouldIgnorePlaybackRemoteCommand(command)) {
-      return;
-    }
     switch (command.type) {
       case PlaybackRemoteCommandType.play:
         await _setPlayWhenReady(true);

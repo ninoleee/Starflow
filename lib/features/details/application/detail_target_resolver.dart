@@ -42,6 +42,7 @@ class DetailTargetResolver {
   Future<MediaDetailTarget> resolveMetadataOnly({
     required MediaDetailTarget target,
     required bool backgroundWorkSuspended,
+    bool forceMetadataRefresh = false,
   }) async {
     if (backgroundWorkSuspended) {
       final cachedTarget = await _detailCache.loadDetailTarget(target);
@@ -51,7 +52,10 @@ class DetailTargetResolver {
             : _mergeCachedDetailTarget(target, cachedTarget),
       );
     }
-    return _resolveMetadataOnlyIfNeeded(target: target);
+    return _resolveMetadataOnlyIfNeeded(
+      target: target,
+      forceMetadataRefresh: forceMetadataRefresh,
+    );
   }
 
   Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
@@ -116,6 +120,7 @@ class DetailTargetResolver {
 
   Future<MediaDetailTarget> _resolveMetadataOnlyIfNeeded({
     required MediaDetailTarget target,
+    bool forceMetadataRefresh = false,
   }) async {
     final traceKey = _detailTraceKey(target);
     DebugTraceOnce.logMetadata(
@@ -145,7 +150,8 @@ class DetailTargetResolver {
           ? target
           : _mergeCachedDetailTarget(target, cachedTarget),
     );
-    if (refreshStatus != DetailMetadataRefreshStatus.never) {
+    if (!forceMetadataRefresh &&
+        refreshStatus != DetailMetadataRefreshStatus.never) {
       DebugTraceOnce.logMetadata(
         traceKey,
         'auto-enrich',
@@ -156,7 +162,8 @@ class DetailTargetResolver {
       DebugTraceOnce.logMetadata(
         traceKey,
         'auto-enrich',
-        'enabled query=${_detailMetadataQuery(nextTarget)} '
+        '${forceMetadataRefresh ? 'forced' : 'enabled'} '
+            'query=${_detailMetadataQuery(nextTarget)} '
             'needsMetadata=${nextTarget.needsMetadataMatch} '
             'needsImdb=${nextTarget.needsImdbRatingMatch} ',
       );

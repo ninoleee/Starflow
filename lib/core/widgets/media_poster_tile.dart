@@ -47,18 +47,30 @@ class MediaPosterTile extends ConsumerWidget {
     final theme = Theme.of(context);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final trimmedPoster = posterUrl.trim();
+    String effectivePosterUrl = trimmedPoster;
+    if (effectivePosterUrl.isEmpty) {
+      for (final source in posterFallbackSources) {
+        final trimmedFallback = source.url.trim();
+        if (trimmedFallback.isEmpty) {
+          continue;
+        }
+        effectivePosterUrl = trimmedFallback;
+        break;
+      }
+    }
     final pixelRatio = MediaQuery.devicePixelRatioOf(context);
-    final cacheWidth = (136 * pixelRatio).round();
     final cacheHeight = (196 * pixelRatio).round();
-    final posterUri = Uri.tryParse(trimmedPoster);
+    final posterUri = Uri.tryParse(effectivePosterUrl);
     final host = posterUri?.host.toLowerCase() ?? '';
     // 豆瓣带 imageView2 等参数的图在部分设备上与 decode 尺寸限制组合可能解码失败，故不缩采样。
     final skipResizeForDecode =
         host.endsWith('.doubanio.com') || host == 'img.douban.com';
     final enablePosterFocusOutline = isTelevision && tvPosterFocusOutlineOnly;
+    final hasPosterCandidate =
+        trimmedPoster.isNotEmpty || posterFallbackSources.isNotEmpty;
 
     late final Widget posterChild;
-    if (trimmedPoster.isEmpty) {
+    if (!hasPosterCandidate) {
       posterChild = _buildPosterPlaceholder(theme);
     } else {
       posterChild = AppNetworkImage(
@@ -66,7 +78,8 @@ class MediaPosterTile extends ConsumerWidget {
         headers: posterHeaders,
         fallbackSources: posterFallbackSources,
         fit: BoxFit.cover,
-        cacheWidth: skipResizeForDecode ? null : cacheWidth,
+        // Only constrain decode height so landscape fallbacks keep
+        // their original aspect ratio before BoxFit.cover crops them.
         cacheHeight: skipResizeForDecode ? null : cacheHeight,
         filterQuality: FilterQuality.low,
         loadingBuilder: (context) {

@@ -1233,6 +1233,9 @@ class _SearchResultCard extends ConsumerWidget {
     final theme = Theme.of(context);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final posterUrl = result.posterUrl.trim();
+    final posterFallbackSources = _buildSearchPosterFallbackSources(result);
+    final hasPosterCandidate =
+        posterUrl.isNotEmpty || posterFallbackSources.isNotEmpty;
     final resourceUri = _parseLaunchUri(result.resourceUrl);
     void onOpen() {
       if (result.detailTarget != null) {
@@ -1259,11 +1262,12 @@ class _SearchResultCard extends ConsumerWidget {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: posterUrl.isEmpty
+                child: !hasPosterCandidate
                     ? _SearchPosterPlaceholder(theme: theme)
                     : AppNetworkImage(
                         posterUrl,
                         headers: result.posterHeaders,
+                        fallbackSources: posterFallbackSources,
                         width: 72,
                         height: 102,
                         fit: BoxFit.cover,
@@ -1749,6 +1753,42 @@ class _SearchTargetChip extends StatelessWidget {
       autofocus: autofocus,
     );
   }
+}
+
+List<AppNetworkImageSource> _buildSearchPosterFallbackSources(
+  SearchResult result,
+) {
+  final sources = <AppNetworkImageSource>[];
+  final seen = <String>{result.posterUrl.trim()};
+  final detailTarget = result.detailTarget;
+
+  void add(String url, [Map<String, String> headers = const {}]) {
+    final trimmedUrl = url.trim();
+    if (trimmedUrl.isEmpty || !seen.add(trimmedUrl)) {
+      return;
+    }
+    sources.add(
+      AppNetworkImageSource(
+        url: trimmedUrl,
+        headers: headers,
+      ),
+    );
+  }
+
+  if (detailTarget != null) {
+    add(detailTarget.posterUrl, detailTarget.posterHeaders);
+  }
+  for (final imageUrl in result.imageUrls) {
+    add(imageUrl, result.posterHeaders);
+  }
+  if (detailTarget != null) {
+    add(detailTarget.bannerUrl, detailTarget.bannerHeaders);
+    add(detailTarget.backdropUrl, detailTarget.backdropHeaders);
+    for (final imageUrl in detailTarget.extraBackdropUrls) {
+      add(imageUrl, detailTarget.extraBackdropHeaders);
+    }
+  }
+  return sources;
 }
 
 class _SearchPosterPlaceholder extends StatelessWidget {

@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod/misc.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
@@ -119,13 +118,8 @@ class HomePageController {
 
   Future<void> refreshModules(WidgetRef ref) async {
     if (ref.read(playbackPerformanceModeProvider)) {
-      debugPrint('[HomeHeroPrefetch] refresh.skip reason=performance-mode');
       return;
     }
-    final previousExplicitRevision =
-        ref.read(homeExplicitRefreshRevisionProvider);
-    final previousMetadataRevision =
-        ref.read(homeMetadataAutoRefreshRevisionProvider);
     ref.invalidate(homeRecentItemsProvider);
     ref.invalidate(homeRecentPlaybackEntriesProvider);
     ref.invalidate(homeCarouselItemsProvider);
@@ -134,14 +128,6 @@ class HomePageController {
     ref.invalidate(homeSectionsProvider);
     ref.read(homeExplicitRefreshRevisionProvider.notifier).state += 1;
     ref.read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
-    final nextExplicitRevision = ref.read(homeExplicitRefreshRevisionProvider);
-    final nextMetadataRevision =
-        ref.read(homeMetadataAutoRefreshRevisionProvider);
-    debugPrint(
-      '[HomeHeroPrefetch] refresh.trigger '
-      'explicit=$previousExplicitRevision->$nextExplicitRevision '
-      'metadata=$previousMetadataRevision->$nextMetadataRevision',
-    );
     primeModulesWithReader(ref.read);
     await Future<void>.delayed(const Duration(milliseconds: 140));
   }
