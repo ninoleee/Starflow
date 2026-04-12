@@ -199,6 +199,8 @@ class _PlatformLogo extends StatelessWidget {
   const _PlatformLogo({required this.platform});
 
   final MediaPersonProfile platform;
+  static const double _logoDisplayWidth = 200;
+  static const double _logoDisplayHeight = 68;
 
   @override
   Widget build(BuildContext context) {
@@ -207,14 +209,19 @@ class _PlatformLogo extends StatelessWidget {
       return const SizedBox.shrink();
     }
     return SizedBox(
-      width: 108,
-      height: 34,
-      child: AppNetworkImage(
-        logoUrl,
-        fit: BoxFit.contain,
-        errorBuilder: (context, error, stackTrace) {
-          return const SizedBox.shrink();
-        },
+      width: _logoDisplayWidth,
+      height: _logoDisplayHeight,
+      child: Center(
+        child: AppNetworkImage(
+          logoUrl,
+          width: _logoDisplayWidth,
+          height: _logoDisplayHeight,
+          fit: BoxFit.contain,
+          alignment: Alignment.center,
+          errorBuilder: (context, error, stackTrace) {
+            return const SizedBox.shrink();
+          },
+        ),
       ),
     );
   }
