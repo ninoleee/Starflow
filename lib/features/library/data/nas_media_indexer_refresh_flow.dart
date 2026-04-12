@@ -294,6 +294,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         includeOnlineMetadata: shouldAttemptOnline,
         phaseLabel: 'Hero 补元数据',
         controller: controller,
+        reportProgress: false,
       );
     }
 
@@ -1108,6 +1109,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     required bool includeOnlineMetadata,
     required String phaseLabel,
     required _RefreshTaskController controller,
+    bool reportProgress = true,
   }) async {
     final normalizedSourceId = source.id.trim();
     final now = DateTime.now();
@@ -1115,7 +1117,9 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     controller.throwIfCancelled();
     final records = await _loadSourceRecordsCached(source.id);
     if (records.isEmpty || scannedItems.isEmpty) {
-      _clearProgressSafely(normalizedSourceId);
+      if (reportProgress) {
+        _clearProgressSafely(normalizedSourceId);
+      }
       return;
     }
     final recordIndexByResourceId = <String, int>{};
@@ -1123,12 +1127,14 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     for (var index = 0; index < nextRecords.length; index++) {
       recordIndexByResourceId[nextRecords[index].resourceId] = index;
     }
-    _progressController.startIndexing(
-      sourceId: normalizedSourceId,
-      totalItems: scannedItems.length,
-      activityLabel: phaseLabel,
-      detail: phaseLabel,
-    );
+    if (reportProgress) {
+      _progressController.startIndexing(
+        sourceId: normalizedSourceId,
+        totalItems: scannedItems.length,
+        activityLabel: phaseLabel,
+        detail: phaseLabel,
+      );
+    }
     for (var index = 0; index < scannedItems.length; index++) {
       controller.throwIfCancelled();
       final scannedItem = scannedItems[index];
@@ -1142,12 +1148,14 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       final shouldAttemptOnline = includeOnlineMetadata &&
           _hasPendingOnlineAttempts(currentRecord, settings);
       if (!shouldAttemptSidecar && !shouldAttemptOnline) {
-        _progressController.updateIndexing(
-          sourceId: normalizedSourceId,
-          current: index + 1,
-          total: scannedItems.length,
-          detail: '${scannedItem.fileName} 已跳过',
-        );
+        if (reportProgress) {
+          _progressController.updateIndexing(
+            sourceId: normalizedSourceId,
+            current: index + 1,
+            total: scannedItems.length,
+            detail: '${scannedItem.fileName} 已跳过',
+          );
+        }
         continue;
       }
       final enrichedItem = shouldAttemptSidecar
@@ -1179,12 +1187,14 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
               (entry) => MapEntry(entry.$2.resourceId, entry.$1),
             ),
           );
-        _progressController.updateIndexing(
-          sourceId: normalizedSourceId,
-          current: index + 1,
-          total: scannedItems.length,
-          detail: '${scannedItem.fileName} 已删除',
-        );
+        if (reportProgress) {
+          _progressController.updateIndexing(
+            sourceId: normalizedSourceId,
+            current: index + 1,
+            total: scannedItems.length,
+            detail: '${scannedItem.fileName} 已删除',
+          );
+        }
         continue;
       }
       final effectiveItem = _mergeStructureInferredSeed(
@@ -1207,12 +1217,14 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         applyOnlineMetadata: shouldAttemptOnline,
         markSidecarAttempt: shouldAttemptSidecar,
       );
-      _progressController.updateIndexing(
-        sourceId: normalizedSourceId,
-        current: index + 1,
-        total: scannedItems.length,
-        detail: effectiveItem.fileName,
-      );
+      if (reportProgress) {
+        _progressController.updateIndexing(
+          sourceId: normalizedSourceId,
+          current: index + 1,
+          total: scannedItems.length,
+          detail: effectiveItem.fileName,
+        );
+      }
     }
     controller.throwIfCancelled();
     final existingState = await _store.loadSourceState(source.id);
@@ -1230,7 +1242,9 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       ),
     );
     _notifyIndexChangedSafely();
-    _clearProgressSafely(normalizedSourceId);
+    if (reportProgress) {
+      _clearProgressSafely(normalizedSourceId);
+    }
   }
 
   WebDavScannedItem _mergeStructureInferredSeed({

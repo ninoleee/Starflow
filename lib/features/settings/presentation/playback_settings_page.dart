@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/core/widgets/no_animation_page_route.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -313,7 +314,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
 
   Future<void> _openSubtitleSettingsPage() async {
     final result = await Navigator.of(context).push<_PlaybackSubtitleDraft>(
-      MaterialPageRoute<_PlaybackSubtitleDraft>(
+      NoAnimationMaterialPageRoute<_PlaybackSubtitleDraft>(
         builder: (context) => PlaybackSubtitleSettingsPage(
           initialSubtitlePreference: _draftSubtitlePreference,
           initialSubtitleScale: _draftSubtitleScale,

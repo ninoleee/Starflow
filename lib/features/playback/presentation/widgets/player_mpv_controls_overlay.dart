@@ -394,10 +394,8 @@ class _PlayerMpvControlsOverlayState extends State<PlayerMpvControlsOverlay> {
                   child: Row(
                     children: [
                       _buildChromeButton(
-                        icon: isFullscreen
-                            ? Icons.fullscreen_exit_rounded
-                            : Icons.arrow_back_rounded,
-                        tooltip: isFullscreen ? '退出全屏' : '返回',
+                        icon: Icons.arrow_back_rounded,
+                        tooltip: '返回',
                         onPressed: widget.onBack,
                         traceStage: 'windows-mpv.overlay.action.back',
                         compact: _showLightweightChrome,

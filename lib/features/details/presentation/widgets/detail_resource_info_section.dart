@@ -392,13 +392,14 @@ class DetailResourceInfoSection extends StatelessWidget {
                   ),
           ),
         ],
-        if (_canManuallyRefreshMetadata(target)) ...[
+        if (!canManageDetailMetadataIndex(target) &&
+            _canManuallyRefreshMetadata(target)) ...[
           const SizedBox(height: 12),
           Align(
             alignment: Alignment.centerLeft,
             child: isTelevision
                 ? TvAdaptiveButton(
-                    label: isRefreshingMetadata ? '更新中...' : '手动更新信息',
+                    label: isRefreshingMetadata ? '更新中...' : '自动更新',
                     icon: Icons.refresh_rounded,
                     focusId: 'detail:resource:refresh-metadata',
                     onPressed: isRefreshingMetadata ? null : onRefreshMetadata,
@@ -419,7 +420,7 @@ class DetailResourceInfoSection extends StatelessWidget {
                             size: 16,
                           ),
                     label: Text(
-                      isRefreshingMetadata ? '更新中...' : '手动更新信息',
+                      isRefreshingMetadata ? '更新中...' : '自动更新',
                     ),
                     style: TextButton.styleFrom(
                       foregroundColor: Colors.white,

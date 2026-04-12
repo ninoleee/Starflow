@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
+import 'package:starflow/core/widgets/no_animation_page_route.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -356,7 +357,7 @@ class SettingsPage extends ConsumerStatefulWidget {
     MediaSourceConfig? existing,
   }) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(
+      NoAnimationMaterialPageRoute<void>(
         builder: (context) => MediaSourceEditorPage(initial: existing),
       ),
     );
@@ -367,7 +368,7 @@ class SettingsPage extends ConsumerStatefulWidget {
     SearchProviderConfig? existing,
   }) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(
+      NoAnimationMaterialPageRoute<void>(
         builder: (context) => SearchProviderEditorPage(initial: existing),
       ),
     );
@@ -375,7 +376,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openMetadataMatchSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(
+      NoAnimationMaterialPageRoute<void>(
         builder: (context) => const MetadataMatchSettingsPage(),
       ),
     );
@@ -489,7 +490,7 @@ class SettingsPage extends ConsumerStatefulWidget {
     NetworkStorageConfig initial,
   ) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(
+      NoAnimationMaterialPageRoute<void>(
         builder: (context) => NetworkStorageSettingsPage(initial: initial),
       ),
     );
@@ -500,7 +501,7 @@ class SettingsPage extends ConsumerStatefulWidget {
     SettingsPlaybackSlice playbackSlice,
   ) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(
+      NoAnimationMaterialPageRoute<void>(
         builder: (context) => PlaybackSettingsPage(
           initialTimeoutSeconds: playbackSlice.playbackOpenTimeoutSeconds,
           initialDefaultSpeed: playbackSlice.playbackDefaultSpeed,
@@ -520,7 +521,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openPerformanceSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(
+      NoAnimationMaterialPageRoute<void>(
         builder: (context) => const PerformanceSettingsPage(),
       ),
     );
@@ -528,7 +529,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openLocalStorageSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(
+      NoAnimationMaterialPageRoute<void>(
         builder: (context) => const LocalStorageSettingsPage(),
       ),
     );
@@ -536,7 +537,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openSettingsManagement(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(
+      NoAnimationMaterialPageRoute<void>(
         builder: (context) => const SettingsManagementPage(),
       ),
     );

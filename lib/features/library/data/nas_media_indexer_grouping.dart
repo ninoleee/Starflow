@@ -1407,7 +1407,7 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       if (candidate.id == normalizedSourceId &&
           (candidate.kind == MediaSourceKind.nas ||
               candidate.kind == MediaSourceKind.quark)) {
-        return candidate.normalizedWebDavSpecialEpisodeKeywords;
+        return candidate.normalizedWebDavSpecialCategoryKeywords;
       }
     }
     return const [];

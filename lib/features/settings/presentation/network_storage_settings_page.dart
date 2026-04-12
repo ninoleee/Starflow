@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/widgets/no_animation_page_route.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
@@ -276,7 +277,7 @@ class _NetworkStorageSettingsPageState
     }
 
     final picked = await Navigator.of(context).push<QuarkDirectoryEntry>(
-      MaterialPageRoute(
+      NoAnimationMaterialPageRoute(
         builder: (context) => QuarkFolderPickerPage(
           cookie: cookie,
           initialFid: _quarkFolderId,
@@ -305,7 +306,7 @@ class _NetworkStorageSettingsPageState
     }
 
     await Navigator.of(context).push<void>(
-      MaterialPageRoute(
+      NoAnimationMaterialPageRoute(
         builder: (context) => QuarkDirectoryManagerPage(
           cookie: cookie,
           initialFid: _quarkFolderId,
@@ -340,7 +341,7 @@ class _NetworkStorageSettingsPageState
             .trim()
         : source.libraryPath.trim();
     final picked = await Navigator.of(context).push<String>(
-      MaterialPageRoute<String>(
+      NoAnimationMaterialPageRoute<String>(
         builder: (context) => WebDavDirectoryPickerPage(
           source: source,
           initialPath: initialPath,

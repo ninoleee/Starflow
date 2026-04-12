@@ -382,26 +382,18 @@ private struct NativePlaybackRequest {
   let seriesKey: String
 }
 
-private final class NativePlaybackViewController: AVPlayerViewController,
-  UIGestureRecognizerDelegate
-{
+private final class NativePlaybackViewController: AVPlayerViewController {
   private static let persistThresholdMs: Int64 = 4_000
-  private static let subtitleSearchChannelName = "starflow/subtitle_search"
-  private static let subtitleButtonAutoHideDelay: TimeInterval = 2.2
 
   private let playbackStore: NativePlaybackMemoryStore
   private let isoFormatter = ISO8601DateFormatter()
   private let request: NativePlaybackRequest
-  private let airPlayRoutePickerView = AVRoutePickerView()
-  private let onlineSubtitleButton = UIButton(type: .system)
-  private var subtitleSearchEngine: FlutterEngine?
-  private var subtitleSearchChannel: FlutterMethodChannel?
-  private var subtitleSearchController: FlutterViewController?
+  private var startupGate: NativePlaybackStartupGate?
+  private let stallRecovery = NativePlaybackStallRecovery()
+  private let metricsTracker = NativePlaybackMetricsTracker()
   private var timeObserverToken: Any?
   private var endObserver: NSObjectProtocol?
   private var playbackStateObservation: NSKeyValueObservation?
-  private var overlayTapGestureRecognizer: UITapGestureRecognizer?
-  private var subtitleButtonAutoHideWorkItem: DispatchWorkItem?
   private var appObservers: [NSObjectProtocol] = []
   private var lastSavedPositionMs: Int64 = -1
   private var remoteCommandsInstalled = false
@@ -417,10 +409,7 @@ private final class NativePlaybackViewController: AVPlayerViewController,
     fatalError("init(coder:) has not been implemented")
   }
 
-  deinit {
-    cleanupSubtitleSearchSession()
-    teardownPlayback()
-  }
+  deinit { teardownPlayback() }
 
   override func viewDidLoad() {
     super.viewDidLoad()
@@ -430,7 +419,7 @@ private final class NativePlaybackViewController: AVPlayerViewController,
     updatesNowPlayingInfoCenter = true
     title = request.title
     configureAudioSession(enabled: true)
-    configureOverlayButtons()
+    cleanupCustomOverlayIfNeeded()
     configurePlayer()
     installRemoteCommands()
     registerAppLifecycleObservers()
@@ -460,236 +449,101 @@ private final class NativePlaybackViewController: AVPlayerViewController,
     }
 
     let player = AVPlayer(playerItem: item)
-    player.automaticallyWaitsToMinimizeStalling = true
+    let bufferingContext = NativePlaybackBufferingTuning.Context(
+      url: request.url,
+      headers: request.headers
+    )
+    NativePlaybackBufferingTuning.apply(
+      playerItem: item,
+      player: player,
+      context: bufferingContext,
+      peakBitRateProfile: .unlimited
+    )
     self.player = player
+    metricsTracker.attach(player: player, item: item)
 
     installEndObserver(for: item)
     installTimeObserver(for: player)
     installPlaybackStateObserver(for: player)
+    stallRecovery.start(player: player, item: item)
 
-    if resumePositionMs > 5_000 {
-      let seekTime = CMTime(value: CMTimeValue(resumePositionMs), timescale: CMTimeScale(1000))
-      player.seek(to: seekTime, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
-        player.play()
-        self.updateNowPlayingInfo()
+    let startupGate = NativePlaybackStartupGate(
+      player: player,
+      item: item,
+      configuration: makeStartupGateConfiguration(for: bufferingContext)
+    )
+    self.startupGate = startupGate
+
+    let resumeSeekTime: CMTime? =
+      resumePositionMs > 5_000
+      ? CMTime(value: CMTimeValue(resumePositionMs), timescale: CMTimeScale(1000))
+      : nil
+
+    startupGate.start(resumeSeekTime: resumeSeekTime) { [weak self, weak player, weak item] result in
+      guard let self = self else {
+        return
       }
-    } else {
-      player.play()
-      updateNowPlayingInfo()
+      if self.startupGate === startupGate {
+        self.startupGate = nil
+      }
+      guard let player = player, self.player === player else {
+        return
+      }
+      if let item = item {
+        self.metricsTracker.refreshAccessErrorLog(item: item)
+      }
+      switch result {
+      case .started:
+        self.updateNowPlayingInfo()
+      case .failed:
+        self.updateNowPlayingInfo()
+      case .cancelled:
+        break
+      }
     }
   }
 
-  private func configureOverlayButtons() {
+  private func makeStartupGateConfiguration(
+    for bufferingContext: NativePlaybackBufferingTuning.Context
+  ) -> NativePlaybackStartupGate.Configuration {
+    guard bufferingContext.isRemoteURL else {
+      return NativePlaybackStartupGate.Configuration(
+        waitForLikelyToKeepUp: false,
+        usePreroll: false,
+        prerollRate: 1.0,
+        keepUpTimeout: 0
+      )
+    }
+
+    if bufferingContext.isLiveStream {
+      return NativePlaybackStartupGate.Configuration(
+        waitForLikelyToKeepUp: true,
+        usePreroll: false,
+        prerollRate: 1.0,
+        keepUpTimeout: 1.2
+      )
+    }
+
+    return .balanced
+  }
+
+  private func cleanupCustomOverlayIfNeeded() {
     guard let overlayView = contentOverlayView else {
       return
     }
 
-    airPlayRoutePickerView.removeFromSuperview()
-    airPlayRoutePickerView.translatesAutoresizingMaskIntoConstraints = false
-    airPlayRoutePickerView.prioritizesVideoDevices = true
-    airPlayRoutePickerView.tintColor = .white
-    airPlayRoutePickerView.activeTintColor = .systemBlue
-    overlayView.addSubview(airPlayRoutePickerView)
-
-    onlineSubtitleButton.removeFromSuperview()
-    onlineSubtitleButton.translatesAutoresizingMaskIntoConstraints = false
-    onlineSubtitleButton.tintColor = .white
-    onlineSubtitleButton.backgroundColor = UIColor.black.withAlphaComponent(0.45)
-    onlineSubtitleButton.layer.cornerRadius = 18
-    onlineSubtitleButton.layer.cornerCurve = .continuous
-    onlineSubtitleButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
-    onlineSubtitleButton.setTitle(" 查字幕", for: .normal)
-    if #available(iOS 13.0, *) {
-      onlineSubtitleButton.setImage(UIImage(systemName: "magnifyingglass"), for: .normal)
-    }
-    onlineSubtitleButton.addTarget(self, action: #selector(openOnlineSubtitleSearch), for: .touchUpInside)
-    overlayView.addSubview(onlineSubtitleButton)
-
-    if let recognizer = overlayTapGestureRecognizer {
-      recognizer.view?.removeGestureRecognizer(recognizer)
-    }
-    let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleOverlayTap))
-    recognizer.cancelsTouchesInView = false
-    recognizer.delegate = self
-    overlayView.addGestureRecognizer(recognizer)
-    overlayTapGestureRecognizer = recognizer
-
-    NSLayoutConstraint.activate([
-      airPlayRoutePickerView.trailingAnchor.constraint(
-        equalTo: overlayView.safeAreaLayoutGuide.trailingAnchor,
-        constant: -18
-      ),
-      airPlayRoutePickerView.topAnchor.constraint(
-        equalTo: overlayView.safeAreaLayoutGuide.topAnchor,
-        constant: 16
-      ),
-      airPlayRoutePickerView.widthAnchor.constraint(equalToConstant: 34),
-      airPlayRoutePickerView.heightAnchor.constraint(equalToConstant: 34),
-      onlineSubtitleButton.trailingAnchor.constraint(
-        equalTo: overlayView.safeAreaLayoutGuide.trailingAnchor,
-        constant: -18
-      ),
-      onlineSubtitleButton.bottomAnchor.constraint(
-        equalTo: overlayView.safeAreaLayoutGuide.bottomAnchor,
-        constant: -84
-      ),
-      onlineSubtitleButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 36),
-    ])
-    setOnlineSubtitleButtonHidden(false, animated: false)
-  }
-
-  @objc
-  private func openOnlineSubtitleSearch() {
-    let query = buildSubtitleSearchQuery()
-    guard !query.isEmpty else {
-      return
-    }
-
-    if subtitleSearchController != nil {
-      return
-    }
-
-    let initialRoute = buildSubtitleSearchRoute(query: query)
-    let engine = FlutterEngine(name: "subtitle-search-\(UUID().uuidString)")
-    guard engine.run(withEntrypoint: nil, initialRoute: initialRoute) else {
-      presentSubtitleSearchNotice(
-        title: "打开字幕搜索失败",
-        message: "暂时无法启动应用内字幕搜索。"
-      )
-      return
-    }
-    GeneratedPluginRegistrant.register(with: engine)
-
-    let channel = FlutterMethodChannel(
-      name: Self.subtitleSearchChannelName,
-      binaryMessenger: engine.binaryMessenger
-    )
-    channel.setMethodCallHandler { [weak self] call, result in
-      self?.handleSubtitleSearchMethodCall(call, result: result)
-    }
-
-    let controller = FlutterViewController(engine: engine, nibName: nil, bundle: nil)
-    controller.modalPresentationStyle = .fullScreen
-
-    subtitleSearchEngine = engine
-    subtitleSearchChannel = channel
-    subtitleSearchController = controller
-
-    present(controller, animated: true)
-  }
-
-  private func buildSubtitleSearchQuery() -> String {
-    let targetObject = playbackStore.decodeTargetJson(request.playbackTargetJson)
-    let seriesTitle = (targetObject["seriesTitle"] as? String)?.nonEmptyTrimmed ?? ""
-    let title = (targetObject["title"] as? String)?.nonEmptyTrimmed ?? ""
-    let itemType =
-      ((targetObject["itemType"] as? String) ?? "")
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-      .lowercased()
-    let seasonNumber = targetObject.intValue(for: "seasonNumber")
-    let episodeNumber = targetObject.intValue(for: "episodeNumber")
-    let year = targetObject.intValue(for: "year")
-
-    var parts: [String] = []
-    let baseTitle = !seriesTitle.isEmpty ? seriesTitle : title
-    if !baseTitle.isEmpty {
-      parts.append(baseTitle)
-    }
-    if seasonNumber > 0, episodeNumber > 0 {
-      parts.append(
-        "S\(String(format: "%02d", seasonNumber))E\(String(format: "%02d", episodeNumber))"
-      )
-    }
-    if itemType != "episode", year > 0 {
-      parts.append("\(year)")
-    }
-    return parts.joined(separator: " ")
-  }
-
-  private func buildSubtitleSearchRoute(query: String) -> String {
-    let title = buildSubtitleSearchTitle()
-    var components = URLComponents()
-    components.path = "/subtitle-search"
-    components.queryItems = [
-      URLQueryItem(name: "q", value: query),
-      URLQueryItem(name: "title", value: title),
-      URLQueryItem(name: "input", value: title.isEmpty ? query : title),
-      URLQueryItem(name: "mode", value: "downloadOnly"),
-      URLQueryItem(name: "standalone", value: "1"),
-    ]
-    return components.string ?? "/subtitle-search"
-  }
-
-  private func buildSubtitleSearchTitle() -> String {
-    let targetObject = playbackStore.decodeTargetJson(request.playbackTargetJson)
-    let seriesTitle = (targetObject["seriesTitle"] as? String)?.nonEmptyTrimmed ?? ""
-    let title = (targetObject["title"] as? String)?.nonEmptyTrimmed ?? ""
-    return !seriesTitle.isEmpty ? seriesTitle : title
-  }
-
-  private func handleSubtitleSearchMethodCall(
-    _ call: FlutterMethodCall,
-    result: @escaping FlutterResult
-  ) {
-    switch call.method {
-    case "finishSubtitleSearch":
-      let arguments = call.arguments as? [String: Any] ?? [:]
-      let cachedPath =
-        (arguments["cachedPath"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-      let subtitleFilePath =
-        (arguments["subtitleFilePath"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        ?? ""
-      let displayName =
-        (arguments["displayName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-      dismissSubtitleSearch {
-        let resolvedName = displayName.isEmpty
-          ? URL(fileURLWithPath: subtitleFilePath.isEmpty ? cachedPath : subtitleFilePath)
-            .lastPathComponent
-          : displayName
-        self.presentSubtitleSearchNotice(
-          title: "字幕已下载",
-          message: resolvedName.isEmpty
-            ? "字幕已下载到本地缓存。当前 iOS 原生播放器暂未自动加载外挂字幕。"
-            : "已缓存字幕：\(resolvedName)\n当前 iOS 原生播放器暂未自动加载外挂字幕。"
-        )
+    for subview in overlayView.subviews {
+      if let button = subview as? UIButton,
+        let title = button.title(for: .normal),
+        title.contains("查字幕")
+      {
+        subview.removeFromSuperview()
+        continue
       }
-      result(true)
-    case "cancelSubtitleSearch":
-      dismissSubtitleSearch()
-      result(true)
-    default:
-      result(FlutterMethodNotImplemented)
-    }
-  }
-
-  private func dismissSubtitleSearch(completion: (() -> Void)? = nil) {
-    let controller = subtitleSearchController
-    subtitleSearchChannel?.setMethodCallHandler(nil)
-    subtitleSearchChannel = nil
-    if let controller {
-      controller.dismiss(animated: true) {
-        self.subtitleSearchController = nil
-        self.subtitleSearchEngine = nil
-        completion?()
+      if subview is AVRoutePickerView {
+        subview.removeFromSuperview()
       }
-    } else {
-      subtitleSearchController = nil
-      subtitleSearchEngine = nil
-      completion?()
     }
-  }
-
-  private func cleanupSubtitleSearchSession() {
-    subtitleSearchChannel?.setMethodCallHandler(nil)
-    subtitleSearchChannel = nil
-    subtitleSearchController = nil
-    subtitleSearchEngine = nil
-  }
-
-  private func presentSubtitleSearchNotice(title: String, message: String) {
-    let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-    alert.addAction(UIAlertAction(title: "知道了", style: .default))
-    present(alert, animated: true)
   }
 
   private func configureAudioSession(enabled: Bool) {
@@ -849,73 +703,9 @@ private final class NativePlaybackViewController: AVPlayerViewController,
       options: [.initial, .new]
     ) { [weak self] player, _ in
       DispatchQueue.main.async {
-        self?.handlePlaybackStateChange(player.timeControlStatus)
+        self?.updateNowPlayingInfo()
       }
     }
-  }
-
-  private func handlePlaybackStateChange(_ status: AVPlayer.TimeControlStatus) {
-    switch status {
-    case .paused:
-      subtitleButtonAutoHideWorkItem?.cancel()
-      setOnlineSubtitleButtonHidden(false, animated: true)
-    case .playing, .waitingToPlayAtSpecifiedRate:
-      setOnlineSubtitleButtonHidden(false, animated: false)
-      scheduleOnlineSubtitleButtonAutoHide()
-    @unknown default:
-      subtitleButtonAutoHideWorkItem?.cancel()
-      setOnlineSubtitleButtonHidden(false, animated: true)
-    }
-    updateNowPlayingInfo()
-  }
-
-  private func scheduleOnlineSubtitleButtonAutoHide() {
-    subtitleButtonAutoHideWorkItem?.cancel()
-    let workItem = DispatchWorkItem { [weak self] in
-      self?.setOnlineSubtitleButtonHidden(true, animated: true)
-    }
-    subtitleButtonAutoHideWorkItem = workItem
-    DispatchQueue.main.asyncAfter(
-      deadline: .now() + Self.subtitleButtonAutoHideDelay,
-      execute: workItem
-    )
-  }
-
-  private func setOnlineSubtitleButtonHidden(_ hidden: Bool, animated: Bool) {
-    onlineSubtitleButton.isUserInteractionEnabled = !hidden
-    if !animated {
-      onlineSubtitleButton.alpha = hidden ? 0 : 1
-      onlineSubtitleButton.isHidden = hidden
-      return
-    }
-    if !hidden {
-      onlineSubtitleButton.isHidden = false
-    }
-    UIView.animate(
-      withDuration: 0.18,
-      delay: 0,
-      options: [.beginFromCurrentState, .curveEaseOut]
-    ) {
-      self.onlineSubtitleButton.alpha = hidden ? 0 : 1
-    } completion: { _ in
-      self.onlineSubtitleButton.isHidden = hidden
-    }
-  }
-
-  @objc
-  private func handleOverlayTap() {
-    guard let player, player.timeControlStatus != .paused else {
-      return
-    }
-    setOnlineSubtitleButtonHidden(false, animated: true)
-    scheduleOnlineSubtitleButtonAutoHide()
-  }
-
-  func gestureRecognizer(
-    _ gestureRecognizer: UIGestureRecognizer,
-    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-  ) -> Bool {
-    true
   }
 
   private func registerAppLifecycleObservers() {
@@ -1043,14 +833,11 @@ private final class NativePlaybackViewController: AVPlayerViewController,
       persistPlaybackProgress(force: true)
     }
 
-    subtitleButtonAutoHideWorkItem?.cancel()
-    subtitleButtonAutoHideWorkItem = nil
+    startupGate?.cancel()
+    startupGate = nil
+    stallRecovery.stop()
+    metricsTracker.detach()
     playbackStateObservation = nil
-
-    if let recognizer = overlayTapGestureRecognizer {
-      recognizer.view?.removeGestureRecognizer(recognizer)
-    }
-    overlayTapGestureRecognizer = nil
 
     if let token = timeObserverToken,
       let currentPlayer = player

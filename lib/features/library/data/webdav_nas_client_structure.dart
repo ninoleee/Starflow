@@ -56,41 +56,24 @@ class _ExternalScanStructureModule {
     if (items.isEmpty) {
       return items;
     }
-    final filteredItems = _filterExtraItems(
-      items,
-      source: source,
-    );
-    if (filteredItems.isEmpty) {
-      webDavTrace(
-        'structure.done',
-        fields: {
-          'resultCount': 0,
-          'episodes': 0,
-          'movies': 0,
-          'filteredExtras': items.length,
-        },
-      );
-      return const [];
-    }
     webDavTrace(
       'structure.start',
       fields: {
-        'itemCount': filteredItems.length,
-        'filteredExtras': items.length - filteredItems.length,
+        'itemCount': items.length,
       },
     );
 
     final context = _buildStructureContext(
-      filteredItems,
+      items,
       source: source,
     );
     final seriesRootPlans = _buildSeriesRootPlans(context);
     final seriesRootForResource = _mapSeriesRootForResource(
-      items: filteredItems,
+      items: items,
       seriesRootPlans: seriesRootPlans,
     );
     final assignment = _assignItemsToStructure(
-      items: filteredItems,
+      items: items,
       context: context,
       seriesRootPlans: seriesRootPlans,
       seriesRootForResource: seriesRootForResource,
@@ -119,40 +102,9 @@ class _ExternalScanStructureModule {
         'movies': resolvedItems
             .where((item) => item.metadataSeed.itemType == 'movie')
             .length,
-        'filteredExtras': items.length - filteredItems.length,
       },
     );
     return resolvedItems;
-  }
-
-  List<_PendingWebDavScannedItem> _filterExtraItems(
-    List<_PendingWebDavScannedItem> items, {
-    required MediaSourceConfig source,
-  }) {
-    final extraKeywords = source.normalizedWebDavExtraKeywords;
-    if (extraKeywords.isEmpty) {
-      return items;
-    }
-    final keptItems = <_PendingWebDavScannedItem>[];
-    for (final item in items) {
-      if (_matchesSpecialCategoryKeyword(
-        item,
-        keywords: extraKeywords,
-        directoryNames: item.relativeDirectories,
-      )) {
-        webDavTrace(
-          'structure.filterExtra',
-          fields: {
-            'path': item.actualAddress,
-            'fileName': item.fileName,
-            'relativeDirs': item.relativeDirectories,
-          },
-        );
-        continue;
-      }
-      keptItems.add(item);
-    }
-    return keptItems;
   }
 
   _StructureInferenceContext _buildStructureContext(
@@ -169,8 +121,7 @@ class _ExternalScanStructureModule {
     final seriesTitleFilterKeywords =
         source.normalizedWebDavSeriesTitleFilterKeywords;
     final specialEpisodeKeywords =
-        source.normalizedWebDavSpecialEpisodeKeywords;
-    final extraKeywords = source.normalizedWebDavExtraKeywords;
+        source.normalizedWebDavSpecialCategoryKeywords;
     for (final item in items) {
       final directoryKey = _segmentsKey(item.relativeDirectories);
       filesByDirectory.putIfAbsent(directoryKey, () => []).add(item);
@@ -223,7 +174,6 @@ class _ExternalScanStructureModule {
       recognitionByResource: recognitionByResource,
       explicitEpisodeCountByDirectory: explicitEpisodeCountByDirectory,
       specialEpisodeKeywords: specialEpisodeKeywords,
-      extraKeywords: extraKeywords,
     );
   }
 
@@ -1059,7 +1009,6 @@ class _StructureInferenceContext {
     required this.recognitionByResource,
     required this.explicitEpisodeCountByDirectory,
     required this.specialEpisodeKeywords,
-    required this.extraKeywords,
   });
 
   final Map<String, List<_PendingWebDavScannedItem>> filesByDirectory;
@@ -1069,7 +1018,6 @@ class _StructureInferenceContext {
   final Map<String, NasMediaRecognition> recognitionByResource;
   final Map<String, int> explicitEpisodeCountByDirectory;
   final List<String> specialEpisodeKeywords;
-  final List<String> extraKeywords;
 }
 
 class _StructureAssignment {

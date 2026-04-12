@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/app/router/app_navigator.dart';
 import 'package:starflow/app/router/app_navigation_shell.dart';
 import 'package:starflow/app/router/app_routes.dart';
+import 'package:starflow/core/widgets/no_animation_page_route.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/bootstrap/presentation/bootstrap_page.dart';
@@ -21,24 +23,18 @@ import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/playback/presentation/player_page.dart';
 import 'package:starflow/features/playback/presentation/subtitle_search_page.dart';
 import 'package:starflow/features/search/presentation/search_page.dart';
-import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/settings_page.dart';
 
-final _performanceReduceMotionEnabledProvider = Provider<bool>((ref) {
-  return ref.watch(appSettingsProvider.select(
-    (settings) => settings.effectiveReduceMotionEnabled,
-  ));
-});
-
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
+    navigatorKey: appNavigatorKey,
     initialLocation: AppRoutes.boot.path,
     routes: [
       GoRoute(
         path: AppRoutes.boot.path,
         name: AppRoutes.boot.name,
-        pageBuilder: (context, state) => _buildNoTransitionPage(
+        pageBuilder: (context, state) => _buildAppPage(
           state: state,
           child: const BootstrapPage(),
         ),
@@ -53,7 +49,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: AppRoutes.home.path,
                 name: AppRoutes.home.name,
-                builder: (context, state) => const HomePage(),
+                pageBuilder: (context, state) => _buildAppPage(
+                  state: state,
+                  child: const HomePage(),
+                ),
               ),
             ],
           ),
@@ -62,8 +61,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: AppRoutes.search.path,
                 name: AppRoutes.search.name,
-                builder: (context, state) => SearchPage(
-                  initialQuery: state.uri.queryParameters['q'],
+                pageBuilder: (context, state) => _buildAppPage(
+                  state: state,
+                  child: SearchPage(
+                    initialQuery: state.uri.queryParameters['q'],
+                  ),
                 ),
               ),
             ],
@@ -73,7 +75,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: AppRoutes.library.path,
                 name: AppRoutes.library.name,
-                builder: (context, state) => const LibraryPage(),
+                pageBuilder: (context, state) => _buildAppPage(
+                  state: state,
+                  child: const LibraryPage(),
+                ),
               ),
             ],
           ),
@@ -82,7 +87,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: AppRoutes.settings.path,
                 name: AppRoutes.settings.name,
-                builder: (context, state) => const SettingsPage(),
+                pageBuilder: (context, state) => _buildAppPage(
+                  state: state,
+                  child: const SettingsPage(),
+                ),
               ),
             ],
           ),
@@ -91,58 +99,73 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.homeEditor.path,
         name: AppRoutes.homeEditor.name,
-        builder: (context, state) => const HomeEditorPage(),
+        pageBuilder: (context, state) => _buildAppPage(
+          state: state,
+          child: const HomeEditorPage(),
+        ),
       ),
       GoRoute(
         path: AppRoutes.homeModuleList.path,
         name: AppRoutes.homeModuleList.name,
-        builder: (context, state) {
-          return _buildRequiredPage<HomeModuleConfig>(
+        pageBuilder: (context, state) {
+          return _buildAppPage(
             state: state,
-            missingPage: const _MissingRouteTargetPage(
-              message: '缺少首页模块目标',
-              showBackButton: false,
+            child: _buildRequiredPage<HomeModuleConfig>(
+              state: state,
+              missingPage: const _MissingRouteTargetPage(
+                message: '缺少首页模块目标',
+                showBackButton: false,
+              ),
+              builder: (module) => HomeModuleCollectionPage(module: module),
             ),
-            builder: (module) => HomeModuleCollectionPage(module: module),
           );
         },
       ),
       GoRoute(
         path: AppRoutes.collection.path,
         name: AppRoutes.collection.name,
-        builder: (context, state) {
-          return _buildRequiredPage<LibraryCollectionTarget>(
+        pageBuilder: (context, state) {
+          return _buildAppPage(
             state: state,
-            missingPage: const _MissingRouteTargetPage(
-              message: '没有收到可展示的分区数据。',
+            child: _buildRequiredPage<LibraryCollectionTarget>(
+              state: state,
+              missingPage: const _MissingRouteTargetPage(
+                message: '没有收到可展示的分区数据。',
+              ),
+              builder: (target) => LibraryCollectionPage(target: target),
             ),
-            builder: (target) => LibraryCollectionPage(target: target),
           );
         },
       ),
       GoRoute(
         path: AppRoutes.detail.path,
         name: AppRoutes.detail.name,
-        builder: (context, state) {
-          return _buildRequiredPage<MediaDetailTarget>(
+        pageBuilder: (context, state) {
+          return _buildAppPage(
             state: state,
-            missingPage: const _MissingRouteTargetPage(
-              message: '没有收到可展示的详情数据。',
+            child: _buildRequiredPage<MediaDetailTarget>(
+              state: state,
+              missingPage: const _MissingRouteTargetPage(
+                message: '没有收到可展示的详情数据。',
+              ),
+              builder: (target) => MediaDetailPage(target: target),
             ),
-            builder: (target) => MediaDetailPage(target: target),
           );
         },
       ),
       GoRoute(
         path: AppRoutes.personCredits.path,
         name: AppRoutes.personCredits.name,
-        builder: (context, state) {
-          return _buildRequiredPage<PersonCreditsPageTarget>(
+        pageBuilder: (context, state) {
+          return _buildAppPage(
             state: state,
-            missingPage: const _MissingRouteTargetPage(
-              message: '没有收到可展示的详情数据。',
+            child: _buildRequiredPage<PersonCreditsPageTarget>(
+              state: state,
+              missingPage: const _MissingRouteTargetPage(
+                message: '没有收到可展示的详情数据。',
+              ),
+              builder: (target) => PersonCreditsPage(target: target),
             ),
-            builder: (target) => PersonCreditsPage(target: target),
           );
         },
       ),
@@ -150,7 +173,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.detailSearch.path,
         name: AppRoutes.detailSearch.name,
         pageBuilder: (context, state) {
-          return _buildNoTransitionPage(
+          return _buildAppPage(
             state: state,
             child: SearchPage(
               initialQuery: state.uri.queryParameters['q'],
@@ -164,7 +187,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRoutes.metadataIndex.name,
         pageBuilder: (context, state) {
           return _buildRequiredFullscreenDialogPage<MediaDetailTarget>(
-            context: context,
             state: state,
             missingPage: const _MissingRouteTargetPage(
               message: '没有收到可展示的详情数据。',
@@ -198,7 +220,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             },
           );
           return _buildFullscreenDialogPage(
-            context: context,
             state: state,
             child: SubtitleSearchPage(request: request),
           );
@@ -209,7 +230,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRoutes.player.name,
         pageBuilder: (context, state) {
           return _buildRequiredFullscreenDialogPage<PlaybackTarget>(
-            context: context,
             state: state,
             missingPage: const _MissingRouteTargetPage(
               message: '没有收到可播放目标。',
@@ -222,32 +242,26 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   );
 });
 
-NoTransitionPage<void> _buildNoTransitionPage({
+Page<void> _buildAppPage({
   required GoRouterState state,
   required Widget child,
 }) {
-  return NoTransitionPage<void>(
+  return NoAnimationMaterialPage<void>(
     key: state.pageKey,
+    name: state.name ?? state.uri.toString(),
+    arguments: state.extra,
     child: child,
   );
 }
 
 Page<void> _buildFullscreenDialogPage({
-  required BuildContext context,
   required GoRouterState state,
   required Widget child,
 }) {
-  final performanceReduceMotionEnabled =
-      ProviderScope.containerOf(context, listen: false)
-          .read(_performanceReduceMotionEnabledProvider);
-  if (performanceReduceMotionEnabled) {
-    return _buildNoTransitionPage(
-      state: state,
-      child: child,
-    );
-  }
-  return MaterialPage<void>(
+  return NoAnimationMaterialPage<void>(
     key: state.pageKey,
+    name: state.name ?? state.uri.toString(),
+    arguments: state.extra,
     fullscreenDialog: true,
     child: child,
   );
@@ -266,13 +280,11 @@ Widget _buildRequiredPage<T>({
 }
 
 Page<void> _buildRequiredFullscreenDialogPage<T>({
-  required BuildContext context,
   required GoRouterState state,
   required Widget missingPage,
   required Widget Function(T target) builder,
 }) {
   return _buildFullscreenDialogPage(
-    context: context,
     state: state,
     child: _buildRequiredPage<T>(
       state: state,

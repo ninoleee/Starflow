@@ -39,21 +39,27 @@ const List<String> kDefaultVarietySpecialEpisodeKeywords = <String>[
   '训练室全纪录',
   '练习室',
   '见面会',
-  '未播',
-  '未播片段',
-  '未公开',
-  '未公开片段',
+  '直播回顾',
+];
+
+const List<String> kDefaultVarietyExtraKeywords = <String>[
+  '花絮',
   '幕后',
   '幕后花絮',
   '制作特辑',
-  '直播回顾',
   '预告',
   '预告片',
   '采访',
   '访谈',
   '删减片段',
+  '未播',
+  '未播片段',
+  '未公开',
+  '未公开片段',
   'trailers',
   'trailer',
+  'teasers',
+  'teaser',
   'samples',
   'sample',
   'clips',
@@ -62,6 +68,7 @@ const List<String> kDefaultVarietySpecialEpisodeKeywords = <String>[
   'interview',
   'featurettes',
   'featurette',
+  'bts',
   'behind the scenes',
   'behindthescenes',
   'deleted scenes',
@@ -71,6 +78,7 @@ const List<String> kDefaultVarietySpecialEpisodeKeywords = <String>[
   'making of',
   'makingof',
   'bonus material',
+  'bonus materials',
   'bonus',
   'unaired',
 ];
@@ -471,7 +479,8 @@ class MediaNaming {
     }
     return haystacks.any(
       (haystack) =>
-          haystack.contains(loweredKeyword) || haystack.contains(compactKeyword),
+          haystack.contains(loweredKeyword) ||
+          haystack.contains(compactKeyword),
     );
   }
 
@@ -487,9 +496,8 @@ class MediaNaming {
         .where((item) => item.isNotEmpty)
         .map(RegExp.escape)
         .toList(growable: false);
-    final pattern = parts.isEmpty
-        ? RegExp.escape(normalized)
-        : parts.join(r'[\s._\-/&+]+');
+    final pattern =
+        parts.isEmpty ? RegExp.escape(normalized) : parts.join(r'[\s._\-/&+]+');
     return RegExp(
       '(^|[^a-z0-9])$pattern(?=[^a-z0-9]|\\\$)',
       caseSensitive: false,

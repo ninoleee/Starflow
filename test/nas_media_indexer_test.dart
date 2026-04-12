@@ -1781,7 +1781,7 @@ void main() {
   });
 
   test(
-      'NasMediaIndexer invalidates cached scope when special episode keywords change',
+      'NasMediaIndexer ignores legacy special episode keyword overrides when computing cached scope',
       () async {
     final store = _MemoryNasMediaIndexStore();
     const source = MediaSourceConfig(
@@ -1845,12 +1845,12 @@ void main() {
     final updatedSource = source.copyWith(
       webDavSpecialEpisodeKeywords: ['先导片', '花絮'],
     );
-    final staleLibrary = await indexer.loadLibrary(
+    final cachedLibrary = await indexer.loadLibrary(
       updatedSource,
       scopedCollections: [collection],
       limit: 20,
     );
-    expect(staleLibrary, isEmpty);
+    expect(cachedLibrary, isNotEmpty);
 
     await indexer.refreshSource(
       updatedSource,
@@ -1859,12 +1859,12 @@ void main() {
 
     final refreshedState = await store.loadSourceState(source.id);
     expect(refreshedState, isNotNull);
-    expect(refreshedState!.scopeKey, contains('special-filter:'));
-    expect(refreshedState.scopeKey, contains('先导片'));
-    expect(refreshedState.scopeKey, contains('花絮'));
+    expect(refreshedState!.scopeKey, equals(initialState.scopeKey));
+    expect(refreshedState.scopeKey, isNot(contains('special-filter:先导片,花絮')));
   });
 
-  test('NasMediaIndexer invalidates cached scope when extra keywords change',
+  test(
+      'NasMediaIndexer ignores legacy extra keyword overrides when computing cached scope',
       () async {
     final store = _MemoryNasMediaIndexStore();
     const source = MediaSourceConfig(
@@ -1931,12 +1931,12 @@ void main() {
     final updatedSource = source.copyWith(
       webDavExtraKeywords: ['花絮', '采访'],
     );
-    final staleLibrary = await indexer.loadLibrary(
+    final cachedLibrary = await indexer.loadLibrary(
       updatedSource,
       scopedCollections: [collection],
       limit: 20,
     );
-    expect(staleLibrary, isEmpty);
+    expect(cachedLibrary, isNotEmpty);
 
     await indexer.refreshSource(
       updatedSource,
@@ -1945,10 +1945,8 @@ void main() {
 
     final refreshedState = await store.loadSourceState(source.id);
     expect(refreshedState, isNotNull);
-    expect(
-      refreshedState!.scopeKey,
-      contains('extra-filter:花絮,采访'),
-    );
+    expect(refreshedState!.scopeKey, equals(initialState.scopeKey));
+    expect(refreshedState.scopeKey, isNot(contains('extra-filter:花絮,采访')));
   });
 
   test(

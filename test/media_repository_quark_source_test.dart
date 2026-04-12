@@ -653,7 +653,6 @@ void main() {
         libraryPath: '/综艺',
         enabled: true,
         webDavStructureInferenceEnabled: true,
-        webDavSpecialEpisodeKeywords: ['先导片'],
       );
       final quarkClient = _FakeQuarkSaveClient(
         entriesByParentFid: {
@@ -999,8 +998,7 @@ void main() {
       );
     });
 
-    test('filters keyword-matched quark extras from structure inference',
-        () async {
+    test('routes keyword-matched quark extras into season zero', () async {
       const source = MediaSourceConfig(
         id: 'quark-extras',
         name: 'Quark Variety Extras',
@@ -1009,7 +1007,6 @@ void main() {
         libraryPath: '/综艺',
         enabled: true,
         webDavStructureInferenceEnabled: true,
-        webDavExtraKeywords: ['花絮', '采访'],
       );
       final quarkClient = _FakeQuarkSaveClient(
         entriesByParentFid: {
@@ -1067,8 +1064,13 @@ void main() {
         limit: 20,
       );
 
-      expect(items, hasLength(1));
-      expect(items.single.playbackItemId, 'regular-episode');
+      expect(items, hasLength(2));
+      final regularEpisode =
+          items.firstWhere((item) => item.playbackItemId == 'regular-episode');
+      expect(regularEpisode.metadataSeed.seasonNumber, 1);
+      final extraEpisode =
+          items.firstWhere((item) => item.playbackItemId == 'extra-episode');
+      expect(extraEpisode.metadataSeed.seasonNumber, 0);
     });
   });
 }

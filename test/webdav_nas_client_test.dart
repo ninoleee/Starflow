@@ -475,7 +475,6 @@ void main() {
           endpoint: 'https://nas.example.com/dav/Shows/VarietySpecials/',
           enabled: true,
           webDavStructureInferenceEnabled: true,
-          webDavSpecialEpisodeKeywords: ['先导片'],
         ),
         limit: 20,
       );
@@ -582,8 +581,7 @@ void main() {
       expect(specialEpisode.episodeNumber, 1);
     });
 
-    test('filters keyword-matched variety extras from structure inference',
-        () async {
+    test('routes keyword-matched variety extras into season zero', () async {
       const rootPropfindResponse = '''
 <?xml version="1.0" encoding="utf-8"?>
 <d:multistatus xmlns:d="DAV:">
@@ -730,14 +728,15 @@ void main() {
           endpoint: 'https://nas.example.com/dav/Shows/VarietyExtras/',
           enabled: true,
           webDavStructureInferenceEnabled: true,
-          webDavExtraKeywords: ['花絮', '采访'],
         ),
         limit: 20,
       );
 
-      expect(items, hasLength(1));
-      expect(items.single.title, '节目 第1期');
-      expect(items.single.seasonNumber, 1);
+      expect(items, hasLength(2));
+      final regularEpisode = items.firstWhere((item) => item.title == '节目 第1期');
+      expect(regularEpisode.seasonNumber, 1);
+      final extraEpisode = items.firstWhere((item) => item.title == '节目 采访');
+      expect(extraEpisode.seasonNumber, 0);
     });
 
     test('treats plain numeric root files as a single implicit season',

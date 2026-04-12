@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
+import 'package:starflow/core/widgets/no_animation_page_route.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -427,7 +428,7 @@ class HomeEditorPage extends ConsumerWidget {
               onTap: () async {
                 Navigator.of(context).pop();
                 await Navigator.of(context, rootNavigator: true).push<void>(
-                  MaterialPageRoute<void>(
+                  NoAnimationMaterialPageRoute<void>(
                     builder: (context) => DoubanAccountEditorPage(
                       initial: doubanAccount,
                     ),

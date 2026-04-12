@@ -276,62 +276,45 @@ extension MediaSourceConfigEditorX on MediaSourceConfig {
   }
 }
 
+List<String> _normalizeDistinctLowerKeywords(Iterable<String> values) {
+  final seen = <String>{};
+  final normalized = <String>[];
+  for (final item in values) {
+    final keyword = item.trim().toLowerCase();
+    if (keyword.isEmpty || !seen.add(keyword)) {
+      continue;
+    }
+    normalized.add(keyword);
+  }
+  return normalized;
+}
+
 extension MediaSourceConfigWebDavFilterX on MediaSourceConfig {
   List<String> get normalizedWebDavExcludedPathKeywords {
-    final seen = <String>{};
-    final values = <String>[];
-    for (final item in webDavExcludedPathKeywords) {
-      final normalized = item.trim().toLowerCase();
-      if (normalized.isEmpty || !seen.add(normalized)) {
-        continue;
-      }
-      values.add(normalized);
-    }
-    return values;
+    return _normalizeDistinctLowerKeywords(webDavExcludedPathKeywords);
   }
 
   List<String> get normalizedWebDavSeriesTitleFilterKeywords {
-    final seen = <String>{};
-    final values = <String>[];
-    for (final item in webDavSeriesTitleFilterKeywords) {
-      final normalized = item.trim().toLowerCase();
-      if (normalized.isEmpty || !seen.add(normalized)) {
-        continue;
-      }
-      values.add(normalized);
-    }
-    return values;
+    return _normalizeDistinctLowerKeywords(webDavSeriesTitleFilterKeywords);
   }
 
   List<String> get normalizedWebDavSpecialEpisodeKeywords {
-    final seen = <String>{};
-    final values = <String>[];
-    for (final source in [
+    // Special / extras keywords are now code-defined so hidden legacy per-source
+    // values do not keep affecting scans after the settings UI removes them.
+    return _normalizeDistinctLowerKeywords(
       kDefaultVarietySpecialEpisodeKeywords,
-      webDavSpecialEpisodeKeywords,
-    ]) {
-      for (final item in source) {
-        final normalized = item.trim().toLowerCase();
-        if (normalized.isEmpty || !seen.add(normalized)) {
-          continue;
-        }
-        values.add(normalized);
-      }
-    }
-    return values;
+    );
   }
 
   List<String> get normalizedWebDavExtraKeywords {
-    final seen = <String>{};
-    final values = <String>[];
-    for (final item in webDavExtraKeywords) {
-      final normalized = item.trim().toLowerCase();
-      if (normalized.isEmpty || !seen.add(normalized)) {
-        continue;
-      }
-      values.add(normalized);
-    }
-    return values;
+    return _normalizeDistinctLowerKeywords(kDefaultVarietyExtraKeywords);
+  }
+
+  List<String> get normalizedWebDavSpecialCategoryKeywords {
+    return _normalizeDistinctLowerKeywords([
+      ...kDefaultVarietySpecialEpisodeKeywords,
+      ...kDefaultVarietyExtraKeywords,
+    ]);
   }
 
   bool matchesWebDavExcludedPath(String rawPath) {
@@ -381,7 +364,7 @@ extension MediaSourceConfigWebDavFilterX on MediaSourceConfig {
     if (kind != MediaSourceKind.nas && kind != MediaSourceKind.quark) {
       return false;
     }
-    final keywords = normalizedWebDavSpecialEpisodeKeywords;
+    final keywords = normalizedWebDavSpecialCategoryKeywords;
     if (keywords.isEmpty) {
       return false;
     }

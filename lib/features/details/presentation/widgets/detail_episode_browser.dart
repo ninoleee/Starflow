@@ -9,6 +9,7 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/application/playback_target_resolver.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -85,6 +86,53 @@ final detailSeriesBrowserProvider = FutureProvider.autoDispose
   }
   return groups.isEmpty ? null : DetailSeriesBrowserState(groups: groups);
 });
+
+final detailEpisodeDisplayFileSizeProvider = FutureProvider.autoDispose
+    .family<int?, _DetailEpisodeFileSizeRequest>((ref, request) async {
+  final target = PlaybackTarget.fromMediaItem(request.item);
+  if (!target.needsResolution) {
+    return request.item.fileSizeBytes;
+  }
+
+  try {
+    final resolved = await PlaybackTargetResolver(read: ref.read).resolve(
+      target,
+    );
+    return resolved.fileSizeBytes ??
+        _fallbackEpisodeDisplayFileSizeBytes(request.item, target);
+  } catch (_) {
+    return _fallbackEpisodeDisplayFileSizeBytes(request.item, target);
+  }
+});
+
+class _DetailEpisodeFileSizeRequest {
+  const _DetailEpisodeFileSizeRequest(this.item);
+
+  final MediaItem item;
+
+  String get _cacheKey {
+    return [
+      item.sourceKind.name,
+      item.sourceId.trim(),
+      item.playbackItemId.trim(),
+      item.streamUrl.trim(),
+      item.actualAddress.trim(),
+      item.itemType.trim(),
+      item.title.trim(),
+      '${item.seasonNumber ?? ''}',
+      '${item.episodeNumber ?? ''}',
+    ].join('|');
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is _DetailEpisodeFileSizeRequest &&
+        other._cacheKey == _cacheKey;
+  }
+
+  @override
+  int get hashCode => _cacheKey.hashCode;
+}
 
 class DetailSeriesBrowserState {
   const DetailSeriesBrowserState({required this.groups});
@@ -541,6 +589,21 @@ class _DetailEpisodeCard extends ConsumerWidget {
       seriesTarget: seriesTarget,
     );
     final titleText = _episodeTitleText(item);
+    final needsFileSizeResolution =
+        _needsEpisodeDisplayFileSizeResolution(item);
+    final resolvedFileSizeBytes = needsFileSizeResolution
+        ? ref
+            .watch(
+              detailEpisodeDisplayFileSizeProvider(
+                _DetailEpisodeFileSizeRequest(item),
+              ),
+            )
+            .maybeWhen(
+              data: (value) => value,
+              orElse: () => null,
+            )
+        : item.fileSizeBytes;
+    final fileSizeText = _episodeDisplayFileSizeLabel(resolvedFileSizeBytes);
 
     void onOpenDetail() {
       context.pushNamed(
@@ -597,7 +660,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
                       ),
                       Positioned(
                         left: 14,
-                        right: 46,
+                        right: 14,
                         top: 14,
                         child: Text(
                           titleText,
@@ -645,15 +708,31 @@ class _DetailEpisodeCard extends ConsumerWidget {
                           ),
                         ),
                       ),
-                      const Positioned(
-                        right: 12,
-                        bottom: 12,
-                        child: Icon(
-                          Icons.chevron_right_rounded,
-                          color: Colors.white,
-                          size: 28,
+                      if (fileSizeText.isNotEmpty)
+                        Positioned(
+                          right: 12,
+                          bottom: 12,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.54),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              fileSizeText,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -725,14 +804,14 @@ class _DetailEpisodeCard extends ConsumerWidget {
   }
 
   String _episodeTitleText(MediaItem item) {
-    final fileSize = _episodeDisplayFileSizeLabel(item);
-    if (fileSize.isEmpty) {
-      return item.title;
+    final title = item.title.trim();
+    if (title.isNotEmpty) {
+      return title;
     }
-    if (item.title.trim().isEmpty) {
-      return fileSize;
+    if (item.episodeNumber != null) {
+      return '第 ${item.episodeNumber} 集';
     }
-    return '${item.title} · $fileSize';
+    return '剧集';
   }
 
   String _progressLabel(
@@ -750,8 +829,22 @@ class _DetailEpisodeCard extends ConsumerWidget {
   }
 }
 
-String _episodeDisplayFileSizeLabel(MediaItem item) {
-  return formatByteSize(item.fileSizeBytes).trim();
+String _episodeDisplayFileSizeLabel(int? fileSizeBytes) {
+  return formatByteSize(fileSizeBytes).trim();
+}
+
+bool _needsEpisodeDisplayFileSizeResolution(MediaItem item) {
+  return PlaybackTarget.fromMediaItem(item).needsResolution;
+}
+
+int? _fallbackEpisodeDisplayFileSizeBytes(
+  MediaItem item,
+  PlaybackTarget target,
+) {
+  if (target.sourceKind == MediaSourceKind.nas && target.needsResolution) {
+    return null;
+  }
+  return item.fileSizeBytes;
 }
 
 String _episodeFileName(MediaItem item) {

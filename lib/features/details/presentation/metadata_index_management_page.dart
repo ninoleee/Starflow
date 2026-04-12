@@ -37,6 +37,7 @@ class MetadataIndexManagementPage extends ConsumerStatefulWidget {
 
 class _MetadataIndexManagementPageState
     extends ConsumerState<MetadataIndexManagementPage> {
+  late MediaDetailTarget _currentTarget;
   late final TextEditingController _queryController;
   late final TextEditingController _yearController;
   late final FocusNode _queryFocusNode;
@@ -50,6 +51,7 @@ class _MetadataIndexManagementPageState
 
   bool _isSearching = false;
   bool _isApplying = false;
+  bool _isAutoRefreshing = false;
   MetadataMatchResult? _wmdbResult;
   MetadataMatchResult? _tmdbResult;
   ImdbRatingPreview? _imdbPreview;
@@ -60,20 +62,21 @@ class _MetadataIndexManagementPageState
   @override
   void initState() {
     super.initState();
+    _currentTarget = widget.target;
     _queryController = TextEditingController(
-      text: widget.target.searchQuery.trim().isNotEmpty
-          ? widget.target.searchQuery.trim()
-          : widget.target.title.trim(),
+      text: _currentTarget.searchQuery.trim().isNotEmpty
+          ? _currentTarget.searchQuery.trim()
+          : _currentTarget.title.trim(),
     );
     _yearController = TextEditingController(
-      text: widget.target.year > 0 ? '${widget.target.year}' : '',
+      text: _currentTarget.year > 0 ? '${_currentTarget.year}' : '',
     );
     _queryFocusNode = FocusNode(debugLabel: 'metadata-index-query');
     _yearFocusNode = FocusNode(debugLabel: 'metadata-index-year');
     _preferSeriesFocusNode =
         FocusNode(debugLabel: 'metadata-index-prefer-series');
     _searchFocusNode = FocusNode(debugLabel: 'metadata-index-search');
-    final itemType = widget.target.itemType.trim().toLowerCase();
+    final itemType = _currentTarget.itemType.trim().toLowerCase();
     _preferSeries =
         itemType == 'series' || itemType == 'season' || itemType == 'episode';
     _recordFuture = _loadRecord();
@@ -93,8 +96,8 @@ class _MetadataIndexManagementPageState
 
   Future<NasMediaIndexRecord?> _loadRecord() {
     return ref.read(nasMediaIndexerProvider).loadRecord(
-          sourceId: widget.target.sourceId,
-          resourceId: widget.target.itemId,
+          sourceId: _currentTarget.sourceId,
+          resourceId: _currentTarget.itemId,
         );
   }
 
@@ -102,7 +105,7 @@ class _MetadataIndexManagementPageState
     final query = _queryController.text.trim();
     final year = int.tryParse(_yearController.text.trim()) ?? 0;
     final preferredImdbId = _resolvePreferredImdbId(
-      widget.target.imdbId,
+      _currentTarget.imdbId,
       query,
     );
     if (query.isEmpty && preferredImdbId.isEmpty) {
@@ -174,7 +177,7 @@ class _MetadataIndexManagementPageState
               query: query,
               year: year,
               preferSeries: _preferSeries,
-              actors: widget.target.actors,
+              actors: _currentTarget.actors,
             );
         return (result, result == null ? '没有匹配到 WMDB 结果。' : '');
       } catch (error) {
@@ -319,7 +322,7 @@ class _MetadataIndexManagementPageState
     try {
       final updatedTarget =
           await ref.read(nasMediaIndexerProvider).applyManualMetadata(
-                target: widget.target,
+                target: _currentTarget,
                 searchQuery: _queryController.text.trim(),
                 metadataMatch: match,
                 imdbRatingMatch: _resolvedImdbMatch(match.imdbId),
@@ -333,6 +336,7 @@ class _MetadataIndexManagementPageState
         match,
         imdbRatingMatch: _resolvedImdbMatch(match.imdbId),
       );
+      _currentTarget = resolvedTarget;
       await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
             seedTarget: widget.target,
             resolvedTarget: resolvedTarget,
@@ -365,7 +369,7 @@ class _MetadataIndexManagementPageState
     try {
       final updatedTarget =
           await ref.read(nasMediaIndexerProvider).applyManualMetadata(
-                target: widget.target,
+                target: _currentTarget,
                 searchQuery: _queryController.text.trim(),
                 imdbRatingMatch: imdbMatch,
               );
@@ -378,6 +382,7 @@ class _MetadataIndexManagementPageState
         null,
         imdbRatingMatch: imdbMatch,
       );
+      _currentTarget = resolvedTarget;
       await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
             seedTarget: widget.target,
             resolvedTarget: resolvedTarget,
@@ -569,6 +574,51 @@ class _MetadataIndexManagementPageState
     );
   }
 
+  Future<void> _runAutomaticRefresh() async {
+    if (_isAutoRefreshing) {
+      return;
+    }
+    setState(() {
+      _isAutoRefreshing = true;
+    });
+
+    try {
+      final updatedTarget = await ref
+          .read(nasMediaIndexerProvider)
+          .enrichDetailTargetMetadataIfNeeded(_currentTarget);
+      final resolvedTarget = updatedTarget ?? _currentTarget;
+      final changed = _hasMetadataChanged(_currentTarget, resolvedTarget);
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _currentTarget = resolvedTarget;
+        _recordFuture = _loadRecord();
+      });
+      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+            seedTarget: widget.target,
+            resolvedTarget: resolvedTarget,
+            metadataRefreshStatus: DetailMetadataRefreshStatus.succeeded,
+          );
+      _invalidateReaders();
+      _showSnackBar(changed ? '已自动更新信息' : '没有可更新的信息');
+    } catch (error) {
+      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+            seedTarget: widget.target,
+            resolvedTarget: _currentTarget,
+            metadataRefreshStatus: DetailMetadataRefreshStatus.failed,
+          );
+      _showSnackBar('自动更新失败：$error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isAutoRefreshing = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
@@ -601,7 +651,7 @@ class _MetadataIndexManagementPageState
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                widget.target.title,
+                                _currentTarget.title,
                                 style: Theme.of(context)
                                     .textTheme
                                     .titleLarge
@@ -618,6 +668,41 @@ class _MetadataIndexManagementPageState
                                           .colorScheme
                                           .onSurfaceVariant,
                                     ),
+                              ),
+                              const SizedBox(height: 12),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: isTelevision
+                                    ? TvAdaptiveButton(
+                                        label: _isAutoRefreshing
+                                            ? '更新中...'
+                                            : '自动更新',
+                                        icon: Icons.refresh_rounded,
+                                        focusId: 'detail:index:auto-refresh',
+                                        onPressed: _isAutoRefreshing
+                                            ? null
+                                            : _runAutomaticRefresh,
+                                      )
+                                    : FilledButton.icon(
+                                        onPressed: _isAutoRefreshing
+                                            ? null
+                                            : _runAutomaticRefresh,
+                                        icon: _isAutoRefreshing
+                                            ? const SizedBox(
+                                                width: 16,
+                                                height: 16,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                ),
+                                              )
+                                            : const Icon(
+                                                Icons.refresh_rounded,
+                                              ),
+                                        label: Text(
+                                          _isAutoRefreshing ? '更新中...' : '自动更新',
+                                        ),
+                                      ),
                               ),
                             ],
                           ),
@@ -827,7 +912,7 @@ class _MetadataIndexManagementPageState
                 ),
               ),
               OverlayToolbar(
-                onBack: () => Navigator.of(context).maybePop(),
+                onBack: () => Navigator.of(context).maybePop(_currentTarget),
               ),
             ],
           ),
@@ -835,6 +920,82 @@ class _MetadataIndexManagementPageState
       ),
     );
   }
+}
+
+bool _hasMetadataChanged(
+  MediaDetailTarget current,
+  MediaDetailTarget next,
+) {
+  return current.title != next.title ||
+      current.posterUrl != next.posterUrl ||
+      current.backdropUrl != next.backdropUrl ||
+      current.logoUrl != next.logoUrl ||
+      current.bannerUrl != next.bannerUrl ||
+      !_sameStrings(current.extraBackdropUrls, next.extraBackdropUrls) ||
+      current.overview != next.overview ||
+      current.year != next.year ||
+      current.durationLabel != next.durationLabel ||
+      !_sameStrings(current.ratingLabels, next.ratingLabels) ||
+      !_sameStrings(current.genres, next.genres) ||
+      !_sameStrings(current.directors, next.directors) ||
+      !_samePeople(current.directorProfiles, next.directorProfiles) ||
+      !_sameStrings(current.actors, next.actors) ||
+      !_samePeople(current.actorProfiles, next.actorProfiles) ||
+      !_sameStrings(current.platforms, next.platforms) ||
+      !_samePeople(current.platformProfiles, next.platformProfiles) ||
+      current.doubanId != next.doubanId ||
+      current.imdbId != next.imdbId ||
+      current.tmdbId != next.tmdbId ||
+      current.tvdbId != next.tvdbId ||
+      current.wikidataId != next.wikidataId ||
+      current.tmdbSetId != next.tmdbSetId ||
+      !_sameMaps(current.providerIds, next.providerIds);
+}
+
+bool _sameStrings(List<String> left, List<String> right) {
+  if (left.length != right.length) {
+    return false;
+  }
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _samePeople(
+  List<MediaPersonProfile> left,
+  List<MediaPersonProfile> right,
+) {
+  if (identical(left, right)) {
+    return true;
+  }
+  if (left.length != right.length) {
+    return false;
+  }
+  for (var index = 0; index < left.length; index++) {
+    if (left[index].name != right[index].name ||
+        left[index].avatarUrl != right[index].avatarUrl) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _sameMaps(
+  Map<String, String> left,
+  Map<String, String> right,
+) {
+  if (left.length != right.length) {
+    return false;
+  }
+  for (final entry in left.entries) {
+    if (right[entry.key] != entry.value) {
+      return false;
+    }
+  }
+  return true;
 }
 
 class _SectionPanel extends StatelessWidget {

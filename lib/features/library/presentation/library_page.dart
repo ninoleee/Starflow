@@ -61,6 +61,7 @@ extension LibraryFilterX on LibraryFilter {
 }
 
 enum _LibraryRefreshSourceKind {
+  indexed,
   webDav,
   quark,
 }
@@ -68,6 +69,8 @@ enum _LibraryRefreshSourceKind {
 extension _LibraryRefreshSourceKindX on _LibraryRefreshSourceKind {
   String get label {
     switch (this) {
+      case _LibraryRefreshSourceKind.indexed:
+        return '非 Emby';
       case _LibraryRefreshSourceKind.webDav:
         return 'WebDAV';
       case _LibraryRefreshSourceKind.quark:
@@ -75,15 +78,28 @@ extension _LibraryRefreshSourceKindX on _LibraryRefreshSourceKind {
     }
   }
 
-  String get rebuildTitle => '重建 $label 索引';
+  String get rebuildTitle {
+    switch (this) {
+      case _LibraryRefreshSourceKind.indexed:
+        return '重建索引';
+      case _LibraryRefreshSourceKind.webDav:
+      case _LibraryRefreshSourceKind.quark:
+        return '重建 $label 索引';
+    }
+  }
 
   String rebuildDescription({
     required bool interruptIncrementalRefresh,
   }) {
     if (interruptIncrementalRefresh) {
+      if (this == _LibraryRefreshSourceKind.indexed) {
+        return '当前正在执行增量更新。继续后会先停止这次增量，再对当前启用的 WebDAV 和 Quark 媒体源执行全量重扫。';
+      }
       return '当前正在执行增量更新。继续后会先停止这次增量，再对当前启用的 $label 媒体源执行全量重扫。';
     }
     switch (this) {
+      case _LibraryRefreshSourceKind.indexed:
+        return '这会同时对当前启用的 WebDAV 和 Quark 媒体源执行全量重扫，忽略已有指纹并重新建立本地索引。';
       case _LibraryRefreshSourceKind.webDav:
         return '这会对当前启用的 WebDAV 媒体源执行全量重扫，忽略已有指纹并重新抓取 sidecar、WMDB、TMDB 和 IMDb 信息。';
       case _LibraryRefreshSourceKind.quark:
@@ -92,6 +108,12 @@ extension _LibraryRefreshSourceKindX on _LibraryRefreshSourceKind {
   }
 
   String incrementalCompletedMessage(int sourceCount) {
+    if (this == _LibraryRefreshSourceKind.indexed) {
+      if (sourceCount == 1) {
+        return '已完成非 Emby 媒体源增量更新';
+      }
+      return '已完成 $sourceCount 个非 Emby 媒体源的增量更新';
+    }
     if (sourceCount == 1) {
       return '已完成 $label 增量更新';
     }
@@ -99,6 +121,12 @@ extension _LibraryRefreshSourceKindX on _LibraryRefreshSourceKind {
   }
 
   String rebuildCompletedMessage(int sourceCount) {
+    if (this == _LibraryRefreshSourceKind.indexed) {
+      if (sourceCount == 1) {
+        return '已完成非 Emby 媒体源索引重建';
+      }
+      return '已完成 $sourceCount 个非 Emby 媒体源的全量重扫';
+    }
     if (sourceCount == 1) {
       return '已完成 $label 索引重建';
     }
@@ -115,9 +143,14 @@ class _LibraryRefreshScope {
   final _LibraryRefreshSourceKind kind;
   final List<String> sourceIds;
 
-  String get incrementalButtonLabel => '增量更新 ${kind.label}';
+  String get incrementalButtonLabel =>
+      kind == _LibraryRefreshSourceKind.indexed
+          ? '增量更新'
+          : '增量更新 ${kind.label}';
 
-  String get rebuildButtonLabel => '重建 ${kind.label} 索引';
+  String get rebuildButtonLabel => kind == _LibraryRefreshSourceKind.indexed
+      ? '重建索引'
+      : '重建 ${kind.label} 索引';
 }
 
 final libraryMediaSourcesSettingsSliceProvider =
@@ -510,6 +543,15 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     List<MediaSourceConfig> mediaSources,
   ) {
     switch (_filter) {
+      case LibraryFilter.all:
+        final sourceIds = _refreshableSourceIdsForIndexedSources(mediaSources);
+        if (sourceIds.isEmpty) {
+          return null;
+        }
+        return _LibraryRefreshScope(
+          kind: _LibraryRefreshSourceKind.indexed,
+          sourceIds: sourceIds,
+        );
       case LibraryFilter.nas:
         final sourceIds = _refreshableSourceIds(
           mediaSources,
@@ -534,10 +576,24 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
           kind: _LibraryRefreshSourceKind.quark,
           sourceIds: sourceIds,
         );
-      case LibraryFilter.all:
       case LibraryFilter.emby:
         return null;
     }
+  }
+
+  List<String> _refreshableSourceIdsForIndexedSources(
+    List<MediaSourceConfig> mediaSources,
+  ) {
+    return {
+      ..._refreshableSourceIds(
+        mediaSources,
+        kind: MediaSourceKind.nas,
+      ),
+      ..._refreshableSourceIds(
+        mediaSources,
+        kind: MediaSourceKind.quark,
+      ),
+    }.toList(growable: false);
   }
 
   List<String> _refreshableSourceIds(
@@ -562,27 +618,22 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     Iterable<WebDavScrapeProgress> progressEntries,
     List<MediaSourceConfig> mediaSources,
   ) {
-    late final MediaSourceKind scopedKind;
-    switch (_filter) {
-      case LibraryFilter.nas:
-        scopedKind = MediaSourceKind.nas;
-      case LibraryFilter.quark:
-        scopedKind = MediaSourceKind.quark;
-      case LibraryFilter.all:
-      case LibraryFilter.emby:
-        return const [];
+    final enabledVisibleSourceIds = switch (_filter) {
+      LibraryFilter.all =>
+        _refreshableSourceIdsForIndexedSources(mediaSources).toSet(),
+      LibraryFilter.nas => _refreshableSourceIds(
+          mediaSources,
+          kind: MediaSourceKind.nas,
+        ).toSet(),
+      LibraryFilter.quark => _refreshableSourceIds(
+          mediaSources,
+          kind: MediaSourceKind.quark,
+        ).toSet(),
+      LibraryFilter.emby => const <String>{},
+    };
+    if (enabledVisibleSourceIds.isEmpty) {
+      return const [];
     }
-    final enabledVisibleSourceIds = mediaSources
-        .where(
-          (source) =>
-              source.enabled &&
-              source.kind == scopedKind &&
-              (scopedKind != MediaSourceKind.quark ||
-                  source.hasConfiguredQuarkFolder),
-        )
-        .map((source) => source.id.trim())
-        .where((sourceId) => sourceId.isNotEmpty)
-        .toSet();
     final visible = progressEntries
         .where((entry) => enabledVisibleSourceIds.contains(entry.sourceId))
         .toList(growable: false)

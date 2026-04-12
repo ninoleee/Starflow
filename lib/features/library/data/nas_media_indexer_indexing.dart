@@ -24,7 +24,7 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       scannedItem.actualAddress,
       seriesTitleFilterKeywords:
           source.normalizedWebDavSeriesTitleFilterKeywords,
-      specialEpisodeKeywords: source.normalizedWebDavSpecialEpisodeKeywords,
+      specialEpisodeKeywords: source.normalizedWebDavSpecialCategoryKeywords,
     );
     final seed = scannedItem.metadataSeed;
     final structureInferredEpisodeLike =

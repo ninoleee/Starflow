@@ -1126,7 +1126,7 @@ class AppMediaRepository implements MediaRepository {
       seriesTitleFilterKeywords: useStructureInference
           ? source.normalizedWebDavSeriesTitleFilterKeywords
           : const <String>[],
-      specialEpisodeKeywords: source.normalizedWebDavSpecialEpisodeKeywords,
+      specialEpisodeKeywords: source.normalizedWebDavSpecialCategoryKeywords,
     );
   }
 
