@@ -317,6 +317,7 @@ class TvFocusableAction extends ConsumerStatefulWidget {
     required this.child,
     this.onPressed,
     this.onContextAction,
+    this.onFocused,
     this.autofocus = false,
     this.focusNode,
     this.focusId,
@@ -327,6 +328,7 @@ class TvFocusableAction extends ConsumerStatefulWidget {
   final Widget child;
   final VoidCallback? onPressed;
   final VoidCallback? onContextAction;
+  final VoidCallback? onFocused;
   final bool autofocus;
   final FocusNode? focusNode;
   final String? focusId;
@@ -407,6 +409,9 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
   }) {
     if (value && memoryEnabled && memoryScope != null && focusId.isNotEmpty) {
       memoryScope.controller.remember(memoryScope.scopeId, focusId);
+    }
+    if (value) {
+      widget.onFocused?.call();
     }
     if (!trackVisualFocus || _isFocusedNotifier.value == value) {
       return;
@@ -871,6 +876,7 @@ class StarflowChipButton extends StatelessWidget {
     required this.selected,
     required this.onPressed,
     this.icon,
+    this.onFocused,
     this.autofocus = false,
     this.focusNode,
     this.focusId,
@@ -880,6 +886,7 @@ class StarflowChipButton extends StatelessWidget {
   final bool selected;
   final VoidCallback? onPressed;
   final IconData? icon;
+  final VoidCallback? onFocused;
   final bool autofocus;
   final FocusNode? focusNode;
   final String? focusId;
@@ -913,6 +920,7 @@ class StarflowChipButton extends StatelessWidget {
     );
     return TvFocusableAction(
       onPressed: onPressed,
+      onFocused: onFocused,
       autofocus: autofocus,
       focusNode: focusNode,
       focusId: focusId,

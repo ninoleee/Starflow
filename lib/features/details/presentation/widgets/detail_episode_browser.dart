@@ -215,9 +215,8 @@ class DetailEpisodeBrowser extends StatefulWidget {
 class _DetailEpisodeBrowserState extends State<DetailEpisodeBrowser> {
   static const double _episodeCardWidth = 292;
   static const double _episodeCardSpacing = 14;
-  static const double _episodeCardStride =
-      _episodeCardWidth + _episodeCardSpacing;
 
+  final ScrollController _seasonScrollController = ScrollController();
   final Map<String, FocusNode> _seasonFocusNodes = <String, FocusNode>{};
   final Map<String, FocusNode> _episodeFocusNodes = <String, FocusNode>{};
 
@@ -235,6 +234,7 @@ class _DetailEpisodeBrowserState extends State<DetailEpisodeBrowser> {
 
   @override
   void dispose() {
+    _seasonScrollController.dispose();
     for (final node in _seasonFocusNodes.values) {
       node.dispose();
     }
@@ -295,122 +295,18 @@ class _DetailEpisodeBrowserState extends State<DetailEpisodeBrowser> {
     return 'detail:episode:$episodeSeed';
   }
 
-  List<String> _episodeNodeKeysForGroup(DetailEpisodeGroup group) {
-    return List<String>.generate(
-      group.episodes.length,
-      (index) => _episodeNodeKey(group, group.episodes[index], index),
-      growable: false,
-    );
-  }
-
-  bool _focusFirstEpisodeSlot(DetailEpisodeGroup selectedGroup) {
-    final keys = _episodeNodeKeysForGroup(selectedGroup);
-    for (final key in keys) {
-      if (_requestDetailFocus([_episodeFocusNodes[key]])) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  bool _moveEpisodeRow({
-    required List<String> keys,
-    required int currentIndex,
-    required int step,
-    required Map<String, FocusNode> nodes,
-    required ScrollController scrollController,
-  }) {
-    final targetIndex = _findReachableEpisodeIndex(
-      keys: keys,
-      startIndex: currentIndex + step,
-      step: step,
-      nodes: nodes,
-    );
-    if (targetIndex == null) {
-      return true;
-    }
-    if (!scrollController.hasClients) {
-      return _requestDetailFocus([nodes[keys[targetIndex]]]);
+  void _ensureFocusNodeVisible(FocusNode? node) {
+    final focusContext = node?.context;
+    if (focusContext == null) {
+      return;
     }
     unawaited(
-      _revealEpisodeRowIndex(
-        index: targetIndex,
-        keys: keys,
-        nodes: nodes,
-        scrollController: scrollController,
-        step: step,
+      Scrollable.ensureVisible(
+        focusContext,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
       ),
     );
-    return true;
-  }
-
-  int? _findReachableEpisodeIndex({
-    required List<String> keys,
-    required int startIndex,
-    required int step,
-    required Map<String, FocusNode> nodes,
-  }) {
-    for (var index = startIndex;
-        index >= 0 && index < keys.length;
-        index += step) {
-      final node = nodes[keys[index]];
-      if (node != null && node.canRequestFocus) {
-        return index;
-      }
-    }
-    return null;
-  }
-
-  Future<void> _revealEpisodeRowIndex({
-    required int index,
-    required List<String> keys,
-    required Map<String, FocusNode> nodes,
-    required ScrollController scrollController,
-    required int step,
-  }) async {
-    if (!mounted || !scrollController.hasClients) {
-      return;
-    }
-    if (index < 0 || index >= keys.length) {
-      return;
-    }
-    final position = scrollController.position;
-    final itemStart = index * _episodeCardStride;
-    final itemEnd = itemStart + _episodeCardWidth;
-    final viewportStart = position.pixels;
-    final viewportEnd = viewportStart + position.viewportDimension;
-    double? targetOffset;
-    if (itemStart < viewportStart + 1) {
-      targetOffset = itemStart;
-    } else if (itemEnd > viewportEnd - 1) {
-      targetOffset = itemEnd - position.viewportDimension;
-    }
-    if (targetOffset != null) {
-      targetOffset = targetOffset
-          .clamp(position.minScrollExtent, position.maxScrollExtent)
-          .toDouble();
-    }
-    if (targetOffset != null && (position.pixels - targetOffset).abs() >= 1) {
-      scrollController.jumpTo(targetOffset);
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      if (_requestDetailFocus([nodes[keys[index]]])) {
-        return;
-      }
-      final fallbackIndex = _findReachableEpisodeIndex(
-        keys: keys,
-        startIndex: index + step,
-        step: step,
-        nodes: nodes,
-      );
-      if (fallbackIndex == null) {
-        return;
-      }
-      _requestDetailFocus([nodes[keys[fallbackIndex]]]);
-    });
   }
 
   @override
@@ -419,9 +315,6 @@ class _DetailEpisodeBrowserState extends State<DetailEpisodeBrowser> {
       groups: widget.groups,
       selectedGroupId: widget.selectedGroupId,
     );
-    final selectedSeasonFocusNode =
-        widget.groups.length > 1 ? _seasonFocusNodes[selectedGroup.id] : null;
-    final episodeNodeKeys = _episodeNodeKeysForGroup(selectedGroup);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -430,43 +323,31 @@ class _DetailEpisodeBrowserState extends State<DetailEpisodeBrowser> {
           SizedBox(
             height: 52,
             child: ListView.separated(
+              controller: _seasonScrollController,
               scrollDirection: Axis.horizontal,
               itemCount: widget.groups.length,
               separatorBuilder: (context, index) => const SizedBox(width: 8),
               itemBuilder: (context, index) {
                 final group = widget.groups[index];
                 final selected = group.id == selectedGroup.id;
-                return TvDirectionalActionPanel(
-                  onDirection: (direction) {
-                    switch (direction) {
-                      case TraversalDirection.left:
-                        if (index <= 0) {
-                          return true;
-                        }
-                        return _requestDetailFocus([
-                          _seasonFocusNodes[widget.groups[index - 1].id],
-                        ]);
-                      case TraversalDirection.right:
-                        if (index >= widget.groups.length - 1) {
-                          return true;
-                        }
-                        return _requestDetailFocus([
-                          _seasonFocusNodes[widget.groups[index + 1].id],
-                        ]);
-                      case TraversalDirection.down:
-                        return _focusFirstEpisodeSlot(selectedGroup);
-                      case TraversalDirection.up:
-                        return false;
+                return _DetailSeasonChip(
+                  label: group.label,
+                  selected: selected,
+                  focusNode: _seasonFocusNodes[group.id],
+                  focusId: 'detail:season:${group.id}',
+                  autofocus: index == 0,
+                  onFocused: () {
+                    if (widget.selectedGroupId != group.id) {
+                      widget.onSeasonSelected(group.id);
                     }
+                    _ensureFocusNodeVisible(_seasonFocusNodes[group.id]);
                   },
-                  child: _DetailSeasonChip(
-                    label: group.label,
-                    selected: selected,
-                    focusNode: _seasonFocusNodes[group.id],
-                    focusId: 'detail:season:${group.id}',
-                    autofocus: index == 0,
-                    onTap: () => widget.onSeasonSelected(group.id),
-                  ),
+                  onTap: () {
+                    if (widget.selectedGroupId != group.id) {
+                      widget.onSeasonSelected(group.id);
+                    }
+                    _ensureFocusNodeVisible(_seasonFocusNodes[group.id]);
+                  },
                 );
               },
             ),
@@ -476,16 +357,18 @@ class _DetailEpisodeBrowserState extends State<DetailEpisodeBrowser> {
         SizedBox(
           height: 272,
           child: DesktopHorizontalPager(
+            key: ValueKey<String>('detail-episodes:${selectedGroup.id}'),
             builder: (context, controller) => ListView.separated(
               controller: controller,
               scrollDirection: Axis.horizontal,
               clipBehavior: Clip.none,
+              cacheExtent: _episodeCardWidth * 2,
               itemCount: selectedGroup.episodes.length,
               separatorBuilder: (context, index) =>
                   const SizedBox(width: _episodeCardSpacing),
               itemBuilder: (context, index) {
                 final episode = selectedGroup.episodes[index];
-                final nodeKey = episodeNodeKeys[index];
+                final nodeKey = _episodeNodeKey(selectedGroup, episode, index);
                 final episodeFocusNode = _episodeFocusNodes[nodeKey];
                 return SizedBox(
                   width: _episodeCardWidth,
@@ -493,31 +376,8 @@ class _DetailEpisodeBrowserState extends State<DetailEpisodeBrowser> {
                     item: episode,
                     seriesTarget: widget.seriesTarget,
                     focusNode: episodeFocusNode,
-                    directionalHandler: (direction) {
-                      switch (direction) {
-                        case TraversalDirection.left:
-                          return _moveEpisodeRow(
-                            keys: episodeNodeKeys,
-                            currentIndex: index,
-                            step: -1,
-                            nodes: _episodeFocusNodes,
-                            scrollController: controller,
-                          );
-                        case TraversalDirection.right:
-                          return _moveEpisodeRow(
-                            keys: episodeNodeKeys,
-                            currentIndex: index,
-                            step: 1,
-                            nodes: _episodeFocusNodes,
-                            scrollController: controller,
-                          );
-                        case TraversalDirection.up:
-                          return selectedSeasonFocusNode != null
-                              ? _requestDetailFocus([selectedSeasonFocusNode])
-                              : false;
-                        case TraversalDirection.down:
-                          return false;
-                      }
+                    onFocused: () {
+                      _ensureFocusNodeVisible(episodeFocusNode);
                     },
                     focusId: _episodeFocusId(episode, index),
                     autofocus: index == 0,
@@ -537,6 +397,7 @@ class _DetailSeasonChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.onFocused,
     this.focusNode,
     this.focusId,
     this.autofocus = false,
@@ -545,6 +406,7 @@ class _DetailSeasonChip extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final VoidCallback? onFocused;
   final FocusNode? focusNode;
   final String? focusId;
   final bool autofocus;
@@ -555,6 +417,7 @@ class _DetailSeasonChip extends StatelessWidget {
       label: label,
       selected: selected,
       onPressed: onTap,
+      onFocused: onFocused,
       focusNode: focusNode,
       focusId: focusId,
       autofocus: autofocus,
@@ -566,16 +429,16 @@ class _DetailEpisodeCard extends ConsumerWidget {
   const _DetailEpisodeCard({
     required this.item,
     required this.seriesTarget,
+    this.onFocused,
     this.focusNode,
-    this.directionalHandler,
     this.focusId,
     this.autofocus = false,
   });
 
   final MediaItem item;
   final MediaDetailTarget seriesTarget;
+  final VoidCallback? onFocused;
   final FocusNode? focusNode;
-  final bool Function(TraversalDirection direction)? directionalHandler;
   final String? focusId;
   final bool autofocus;
 
@@ -613,147 +476,145 @@ class _DetailEpisodeCard extends ConsumerWidget {
     }
 
     final effectiveFocusId = focusId?.trim() ?? '';
-    return TvDirectionalActionPanel(
-      onDirection: directionalHandler ?? (direction) => false,
-      child: TvFocusableAction(
-        onPressed: onOpenDetail,
-        focusNode: focusNode,
-        focusId: effectiveFocusId.isEmpty ? null : effectiveFocusId,
-        autofocus: autofocus,
-        borderRadius: BorderRadius.circular(24),
-        visualStyle: TvFocusVisualStyle.floating,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
+    return TvFocusableAction(
+      onPressed: onOpenDetail,
+      onFocused: onFocused,
+      focusNode: focusNode,
+      focusId: effectiveFocusId.isEmpty ? null : effectiveFocusId,
+      autofocus: autofocus,
+      borderRadius: BorderRadius.circular(24),
+      visualStyle: TvFocusVisualStyle.floating,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
             color: Colors.white.withValues(alpha: 0.06),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.06),
-            ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(24),
-                ),
-                child: AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      _DetailEpisodeArtwork(item: item),
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              Colors.black.withValues(alpha: 0.18),
-                              Colors.transparent,
-                              Colors.black.withValues(alpha: 0.12),
-                              Colors.black.withValues(alpha: 0.58),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomCenter,
-                            stops: const [0, 0.34, 0.62, 1],
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        left: 14,
-                        right: 14,
-                        top: 14,
-                        child: Text(
-                          titleText,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            height: 1.25,
-                            shadows: [
-                              Shadow(
-                                color: Color(0xAA000000),
-                                blurRadius: 16,
-                                offset: Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        left: 12,
-                        bottom: 12,
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 214),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.46),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(
-                              badgeText,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      if (fileSizeText.isNotEmpty)
-                        Positioned(
-                          right: 12,
-                          bottom: 12,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.54),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(
-                              fileSizeText,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
               ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                  child: Text(
-                    summary,
-                    maxLines: 6,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFFD7E0F1),
-                      fontSize: 13,
-                      height: 1.45,
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _DetailEpisodeArtwork(item: item),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.black.withValues(alpha: 0.18),
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.12),
+                            Colors.black.withValues(alpha: 0.58),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomCenter,
+                          stops: const [0, 0.34, 0.62, 1],
+                        ),
+                      ),
                     ),
+                    Positioned(
+                      left: 14,
+                      right: 14,
+                      top: 14,
+                      child: Text(
+                        titleText,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          height: 1.25,
+                          shadows: [
+                            Shadow(
+                              color: Color(0xAA000000),
+                              blurRadius: 16,
+                              offset: Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 12,
+                      bottom: 12,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 214),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.46),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            badgeText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (fileSizeText.isNotEmpty)
+                      Positioned(
+                        right: 12,
+                        bottom: 12,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.54),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            fileSizeText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                child: Text(
+                  summary,
+                  maxLines: 6,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFD7E0F1),
+                    fontSize: 13,
+                    height: 1.45,
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -1003,17 +864,6 @@ MediaDetailTarget episodeToDetailTarget(
         ? target.providerIds
         : seriesTarget.providerIds,
   );
-}
-
-bool _requestDetailFocus(Iterable<FocusNode?> nodes) {
-  for (final node in nodes) {
-    if (node == null || !node.canRequestFocus || node.context == null) {
-      continue;
-    }
-    node.requestFocus();
-    return true;
-  }
-  return false;
 }
 
 class _DetailImageAsset {

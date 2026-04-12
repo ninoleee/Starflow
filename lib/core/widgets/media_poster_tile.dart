@@ -4,7 +4,7 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 
-class MediaPosterTile extends ConsumerWidget {
+class MediaPosterTile extends ConsumerStatefulWidget {
   const MediaPosterTile({
     super.key,
     required this.title,
@@ -43,13 +43,67 @@ class MediaPosterTile extends ConsumerWidget {
   final bool tvPosterFocusOutlineOnly;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MediaPosterTile> createState() => _MediaPosterTileState();
+}
+
+class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
+  final ValueNotifier<bool> _isFocusedNotifier = ValueNotifier<bool>(false);
+  FocusNode? _ownedFocusNode;
+
+  FocusNode get _effectiveFocusNode =>
+      widget.focusNode ??
+      (_ownedFocusNode ??=
+          FocusNode(debugLabel: 'media-poster:${widget.focusId ?? widget.key}'));
+
+  @override
+  void initState() {
+    super.initState();
+    _effectiveFocusNode.addListener(_handleFocusChanged);
+    _handleFocusChanged();
+  }
+
+  @override
+  void didUpdateWidget(covariant MediaPosterTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final previousFocusNode = oldWidget.focusNode ?? _ownedFocusNode;
+    final nextFocusNode = _effectiveFocusNode;
+    if (!identical(previousFocusNode, nextFocusNode)) {
+      previousFocusNode?.removeListener(_handleFocusChanged);
+      nextFocusNode.addListener(_handleFocusChanged);
+      _handleFocusChanged();
+      if (oldWidget.focusNode == null && widget.focusNode != null) {
+        _ownedFocusNode?.dispose();
+        _ownedFocusNode = null;
+      }
+    }
+  }
+
+  void _handleFocusChanged() {
+    final isFocused =
+        _effectiveFocusNode.hasFocus || _effectiveFocusNode.hasPrimaryFocus;
+    if (_isFocusedNotifier.value == isFocused) {
+      return;
+    }
+    _isFocusedNotifier.value = isFocused;
+  }
+
+  @override
+  void dispose() {
+    final currentFocusNode = widget.focusNode ?? _ownedFocusNode;
+    currentFocusNode?.removeListener(_handleFocusChanged);
+    _ownedFocusNode?.dispose();
+    _isFocusedNotifier.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
-    final trimmedPoster = posterUrl.trim();
+    final trimmedPoster = widget.posterUrl.trim();
     String effectivePosterUrl = trimmedPoster;
     if (effectivePosterUrl.isEmpty) {
-      for (final source in posterFallbackSources) {
+      for (final source in widget.posterFallbackSources) {
         final trimmedFallback = source.url.trim();
         if (trimmedFallback.isEmpty) {
           continue;
@@ -65,9 +119,10 @@ class MediaPosterTile extends ConsumerWidget {
     // 豆瓣带 imageView2 等参数的图在部分设备上与 decode 尺寸限制组合可能解码失败，故不缩采样。
     final skipResizeForDecode =
         host.endsWith('.doubanio.com') || host == 'img.douban.com';
-    final enablePosterFocusOutline = isTelevision && tvPosterFocusOutlineOnly;
+    final enablePosterFocusOutline =
+        isTelevision && widget.tvPosterFocusOutlineOnly;
     final hasPosterCandidate =
-        trimmedPoster.isNotEmpty || posterFallbackSources.isNotEmpty;
+        trimmedPoster.isNotEmpty || widget.posterFallbackSources.isNotEmpty;
 
     late final Widget posterChild;
     if (!hasPosterCandidate) {
@@ -75,8 +130,8 @@ class MediaPosterTile extends ConsumerWidget {
     } else {
       posterChild = AppNetworkImage(
         trimmedPoster,
-        headers: posterHeaders,
-        fallbackSources: posterFallbackSources,
+        headers: widget.posterHeaders,
+        fallbackSources: widget.posterFallbackSources,
         fit: BoxFit.cover,
         // Only constrain decode height so landscape fallbacks keep
         // their original aspect ratio before BoxFit.cover crops them.
@@ -99,12 +154,12 @@ class MediaPosterTile extends ConsumerWidget {
             fit: StackFit.expand,
             children: [
               Positioned.fill(child: posterChild),
-              if (imageBadgeText.trim().isNotEmpty)
+              if (widget.imageBadgeText.trim().isNotEmpty)
                 Positioned(
                   left: 10,
                   bottom: 10,
                   child: _PosterImageBadge(
-                    text: imageBadgeText,
+                    text: widget.imageBadgeText,
                     textStyle: theme.textTheme.labelSmall?.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w800,
@@ -113,12 +168,12 @@ class MediaPosterTile extends ConsumerWidget {
                     ),
                   ),
                 ),
-              if (imageTopRightBadgeText.trim().isNotEmpty)
+              if (widget.imageTopRightBadgeText.trim().isNotEmpty)
                 Positioned(
                   top: 10,
                   right: 10,
                   child: _PosterImageBadge(
-                    text: imageTopRightBadgeText,
+                    text: widget.imageTopRightBadgeText,
                     textStyle: theme.textTheme.labelSmall?.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w800,
@@ -134,18 +189,17 @@ class MediaPosterTile extends ConsumerWidget {
       if (!enablePosterFocusOutline) {
         return posterFrame;
       }
-      return Builder(
-        builder: (context) {
-          final focusState = Focus.of(context);
-          final isPosterFocused =
-              focusState.hasFocus || focusState.hasPrimaryFocus;
+      return ValueListenableBuilder<bool>(
+        valueListenable: _isFocusedNotifier,
+        child: posterFrame,
+        builder: (context, isPosterFocused, child) {
           if (!isPosterFocused) {
-            return posterFrame;
+            return child!;
           }
           return Stack(
             fit: StackFit.expand,
             children: [
-              posterFrame,
+              child!,
               IgnorePointer(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
@@ -166,15 +220,15 @@ class MediaPosterTile extends ConsumerWidget {
     final titleStyle = theme.textTheme.titleSmall?.copyWith(
       fontWeight: FontWeight.w700,
       height: 1.22,
-      color: titleColor,
+      color: widget.titleColor,
     );
-    final subtitlePresent = subtitle.trim().isNotEmpty;
+    final subtitlePresent = widget.subtitle.trim().isNotEmpty;
     final subtitleStyle = theme.textTheme.bodySmall?.copyWith(
-      color: subtitleColor ?? theme.colorScheme.onSurfaceVariant,
+      color: widget.subtitleColor ?? theme.colorScheme.onSurfaceVariant,
       fontWeight: FontWeight.w600,
     );
     final content = SizedBox(
-      width: width,
+      width: widget.width,
       child: RepaintBoundary(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -185,7 +239,7 @@ class MediaPosterTile extends ConsumerWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              title,
+              widget.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: titleStyle,
@@ -193,7 +247,7 @@ class MediaPosterTile extends ConsumerWidget {
             if (subtitlePresent) ...[
               const SizedBox(height: 2),
               Text(
-                subtitle,
+                widget.subtitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: subtitleStyle,
@@ -206,11 +260,11 @@ class MediaPosterTile extends ConsumerWidget {
 
     if (isTelevision) {
       return TvFocusableAction(
-        onPressed: onTap,
-        onContextAction: onContextAction,
-        focusId: focusId,
-        focusNode: focusNode,
-        autofocus: autofocus,
+        onPressed: widget.onTap,
+        onContextAction: widget.onContextAction,
+        focusId: widget.focusId,
+        focusNode: _effectiveFocusNode,
+        autofocus: widget.autofocus,
         borderRadius: BorderRadius.circular(16),
         visualStyle: enablePosterFocusOutline
             ? TvFocusVisualStyle.none
@@ -221,9 +275,9 @@ class MediaPosterTile extends ConsumerWidget {
 
     return InkWell(
       borderRadius: BorderRadius.circular(16),
-      onTap: onTap,
-      onLongPress: onContextAction,
-      onSecondaryTap: onContextAction,
+      onTap: widget.onTap,
+      onLongPress: widget.onContextAction,
+      onSecondaryTap: widget.onContextAction,
       child: content,
     );
   }
