@@ -200,7 +200,7 @@ class _PlatformLogo extends StatelessWidget {
 
   final MediaPersonProfile platform;
   static const double _logoDisplayWidth = 200;
-  static const double _logoDisplayHeight = 68;
+  static const double _logoDisplayHeight = 100;
 
   @override
   Widget build(BuildContext context) {
