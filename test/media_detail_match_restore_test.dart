@@ -254,6 +254,202 @@ void main() {
   });
 
   testWidgets(
+      'detail page restores cached choices and injects the entry source when missing',
+      (tester) async {
+    const seedTarget = MediaDetailTarget(
+      title: '测试影片',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：Emby · 客厅 Emby',
+      searchQuery: '测试影片',
+      sourceId: 'emby-main',
+      itemId: 'movie-seed',
+      itemType: 'movie',
+      sectionName: 'Emby 版本',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+    );
+    const quarkChoice = MediaDetailTarget(
+      title: '测试影片',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：Quark · 夸克',
+      searchQuery: '测试影片',
+      sourceId: 'quark-main',
+      itemId: 'movie-quark',
+      itemType: 'movie',
+      sectionName: 'Quark 版本',
+      sourceKind: MediaSourceKind.quark,
+      sourceName: '夸克',
+      playbackTarget: PlaybackTarget(
+        title: '测试影片',
+        sourceId: 'quark-main',
+        streamUrl: 'https://quark.example/movie-quark.mkv',
+        sourceName: '夸克',
+        sourceKind: MediaSourceKind.quark,
+        itemId: 'movie-quark',
+        itemType: 'movie',
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'tmdbMetadataMatchEnabled': false,
+              'wmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+              'detailAutoLibraryMatchEnabled': false,
+            }),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            const _NoopMediaRepository(),
+          ),
+          localStorageCacheRepositoryProvider.overrideWithValue(
+            _FakeRestoreCacheRepository(
+              cachedState: const CachedDetailState(
+                target: quarkChoice,
+                libraryMatchChoices: [quarkChoice],
+                selectedLibraryMatchIndex: 0,
+              ),
+            ),
+          ),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(target: seedTarget),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DropdownButton<int>), findsOneWidget);
+    final dropdown = tester.widget<DropdownButton<int>>(
+      find.byType(DropdownButton<int>),
+    );
+    final labels = dropdown.items!
+        .map((item) => (item.child as Text).data ?? '')
+        .toList(growable: false);
+    expect(dropdown.value, 0);
+    expect(labels.first, '客厅 Emby · 测试影片 · Emby 版本');
+    expect(labels.last, '夸克 · 测试影片 · Quark 版本');
+  });
+
+  testWidgets(
+      'detail page manual library match keeps the entry source and skips requerying it',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const seedTarget = MediaDetailTarget(
+      title: '测试影片',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：Emby · 客厅 Emby',
+      searchQuery: '测试影片',
+      sourceId: 'emby-main',
+      itemId: 'movie-seed',
+      itemType: 'movie',
+      sectionId: 'movies',
+      sectionName: 'Emby 版本',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+    );
+
+    final mediaRepository = _PreferredEntrySourceMatchMediaRepository();
+    final cacheRepository = _RecordingRestoreCacheRepository();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [
+                {
+                  'id': 'emby-main',
+                  'name': '客厅 Emby',
+                  'kind': 'emby',
+                  'endpoint': 'https://emby.example',
+                  'enabled': true,
+                },
+                {
+                  'id': 'quark-main',
+                  'name': '夸克',
+                  'kind': 'quark',
+                  'endpoint': 'folder-1',
+                  'enabled': true,
+                },
+              ],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'tmdbMetadataMatchEnabled': false,
+              'wmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+              'detailAutoLibraryMatchEnabled': false,
+            }),
+          ),
+          mediaRepositoryProvider.overrideWithValue(mediaRepository),
+          localStorageCacheRepositoryProvider
+              .overrideWithValue(cacheRepository),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(target: seedTarget),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.scrollUntilVisible(
+      find.text('匹配资源库'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(
+      find.ancestor(
+        of: find.text('匹配资源库'),
+        matching: find.byType(TextButton),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(
+      mediaRepository.calls
+          .where((entry) => entry.contains('emby-main'))
+          .toList(growable: false),
+      isEmpty,
+    );
+    expect(
+      mediaRepository.calls,
+      contains('library:quark:quark-main:'),
+    );
+    expect(find.byType(DropdownButton<int>), findsOneWidget);
+    final dropdown = tester.widget<DropdownButton<int>>(
+      find.byType(DropdownButton<int>),
+    );
+    final labels = dropdown.items!
+        .map((item) => (item.child as Text).data ?? '')
+        .toList(growable: false);
+    expect(dropdown.value, 0);
+    expect(labels.first, '客厅 Emby · 测试影片 · Emby 版本');
+    expect(labels.last, '夸克 · 测试影片 · Quark 版本');
+    expect(cacheRepository.lastSavedState?.libraryMatchChoices.length, 2);
+    expect(cacheRepository.lastSavedState?.target.sourceId, 'emby-main');
+  });
+
+  testWidgets(
       'detail page restores cached episode file variants as playable versions',
       (tester) async {
     const seedTarget = MediaDetailTarget(
@@ -1902,6 +2098,54 @@ class _SingleMatchMediaRepository implements MediaRepository {
     required String sourceId,
     bool forceFullRescan = false,
   }) async {}
+}
+
+class _PreferredEntrySourceMatchMediaRepository extends _NoopMediaRepository {
+  final List<String> calls = <String>[];
+
+  @override
+  Future<List<MediaCollection>> fetchCollections({
+    MediaSourceKind? kind,
+    String? sourceId,
+  }) async {
+    calls.add('collections:${kind?.name ?? 'unknown'}:${sourceId ?? ''}');
+    return const <MediaCollection>[];
+  }
+
+  @override
+  Future<List<MediaItem>> fetchLibrary({
+    MediaSourceKind? kind,
+    String? sourceId,
+    String? sectionId,
+    int limit = 200,
+  }) async {
+    calls.add(
+      'library:${kind?.name ?? 'unknown'}:${sourceId ?? ''}:${sectionId ?? ''}',
+    );
+    if (kind == MediaSourceKind.quark && sourceId == 'quark-main') {
+      return [
+        MediaItem(
+          id: 'movie-quark',
+          title: '测试影片',
+          overview: '',
+          posterUrl: '',
+          year: 2026,
+          durationLabel: '120 分钟',
+          genres: const [],
+          itemType: 'movie',
+          sectionId: 'quark',
+          sectionName: 'Quark 版本',
+          sourceId: 'quark-main',
+          sourceName: '夸克',
+          sourceKind: MediaSourceKind.quark,
+          streamUrl: '',
+          actualAddress: '/测试影片.mkv',
+          addedAt: DateTime.utc(2026, 4, 7),
+        ),
+      ];
+    }
+    return const <MediaItem>[];
+  }
 }
 
 class _SeriesRestoreMediaRepository extends _NoopMediaRepository {

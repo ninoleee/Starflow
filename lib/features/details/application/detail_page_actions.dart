@@ -99,6 +99,8 @@ class DetailCachedStateRestorer {
       pageSeedTarget: pageSeedTarget,
       choices: preservedChoices,
       fallbackSelectedIndex: cachedState.selectedLibraryMatchIndex,
+      includePreferredEntryChoice: true,
+      currentTarget: preservedResolvedTarget,
     );
 
     final hasMultiChoices = preferredChoices.choices.length > 1;
@@ -138,8 +140,17 @@ DetailLibraryMatchPreferenceResult prioritizeDetailLibraryMatchChoices({
   required MediaDetailTarget pageSeedTarget,
   required List<MediaDetailTarget> choices,
   int fallbackSelectedIndex = 0,
+  bool includePreferredEntryChoice = false,
+  MediaDetailTarget? currentTarget,
 }) {
-  if (choices.isEmpty) {
+  final effectiveChoices = includePreferredEntryChoice
+      ? prependPreferredEntryLibraryChoice(
+          pageSeedTarget: pageSeedTarget,
+          choices: choices,
+          currentTarget: currentTarget,
+        )
+      : List<MediaDetailTarget>.unmodifiable(choices);
+  if (effectiveChoices.isEmpty) {
     return const DetailLibraryMatchPreferenceResult(
       choices: <MediaDetailTarget>[],
       selectedIndex: 0,
@@ -149,24 +160,39 @@ DetailLibraryMatchPreferenceResult prioritizeDetailLibraryMatchChoices({
 
   final normalizedFallbackIndex = fallbackSelectedIndex.clamp(
     0,
-    choices.length - 1,
+    effectiveChoices.length - 1,
   );
+  final preferredMatches = effectiveChoices
+      .where(
+        (choice) => _matchesDetailTargetPreferredSource(
+          pageSeedTarget: pageSeedTarget,
+          candidate: choice,
+        ),
+      )
+      .length;
+  if (preferredMatches == effectiveChoices.length) {
+    return DetailLibraryMatchPreferenceResult(
+      choices: effectiveChoices,
+      selectedIndex: normalizedFallbackIndex,
+      matchedPreferredSource: true,
+    );
+  }
   final preferredIndex = _preferredDetailLibraryMatchIndex(
     pageSeedTarget: pageSeedTarget,
-    choices: choices,
+    choices: effectiveChoices,
   );
   if (preferredIndex < 0) {
     return DetailLibraryMatchPreferenceResult(
-      choices: List<MediaDetailTarget>.unmodifiable(choices),
+      choices: effectiveChoices,
       selectedIndex: normalizedFallbackIndex,
       matchedPreferredSource: false,
     );
   }
 
   final prioritized = <MediaDetailTarget>[
-    choices[preferredIndex],
-    for (var index = 0; index < choices.length; index++)
-      if (index != preferredIndex) choices[index],
+    effectiveChoices[preferredIndex],
+    for (var index = 0; index < effectiveChoices.length; index++)
+      if (index != preferredIndex) effectiveChoices[index],
   ];
   return DetailLibraryMatchPreferenceResult(
     choices: List<MediaDetailTarget>.unmodifiable(prioritized),
@@ -305,6 +331,10 @@ bool _hasResolvedStructuralResourceState(MediaDetailTarget target) {
       target.itemId.trim().isNotEmpty;
 }
 
+bool _hasResolvedDetailLocalResourceState(MediaDetailTarget target) {
+  return _hasResolvedStructuralResourceState(target);
+}
+
 bool _hasDetailTargetSourcePreference(MediaDetailTarget target) {
   return target.sourceId.trim().isNotEmpty || target.sourceKind != null;
 }
@@ -329,6 +359,66 @@ bool _matchesDetailTargetPreferredSource({
     return preferredKind != null;
   }
   return candidate.sourceName.trim() == preferredSourceName;
+}
+
+MediaDetailTarget? resolvePreferredEntryLibraryChoice({
+  required MediaDetailTarget pageSeedTarget,
+  MediaDetailTarget? currentTarget,
+}) {
+  if (pageSeedTarget.isSeries) {
+    return null;
+  }
+  for (final candidate in [currentTarget, pageSeedTarget]) {
+    if (candidate == null) {
+      continue;
+    }
+    if (!_matchesDetailTargetPreferredSource(
+      pageSeedTarget: pageSeedTarget,
+      candidate: candidate,
+    )) {
+      continue;
+    }
+    if (!_hasResolvedDetailLocalResourceState(candidate)) {
+      continue;
+    }
+    return candidate;
+  }
+  return null;
+}
+
+List<MediaDetailTarget> prependPreferredEntryLibraryChoice({
+  required MediaDetailTarget pageSeedTarget,
+  required List<MediaDetailTarget> choices,
+  MediaDetailTarget? currentTarget,
+}) {
+  final hasPreferredChoice = choices.any(
+    (choice) => _matchesDetailTargetPreferredSource(
+      pageSeedTarget: pageSeedTarget,
+      candidate: choice,
+    ),
+  );
+  if (hasPreferredChoice) {
+    return List<MediaDetailTarget>.unmodifiable(choices);
+  }
+
+  final preferredChoice = resolvePreferredEntryLibraryChoice(
+    pageSeedTarget: pageSeedTarget,
+    currentTarget: currentTarget,
+  );
+  if (preferredChoice == null) {
+    return List<MediaDetailTarget>.unmodifiable(choices);
+  }
+
+  final seenKeys = <String>{};
+  final merged = <MediaDetailTarget>[];
+  for (final choice in [preferredChoice, ...choices]) {
+    final key = _detailLibraryChoiceIdentityKey(choice);
+    if (!seenKeys.add(key)) {
+      continue;
+    }
+    merged.add(choice);
+  }
+  return List<MediaDetailTarget>.unmodifiable(merged);
 }
 
 int _preferredDetailLibraryMatchIndex({
@@ -358,6 +448,30 @@ int _preferredDetailLibraryMatchIndex({
         (preferredSourceName.isEmpty ||
             choice.sourceName.trim() == preferredSourceName),
   );
+}
+
+String _detailLibraryChoiceIdentityKey(MediaDetailTarget target) {
+  final playback = target.playbackTarget;
+  return [
+    target.sourceId.trim(),
+    playback?.sourceId.trim() ?? '',
+    target.itemId.trim(),
+    playback?.itemId.trim() ?? '',
+    playback?.preferredMediaSourceId.trim() ?? '',
+    _normalizeDetailLibraryChoicePath(target.resourcePath),
+    _normalizeDetailLibraryChoicePath(playback?.actualAddress ?? ''),
+    _normalizeDetailLibraryChoicePath(playback?.streamUrl ?? ''),
+  ].join('|');
+}
+
+String _normalizeDetailLibraryChoicePath(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  final uri = Uri.tryParse(trimmed);
+  final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
+  return rawPath.replaceAll('\\', '/').trim();
 }
 
 int normalizeSubtitleSearchIndex(
