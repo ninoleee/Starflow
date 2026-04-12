@@ -166,10 +166,6 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
     }
   }
 
-  Future<void> _showAirPlayRoutePicker() async {
-    await PlaybackSystemSessionController.showAirPlayPicker();
-  }
-
   _PictureInPictureAspectRatio _currentPictureInPictureAspectRatio() {
     final width = _player?.state.width ?? 0;
     final height = _player?.state.height ?? 0;
