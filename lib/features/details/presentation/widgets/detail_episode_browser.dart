@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,13 +34,9 @@ final detailSeriesBrowserProvider = FutureProvider.autoDispose
     sectionName: target.sectionName,
   );
 
-  final seasons = children
-      .where((item) => item.itemType.trim().toLowerCase() == 'season')
-      .toList(growable: false);
+  final seasons = children.where(_isSeasonItem).toList(growable: false);
   if (seasons.isEmpty) {
-    final episodes = children
-        .where((item) => item.itemType.trim().toLowerCase() == 'episode')
-        .toList(growable: false);
+    final episodes = children.where(_isEpisodeItem).toList(growable: false);
     if (episodes.isEmpty) {
       return null;
     }
@@ -55,37 +52,102 @@ final detailSeriesBrowserProvider = FutureProvider.autoDispose
     );
   }
 
-  final seasonEpisodes = await Future.wait(
-    seasons.map(
-      (season) => repository.fetchChildren(
-        sourceId: target.sourceId,
-        parentId: season.id,
-        sectionId: target.sectionId,
-        sectionName: target.sectionName,
-      ),
-    ),
-  );
+  final firstSeason = seasons.first;
+  List<MediaItem> firstSeasonEpisodes = const <MediaItem>[];
+  var firstSeasonPreloaded = false;
+  try {
+    final firstChildren = await repository.fetchChildren(
+      sourceId: target.sourceId,
+      parentId: firstSeason.id,
+      sectionId: target.sectionId,
+      sectionName: target.sectionName,
+    );
+    firstSeasonPreloaded = true;
+    firstSeasonEpisodes = firstChildren.where(_isEpisodeItem).toList(
+          growable: false,
+        );
+  } catch (_) {
+    firstSeasonPreloaded = false;
+    firstSeasonEpisodes = const <MediaItem>[];
+  }
 
   final groups = <DetailEpisodeGroup>[];
   for (var index = 0; index < seasons.length; index++) {
     final season = seasons[index];
-    final episodes = seasonEpisodes[index]
-        .where((item) => item.itemType.trim().toLowerCase() == 'episode')
-        .toList(growable: false);
-    if (episodes.isEmpty) {
-      continue;
-    }
+    final preloadEpisodes = index == 0
+        ? sortEpisodesForDetailBrowser(firstSeasonEpisodes)
+        : const <MediaItem>[];
     groups.add(
       DetailEpisodeGroup(
         id: season.id,
         title: season.title,
         seasonNumber: season.seasonNumber,
-        episodes: sortEpisodesForDetailBrowser(episodes),
+        episodes: preloadEpisodes,
+        episodesLoaded: index == 0 ? firstSeasonPreloaded : false,
       ),
     );
   }
   return groups.isEmpty ? null : DetailSeriesBrowserState(groups: groups);
 });
+
+final detailSeasonEpisodesProvider = FutureProvider.autoDispose
+    .family<List<MediaItem>, _DetailSeasonEpisodesRequest>(
+        (ref, request) async {
+  final repository = ref.read(mediaRepositoryProvider);
+  final children = await repository.fetchChildren(
+    sourceId: request.sourceId,
+    parentId: request.seasonId,
+    sectionId: request.sectionId,
+    sectionName: request.sectionName,
+  );
+  final episodes = children.where(_isEpisodeItem).toList(growable: false);
+  return sortEpisodesForDetailBrowser(episodes);
+});
+
+bool _isSeasonItem(MediaItem item) {
+  return item.itemType.trim().toLowerCase() == 'season';
+}
+
+bool _isEpisodeItem(MediaItem item) {
+  return item.itemType.trim().toLowerCase() == 'episode';
+}
+
+class _DetailSeasonEpisodesRequest {
+  const _DetailSeasonEpisodesRequest({
+    required this.sourceId,
+    required this.seasonId,
+    required this.sectionId,
+    required this.sectionName,
+  });
+
+  factory _DetailSeasonEpisodesRequest.fromTargetAndGroup({
+    required MediaDetailTarget target,
+    required DetailEpisodeGroup group,
+  }) {
+    return _DetailSeasonEpisodesRequest(
+      sourceId: target.sourceId.trim(),
+      seasonId: group.id.trim(),
+      sectionId: target.sectionId.trim(),
+      sectionName: target.sectionName.trim(),
+    );
+  }
+
+  final String sourceId;
+  final String seasonId;
+  final String sectionId;
+  final String sectionName;
+
+  String get _cacheKey => '$sourceId|$seasonId|$sectionId|$sectionName';
+
+  @override
+  bool operator ==(Object other) {
+    return other is _DetailSeasonEpisodesRequest &&
+        other._cacheKey == _cacheKey;
+  }
+
+  @override
+  int get hashCode => _cacheKey.hashCode;
+}
 
 final detailEpisodeDisplayFileSizeProvider = FutureProvider.autoDispose
     .family<int?, _DetailEpisodeFileSizeRequest>((ref, request) async {
@@ -146,12 +208,27 @@ class DetailEpisodeGroup {
     required this.title,
     required this.seasonNumber,
     required this.episodes,
+    this.episodesLoaded = true,
   });
 
   final String id;
   final String title;
   final int? seasonNumber;
   final List<MediaItem> episodes;
+  final bool episodesLoaded;
+
+  DetailEpisodeGroup copyWith({
+    List<MediaItem>? episodes,
+    bool? episodesLoaded,
+  }) {
+    return DetailEpisodeGroup(
+      id: id,
+      title: title,
+      seasonNumber: seasonNumber,
+      episodes: episodes ?? this.episodes,
+      episodesLoaded: episodesLoaded ?? this.episodesLoaded,
+    );
+  }
 
   String get label {
     if (seasonNumber != null && seasonNumber! > 0) {
@@ -194,7 +271,7 @@ DetailEpisodeGroup resolveSelectedEpisodeGroup({
   return selectedGroup;
 }
 
-class DetailEpisodeBrowser extends StatefulWidget {
+class DetailEpisodeBrowser extends ConsumerStatefulWidget {
   const DetailEpisodeBrowser({
     super.key,
     required this.seriesTarget,
@@ -209,31 +286,48 @@ class DetailEpisodeBrowser extends StatefulWidget {
   final ValueChanged<String> onSeasonSelected;
 
   @override
-  State<DetailEpisodeBrowser> createState() => _DetailEpisodeBrowserState();
+  ConsumerState<DetailEpisodeBrowser> createState() =>
+      _DetailEpisodeBrowserState();
 }
 
-class _DetailEpisodeBrowserState extends State<DetailEpisodeBrowser> {
+class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
   static const double _episodeCardWidth = 292;
   static const double _episodeCardSpacing = 14;
+  static const int _episodeVisiblePadding = 1;
 
   final ScrollController _seasonScrollController = ScrollController();
   final Map<String, FocusNode> _seasonFocusNodes = <String, FocusNode>{};
   final Map<String, FocusNode> _episodeFocusNodes = <String, FocusNode>{};
+  ScrollController? _episodeScrollController;
+  String _activeEpisodeGroupId = '';
+  int _activeEpisodeCount = 0;
+  int _visibleEpisodeStart = 0;
+  int _visibleEpisodeEnd = -1;
+  int _focusedEpisodeIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _syncFocusNodes();
+    _prefetchSelectedSeasonGroup();
   }
 
   @override
   void didUpdateWidget(covariant DetailEpisodeBrowser oldWidget) {
     super.didUpdateWidget(oldWidget);
     _syncFocusNodes();
+    if (oldWidget.selectedGroupId != widget.selectedGroupId ||
+        oldWidget.seriesTarget != widget.seriesTarget) {
+      _focusedEpisodeIndex = 0;
+      _visibleEpisodeStart = 0;
+      _visibleEpisodeEnd = -1;
+      _prefetchSelectedSeasonGroup();
+    }
   }
 
   @override
   void dispose() {
+    _episodeScrollController?.removeListener(_handleEpisodeListScroll);
     _seasonScrollController.dispose();
     for (final node in _seasonFocusNodes.values) {
       node.dispose();
@@ -253,19 +347,48 @@ class _DetailEpisodeBrowserState extends State<DetailEpisodeBrowser> {
         () => FocusNode(debugLabel: 'detail-season-${group.id}'),
       );
     }
+  }
 
+  void _syncEpisodeFocusNodes(
+    DetailEpisodeGroup group,
+    List<MediaItem> episodes,
+  ) {
     final episodeKeys = <String>{};
-    for (final group in widget.groups) {
-      for (var index = 0; index < group.episodes.length; index++) {
-        final key = _episodeNodeKey(group, group.episodes[index], index);
-        episodeKeys.add(key);
-        _episodeFocusNodes.putIfAbsent(
-          key,
-          () => FocusNode(debugLabel: 'detail-episode-$key'),
-        );
-      }
+    for (var index = 0; index < episodes.length; index++) {
+      final key = _episodeNodeKey(group, episodes[index], index);
+      episodeKeys.add(key);
+      _episodeFocusNodes.putIfAbsent(
+        key,
+        () => FocusNode(debugLabel: 'detail-episode-$key'),
+      );
     }
     _disposeRemovedFocusNodes(_episodeFocusNodes, activeKeys: episodeKeys);
+  }
+
+  void _prefetchSelectedSeasonGroup() {
+    if (widget.groups.isEmpty) {
+      return;
+    }
+    final selectedGroup = resolveSelectedEpisodeGroup(
+      groups: widget.groups,
+      selectedGroupId: widget.selectedGroupId,
+    );
+    _prefetchSeasonGroup(selectedGroup);
+  }
+
+  void _prefetchSeasonGroup(DetailEpisodeGroup group) {
+    if (group.episodesLoaded || group.id.trim().isEmpty) {
+      return;
+    }
+    final request = _DetailSeasonEpisodesRequest.fromTargetAndGroup(
+      target: widget.seriesTarget,
+      group: group,
+    );
+    unawaited(
+      ref
+          .read(detailSeasonEpisodesProvider(request).future)
+          .catchError((_) => const <MediaItem>[]),
+    );
   }
 
   void _disposeRemovedFocusNodes(
@@ -295,6 +418,107 @@ class _DetailEpisodeBrowserState extends State<DetailEpisodeBrowser> {
     return 'detail:episode:$episodeSeed';
   }
 
+  void _bindEpisodeListController(
+    ScrollController controller, {
+    required String groupId,
+    required int episodeCount,
+  }) {
+    var shouldScheduleRefresh = false;
+    if (!identical(_episodeScrollController, controller)) {
+      _episodeScrollController?.removeListener(_handleEpisodeListScroll);
+      _episodeScrollController = controller;
+      _episodeScrollController?.addListener(_handleEpisodeListScroll);
+      shouldScheduleRefresh = true;
+    }
+    if (_activeEpisodeGroupId != groupId) {
+      _activeEpisodeGroupId = groupId;
+      _focusedEpisodeIndex = 0;
+      _visibleEpisodeStart = 0;
+      _visibleEpisodeEnd =
+          episodeCount > 0 ? math.min(episodeCount - 1, 3) : -1;
+      shouldScheduleRefresh = true;
+    }
+    if (_activeEpisodeCount != episodeCount) {
+      _activeEpisodeCount = episodeCount;
+      if (_focusedEpisodeIndex >= _activeEpisodeCount) {
+        _focusedEpisodeIndex = 0;
+      }
+      shouldScheduleRefresh = true;
+    }
+    if (shouldScheduleRefresh) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        _refreshVisibleEpisodeRange();
+      });
+    }
+  }
+
+  void _handleEpisodeListScroll() {
+    if (!mounted) {
+      return;
+    }
+    _refreshVisibleEpisodeRange();
+  }
+
+  void _refreshVisibleEpisodeRange() {
+    final count = _activeEpisodeCount;
+    var nextStart = 0;
+    var nextEnd = count > 0 ? math.min(count - 1, 3) : -1;
+    final controller = _episodeScrollController;
+    if (count > 0 && controller != null && controller.hasClients) {
+      const stride = _episodeCardWidth + _episodeCardSpacing;
+      final position = controller.position;
+      final maxScroll = math.max(position.maxScrollExtent, 0);
+      final offset = position.pixels.clamp(0.0, maxScroll);
+      final visibleStart = (offset / stride).floor();
+      final viewport = position.viewportDimension;
+      final visibleCount = math.max(1, (viewport / stride).ceil());
+      nextStart = math.max(0, visibleStart - _episodeVisiblePadding);
+      nextEnd = math.min(
+        count - 1,
+        visibleStart + visibleCount + _episodeVisiblePadding,
+      );
+    }
+    if (nextStart == _visibleEpisodeStart && nextEnd == _visibleEpisodeEnd) {
+      return;
+    }
+    setState(() {
+      _visibleEpisodeStart = nextStart;
+      _visibleEpisodeEnd = nextEnd;
+    });
+  }
+
+  bool _shouldResolveFileSizeForIndex(int index) {
+    if (index == _focusedEpisodeIndex) {
+      return true;
+    }
+    if (_visibleEpisodeEnd < _visibleEpisodeStart) {
+      return false;
+    }
+    return index >= _visibleEpisodeStart && index <= _visibleEpisodeEnd;
+  }
+
+  AsyncValue<DetailEpisodeGroup> _selectedGroupAsync(
+    DetailEpisodeGroup selectedGroup,
+  ) {
+    if (selectedGroup.episodesLoaded) {
+      return AsyncData<DetailEpisodeGroup>(selectedGroup);
+    }
+    final request = _DetailSeasonEpisodesRequest.fromTargetAndGroup(
+      target: widget.seriesTarget,
+      group: selectedGroup,
+    );
+    final episodesAsync = ref.watch(detailSeasonEpisodesProvider(request));
+    return episodesAsync.whenData(
+      (episodes) => selectedGroup.copyWith(
+        episodes: episodes,
+        episodesLoaded: true,
+      ),
+    );
+  }
+
   void _ensureFocusNodeVisible(FocusNode? node) {
     final focusContext = node?.context;
     if (focusContext == null) {
@@ -315,6 +539,7 @@ class _DetailEpisodeBrowserState extends State<DetailEpisodeBrowser> {
       groups: widget.groups,
       selectedGroupId: widget.selectedGroupId,
     );
+    final selectedGroupAsync = _selectedGroupAsync(selectedGroup);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -337,12 +562,14 @@ class _DetailEpisodeBrowserState extends State<DetailEpisodeBrowser> {
                   focusId: 'detail:season:${group.id}',
                   autofocus: index == 0,
                   onFocused: () {
+                    _prefetchSeasonGroup(group);
                     if (widget.selectedGroupId != group.id) {
                       widget.onSeasonSelected(group.id);
                     }
                     _ensureFocusNodeVisible(_seasonFocusNodes[group.id]);
                   },
                   onTap: () {
+                    _prefetchSeasonGroup(group);
                     if (widget.selectedGroupId != group.id) {
                       widget.onSeasonSelected(group.id);
                     }
@@ -356,34 +583,84 @@ class _DetailEpisodeBrowserState extends State<DetailEpisodeBrowser> {
         ],
         SizedBox(
           height: 272,
-          child: DesktopHorizontalPager(
-            key: ValueKey<String>('detail-episodes:${selectedGroup.id}'),
-            builder: (context, controller) => ListView.separated(
-              controller: controller,
-              scrollDirection: Axis.horizontal,
-              clipBehavior: Clip.none,
-              cacheExtent: _episodeCardWidth * 2,
-              itemCount: selectedGroup.episodes.length,
-              separatorBuilder: (context, index) =>
-                  const SizedBox(width: _episodeCardSpacing),
-              itemBuilder: (context, index) {
-                final episode = selectedGroup.episodes[index];
-                final nodeKey = _episodeNodeKey(selectedGroup, episode, index);
-                final episodeFocusNode = _episodeFocusNodes[nodeKey];
-                return SizedBox(
-                  width: _episodeCardWidth,
-                  child: _DetailEpisodeCard(
-                    item: episode,
-                    seriesTarget: widget.seriesTarget,
-                    focusNode: episodeFocusNode,
-                    onFocused: () {
-                      _ensureFocusNodeVisible(episodeFocusNode);
-                    },
-                    focusId: _episodeFocusId(episode, index),
-                    autofocus: index == 0,
+          child: selectedGroupAsync.when(
+            data: (resolvedGroup) {
+              final episodes = resolvedGroup.episodes;
+              _syncEpisodeFocusNodes(resolvedGroup, episodes);
+              if (episodes.isEmpty) {
+                return const Center(
+                  child: Text(
+                    '当前分组暂无剧集',
+                    style: TextStyle(
+                      color: Color(0xFF90A0BD),
+                      fontSize: 14,
+                    ),
                   ),
                 );
-              },
+              }
+              if (_focusedEpisodeIndex >= episodes.length) {
+                _focusedEpisodeIndex = 0;
+              }
+              return DesktopHorizontalPager(
+                key: ValueKey<String>('detail-episodes:${resolvedGroup.id}'),
+                builder: (context, controller) {
+                  _bindEpisodeListController(
+                    controller,
+                    groupId: resolvedGroup.id,
+                    episodeCount: episodes.length,
+                  );
+                  return ListView.separated(
+                    controller: controller,
+                    scrollDirection: Axis.horizontal,
+                    clipBehavior: Clip.none,
+                    cacheExtent: _episodeCardWidth * 2,
+                    itemCount: episodes.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(width: _episodeCardSpacing),
+                    itemBuilder: (context, index) {
+                      final episode = episodes[index];
+                      final nodeKey =
+                          _episodeNodeKey(resolvedGroup, episode, index);
+                      final episodeFocusNode = _episodeFocusNodes.putIfAbsent(
+                        nodeKey,
+                        () => FocusNode(debugLabel: 'detail-episode-$nodeKey'),
+                      );
+                      return SizedBox(
+                        width: _episodeCardWidth,
+                        child: _DetailEpisodeCard(
+                          item: episode,
+                          seriesTarget: widget.seriesTarget,
+                          focusNode: episodeFocusNode,
+                          onFocused: () {
+                            if (_focusedEpisodeIndex != index) {
+                              setState(() {
+                                _focusedEpisodeIndex = index;
+                              });
+                            }
+                            _ensureFocusNodeVisible(episodeFocusNode);
+                          },
+                          focusId: _episodeFocusId(episode, index),
+                          autofocus: index == 0,
+                          enableFileSizeResolution:
+                              _shouldResolveFileSizeForIndex(index),
+                        ),
+                      );
+                    },
+                  );
+                },
+              );
+            },
+            loading: () => const Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
+            error: (error, stackTrace) => Center(
+              child: Text(
+                '加载剧集失败：$error',
+                style: const TextStyle(
+                  color: Color(0xFF90A0BD),
+                  fontSize: 14,
+                ),
+              ),
             ),
           ),
         ),
@@ -429,6 +706,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
   const _DetailEpisodeCard({
     required this.item,
     required this.seriesTarget,
+    required this.enableFileSizeResolution,
     this.onFocused,
     this.focusNode,
     this.focusId,
@@ -437,6 +715,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
 
   final MediaItem item;
   final MediaDetailTarget seriesTarget;
+  final bool enableFileSizeResolution;
   final VoidCallback? onFocused;
   final FocusNode? focusNode;
   final String? focusId;
@@ -452,20 +731,24 @@ class _DetailEpisodeCard extends ConsumerWidget {
       seriesTarget: seriesTarget,
     );
     final titleText = _episodeTitleText(item);
-    final needsFileSizeResolution =
-        _needsEpisodeDisplayFileSizeResolution(item);
-    final resolvedFileSizeBytes = needsFileSizeResolution
-        ? ref
-            .watch(
-              detailEpisodeDisplayFileSizeProvider(
-                _DetailEpisodeFileSizeRequest(item),
-              ),
-            )
-            .maybeWhen(
-              data: (value) => value,
-              orElse: () => null,
-            )
-        : item.fileSizeBytes;
+    final playbackTarget = PlaybackTarget.fromMediaItem(item);
+    final needsFileSizeResolution = playbackTarget.needsResolution;
+    final fallbackFileSizeBytes = item.fileSizeBytes ??
+        _fallbackEpisodeDisplayFileSizeBytes(item, playbackTarget);
+    final resolvedFileSizeBytes = !needsFileSizeResolution
+        ? item.fileSizeBytes
+        : enableFileSizeResolution
+            ? ref
+                .watch(
+                  detailEpisodeDisplayFileSizeProvider(
+                    _DetailEpisodeFileSizeRequest(item),
+                  ),
+                )
+                .maybeWhen(
+                  data: (value) => value,
+                  orElse: () => fallbackFileSizeBytes,
+                )
+            : fallbackFileSizeBytes;
     final fileSizeText = _episodeDisplayFileSizeLabel(resolvedFileSizeBytes);
 
     void onOpenDetail() {
@@ -476,146 +759,173 @@ class _DetailEpisodeCard extends ConsumerWidget {
     }
 
     final effectiveFocusId = focusId?.trim() ?? '';
+    final borderRadius = BorderRadius.circular(24);
+    final cardChild = DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: borderRadius,
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.06),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(24),
+            ),
+            child: AspectRatio(
+              aspectRatio: 16 / 9,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _DetailEpisodeArtwork(item: item),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.black.withValues(alpha: 0.18),
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.12),
+                          Colors.black.withValues(alpha: 0.58),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomCenter,
+                        stops: const [0, 0.34, 0.62, 1],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 14,
+                    right: 14,
+                    top: 14,
+                    child: Text(
+                      titleText,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        height: 1.25,
+                        shadows: [
+                          Shadow(
+                            color: Color(0xAA000000),
+                            blurRadius: 16,
+                            offset: Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 12,
+                    bottom: 12,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 214),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.46),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          badgeText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (fileSizeText.isNotEmpty)
+                    Positioned(
+                      right: 12,
+                      bottom: 12,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.54),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          fileSizeText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+              child: Text(
+                summary,
+                maxLines: 6,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFFD7E0F1),
+                  fontSize: 13,
+                  height: 1.45,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
     return TvFocusableAction(
       onPressed: onOpenDetail,
       onFocused: onFocused,
       focusNode: focusNode,
       focusId: effectiveFocusId.isEmpty ? null : effectiveFocusId,
       autofocus: autofocus,
-      borderRadius: BorderRadius.circular(24),
-      visualStyle: TvFocusVisualStyle.floating,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.06),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(24),
-              ),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _DetailEpisodeArtwork(item: item),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.black.withValues(alpha: 0.18),
-                            Colors.transparent,
-                            Colors.black.withValues(alpha: 0.12),
-                            Colors.black.withValues(alpha: 0.58),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomCenter,
-                          stops: const [0, 0.34, 0.62, 1],
-                        ),
-                      ),
+      borderRadius: borderRadius,
+      visualStyle: TvFocusVisualStyle.none,
+      child: Builder(
+        builder: (context) {
+          final focusState = Focus.of(context);
+          final isFocused = focusState.hasFocus || focusState.hasPrimaryFocus;
+          if (!isFocused) {
+            return cardChild;
+          }
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              cardChild,
+              IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: borderRadius,
+                    border: Border.all(
+                      color: Colors.white,
+                      width: 2.4,
                     ),
-                    Positioned(
-                      left: 14,
-                      right: 14,
-                      top: 14,
-                      child: Text(
-                        titleText,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          height: 1.25,
-                          shadows: [
-                            Shadow(
-                              color: Color(0xAA000000),
-                              blurRadius: 16,
-                              offset: Offset(0, 3),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      left: 12,
-                      bottom: 12,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 214),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.46),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            badgeText,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (fileSizeText.isNotEmpty)
-                      Positioned(
-                        right: 12,
-                        bottom: 12,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.54),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            fileSizeText,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                child: Text(
-                  summary,
-                  maxLines: 6,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFFD7E0F1),
-                    fontSize: 13,
-                    height: 1.45,
                   ),
                 ),
               ),
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -694,10 +1004,6 @@ String _episodeDisplayFileSizeLabel(int? fileSizeBytes) {
   return formatByteSize(fileSizeBytes).trim();
 }
 
-bool _needsEpisodeDisplayFileSizeResolution(MediaItem item) {
-  return PlaybackTarget.fromMediaItem(item).needsResolution;
-}
-
 int? _fallbackEpisodeDisplayFileSizeBytes(
   MediaItem item,
   PlaybackTarget target,
@@ -742,20 +1048,63 @@ class _DetailEpisodeArtwork extends StatelessWidget {
   Widget build(BuildContext context) {
     final artwork = _resolveEpisodeArtworkAsset(item);
     if (artwork.url.isNotEmpty) {
-      return ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        child: AppNetworkImage(
-          artwork.url,
-          headers: artwork.headers,
-          fallbackSources: _buildEpisodeArtworkFallbackSources(item),
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) =>
-              _DetailEpisodeArtworkFallback(item: item),
-        ),
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final decodeSize = _resolveEpisodeArtworkDecodeSize(
+            context,
+            constraints,
+          );
+          return ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            child: AppNetworkImage(
+              artwork.url,
+              headers: artwork.headers,
+              fallbackSources: _buildEpisodeArtworkFallbackSources(item),
+              cacheWidth: decodeSize?.width,
+              cacheHeight: decodeSize?.height,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) =>
+                  _DetailEpisodeArtworkFallback(item: item),
+            ),
+          );
+        },
       );
     }
     return _DetailEpisodeArtworkFallback(item: item);
   }
+}
+
+class _DetailEpisodeArtworkDecodeSize {
+  const _DetailEpisodeArtworkDecodeSize({
+    required this.width,
+    required this.height,
+  });
+
+  final int width;
+  final int height;
+}
+
+_DetailEpisodeArtworkDecodeSize? _resolveEpisodeArtworkDecodeSize(
+  BuildContext context,
+  BoxConstraints constraints,
+) {
+  final mediaQuery = MediaQuery.maybeOf(context);
+  final logicalWidth = constraints.hasBoundedWidth
+      ? constraints.maxWidth
+      : (mediaQuery?.size.width ?? 0);
+  final logicalHeight = constraints.hasBoundedHeight
+      ? constraints.maxHeight
+      : (logicalWidth * 9 / 16);
+  if (logicalWidth <= 0 || logicalHeight <= 0) {
+    return null;
+  }
+  final dpr = (mediaQuery?.devicePixelRatio ?? 1.0).clamp(1.0, 2.5);
+  final decodeWidth = (logicalWidth * dpr).round();
+  final decodeHeight = (logicalHeight * dpr).round();
+  return _DetailEpisodeArtworkDecodeSize(
+    width: math.max(1, math.min(decodeWidth, 1920)),
+    height: math.max(1, math.min(decodeHeight, 1080)),
+  );
 }
 
 class _DetailEpisodeArtworkFallback extends StatelessWidget {

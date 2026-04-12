@@ -72,8 +72,8 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   @override
   void didUpdateWidget(covariant AppNetworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url ||
-        oldWidget.headers != widget.headers ||
+    if (oldWidget.url.trim() != widget.url.trim() ||
+        !_sameHeaders(oldWidget.headers, widget.headers) ||
         !_sameImageSources(
           oldWidget.fallbackSources,
           widget.fallbackSources,
@@ -290,6 +290,16 @@ class _ResolvedImageContent {
       bytesFingerprint: _fingerprintBytes(bytes),
     );
   }
+}
+
+bool _sameHeaders(Map<String, String>? left, Map<String, String>? right) {
+  final normalizedLeft = left == null || left.isEmpty
+      ? null
+      : Map<String, String>.from(left);
+  final normalizedRight = right == null || right.isEmpty
+      ? null
+      : Map<String, String>.from(right);
+  return mapEquals(normalizedLeft, normalizedRight);
 }
 
 bool _sameImageSources(

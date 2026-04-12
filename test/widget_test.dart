@@ -743,7 +743,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('这是整部剧的总介绍。'), findsNothing);
-    expect(find.text('第1集 风暴前夜 · 1.00 GB'), findsOneWidget);
+    expect(find.text('1.00 GB'), findsOneWidget);
     expect(find.textContaining('第1集 风暴前夜.mkv'), findsOneWidget);
   });
 }

@@ -234,8 +234,6 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     required PlaybackEngine playbackEngine,
     required PlaybackDecodeMode playbackDecodeMode,
     required PlaybackMpvQualityPreset playbackMpvQualityPreset,
-    required bool playbackTraceEnabled,
-    required bool subtitleSearchTraceEnabled,
   }) async {
     final current = state.value ?? await _repository.load();
     if (current.playbackBackgroundPlaybackEnabled &&
@@ -256,8 +254,8 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         playbackEngine: playbackEngine,
         playbackDecodeMode: playbackDecodeMode,
         playbackMpvQualityPreset: playbackMpvQualityPreset,
-        playbackTraceEnabled: playbackTraceEnabled,
-        subtitleSearchTraceEnabled: subtitleSearchTraceEnabled,
+        playbackTraceEnabled: false,
+        subtitleSearchTraceEnabled: false,
       ),
     );
   }
@@ -469,8 +467,8 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   void _syncRuntimeTraceSettings(AppSettings settings) {
-    setPlaybackTraceEnabled(settings.playbackTraceEnabled);
-    setSubtitleSearchTraceEnabled(settings.subtitleSearchTraceEnabled);
+    setPlaybackTraceEnabled(false);
+    setSubtitleSearchTraceEnabled(false);
   }
 
   HomeModuleConfig _resolveHeroModule(AppSettings settings) {

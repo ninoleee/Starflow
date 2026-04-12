@@ -91,18 +91,37 @@ class DetailPageController extends ChangeNotifier {
   })  : _detailSessionId = initialSessionId,
         _manualOverrideTarget = initialManualOverrideTarget,
         _libraryMatchView = libraryMatchView,
-        _subtitleSearchView = subtitleSearchView;
+        _subtitleSearchView = subtitleSearchView {
+    _manualOverrideTargetNotifier = ValueNotifier<MediaDetailTarget?>(
+      _manualOverrideTarget,
+    );
+    _libraryMatchViewNotifier =
+        ValueNotifier<DetailLibraryMatchViewState>(_libraryMatchView);
+    _subtitleSearchViewNotifier =
+        ValueNotifier<DetailSubtitleSearchViewState>(_subtitleSearchView);
+  }
 
   int _detailSessionId;
   MediaDetailTarget? _manualOverrideTarget;
   DetailLibraryMatchViewState _libraryMatchView;
   DetailSubtitleSearchViewState _subtitleSearchView;
   Object? _activeLibraryMatchToken;
+  late final ValueNotifier<MediaDetailTarget?> _manualOverrideTargetNotifier;
+  late final ValueNotifier<DetailLibraryMatchViewState>
+      _libraryMatchViewNotifier;
+  late final ValueNotifier<DetailSubtitleSearchViewState>
+      _subtitleSearchViewNotifier;
 
   int get detailSessionId => _detailSessionId;
   MediaDetailTarget? get manualOverrideTarget => _manualOverrideTarget;
   DetailLibraryMatchViewState get libraryMatchView => _libraryMatchView;
   DetailSubtitleSearchViewState get subtitleSearchView => _subtitleSearchView;
+  ValueListenable<MediaDetailTarget?> get manualOverrideTargetListenable =>
+      _manualOverrideTargetNotifier;
+  ValueListenable<DetailLibraryMatchViewState> get libraryMatchViewListenable =>
+      _libraryMatchViewNotifier;
+  ValueListenable<DetailSubtitleSearchViewState>
+      get subtitleSearchViewListenable => _subtitleSearchViewNotifier;
 
   List<MediaDetailTarget> get libraryMatchChoices => _libraryMatchView.choices;
   int get selectedLibraryMatchIndex => _libraryMatchView.selectedIndex;
@@ -163,16 +182,19 @@ class DetailPageController extends ChangeNotifier {
 
   void setManualOverrideTarget(MediaDetailTarget? target) {
     _manualOverrideTarget = target;
+    _manualOverrideTargetNotifier.value = target;
     notifyListeners();
   }
 
   void resetForTargetChange() {
     _manualOverrideTarget = null;
+    _manualOverrideTargetNotifier.value = null;
     _libraryMatchView = const DetailLibraryMatchViewState(
       choices: <MediaDetailTarget>[],
       selectedIndex: 0,
       isMatching: false,
     );
+    _libraryMatchViewNotifier.value = _libraryMatchView;
     _subtitleSearchView = const DetailSubtitleSearchViewState(
       choices: <CachedSubtitleSearchOption>[],
       selectedIndex: -1,
@@ -180,15 +202,18 @@ class DetailPageController extends ChangeNotifier {
       busyResultId: null,
       statusMessage: null,
     );
+    _subtitleSearchViewNotifier.value = _subtitleSearchView;
     notifyListeners();
   }
 
   void resetForPageInactive() {
     _libraryMatchView = _libraryMatchView.copyWith(isMatching: false);
+    _libraryMatchViewNotifier.value = _libraryMatchView;
     _subtitleSearchView = _subtitleSearchView.copyWith(
       isSearching: false,
       busyResultId: null,
     );
+    _subtitleSearchViewNotifier.value = _subtitleSearchView;
     notifyListeners();
   }
 
@@ -202,6 +227,7 @@ class DetailPageController extends ChangeNotifier {
       selectedIndex: selectedIndex,
       isMatching: isMatching,
     );
+    _libraryMatchViewNotifier.value = _libraryMatchView;
     notifyListeners();
   }
 
@@ -219,6 +245,7 @@ class DetailPageController extends ChangeNotifier {
       busyResultId: busyResultId,
       statusMessage: statusMessage,
     );
+    _subtitleSearchViewNotifier.value = _subtitleSearchView;
     notifyListeners();
   }
 
@@ -253,7 +280,9 @@ class DetailPageController extends ChangeNotifier {
     final resolvedTarget = _libraryMatchView.choices[resolvedIndex];
     _libraryMatchView =
         _libraryMatchView.copyWith(selectedIndex: resolvedIndex);
+    _libraryMatchViewNotifier.value = _libraryMatchView;
     _manualOverrideTarget = resolvedTarget;
+    _manualOverrideTargetNotifier.value = resolvedTarget;
     notifyListeners();
     return resolvedTarget;
   }
@@ -285,5 +314,13 @@ class DetailPageController extends ChangeNotifier {
       target.searchQuery.trim(),
       target.itemType.trim(),
     ].join('|');
+  }
+
+  @override
+  void dispose() {
+    _manualOverrideTargetNotifier.dispose();
+    _libraryMatchViewNotifier.dispose();
+    _subtitleSearchViewNotifier.dispose();
+    super.dispose();
   }
 }

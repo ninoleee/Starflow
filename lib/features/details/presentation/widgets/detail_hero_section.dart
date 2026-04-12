@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -165,6 +164,9 @@ class DetailHeroSection extends ConsumerWidget {
                     metadata: metadata,
                     peopleLine: peopleLine,
                     simplifyVisualEffects: simplifyVisualEffects,
+                    isTelevision: isTelevision,
+                    primaryPlaybackTarget: primaryPlaybackTarget,
+                    showResumeAction: showResumeAction,
                     artworkFocusNode: artworkFocusNode,
                     playFocusNode: playFocusNode,
                   );
@@ -191,13 +193,16 @@ class DetailHeroSection extends ConsumerWidget {
   }
 }
 
-class DetailHeroContent extends ConsumerWidget {
+class DetailHeroContent extends StatelessWidget {
   const DetailHeroContent({
     super.key,
     required this.target,
     required this.metadata,
     required this.peopleLine,
     required this.simplifyVisualEffects,
+    required this.isTelevision,
+    required this.primaryPlaybackTarget,
+    required this.showResumeAction,
     this.artworkFocusNode,
     this.playFocusNode,
   });
@@ -206,24 +211,17 @@ class DetailHeroContent extends ConsumerWidget {
   final List<String> metadata;
   final String peopleLine;
   final bool simplifyVisualEffects;
+  final bool isTelevision;
+  final PlaybackTarget? primaryPlaybackTarget;
+  final bool showResumeAction;
   final FocusNode? artworkFocusNode;
   final FocusNode? playFocusNode;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+  Widget build(BuildContext context) {
     final hasLogo = target.logoUrl.trim().isNotEmpty;
     final primaryTitle = _resolveDetailHeroPrimaryTitle(target);
     final episodeTitle = _resolveDetailHeroEpisodeTitle(target);
-    final resumeEntry =
-        ref.watch(playbackResumeForDetailTargetProvider(target)).value;
-    final showResumeAction =
-        resumeEntry != null && (target.isSeries || resumeEntry.canResume);
-    final primaryPlaybackTarget = resolvePrimaryPlaybackTarget(
-      target,
-      resumeEntry,
-      preferResume: showResumeAction,
-    );
     final primaryPlaybackLabel = showResumeAction ? '继续播放' : '立即播放';
     final metadataChipPadding = EdgeInsets.symmetric(
       horizontal: simplifyVisualEffects ? 10 : 11,
@@ -559,17 +557,61 @@ class DetailBackdropImage extends StatelessWidget {
       return const ColoredBox(color: Color(0xFF0A1423));
     }
 
-    return AppNetworkImage(
-      imageUrl,
-      headers: imageHeaders,
-      fallbackSources: fallbackSources,
-      fit: BoxFit.cover,
-      alignment: Alignment.topCenter,
-      errorBuilder: (context, error, stackTrace) {
-        return const ColoredBox(color: Color(0xFF0A1423));
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final decodeSize = _resolveDetailBackdropDecodeSize(
+          context,
+          constraints,
+        );
+        return AppNetworkImage(
+          imageUrl,
+          headers: imageHeaders,
+          fallbackSources: fallbackSources,
+          cacheWidth: decodeSize?.width,
+          cacheHeight: decodeSize?.height,
+          fit: BoxFit.cover,
+          alignment: Alignment.topCenter,
+          errorBuilder: (context, error, stackTrace) {
+            return const ColoredBox(color: Color(0xFF0A1423));
+          },
+        );
       },
     );
   }
+}
+
+class _DetailBackdropDecodeSize {
+  const _DetailBackdropDecodeSize({
+    required this.width,
+    required this.height,
+  });
+
+  final int width;
+  final int height;
+}
+
+_DetailBackdropDecodeSize? _resolveDetailBackdropDecodeSize(
+  BuildContext context,
+  BoxConstraints constraints,
+) {
+  final mediaQuery = MediaQuery.maybeOf(context);
+  final screenSize = mediaQuery?.size;
+  final logicalWidth = constraints.hasBoundedWidth
+      ? constraints.maxWidth
+      : (screenSize?.width ?? 0);
+  final logicalHeight = constraints.hasBoundedHeight
+      ? constraints.maxHeight
+      : (screenSize?.height ?? 0);
+  if (logicalWidth <= 0 || logicalHeight <= 0) {
+    return null;
+  }
+  final dpr = (mediaQuery?.devicePixelRatio ?? 1.0).clamp(1.0, 3.0);
+  final decodeWidth = (logicalWidth * dpr).round();
+  final decodeHeight = (logicalHeight * dpr).round();
+  return _DetailBackdropDecodeSize(
+    width: math.max(1, math.min(decodeWidth, 4096)),
+    height: math.max(1, math.min(decodeHeight, 4096)),
+  );
 }
 
 class DetailHeroImageAsset {

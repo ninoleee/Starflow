@@ -1233,13 +1233,14 @@ class MediaDetailPage extends ConsumerStatefulWidget {
 
 class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     with PageActivityMixin<MediaDetailPage> {
-  String _selectedSeasonId = '';
   bool _isRefreshingMetadata = false;
   bool _isCheckingOnlineResourceUpdate = false;
   bool _isSavingOnlineResourceUpdate = false;
   List<SearchResult> _favoriteSearchResults = const <SearchResult>[];
   _LibraryMatchTaskController? _activeLibraryMatchController;
   late final DetailPageController _pageController;
+  final ValueNotifier<String> _selectedSeasonIdNotifier =
+      ValueNotifier<String>('');
   final ScrollController _scrollController = ScrollController();
   final FocusNode _heroArtworkFocusNode =
       FocusNode(debugLabel: 'detail-hero-artwork');
@@ -1265,8 +1266,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       _pageController.subtitleSearchChoices;
   bool get _isSearchingSubtitles => _pageController.isSearchingSubtitles;
   String? get _busySubtitleResultId => _pageController.busySubtitleResultId;
-  DetailLibraryMatchViewState get _libraryMatchView =>
-      _pageController.libraryMatchView;
   DetailSubtitleSearchViewState get _subtitleSearchView =>
       _pageController.subtitleSearchView;
 
@@ -1274,7 +1273,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   void initState() {
     super.initState();
     _pageController = DetailPageController();
-    _pageController.addListener(_handlePageControllerChanged);
     _heroArtworkFocusNode.addListener(_handleHeroArtworkFocusChanged);
   }
 
@@ -1288,7 +1286,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         reason: 'target.change',
         additionalTargets: [oldWidget.target],
       );
-      _selectedSeasonId = '';
+      _selectedSeasonIdNotifier.value = '';
       _isRefreshingMetadata = false;
       _pageController.resetForTargetChange();
       _retainedTargetAsync.clear();
@@ -1303,8 +1301,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   void dispose() {
     _cancelActiveLibraryMatch(reason: 'dispose');
     _heroArtworkFocusNode.removeListener(_handleHeroArtworkFocusChanged);
-    _pageController.removeListener(_handlePageControllerChanged);
     _pageController.dispose();
+    _selectedSeasonIdNotifier.dispose();
     _heroArtworkFocusNode.dispose();
     _heroPlayFocusNode.dispose();
     _scrollController.dispose();
@@ -1630,13 +1628,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       busyResultId: busyResultId,
       statusMessage: statusMessage,
     );
-  }
-
-  void _handlePageControllerChanged() {
-    if (!mounted) {
-      return;
-    }
-    setState(() {});
   }
 
   void _handleHeroArtworkFocusChanged() {
@@ -2367,9 +2358,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       return;
     }
 
-    setState(() {
-      _isRefreshingMetadata = true;
-    });
+    _isRefreshingMetadata = true;
 
     var changed = false;
     try {
@@ -2414,9 +2403,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       return;
     } finally {
       if (_isSessionActive(activeSessionId) && _isRefreshingMetadata) {
-        setState(() {
-          _isRefreshingMetadata = false;
-        });
+        _isRefreshingMetadata = false;
       }
     }
 
@@ -2581,14 +2568,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   }
 
   DetailSubtitleSearchViewData get _currentSubtitleSearchViewData {
-    final subtitleView = _subtitleSearchView;
-    return DetailSubtitleSearchViewData(
-      choices: subtitleView.choices,
-      selectedIndex: subtitleView.selectedIndex,
-      isSearching: subtitleView.isSearching,
-      busyResultId: subtitleView.busyResultId,
-      statusMessage: subtitleView.statusMessage,
-    );
+    return _subtitleSearchViewDataFromState(_subtitleSearchView);
   }
 
   void _applySubtitleSearchViewData(DetailSubtitleSearchViewData viewData) {
@@ -2601,11 +2581,25 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     );
   }
 
-  MediaDetailTarget _decorateTargetWithSelectedSubtitle(
-      MediaDetailTarget target) {
+  DetailSubtitleSearchViewData _subtitleSearchViewDataFromState(
+    DetailSubtitleSearchViewState subtitleView,
+  ) {
+    return DetailSubtitleSearchViewData(
+      choices: subtitleView.choices,
+      selectedIndex: subtitleView.selectedIndex,
+      isSearching: subtitleView.isSearching,
+      busyResultId: subtitleView.busyResultId,
+      statusMessage: subtitleView.statusMessage,
+    );
+  }
+
+  MediaDetailTarget _decorateTargetWithSubtitleView(
+    MediaDetailTarget target,
+    DetailSubtitleSearchViewState subtitleView,
+  ) {
     return _detailSubtitleController.decorateTargetWithSelectedSubtitle(
       target,
-      viewData: _currentSubtitleSearchViewData,
+      viewData: _subtitleSearchViewDataFromState(subtitleView),
     );
   }
 
@@ -2971,31 +2965,159 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     await _applySelectedSubtitleSearchIndex(target, nextIndex);
   }
 
+  Widget _buildSeriesSection(
+    MediaDetailTarget target,
+    AsyncValue<DetailSeriesBrowserState?> seriesAsync,
+  ) {
+    return seriesAsync.when(
+      data: (browser) {
+        if (browser == null || browser.groups.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return ValueListenableBuilder<String>(
+          valueListenable: _selectedSeasonIdNotifier,
+          builder: (context, selectedSeasonId, _) {
+            final selectedGroup = resolveSelectedEpisodeGroup(
+              groups: browser.groups,
+              selectedGroupId: selectedSeasonId,
+            );
+            return DetailBlock(
+              title: '剧集',
+              child: DetailEpisodeBrowser(
+                seriesTarget: target,
+                groups: browser.groups,
+                selectedGroupId: selectedGroup.id,
+                onSeasonSelected: (groupId) {
+                  if (_selectedSeasonIdNotifier.value == groupId) {
+                    return;
+                  }
+                  _selectedSeasonIdNotifier.value = groupId;
+                },
+              ),
+            );
+          },
+        );
+      },
+      loading: () => const DetailBlock(
+        title: '剧集',
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 12),
+          child: Center(
+            child: CircularProgressIndicator(color: Colors.white),
+          ),
+        ),
+      ),
+      error: (error, stackTrace) => DetailBlock(
+        title: '剧集',
+        child: Text(
+          '加载剧集失败：$error',
+          style: const TextStyle(
+            color: Color(0xFF90A0BD),
+            fontSize: 14,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResourceInfoBlock({
+    required MediaDetailTarget target,
+    required bool isTelevision,
+    required PlaybackEngine playbackEngine,
+    required bool canCheckFavoriteOnlineResourceUpdate,
+  }) {
+    return ValueListenableBuilder<DetailLibraryMatchViewState>(
+      valueListenable: _pageController.libraryMatchViewListenable,
+      builder: (context, libraryMatchView, _) {
+        return ValueListenableBuilder<DetailSubtitleSearchViewState>(
+          valueListenable: _pageController.subtitleSearchViewListenable,
+          builder: (context, subtitleSearchView, __) {
+            return DetailBlock(
+              title: '资源信息',
+              child: DetailResourceInfoSection(
+                target: target,
+                isTelevision: isTelevision,
+                playbackEngine: playbackEngine,
+                libraryView: libraryMatchView,
+                subtitleView: subtitleSearchView,
+                selectedSubtitleIndex: _normalizeSubtitleSearchIndex(
+                  subtitleSearchView.selectedIndex,
+                  choices: subtitleSearchView.choices,
+                ),
+                subtitleChoiceLabelBuilder: _subtitleSearchChoiceLabel,
+                onSearchOnline: () {
+                  context.pushNamed(
+                    'detail-search',
+                    queryParameters: {
+                      'q': target.searchQuery,
+                    },
+                  );
+                },
+                onOpenTelevisionPlayableVariantPicker:
+                    _openTelevisionPlayableVariantPicker,
+                onLibraryMatchSelected: _applySelectedLibraryMatchIndex,
+                onOpenTelevisionLibraryMatchPicker:
+                    _openTelevisionLibraryMatchPicker,
+                onMatchLocalResource: libraryMatchView.isMatching
+                    ? null
+                    : () {
+                        detailResourceSwitchTrace(
+                          'resource.ui.match.tap',
+                          fields: {
+                            'target': _detailResourceTraceTarget(target),
+                            'isMatching': libraryMatchView.isMatching,
+                            'currentChoices': libraryMatchView.choices.length,
+                          },
+                        );
+                        _matchLocalResource(target);
+                      },
+                onCheckOnlineResourceUpdate:
+                    canCheckFavoriteOnlineResourceUpdate
+                        ? () => _checkFavoriteOnlineResourceUpdate(target)
+                        : null,
+                isCheckingOnlineResourceUpdate: _isCheckingOnlineResourceUpdate,
+                onOpenPlaybackEnginePicker: () =>
+                    _openPlaybackEnginePicker(playbackEngine),
+                onPlaybackEngineSelected: (selection) {
+                  unawaited(
+                    _setPlaybackEngine(
+                      selection,
+                      currentEngine: playbackEngine,
+                    ),
+                  );
+                },
+                onSearchSubtitles: subtitleSearchView.isSearching
+                    ? null
+                    : () => _searchSubtitlesForDetail(target),
+                onOpenTelevisionSubtitlePicker: () =>
+                    _openTelevisionSubtitlePicker(target),
+                onSubtitleSelected: (index) {
+                  unawaited(
+                    _applySelectedSubtitleSearchIndex(
+                      target,
+                      index,
+                    ),
+                  );
+                },
+                onOpenMetadataIndexManager: () {
+                  detailResourceSwitchTrace(
+                    'resource.ui.metadata-manager.tap',
+                    fields: {
+                      'target': _detailResourceTraceTarget(target),
+                    },
+                  );
+                  _openMetadataIndexManager(target);
+                },
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final seedTarget = _manualOverrideTarget ?? widget.target;
-    final watchedTargetAsync = isPageVisible
-        ? ref.watch(enrichedDetailTargetProvider(seedTarget))
-        : null;
-    final targetAsync = _retainedTargetAsync.resolve(
-      activeValue: watchedTargetAsync,
-      fallbackValue: AsyncValue.data(seedTarget),
-    );
-    final target = targetAsync.value ?? seedTarget;
-    if (!target.isSeries) {
-      _retainedSeriesAsync.clear();
-    }
-    final watchedSeriesAsync = target.isSeries && isPageVisible
-        ? ref.watch(detailSeriesBrowserProvider(target))
-        : null;
-    final seriesAsync = target.isSeries
-        ? _retainedSeriesAsync.resolve(
-            activeValue: watchedSeriesAsync,
-            fallbackValue: const AsyncLoading<DetailSeriesBrowserState?>(),
-          )
-        : const AsyncData<DetailSeriesBrowserState?>(
-            null,
-          );
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final performanceSlimDetailHeroEnabled = ref.watch(
       appSettingsProvider.select(
@@ -3008,15 +3130,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     final playbackEngine = ref.watch(
       appSettingsProvider.select((settings) => settings.playbackEngine),
     );
-    final favoriteOnlineResourceMatch = ref
-        .read(detailOnlineResourceUpdateServiceProvider)
-        .resolveFavoriteMatch(
-          target: target,
-          favorites: _favoriteSearchResults,
-        );
-    final canCheckFavoriteOnlineResourceUpdate =
-        favoriteOnlineResourceMatch != null &&
-            networkStorage.quarkCookie.trim().isNotEmpty;
 
     return TvPageFocusScope(
       controller: _tvFocusMemoryController,
@@ -3039,318 +3152,243 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                   end: Alignment.bottomCenter,
                 ),
               ),
-              child: ListView(
-                controller: _scrollController,
-                padding: EdgeInsets.zero,
-                children: [
-                  DetailHeroSection(
-                    target: _decorateTargetWithSelectedSubtitle(target),
-                    simplifyVisualEffects: performanceSlimDetailHeroEnabled,
-                    isTelevision: isTelevision,
-                    artworkFocusNode: _heroArtworkFocusNode,
-                    playFocusNode: _heroPlayFocusNode,
-                  ),
-                  Padding(
+              child: ValueListenableBuilder<MediaDetailTarget?>(
+                valueListenable: _pageController.manualOverrideTargetListenable,
+                builder: (context, manualOverrideTarget, _) {
+                  final seedTarget = manualOverrideTarget ?? widget.target;
+                  final watchedTargetAsync = isPageVisible
+                      ? ref.watch(enrichedDetailTargetProvider(seedTarget))
+                      : null;
+                  final targetAsync = _retainedTargetAsync.resolve(
+                    activeValue: watchedTargetAsync,
+                    fallbackValue: AsyncValue.data(seedTarget),
+                  );
+                  final target = targetAsync.value ?? seedTarget;
+                  if (!target.isSeries) {
+                    _retainedSeriesAsync.clear();
+                  }
+                  final watchedSeriesAsync = target.isSeries && isPageVisible
+                      ? ref.watch(detailSeriesBrowserProvider(target))
+                      : null;
+                  final seriesAsync = target.isSeries
+                      ? _retainedSeriesAsync.resolve(
+                          activeValue: watchedSeriesAsync,
+                          fallbackValue:
+                              const AsyncLoading<DetailSeriesBrowserState?>(),
+                        )
+                      : const AsyncData<DetailSeriesBrowserState?>(
+                          null,
+                        );
+                  final favoriteOnlineResourceMatch = ref
+                      .read(detailOnlineResourceUpdateServiceProvider)
+                      .resolveFavoriteMatch(
+                        target: target,
+                        favorites: _favoriteSearchResults,
+                      );
+                  final canCheckFavoriteOnlineResourceUpdate =
+                      favoriteOnlineResourceMatch != null &&
+                          networkStorage.quarkCookie.trim().isNotEmpty;
+                  final galleryImages = buildDetailGalleryImages(target);
+
+                  return ListView(
+                    controller: _scrollController,
                     padding: EdgeInsets.zero,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (target.isSeries)
-                          seriesAsync.when(
-                            data: (browser) {
-                              if (browser == null || browser.groups.isEmpty) {
-                                return const SizedBox.shrink();
-                              }
-                              final selectedGroup = resolveSelectedEpisodeGroup(
-                                groups: browser.groups,
-                                selectedGroupId: _selectedSeasonId,
-                              );
-                              return DetailBlock(
-                                title: '剧集',
-                                child: DetailEpisodeBrowser(
-                                  seriesTarget: target,
-                                  groups: browser.groups,
-                                  selectedGroupId: selectedGroup.id,
-                                  onSeasonSelected: (groupId) {
-                                    setState(() {
-                                      _selectedSeasonId = groupId;
-                                    });
-                                  },
-                                ),
-                              );
-                            },
-                            loading: () => const DetailBlock(
-                              title: '剧集',
-                              child: Padding(
-                                padding: EdgeInsets.symmetric(vertical: 12),
-                                child: Center(
-                                  child: CircularProgressIndicator(
-                                      color: Colors.white),
-                                ),
-                              ),
+                    children: [
+                      ValueListenableBuilder<DetailSubtitleSearchViewState>(
+                        valueListenable:
+                            _pageController.subtitleSearchViewListenable,
+                        builder: (context, subtitleSearchView, __) {
+                          return DetailHeroSection(
+                            target: _decorateTargetWithSubtitleView(
+                              target,
+                              subtitleSearchView,
                             ),
-                            error: (error, stackTrace) => DetailBlock(
-                              title: '剧集',
-                              child: Text(
-                                '加载剧集失败：$error',
-                                style: const TextStyle(
-                                  color: Color(0xFF90A0BD),
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ),
-                          ),
-                        if (target.overview.trim().isNotEmpty)
-                          DetailBlock(
-                            title: _overviewSectionTitle(
-                              currentTarget: target,
-                              pageTarget: widget.target,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (_episodeDetailSubtitleLine(
+                            simplifyVisualEffects:
+                                performanceSlimDetailHeroEnabled,
+                            isTelevision: isTelevision,
+                            artworkFocusNode: _heroArtworkFocusNode,
+                            playFocusNode: _heroPlayFocusNode,
+                          );
+                        },
+                      ),
+                      Padding(
+                        padding: EdgeInsets.zero,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (target.isSeries)
+                              _buildSeriesSection(target, seriesAsync),
+                            if (target.overview.trim().isNotEmpty)
+                              DetailBlock(
+                                title: _overviewSectionTitle(
                                   currentTarget: target,
                                   pageTarget: widget.target,
-                                )
-                                    case final episodeTitle?) ...[
-                                  Text(
-                                    episodeTitle,
-                                    style: const TextStyle(
-                                      color: Color(0xFFF1F5FF),
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
-                                      height: 1.4,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                ],
-                                Text(
-                                  target.overview,
-                                  style: const TextStyle(
-                                    color: Color(0xFFDCE6F8),
-                                    fontSize: 15,
-                                    height: 1.7,
-                                  ),
                                 ),
-                              ],
-                            ),
-                          ),
-                        if (target.overview.trim().isEmpty &&
-                            (_episodeDetailSubtitleLine(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (_episodeDetailSubtitleLine(
                                       currentTarget: target,
                                       pageTarget: widget.target,
-                                    ) !=
-                                    null ||
-                                _episodeDetailFileNameLine(
+                                    )
+                                        case final episodeTitle?) ...[
+                                      Text(
+                                        episodeTitle,
+                                        style: const TextStyle(
+                                          color: Color(0xFFF1F5FF),
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700,
+                                          height: 1.4,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 10),
+                                    ],
+                                    Text(
+                                      target.overview,
+                                      style: const TextStyle(
+                                        color: Color(0xFFDCE6F8),
+                                        fontSize: 15,
+                                        height: 1.7,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (target.overview.trim().isEmpty &&
+                                (_episodeDetailSubtitleLine(
+                                          currentTarget: target,
+                                          pageTarget: widget.target,
+                                        ) !=
+                                        null ||
+                                    _episodeDetailFileNameLine(
+                                          currentTarget: target,
+                                          pageTarget: widget.target,
+                                        ) !=
+                                        null))
+                              DetailBlock(
+                                title: _overviewSectionTitle(
+                                  currentTarget: target,
+                                  pageTarget: widget.target,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (_episodeDetailSubtitleLine(
                                       currentTarget: target,
                                       pageTarget: widget.target,
-                                    ) !=
-                                    null))
-                          DetailBlock(
-                            title: _overviewSectionTitle(
-                              currentTarget: target,
-                              pageTarget: widget.target,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (_episodeDetailSubtitleLine(
-                                  currentTarget: target,
-                                  pageTarget: widget.target,
-                                )
-                                    case final episodeTitle?)
-                                  Text(
-                                    episodeTitle,
-                                    style: const TextStyle(
-                                      color: Color(0xFFF1F5FF),
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
-                                      height: 1.4,
-                                    ),
-                                  ),
-                                if (_episodeDetailFileNameLine(
-                                  currentTarget: target,
-                                  pageTarget: widget.target,
-                                )
-                                    case final fileName?) ...[
-                                  if (_episodeDetailSubtitleLine(
-                                        currentTarget: target,
-                                        pageTarget: widget.target,
-                                      ) !=
-                                      null)
-                                    const SizedBox(height: 8),
-                                  Text(
-                                    fileName,
-                                    style: const TextStyle(
-                                      color: Color(0xFFB9C8DE),
-                                      fontSize: 14,
-                                      height: 1.5,
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        if (buildDetailGalleryImages(target).isNotEmpty)
-                          DetailBlock(
-                            title: '剧照',
-                            child: DetailImageGallery(
-                              images: buildDetailGalleryImages(target),
-                            ),
-                          ),
-                        if (target.resolvedDirectorProfiles.isNotEmpty ||
-                            target.resolvedActorProfiles.isNotEmpty)
-                          DetailBlock(
-                            title: '演职员',
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (target
-                                    .resolvedDirectorProfiles.isNotEmpty) ...[
-                                  const InfoLabel('导演'),
-                                  const SizedBox(height: 10),
-                                  PersonRail(
-                                    people: target.resolvedDirectorProfiles,
-                                    focusScopePrefix: 'detail:director',
-                                    onPersonTap: (person) {
-                                      context.pushNamed(
-                                        'person-credits',
-                                        extra: PersonCreditsPageTarget(
-                                          person: person,
-                                          role: PersonCreditsRole.director,
+                                    )
+                                        case final episodeTitle?)
+                                      Text(
+                                        episodeTitle,
+                                        style: const TextStyle(
+                                          color: Color(0xFFF1F5FF),
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700,
+                                          height: 1.4,
                                         ),
-                                      );
-                                    },
-                                  ),
-                                ],
-                                if (target
-                                        .resolvedDirectorProfiles.isNotEmpty &&
-                                    target.resolvedActorProfiles.isNotEmpty)
-                                  const SizedBox(height: 18),
-                                if (target
-                                    .resolvedActorProfiles.isNotEmpty) ...[
-                                  const InfoLabel('演员'),
-                                  const SizedBox(height: 10),
-                                  PersonRail(
-                                    people: target.resolvedActorProfiles,
-                                    focusScopePrefix: 'detail:actor',
-                                    onPersonTap: (person) {
-                                      context.pushNamed(
-                                        'person-credits',
-                                        extra: PersonCreditsPageTarget(
-                                          person: person,
-                                          role: PersonCreditsRole.actor,
+                                      ),
+                                    if (_episodeDetailFileNameLine(
+                                      currentTarget: target,
+                                      pageTarget: widget.target,
+                                    )
+                                        case final fileName?) ...[
+                                      if (_episodeDetailSubtitleLine(
+                                            currentTarget: target,
+                                            pageTarget: widget.target,
+                                          ) !=
+                                          null)
+                                        const SizedBox(height: 8),
+                                      Text(
+                                        fileName,
+                                        style: const TextStyle(
+                                          color: Color(0xFFB9C8DE),
+                                          fontSize: 14,
+                                          height: 1.5,
                                         ),
-                                      );
-                                    },
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        if (target.resolvedPlatformProfiles.isNotEmpty)
-                          DetailBlock(
-                            title: '公司',
-                            child: PlatformRail(
-                              platforms: target.resolvedPlatformProfiles,
-                            ),
-                          ),
-                        if (shouldShowDetailResourceInfo(target))
-                          DetailBlock(
-                            title: '资源信息',
-                            child: DetailResourceInfoSection(
-                              target: target,
-                              isTelevision: isTelevision,
-                              playbackEngine: playbackEngine,
-                              libraryView: _libraryMatchView,
-                              subtitleView: _subtitleSearchView,
-                              selectedSubtitleIndex:
-                                  _normalizeSubtitleSearchIndex(
-                                _subtitleSearchView.selectedIndex,
-                                choices: _subtitleSearchView.choices,
+                                      ),
+                                    ],
+                                  ],
+                                ),
                               ),
-                              subtitleChoiceLabelBuilder:
-                                  _subtitleSearchChoiceLabel,
-                              onSearchOnline: () {
-                                context.pushNamed(
-                                  'detail-search',
-                                  queryParameters: {
-                                    'q': target.searchQuery,
-                                  },
-                                );
-                              },
-                              onOpenTelevisionPlayableVariantPicker:
-                                  _openTelevisionPlayableVariantPicker,
-                              onLibraryMatchSelected:
-                                  _applySelectedLibraryMatchIndex,
-                              onOpenTelevisionLibraryMatchPicker:
-                                  _openTelevisionLibraryMatchPicker,
-                              onMatchLocalResource: _libraryMatchView.isMatching
-                                  ? null
-                                  : () {
-                                      detailResourceSwitchTrace(
-                                        'resource.ui.match.tap',
-                                        fields: {
-                                          'target': _detailResourceTraceTarget(
-                                              target),
-                                          'isMatching':
-                                              _libraryMatchView.isMatching,
-                                          'currentChoices':
-                                              _libraryMatchView.choices.length,
+                            if (galleryImages.isNotEmpty)
+                              DetailBlock(
+                                title: '剧照',
+                                child: DetailImageGallery(
+                                  images: galleryImages,
+                                ),
+                              ),
+                            if (target.resolvedDirectorProfiles.isNotEmpty ||
+                                target.resolvedActorProfiles.isNotEmpty)
+                              DetailBlock(
+                                title: '演职员',
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (target.resolvedDirectorProfiles
+                                        .isNotEmpty) ...[
+                                      const InfoLabel('导演'),
+                                      const SizedBox(height: 10),
+                                      PersonRail(
+                                        people: target.resolvedDirectorProfiles,
+                                        focusScopePrefix: 'detail:director',
+                                        onPersonTap: (person) {
+                                          context.pushNamed(
+                                            'person-credits',
+                                            extra: PersonCreditsPageTarget(
+                                              person: person,
+                                              role: PersonCreditsRole.director,
+                                            ),
+                                          );
                                         },
-                                      );
-                                      _matchLocalResource(target);
-                                    },
-                              onCheckOnlineResourceUpdate:
-                                  canCheckFavoriteOnlineResourceUpdate
-                                      ? () =>
-                                          _checkFavoriteOnlineResourceUpdate(
-                                            target,
-                                          )
-                                      : null,
-                              isCheckingOnlineResourceUpdate:
-                                  _isCheckingOnlineResourceUpdate,
-                              onOpenPlaybackEnginePicker: () =>
-                                  _openPlaybackEnginePicker(playbackEngine),
-                              onPlaybackEngineSelected: (selection) {
-                                unawaited(
-                                  _setPlaybackEngine(
-                                    selection,
-                                    currentEngine: playbackEngine,
-                                  ),
-                                );
-                              },
-                              onSearchSubtitles: _subtitleSearchView.isSearching
-                                  ? null
-                                  : () => _searchSubtitlesForDetail(target),
-                              onOpenTelevisionSubtitlePicker: () =>
-                                  _openTelevisionSubtitlePicker(target),
-                              onSubtitleSelected: (index) {
-                                unawaited(
-                                  _applySelectedSubtitleSearchIndex(
-                                    target,
-                                    index,
-                                  ),
-                                );
-                              },
-                              onOpenMetadataIndexManager: () {
-                                detailResourceSwitchTrace(
-                                  'resource.ui.metadata-manager.tap',
-                                  fields: {
-                                    'target':
-                                        _detailResourceTraceTarget(target),
-                                  },
-                                );
-                                _openMetadataIndexManager(target);
-                              },
-                            ),
-                          ),
-                        appPageBottomSpacer(),
-                      ],
-                    ),
-                  ),
-                ],
+                                      ),
+                                    ],
+                                    if (target.resolvedDirectorProfiles
+                                            .isNotEmpty &&
+                                        target.resolvedActorProfiles.isNotEmpty)
+                                      const SizedBox(height: 18),
+                                    if (target
+                                        .resolvedActorProfiles.isNotEmpty) ...[
+                                      const InfoLabel('演员'),
+                                      const SizedBox(height: 10),
+                                      PersonRail(
+                                        people: target.resolvedActorProfiles,
+                                        focusScopePrefix: 'detail:actor',
+                                        onPersonTap: (person) {
+                                          context.pushNamed(
+                                            'person-credits',
+                                            extra: PersonCreditsPageTarget(
+                                              person: person,
+                                              role: PersonCreditsRole.actor,
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            if (target.resolvedPlatformProfiles.isNotEmpty)
+                              DetailBlock(
+                                title: '公司',
+                                child: PlatformRail(
+                                  platforms: target.resolvedPlatformProfiles,
+                                ),
+                              ),
+                            if (shouldShowDetailResourceInfo(target))
+                              _buildResourceInfoBlock(
+                                target: target,
+                                isTelevision: isTelevision,
+                                playbackEngine: playbackEngine,
+                                canCheckFavoriteOnlineResourceUpdate:
+                                    canCheckFavoriteOnlineResourceUpdate,
+                              ),
+                            appPageBottomSpacer(),
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
             Positioned(
