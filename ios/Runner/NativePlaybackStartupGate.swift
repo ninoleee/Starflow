@@ -57,7 +57,11 @@ final class NativePlaybackStartupGate {
   }
 
   deinit {
-    invalidateObservers()
+    // `deinit` is nonisolated; cannot call `@MainActor` instance methods.
+    statusObservation = nil
+    keepUpObservation = nil
+    bufferEmptyObservation = nil
+    bufferFullObservation = nil
     keepUpTimeoutWorkItem?.cancel()
   }
 
