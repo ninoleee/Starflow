@@ -1060,6 +1060,7 @@ class _DetailEpisodeArtwork extends StatelessWidget {
               artwork.url,
               headers: artwork.headers,
               fallbackSources: _buildEpisodeArtworkFallbackSources(item),
+              cachePolicy: artwork.cachePolicy,
               cacheWidth: decodeSize?.width,
               cacheHeight: decodeSize?.height,
               fit: BoxFit.cover,
@@ -1219,10 +1220,12 @@ class _DetailImageAsset {
   const _DetailImageAsset({
     required this.url,
     this.headers = const {},
+    this.cachePolicy = AppNetworkImageCachePolicy.persistent,
   });
 
   final String url;
   final Map<String, String> headers;
+  final AppNetworkImageCachePolicy cachePolicy;
 }
 
 _DetailImageAsset _resolveEpisodeArtworkAsset(MediaItem item) {
@@ -1230,6 +1233,9 @@ _DetailImageAsset _resolveEpisodeArtworkAsset(MediaItem item) {
     return _DetailImageAsset(
       url: item.backdropUrl.trim(),
       headers: item.backdropHeaders,
+      cachePolicy: _shouldBypassPersistentCacheForEpisodeBackdrop(item)
+          ? AppNetworkImageCachePolicy.networkOnly
+          : AppNetworkImageCachePolicy.persistent,
     );
   }
   if (item.bannerUrl.trim().isNotEmpty) {
@@ -1242,6 +1248,7 @@ _DetailImageAsset _resolveEpisodeArtworkAsset(MediaItem item) {
     return _DetailImageAsset(
       url: item.extraBackdropUrls.first,
       headers: item.extraBackdropHeaders,
+      cachePolicy: AppNetworkImageCachePolicy.networkOnly,
     );
   }
   if (item.posterUrl.trim().isNotEmpty) {
@@ -1259,7 +1266,11 @@ List<AppNetworkImageSource> _buildEpisodeArtworkFallbackSources(
   final sources = <AppNetworkImageSource>[];
   final seen = <String>{item.backdropUrl.trim()};
 
-  void add(String url, Map<String, String> headers) {
+  void add(
+    String url,
+    Map<String, String> headers,
+    AppNetworkImageCachePolicy cachePolicy,
+  ) {
     final trimmedUrl = url.trim();
     if (trimmedUrl.isEmpty || !seen.add(trimmedUrl)) {
       return;
@@ -1268,14 +1279,39 @@ List<AppNetworkImageSource> _buildEpisodeArtworkFallbackSources(
       AppNetworkImageSource(
         url: trimmedUrl,
         headers: headers,
+        cachePolicy: cachePolicy,
       ),
     );
   }
 
-  add(item.bannerUrl, item.bannerHeaders);
+  add(
+    item.bannerUrl,
+    item.bannerHeaders,
+    AppNetworkImageCachePolicy.persistent,
+  );
   for (final url in item.extraBackdropUrls) {
-    add(url, item.extraBackdropHeaders);
+    add(
+      url,
+      item.extraBackdropHeaders,
+      AppNetworkImageCachePolicy.networkOnly,
+    );
   }
-  add(item.posterUrl, item.posterHeaders);
+  add(
+    item.posterUrl,
+    item.posterHeaders,
+    AppNetworkImageCachePolicy.persistent,
+  );
   return sources;
+}
+
+bool _shouldBypassPersistentCacheForEpisodeBackdrop(MediaItem item) {
+  final itemType = item.itemType.trim().toLowerCase();
+  if (itemType != 'episode') {
+    return false;
+  }
+  final backdropUrl = item.backdropUrl.trim();
+  final bannerUrl = item.bannerUrl.trim();
+  return backdropUrl.isNotEmpty &&
+      bannerUrl.isNotEmpty &&
+      backdropUrl != bannerUrl;
 }

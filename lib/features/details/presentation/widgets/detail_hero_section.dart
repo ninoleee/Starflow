@@ -102,6 +102,7 @@ class DetailHeroSection extends ConsumerWidget {
           imageUrl: primaryBackdropAsset.url,
           imageHeaders: primaryBackdropAsset.headers,
           fallbackSources: buildPrimaryBackdropFallbackSources(target),
+          cachePolicy: primaryBackdropAsset.cachePolicy,
         ),
         IgnorePointer(
           child: Align(
@@ -545,11 +546,13 @@ class DetailBackdropImage extends StatelessWidget {
     required this.imageUrl,
     this.imageHeaders = const {},
     this.fallbackSources = const [],
+    this.cachePolicy = AppNetworkImageCachePolicy.persistent,
   });
 
   final String imageUrl;
   final Map<String, String> imageHeaders;
   final List<AppNetworkImageSource> fallbackSources;
+  final AppNetworkImageCachePolicy cachePolicy;
 
   @override
   Widget build(BuildContext context) {
@@ -567,6 +570,7 @@ class DetailBackdropImage extends StatelessWidget {
           imageUrl,
           headers: imageHeaders,
           fallbackSources: fallbackSources,
+          cachePolicy: cachePolicy,
           cacheWidth: decodeSize?.width,
           cacheHeight: decodeSize?.height,
           fit: BoxFit.cover,
@@ -618,10 +622,12 @@ class DetailHeroImageAsset {
   const DetailHeroImageAsset({
     required this.url,
     this.headers = const {},
+    this.cachePolicy = AppNetworkImageCachePolicy.persistent,
   });
 
   final String url;
   final Map<String, String> headers;
+  final AppNetworkImageCachePolicy cachePolicy;
 }
 
 DetailHeroImageAsset resolvePrimaryBackdropAsset(MediaDetailTarget target) {
@@ -629,6 +635,9 @@ DetailHeroImageAsset resolvePrimaryBackdropAsset(MediaDetailTarget target) {
     return DetailHeroImageAsset(
       url: target.backdropUrl.trim(),
       headers: target.backdropHeaders,
+      cachePolicy: _shouldBypassPersistentCacheForBackdrop(target)
+          ? AppNetworkImageCachePolicy.networkOnly
+          : AppNetworkImageCachePolicy.persistent,
     );
   }
   if (target.bannerUrl.trim().isNotEmpty) {
@@ -641,6 +650,7 @@ DetailHeroImageAsset resolvePrimaryBackdropAsset(MediaDetailTarget target) {
     return DetailHeroImageAsset(
       url: target.extraBackdropUrls.first,
       headers: target.extraBackdropHeaders,
+      cachePolicy: AppNetworkImageCachePolicy.networkOnly,
     );
   }
   if (target.posterUrl.trim().isNotEmpty) {
@@ -658,7 +668,11 @@ List<AppNetworkImageSource> buildPrimaryBackdropFallbackSources(
   final sources = <AppNetworkImageSource>[];
   final seen = <String>{target.backdropUrl.trim()};
 
-  void add(String url, Map<String, String> headers) {
+  void add(
+    String url,
+    Map<String, String> headers,
+    AppNetworkImageCachePolicy cachePolicy,
+  ) {
     final trimmedUrl = url.trim();
     if (trimmedUrl.isEmpty || !seen.add(trimmedUrl)) {
       return;
@@ -667,16 +681,41 @@ List<AppNetworkImageSource> buildPrimaryBackdropFallbackSources(
       AppNetworkImageSource(
         url: trimmedUrl,
         headers: headers,
+        cachePolicy: cachePolicy,
       ),
     );
   }
 
-  add(target.bannerUrl, target.bannerHeaders);
+  add(
+    target.bannerUrl,
+    target.bannerHeaders,
+    AppNetworkImageCachePolicy.persistent,
+  );
   for (final url in target.extraBackdropUrls) {
-    add(url, target.extraBackdropHeaders);
+    add(
+      url,
+      target.extraBackdropHeaders,
+      AppNetworkImageCachePolicy.networkOnly,
+    );
   }
-  add(target.posterUrl, target.posterHeaders);
+  add(
+    target.posterUrl,
+    target.posterHeaders,
+    AppNetworkImageCachePolicy.persistent,
+  );
   return sources;
+}
+
+bool _shouldBypassPersistentCacheForBackdrop(MediaDetailTarget target) {
+  final itemType = target.itemType.trim().toLowerCase();
+  if (itemType != 'episode') {
+    return false;
+  }
+  final backdropUrl = target.backdropUrl.trim();
+  final bannerUrl = target.bannerUrl.trim();
+  return backdropUrl.isNotEmpty &&
+      bannerUrl.isNotEmpty &&
+      backdropUrl != bannerUrl;
 }
 
 PlaybackTarget? resolvePrimaryPlaybackTarget(

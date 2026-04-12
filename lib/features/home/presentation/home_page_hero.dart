@@ -380,7 +380,8 @@ _FeaturedHeroImage _resolveFeaturedHeroLandscapeImage({
   required _FeaturedHeroImage fallbackImage,
 }) {
   final wideCandidates = <_FeaturedHeroImage>[
-    if (target.backdropUrl.trim().isNotEmpty)
+    if (target.backdropUrl.trim().isNotEmpty &&
+        !_isHomeDetailOnlyEpisodeBackdrop(target))
       _FeaturedHeroImage(
         url: target.backdropUrl,
         headers: target.backdropHeaders,
@@ -390,12 +391,6 @@ _FeaturedHeroImage _resolveFeaturedHeroLandscapeImage({
         url: target.bannerUrl,
         headers: target.bannerHeaders,
       ),
-    for (final imageUrl in target.extraBackdropUrls)
-      if (imageUrl.trim().isNotEmpty)
-        _FeaturedHeroImage(
-          url: imageUrl,
-          headers: target.extraBackdropHeaders,
-        ),
     if (fallbackImage.url.trim().isNotEmpty &&
         fallbackImage.url.trim() != target.posterUrl.trim())
       fallbackImage,
@@ -460,7 +455,8 @@ _FeaturedHeroImage _resolveFeaturedHeroBackgroundImage({
   required MediaDetailTarget target,
   required _FeaturedHeroImage fallbackImage,
 }) {
-  if (target.backdropUrl.trim().isNotEmpty) {
+  if (target.backdropUrl.trim().isNotEmpty &&
+      !_isHomeDetailOnlyEpisodeBackdrop(target)) {
     return _FeaturedHeroImage(
       url: target.backdropUrl,
       headers: target.backdropHeaders,
@@ -471,14 +467,6 @@ _FeaturedHeroImage _resolveFeaturedHeroBackgroundImage({
       url: target.bannerUrl,
       headers: target.bannerHeaders,
     );
-  }
-  for (final imageUrl in target.extraBackdropUrls) {
-    if (imageUrl.trim().isNotEmpty) {
-      return _FeaturedHeroImage(
-        url: imageUrl,
-        headers: target.extraBackdropHeaders,
-      );
-    }
   }
   if (target.posterUrl.trim().isNotEmpty) {
     return _FeaturedHeroImage(

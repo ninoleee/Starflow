@@ -228,11 +228,22 @@ List<_LibraryImageAsset> _resolveLibraryPosterAssets(MediaItem item) {
 
   add(item.posterUrl, item.posterHeaders);
   add(item.bannerUrl, item.bannerHeaders);
-  add(item.backdropUrl, item.backdropHeaders);
-  for (final url in item.extraBackdropUrls) {
-    add(url, item.extraBackdropHeaders);
+  if (!_isLibraryDetailOnlyEpisodeBackdrop(item)) {
+    add(item.backdropUrl, item.backdropHeaders);
   }
   return assets;
+}
+
+bool _isLibraryDetailOnlyEpisodeBackdrop(MediaItem item) {
+  final itemType = item.itemType.trim().toLowerCase();
+  if (itemType != 'episode') {
+    return false;
+  }
+  final backdropUrl = item.backdropUrl.trim();
+  final bannerUrl = item.bannerUrl.trim();
+  return backdropUrl.isNotEmpty &&
+      bannerUrl.isNotEmpty &&
+      backdropUrl != bannerUrl;
 }
 
 String _libraryItemFocusId({

@@ -1082,11 +1082,22 @@ List<AppNetworkImageSource> _buildPosterFallbackSources(
   }
 
   add(target.bannerUrl, target.bannerHeaders);
-  add(target.backdropUrl, target.backdropHeaders);
-  for (final url in target.extraBackdropUrls) {
-    add(url, target.extraBackdropHeaders);
+  if (!_isHomeDetailOnlyEpisodeBackdrop(target)) {
+    add(target.backdropUrl, target.backdropHeaders);
   }
   return sources;
+}
+
+bool _isHomeDetailOnlyEpisodeBackdrop(MediaDetailTarget target) {
+  final itemType = target.itemType.trim().toLowerCase();
+  if (itemType != 'episode') {
+    return false;
+  }
+  final backdropUrl = target.backdropUrl.trim();
+  final bannerUrl = target.bannerUrl.trim();
+  return backdropUrl.isNotEmpty &&
+      bannerUrl.isNotEmpty &&
+      backdropUrl != bannerUrl;
 }
 
 int? _resolveCacheDimension(

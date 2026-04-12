@@ -29,6 +29,7 @@ class _StubPersistentImageCache implements PersistentImageCache {
   Future<Uint8List> load(
     String url, {
     Map<String, String>? headers,
+    bool persist = true,
   }) async {
     final response = await _client.get(Uri.parse(url), headers: headers);
     if (response.statusCode < 200 || response.statusCode >= 300) {

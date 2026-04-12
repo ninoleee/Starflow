@@ -6,6 +6,7 @@ abstract class PersistentImageCache {
   Future<Uint8List> load(
     String url, {
     Map<String, String>? headers,
+    bool persist = true,
   });
 
   Future<LocalStorageCacheSummary> inspect();

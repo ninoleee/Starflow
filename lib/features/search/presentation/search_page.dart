@@ -10,6 +10,7 @@ import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
+import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
 import 'package:starflow/features/search/application/search_favorite_metadata_service.dart';
@@ -1783,12 +1784,23 @@ List<AppNetworkImageSource> _buildSearchPosterFallbackSources(
   }
   if (detailTarget != null) {
     add(detailTarget.bannerUrl, detailTarget.bannerHeaders);
-    add(detailTarget.backdropUrl, detailTarget.backdropHeaders);
-    for (final imageUrl in detailTarget.extraBackdropUrls) {
-      add(imageUrl, detailTarget.extraBackdropHeaders);
+    if (!_isSearchDetailOnlyEpisodeBackdrop(detailTarget)) {
+      add(detailTarget.backdropUrl, detailTarget.backdropHeaders);
     }
   }
   return sources;
+}
+
+bool _isSearchDetailOnlyEpisodeBackdrop(MediaDetailTarget target) {
+  final itemType = target.itemType.trim().toLowerCase();
+  if (itemType != 'episode') {
+    return false;
+  }
+  final backdropUrl = target.backdropUrl.trim();
+  final bannerUrl = target.bannerUrl.trim();
+  return backdropUrl.isNotEmpty &&
+      bannerUrl.isNotEmpty &&
+      backdropUrl != bannerUrl;
 }
 
 class _SearchPosterPlaceholder extends StatelessWidget {

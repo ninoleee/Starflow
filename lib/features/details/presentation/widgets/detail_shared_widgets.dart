@@ -285,10 +285,12 @@ class DetailImageAsset {
   const DetailImageAsset({
     required this.url,
     this.headers = const {},
+    this.cachePolicy = AppNetworkImageCachePolicy.persistent,
   });
 
   final String url;
   final Map<String, String> headers;
+  final AppNetworkImageCachePolicy cachePolicy;
 }
 
 class DetailImageGallery extends StatelessWidget {
@@ -324,6 +326,7 @@ class DetailImageGallery extends StatelessWidget {
                   child: AppNetworkImage(
                     image.url,
                     headers: image.headers,
+                    cachePolicy: image.cachePolicy,
                     fit: BoxFit.contain,
                     errorBuilder: (context, error, stackTrace) {
                       return const ColoredBox(color: Color(0xFF0D192A));
@@ -362,6 +365,7 @@ class DetailImageGallery extends StatelessWidget {
                     child: AppNetworkImage(
                       image.url,
                       headers: image.headers,
+                      cachePolicy: image.cachePolicy,
                       fit: BoxFit.cover,
                       errorBuilder: (context, error, stackTrace) {
                         return const ColoredBox(color: Color(0xFF0D192A));
@@ -382,18 +386,54 @@ List<DetailImageAsset> buildDetailGalleryImages(MediaDetailTarget target) {
   final seen = <String>{};
   final images = <DetailImageAsset>[];
 
-  void add(String url, Map<String, String> headers) {
+  void add(
+    String url,
+    Map<String, String> headers,
+    AppNetworkImageCachePolicy cachePolicy,
+  ) {
     final trimmed = url.trim();
     if (trimmed.isEmpty || !seen.add(trimmed)) {
       return;
     }
-    images.add(DetailImageAsset(url: trimmed, headers: headers));
+    images.add(
+      DetailImageAsset(
+        url: trimmed,
+        headers: headers,
+        cachePolicy: cachePolicy,
+      ),
+    );
   }
 
-  add(target.backdropUrl, target.backdropHeaders);
-  add(target.bannerUrl, target.bannerHeaders);
+  add(
+    target.backdropUrl,
+    target.backdropHeaders,
+    _shouldBypassPersistentCacheForBackdrop(target)
+        ? AppNetworkImageCachePolicy.networkOnly
+        : AppNetworkImageCachePolicy.persistent,
+  );
+  add(
+    target.bannerUrl,
+    target.bannerHeaders,
+    AppNetworkImageCachePolicy.persistent,
+  );
   for (final url in target.extraBackdropUrls) {
-    add(url, target.extraBackdropHeaders);
+    add(
+      url,
+      target.extraBackdropHeaders,
+      AppNetworkImageCachePolicy.networkOnly,
+    );
   }
   return images;
+}
+
+bool _shouldBypassPersistentCacheForBackdrop(MediaDetailTarget target) {
+  final itemType = target.itemType.trim().toLowerCase();
+  if (itemType != 'episode') {
+    return false;
+  }
+  final backdropUrl = target.backdropUrl.trim();
+  final bannerUrl = target.bannerUrl.trim();
+  return backdropUrl.isNotEmpty &&
+      bannerUrl.isNotEmpty &&
+      backdropUrl != bannerUrl;
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
@@ -22,6 +23,9 @@ import 'package:starflow/features/settings/presentation/playback_settings_page.d
 import 'package:starflow/features/settings/presentation/search_provider_editor_page.dart';
 import 'package:starflow/features/settings/presentation/settings_management_page.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
+
+final Future<PackageInfo> _settingsPagePackageInfoFuture =
+    PackageInfo.fromPlatform();
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -346,7 +350,7 @@ class SettingsPage extends ConsumerStatefulWidget {
                     ],
                   ),
                 ),
-                const SizedBox(height: kBottomReservedSpacing),
+                const _SettingsPageVersionFooter(),
               ],
             ),
           ),
@@ -583,6 +587,47 @@ class SettingsPage extends ConsumerStatefulWidget {
     await ref
         .read(settingsControllerProvider.notifier)
         .setHomeHeroSourceModuleId(selection);
+  }
+}
+
+class _SettingsPageVersionFooter extends StatelessWidget {
+  const _SettingsPageVersionFooter();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return FutureBuilder<PackageInfo>(
+      future: _settingsPagePackageInfoFuture,
+      builder: (context, snapshot) {
+        final info = snapshot.data;
+        final version = info?.version.trim() ?? '';
+        if (version.isEmpty) {
+          return const SizedBox(height: kBottomReservedSpacing);
+        }
+        final buildNumber = info?.buildNumber.trim() ?? '';
+        final versionLabel = buildNumber.isEmpty
+            ? '版本 $version · Nino'
+            : '版本 $version ($buildNumber) · Nino';
+        return Padding(
+          padding: const EdgeInsets.only(
+            top: 18,
+            bottom: kBottomReservedSpacing,
+          ),
+          child: Center(
+            child: Text(
+              versionLabel,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant.withValues(
+                  alpha: 0.72,
+                ),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 

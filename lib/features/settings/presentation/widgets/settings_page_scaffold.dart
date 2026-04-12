@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
@@ -43,7 +44,7 @@ class SettingsPageScaffold extends StatelessWidget {
               keyboardDismissBehavior: keyboardDismissBehavior,
               children: [
                 ...children,
-                SizedBox(height: bottomSpacing),
+                _SettingsVersionFooter(bottomSpacing: bottomSpacing),
               ],
             ),
             Positioned(
@@ -58,6 +59,54 @@ class SettingsPageScaffold extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+final Future<PackageInfo> _settingsPackageInfoFuture =
+    PackageInfo.fromPlatform();
+
+class _SettingsVersionFooter extends StatelessWidget {
+  const _SettingsVersionFooter({
+    required this.bottomSpacing,
+  });
+
+  final double bottomSpacing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return FutureBuilder<PackageInfo>(
+      future: _settingsPackageInfoFuture,
+      builder: (context, snapshot) {
+        final info = snapshot.data;
+        final version = info?.version.trim() ?? '';
+        if (version.isEmpty) {
+          return SizedBox(height: bottomSpacing);
+        }
+        final buildNumber = info?.buildNumber.trim() ?? '';
+        final versionLabel = buildNumber.isEmpty
+            ? '版本 $version · Nino'
+            : '版本 $version ($buildNumber) · Nino';
+        return Padding(
+          padding: EdgeInsets.only(
+            top: 18,
+            bottom: bottomSpacing,
+          ),
+          child: Center(
+            child: Text(
+              versionLabel,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant.withValues(
+                  alpha: 0.72,
+                ),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

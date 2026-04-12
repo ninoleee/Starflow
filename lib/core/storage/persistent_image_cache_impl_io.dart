@@ -70,10 +70,17 @@ class _IoPersistentImageCache implements PersistentImageCache {
   Future<Uint8List> load(
     String url, {
     Map<String, String>? headers,
+    bool persist = true,
   }) async {
     final trimmedUrl = url.trim();
     if (trimmedUrl.isEmpty) {
       throw StateError('Image URL is empty.');
+    }
+    if (!persist) {
+      return _fetchNetworkBytes(
+        url: trimmedUrl,
+        headers: headers,
+      );
     }
     final cacheKey = _cacheIdentity(trimmedUrl, headers);
     final memoryCached = _memoryCache.remove(cacheKey);
@@ -122,22 +129,10 @@ class _IoPersistentImageCache implements PersistentImageCache {
     }
 
     try {
-      final response = await _client.get(Uri.parse(url), headers: headers);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw StateError(
-          'HTTP request failed, statusCode: ${response.statusCode}, $url',
-        );
-      }
-
-      final bytes = response.bodyBytes;
-      if (bytes.isEmpty) {
-        throw StateError('Image response body is empty: $url');
-      }
-      final contentType = response.headers['content-type'] ?? '';
-      if (!_looksLikeImageResponse(contentType, bytes)) {
-        throw StateError('Image response is not a decodable image: $url');
-      }
-
+      final bytes = await _fetchNetworkBytes(
+        url: url,
+        headers: headers,
+      );
       await file.writeAsBytes(bytes, flush: false);
       await _saveMetadata(metadataFile, _buildMetadata());
       _remember(cacheKey, bytes);
@@ -159,6 +154,28 @@ class _IoPersistentImageCache implements PersistentImageCache {
     if (bytes.isEmpty || !_looksLikeImageBytes(bytes)) {
       await _deleteIfExists(file);
       return null;
+    }
+    return bytes;
+  }
+
+  Future<Uint8List> _fetchNetworkBytes({
+    required String url,
+    required Map<String, String>? headers,
+  }) async {
+    final response = await _client.get(Uri.parse(url), headers: headers);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError(
+        'HTTP request failed, statusCode: ${response.statusCode}, $url',
+      );
+    }
+
+    final bytes = response.bodyBytes;
+    if (bytes.isEmpty) {
+      throw StateError('Image response body is empty: $url');
+    }
+    final contentType = response.headers['content-type'] ?? '';
+    if (!_looksLikeImageResponse(contentType, bytes)) {
+      throw StateError('Image response is not a decodable image: $url');
     }
     return bytes;
   }

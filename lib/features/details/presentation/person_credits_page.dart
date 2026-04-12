@@ -549,7 +549,11 @@ List<AppNetworkImageSource> _buildPosterFallbackSources(
   final sources = <AppNetworkImageSource>[];
   final seen = <String>{target.posterUrl.trim()};
 
-  void add(String url, Map<String, String> headers) {
+  void add(
+    String url,
+    Map<String, String> headers,
+    AppNetworkImageCachePolicy cachePolicy,
+  ) {
     final trimmedUrl = url.trim();
     if (trimmedUrl.isEmpty || !seen.add(trimmedUrl)) {
       return;
@@ -558,14 +562,27 @@ List<AppNetworkImageSource> _buildPosterFallbackSources(
       AppNetworkImageSource(
         url: trimmedUrl,
         headers: headers,
+        cachePolicy: cachePolicy,
       ),
     );
   }
 
-  add(target.bannerUrl, target.bannerHeaders);
-  add(target.backdropUrl, target.backdropHeaders);
+  add(
+    target.bannerUrl,
+    target.bannerHeaders,
+    AppNetworkImageCachePolicy.persistent,
+  );
+  add(
+    target.backdropUrl,
+    target.backdropHeaders,
+    AppNetworkImageCachePolicy.persistent,
+  );
   for (final url in target.extraBackdropUrls) {
-    add(url, target.extraBackdropHeaders);
+    add(
+      url,
+      target.extraBackdropHeaders,
+      AppNetworkImageCachePolicy.networkOnly,
+    );
   }
   return sources;
 }

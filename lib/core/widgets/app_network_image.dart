@@ -12,14 +12,21 @@ typedef AppNetworkImageErrorBuilder = Widget Function(
     BuildContext context, Object error, StackTrace? stackTrace);
 typedef AppNetworkImageLoadingBuilder = Widget Function(BuildContext context);
 
+enum AppNetworkImageCachePolicy {
+  persistent,
+  networkOnly,
+}
+
 class AppNetworkImageSource {
   const AppNetworkImageSource({
     required this.url,
     this.headers = const {},
+    this.cachePolicy = AppNetworkImageCachePolicy.persistent,
   });
 
   final String url;
   final Map<String, String> headers;
+  final AppNetworkImageCachePolicy cachePolicy;
 }
 
 class AppNetworkImage extends ConsumerStatefulWidget {
@@ -38,6 +45,7 @@ class AppNetworkImage extends ConsumerStatefulWidget {
     this.loadingBuilder,
     this.debugLabel = '',
     this.fallbackSources = const [],
+    this.cachePolicy = AppNetworkImageCachePolicy.persistent,
   });
 
   final String url;
@@ -53,6 +61,7 @@ class AppNetworkImage extends ConsumerStatefulWidget {
   final AppNetworkImageLoadingBuilder? loadingBuilder;
   final String debugLabel;
   final List<AppNetworkImageSource> fallbackSources;
+  final AppNetworkImageCachePolicy cachePolicy;
 
   @override
   ConsumerState<AppNetworkImage> createState() => _AppNetworkImageState();
@@ -74,6 +83,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.url.trim() != widget.url.trim() ||
         !_sameHeaders(oldWidget.headers, widget.headers) ||
+        oldWidget.cachePolicy != widget.cachePolicy ||
         !_sameImageSources(
           oldWidget.fallbackSources,
           widget.fallbackSources,
@@ -98,6 +108,9 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     final candidates = _buildCandidateSources();
     if (candidates.isEmpty) {
       return null;
+    }
+    if (!_shouldUseResolvedImageFutureCache(candidates)) {
+      return _loadAndAnalyze(candidates);
     }
     final cacheKey = _buildCandidatesCacheKey(candidates);
     final cachedFuture = _resolvedImageFutureCache[cacheKey];
@@ -126,12 +139,15 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
         final bytes = await persistentImageCache.load(
           candidate.url,
           headers: candidate.headers,
+          persist:
+              candidate.cachePolicy == AppNetworkImageCachePolicy.persistent,
         );
         return _ResolvedImageContent(
           bytes: bytes,
           isSvg: _looksLikeSvg(candidate.url, bytes),
           sourceUrl: candidate.url,
           sourceHeaders: candidate.headers,
+          sourceCachePolicy: candidate.cachePolicy,
         );
       } catch (error, stackTrace) {
         lastError = error;
@@ -229,12 +245,20 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     final seen = <String>{};
     final candidates = <AppNetworkImageSource>[];
 
-    void add(String url, Map<String, String>? headers) {
+    void add(
+      String url,
+      Map<String, String>? headers,
+      AppNetworkImageCachePolicy cachePolicy,
+    ) {
       final trimmedUrl = url.trim();
       final resolvedHeaders = (headers?.isNotEmpty ?? false)
           ? headers!
           : (networkImageHeadersForUrl(trimmedUrl) ?? const <String, String>{});
-      final sourceIdentity = _buildSourceIdentity(trimmedUrl, resolvedHeaders);
+      final sourceIdentity = _buildSourceIdentity(
+        trimmedUrl,
+        resolvedHeaders,
+        cachePolicy: cachePolicy,
+      );
       if (trimmedUrl.isEmpty || !seen.add(sourceIdentity)) {
         return;
       }
@@ -242,21 +266,35 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
         AppNetworkImageSource(
           url: trimmedUrl,
           headers: resolvedHeaders,
+          cachePolicy: cachePolicy,
         ),
       );
     }
 
-    add(widget.url, widget.headers);
+    add(widget.url, widget.headers, widget.cachePolicy);
     for (final source in widget.fallbackSources) {
-      add(source.url, source.headers);
+      add(source.url, source.headers, source.cachePolicy);
     }
     return candidates;
+  }
+
+  bool _shouldUseResolvedImageFutureCache(
+    List<AppNetworkImageSource> candidates,
+  ) {
+    return candidates.every(
+      (candidate) =>
+          candidate.cachePolicy == AppNetworkImageCachePolicy.persistent,
+    );
   }
 
   String _buildCandidatesCacheKey(List<AppNetworkImageSource> candidates) {
     return candidates
         .map((candidate) =>
-            _buildSourceIdentity(candidate.url, candidate.headers))
+            _buildSourceIdentity(
+              candidate.url,
+              candidate.headers,
+              cachePolicy: candidate.cachePolicy,
+            ))
         .join('\u0000');
   }
 
@@ -276,17 +314,23 @@ class _ResolvedImageContent {
     required this.isSvg,
     required this.sourceUrl,
     required this.sourceHeaders,
+    required this.sourceCachePolicy,
   });
 
   final Uint8List bytes;
   final bool isSvg;
   final String sourceUrl;
   final Map<String, String> sourceHeaders;
+  final AppNetworkImageCachePolicy sourceCachePolicy;
 
   ImageProvider<Object> get rasterProvider {
     return _PersistentMemoryImageProvider(
       bytes: bytes,
-      sourceKey: _buildSourceIdentity(sourceUrl, sourceHeaders),
+      sourceKey: _buildSourceIdentity(
+        sourceUrl,
+        sourceHeaders,
+        cachePolicy: sourceCachePolicy,
+      ),
       bytesFingerprint: _fingerprintBytes(bytes),
     );
   }
@@ -313,17 +357,27 @@ bool _sameImageSources(
     final leftSource = left[index];
     final rightSource = right[index];
     if (leftSource.url != rightSource.url ||
-        !mapEquals(leftSource.headers, rightSource.headers)) {
+        !mapEquals(leftSource.headers, rightSource.headers) ||
+        leftSource.cachePolicy != rightSource.cachePolicy) {
       return false;
     }
   }
   return true;
 }
 
-String _buildSourceIdentity(String url, Map<String, String> headers) {
+String _buildSourceIdentity(
+  String url,
+  Map<String, String> headers, {
+  AppNetworkImageCachePolicy cachePolicy =
+      AppNetworkImageCachePolicy.persistent,
+}) {
   final normalizedUrl = url.trim();
+  final buffer = StringBuffer()
+    ..write(cachePolicy.name)
+    ..write('|')
+    ..write(normalizedUrl);
   if (headers.isEmpty) {
-    return normalizedUrl;
+    return buffer.toString();
   }
   final normalizedHeaders = headers.entries
       .map((entry) =>
@@ -332,9 +386,8 @@ String _buildSourceIdentity(String url, Map<String, String> headers) {
       .toList(growable: false)
     ..sort((a, b) => a.key.compareTo(b.key));
   if (normalizedHeaders.isEmpty) {
-    return normalizedUrl;
+    return buffer.toString();
   }
-  final buffer = StringBuffer(normalizedUrl);
   for (final entry in normalizedHeaders) {
     buffer
       ..write('\n')
