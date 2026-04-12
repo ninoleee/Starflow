@@ -738,6 +738,7 @@ class AppSettings {
     this.performanceLightweightTvFocusEnabled = false,
     this.performanceStaticHomeHeroEnabled = false,
     this.performanceLightweightHomeHeroEnabled = false,
+    this.performanceLiveItemHeroOverlayEnabled = true,
     this.performanceSlimDetailHeroEnabled = false,
     this.performanceLeanPlaybackUiEnabled = false,
     this.performanceAggressivePlaybackTuningEnabled = false,
@@ -782,6 +783,7 @@ class AppSettings {
   final bool performanceLightweightTvFocusEnabled;
   final bool performanceStaticHomeHeroEnabled;
   final bool performanceLightweightHomeHeroEnabled;
+  final bool performanceLiveItemHeroOverlayEnabled;
   final bool performanceSlimDetailHeroEnabled;
   final bool performanceLeanPlaybackUiEnabled;
   final bool performanceAggressivePlaybackTuningEnabled;
@@ -826,6 +828,7 @@ class AppSettings {
     bool? performanceLightweightTvFocusEnabled,
     bool? performanceStaticHomeHeroEnabled,
     bool? performanceLightweightHomeHeroEnabled,
+    bool? performanceLiveItemHeroOverlayEnabled,
     bool? performanceSlimDetailHeroEnabled,
     bool? performanceLeanPlaybackUiEnabled,
     bool? performanceAggressivePlaybackTuningEnabled,
@@ -885,6 +888,9 @@ class AppSettings {
       performanceLightweightHomeHeroEnabled:
           performanceLightweightHomeHeroEnabled ??
               this.performanceLightweightHomeHeroEnabled,
+      performanceLiveItemHeroOverlayEnabled:
+          performanceLiveItemHeroOverlayEnabled ??
+              this.performanceLiveItemHeroOverlayEnabled,
       performanceSlimDetailHeroEnabled: performanceSlimDetailHeroEnabled ??
           this.performanceSlimDetailHeroEnabled,
       performanceLeanPlaybackUiEnabled: performanceLeanPlaybackUiEnabled ??
@@ -956,6 +962,8 @@ class AppSettings {
       'performanceStaticHomeHeroEnabled': performanceStaticHomeHeroEnabled,
       'performanceLightweightHomeHeroEnabled':
           performanceLightweightHomeHeroEnabled,
+      'performanceLiveItemHeroOverlayEnabled':
+          performanceLiveItemHeroOverlayEnabled,
       'performanceSlimDetailHeroEnabled': performanceSlimDetailHeroEnabled,
       'performanceLeanPlaybackUiEnabled': performanceLeanPlaybackUiEnabled,
       'performanceAggressivePlaybackTuningEnabled':
@@ -1057,6 +1065,8 @@ class AppSettings {
           json['performanceStaticHomeHeroEnabled'] as bool? ?? false,
       performanceLightweightHomeHeroEnabled:
           json['performanceLightweightHomeHeroEnabled'] as bool? ?? false,
+      performanceLiveItemHeroOverlayEnabled:
+          json['performanceLiveItemHeroOverlayEnabled'] as bool? ?? true,
       performanceSlimDetailHeroEnabled:
           json['performanceSlimDetailHeroEnabled'] as bool? ?? false,
       performanceLeanPlaybackUiEnabled:
@@ -1131,6 +1141,7 @@ extension AppSettingsPerformanceX on AppSettings {
       performanceLightweightTvFocusEnabled,
       performanceStaticHomeHeroEnabled,
       performanceLightweightHomeHeroEnabled,
+      !performanceLiveItemHeroOverlayEnabled,
       performanceSlimDetailHeroEnabled,
       performanceLeanPlaybackUiEnabled,
     ].where((enabled) => enabled).length;

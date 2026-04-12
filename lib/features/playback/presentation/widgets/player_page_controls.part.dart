@@ -95,6 +95,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
     if (!_isReady || player == null) {
       return;
     }
+    _maybeClearIosEmbeddedMpvStartupPauseGuard(userInitiated: true);
     _traceWindowsMpv(
       'windows-mpv.command.toggle-playback',
       fields: {'playingBefore': player.state.playing},
@@ -133,6 +134,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
     if (!_isReady || player == null) {
       return;
     }
+    _maybeClearIosEmbeddedMpvStartupPauseGuard(userInitiated: true);
     final current = player.state.position;
     final target = current + delta;
     _traceWindowsMpv(
@@ -154,6 +156,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
     if (!_isReady || player == null) {
       return;
     }
+    _maybeClearIosEmbeddedMpvStartupPauseGuard(userInitiated: true);
     _traceWindowsMpv(
       'windows-mpv.command.seek-to',
       fields: {

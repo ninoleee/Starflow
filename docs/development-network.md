@@ -19,15 +19,13 @@
 - 播放页 presentation 现在继续拆到 `player_page.dart` + `player_page_*.part.dart` + 独立 overlay/dialog widgets；这属于本地代码组织与重建范围收口，不改变任何线上请求协议
 - 进入播放器时会更早切到“播放优先”模式；从网络侧看，首页 Hero 补数、详情页自动补全和隐藏页图片加载会更快被压住
 - `MPV` 的远程流调优、质量预设自动降档和 `ISO` 设备源判断已经收口到本地策略层；这些都只改变本地打开方式和缓冲参数，不引入新的网络协议
-- `playback trace / subtitle search trace` 现在默认关闭；即使临时打开，也只写本地日志，不会上报到服务端
+- 应用内置 trace / log 当前已统一静音；设置页里保留的 trace 开关仅用于兼容已有设置字段，不再产生运行时输出
 - `NasMediaIndexer` 当前已经拆成 `refresh_flow / storage_access / indexing / grouping / refresh_support` 多段 `part` 文件；这次拆分只是在本地把刷新编排、索引计算、分组和缓存访问解耦，不新增任何新的网络协议或请求源
 - `PlaybackMemoryRepository` 新增的单调时间戳策略只影响本地“最近播放”排序稳定性，尤其是 Windows 下的同毫秒写入场景；它不涉及任何网络请求
 
-当前还有一个开发态残留：`test/media_repository_quark_source_test.dart` 里仍会打印一条 `indexer.refresh.background.error ... ProviderContainer already disposed` 非失败 trace。它不会改变线上请求协议，但在排查后台刷新时值得留意。
-
 补充说明：
 
-- `WebDAV` 调试日志默认不开启，网络排障时如果需要看扫描与索引过程，可临时修改 `lib/core/utils/webdav_trace.dart` 接入输出
+- 当前仓库内置的 `WebDAV / metadata / subtitle / playback / detail resource switch` trace helper 都已静音；默认不再输出扫描、索引、匹配或播放链路日志
 - `WebDAV / NAS` 标题识别会在本地剥离 `{tmdbid-...}`、`{tvdbid-...}`、`{imdbid-...}`、`{doubanid-...}` 这类嵌入式外部 ID 标签；这一步只影响本地展示标题和搜索词，不新增网络请求
 - `NasMediaIndexer` 主文件压回约 `1k` 行并拆出多个 helper 后，`index_refresh` 相关请求扇出仍然和之前一致；后续如果要排查刷新请求行为，需要把这些 `nas_media_indexer*.dart` 文件视为同一条链路来看
 - 如果条目后续已经刮削过或手动关联过详情信息，首页、媒体库和详情页展示时会优先使用缓存里的更新后标题；这同样只是本地缓存合并优先级调整，不增加新的网络请求
@@ -62,11 +60,11 @@
 - `App 内原生播放器` 与新增的解码模式设置也不引入新的网络协议，仍然复用同一条播放地址和请求头链路
 - 非 `TV` 内嵌 `MPV` 改为 Starflow 自己的轻量播放叠层，也只是本地播放器 UI 收敛；首层现在只保留返回 / 播放 / 进度 / 全屏 / 更多，音量、字幕、音轨、外挂字幕、在线字幕与字幕偏移仍然复用现有播放链路，不新增新的服务端接口
 - Windows `MPV` 在下一次打开前先串行等待上一实例完成 `pause -> stop -> dispose`，关闭后台播放、退出播放器和打开新片源也会复用同一套本地清理流程，不新增网络请求
-- `lib/core/utils/playback_trace.dart` 与 `lib/core/utils/subtitle_search_trace.dart` 的本地 trace 默认关闭；需要排障时才临时打开，也只写本地调试日志与 timeline，不会上报到服务端
+- `lib/core/utils/playback_trace.dart`、`lib/core/utils/subtitle_search_trace.dart`、`lib/core/utils/metadata_search_trace.dart`、`lib/core/utils/detail_resource_switch_trace.dart` 当前都已静音；保留这些 helper 主要是为了兼容已有调用点和设置字段
 - 非 `TV` 叠层里的 fullscreen 状态透传、窗口态 click-only 唤醒、auto-hide 定时器取消、播放设置弹窗 Material 化和 dispose 保护也都属于本地 widget 生命周期修正，不涉及新的网络协议
 - `TV` 播放器新增的“首层极简 + 二层高级”交互，同样只是本地遥控器焦点与播放器控件拆分，不新增新的服务端接口
-- 详情页与播放器页的在线字幕搜索现在都走应用内实现，不依赖外部浏览器；是否真的发起请求由 `设置 -> 播放 -> 字幕 -> 在线字幕来源` 控制
-- 详情页不再在进入时自动搜索字幕；只有手动点击“搜索字幕 / 刷新字幕”时才会发起请求，搜索结果和下载后的字幕文件都会优先复用本地缓存，避免重复请求
+- 详情页、独立字幕搜索页与播放器页的在线字幕搜索现在都走应用内实现，不依赖外部浏览器；是否真的发起请求由 `设置 -> 播放 -> 字幕 -> 在线字幕来源` 控制
+- 详情页和独立字幕搜索页都不再在进入时自动搜索字幕；只有手动点击搜索时才会发起请求，搜索结果和下载后的字幕文件都会优先复用本地缓存，避免重复请求
 - 首页“最近播放”模块直接读取本地播放记忆与详情缓存，不引入新的网络请求
 - 最近播放从“具体单集记录”切到“剧集总名 + 单集副标题”的展示规则，也只是本地展示层映射调整，不增加新的网络请求
 - `WebDAV` 文件删除虽然仍然只用标准 `DELETE`，但客户端现在会在成功后再次检查父目录，确认远端文件真的已经消失；如果远端仍存在，就不会继续当作本地删除成功
@@ -207,9 +205,8 @@ PowerShell 下推荐使用包装脚本运行 Flutter：
 
 - `TMDB`：标题匹配、人物作品、`poster / backdrop / still / profile / logo` 图片与 `TMDB` 评分
 - 其中人物头像使用 `profile`，详情页公司 Logo 使用 `production_companies.logo_path`；当前不再把 `networks` 当作公司 Logo 展示
-- `WMDB`：中文资料、豆瓣 / IMDb 评分补全
+- `WMDB`：中文资料、豆瓣 / IMDb 评分标签与外部 ID 补全
 - 豆瓣：兴趣、推荐、片单、轮播等发现内容
-- `IMDb`：独立评分兜底
 
 `TV` 模式下新增的这些交互也会继续命中同一批网络能力：
 
@@ -245,7 +242,7 @@ PowerShell 下推荐使用包装脚本运行 Flutter：
 
 - `TMDB Read Access Token` 是否已填写
 - 当前网络或代理是否能访问 `api.themoviedb.org` 与 `image.tmdb.org`
-- `WMDB / 豆瓣 / IMDb` 相关站点是否被本机网络策略拦截
+- `WMDB / 豆瓣` 相关站点是否被本机网络策略拦截
 
 和手动元数据更新相关的当前行为：
 
@@ -270,7 +267,7 @@ PowerShell 下推荐使用包装脚本运行 Flutter：
 当前应用内在线字幕链路的要点：
 
 - 在线字幕来源由 `设置 -> 播放 -> 字幕 -> 在线字幕来源` 统一控制，当前已接入 `ASSRT / SubHD / YIFY`
-- 详情页内联字幕搜索和播放器页里的“在线查找字幕”复用同一个仓库实现
+- 详情页内联字幕搜索、独立字幕搜索页和播放器页里的“在线查找字幕”复用同一个仓库实现
 - 搜索请求当前会按来源分别访问：
   - `ASSRT`：`https://assrt.net/sub/`
   - `SubHD`：`https://subhd.tv/search/...`
@@ -279,13 +276,13 @@ PowerShell 下推荐使用包装脚本运行 Flutter：
   - `ASSRT` 下载地址
   - `YIFY` ZIP 下载地址
   - `SubHD` 当前仅支持搜索结果浏览，不支持应用内直接下载
-- 详情页只有在已经拿到可播放目标且手动点击“搜索字幕 / 刷新字幕”时才会发起搜索，并且最多保留 `10` 条可自动加载的结果
+- 详情页只有在已经拿到可播放目标且手动点击“搜索字幕 / 刷新字幕”时才会发起搜索，并且最多保留 `10` 条可自动加载的结果；独立字幕搜索页进入后也只会预填查询词，不会自动发请求
 - 查询会按站点自动做短查询 fallback，例如把 `片名 + SxxEyy`、`片名 + 年份` 逐步回退为更短的片名
 - `ASSRT` 如果返回站点错误页，会直接按来源失败处理，不再把错误页误判成“0 结果”
 - 下载后的字幕会缓存到应用支持目录下的 `starflow-subtitle-cache`
 - 如果某条字幕之前已经下载并解压过，再次选择时会优先复用本地缓存，不再重复下载
 - 如果在线字幕来源被全部关闭，则不会发起这类请求
-- Android `TV` 从原生播放器进入独立字幕搜索页时，会保留当前 `query / title / input`，因此网络请求仍然沿用当前片名或剧集搜索词，不会再以空查询打开
+- Android `TV` 从原生播放器进入独立字幕搜索页时，会保留当前 `query / title / input`，因此后续手动搜索会沿用当前片名或剧集搜索词，不会再以空查询打开
 
 ## 9. 品牌资源导出
 

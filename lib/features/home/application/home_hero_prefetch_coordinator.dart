@@ -201,13 +201,14 @@ class HomeHeroPrefetchCoordinator {
         )) {
           return;
         }
+        final producedUpdate =
+            _heroMetadataRefreshProducedUpdate(target, updatedTarget);
         await cacheRepository.saveDetailTarget(
           seedTarget: target,
           resolvedTarget: updatedTarget,
-          metadataRefreshStatus:
-              _heroMetadataRefreshProducedUpdate(target, updatedTarget)
-                  ? DetailMetadataRefreshStatus.succeeded
-                  : DetailMetadataRefreshStatus.failed,
+          metadataRefreshStatus: producedUpdate
+              ? DetailMetadataRefreshStatus.succeeded
+              : DetailMetadataRefreshStatus.failed,
         );
       } catch (_) {
         if (!_isRefreshSessionActive(

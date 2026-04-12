@@ -30,6 +30,42 @@ import 'package:starflow/features/storage/data/local_storage_cache_repository.da
 part 'home_page_hero.dart';
 part 'home_page_sections.dart';
 
+class HomeHeroPrefetchDecision {
+  const HomeHeroPrefetchDecision({
+    this.shouldSchedule = false,
+    this.forceMetadataRefresh = false,
+  });
+
+  final bool shouldSchedule;
+  final bool forceMetadataRefresh;
+}
+
+@visibleForTesting
+HomeHeroPrefetchDecision resolveHomeHeroPrefetchDecision({
+  required bool isPageVisible,
+  required int featuredItemCount,
+  required bool heroListChanged,
+  required int scheduledMetadataRevision,
+  required int currentMetadataRevision,
+  required int scheduledExplicitRevision,
+  required int currentExplicitRevision,
+}) {
+  final metadataBoundaryChanged =
+      scheduledMetadataRevision != currentMetadataRevision;
+  final explicitBoundaryChanged =
+      scheduledExplicitRevision != currentExplicitRevision;
+  final shouldSchedule = isPageVisible &&
+      featuredItemCount > 0 &&
+      (heroListChanged || metadataBoundaryChanged || explicitBoundaryChanged);
+  if (!shouldSchedule) {
+    return const HomeHeroPrefetchDecision();
+  }
+  return const HomeHeroPrefetchDecision(
+    shouldSchedule: true,
+    forceMetadataRefresh: true,
+  );
+}
+
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
@@ -125,10 +161,16 @@ class _HomeCarouselOverlayRequest {
 }
 
 final _homeResolvedCardProvider =
-    Provider.family<HomeCardViewModel, _HomeCardOverlayRequest>((
+    Provider.autoDispose.family<HomeCardViewModel, _HomeCardOverlayRequest>((
   ref,
   request,
 ) {
+  final liveOverlayEnabled = ref.watch(
+    effectivePerformanceLiveItemHeroOverlayEnabledProvider,
+  );
+  if (!liveOverlayEnabled) {
+    return request.item;
+  }
   final cacheScope = request.cacheScope;
   if (!cacheScope.isEmpty) {
     ref.watch(
@@ -153,11 +195,17 @@ final _homeResolvedCardProvider =
   return mergeCachedHomeCardItem(request.item, mergedTarget);
 });
 
-final _homeResolvedCarouselItemProvider =
-    Provider.family<HomeCarouselItemViewModel, _HomeCarouselOverlayRequest>((
+final _homeResolvedCarouselItemProvider = Provider.autoDispose
+    .family<HomeCarouselItemViewModel, _HomeCarouselOverlayRequest>((
   ref,
   request,
 ) {
+  final liveOverlayEnabled = ref.watch(
+    effectivePerformanceLiveItemHeroOverlayEnabledProvider,
+  );
+  if (!liveOverlayEnabled) {
+    return request.item;
+  }
   final cacheScope = request.cacheScope;
   if (!cacheScope.isEmpty) {
     ref.watch(
@@ -401,18 +449,21 @@ class _HomePageState extends ConsumerState<HomePage>
         featuredItems.map((item) => item.id.trim()).toList(growable: false);
     final heroListChanged = !listEquals(currentHeroIds, _lastFeaturedHeroIds);
     _lastFeaturedHeroIds = currentHeroIds;
-    final shouldForceHeroMetadataRefresh =
-        _scheduledHeroExplicitRefreshRevision != homeExplicitRefreshRevision;
-    if (isPageVisible &&
-        featuredItems.isNotEmpty &&
-        (_scheduledHeroMetadataAutoRefreshRevision !=
-                homeMetadataAutoRefreshRevision ||
-            shouldForceHeroMetadataRefresh)) {
+    final heroPrefetchDecision = resolveHomeHeroPrefetchDecision(
+      isPageVisible: isPageVisible,
+      featuredItemCount: featuredItems.length,
+      heroListChanged: heroListChanged,
+      scheduledMetadataRevision: _scheduledHeroMetadataAutoRefreshRevision,
+      currentMetadataRevision: homeMetadataAutoRefreshRevision,
+      scheduledExplicitRevision: _scheduledHeroExplicitRefreshRevision,
+      currentExplicitRevision: homeExplicitRefreshRevision,
+    );
+    if (heroPrefetchDecision.shouldSchedule) {
       _heroPrefetchCoordinator.schedulePrefetch(
         ref: ref,
         targets: featuredItems.map((item) => item.detailTarget),
         isPageActive: () => mounted && isPageVisible,
-        forceMetadataRefresh: shouldForceHeroMetadataRefresh,
+        forceMetadataRefresh: heroPrefetchDecision.forceMetadataRefresh,
       );
       _scheduledHeroMetadataAutoRefreshRevision =
           homeMetadataAutoRefreshRevision;

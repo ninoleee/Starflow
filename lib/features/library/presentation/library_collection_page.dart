@@ -22,6 +22,7 @@ import 'package:starflow/features/library/domain/library_collection_models.dart'
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/presentation/widgets/library_paged_grid.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
@@ -89,9 +90,21 @@ class LibraryCollectionVisiblePageRequest {
 final libraryCollectionVisiblePageItemsProvider = FutureProvider.family<
     LibraryVisiblePageItemsResult,
     LibraryCollectionVisiblePageRequest>((ref, request) async {
+  final liveOverlayEnabled = ref.watch(
+    effectivePerformanceLiveItemHeroOverlayEnabledProvider,
+  );
   final items = await ref
       .watch(libraryCollectionSeedItemsProvider(request.target).future);
-  await ref.read(localStorageCacheRepositoryProvider).primeDetailPayload();
+  final cacheRepository = ref.read(localStorageCacheRepositoryProvider);
+  if (!liveOverlayEnabled) {
+    return resolveVisibleLibraryPageItemsWithCachedDetails(
+      items: items,
+      page: request.page,
+      pageSize: request.pageSize,
+      localStorageCacheRepository: cacheRepository,
+    );
+  }
+  await cacheRepository.primeDetailPayload();
   return LibraryVisiblePageItemsResult(
     totalItems: items.length,
     items: visibleLibraryPageItems(

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
@@ -96,7 +97,16 @@ class LibraryItemOverlayRequest {
 }
 
 final libraryResolvedItemProvider =
-    Provider.family<MediaItem, LibraryItemOverlayRequest>((ref, request) {
+    Provider.autoDispose.family<MediaItem, LibraryItemOverlayRequest>((
+  ref,
+  request,
+) {
+  final liveOverlayEnabled = ref.watch(
+    effectivePerformanceLiveItemHeroOverlayEnabledProvider,
+  );
+  if (!liveOverlayEnabled) {
+    return request.item;
+  }
   final cacheScope = request.cacheScope;
   if (!cacheScope.isEmpty) {
     ref.watch(
@@ -154,7 +164,8 @@ LocalStorageDetailCacheScope buildVisibleLibraryPageCacheScope({
   );
 }
 
-Future<LibraryVisiblePageItemsResult> resolveVisibleLibraryPageItemsWithCachedDetails({
+Future<LibraryVisiblePageItemsResult>
+    resolveVisibleLibraryPageItemsWithCachedDetails({
   required List<MediaItem> items,
   required int page,
   required int pageSize,
@@ -171,9 +182,8 @@ Future<LibraryVisiblePageItemsResult> resolveVisibleLibraryPageItemsWithCachedDe
       items: const <MediaItem>[],
     );
   }
-  final seedTargets = visibleItems
-      .map(MediaDetailTarget.fromMediaItem)
-      .toList(growable: false);
+  final seedTargets =
+      visibleItems.map(MediaDetailTarget.fromMediaItem).toList(growable: false);
   final resolvedItems = await resolveLibraryItemsWithCachedDetails(
     items: visibleItems,
     localStorageCacheRepository: localStorageCacheRepository,

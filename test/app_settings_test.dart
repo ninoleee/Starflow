@@ -12,6 +12,7 @@ void main() {
       'homeHeroBackgroundEnabled': false,
       'translucentEffectsEnabled': false,
       'autoHideNavigationBarEnabled': false,
+      'performanceLiveItemHeroOverlayEnabled': false,
       'playbackOpenTimeoutSeconds': 45,
       'playbackDefaultSpeed': 1.25,
       'playbackSubtitlePreference': 'off',
@@ -29,6 +30,7 @@ void main() {
     expect(settings.homeHeroBackgroundEnabled, isFalse);
     expect(settings.translucentEffectsEnabled, isFalse);
     expect(settings.autoHideNavigationBarEnabled, isFalse);
+    expect(settings.performanceLiveItemHeroOverlayEnabled, isFalse);
     expect(settings.playbackOpenTimeoutSeconds, 45);
     expect(settings.playbackDefaultSpeed, 1.25);
     expect(
@@ -50,6 +52,7 @@ void main() {
     expect(settings.toJson()['homeHeroBackgroundEnabled'], isFalse);
     expect(settings.toJson()['translucentEffectsEnabled'], isFalse);
     expect(settings.toJson()['autoHideNavigationBarEnabled'], isFalse);
+    expect(settings.toJson()['performanceLiveItemHeroOverlayEnabled'], isFalse);
     expect(settings.toJson()['playbackOpenTimeoutSeconds'], 45);
     expect(settings.toJson()['playbackDefaultSpeed'], 1.25);
     expect(settings.toJson()['playbackSubtitlePreference'], 'off');
@@ -70,6 +73,7 @@ void main() {
     expect(settings.homeHeroBackgroundEnabled, isTrue);
     expect(settings.translucentEffectsEnabled, isTrue);
     expect(settings.autoHideNavigationBarEnabled, isTrue);
+    expect(settings.performanceLiveItemHeroOverlayEnabled, isTrue);
     expect(
       settings.homeModules
           .firstWhere((item) => item.type == HomeModuleType.hero)
@@ -269,6 +273,7 @@ void main() {
     expect(settings.doubanAccount.enabled, isTrue);
     expect(settings.homeModules.length, 4);
     expect(settings.homeModules.first.type, HomeModuleType.hero);
+    expect(settings.performanceLiveItemHeroOverlayEnabled, isTrue);
     expect(
       settings.homeModules.skip(1).map((item) => item.title).toList(),
       ['热播新剧', '豆瓣热门电影', '热播综艺'],

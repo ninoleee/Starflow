@@ -1,5 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/application/settings_slice_providers.dart';
@@ -79,6 +81,7 @@ void main() {
       'translucentEffectsEnabled': false,
       'autoHideNavigationBarEnabled': false,
       'homeHeroBackgroundEnabled': false,
+      'performanceLiveItemHeroOverlayEnabled': false,
     });
     final container = ProviderContainer(
       overrides: [appSettingsProvider.overrideWithValue(settings)],
@@ -92,7 +95,33 @@ void main() {
         translucentEffectsEnabled: false,
         autoHideNavigationBarEnabled: false,
         homeHeroBackgroundEnabled: false,
+        performanceLiveItemHeroOverlayEnabled: false,
       ),
+    );
+  });
+
+  test('runtime item hero overlay is forced off on television', () async {
+    final container = ProviderContainer(
+      overrides: [
+        appSettingsProvider.overrideWithValue(
+          const AppSettings(
+            mediaSources: [],
+            searchProviders: [],
+            doubanAccount: DoubanAccountConfig(enabled: false),
+            homeModules: [],
+            performanceLiveItemHeroOverlayEnabled: true,
+          ),
+        ),
+        isTelevisionProvider.overrideWith((ref) => true),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(isTelevisionProvider.future);
+
+    expect(
+      container.read(effectivePerformanceLiveItemHeroOverlayEnabledProvider),
+      isFalse,
     );
   });
 }

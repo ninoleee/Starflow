@@ -103,6 +103,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   static const _kSpeedOptions = <double>[0.75, 1.0, 1.25, 1.5, 2.0];
   static const _kSubtitleDelaySteps = <double>[-2, -1, -0.5, 0, 0.5, 1, 2];
   static const _kProgressPersistInterval = Duration(seconds: 8);
+  static const _kIosEmbeddedMpvStartupPauseGuardWindow = Duration(seconds: 3);
+  static const _kIosEmbeddedMpvStartupPauseGuardProgress =
+      Duration(milliseconds: 1200);
   static const int _kDefaultMpvBufferSizeBytes = 32 * 1024 * 1024;
   static const int _kNetworkMpvBufferSizeBytes = 64 * 1024 * 1024;
   static const int _kHeavyMpvBufferSizeBytes = 96 * 1024 * 1024;
@@ -186,6 +189,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   int? _lastTracedVideoHeight;
   bool? _lastTracedBufferingState;
   int? _lastTracedBufferingBucket;
+  DateTime? _iosEmbeddedMpvStartupPauseGuardUntil;
+  Duration _iosEmbeddedMpvStartupPauseGuardBaseline = Duration.zero;
   late final ProviderContainer _providerContainer;
   late final StateController<bool> _playbackPerformanceModeController;
   Timer? _tvPlaybackChromeHideTimer;
@@ -255,6 +260,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _videoController = null;
     _isReady = false;
     _isEmbeddedMpvFullscreen = false;
+    _clearIosEmbeddedMpvStartupPauseGuard();
     _stopMpvStallWatchdog(clearRecoveryFlag: clearStallRecoveryFlag);
     return player;
   }
@@ -345,6 +351,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool get _isActivelyPlaying {
     final player = _player;
     return _isReady && player != null && player.state.playing;
+  }
+
+  bool get _isIosEmbeddedMpvPlayback {
+    if (kIsWeb) {
+      return false;
+    }
+    final playbackEngine =
+        _providerContainer.read(appSettingsProvider).playbackEngine;
+    return defaultTargetPlatform == TargetPlatform.iOS &&
+        playbackEngine == PlaybackEngine.embeddedMpv;
   }
 
   bool get _backgroundPlaybackEnabled =>

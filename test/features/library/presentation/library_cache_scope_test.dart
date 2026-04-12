@@ -108,8 +108,7 @@ void main() {
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 2);
   });
 
-  test(
-      'library visible page provider stays stable across cache updates',
+  test('library visible page provider stays stable across cache updates',
       () async {
     final mediaRepository = _CountingMediaRepository(
       library: [
@@ -219,6 +218,118 @@ void main() {
     expect(onPageUpdate.items.single.title, 'Page 1');
     expect(mediaRepository.fetchLibraryCallCount, 1);
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 0);
+  });
+
+  test(
+      'library visible page provider returns a static cached snapshot when runtime overlay updates are disabled',
+      () async {
+    final mediaRepository = _CountingMediaRepository(
+      library: [
+        MediaItem(
+          id: 'movie-1',
+          title: 'Page 1',
+          overview: '',
+          posterUrl: '',
+          year: 2024,
+          durationLabel: '',
+          genres: const [],
+          sourceId: 'emby-main',
+          sourceName: 'Living Room',
+          sourceKind: MediaSourceKind.emby,
+          streamUrl: '',
+          tmdbId: '101',
+          addedAt: DateTime(2026, 4, 12),
+        ),
+        MediaItem(
+          id: 'movie-2',
+          title: 'Page 2',
+          overview: '',
+          posterUrl: '',
+          year: 2025,
+          durationLabel: '',
+          genres: const [],
+          sourceId: 'emby-main',
+          sourceName: 'Living Room',
+          sourceKind: MediaSourceKind.emby,
+          streamUrl: '',
+          tmdbId: '102',
+          addedAt: DateTime(2026, 4, 12),
+        ),
+      ],
+    );
+    final cacheRepository = _MutableLocalStorageCacheRepository();
+    cacheRepository.targetsByLookupKey['library|emby-main|movie-1'] =
+        const MediaDetailTarget(
+      title: 'Page 1 Cached',
+      posterUrl: '',
+      overview: '',
+      sourceId: 'emby-main',
+      itemId: 'movie-1',
+      itemType: 'movie',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: 'Living Room',
+    );
+    final container = ProviderContainer(
+      overrides: [
+        appSettingsProvider.overrideWithValue(
+          const AppSettings(
+            mediaSources: [],
+            searchProviders: [],
+            doubanAccount: DoubanAccountConfig(enabled: false),
+            homeModules: [],
+            performanceLiveItemHeroOverlayEnabled: false,
+          ),
+        ),
+        mediaRepositoryProvider.overrideWithValue(mediaRepository),
+        localStorageCacheRepositoryProvider.overrideWithValue(cacheRepository),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final request = const LibraryVisiblePageRequest(
+      filter: LibraryFilter.all,
+      page: 0,
+      pageSize: 1,
+    );
+    final initialPage = await container.read(
+      libraryVisiblePageItemsProvider(request).future,
+    );
+    expect(initialPage.totalItems, 2);
+    expect(initialPage.items.single.title, 'Page 1 Cached');
+    expect(mediaRepository.fetchLibraryCallCount, 1);
+    expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
+
+    cacheRepository.targetsByLookupKey['library|emby-main|movie-1'] =
+        const MediaDetailTarget(
+      title: 'Page 1 Cached Updated',
+      posterUrl: '',
+      overview: '',
+      sourceId: 'emby-main',
+      itemId: 'movie-1',
+      itemType: 'movie',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: 'Living Room',
+    );
+    final revisionNotifier =
+        container.read(localStorageDetailCacheChangeProvider.notifier);
+    revisionNotifier.apply(
+      const LocalStorageDetailCacheChangeEvent(
+        scope: LocalStorageDetailCacheScope(
+          sourceIds: {'emby-main'},
+          lookupKeys: {'library|emby-main|movie-1'},
+        ),
+        changedFields: {
+          LocalStorageDetailCacheChangedField.summary,
+        },
+      ),
+    );
+
+    final stablePage = await container.read(
+      libraryVisiblePageItemsProvider(request).future,
+    );
+    expect(stablePage.items.single.title, 'Page 1 Cached');
+    expect(mediaRepository.fetchLibraryCallCount, 1);
+    expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
   });
 
   test('library resolved item provider updates only the targeted visible item',
@@ -337,6 +448,78 @@ void main() {
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 0);
   });
 
+  test('library resolved item provider skips runtime overlay when disabled',
+      () async {
+    final cacheRepository = _MutableLocalStorageCacheRepository();
+    cacheRepository.targetsByLookupKey['library|emby-main|movie-1'] =
+        const MediaDetailTarget(
+      title: 'Page 1 Cached',
+      posterUrl: '',
+      overview: '',
+      sourceId: 'emby-main',
+      itemId: 'movie-1',
+      itemType: 'movie',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: 'Living Room',
+    );
+    final container = ProviderContainer(
+      overrides: [
+        appSettingsProvider.overrideWithValue(
+          const AppSettings(
+            mediaSources: [],
+            searchProviders: [],
+            doubanAccount: DoubanAccountConfig(enabled: false),
+            homeModules: [],
+            performanceLiveItemHeroOverlayEnabled: false,
+          ),
+        ),
+        localStorageCacheRepositoryProvider.overrideWithValue(cacheRepository),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final seedItem = MediaItem(
+      id: 'movie-1',
+      title: 'Page 1',
+      overview: '',
+      posterUrl: '',
+      year: 2024,
+      durationLabel: '',
+      genres: const [],
+      sourceId: 'emby-main',
+      sourceName: 'Living Room',
+      sourceKind: MediaSourceKind.emby,
+      streamUrl: '',
+      tmdbId: '101',
+      addedAt: DateTime(2026, 4, 12),
+    );
+
+    final initialResolved = container.read(
+      libraryResolvedItemProvider(LibraryItemOverlayRequest(seedItem)),
+    );
+    expect(initialResolved.title, 'Page 1');
+
+    final revisionNotifier =
+        container.read(localStorageDetailCacheChangeProvider.notifier);
+    revisionNotifier.apply(
+      const LocalStorageDetailCacheChangeEvent(
+        scope: LocalStorageDetailCacheScope(
+          sourceIds: {'emby-main'},
+          lookupKeys: {'library|emby-main|movie-1'},
+        ),
+        changedFields: {
+          LocalStorageDetailCacheChangedField.summary,
+        },
+      ),
+    );
+
+    final stillStatic = container.read(
+      libraryResolvedItemProvider(LibraryItemOverlayRequest(seedItem)),
+    );
+    expect(stillStatic.title, 'Page 1');
+    expect(cacheRepository.loadDetailTargetsBatchCallCount, 0);
+  });
+
   test(
       'library collection visible page provider ignores off-page cache updates',
       () async {
@@ -430,6 +613,127 @@ void main() {
     expect(offPageUpdate.items.single.title, 'Episode 1');
     expect(mediaRepository.fetchLibraryCallCount, 1);
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 0);
+  });
+
+  test(
+      'library collection visible page provider returns a static cached snapshot when runtime overlay updates are disabled',
+      () async {
+    final mediaRepository = _CountingMediaRepository(
+      library: [
+        MediaItem(
+          id: 'episode-1',
+          title: 'Episode 1',
+          overview: '',
+          posterUrl: '',
+          year: 2024,
+          durationLabel: '',
+          genres: const [],
+          sourceId: 'nas-main',
+          sourceName: 'NAS',
+          sourceKind: MediaSourceKind.nas,
+          streamUrl: '',
+          itemType: 'episode',
+          sectionId: 'season-1',
+          addedAt: DateTime(2026, 4, 12),
+        ),
+        MediaItem(
+          id: 'episode-2',
+          title: 'Episode 2',
+          overview: '',
+          posterUrl: '',
+          year: 2024,
+          durationLabel: '',
+          genres: const [],
+          sourceId: 'nas-main',
+          sourceName: 'NAS',
+          sourceKind: MediaSourceKind.nas,
+          streamUrl: '',
+          itemType: 'episode',
+          sectionId: 'season-1',
+          addedAt: DateTime(2026, 4, 12),
+        ),
+      ],
+    );
+    final cacheRepository = _MutableLocalStorageCacheRepository();
+    cacheRepository.targetsByLookupKey['library|nas-main|episode-1'] =
+        const MediaDetailTarget(
+      title: 'Episode 1 Cached',
+      posterUrl: '',
+      overview: '',
+      sourceId: 'nas-main',
+      itemId: 'episode-1',
+      itemType: 'episode',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'NAS',
+    );
+    final container = ProviderContainer(
+      overrides: [
+        appSettingsProvider.overrideWithValue(
+          const AppSettings(
+            mediaSources: [],
+            searchProviders: [],
+            doubanAccount: DoubanAccountConfig(enabled: false),
+            homeModules: [],
+            performanceLiveItemHeroOverlayEnabled: false,
+          ),
+        ),
+        mediaRepositoryProvider.overrideWithValue(mediaRepository),
+        localStorageCacheRepositoryProvider.overrideWithValue(cacheRepository),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    const request = LibraryCollectionVisiblePageRequest(
+      target: LibraryCollectionTarget(
+        title: 'Season 1',
+        sourceId: 'nas-main',
+        sourceName: 'NAS',
+        sourceKind: MediaSourceKind.nas,
+        sectionId: 'season-1',
+      ),
+      page: 0,
+      pageSize: 1,
+    );
+
+    final initialPage = await container.read(
+      libraryCollectionVisiblePageItemsProvider(request).future,
+    );
+    expect(initialPage.totalItems, 2);
+    expect(initialPage.items.single.title, 'Episode 1 Cached');
+    expect(mediaRepository.fetchLibraryCallCount, 1);
+    expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
+
+    cacheRepository.targetsByLookupKey['library|nas-main|episode-1'] =
+        const MediaDetailTarget(
+      title: 'Episode 1 Cached Updated',
+      posterUrl: '',
+      overview: '',
+      sourceId: 'nas-main',
+      itemId: 'episode-1',
+      itemType: 'episode',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'NAS',
+    );
+    final revisionNotifier =
+        container.read(localStorageDetailCacheChangeProvider.notifier);
+    revisionNotifier.apply(
+      const LocalStorageDetailCacheChangeEvent(
+        scope: LocalStorageDetailCacheScope(
+          sourceIds: {'nas-main'},
+          lookupKeys: {'library|nas-main|episode-1'},
+        ),
+        changedFields: {
+          LocalStorageDetailCacheChangedField.summary,
+        },
+      ),
+    );
+
+    final stablePage = await container.read(
+      libraryCollectionVisiblePageItemsProvider(request).future,
+    );
+    expect(stablePage.items.single.title, 'Episode 1 Cached');
+    expect(mediaRepository.fetchLibraryCallCount, 1);
+    expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
   });
 }
 

@@ -85,6 +85,8 @@ final settingsPerformanceSliceProvider = Provider<SettingsPerformanceSlice>(
         translucentEffectsEnabled: settings.translucentEffectsEnabled,
         autoHideNavigationBarEnabled: settings.autoHideNavigationBarEnabled,
         homeHeroBackgroundEnabled: settings.homeHeroBackgroundEnabled,
+        performanceLiveItemHeroOverlayEnabled:
+            settings.performanceLiveItemHeroOverlayEnabled,
       ),
     ),
   ),
@@ -220,12 +222,14 @@ class SettingsPerformanceSlice {
     required this.translucentEffectsEnabled,
     required this.autoHideNavigationBarEnabled,
     required this.homeHeroBackgroundEnabled,
+    required this.performanceLiveItemHeroOverlayEnabled,
   });
 
   final bool highPerformanceModeEnabled;
   final bool translucentEffectsEnabled;
   final bool autoHideNavigationBarEnabled;
   final bool homeHeroBackgroundEnabled;
+  final bool performanceLiveItemHeroOverlayEnabled;
 
   @override
   bool operator ==(Object other) {
@@ -235,7 +239,9 @@ class SettingsPerformanceSlice {
             other.translucentEffectsEnabled == translucentEffectsEnabled &&
             other.autoHideNavigationBarEnabled ==
                 autoHideNavigationBarEnabled &&
-            other.homeHeroBackgroundEnabled == homeHeroBackgroundEnabled;
+            other.homeHeroBackgroundEnabled == homeHeroBackgroundEnabled &&
+            other.performanceLiveItemHeroOverlayEnabled ==
+                performanceLiveItemHeroOverlayEnabled;
   }
 
   @override
@@ -244,6 +250,7 @@ class SettingsPerformanceSlice {
         translucentEffectsEnabled,
         autoHideNavigationBarEnabled,
         homeHeroBackgroundEnabled,
+        performanceLiveItemHeroOverlayEnabled,
       );
 }
 

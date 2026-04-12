@@ -269,19 +269,24 @@ class _FeaturedHeroOverlayRequest {
 
   @override
   bool operator ==(Object other) {
-    return other is _FeaturedHeroOverlayRequest &&
-        other.identity == identity;
+    return other is _FeaturedHeroOverlayRequest && other.identity == identity;
   }
 
   @override
   int get hashCode => identity.hashCode;
 }
 
-final _featuredHeroItemOverlayProvider =
-    Provider.family<_FeaturedHeroItem, _FeaturedHeroOverlayRequest>((
+final _featuredHeroItemOverlayProvider = Provider.autoDispose
+    .family<_FeaturedHeroItem, _FeaturedHeroOverlayRequest>((
   ref,
   request,
 ) {
+  final liveOverlayEnabled = ref.watch(
+    effectivePerformanceLiveItemHeroOverlayEnabledProvider,
+  );
+  if (!liveOverlayEnabled) {
+    return request.item;
+  }
   final cacheScope = request.cacheScope;
   if (!cacheScope.isEmpty) {
     ref.watch(
@@ -329,7 +334,8 @@ _FeaturedHeroItem _overlayFeaturedHeroItem({
   );
   return _FeaturedHeroItem(
     id: seed.id,
-    title: mergedTarget.title.trim().isNotEmpty ? mergedTarget.title : seed.title,
+    title:
+        mergedTarget.title.trim().isNotEmpty ? mergedTarget.title : seed.title,
     landscapeImage: landscapeImage,
     portraitImage: portraitImage,
     backgroundImage: _resolveFeaturedHeroBackgroundImage(

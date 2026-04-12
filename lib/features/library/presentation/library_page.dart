@@ -215,9 +215,21 @@ class LibraryVisiblePageRequest {
 final libraryVisiblePageItemsProvider = FutureProvider.family<
     LibraryVisiblePageItemsResult,
     LibraryVisiblePageRequest>((ref, request) async {
+  final liveOverlayEnabled = ref.watch(
+    effectivePerformanceLiveItemHeroOverlayEnabledProvider,
+  );
   final items =
       await ref.watch(librarySeedItemsProvider(request.filter).future);
-  await ref.read(localStorageCacheRepositoryProvider).primeDetailPayload();
+  final cacheRepository = ref.read(localStorageCacheRepositoryProvider);
+  if (!liveOverlayEnabled) {
+    return resolveVisibleLibraryPageItemsWithCachedDetails(
+      items: items,
+      page: request.page,
+      pageSize: request.pageSize,
+      localStorageCacheRepository: cacheRepository,
+    );
+  }
+  await cacheRepository.primeDetailPayload();
   return LibraryVisiblePageItemsResult(
     totalItems: items.length,
     items: visibleLibraryPageItems(

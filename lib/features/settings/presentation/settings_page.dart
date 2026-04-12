@@ -245,7 +245,10 @@ class SettingsPage extends ConsumerStatefulWidget {
                     children: [
                       _SettingsNavigationTile(
                         title: '高性能与轻量模式',
-                        subtitle: _performanceSettingsSummary(performanceSlice),
+                        subtitle: _performanceSettingsSummary(
+                          performanceSlice,
+                          isTelevision: isTelevision,
+                        ),
                         onTap: () => _openPerformanceSettings(context),
                       ),
                       const SizedBox(height: 18),
@@ -738,17 +741,22 @@ String _libraryMatchSourceSummary({
   return '${selectedNames.take(2).join('、')} 等 ${selectedNames.length} 个来源';
 }
 
-String _performanceSettingsSummary(SettingsPerformanceSlice performanceSlice) {
+String _performanceSettingsSummary(
+  SettingsPerformanceSlice performanceSlice, {
+  required bool isTelevision,
+}) {
   final enabledItems = <String>[
     if (!performanceSlice.translucentEffectsEnabled) '磨砂关闭',
     if (!performanceSlice.autoHideNavigationBarEnabled) '菜单常驻',
     if (!performanceSlice.homeHeroBackgroundEnabled) 'Hero 背景关闭',
+    if (isTelevision || !performanceSlice.performanceLiveItemHeroOverlayEnabled)
+      '局部实时更新关闭',
   ];
 
   if (enabledItems.isEmpty) {
     return performanceSlice.highPerformanceModeEnabled
         ? '预设已开，当前轻量项已手动调回'
-        : '按需管理界面与 Hero 基础轻量模式';
+        : '按需管理界面、Hero 与局部更新策略';
   }
 
   final itemsLabel = enabledItems.length <= 2

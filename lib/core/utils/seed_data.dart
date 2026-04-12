@@ -66,6 +66,7 @@ class SeedData {
     performanceLightweightTvFocusEnabled: false,
     performanceStaticHomeHeroEnabled: false,
     performanceLightweightHomeHeroEnabled: false,
+    performanceLiveItemHeroOverlayEnabled: true,
     performanceSlimDetailHeroEnabled: false,
     performanceLeanPlaybackUiEnabled: false,
     performanceAggressivePlaybackTuningEnabled: false,

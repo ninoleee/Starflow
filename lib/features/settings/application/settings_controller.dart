@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/utils/seed_data.dart';
@@ -23,6 +24,18 @@ final settingsControllerProvider =
 final appSettingsProvider = Provider<AppSettings>((ref) {
   return ref.watch(settingsControllerProvider).value ??
       SeedData.defaultSettings;
+});
+
+final effectivePerformanceLiveItemHeroOverlayEnabledProvider = Provider<bool>((
+  ref,
+) {
+  final configuredEnabled = ref.watch(
+    appSettingsProvider.select(
+      (settings) => settings.performanceLiveItemHeroOverlayEnabled,
+    ),
+  );
+  final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+  return configuredEnabled && !isTelevision;
 });
 
 class SettingsController extends AsyncNotifier<AppSettings> {
@@ -304,6 +317,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
             performanceLightweightTvFocusEnabled: true,
             performanceStaticHomeHeroEnabled: true,
             performanceLightweightHomeHeroEnabled: true,
+            performanceLiveItemHeroOverlayEnabled: false,
             performanceSlimDetailHeroEnabled: true,
             performanceLeanPlaybackUiEnabled: true,
             performanceAggressivePlaybackTuningEnabled: true,
@@ -319,6 +333,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
                 performanceLightweightTvFocusEnabled: false,
                 performanceStaticHomeHeroEnabled: false,
                 performanceLightweightHomeHeroEnabled: false,
+                performanceLiveItemHeroOverlayEnabled: true,
                 performanceSlimDetailHeroEnabled: false,
                 performanceLeanPlaybackUiEnabled: false,
                 performanceAggressivePlaybackTuningEnabled: false,
@@ -362,6 +377,13 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     final current = state.value ?? await _repository.load();
     await _persist(
       current.copyWith(performanceLightweightHomeHeroEnabled: enabled),
+    );
+  }
+
+  Future<void> setPerformanceLiveItemHeroOverlayEnabled(bool enabled) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(performanceLiveItemHeroOverlayEnabled: enabled),
     );
   }
 

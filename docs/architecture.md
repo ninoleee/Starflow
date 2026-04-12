@@ -104,7 +104,7 @@ lib/
 - `home`：首页模块装配与 Hero
 - `library`：媒体源接入、`WebDAV` 索引、`Quark` 目录源、刷新、删除
 - `details`：详情页、详情缓存、手动索引入口、人物关联影片页
-- `metadata`：`WMDB / TMDB / IMDb`
+- `metadata`：`WMDB / TMDB`
 - `search`：本地搜索、在线搜索、夸克保存、`SmartStrm`
 - `playback`：播放器
 - `settings`：设置、配置导入导出
@@ -173,7 +173,6 @@ lib/
 - `test/perf/bootstrap_smoke_test.dart`、`test/perf/home_settings_slices_smoke_test.dart`、`test/perf/player_open_smoke_test.dart` 已通过
 - `test/home_controller_test.dart`、`test/home_settings_slices_test.dart`、`test/playback_memory_repository_test.dart`、`test/nas_media_indexer_test.dart` 已通过
 - `NasMediaIndexer` 拆分后的定向验证已通过：`dart analyze lib/features/library/data/nas_media_indexer*.dart` 与 `flutter test test/nas_media_indexer_test.dart`
-- 当前还留有一条非失败开发态 trace：`test/media_repository_quark_source_test.dart` 会打印 `indexer.refresh.background.error ... ProviderContainer already disposed`，说明后台任务链的 dispose 时序后续仍值得继续治理
 
 ## 3.2 跨 feature 新结构关系（Home / Detail / Playback / Library / Settings Slices）
 
@@ -201,7 +200,7 @@ lib/
 
 - `DetailTargetResolver` 已作为详情解析入口，统一负责：
   - seed + 详情缓存合并
-  - 自动元数据补全（`WMDB / TMDB / IMDb`）
+  - 自动元数据补全（`WMDB / TMDB`）
   - 播放目标补全（`Emby / Quark`）
   - 解析结果回写详情缓存
 - `HomeHeroPrefetchCoordinator` 与详情链路复用同一套详情缓存与 enrichment provider，避免首页和详情各自维护一套补全逻辑。
@@ -361,7 +360,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 这一步会遍历作用域内目录来识别变更，但不会越过到其他分区
 - sidecar 和在线元数据补全只针对增量项继续执行
 - 只有当当前作用域索引为空时，才允许在后台调度一次自动全量重建；读链路本身不再同步等待这次重建
-- `WebDAV` 调试日志默认不开启，需要排障时再临时修改 `lib/core/utils/webdav_trace.dart` 接入输出
+- 当前仓库内置的 `WebDAV / metadata / subtitle / playback / detail resource switch` trace helper 都已静音；默认不再输出扫描、索引、匹配或播放链路日志
 
 `NasMediaIndexer` 负责的事情包括：
 
@@ -374,7 +373,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - sidecar 读取
 - `streamdetails`
 - 外部 ID 提取
-- `WMDB / TMDB / IMDb` 补全
+- `WMDB / TMDB` 在线补全，并继续保留上游返回的 `IMDb ID / IMDb` 评分标签
 - 对开启目录结构推断的剧集条目，可选启用“剧集只按剧名层级搜刮”：metadata 查询只使用目录推导出的剧名，不再把季/集标题拼进搜索词，也不会继续请求单集 still
 - `MediaItem` 生成
 - 剧集父子关系聚合
@@ -456,7 +455,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 
 - 顶部 Hero 优先使用背景图，不再重复放置海报；文字覆盖区域单独加阴影，未覆盖区域保持原图
 - 高性能模式开启时，详情页顶部大图区会进一步收紧高度、缩小信息区，并减少背景遮罩层
-- `TMDB` 已接入 `poster / backdrop / still / profile / logo` 等图片字段，并把 `TMDB x.x` 写入统一评分标签链路
+- `TMDB` 已接入 `poster / backdrop / still / profile / logo` 等图片字段，并把 `TMDB x.x` 写入统一评分标签链路；当前不再主动去 `IMDb` 搜索信息，`IMDb` 相关标签只会在上游 `WMDB / TMDB` 已返回时参与展示和保存
 - 详情页评分标签会按来源归一去重；`豆瓣 / IMDb / TMDB` 各最多保留一条，避免 seed target、详情缓存和后续在线补全合并后出现重复评分标签
 - 人物头像统一来自 `TMDB profile`，详情页公司 Logo 来自 `TMDB production_companies.logo_path`，不再把 `networks` 混作公司展示
 - 演职员头像可跳转到人物关联影片页，人物作品列表继续复用首页同款海报卡片；卡片右上角会优先显示题材/类型标签，左下角继续显示可用评分标签
@@ -475,7 +474,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 修改搜索词
 - 修改年份
 - 切换是否按剧集匹配
-- 手动搜索 `WMDB / TMDB / IMDb`
+- 手动搜索 `WMDB / TMDB`
 - 直接写回本地索引和详情缓存
 - 手动应用命中结果时会强制覆盖本地已存在的标题、简介、图片、人物、公司 Logo 和外部 ID，不再只补空字段
 - 详情页“手动更新信息”同样会直接重新搜索，并把命中的在线结果覆盖到当前详情缓存
@@ -487,9 +486,13 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 当自动匹配关闭时，详情页只保留“重新匹配资源”这一条手动触发路径
 - `设置 -> 元数据与评分 -> 匹配来源` 会直接限制详情页本地资源匹配的实际扫描范围；只会扫描被选中的已启用 `Emby / WebDAV / Quark` 来源
 - 如果“匹配来源”未单独勾选，则默认使用全部已启用来源；如果保存的来源 ID 已失效，则自动回退到全部已启用来源
+- 如果详情页 seed target 本身来自媒体库卡片或指定来源模块，并已经带了 `sourceId / sourceKind / itemId / sectionId` 这类来源上下文，匹配链路会先优先处理这个来源，而不是把所有来源完全等价并行处理
+- 对非 `series` 聚合页，如果入口 target 本身已经是该来源下的已解析资源，候选列表会先直接补入这条入口资源；手动重新匹配时也会跳过对这个入口来源的重复扫描
+- 如果入口来源当前还没有命中项，但 seed target 带了明确 `sourceId` 或分区上下文，`Emby` 会先优先扫描同来源分区，`WebDAV / Quark` 也会先优先扫描同来源，再回退到其他已启用来源
 - 手动匹配按多个搜索源并发执行，先命中的结果会立刻显示，但不会取消其余源的搜索
 - 如果一次手动匹配命中多个本地资源，详情缓存会连同候选列表和当前选中项一起保存；后续重新进入详情页时会直接恢复这组候选
 - 其中只要候选里有多个可直接播放的叶子资源，详情页会优先展示“播放版本”切换，而不是只把它们当成一组普通候选
+- 如果候选本来就全部来自同一个入口优先来源，则仍保留原有选中项，不会仅因为“入口来源优先”而把选中项强行重置到第一个
 - 外部 ID 强匹配不要求 `IMDb / TMDB / 豆瓣 / TVDB / Wikidata` 同时命中；任一 ID 命中即可成立，命中原因会按实际命中的 ID 组合展示
 - 删除某个已匹配本地资源时，详情缓存只会精确剔除当前资源对应的命中关系；如果还有其他候选，则继续保留并回退到剩余候选
 - 如果删除的是当前唯一命中的本地资源，则只清空这条资源状态、播放目标和来源上下文，影片自己的在线元数据与详情缓存仍然保留
@@ -570,7 +573,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 字幕轨切换
 - 字幕偏移
 - 外部字幕加载
-- 在线字幕搜索入口
+- 在线字幕搜索入口（手动触发）
 - 播放解码模式切换
   - `自动`
   - `硬解优先`
@@ -579,8 +582,8 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - Android 后台播放状态同步
 - `TV` 播放页不再常驻显示右上角遥控器提示文案，菜单键仍可直接打开播放设置
 - iOS 后台音频播放会话
-- `TV` / 定制系统环境下，如果外部字幕选择器、在线字幕搜索外跳或其他外部打开能力不可用，页面会优先提示失败而不是直接崩溃
-- Android `TV` 从原生播放器拉起独立字幕搜索页时，会把当前 `query / title / input` 一并透传给 Flutter 路由，避免字幕搜索页空查询打开
+- `TV` / 定制系统环境下，如果外部字幕选择器或其他外部打开能力不可用，页面会优先提示失败而不是直接崩溃
+- Android `TV` 从原生播放器拉起独立字幕搜索页时，会把当前 `query / title / input` 一并透传给 Flutter 路由，避免字幕搜索页空查询打开；页面只预填，不会自动发起搜索
 - 播放设置里的字幕默认项已收拢到独立二级页，和播放中临时字幕操作分开
 - 非 `TV` 的内嵌 `MPV` 当前使用 Starflow 自己的轻量播放叠层，而不是 `media_kit` 默认控制条：
   - 首层只保留返回、播放/暂停、进度、全屏和“更多”；音量、字幕、音轨与其他高级播放项统一收进播放设置弹窗
@@ -598,7 +601,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
   - `player_page_runtime_actions.part.dart`：续播、跳过、字幕、外挂字幕、在线字幕、启动 probe
   - `player_page_controls.part.dart`：返回、进度、选择器、播放设置、视频 surface
   - `player_mpv_controls_overlay.dart`、`player_playback_options_dialog.dart`、`player_playback_overlays.dart`、`player_playback_dialogs.dart`、`player_tv_playback_widgets.dart`：纯展示层组件
-- `lib/core/utils/playback_trace.dart` 与 `subtitle_search_trace.dart` 仍保留本地 scoped trace 能力，但默认关闭；排障时才临时打开，且不会上报到服务端
+- `lib/core/utils/playback_trace.dart`、`subtitle_search_trace.dart`、`metadata_search_trace.dart` 与 `detail_resource_switch_trace.dart` 仍保留调用点与设置字段，但当前实现都已静音，不再产生运行时输出
 - 内置 `MPV` 现已把 `ISO` 打开路径统一纳入同一条执行链：本地路径 / `file://` / UNC 优先尝试 `dvd-device / bluray-device`，远程 `ISO` 则直接回退普通 `Media(...)` 打开，并在回退前清理残留的 `dvd-device / bluray-device / http-header-fields`
 - `TV` 分支当前仍保留自定义播放叠层：
   - 电视场景继续走“首层极简 + 二层高级”的 `NoVideoControls + 遥控器快捷键` 模式
