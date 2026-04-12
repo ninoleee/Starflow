@@ -347,19 +347,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     return _isReady && player != null && player.state.playing;
   }
 
-  bool get _shouldUsePlaybackSystemSession {
-    if (kIsWeb || !PlaybackSystemSessionController.isSupportedPlatform) {
-      return false;
-    }
-    final playbackEngine =
-        _providerContainer.read(appSettingsProvider).playbackEngine;
-    if (defaultTargetPlatform == TargetPlatform.iOS &&
-        playbackEngine == PlaybackEngine.embeddedMpv) {
-      return false;
-    }
-    return true;
-  }
-
   bool get _backgroundPlaybackEnabled =>
       !_isTelevisionPlaybackDevice &&
       ref.read(appSettingsProvider).playbackBackgroundPlaybackEnabled;

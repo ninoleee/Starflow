@@ -51,11 +51,18 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
         aspectRatioHeight: size.height,
       );
     }
+    if (BackgroundPlaybackController.isAppleMobilePlatform) {
+      if (shouldEnable) {
+        await BackgroundPlaybackController.setEnabled(true);
+      }
+      return;
+    }
     await BackgroundPlaybackController.setEnabled(shouldEnable);
   }
 
   Future<void> _bindPlaybackSystemSession() async {
-    if (!_shouldUsePlaybackSystemSession || _playbackSystemSessionBound) {
+    if (!PlaybackSystemSessionController.isSupportedPlatform ||
+        _playbackSystemSessionBound) {
       return;
     }
     await PlaybackSystemSessionController.attach(_handlePlaybackRemoteCommand);
@@ -71,13 +78,6 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
   }
 
   Future<void> _syncPlaybackSystemSession({bool force = false}) async {
-    if (!_shouldUsePlaybackSystemSession) {
-      if (_playbackSystemSessionBound || force) {
-        await _teardownPlaybackSystemSession();
-      }
-      return;
-    }
-
     if (!PlaybackSystemSessionController.isSupportedPlatform) {
       return;
     }
