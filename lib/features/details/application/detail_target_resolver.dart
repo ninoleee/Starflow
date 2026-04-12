@@ -368,13 +368,113 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
               actors: nextTarget.actors,
             );
       if (wmdbMatch != null) {
+        DebugTraceOnce.logMetadata(
+          traceKey,
+          'wmdb',
+          'matched title=${wmdbMatch.title} imdbId=${wmdbMatch.imdbId} '
+              'ratings=${wmdbMatch.ratingLabels.join(' | ')}',
+        );
         nextTarget = _applyMetadataMatchToDetailTarget(
           nextTarget,
           wmdbMatch,
         );
+      } else {
+        DebugTraceOnce.logMetadata(traceKey, 'wmdb', 'no match');
       }
     } catch (_) {
-      // ignore
+      DebugTraceOnce.logMetadata(traceKey, 'wmdb', 'failed');
+    }
+  }
+
+  if (settings.tmdbMetadataMatchEnabled &&
+      settings.tmdbReadAccessToken.trim().isNotEmpty &&
+      _detailMetadataQuery(nextTarget).isNotEmpty) {
+    try {
+      final currentQuery = _detailMetadataQuery(nextTarget);
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'tmdb',
+        'request query=$currentQuery year=${nextTarget.year} '
+            'preferSeries=${_prefersSeriesMetadata(nextTarget)}',
+      );
+      final tmdbMatch = await tmdbMetadataClient.matchTitle(
+        query: currentQuery,
+        readAccessToken: settings.tmdbReadAccessToken.trim(),
+        year: nextTarget.year,
+        preferSeries: _prefersSeriesMetadata(nextTarget),
+      );
+      if (tmdbMatch != null) {
+        DebugTraceOnce.logMetadata(
+          traceKey,
+          'tmdb',
+          'matched title=${tmdbMatch.title} imdbId=${tmdbMatch.imdbId}',
+        );
+        final resolvedBackdropUrl = await _resolveTmdbBackdropForTarget(
+          settings: settings,
+          tmdbMetadataClient: tmdbMetadataClient,
+          target: nextTarget,
+          match: tmdbMatch,
+        );
+        nextTarget = _applyMetadataMatchToDetailTarget(
+          nextTarget,
+          MetadataMatchResult(
+            provider: MetadataMatchProvider.tmdb,
+            title: tmdbMatch.title,
+            originalTitle: tmdbMatch.originalTitle,
+            posterUrl: tmdbMatch.posterUrl,
+            backdropUrl: resolvedBackdropUrl,
+            logoUrl: tmdbMatch.logoUrl,
+            bannerUrl: _resolveTmdbBannerForTarget(
+              target: nextTarget,
+              match: tmdbMatch,
+              resolvedBackdropUrl: resolvedBackdropUrl,
+            ),
+            extraBackdropUrls: _resolveTmdbExtraBackdropUrlsForTarget(
+              target: nextTarget,
+              match: tmdbMatch,
+              resolvedBackdropUrl: resolvedBackdropUrl,
+            ),
+            overview: tmdbMatch.overview,
+            year: tmdbMatch.year,
+            durationLabel: tmdbMatch.durationLabel,
+            genres: tmdbMatch.genres,
+            directors: tmdbMatch.directors,
+            directorProfiles: tmdbMatch.directorProfiles
+                .map(
+                  (item) => MetadataPersonProfile(
+                    name: item.name,
+                    avatarUrl: item.avatarUrl,
+                  ),
+                )
+                .toList(growable: false),
+            actors: tmdbMatch.actors,
+            actorProfiles: tmdbMatch.actorProfiles
+                .map(
+                  (item) => MetadataPersonProfile(
+                    name: item.name,
+                    avatarUrl: item.avatarUrl,
+                  ),
+                )
+                .toList(growable: false),
+            platforms: tmdbMatch.platforms,
+            platformProfiles: tmdbMatch.platformProfiles
+                .map(
+                  (item) => MetadataPersonProfile(
+                    name: item.name,
+                    avatarUrl: item.avatarUrl,
+                  ),
+                )
+                .toList(growable: false),
+            ratingLabels: tmdbMatch.ratingLabels,
+            imdbId: tmdbMatch.imdbId,
+            tmdbId: '${tmdbMatch.tmdbId}',
+          ),
+        );
+      } else {
+        DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'no match');
+      }
+    } catch (_) {
+      DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'failed');
     }
   }
   return normalizeRatingLabelsInTarget(nextTarget);
@@ -396,6 +496,66 @@ bool _hasRatingLabelKeyword(Iterable<String> labels, String keyword) {
   }
   return labels
       .any((label) => label.trim().toLowerCase().contains(normalizedKeyword));
+}
+
+Future<String> _resolveTmdbBackdropForTarget({
+  required DetailEnrichmentSettings settings,
+  required TmdbMetadataClient tmdbMetadataClient,
+  required MediaDetailTarget target,
+  required TmdbMetadataMatch match,
+}) async {
+  if (_isEpisodeLikeTarget(target) &&
+      match.isSeries &&
+      match.tmdbId > 0 &&
+      settings.tmdbReadAccessToken.trim().isNotEmpty) {
+    try {
+      final stillUrl = await tmdbMetadataClient.fetchEpisodeStillUrl(
+        seriesId: match.tmdbId,
+        seasonNumber: target.seasonNumber!,
+        episodeNumber: target.episodeNumber!,
+        readAccessToken: settings.tmdbReadAccessToken.trim(),
+      );
+      if (stillUrl.trim().isNotEmpty) {
+        return stillUrl.trim();
+      }
+    } catch (_) {
+      // Ignore episode still failures and keep the title-level backdrop.
+    }
+  }
+  return match.backdropUrl.trim();
+}
+
+String _resolveTmdbBannerForTarget({
+  required MediaDetailTarget target,
+  required TmdbMetadataMatch match,
+  required String resolvedBackdropUrl,
+}) {
+  if (!_isEpisodeLikeTarget(target)) {
+    return '';
+  }
+  final seriesBackdrop = match.backdropUrl.trim();
+  if (seriesBackdrop.isEmpty || seriesBackdrop == resolvedBackdropUrl.trim()) {
+    return '';
+  }
+  return seriesBackdrop;
+}
+
+List<String> _resolveTmdbExtraBackdropUrlsForTarget({
+  required MediaDetailTarget target,
+  required TmdbMetadataMatch match,
+  required String resolvedBackdropUrl,
+}) {
+  final bannerUrl = _resolveTmdbBannerForTarget(
+    target: target,
+    match: match,
+    resolvedBackdropUrl: resolvedBackdropUrl,
+  );
+  return _mergeUniqueImageUrls([
+    if (bannerUrl.isNotEmpty) bannerUrl,
+    ...match.extraBackdropUrls,
+  ])
+      .where((item) => item != resolvedBackdropUrl.trim())
+      .toList(growable: false);
 }
 
 bool _isEpisodeLikeTarget(MediaDetailTarget target) {

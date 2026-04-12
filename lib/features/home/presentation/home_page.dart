@@ -255,6 +255,10 @@ class _HomePageState extends ConsumerState<HomePage>
   int _scheduledHeroMetadataAutoRefreshRevision = 0;
   int _scheduledHeroExplicitRefreshRevision = 0;
 
+  void _logHeroPrefetch(String message) {
+    debugPrint('[HomeHeroPrefetch] $message');
+  }
+
   bool get _showHeroPagerButtons {
     if (kIsWeb) {
       return true;
@@ -424,6 +428,10 @@ class _HomePageState extends ConsumerState<HomePage>
   }) {
     if (homeMetadataAutoRefreshRevision !=
         _observedHomeMetadataAutoRefreshRevision) {
+      _logHeroPrefetch(
+        'home.revision metadata $_observedHomeMetadataAutoRefreshRevision -> '
+        '$homeMetadataAutoRefreshRevision',
+      );
       _heroPrefetchCoordinator.reset();
       _observedHomeMetadataAutoRefreshRevision =
           homeMetadataAutoRefreshRevision;
@@ -458,7 +466,23 @@ class _HomePageState extends ConsumerState<HomePage>
       scheduledExplicitRevision: _scheduledHeroExplicitRefreshRevision,
       currentExplicitRevision: homeExplicitRefreshRevision,
     );
+    _logHeroPrefetch(
+      'home.check visible=$isPageVisible '
+      'featured=${featuredItems.length} '
+      'heroEnabled=$heroEnabled '
+      'heroListChanged=$heroListChanged '
+      'metadataRevision=$homeMetadataAutoRefreshRevision '
+      'scheduledMetadata=$_scheduledHeroMetadataAutoRefreshRevision '
+      'explicitRevision=$homeExplicitRefreshRevision '
+      'scheduledExplicit=$_scheduledHeroExplicitRefreshRevision '
+      'shouldSchedule=${heroPrefetchDecision.shouldSchedule} '
+      'force=${heroPrefetchDecision.forceMetadataRefresh}',
+    );
     if (heroPrefetchDecision.shouldSchedule) {
+      _logHeroPrefetch(
+        'home.schedule titles=${featuredItems.map((item) => item.title).join(' || ')} '
+        'force=${heroPrefetchDecision.forceMetadataRefresh}',
+      );
       _heroPrefetchCoordinator.schedulePrefetch(
         ref: ref,
         targets: featuredItems.map((item) => item.detailTarget),
@@ -468,6 +492,10 @@ class _HomePageState extends ConsumerState<HomePage>
       _scheduledHeroMetadataAutoRefreshRevision =
           homeMetadataAutoRefreshRevision;
       _scheduledHeroExplicitRefreshRevision = homeExplicitRefreshRevision;
+    } else if (featuredItems.isNotEmpty) {
+      _logHeroPrefetch(
+        'home.skip-schedule titles=${featuredItems.map((item) => item.title).join(' || ')}',
+      );
     }
     if (heroListChanged) {
       _scheduleHeroSelectionSync(activeHero);
