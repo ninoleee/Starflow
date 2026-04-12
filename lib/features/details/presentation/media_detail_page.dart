@@ -12,7 +12,6 @@ import 'package:starflow/core/navigation/retained_async_controller.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/core/utils/detail_resource_switch_trace.dart';
-import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -35,8 +34,6 @@ import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/library/domain/media_title_matcher.dart';
-import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
 import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
@@ -86,14 +83,6 @@ bool _hasRatingLabelKeyword(Iterable<String> labels, String keyword) {
   );
 }
 
-bool _shouldUseStandaloneImdbRating(DetailEnrichmentSettings settings) {
-  return settings.imdbRatingMatchEnabled;
-}
-
-bool _needsStandaloneImdbFallback(MediaDetailTarget target) {
-  return resolvePreferredPosterRatingLabel(target.ratingLabels).isEmpty;
-}
-
 bool _isEpisodeLikeTarget(MediaDetailTarget target) {
   return target.itemType.trim().toLowerCase() == 'episode' &&
       target.seasonNumber != null &&
@@ -119,15 +108,12 @@ bool _canAttemptDetailMetadataRefresh({
 }) {
   final query = _detailMetadataQuery(target);
   final doubanId = target.doubanId.trim();
-  final preferredImdbId = _resolvePreferredImdbId(target.imdbId, query);
   final canUseWmdb = settings.wmdbMetadataMatchEnabled &&
       (query.isNotEmpty || doubanId.isNotEmpty);
   final canUseTmdb = settings.tmdbMetadataMatchEnabled &&
       settings.tmdbReadAccessToken.trim().isNotEmpty &&
-      (query.isNotEmpty || preferredImdbId.isNotEmpty);
-  final canUseImdb =
-      _shouldUseStandaloneImdbRating(settings) && query.isNotEmpty;
-  return canUseWmdb || canUseTmdb || canUseImdb;
+      query.isNotEmpty;
+  return canUseWmdb || canUseTmdb;
 }
 
 bool _hasExistingMetadataRefreshMarker(MediaDetailTarget target) {
@@ -164,6 +150,17 @@ bool _shouldAutoRefreshOverviewMetadata({
     settings: settings,
     target: currentTarget,
   );
+}
+
+bool _shouldRunEntryMetadataRefresh(MediaDetailTarget target) {
+  if (!_isOverviewMetadataRefreshTarget(target)) {
+    return false;
+  }
+  if (target.sourceKind == MediaSourceKind.nas &&
+      target.sourceId.trim().isNotEmpty) {
+    return false;
+  }
+  return target.title.trim().isNotEmpty || target.searchQuery.trim().isNotEmpty;
 }
 
 Future<String> _resolveTmdbBackdropForTarget({
@@ -231,112 +228,14 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
   required MediaDetailTarget target,
   required WmdbMetadataClient wmdbMetadataClient,
   required TmdbMetadataClient tmdbMetadataClient,
-  required ImdbRatingClient imdbRatingClient,
   bool forceSearch = false,
   bool forceReplace = false,
 }) async {
   var nextTarget = target;
   final initialQuery = _detailMetadataQuery(target);
   final traceKey = _detailTraceKey(target);
-  final preferredImdbId = _resolvePreferredImdbId(
-    target.imdbId,
-    initialQuery,
-  );
-  var imdbIdMetadataMatched = false;
-
-  if (preferredImdbId.isNotEmpty &&
-      settings.tmdbMetadataMatchEnabled &&
-      settings.tmdbReadAccessToken.trim().isNotEmpty) {
-    try {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'tmdb',
-        'request imdbId=$preferredImdbId preferSeries=${_prefersSeriesMetadata(nextTarget)}',
-      );
-      final tmdbMatch = await tmdbMetadataClient.matchByImdbId(
-        imdbId: preferredImdbId,
-        readAccessToken: settings.tmdbReadAccessToken.trim(),
-        preferSeries: _prefersSeriesMetadata(nextTarget),
-      );
-      if (tmdbMatch != null) {
-        imdbIdMetadataMatched = true;
-        DebugTraceOnce.logMetadata(
-          traceKey,
-          'tmdb',
-          'matched title=${tmdbMatch.title} imdbId=${tmdbMatch.imdbId}',
-        );
-        final resolvedBackdropUrl = await _resolveTmdbBackdropForTarget(
-          settings: settings,
-          tmdbMetadataClient: tmdbMetadataClient,
-          target: nextTarget,
-          match: tmdbMatch,
-        );
-        nextTarget = _applyMetadataMatchToDetailTarget(
-          nextTarget,
-          MetadataMatchResult(
-            provider: MetadataMatchProvider.tmdb,
-            title: tmdbMatch.title,
-            originalTitle: tmdbMatch.originalTitle,
-            posterUrl: tmdbMatch.posterUrl,
-            backdropUrl: resolvedBackdropUrl,
-            logoUrl: tmdbMatch.logoUrl,
-            bannerUrl: _resolveTmdbBannerForTarget(
-              target: nextTarget,
-              match: tmdbMatch,
-              resolvedBackdropUrl: resolvedBackdropUrl,
-            ),
-            extraBackdropUrls: _resolveTmdbExtraBackdropUrlsForTarget(
-              target: nextTarget,
-              match: tmdbMatch,
-              resolvedBackdropUrl: resolvedBackdropUrl,
-            ),
-            overview: tmdbMatch.overview,
-            year: tmdbMatch.year,
-            durationLabel: tmdbMatch.durationLabel,
-            genres: tmdbMatch.genres,
-            directors: tmdbMatch.directors,
-            directorProfiles: tmdbMatch.directorProfiles
-                .map(
-                  (item) => MetadataPersonProfile(
-                    name: item.name,
-                    avatarUrl: item.avatarUrl,
-                  ),
-                )
-                .toList(),
-            actors: tmdbMatch.actors,
-            actorProfiles: tmdbMatch.actorProfiles
-                .map(
-                  (item) => MetadataPersonProfile(
-                    name: item.name,
-                    avatarUrl: item.avatarUrl,
-                  ),
-                )
-                .toList(),
-            platforms: tmdbMatch.platforms,
-            platformProfiles: tmdbMatch.platformProfiles
-                .map(
-                  (item) => MetadataPersonProfile(
-                    name: item.name,
-                    avatarUrl: item.avatarUrl,
-                  ),
-                )
-                .toList(),
-            ratingLabels: tmdbMatch.ratingLabels,
-            imdbId: tmdbMatch.imdbId,
-            tmdbId: '${tmdbMatch.tmdbId}',
-          ),
-          replaceExisting: forceReplace,
-        );
-      } else {
-        DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'no match');
-      }
-    } catch (_) {
-      DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'failed');
-    }
-  }
 
   if (settings.wmdbMetadataMatchEnabled &&
-      !imdbIdMetadataMatched &&
       (forceSearch ||
           nextTarget.needsMetadataMatch ||
           _needsRatingLabel(nextTarget, keyword: '豆瓣') ||
@@ -382,8 +281,7 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
 
   if (settings.tmdbMetadataMatchEnabled &&
       settings.tmdbReadAccessToken.trim().isNotEmpty &&
-      !imdbIdMetadataMatched &&
-      (forceSearch || nextTarget.imdbId.trim().isEmpty)) {
+      (forceSearch || _detailMetadataQuery(nextTarget).isNotEmpty)) {
     try {
       final currentQuery = _detailMetadataQuery(nextTarget);
       DebugTraceOnce.logMetadata(
@@ -475,72 +373,7 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
     }
   }
 
-  if (_shouldUseStandaloneImdbRating(settings) &&
-      (forceSearch || _needsStandaloneImdbFallback(nextTarget))) {
-    try {
-      final currentQuery = _detailMetadataQuery(nextTarget);
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'imdb',
-        'request query=${currentQuery.isEmpty ? initialQuery : currentQuery} '
-            'year=${nextTarget.year} imdbId=${nextTarget.imdbId}',
-      );
-      final ratingMatch = await imdbRatingClient.matchRating(
-        query: currentQuery.isEmpty ? initialQuery : currentQuery,
-        year: nextTarget.year,
-        preferSeries: _prefersSeriesMetadata(nextTarget),
-        imdbId: nextTarget.imdbId,
-      );
-      if (ratingMatch != null) {
-        DebugTraceOnce.logMetadata(
-          traceKey,
-          'imdb',
-          'matched rating=${ratingMatch.ratingLabel} imdbId=${ratingMatch.imdbId}',
-        );
-        final nextRatingLabel = ratingMatch.ratingLabel.trim();
-        nextTarget = nextTarget.copyWith(
-          ratingLabels: _mergeLabels(
-            nextTarget.ratingLabels,
-            nextRatingLabel.isEmpty ? const [] : [nextRatingLabel],
-          ),
-          imdbId: forceReplace
-              ? _firstNonEmpty(ratingMatch.imdbId, nextTarget.imdbId)
-              : (nextTarget.imdbId.trim().isEmpty
-                  ? ratingMatch.imdbId
-                  : nextTarget.imdbId),
-        );
-      } else {
-        DebugTraceOnce.logMetadata(traceKey, 'imdb', 'no match');
-      }
-    } catch (_) {
-      DebugTraceOnce.logMetadata(traceKey, 'imdb', 'failed');
-      // Ignore IMDb failures and continue.
-    }
-  }
-
   return _normalizeRatingLabelsInTarget(nextTarget);
-}
-
-String _resolvePreferredImdbId(String currentImdbId, String query) {
-  final normalizedCurrent = _normalizeImdbId(currentImdbId);
-  if (normalizedCurrent.isNotEmpty) {
-    return normalizedCurrent;
-  }
-  return _extractImdbIdFromText(query);
-}
-
-String _extractImdbIdFromText(String value) {
-  final match =
-      RegExp(r'\btt\d{7,9}\b', caseSensitive: false).firstMatch(value);
-  return _normalizeImdbId(match?.group(0) ?? '');
-}
-
-String _normalizeImdbId(String value) {
-  final trimmed = value.trim().toLowerCase();
-  if (!RegExp(r'^tt\d{7,9}$').hasMatch(trimmed)) {
-    return '';
-  }
-  return trimmed;
 }
 
 String _detailTraceKey(MediaDetailTarget target) {
@@ -665,7 +498,16 @@ Future<MetadataMatchResult?> _tryPreferredMetadataMatch({
         actors: target.actors,
       ),
     );
-  } catch (_) {
+  } catch (error, stackTrace) {
+    detailResourceSwitchTrace(
+      'resource.match.metadata.error',
+      fields: {
+        'target': target.title,
+        'query': query,
+      },
+      error: error,
+      stackTrace: stackTrace,
+    );
     return null;
   }
 }
@@ -710,60 +552,23 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
 
   List<_LibraryMatchCandidate> buildCandidates(List<MediaItem> items) {
     controller.throwIfCancelled();
-    final matches = <_LibraryMatchCandidate>[];
-    final doubanId = _resolveManualMatchDoubanId(target, metadataMatch);
-    final imdbId = _resolveManualMatchImdbId(target, metadataMatch);
-    final tmdbId = _resolveManualMatchTmdbId(target, metadataMatch);
-    final tvdbId = _resolveManualMatchTvdbId(target);
-    final wikidataId = _resolveManualMatchWikidataId(target);
-    final hasExternalIds = doubanId.trim().isNotEmpty ||
-        imdbId.trim().isNotEmpty ||
-        tmdbId.trim().isNotEmpty ||
-        tvdbId.trim().isNotEmpty ||
-        wikidataId.trim().isNotEmpty;
-    final exactMatchedItems = listMediaItemsMatchingExternalIds(
-      items,
-      doubanId: doubanId,
-      imdbId: imdbId,
-      tmdbId: tmdbId,
-      tvdbId: tvdbId,
-      wikidataId: wikidataId,
-    );
-    for (final exactMatched in exactMatchedItems) {
-      matches.add(
-        _LibraryMatchCandidate(
-          item: exactMatched,
-          matchReason: _externalIdMatchReason(
-            exactMatched,
-            doubanId: doubanId,
-            imdbId: imdbId,
-            tmdbId: tmdbId,
-            tvdbId: tvdbId,
-            wikidataId: wikidataId,
-          ),
-          score: 1e9,
-        ),
-      );
-    }
-    if (hasExternalIds) {
-      return matches;
-    }
-    for (final scored in listScoredMediaItemsMatchingTitles(
-      items,
+    final matches = _detailLibraryMatchService.buildManualMatchCandidates(
+      target: target,
+      items: items,
       titles: titles,
       year: year,
+      metadataMatch: metadataMatch,
       maxResults: maxMatches,
-    )) {
-      controller.throwIfCancelled();
-      matches.add(
-        _LibraryMatchCandidate(
-          item: scored.item,
-          matchReason: _titleMatchReason(year),
-          score: scored.score,
-        ),
-      );
-    }
-    return matches;
+    );
+    return matches
+        .map(
+          (candidate) => _LibraryMatchCandidate(
+            item: candidate.item,
+            matchReason: candidate.matchReason,
+            score: candidate.score,
+          ),
+        )
+        .toList(growable: false);
   }
 
   final taskFactories = <Future<List<_LibraryMatchCandidate>> Function()>[];
@@ -779,7 +584,16 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
         sourceId: source.id,
       );
       controller.throwIfCancelled();
-    } catch (_) {
+    } catch (error, stackTrace) {
+      detailResourceSwitchTrace(
+        'resource.match.source.emby.collections.error',
+        fields: {
+          'sourceId': source.id,
+          'sourceName': source.name,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       collections = const [];
     }
     if (collections.isEmpty) {
@@ -818,7 +632,17 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
           return buildCandidates(items);
         } on _LibraryMatchCancelledException {
           rethrow;
-        } catch (_) {
+        } catch (error, stackTrace) {
+          detailResourceSwitchTrace(
+            'resource.match.source.emby.library.error',
+            fields: {
+              'sourceId': collection.sourceId,
+              'sectionId': collection.id,
+              'sectionName': collection.title,
+            },
+            error: error,
+            stackTrace: stackTrace,
+          );
           return const <_LibraryMatchCandidate>[];
         }
       });
@@ -844,7 +668,16 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
         return buildCandidates(nasLibrary);
       } on _LibraryMatchCancelledException {
         rethrow;
-      } catch (_) {
+      } catch (error, stackTrace) {
+        detailResourceSwitchTrace(
+          'resource.match.source.nas.error',
+          fields: {
+            'sourceId': source.id,
+            'sourceName': source.name,
+          },
+          error: error,
+          stackTrace: stackTrace,
+        );
         return const <_LibraryMatchCandidate>[];
       }
     });
@@ -866,13 +699,30 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
         return buildCandidates(items);
       } on _LibraryMatchCancelledException {
         rethrow;
-      } catch (_) {
+      } catch (error, stackTrace) {
+        detailResourceSwitchTrace(
+          'resource.match.source.quark.error',
+          fields: {
+            'sourceId': source.id,
+            'sourceName': source.name,
+          },
+          error: error,
+          stackTrace: stackTrace,
+        );
         return const <_LibraryMatchCandidate>[];
       }
     });
   }
 
   if (taskFactories.isEmpty) {
+    detailResourceSwitchTrace(
+      'resource.match.sources.empty',
+      fields: {
+        'allowedSources': allowedSources
+            .map((item) => '${item.kind.name}:${item.id}')
+            .join(' || '),
+      },
+    );
     return snapshot();
   }
 
@@ -1098,28 +948,6 @@ int _resolveManualMatchYear(
   );
 }
 
-String _externalIdMatchReason(
-  MediaItem item, {
-  required String doubanId,
-  required String imdbId,
-  required String tmdbId,
-  required String tvdbId,
-  required String wikidataId,
-}) {
-  return _detailLibraryMatchService.externalIdMatchReason(
-    item,
-    doubanId: doubanId,
-    imdbId: imdbId,
-    tmdbId: tmdbId,
-    tvdbId: tvdbId,
-    wikidataId: wikidataId,
-  );
-}
-
-String _titleMatchReason(int year) {
-  return _detailLibraryMatchService.titleMatchReason(year);
-}
-
 String _resolveManualMatchDoubanId(
   MediaDetailTarget target,
   MetadataMatchResult? metadataMatch,
@@ -1192,14 +1020,6 @@ bool _sameMaps(Map<String, String> left, Map<String, String> right) {
     }
   }
   return true;
-}
-
-String _firstNonEmpty(String primary, String fallback) {
-  final primaryTrimmed = primary.trim();
-  if (primaryTrimmed.isNotEmpty) {
-    return primaryTrimmed;
-  }
-  return fallback.trim();
 }
 
 MediaDetailTarget _normalizeRatingLabelsInTarget(MediaDetailTarget target) {
@@ -1313,7 +1133,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     if (oldWidget.target.itemId != widget.target.itemId ||
         oldWidget.target.title != widget.target.title ||
         oldWidget.target.searchQuery != widget.target.searchQuery) {
-      _cancelDetailTasks(additionalTargets: [oldWidget.target]);
+      _cancelDetailTasks(
+        reason: 'target.change',
+        additionalTargets: [oldWidget.target],
+      );
       _selectedSeasonId = '';
       _isRefreshingMetadata = false;
       _pageController.resetForTargetChange();
@@ -1327,7 +1150,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
 
   @override
   void dispose() {
-    _cancelActiveLibraryMatch();
+    _cancelActiveLibraryMatch(reason: 'dispose');
     _heroArtworkFocusNode.removeListener(_handleHeroArtworkFocusChanged);
     _pageController.removeListener(_handlePageControllerChanged);
     _pageController.dispose();
@@ -1346,7 +1169,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
 
   @override
   void onPageBecameInactive() {
-    _cancelDetailTasks(invalidateProviders: false);
+    _cancelDetailTasks(
+      reason: 'page.inactive',
+      invalidateProviders: false,
+    );
     if (!mounted) {
       return;
     }
@@ -1584,16 +1410,26 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     }
   }
 
-  void _cancelActiveLibraryMatch() {
+  void _cancelActiveLibraryMatch({String reason = ''}) {
+    if (_activeLibraryMatchController != null) {
+      detailResourceSwitchTrace(
+        'resource.match.cancel.request',
+        fields: {
+          'reason': reason,
+          'target': _detailResourceTraceTarget(_manualOverrideTarget),
+        },
+      );
+    }
     _activeLibraryMatchController?.cancel();
     _activeLibraryMatchController = null;
   }
 
   void _cancelDetailTasks({
+    String reason = '',
     bool invalidateProviders = true,
     Iterable<MediaDetailTarget> additionalTargets = const [],
   }) {
-    _cancelActiveLibraryMatch();
+    _cancelActiveLibraryMatch(reason: reason);
     _pageController.cancelDetailTasks();
     if (!invalidateProviders) {
       return;
@@ -1735,7 +1571,17 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       );
       var currentTarget = runtimePlan.effectiveTarget;
       final enrichmentSettings = ref.read(detailEnrichmentSettingsProvider);
-      if (_shouldAutoRefreshOverviewMetadata(
+      if (_shouldRunEntryMetadataRefresh(currentTarget)) {
+        await _refreshMetadata(
+          currentTarget,
+          sessionId: sessionId,
+          showFeedback: false,
+        );
+        if (!_isSessionActive(sessionId)) {
+          return;
+        }
+        currentTarget = _manualOverrideTarget ?? currentTarget;
+      } else if (_shouldAutoRefreshOverviewMetadata(
         pageTarget: widget.target,
         currentTarget: currentTarget,
         settings: enrichmentSettings,
@@ -1776,16 +1622,27 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       final resolved = await ref.read(
         enrichedDetailTargetProvider(currentTarget).future,
       );
+      final shouldAutoMatchSeriesSources = shouldAutoMatchSeriesOverviewSources(
+        pageSeedTarget: widget.target,
+        libraryMatchChoices: _libraryMatchChoices,
+      );
       if (!_isSessionActive(sessionId) ||
-          _manualOverrideTarget != null ||
+          (_manualOverrideTarget != null && !shouldAutoMatchSeriesSources) ||
           ref.read(backgroundEnrichmentSuspendedProvider)) {
         return;
       }
-      if (!shouldAutoMatchDetailLocalResource(resolved)) {
+      final autoMatchTarget = shouldAutoMatchSeriesSources
+          ? buildSeriesOverviewSourceMatchSeed(
+              pageSeedTarget: widget.target,
+              resolvedTarget: resolved,
+            )
+          : resolved;
+      if (!shouldAutoMatchDetailLocalResource(autoMatchTarget) &&
+          !shouldAutoMatchSeriesSources) {
         return;
       }
       await _matchLocalResource(
-        resolved,
+        autoMatchTarget,
         sessionId: sessionId,
         showFeedback: false,
       );
@@ -1876,6 +1733,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     int sessionId,
     MediaDetailTarget currentTarget,
   ) async {
+    if (currentTarget.isSeries) {
+      return;
+    }
     detailResourceSwitchTrace(
       'variant.restore.start',
       dedupeKey: 'variant.restore|${_detailTraceKey(widget.target)}',
@@ -1939,6 +1799,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     required List<MediaDetailTarget> baseChoices,
     required MediaDetailTarget selectedTarget,
   }) async {
+    if (selectedTarget.isSeries) {
+      return null;
+    }
     final initialChoices = _mergeExpandedLibraryChoices([
       ...baseChoices,
       selectedTarget,
@@ -2067,7 +1930,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     }
 
     final controller = _LibraryMatchTaskController();
-    _cancelActiveLibraryMatch();
+    _cancelActiveLibraryMatch(reason: 'match.restart');
     _activeLibraryMatchController = controller;
     _updateLibraryMatchView(
       choices: const [],
@@ -2076,6 +1939,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     );
 
     try {
+      detailResourceSwitchTrace(
+        'resource.match.begin',
+        fields: {
+          'target': _detailResourceTraceTarget(currentTarget),
+          'sessionId': activeSessionId,
+        },
+      );
       final settings = ref.read(appSettingsProvider);
       final query = currentTarget.searchQuery.trim().isEmpty
           ? currentTarget.title
@@ -2086,11 +1956,38 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         target: currentTarget,
         query: query,
       );
+      detailResourceSwitchTrace(
+        'resource.match.metadata.done',
+        fields: {
+          'target': _detailResourceTraceTarget(currentTarget),
+          'query': query,
+          'matched': metadataMatch != null,
+          'tmdbId': metadataMatch?.tmdbId ?? '',
+          'imdbId': metadataMatch?.imdbId ?? '',
+        },
+      );
       controller.throwIfCancelled();
       if (!_isLibraryMatchActive(activeSessionId, controller)) {
+        detailResourceSwitchTrace(
+          'resource.match.cancel.after-metadata',
+          fields: {
+            'target': _detailResourceTraceTarget(currentTarget),
+            'sessionId': activeSessionId,
+          },
+        );
         throw const _LibraryMatchCancelledException();
       }
       final allowedSources = _resolveLibraryMatchSources(settings);
+      detailResourceSwitchTrace(
+        'resource.match.sources',
+        fields: {
+          'target': _detailResourceTraceTarget(currentTarget),
+          'allowedCount': allowedSources.length,
+          'allowedSources': allowedSources
+              .map((item) => '${item.kind.name}:${item.id}')
+              .join(' || '),
+        },
+      );
 
       final candidates = await _findAllLibraryMatchCandidates(
         mediaRepository: ref.read(mediaRepositoryProvider),
@@ -2109,7 +2006,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
             partialCandidates,
             query,
           );
-          if (partialMerged.isEmpty) {
+          final preferredPartial = prioritizeDetailLibraryMatchChoices(
+            pageSeedTarget: widget.target,
+            choices: partialMerged,
+          );
+          final partialChoices = preferredPartial.choices;
+          if (partialChoices.isEmpty) {
             return;
           }
           detailResourceSwitchTrace(
@@ -2118,31 +2020,44 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
             fields: {
               'target': _detailResourceTraceTarget(currentTarget),
               'partialCandidates': partialCandidates.length,
-              'partialMerged': partialMerged.length,
-              'partialSample': _detailResourceTraceChoiceSample(partialMerged),
+              'partialMerged': partialChoices.length,
+              'partialSample': _detailResourceTraceChoiceSample(partialChoices),
             },
           );
           _updateLibraryMatchView(
-            choices: partialMerged.length > 1
-                ? partialMerged
+            choices: partialChoices.length > 1
+                ? partialChoices
                 : const <MediaDetailTarget>[],
-            selectedIndex: 0,
+            selectedIndex: preferredPartial.selectedIndex,
             isMatching: true,
           );
-          _pageController.setManualOverrideTarget(partialMerged.first);
+          _pageController.setManualOverrideTarget(
+            partialChoices[preferredPartial.selectedIndex],
+          );
         },
       );
 
       controller.throwIfCancelled();
       if (!_isLibraryMatchActive(activeSessionId, controller)) {
+        detailResourceSwitchTrace(
+          'resource.match.cancel.after-candidates',
+          fields: {
+            'target': _detailResourceTraceTarget(currentTarget),
+            'sessionId': activeSessionId,
+            'candidateCount': candidates.length,
+          },
+        );
         throw const _LibraryMatchCancelledException();
       }
 
-      final merged = _candidatesToMergedTargets(
-        currentTarget,
-        candidates,
-        query,
-      );
+      final merged = prioritizeDetailLibraryMatchChoices(
+        pageSeedTarget: widget.target,
+        choices: _candidatesToMergedTargets(
+          currentTarget,
+          candidates,
+          query,
+        ),
+      ).choices;
       detailResourceSwitchTrace(
         'resource.match.final',
         dedupeKey: 'resource.match|${_detailTraceKey(widget.target)}',
@@ -2153,16 +2068,22 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           'mergedSample': _detailResourceTraceChoiceSample(merged),
         },
       );
-      final expandedVariantState = await _expandEpisodeLikeLibraryMatchChoices(
-        baseChoices: merged,
-        selectedTarget: merged.isEmpty ? currentTarget : merged.first,
+      final expandedVariantState = currentTarget.isSeries
+          ? null
+          : await _expandEpisodeLikeLibraryMatchChoices(
+              baseChoices: merged,
+              selectedTarget: merged.isEmpty ? currentTarget : merged.first,
+            );
+      final preferredEffective = prioritizeDetailLibraryMatchChoices(
+        pageSeedTarget: widget.target,
+        choices: expandedVariantState?.choices ?? merged,
+        fallbackSelectedIndex: expandedVariantState?.selectedIndex ?? 0,
       );
-      final effectiveChoices = expandedVariantState?.choices ?? merged;
-      final effectiveSelectedIndex = expandedVariantState?.selectedIndex.clamp(
-            0,
-            effectiveChoices.isEmpty ? 0 : effectiveChoices.length - 1,
-          ) ??
-          0;
+      final effectiveChoices = preferredEffective.choices;
+      final effectiveSelectedIndex = preferredEffective.selectedIndex.clamp(
+        0,
+        effectiveChoices.isEmpty ? 0 : effectiveChoices.length - 1,
+      );
 
       _updateLibraryMatchView(
         choices: effectiveChoices.length > 1
@@ -2240,6 +2161,29 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         ),
       );
     } on _LibraryMatchCancelledException {
+      detailResourceSwitchTrace(
+        'resource.match.cancelled',
+        fields: {
+          'target': _detailResourceTraceTarget(currentTarget),
+          'sessionId': activeSessionId,
+        },
+      );
+      return;
+    } catch (error, stackTrace) {
+      detailResourceSwitchTrace(
+        'resource.match.error',
+        fields: {
+          'target': _detailResourceTraceTarget(currentTarget),
+          'sessionId': activeSessionId,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (_isSessionActive(activeSessionId) && showFeedback && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('匹配本地资源失败：$error')),
+        );
+      }
       return;
     } finally {
       final isCurrentController =
@@ -2275,7 +2219,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         target: currentTarget,
         wmdbMetadataClient: ref.read(wmdbMetadataClientProvider),
         tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
-        imdbRatingClient: ref.read(imdbRatingClientProvider),
         forceSearch: true,
         forceReplace: true,
       );
@@ -2329,7 +2272,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
 
   Future<void> _openMetadataIndexManager(
       MediaDetailTarget currentTarget) async {
-    if (!canManageDetailMetadataIndex(currentTarget)) {
+    if (!shouldShowDetailMetadataManagerEntry(currentTarget)) {
       return;
     }
     final updatedTarget = await context.pushNamed<MediaDetailTarget>(
@@ -3167,7 +3110,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                 _subtitleSearchView.selectedIndex,
                                 choices: _subtitleSearchView.choices,
                               ),
-                              isRefreshingMetadata: _isRefreshingMetadata,
                               subtitleChoiceLabelBuilder:
                                   _subtitleSearchChoiceLabel,
                               onSearchOnline: () {
@@ -3186,7 +3128,20 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                   _openTelevisionLibraryMatchPicker,
                               onMatchLocalResource: _libraryMatchView.isMatching
                                   ? null
-                                  : () => _matchLocalResource(target),
+                                  : () {
+                                      detailResourceSwitchTrace(
+                                        'resource.ui.match.tap',
+                                        fields: {
+                                          'target': _detailResourceTraceTarget(
+                                              target),
+                                          'isMatching':
+                                              _libraryMatchView.isMatching,
+                                          'currentChoices':
+                                              _libraryMatchView.choices.length,
+                                        },
+                                      );
+                                      _matchLocalResource(target);
+                                    },
                               onCheckOnlineResourceUpdate:
                                   canCheckFavoriteOnlineResourceUpdate
                                       ? () =>
@@ -3219,11 +3174,16 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                   ),
                                 );
                               },
-                              onOpenMetadataIndexManager: () =>
-                                  _openMetadataIndexManager(target),
-                              onRefreshMetadata: _isRefreshingMetadata
-                                  ? null
-                                  : () => _refreshMetadata(target),
+                              onOpenMetadataIndexManager: () {
+                                detailResourceSwitchTrace(
+                                  'resource.ui.metadata-manager.tap',
+                                  fields: {
+                                    'target':
+                                        _detailResourceTraceTarget(target),
+                                  },
+                                );
+                                _openMetadataIndexManager(target);
+                              },
                             ),
                           ),
                       ],

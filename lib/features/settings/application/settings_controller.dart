@@ -9,6 +9,7 @@ import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
+import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
@@ -442,6 +443,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     state = AsyncData(next);
     _syncRuntimeTraceSettings(next);
     await _repository.save(next);
+    ref.read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
   }
 
   void _syncRuntimeTraceSettings(AppSettings settings) {

@@ -15,15 +15,26 @@ const DetailLibraryMatchService _detailLibraryMatchService =
 
 bool shouldAutoMatchDetailLocalResource(MediaDetailTarget target) {
   final availability = target.availabilityLabel.trim();
+  final itemType = target.itemType.trim().toLowerCase();
+  if (itemType == 'episode') {
+    return false;
+  }
   return !target.isPlayable &&
       target.needsLibraryMatch &&
       (availability.isEmpty || availability == '无');
 }
 
 bool canManageDetailMetadataIndex(MediaDetailTarget target) {
-  return target.sourceKind == MediaSourceKind.nas &&
+  return (target.sourceKind == MediaSourceKind.nas ||
+          target.sourceKind == MediaSourceKind.quark) &&
       target.sourceId.trim().isNotEmpty &&
       target.itemId.trim().isNotEmpty;
+}
+
+bool shouldShowDetailMetadataManagerEntry(MediaDetailTarget target) {
+  return canManageDetailMetadataIndex(target) ||
+      target.title.trim().isNotEmpty ||
+      target.searchQuery.trim().isNotEmpty;
 }
 
 bool shouldShowDetailResourceInfo(MediaDetailTarget target) {
@@ -63,7 +74,6 @@ class DetailResourceInfoSection extends StatelessWidget {
     required this.libraryView,
     required this.subtitleView,
     required this.selectedSubtitleIndex,
-    required this.isRefreshingMetadata,
     required this.subtitleChoiceLabelBuilder,
     required this.onSearchOnline,
     required this.onOpenTelevisionPlayableVariantPicker,
@@ -78,7 +88,6 @@ class DetailResourceInfoSection extends StatelessWidget {
     required this.onOpenTelevisionSubtitlePicker,
     required this.onSubtitleSelected,
     required this.onOpenMetadataIndexManager,
-    required this.onRefreshMetadata,
   });
 
   final MediaDetailTarget target;
@@ -87,7 +96,6 @@ class DetailResourceInfoSection extends StatelessWidget {
   final DetailLibraryMatchViewState libraryView;
   final DetailSubtitleSearchViewState subtitleView;
   final int selectedSubtitleIndex;
-  final bool isRefreshingMetadata;
   final String Function(CachedSubtitleSearchOption choice)
       subtitleChoiceLabelBuilder;
   final VoidCallback onSearchOnline;
@@ -103,7 +111,6 @@ class DetailResourceInfoSection extends StatelessWidget {
   final VoidCallback onOpenTelevisionSubtitlePicker;
   final ValueChanged<int> onSubtitleSelected;
   final VoidCallback onOpenMetadataIndexManager;
-  final VoidCallback? onRefreshMetadata;
 
   @override
   Widget build(BuildContext context) {
@@ -362,13 +369,13 @@ class DetailResourceInfoSection extends StatelessWidget {
           onOpenTelevisionSubtitlePicker: onOpenTelevisionSubtitlePicker,
           onSubtitleSelected: onSubtitleSelected,
         ),
-        if (canManageDetailMetadataIndex(target)) ...[
+        if (shouldShowDetailMetadataManagerEntry(target)) ...[
           const SizedBox(height: 12),
           Align(
             alignment: Alignment.centerLeft,
             child: isTelevision
                 ? TvAdaptiveButton(
-                    label: '建立/管理索引',
+                    label: '信息管理',
                     icon: Icons.manage_search_rounded,
                     focusId: 'detail:resource:metadata-index',
                     onPressed: onOpenMetadataIndexManager,
@@ -380,48 +387,7 @@ class DetailResourceInfoSection extends StatelessWidget {
                       Icons.manage_search_rounded,
                       size: 16,
                     ),
-                    label: const Text('建立/管理索引'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 0,
-                        vertical: 0,
-                      ),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                  ),
-          ),
-        ],
-        if (!canManageDetailMetadataIndex(target) &&
-            _canManuallyRefreshMetadata(target)) ...[
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: isTelevision
-                ? TvAdaptiveButton(
-                    label: isRefreshingMetadata ? '更新中...' : '自动更新',
-                    icon: Icons.refresh_rounded,
-                    focusId: 'detail:resource:refresh-metadata',
-                    onPressed: isRefreshingMetadata ? null : onRefreshMetadata,
-                    variant: TvButtonVariant.text,
-                  )
-                : TextButton.icon(
-                    onPressed: isRefreshingMetadata ? null : onRefreshMetadata,
-                    icon: isRefreshingMetadata
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Icon(
-                            Icons.refresh_rounded,
-                            size: 16,
-                          ),
-                    label: Text(
-                      isRefreshingMetadata ? '更新中...' : '自动更新',
-                    ),
+                    label: const Text('信息管理'),
                     style: TextButton.styleFrom(
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
@@ -598,14 +564,6 @@ bool _canShowManualResourceMatchButton(MediaDetailTarget target) {
   }
   if (target.sourceId.trim().isNotEmpty || target.itemId.trim().isNotEmpty) {
     return true;
-  }
-  return target.title.trim().isNotEmpty || target.searchQuery.trim().isNotEmpty;
-}
-
-bool _canManuallyRefreshMetadata(MediaDetailTarget target) {
-  if (target.sourceKind == MediaSourceKind.nas &&
-      target.sourceId.trim().isNotEmpty) {
-    return false;
   }
   return target.title.trim().isNotEmpty || target.searchQuery.trim().isNotEmpty;
 }

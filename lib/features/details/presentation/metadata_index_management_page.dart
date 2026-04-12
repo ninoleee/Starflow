@@ -12,15 +12,15 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/presentation/library_collection_page.dart';
 import 'package:starflow/features/library/presentation/library_page.dart';
-import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
+import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
-import 'package:starflow/features/settings/domain/app_settings.dart';
 
 class MetadataIndexManagementPage extends ConsumerStatefulWidget {
   const MetadataIndexManagementPage({
@@ -52,12 +52,10 @@ class _MetadataIndexManagementPageState
   bool _isSearching = false;
   bool _isApplying = false;
   bool _isAutoRefreshing = false;
-  MetadataMatchResult? _wmdbResult;
-  MetadataMatchResult? _tmdbResult;
-  ImdbRatingPreview? _imdbPreview;
+  List<MetadataMatchResult> _wmdbResults = const <MetadataMatchResult>[];
+  List<MetadataMatchResult> _tmdbResults = const <MetadataMatchResult>[];
   String _wmdbMessage = '';
   String _tmdbMessage = '';
-  String _imdbMessage = '';
 
   @override
   void initState() {
@@ -95,139 +93,130 @@ class _MetadataIndexManagementPageState
   }
 
   Future<NasMediaIndexRecord?> _loadRecord() {
+    if (!_supportsLocalMetadataIndex(_currentTarget)) {
+      return Future<NasMediaIndexRecord?>.value(null);
+    }
     return ref.read(nasMediaIndexerProvider).loadRecord(
           sourceId: _currentTarget.sourceId,
           resourceId: _currentTarget.itemId,
         );
   }
 
+  bool _supportsLocalMetadataIndex(MediaDetailTarget target) {
+    return (target.sourceKind == MediaSourceKind.nas ||
+            target.sourceKind == MediaSourceKind.quark) &&
+        target.sourceId.trim().isNotEmpty &&
+        target.itemId.trim().isNotEmpty;
+  }
+
+  String _effectiveSearchQuery() {
+    final manual = _queryController.text.trim();
+    if (manual.isNotEmpty) {
+      return manual;
+    }
+    final cached = _currentTarget.searchQuery.trim();
+    if (cached.isNotEmpty) {
+      return cached;
+    }
+    return _currentTarget.title.trim();
+  }
+
+  int _effectiveSearchYear() {
+    return int.tryParse(_yearController.text.trim()) ?? _currentTarget.year;
+  }
+
+  Future<void> _persistResolvedTarget(
+    MediaDetailTarget resolvedTarget, {
+    DetailMetadataRefreshStatus? metadataRefreshStatus,
+    bool closePage = false,
+  }) async {
+    _currentTarget = resolvedTarget;
+    setState(() {
+      _recordFuture = _loadRecord();
+    });
+    await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+          seedTarget: widget.target,
+          resolvedTarget: resolvedTarget,
+          metadataRefreshStatus: metadataRefreshStatus,
+        );
+    _invalidateReaders();
+    if (!mounted || !closePage) {
+      return;
+    }
+    context.pop(resolvedTarget);
+  }
+
   Future<void> _runSearch() async {
     final query = _queryController.text.trim();
     final year = int.tryParse(_yearController.text.trim()) ?? 0;
-    final preferredImdbId = _resolvePreferredImdbId(
-      _currentTarget.imdbId,
-      query,
-    );
-    if (query.isEmpty && preferredImdbId.isEmpty) {
+    if (query.isEmpty) {
       _showSnackBar('请先输入要搜索的片名');
       return;
     }
 
     setState(() {
       _isSearching = true;
-      _wmdbResult = null;
-      _tmdbResult = null;
-      _imdbPreview = null;
+      _wmdbResults = const <MetadataMatchResult>[];
+      _tmdbResults = const <MetadataMatchResult>[];
       _wmdbMessage = '';
       _tmdbMessage = '';
-      _imdbMessage = '';
     });
 
     final settings = ref.read(appSettingsProvider);
-    Future<(MetadataMatchResult?, String)> resolveTmdb() async {
+    Future<(List<MetadataMatchResult>, String)> resolveTmdb() async {
       final token = settings.tmdbReadAccessToken.trim();
       if (token.isEmpty) {
-        return (null, '未配置 TMDB Read Access Token。');
+        return (const <MetadataMatchResult>[], '未配置 TMDB Read Access Token。');
       }
       try {
         final client = ref.read(tmdbMetadataClientProvider);
-        final result = preferredImdbId.isNotEmpty
-            ? await client.matchByImdbId(
-                imdbId: preferredImdbId,
-                readAccessToken: token,
-                preferSeries: _preferSeries,
-              )
-            : await client.matchTitle(
-                query: query,
-                readAccessToken: token,
-                year: year,
-                preferSeries: _preferSeries,
-              );
+        final results = (await client.searchTitleMatches(
+          query: query,
+          readAccessToken: token,
+          year: year,
+          preferSeries: _preferSeries,
+          maxResults: 3,
+        ))
+            .map(_tmdbToMetadataMatch)
+            .toList(growable: false);
         return (
-          result == null ? null : _tmdbToMetadataMatch(result),
-          result == null ? '没有匹配到 TMDB 结果。' : '',
+          results,
+          results.isEmpty ? '没有匹配到 TMDB 结果。' : '',
         );
       } catch (error) {
-        return (null, '$error');
+        return (const <MetadataMatchResult>[], '$error');
       }
     }
 
-    Future<(ImdbRatingPreview?, String)> resolveImdb() async {
-      if (_hasTmdbAvailable(settings)) {
-        return (null, 'TMDB 可用时跳过独立 IMDb 评分查询。');
-      }
+    Future<(List<MetadataMatchResult>, String)> resolveWmdb() async {
       try {
-        final result = await ref.read(imdbRatingClientProvider).previewMatch(
-              query: preferredImdbId.isNotEmpty ? preferredImdbId : query,
-              year: year,
-              preferSeries: _preferSeries,
-            );
-        return (result, result == null ? '没有匹配到 IMDb 评分。' : '');
+        final results =
+            await ref.read(wmdbMetadataClientProvider).searchTitleMatches(
+                  query: query,
+                  year: year,
+                  preferSeries: _preferSeries,
+                  actors: _currentTarget.actors,
+                  maxResults: 3,
+                );
+        return (results, results.isEmpty ? '没有匹配到 WMDB 结果。' : '');
       } catch (error) {
-        return (null, '$error');
-      }
-    }
-
-    Future<(MetadataMatchResult?, String)> resolveWmdb() async {
-      if (query.isEmpty) {
-        return (null, 'IMDb ID 查询已跳过 WMDB 标题搜索。');
-      }
-      try {
-        final result = await ref.read(wmdbMetadataClientProvider).matchTitle(
-              query: query,
-              year: year,
-              preferSeries: _preferSeries,
-              actors: _currentTarget.actors,
-            );
-        return (result, result == null ? '没有匹配到 WMDB 结果。' : '');
-      } catch (error) {
-        return (null, '$error');
+        return (const <MetadataMatchResult>[], '$error');
       }
     }
 
     final tmdbResolved = await resolveTmdb();
-    final imdbResolved = await resolveImdb();
-    final shouldFallbackToTitleSearch = preferredImdbId.isEmpty ||
-        (tmdbResolved.$1 == null && imdbResolved.$1 == null);
-    final wmdbResolved = shouldFallbackToTitleSearch
-        ? await resolveWmdb()
-        : (null, '已优先命中 IMDb ID，跳过标题 WMDB 搜索。');
+    final wmdbResolved = await resolveWmdb();
     if (!mounted) {
       return;
     }
 
     setState(() {
       _isSearching = false;
-      _wmdbResult = wmdbResolved.$1;
+      _wmdbResults = wmdbResolved.$1;
       _wmdbMessage = wmdbResolved.$2;
-      _tmdbResult = tmdbResolved.$1;
+      _tmdbResults = tmdbResolved.$1;
       _tmdbMessage = tmdbResolved.$2;
-      _imdbPreview = imdbResolved.$1;
-      _imdbMessage = imdbResolved.$2;
     });
-  }
-
-  String _resolvePreferredImdbId(String currentImdbId, String query) {
-    final normalizedCurrent = _normalizeImdbId(currentImdbId);
-    if (normalizedCurrent.isNotEmpty) {
-      return normalizedCurrent;
-    }
-    final match =
-        RegExp(r'\btt\d{7,9}\b', caseSensitive: false).firstMatch(query);
-    return _normalizeImdbId(match?.group(0) ?? '');
-  }
-
-  String _normalizeImdbId(String value) {
-    final trimmed = value.trim().toLowerCase();
-    if (!RegExp(r'^tt\d{7,9}$').hasMatch(trimmed)) {
-      return '';
-    }
-    return trimmed;
-  }
-
-  bool _hasTmdbAvailable(AppSettings settings) {
-    return settings.tmdbMetadataMatchEnabled &&
-        settings.tmdbReadAccessToken.trim().isNotEmpty;
   }
 
   Widget _wrapTelevisionSearchField({
@@ -320,34 +309,29 @@ class _MetadataIndexManagementPageState
     });
 
     try {
-      final updatedTarget =
-          await ref.read(nasMediaIndexerProvider).applyManualMetadata(
+      final searchQuery = _effectiveSearchQuery();
+      final updatedTarget = _supportsLocalMetadataIndex(_currentTarget)
+          ? await ref.read(nasMediaIndexerProvider).applyManualMetadata(
                 target: _currentTarget,
-                searchQuery: _queryController.text.trim(),
+                searchQuery: searchQuery,
                 metadataMatch: match,
-                imdbRatingMatch: _resolvedImdbMatch(match.imdbId),
-              );
-      if (updatedTarget == null) {
-        _showSnackBar('没有找到可写回的索引记录');
-        return;
-      }
+              )
+          : null;
       final resolvedTarget = _applyMetadataResultToTarget(
-        updatedTarget,
+        (updatedTarget ?? _currentTarget).copyWith(
+          searchQuery: searchQuery.isEmpty
+              ? (updatedTarget ?? _currentTarget).searchQuery
+              : searchQuery,
+        ),
         match,
-        imdbRatingMatch: _resolvedImdbMatch(match.imdbId),
       );
-      _currentTarget = resolvedTarget;
-      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
-            seedTarget: widget.target,
-            resolvedTarget: resolvedTarget,
-          );
-      _invalidateReaders();
-      if (!mounted) {
-        return;
-      }
-      context.pop(resolvedTarget);
+      await _persistResolvedTarget(
+        resolvedTarget,
+        metadataRefreshStatus: DetailMetadataRefreshStatus.succeeded,
+        closePage: true,
+      );
     } catch (error) {
-      _showSnackBar('写入索引失败：$error');
+      _showSnackBar('保存信息失败：$error');
     } finally {
       if (mounted) {
         setState(() {
@@ -355,76 +339,12 @@ class _MetadataIndexManagementPageState
         });
       }
     }
-  }
-
-  Future<void> _applyImdbPreview() async {
-    final imdbMatch = _resolvedImdbMatch('');
-    if (imdbMatch == null || _isApplying) {
-      return;
-    }
-    setState(() {
-      _isApplying = true;
-    });
-
-    try {
-      final updatedTarget =
-          await ref.read(nasMediaIndexerProvider).applyManualMetadata(
-                target: _currentTarget,
-                searchQuery: _queryController.text.trim(),
-                imdbRatingMatch: imdbMatch,
-              );
-      if (updatedTarget == null) {
-        _showSnackBar('没有找到可写回的索引记录');
-        return;
-      }
-      final resolvedTarget = _applyMetadataResultToTarget(
-        updatedTarget,
-        null,
-        imdbRatingMatch: imdbMatch,
-      );
-      _currentTarget = resolvedTarget;
-      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
-            seedTarget: widget.target,
-            resolvedTarget: resolvedTarget,
-          );
-      _invalidateReaders();
-      if (!mounted) {
-        return;
-      }
-      context.pop(resolvedTarget);
-    } catch (error) {
-      _showSnackBar('写入评分失败：$error');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isApplying = false;
-        });
-      }
-    }
-  }
-
-  ImdbRatingMatch? _resolvedImdbMatch(String preferredImdbId) {
-    final preview = _imdbPreview;
-    if (preview == null || preview.ratingLabel.trim().isEmpty) {
-      return null;
-    }
-    final normalizedPreferredId = preferredImdbId.trim().toLowerCase();
-    if (normalizedPreferredId.isNotEmpty &&
-        preview.imdbId.trim().toLowerCase() != normalizedPreferredId) {
-      return null;
-    }
-    return ImdbRatingMatch(
-      imdbId: preview.imdbId,
-      ratingLabel: preview.ratingLabel,
-      voteCount: preview.voteCount,
-    );
   }
 
   MediaDetailTarget _applyMetadataResultToTarget(
     MediaDetailTarget target,
-    MetadataMatchResult? match, {
-    ImdbRatingMatch? imdbRatingMatch,
-  }) {
+    MetadataMatchResult? match,
+  ) {
     var nextTarget = target;
     if (match != null) {
       final directorProfiles = match.directorProfiles
@@ -519,18 +439,6 @@ class _MetadataIndexManagementPageState
             match.tmdbId.trim().isNotEmpty ? match.tmdbId : nextTarget.tmdbId,
       );
     }
-    if (imdbRatingMatch != null &&
-        imdbRatingMatch.ratingLabel.trim().isNotEmpty) {
-      nextTarget = nextTarget.copyWith(
-        imdbId: imdbRatingMatch.imdbId.trim().isNotEmpty
-            ? imdbRatingMatch.imdbId
-            : nextTarget.imdbId,
-        ratingLabels: _mergeLabels(
-          nextTarget.ratingLabels,
-          [imdbRatingMatch.ratingLabel],
-        ),
-      );
-    }
     return nextTarget;
   }
 
@@ -583,25 +491,16 @@ class _MetadataIndexManagementPageState
     });
 
     try {
-      final updatedTarget = await ref
-          .read(nasMediaIndexerProvider)
-          .enrichDetailTargetMetadataIfNeeded(_currentTarget);
-      final resolvedTarget = updatedTarget ?? _currentTarget;
+      final resolvedTarget = await _resolveAutomaticRefreshTarget();
       final changed = _hasMetadataChanged(_currentTarget, resolvedTarget);
       if (!mounted) {
         return;
       }
 
-      setState(() {
-        _currentTarget = resolvedTarget;
-        _recordFuture = _loadRecord();
-      });
-      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
-            seedTarget: widget.target,
-            resolvedTarget: resolvedTarget,
-            metadataRefreshStatus: DetailMetadataRefreshStatus.succeeded,
-          );
-      _invalidateReaders();
+      await _persistResolvedTarget(
+        resolvedTarget,
+        metadataRefreshStatus: DetailMetadataRefreshStatus.succeeded,
+      );
       _showSnackBar(changed ? '已自动更新信息' : '没有可更新的信息');
     } catch (error) {
       await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
@@ -617,6 +516,50 @@ class _MetadataIndexManagementPageState
         });
       }
     }
+  }
+
+  Future<MediaDetailTarget> _resolveAutomaticRefreshTarget() async {
+    final searchQuery = _effectiveSearchQuery();
+    final searchYear = _effectiveSearchYear();
+    final searchBaseTarget = _currentTarget.copyWith(
+      searchQuery:
+          searchQuery.isEmpty ? _currentTarget.searchQuery : searchQuery,
+      year: searchYear > 0 ? searchYear : _currentTarget.year,
+    );
+
+    if (_supportsLocalMetadataIndex(searchBaseTarget)) {
+      final indexedTarget = await ref
+          .read(nasMediaIndexerProvider)
+          .enrichDetailTargetMetadataIfNeeded(searchBaseTarget);
+      if (indexedTarget != null) {
+        await ref
+            .read(nasMediaIndexerProvider)
+            .markDetailTargetMetadataManuallyManaged(searchBaseTarget);
+        return indexedTarget.copyWith(
+          searchQuery:
+              searchQuery.isEmpty ? indexedTarget.searchQuery : searchQuery,
+          year: searchYear > 0 ? searchYear : indexedTarget.year,
+        );
+      }
+    }
+
+    final settings = ref.read(appSettingsProvider);
+    var nextTarget = searchBaseTarget;
+    final metadataMatch = await ref.read(metadataMatchResolverProvider).match(
+          settings: settings,
+          request: MetadataMatchRequest(
+            query: searchQuery,
+            doubanId: nextTarget.doubanId,
+            year: searchYear,
+            preferSeries: _preferSeries,
+            actors: nextTarget.actors,
+          ),
+        );
+    if (metadataMatch != null) {
+      nextTarget = _applyMetadataResultToTarget(nextTarget, metadataMatch);
+    }
+
+    return nextTarget;
   }
 
   @override
@@ -646,7 +589,7 @@ class _MetadataIndexManagementPageState
                               12,
                         ),
                         _SectionPanel(
-                          title: '索引管理',
+                          title: '信息管理',
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -659,7 +602,7 @@ class _MetadataIndexManagementPageState
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                '为当前 WebDAV 资源手动搜索 WMDB / TMDB / IMDb，并把结果写回本地索引。',
+                                '所有详情页都可以在这里手动搜索 WMDB / TMDB。有本地索引时写回索引，没有本地索引时写回当前详情缓存。',
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodyMedium
@@ -709,7 +652,9 @@ class _MetadataIndexManagementPageState
                         ),
                         const SizedBox(height: 16),
                         _SectionPanel(
-                          title: '当前索引',
+                          title: _supportsLocalMetadataIndex(_currentTarget)
+                              ? '当前索引'
+                              : '当前缓存',
                           child: snapshot.connectionState ==
                                   ConnectionState.waiting
                               ? const Padding(
@@ -718,7 +663,13 @@ class _MetadataIndexManagementPageState
                                 )
                               : snapshot.hasError
                                   ? Text('读取索引失败：${snapshot.error}')
-                                  : _CurrentIndexCard(record: snapshot.data),
+                                  : _CurrentIndexCard(
+                                      record: snapshot.data,
+                                      supportsLocalIndex:
+                                          _supportsLocalMetadataIndex(
+                                        _currentTarget,
+                                      ),
+                                    ),
                         ),
                         const SizedBox(height: 16),
                         _SectionPanel(
@@ -872,38 +823,24 @@ class _MetadataIndexManagementPageState
                         const SizedBox(height: 16),
                         _ProviderResultCard(
                           title: 'WMDB',
-                          result: _wmdbResult,
+                          results: _wmdbResults,
                           message: _wmdbMessage,
                           actionLabel: '应用 WMDB 结果',
                           isApplying: _isApplying,
                           isTelevision: isTelevision,
-                          focusId: 'detail:index:apply:wmdb',
-                          onApply: _wmdbResult == null
-                              ? null
-                              : () => _applyMetadataMatch(_wmdbResult!),
+                          focusIdPrefix: 'detail:index:apply:wmdb',
+                          onApply: _applyMetadataMatch,
                         ),
                         const SizedBox(height: 12),
                         _ProviderResultCard(
                           title: 'TMDB',
-                          result: _tmdbResult,
+                          results: _tmdbResults,
                           message: _tmdbMessage,
                           actionLabel: '应用 TMDB 结果',
                           isApplying: _isApplying,
                           isTelevision: isTelevision,
-                          focusId: 'detail:index:apply:tmdb',
-                          onApply: _tmdbResult == null
-                              ? null
-                              : () => _applyMetadataMatch(_tmdbResult!),
-                        ),
-                        const SizedBox(height: 12),
-                        _ImdbResultCard(
-                          preview: _imdbPreview,
-                          message: _imdbMessage,
-                          isApplying: _isApplying,
-                          isTelevision: isTelevision,
-                          focusId: 'detail:index:apply:imdb',
-                          onApply:
-                              _imdbPreview == null ? null : _applyImdbPreview,
+                          focusIdPrefix: 'detail:index:apply:tmdb',
+                          onApply: _applyMetadataMatch,
                         ),
                         const SizedBox(height: 24),
                       ],
@@ -1037,15 +974,19 @@ class _SectionPanel extends StatelessWidget {
 class _CurrentIndexCard extends StatelessWidget {
   const _CurrentIndexCard({
     required this.record,
+    required this.supportsLocalIndex,
   });
 
   final NasMediaIndexRecord? record;
+  final bool supportsLocalIndex;
 
   @override
   Widget build(BuildContext context) {
     if (record == null) {
       return Text(
-        '没有找到当前资源的本地索引记录。可以先回媒体库页执行重建索引，再回来手动匹配。',
+        supportsLocalIndex
+            ? '没有找到当前资源的本地索引记录。你仍然可以直接搜索并写入，命中的信息会先保存到当前详情缓存。'
+            : '当前资源没有本地索引能力。这里保存的结果会直接写入当前详情缓存。',
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
@@ -1078,7 +1019,6 @@ class _CurrentIndexCard extends StatelessWidget {
       if (record.sidecarMatched) 'Sidecar',
       if (record.wmdbMatched) 'WMDB',
       if (record.tmdbMatched) 'TMDB',
-      if (record.imdbMatched) 'IMDb',
     ];
     return flags.isEmpty ? '无' : flags.join(' / ');
   }
@@ -1087,29 +1027,30 @@ class _CurrentIndexCard extends StatelessWidget {
 class _ProviderResultCard extends StatelessWidget {
   const _ProviderResultCard({
     required this.title,
-    required this.result,
+    required this.results,
     required this.message,
     required this.actionLabel,
     required this.isApplying,
     required this.isTelevision,
     required this.onApply,
-    this.focusId,
+    this.focusIdPrefix,
   });
 
   final String title;
-  final MetadataMatchResult? result;
+  final List<MetadataMatchResult> results;
   final String message;
   final String actionLabel;
   final bool isApplying;
   final bool isTelevision;
-  final VoidCallback? onApply;
-  final String? focusId;
+  final Future<void> Function(MetadataMatchResult result)? onApply;
+  final String? focusIdPrefix;
 
   @override
   Widget build(BuildContext context) {
+    final visibleResults = results.take(3).toList(growable: false);
     return _SectionPanel(
       title: title,
-      child: result == null
+      child: visibleResults.isEmpty
           ? Text(
               message.trim().isEmpty ? '还没有搜索结果。' : message,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -1119,111 +1060,57 @@ class _ProviderResultCard extends StatelessWidget {
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _MatchPreviewCard(
-                  title: result!.title,
-                  imageUrl: result!.posterUrl,
-                  lines: [
-                    '年份：${result!.year > 0 ? result!.year : '未知'}',
-                    if (result!.doubanId.trim().isNotEmpty)
-                      '豆瓣 ID：${result!.doubanId}',
-                    if (result!.imdbId.trim().isNotEmpty)
-                      'IMDb ID：${result!.imdbId}',
-                    if (result!.tmdbId.trim().isNotEmpty)
-                      'TMDB ID：${result!.tmdbId}',
-                    if (result!.ratingLabels.isNotEmpty)
-                      '评分：${result!.ratingLabels.join(' · ')}',
-                  ],
-                  overview: result!.overview,
-                ),
-                const SizedBox(height: 12),
-                isTelevision
-                    ? TvAdaptiveButton(
-                        label: isApplying ? '应用中...' : actionLabel,
-                        icon: Icons.save_rounded,
-                        onPressed: isApplying ? null : onApply,
-                        focusId: focusId,
-                      )
-                    : FilledButton.icon(
-                        onPressed: isApplying ? null : onApply,
-                        icon: isApplying
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.save_rounded),
-                        label: Text(actionLabel),
-                      ),
-              ],
-            ),
-    );
-  }
-}
-
-class _ImdbResultCard extends StatelessWidget {
-  const _ImdbResultCard({
-    required this.preview,
-    required this.message,
-    required this.isApplying,
-    required this.isTelevision,
-    required this.onApply,
-    this.focusId,
-  });
-
-  final ImdbRatingPreview? preview;
-  final String message;
-  final bool isApplying;
-  final bool isTelevision;
-  final VoidCallback? onApply;
-  final String? focusId;
-
-  @override
-  Widget build(BuildContext context) {
-    return _SectionPanel(
-      title: 'IMDb',
-      child: preview == null
-          ? Text(
-              message.trim().isEmpty ? '还没有搜索结果。' : message,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                for (var index = 0; index < visibleResults.length; index++) ...[
+                  _MatchPreviewCard(
+                    title: visibleResults[index].title,
+                    imageUrl: visibleResults[index].posterUrl,
+                    lines: [
+                      '年份：${visibleResults[index].year > 0 ? visibleResults[index].year : '未知'}',
+                      if (visibleResults[index].doubanId.trim().isNotEmpty)
+                        '豆瓣 ID：${visibleResults[index].doubanId}',
+                      if (visibleResults[index].imdbId.trim().isNotEmpty)
+                        'IMDb ID：${visibleResults[index].imdbId}',
+                      if (visibleResults[index].tmdbId.trim().isNotEmpty)
+                        'TMDB ID：${visibleResults[index].tmdbId}',
+                      if (visibleResults[index].ratingLabels.isNotEmpty)
+                        '评分：${visibleResults[index].ratingLabels.join(' · ')}',
+                    ],
+                    overview: visibleResults[index].overview,
                   ),
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _MatchPreviewCard(
-                  title: preview!.title,
-                  imageUrl: preview!.posterUrl,
-                  lines: [
-                    '年份：${preview!.year > 0 ? preview!.year : '未知'}',
-                    if (preview!.typeLabel.trim().isNotEmpty)
-                      '类型：${preview!.typeLabel}',
-                    'IMDb ID：${preview!.imdbId}',
-                    '评分：${preview!.ratingLabel.trim().isEmpty ? '无' : preview!.ratingLabel}',
-                    if (preview!.voteCount > 0) '票数：${preview!.voteCount}',
-                  ],
-                ),
-                const SizedBox(height: 12),
-                isTelevision
-                    ? TvAdaptiveButton(
-                        label: isApplying ? '写入中...' : '仅写入 IMDb 评分',
-                        icon: Icons.star_rounded,
-                        onPressed: isApplying ? null : onApply,
-                        focusId: focusId,
-                      )
-                    : FilledButton.icon(
-                        onPressed: isApplying ? null : onApply,
-                        icon: isApplying
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.star_rounded),
-                        label: const Text('仅写入 IMDb 评分'),
-                      ),
+                  const SizedBox(height: 12),
+                  isTelevision
+                      ? TvAdaptiveButton(
+                          label: isApplying ? '应用中...' : actionLabel,
+                          icon: Icons.save_rounded,
+                          onPressed: isApplying
+                              ? null
+                              : () {
+                                  onApply?.call(visibleResults[index]);
+                                },
+                          focusId: focusIdPrefix == null
+                              ? null
+                              : '$focusIdPrefix:$index',
+                        )
+                      : FilledButton.icon(
+                          onPressed: isApplying
+                              ? null
+                              : () {
+                                  onApply?.call(visibleResults[index]);
+                                },
+                          icon: isApplying
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.save_rounded),
+                          label: Text(actionLabel),
+                        ),
+                  if (index < visibleResults.length - 1)
+                    const SizedBox(height: 16),
+                ],
               ],
             ),
     );

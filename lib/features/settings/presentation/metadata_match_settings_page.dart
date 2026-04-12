@@ -5,7 +5,6 @@ import 'package:starflow/core/utils/network_image_headers.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
-import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
@@ -153,30 +152,6 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 18),
-        SectionPanel(
-          title: '评分',
-          child: Column(
-            children: [
-              _MetadataToggleTile(
-                title: '启用 IMDb 自动补评分',
-                value: settings.imdbRatingMatchEnabled,
-                onChanged: (value) {
-                  ref
-                      .read(settingsControllerProvider.notifier)
-                      .setImdbRatingMatchEnabled(value);
-                },
-              ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: SettingsActionButton(
-                  label: '测试 IMDb',
-                  icon: Icons.science_rounded,
-                  onPressed: () => _openImdbTestDialog(context, ref),
-                ),
-              ),
-            ],
-          ),
-        ),
       ],
     );
   }
@@ -313,8 +288,10 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
           return StatefulBuilder(
             builder: (context, setState) {
               Future<void> runTest() async {
-                final token =
-                    ref.read(settingsMetadataMatchSliceProvider).tmdbReadAccessToken.trim();
+                final token = ref
+                    .read(settingsMetadataMatchSliceProvider)
+                    .tmdbReadAccessToken
+                    .trim();
                 final query = controller.text.trim();
                 if (token.isEmpty) {
                   setState(() {
@@ -719,214 +696,6 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
       titleFocusNode.dispose();
       actorFocusNode.dispose();
       yearFocusNode.dispose();
-      closeFocusNode.dispose();
-      startFocusNode.dispose();
-    }
-  }
-
-  Future<void> _openImdbTestDialog(
-    BuildContext context,
-    WidgetRef ref,
-  ) async {
-    final queryController = TextEditingController(text: 'The Godfather');
-    final yearController = TextEditingController(text: '1972');
-    var preferSeries = false;
-    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
-    final queryFocusNode = FocusNode(debugLabel: 'imdb-test-query');
-    final yearFocusNode = FocusNode(debugLabel: 'imdb-test-year');
-    final preferSeriesFocusNode = FocusNode(debugLabel: 'imdb-test-series');
-    final closeFocusNode = FocusNode(debugLabel: 'imdb-test-close');
-    final startFocusNode = FocusNode(debugLabel: 'imdb-test-start');
-    try {
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) {
-          var loading = false;
-          String message = '';
-          ImdbRatingPreview? result;
-
-          return StatefulBuilder(
-            builder: (context, setState) {
-              Future<void> runTest() async {
-                final query = queryController.text.trim();
-                final year = int.tryParse(yearController.text.trim()) ?? 0;
-                if (query.isEmpty) {
-                  setState(() {
-                    message = '请先输入要测试的片名。';
-                    result = null;
-                  });
-                  return;
-                }
-
-                setState(() {
-                  loading = true;
-                  message = '';
-                  result = null;
-                });
-
-                try {
-                  final match =
-                      await ref.read(imdbRatingClientProvider).previewMatch(
-                            query: query,
-                            year: year,
-                            preferSeries: preferSeries,
-                          );
-                  setState(() {
-                    loading = false;
-                    result = match;
-                    message = match == null ? '没有匹配到结果。' : '匹配成功。';
-                  });
-                } catch (error) {
-                  setState(() {
-                    loading = false;
-                    result = null;
-                    message = '$error';
-                  });
-                }
-              }
-
-              final dialog = FocusTraversalGroup(
-                policy: OrderedTraversalPolicy(),
-                child: AlertDialog(
-                  title: const Text('测试 IMDb'),
-                  content: SizedBox(
-                    width: 420,
-                    child: SingleChildScrollView(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(1),
-                            child: wrapTelevisionDialogFieldTraversal(
-                              enabled: isTelevision,
-                              child: TextField(
-                                controller: queryController,
-                                focusNode: queryFocusNode,
-                                autofocus: true,
-                                textInputAction: TextInputAction.next,
-                                decoration: const InputDecoration(
-                                  labelText: '测试片名',
-                                  hintText: '例如：The Godfather',
-                                  border: OutlineInputBorder(),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(2),
-                            child: wrapTelevisionDialogFieldTraversal(
-                              enabled: isTelevision,
-                              child: TextField(
-                                controller: yearController,
-                                focusNode: yearFocusNode,
-                                keyboardType: TextInputType.number,
-                                textInputAction: TextInputAction.done,
-                                decoration: const InputDecoration(
-                                  labelText: '年份',
-                                  hintText: '可选，例如：1972',
-                                  border: OutlineInputBorder(),
-                                ),
-                                onSubmitted: (_) => runTest(),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(3),
-                            child: StarflowCheckboxTile(
-                              focusNode: preferSeriesFocusNode,
-                              title: '优先按剧集匹配',
-                              value: preferSeries,
-                              onChanged: (value) {
-                                setState(() {
-                                  preferSeries = value;
-                                });
-                              },
-                            ),
-                          ),
-                          if (loading) ...[
-                            const SizedBox(height: 6),
-                            const LinearProgressIndicator(),
-                          ],
-                          if (message.trim().isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            Text(
-                              message,
-                              style: TextStyle(
-                                color: result == null
-                                    ? const Color(0xFFE79A9A)
-                                    : const Color(0xFF9FD6B3),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                          if (result != null) ...[
-                            const SizedBox(height: 12),
-                            _TestResultCard(
-                              title: result!.title,
-                              imageUrl: result!.posterUrl,
-                              lines: [
-                                '年份：${result!.year > 0 ? result!.year : '未知'}',
-                                '类型：${result!.typeLabel.trim().isEmpty ? '未知' : result!.typeLabel}',
-                                '海报：${result!.posterUrl.trim().isEmpty ? '无' : '有'}',
-                                'IMDb ID：${result!.imdbId}',
-                                '评分：${result!.ratingLabel.trim().isEmpty ? '无' : result!.ratingLabel}',
-                                if (result!.voteCount > 0)
-                                  '票数：${result!.voteCount}',
-                              ],
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                  actions: [
-                    FocusTraversalOrder(
-                      order: const NumericFocusOrder(4),
-                      child: SettingsActionButton(
-                        label: '关闭',
-                        icon: Icons.close_rounded,
-                        focusNode: closeFocusNode,
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                        variant: StarflowButtonVariant.ghost,
-                      ),
-                    ),
-                    FocusTraversalOrder(
-                      order: const NumericFocusOrder(5),
-                      child: SettingsActionButton(
-                        label: '开始测试',
-                        icon: Icons.play_arrow_rounded,
-                        focusNode: startFocusNode,
-                        onPressed: loading ? null : runTest,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-              return wrapTelevisionDialogBackHandling(
-                enabled: isTelevision,
-                dialogContext: dialogContext,
-                inputFocusNodes: [queryFocusNode, yearFocusNode],
-                contentFocusNodes: [
-                  queryFocusNode,
-                  yearFocusNode,
-                  preferSeriesFocusNode,
-                ],
-                actionFocusNodes: [startFocusNode, closeFocusNode],
-                child: dialog,
-              );
-            },
-          );
-        },
-      );
-    } finally {
-      queryController.dispose();
-      yearController.dispose();
-      queryFocusNode.dispose();
-      yearFocusNode.dispose();
-      preferSeriesFocusNode.dispose();
       closeFocusNode.dispose();
       startFocusNode.dispose();
     }

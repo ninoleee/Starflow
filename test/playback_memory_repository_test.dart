@@ -192,4 +192,106 @@ void main() {
     expect(entry.target.itemId, 'quark-movie-1');
     expect(entry.target.needsResolution, isTrue);
   });
+
+  test('clears deleted playback entries by resource path', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final repository = PlaybackMemoryRepository(sharedPreferences: prefs);
+    const deletedTarget = PlaybackTarget(
+      title: '要删除的电影',
+      sourceId: 'nas-main',
+      streamUrl: 'https://nas.example.com/deleted.mp4',
+      sourceName: '家庭 NAS',
+      sourceKind: MediaSourceKind.nas,
+      actualAddress: '/movies/要删除的电影.mkv',
+      itemId: 'deleted-movie-1',
+      itemType: 'movie',
+    );
+    const keptTarget = PlaybackTarget(
+      title: '保留的电影',
+      sourceId: 'nas-main',
+      streamUrl: 'https://nas.example.com/kept.mp4',
+      sourceName: '家庭 NAS',
+      sourceKind: MediaSourceKind.nas,
+      actualAddress: '/movies/保留的电影.mkv',
+      itemId: 'kept-movie-1',
+      itemType: 'movie',
+    );
+
+    await repository.saveProgress(
+      target: deletedTarget,
+      position: const Duration(minutes: 10),
+      duration: const Duration(hours: 2),
+    );
+    await repository.saveProgress(
+      target: keptTarget,
+      position: const Duration(minutes: 20),
+      duration: const Duration(hours: 2),
+    );
+
+    await repository.clearEntriesForResource(
+      sourceId: 'nas-main',
+      resourcePath: '/movies/要删除的电影.mkv',
+    );
+
+    expect(await repository.loadEntryForTarget(deletedTarget), isNull);
+    expect(await repository.loadEntryForTarget(keptTarget), isNotNull);
+  });
+
+  test('clears series playback aggregates for deleted directory scopes',
+      () async {
+    final prefs = await SharedPreferences.getInstance();
+    final repository = PlaybackMemoryRepository(sharedPreferences: prefs);
+    const episodeTarget = PlaybackTarget(
+      title: '第一集',
+      sourceId: 'nas-main',
+      streamUrl: 'https://nas.example.com/series-1-ep1.mp4',
+      sourceName: '家庭 NAS',
+      sourceKind: MediaSourceKind.nas,
+      actualAddress: '/shows/示例剧/Season 1/Episode 01.mkv',
+      itemId: 'episode-1',
+      itemType: 'episode',
+      seriesId: 'series-1',
+      seriesTitle: '示例剧',
+      seasonNumber: 1,
+      episodeNumber: 1,
+    );
+
+    await repository.saveProgress(
+      target: episodeTarget,
+      position: const Duration(minutes: 12),
+      duration: const Duration(minutes: 45),
+    );
+    await repository.saveSkipPreference(
+      SeriesSkipPreference(
+        seriesKey: buildSeriesKeyForTarget(episodeTarget),
+        updatedAt: DateTime(2026, 4, 12),
+        seriesTitle: '示例剧',
+        enabled: true,
+        introDuration: const Duration(seconds: 90),
+      ),
+    );
+
+    await repository.clearEntriesForResource(
+      sourceId: 'nas-main',
+      resourcePath: '/shows/示例剧',
+      treatAsScope: true,
+    );
+
+    expect(await repository.loadEntryForTarget(episodeTarget), isNull);
+    expect(
+      await repository.loadResumeForDetailTarget(
+        const MediaDetailTarget(
+          title: '示例剧',
+          posterUrl: '',
+          overview: '',
+          sourceId: 'nas-main',
+          itemId: 'series-1',
+          itemType: 'series',
+          year: 2026,
+        ),
+      ),
+      isNull,
+    );
+    expect(await repository.loadSkipPreference(episodeTarget), isNull);
+  });
 }

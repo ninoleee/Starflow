@@ -267,14 +267,9 @@ class HomeHeroPrefetchCoordinator {
     final needsTmdb = settings.tmdbMetadataMatchEnabled &&
         settings.tmdbReadAccessToken.trim().isNotEmpty &&
         (target.needsMetadataMatch ||
-            target.imdbId.trim().isEmpty ||
             target.backdropUrl.trim().isEmpty ||
             target.logoUrl.trim().isEmpty);
-    final needsImdb = settings.imdbRatingMatchEnabled &&
-        (!settings.tmdbMetadataMatchEnabled ||
-            settings.tmdbReadAccessToken.trim().isEmpty) &&
-        target.needsImdbRatingMatch;
-    return needsWmdb || needsTmdb || needsImdb;
+    return needsWmdb || needsTmdb;
   }
 
   bool _heroMetadataRefreshProducedUpdate(

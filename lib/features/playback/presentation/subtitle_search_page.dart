@@ -346,19 +346,25 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       child: Scaffold(
         appBar: AppBar(
           automaticallyImplyLeading: !isTelevision,
+          leadingWidth: isTelevision ? null : 64,
           title: Text(applyMode == SubtitleSearchApplyMode.downloadOnly
               ? '下载字幕'
               : '搜索并加载字幕'),
           leading: isTelevision
               ? null
-              : IconButton(
-                  icon: const Icon(Icons.arrow_back_rounded),
-                  onPressed: () async {
-                    final navigator = Navigator.of(context);
-                    if (await _handleClose()) {
-                      navigator.maybePop();
-                    }
-                  },
+              : SizedBox(
+                  width: 56,
+                  height: 56,
+                  child: IconButton(
+                    padding: const EdgeInsets.all(16),
+                    icon: const Icon(Icons.arrow_back_rounded),
+                    onPressed: () async {
+                      final navigator = Navigator.of(context);
+                      if (await _handleClose()) {
+                        navigator.maybePop();
+                      }
+                    },
+                  ),
                 ),
         ),
         body: AppPageBackground(

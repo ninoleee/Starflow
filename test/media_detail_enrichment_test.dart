@@ -182,6 +182,74 @@ void main() {
       expect(resolved.ratingLabels, ['豆瓣 9.6', 'TMDB 8.3']);
     });
 
+    test('skips auto enrichment when cached metadata refresh already ran',
+        () async {
+      var wmdbRequestCount = 0;
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'wmdbMetadataMatchEnabled': true,
+              'tmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+            }),
+          ),
+          wmdbMetadataClientProvider.overrideWithValue(
+            WmdbMetadataClient(
+              MockClient((request) async {
+                wmdbRequestCount += 1;
+                return http.Response(
+                  jsonEncode({
+                    'data': [
+                      {
+                        'poster': 'https://img.wmdb.tv/poster.jpg',
+                        'name': '天书奇谭',
+                      },
+                    ],
+                    'doubanId': '1428581',
+                  }),
+                  200,
+                  headers: const {'content-type': 'application/json'},
+                );
+              }),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const target = MediaDetailTarget(
+        title: '天书奇谭',
+        posterUrl: '',
+        overview: '',
+        year: 1983,
+        availabilityLabel: '无',
+        searchQuery: '天书奇谭',
+        doubanId: '1428581',
+        sourceName: '豆瓣',
+      );
+
+      await container
+          .read(localStorageCacheRepositoryProvider)
+          .saveDetailTarget(
+            seedTarget: target,
+            resolvedTarget: target,
+            metadataRefreshStatus: DetailMetadataRefreshStatus.succeeded,
+          );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(target).future,
+      );
+
+      expect(wmdbRequestCount, 0);
+      expect(resolved.posterUrl, isEmpty);
+      expect(resolved.overview, isEmpty);
+    });
+
     test('resolves Emby playback details for existing matched target',
         () async {
       final container = ProviderContainer(
@@ -1016,7 +1084,7 @@ void main() {
       expect(resolved.overview, '来自本地媒体库的简介');
     });
 
-    test('auto enrich prioritizes tmdb imdb-id lookup before title search',
+    test('auto enrich skips tmdb imdb-id lookup and keeps wmdb title match',
         () async {
       var wmdbRequests = 0;
       var tmdbFindRequests = 0;
@@ -1126,7 +1194,7 @@ void main() {
       );
 
       expect(resolved.imdbId, 'tt0133093');
-      expect(tmdbFindRequests, 1);
+      expect(tmdbFindRequests, 0);
       expect(wmdbRequests, 1);
     });
 

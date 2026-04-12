@@ -52,6 +52,7 @@ class NasMediaIndexRecord {
     required this.tmdbStatus,
     required this.imdbStatus,
     required this.item,
+    this.manualMetadataLocked = false,
     this.recognizedSeasonNumber,
     this.recognizedEpisodeNumber,
   });
@@ -81,6 +82,7 @@ class NasMediaIndexRecord {
   final NasMetadataFetchStatus tmdbStatus;
   final NasMetadataFetchStatus imdbStatus;
   final MediaItem item;
+  final bool manualMetadataLocked;
 
   bool get sidecarMatched => sidecarStatus.isSuccessful;
 
@@ -123,6 +125,7 @@ class NasMediaIndexRecord {
       'wmdbStatus': wmdbStatus.name,
       'tmdbStatus': tmdbStatus.name,
       'imdbStatus': imdbStatus.name,
+      'manualMetadataLocked': manualMetadataLocked,
       'item': item.toJson(),
     };
   }
@@ -158,6 +161,7 @@ class NasMediaIndexRecord {
       wmdbStatus: NasMetadataFetchStatusX.fromJsonValue(json['wmdbStatus']),
       tmdbStatus: NasMetadataFetchStatusX.fromJsonValue(json['tmdbStatus']),
       imdbStatus: NasMetadataFetchStatusX.fromJsonValue(json['imdbStatus']),
+      manualMetadataLocked: json['manualMetadataLocked'] as bool? ?? false,
       item: MediaItem.fromJson(
         Map<String, dynamic>.from(json['item'] as Map? ?? const {}),
       ),

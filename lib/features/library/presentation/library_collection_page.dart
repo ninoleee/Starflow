@@ -195,7 +195,9 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
-        child: Wrap(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),

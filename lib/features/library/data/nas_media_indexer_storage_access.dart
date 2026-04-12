@@ -310,6 +310,7 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
       wmdbStatus: existing.wmdbStatus,
       tmdbStatus: existing.tmdbStatus,
       imdbStatus: existing.imdbStatus,
+      manualMetadataLocked: existing.manualMetadataLocked,
       item: refreshedItem,
     );
   }

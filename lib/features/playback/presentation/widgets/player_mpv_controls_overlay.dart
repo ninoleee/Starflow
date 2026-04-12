@@ -327,7 +327,11 @@ class _PlayerMpvControlsOverlayState extends State<PlayerMpvControlsOverlay> {
     String? tooltip,
     String? traceStage,
     bool compact = false,
+    bool largeTapTarget = false,
   }) {
+    final buttonSize = compact
+        ? (largeTapTarget ? 44.0 : 32.0)
+        : (largeTapTarget ? 48.0 : 36.0);
     return Tooltip(
       message: _showTooltips ? (tooltip ?? '') : '',
       child: IconButton(
@@ -342,8 +346,8 @@ class _PlayerMpvControlsOverlayState extends State<PlayerMpvControlsOverlay> {
         color: Colors.white,
         padding: EdgeInsets.zero,
         constraints: BoxConstraints.tightFor(
-          width: compact ? 32 : 36,
-          height: compact ? 32 : 36,
+          width: buttonSize,
+          height: buttonSize,
         ),
         style: IconButton.styleFrom(
           visualDensity: VisualDensity.compact,
@@ -399,6 +403,7 @@ class _PlayerMpvControlsOverlayState extends State<PlayerMpvControlsOverlay> {
                         onPressed: widget.onBack,
                         traceStage: 'windows-mpv.overlay.action.back',
                         compact: _showLightweightChrome,
+                        largeTapTarget: true,
                       ),
                       const SizedBox(width: 12),
                       Expanded(

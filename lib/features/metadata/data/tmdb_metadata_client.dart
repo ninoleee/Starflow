@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
+import 'package:starflow/core/utils/metadata_search_trace.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
 
 final tmdbMetadataClientProvider = Provider<TmdbMetadataClient>((ref) {
@@ -31,6 +32,16 @@ class TmdbMetadataClient {
     final cleanedQuery = _cleanQuery(query);
     final cleanedToken = readAccessToken.trim();
     if (cleanedQuery.isEmpty || cleanedToken.isEmpty) {
+      metadataSearchTrace(
+        'tmdb.matchTitle.skip-invalid',
+        fields: <String, Object?>{
+          'query': query,
+          'cleanedQuery': cleanedQuery,
+          'hasToken': cleanedToken.isNotEmpty,
+          'year': year,
+          'preferSeries': preferSeries,
+        },
+      );
       return null;
     }
 
@@ -41,14 +52,45 @@ class TmdbMetadataClient {
       preferSeries: preferSeries,
     );
     if (_resolvedMatches.containsKey(cacheKey)) {
-      return _resolvedMatches[cacheKey];
+      final cached = _resolvedMatches[cacheKey];
+      metadataSearchTrace(
+        'tmdb.matchTitle.cache-hit',
+        fields: <String, Object?>{
+          'query': query,
+          'cleanedQuery': cleanedQuery,
+          'year': year,
+          'preferSeries': preferSeries,
+          'matched': cached != null,
+          'title': cached?.title ?? '',
+          'tmdbId': cached?.tmdbId ?? 0,
+        },
+      );
+      return cached;
     }
 
     final inflight = _inflightMatches[cacheKey];
     if (inflight != null) {
+      metadataSearchTrace(
+        'tmdb.matchTitle.inflight-hit',
+        fields: <String, Object?>{
+          'query': query,
+          'cleanedQuery': cleanedQuery,
+          'year': year,
+          'preferSeries': preferSeries,
+        },
+      );
       return inflight;
     }
 
+    metadataSearchTrace(
+      'tmdb.matchTitle.start',
+      fields: <String, Object?>{
+        'query': query,
+        'cleanedQuery': cleanedQuery,
+        'year': year,
+        'preferSeries': preferSeries,
+      },
+    );
     final future = _matchTitleUncached(
       query: cleanedQuery,
       readAccessToken: cleanedToken,
@@ -59,11 +101,78 @@ class TmdbMetadataClient {
 
     try {
       final result = await future;
+      metadataSearchTrace(
+        'tmdb.matchTitle.finish',
+        fields: <String, Object?>{
+          'query': cleanedQuery,
+          'year': year,
+          'preferSeries': preferSeries,
+          'matched': result != null,
+          'title': result?.title ?? '',
+          'imdbId': result?.imdbId ?? '',
+          'tmdbId': result?.tmdbId ?? 0,
+        },
+      );
       _resolvedMatches[cacheKey] = result;
       return result;
     } finally {
       _inflightMatches.remove(cacheKey);
     }
+  }
+
+  Future<List<TmdbMetadataMatch>> searchTitleMatches({
+    required String query,
+    required String readAccessToken,
+    int year = 0,
+    bool preferSeries = false,
+    int maxResults = 3,
+  }) async {
+    final cleanedQuery = _cleanQuery(query);
+    final cleanedToken = readAccessToken.trim();
+    if (cleanedQuery.isEmpty || cleanedToken.isEmpty || maxResults <= 0) {
+      return const <TmdbMetadataMatch>[];
+    }
+
+    final searchResponse = await _client.get(
+      _buildSearchUri(cleanedQuery),
+      headers: _buildHeaders(cleanedToken),
+    );
+    if (searchResponse.statusCode != 200) {
+      throw TmdbMetadataException(
+        'TMDB 搜索失败：HTTP ${searchResponse.statusCode}',
+      );
+    }
+
+    final decodedSearch = jsonDecode(
+      utf8.decode(searchResponse.bodyBytes, allowMalformed: true),
+    );
+    if (decodedSearch is! Map<String, dynamic>) {
+      return const <TmdbMetadataMatch>[];
+    }
+
+    final candidates = (decodedSearch['results'] as List<dynamic>? ?? const [])
+        .map((item) => _TmdbSearchResult.fromJson(item))
+        .whereType<_TmdbSearchResult>()
+        .toList(growable: false);
+    if (candidates.isEmpty) {
+      return const <TmdbMetadataMatch>[];
+    }
+
+    final ranked = _rankCandidates(
+      candidates,
+      query: cleanedQuery,
+      year: year,
+      preferSeries: preferSeries,
+    );
+    final matches = await Future.wait(
+      ranked.take(maxResults).map(
+            (item) => _fetchCompleteMatch(
+              result: item,
+              readAccessToken: cleanedToken,
+            ),
+          ),
+    );
+    return matches.whereType<TmdbMetadataMatch>().toList(growable: false);
   }
 
   Future<TmdbMetadataMatch?> matchByImdbId({
@@ -74,6 +183,15 @@ class TmdbMetadataClient {
     final normalizedImdbId = imdbId.trim().toLowerCase();
     final cleanedToken = readAccessToken.trim();
     if (normalizedImdbId.isEmpty || cleanedToken.isEmpty) {
+      metadataSearchTrace(
+        'tmdb.matchByImdbId.skip-invalid',
+        fields: <String, Object?>{
+          'imdbId': imdbId,
+          'normalizedImdbId': normalizedImdbId,
+          'hasToken': cleanedToken.isNotEmpty,
+          'preferSeries': preferSeries,
+        },
+      );
       return null;
     }
 
@@ -84,14 +202,39 @@ class TmdbMetadataClient {
       preferSeries ? 'tv' : 'movie',
     ].join('|');
     if (_resolvedMatches.containsKey(cacheKey)) {
-      return _resolvedMatches[cacheKey];
+      final cached = _resolvedMatches[cacheKey];
+      metadataSearchTrace(
+        'tmdb.matchByImdbId.cache-hit',
+        fields: <String, Object?>{
+          'imdbId': normalizedImdbId,
+          'preferSeries': preferSeries,
+          'matched': cached != null,
+          'title': cached?.title ?? '',
+          'tmdbId': cached?.tmdbId ?? 0,
+        },
+      );
+      return cached;
     }
 
     final inflight = _inflightMatches[cacheKey];
     if (inflight != null) {
+      metadataSearchTrace(
+        'tmdb.matchByImdbId.inflight-hit',
+        fields: <String, Object?>{
+          'imdbId': normalizedImdbId,
+          'preferSeries': preferSeries,
+        },
+      );
       return inflight;
     }
 
+    metadataSearchTrace(
+      'tmdb.matchByImdbId.start',
+      fields: <String, Object?>{
+        'imdbId': normalizedImdbId,
+        'preferSeries': preferSeries,
+      },
+    );
     final future = _matchByImdbIdUncached(
       imdbId: normalizedImdbId,
       readAccessToken: cleanedToken,
@@ -101,6 +244,16 @@ class TmdbMetadataClient {
 
     try {
       final result = await future;
+      metadataSearchTrace(
+        'tmdb.matchByImdbId.finish',
+        fields: <String, Object?>{
+          'imdbId': normalizedImdbId,
+          'preferSeries': preferSeries,
+          'matched': result != null,
+          'title': result?.title ?? '',
+          'tmdbId': result?.tmdbId ?? 0,
+        },
+      );
       _resolvedMatches[cacheKey] = result;
       return result;
     } finally {
@@ -114,11 +267,29 @@ class TmdbMetadataClient {
     required int year,
     required bool preferSeries,
   }) async {
+    final searchUri = _buildSearchUri(query);
+    metadataSearchTrace(
+      'tmdb.matchTitle.request',
+      fields: <String, Object?>{
+        'query': query,
+        'year': year,
+        'preferSeries': preferSeries,
+        'uri': searchUri,
+      },
+    );
     final searchResponse = await _client.get(
-      _buildSearchUri(query),
+      searchUri,
       headers: _buildHeaders(readAccessToken),
     );
     if (searchResponse.statusCode != 200) {
+      metadataSearchTrace(
+        'tmdb.matchTitle.response-failed',
+        fields: <String, Object?>{
+          'query': query,
+          'status': searchResponse.statusCode,
+          'uri': searchUri,
+        },
+      );
       throw TmdbMetadataException(
         'TMDB 搜索失败：HTTP ${searchResponse.statusCode}',
       );
@@ -136,18 +307,50 @@ class TmdbMetadataClient {
         .whereType<_TmdbSearchResult>()
         .toList();
     if (candidates.isEmpty) {
+      metadataSearchTrace(
+        'tmdb.matchTitle.candidates',
+        fields: <String, Object?>{
+          'query': query,
+          'count': 0,
+          'sample': '',
+        },
+      );
       return null;
     }
 
-    final best = _pickBestMatch(
+    final ranked = _rankScoredCandidates(
       candidates,
       query: query,
       year: year,
       preferSeries: preferSeries,
     );
-    if (best == null) {
+    metadataSearchTrace(
+      'tmdb.matchTitle.candidates',
+      fields: <String, Object?>{
+        'query': query,
+        'count': candidates.length,
+        'rankedCount': ranked.length,
+        'sample': _describeRankedTmdbCandidates(ranked),
+      },
+    );
+    if (ranked.isEmpty) {
+      metadataSearchTrace(
+        'tmdb.matchTitle.no-ranked-candidate',
+        fields: <String, Object?>{
+          'query': query,
+          'count': candidates.length,
+        },
+      );
       return null;
     }
+    final best = ranked.first.item;
+    metadataSearchTrace(
+      'tmdb.matchTitle.best',
+      fields: <String, Object?>{
+        'query': query,
+        'candidate': _describeTmdbCandidate(best, score: ranked.first.score),
+      },
+    );
 
     return _fetchCompleteMatch(
       result: best,
@@ -160,11 +363,28 @@ class TmdbMetadataClient {
     required String readAccessToken,
     required bool preferSeries,
   }) async {
+    final findUri = _buildFindUri(imdbId);
+    metadataSearchTrace(
+      'tmdb.matchByImdbId.request',
+      fields: <String, Object?>{
+        'imdbId': imdbId,
+        'preferSeries': preferSeries,
+        'uri': findUri,
+      },
+    );
     final findResponse = await _client.get(
-      _buildFindUri(imdbId),
+      findUri,
       headers: _buildHeaders(readAccessToken),
     );
     if (findResponse.statusCode != 200) {
+      metadataSearchTrace(
+        'tmdb.matchByImdbId.response-failed',
+        fields: <String, Object?>{
+          'imdbId': imdbId,
+          'status': findResponse.statusCode,
+          'uri': findUri,
+        },
+      );
       throw TmdbMetadataException(
         'TMDB IMDb ID 查询失败：HTTP ${findResponse.statusCode}',
       );
@@ -202,9 +422,28 @@ class TmdbMetadataClient {
           .whereType<_TmdbSearchResult>()),
     ];
     if (candidates.isEmpty) {
+      metadataSearchTrace(
+        'tmdb.matchByImdbId.candidates',
+        fields: <String, Object?>{
+          'imdbId': imdbId,
+          'count': 0,
+          'sample': '',
+        },
+      );
       return null;
     }
 
+    metadataSearchTrace(
+      'tmdb.matchByImdbId.candidates',
+      fields: <String, Object?>{
+        'imdbId': imdbId,
+        'count': candidates.length,
+        'sample': candidates
+            .take(5)
+            .map((item) => _describeTmdbCandidate(item))
+            .join(' || '),
+      },
+    );
     final target = _pickBestImdbIdMatch(
       candidates,
       preferSeries: preferSeries,
@@ -212,6 +451,13 @@ class TmdbMetadataClient {
     if (target == null) {
       return null;
     }
+    metadataSearchTrace(
+      'tmdb.matchByImdbId.best',
+      fields: <String, Object?>{
+        'imdbId': imdbId,
+        'candidate': _describeTmdbCandidate(target),
+      },
+    );
 
     return _fetchCompleteMatch(
       result: target,
@@ -284,30 +530,18 @@ class TmdbMetadataClient {
     };
   }
 
-  _TmdbSearchResult? _pickBestMatch(
+  List<_TmdbSearchResult> _rankCandidates(
     List<_TmdbSearchResult> results, {
     required String query,
     required int year,
     required bool preferSeries,
   }) {
-    final normalizedQuery = _normalizeTitle(query);
-    _TmdbSearchResult? best;
-    var bestScore = double.negativeInfinity;
-
-    for (final item in results) {
-      final score = _scoreCandidate(
-        item,
-        normalizedQuery: normalizedQuery,
-        year: year,
-        preferSeries: preferSeries,
-      );
-      if (score > bestScore) {
-        best = item;
-        bestScore = score;
-      }
-    }
-
-    return bestScore < 0 ? null : best;
+    return _rankScoredCandidates(
+      results,
+      query: query,
+      year: year,
+      preferSeries: preferSeries,
+    ).map((entry) => entry.item).toList(growable: false);
   }
 
   _TmdbSearchResult? _pickBestImdbIdMatch(
@@ -438,24 +672,84 @@ class TmdbMetadataClient {
     required _TmdbSearchResult result,
     required String readAccessToken,
   }) async {
+    final detailsUri = _buildDetailsUri(result);
+    metadataSearchTrace(
+      'tmdb.details.request',
+      fields: <String, Object?>{
+        'tmdbId': result.id,
+        'mediaType': result.mediaType,
+        'title': result.title,
+        'uri': detailsUri,
+      },
+    );
     final detailsResponse = await _client.get(
-      _buildDetailsUri(result),
+      detailsUri,
       headers: _buildHeaders(readAccessToken),
     );
     if (detailsResponse.statusCode != 200) {
-      throw TmdbMetadataException(
-        'TMDB 详情失败：HTTP ${detailsResponse.statusCode}',
+      metadataSearchTrace(
+        'tmdb.details.fallback',
+        fields: <String, Object?>{
+          'tmdbId': result.id,
+          'mediaType': result.mediaType,
+          'status': detailsResponse.statusCode,
+        },
       );
+      return _buildSearchFallbackMatch(result);
     }
 
     final decodedDetails = jsonDecode(
       utf8.decode(detailsResponse.bodyBytes, allowMalformed: true),
     );
     if (decodedDetails is! Map<String, dynamic>) {
-      return null;
+      metadataSearchTrace(
+        'tmdb.details.invalid-body',
+        fields: <String, Object?>{
+          'tmdbId': result.id,
+          'mediaType': result.mediaType,
+        },
+      );
+      return _buildSearchFallbackMatch(result);
     }
 
-    return _mapDetails(result, decodedDetails);
+    final match = _mapDetails(result, decodedDetails);
+    metadataSearchTrace(
+      'tmdb.details.mapped',
+      fields: <String, Object?>{
+        'tmdbId': match.tmdbId,
+        'mediaType': match.isSeries ? 'tv' : 'movie',
+        'title': match.title,
+        'originalTitle': match.originalTitle,
+        'imdbId': match.imdbId,
+        'year': match.year,
+      },
+    );
+    return match;
+  }
+
+  TmdbMetadataMatch _buildSearchFallbackMatch(_TmdbSearchResult result) {
+    return TmdbMetadataMatch(
+      tmdbId: result.id,
+      isSeries: result.isSeries,
+      title: result.title,
+      originalTitle: result.originalTitle,
+      posterUrl: _resolveImageUrl(result.posterPath, size: 'w500'),
+      backdropUrl: '',
+      logoUrl: '',
+      extraBackdropUrls: const <String>[],
+      overview: result.overview,
+      year: result.year,
+      durationLabel: '',
+      genres: const <String>[],
+      directors: const <String>[],
+      directorProfiles: const <TmdbPersonProfile>[],
+      actors: const <String>[],
+      actorProfiles: const <TmdbPersonProfile>[],
+      platforms: const <String>[],
+      platformProfiles: const <TmdbPersonProfile>[],
+      ratingLabels: const <String>[],
+      imdbId: '',
+    );
   }
 
   TmdbMetadataMatch _mapDetails(
@@ -1074,6 +1368,63 @@ class TmdbMetadataClient {
       return '';
     }
     return uri.pathSegments.last.trim();
+  }
+
+  List<({double score, _TmdbSearchResult item})> _rankScoredCandidates(
+    List<_TmdbSearchResult> results, {
+    required String query,
+    required int year,
+    required bool preferSeries,
+  }) {
+    final normalizedQuery = _normalizeTitle(query);
+    final scored = results
+        .map(
+          (item) => (
+            item: item,
+            score: _scoreCandidate(
+              item,
+              normalizedQuery: normalizedQuery,
+              year: year,
+              preferSeries: preferSeries,
+            ),
+          ),
+        )
+        .where((entry) => entry.score >= 0)
+        .toList(growable: false)
+      ..sort((left, right) => right.score.compareTo(left.score));
+
+    final seen = <int>{};
+    final ranked = <({double score, _TmdbSearchResult item})>[];
+    for (final entry in scored) {
+      if (!seen.add(entry.item.id)) {
+        continue;
+      }
+      ranked.add(entry);
+    }
+    return ranked;
+  }
+
+  String _describeRankedTmdbCandidates(
+    List<({double score, _TmdbSearchResult item})> ranked,
+  ) {
+    return ranked
+        .take(5)
+        .map((entry) => _describeTmdbCandidate(entry.item, score: entry.score))
+        .join(' || ');
+  }
+
+  String _describeTmdbCandidate(_TmdbSearchResult item, {double? score}) {
+    final parts = <String>[
+      '${item.mediaType}/${item.id}',
+      item.title,
+      if (item.originalTitle.isNotEmpty &&
+          item.originalTitle.toLowerCase() != item.title.toLowerCase())
+        'orig=${item.originalTitle}',
+      if (item.year > 0) 'year=${item.year}',
+      'pop=${item.popularity.toStringAsFixed(3)}',
+      if (score != null) 'score=${score.toStringAsFixed(2)}',
+    ];
+    return parts.join(' ');
   }
 }
 

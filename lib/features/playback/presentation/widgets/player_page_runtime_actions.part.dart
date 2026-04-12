@@ -445,21 +445,13 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     return '$error';
   }
 
-  Future<void> _runStartupProbe(PlaybackTarget target) async {
-    final probe = await _probeStartup(target);
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _startupProbe = probe;
-    });
-  }
-
   Future<_StartupProbeResult> _probeStartup(PlaybackTarget target) async {
     if (!_startupProbeEnabled) {
       return const _StartupProbeResult();
     }
-    final streamUrl = target.streamUrl.trim();
+    final streamUrl = isLoopbackPlaybackRelayUrl(target.streamUrl)
+        ? target.actualAddress.trim()
+        : target.streamUrl.trim();
     if (streamUrl.isEmpty) {
       return const _StartupProbeResult();
     }

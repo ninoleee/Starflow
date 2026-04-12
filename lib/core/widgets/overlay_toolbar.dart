@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 
+const double _kOverlayToolbarBackButtonWidth = 64;
+const double _kOverlayToolbarBackButtonHorizontalPadding = 16;
+
 /// 无 AppBar 全屏页顶栏：左侧返回，右侧可选控件（高度 [kToolbarHeight]，无标题）。
 class OverlayToolbar extends ConsumerWidget {
   const OverlayToolbar({
@@ -35,13 +38,23 @@ class OverlayToolbar extends ConsumerWidget {
               if (showBackButton)
                 TvFocusableAction(
                   onPressed: backAction,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(18),
                   visualStyle: TvFocusVisualStyle.subtle,
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Icon(
-                      Icons.arrow_back_rounded,
-                      color: color,
+                  child: SizedBox(
+                    width: _kOverlayToolbarBackButtonWidth,
+                    height: kToolbarHeight,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal:
+                              _kOverlayToolbarBackButtonHorizontalPadding,
+                        ),
+                        child: Icon(
+                          Icons.arrow_back_rounded,
+                          color: color,
+                        ),
+                      ),
                     ),
                   ),
                 ),

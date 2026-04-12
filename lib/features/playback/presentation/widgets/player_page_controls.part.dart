@@ -90,14 +90,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
     await _syncEmbeddedMpvFullscreen(isFullscreen);
   }
 
-  Future<void> _toggleEmbeddedMpvFullscreen() async {
-    final fullscreenBefore = _isEmbeddedMpvFullscreen;
-    await _setEmbeddedMpvFullscreen(
-      !fullscreenBefore,
-      reason: 'overlay-toggle',
-    );
-  }
-
   Future<void> _togglePlayback() async {
     final player = _player;
     if (!_isReady || player == null) {
@@ -234,25 +226,13 @@ extension _PlayerPageStateControls on _PlayerPageState {
     );
   }
 
-  Future<void> _enterPictureInPictureManually() async {
-    if (!_pictureInPictureSupported || _isInPictureInPictureMode) {
-      return;
-    }
-    _traceWindowsMpv('windows-mpv.command.enter-picture-in-picture');
-    final size = _currentPictureInPictureAspectRatio();
-    await AndroidPictureInPictureController.enter(
-      aspectRatioWidth: size.width,
-      aspectRatioHeight: size.height,
-    );
-  }
-
   Widget _buildVideoSurface(
     ThemeData theme, {
     required bool isTelevision,
     required AppSettings settings,
   }) {
     if (_error != null) {
-      return Center(
+      final errorBody = Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
           child: Padding(
@@ -283,7 +263,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
                     icon: Icons.arrow_back_rounded,
                     onPressed: () {
                       unawaited(
-                          _requestExitPlayer(reason: 'error-button-exit'));
+                        _requestExitPlayer(reason: 'error-button-exit'),
+                      );
                     },
                     variant: StarflowButtonVariant.secondary,
                   ),
@@ -293,14 +274,40 @@ extension _PlayerPageStateControls on _PlayerPageState {
           ),
         ),
       );
+      if (isTelevision) {
+        return errorBody;
+      }
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          errorBody,
+          _buildNonTvTransientTopChrome(
+            settings: settings,
+            showMoreButton: false,
+          ),
+        ],
+      );
     }
 
     final player = _player;
     final videoController = _videoController;
     if (!_isReady || player == null || videoController == null) {
-      return PlayerStartupOverlay(
+      final startupOverlay = PlayerStartupOverlay(
         target: _resolvedTarget ?? widget.target,
         speedLabel: _startupProbe.speedLabel,
+      );
+      if (isTelevision) {
+        return startupOverlay;
+      }
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          startupOverlay,
+          _buildNonTvTransientTopChrome(
+            settings: settings,
+            showMoreButton: false,
+          ),
+        ],
       );
     }
 
@@ -378,47 +385,18 @@ extension _PlayerPageStateControls on _PlayerPageState {
     required bool isTelevision,
     required AppSettings settings,
   }) {
-    final useWindowManagedFullscreen =
-        !isTelevision && _useWindowManagedEmbeddedMpvFullscreen;
     final video = Video(
       controller: videoController,
-      controls: isTelevision || useWindowManagedFullscreen
+      controls: isTelevision
           ? NoVideoControls
           : (state) {
-              final isFullscreen = _isEmbeddedMpvFullscreen;
-              return PlayerMpvControlsOverlay(
-                isFullscreen: isFullscreen,
-                player: videoController.player,
-                target: _resolvedTarget ?? widget.target,
-                showVolumeSlider: _showDesktopVolumeSliderForMpv,
-                preferLightweightChrome: _leanPlaybackUiEnabled,
-                traceEnabled: _shouldTraceWindowsMpv,
-                onBack: () => _handleDesktopBack(reason: 'overlay-back'),
-                onTogglePlayback: _togglePlayback,
-                onSeekTo: _seekTo,
-                onOpenSubtitle: _openCurrentSubtitleSelector,
-                onOpenAudio: _openCurrentAudioSelector,
-                onOpenOptions: () => _showPlaybackOptions(
-                  isTelevision: false,
+              return _EmbeddedMpvFullscreenControlsBridge(
+                onFullscreenChanged:
+                    _handleObservedEmbeddedMpvFullscreenChanged,
+                child: _buildAdaptiveEmbeddedVideoControls(
+                  state,
                   settings: settings,
                 ),
-                onToggleFullscreen: () async {
-                  final fullscreenBefore = _isEmbeddedMpvFullscreen;
-                  _traceWindowsMpv(
-                    'windows-mpv.overlay.fullscreen-toggle-request',
-                    fields: {'fullscreenBefore': fullscreenBefore},
-                  );
-                  await state.toggleFullscreen();
-                  await _syncEmbeddedMpvFullscreen(!fullscreenBefore);
-                },
-                onShowPictureInPicture:
-                    _pictureInPictureSupported && !_isInPictureInPictureMode
-                        ? _enterPictureInPictureManually
-                        : null,
-                onShowAirPlay:
-                    PlaybackSystemSessionController.supportsAirPlayPicker
-                        ? _showAirPlayRoutePicker
-                        : null,
               );
             },
       fill: Colors.black,
@@ -428,56 +406,155 @@ extension _PlayerPageStateControls on _PlayerPageState {
         isTelevision: isTelevision,
       ),
     );
-    if (!useWindowManagedFullscreen) {
-      return video;
-    }
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Positioned.fill(child: video),
-        Positioned.fill(
-          child: PlayerMpvControlsOverlay(
-            isFullscreen: _isEmbeddedMpvFullscreen,
-            player: videoController.player,
-            target: _resolvedTarget ?? widget.target,
-            showVolumeSlider: _showDesktopVolumeSliderForMpv,
-            preferLightweightChrome: _leanPlaybackUiEnabled,
-            traceEnabled: _shouldTraceWindowsMpv,
-            onBack: () => _handleDesktopBack(reason: 'overlay-back'),
-            onTogglePlayback: _togglePlayback,
-            onSeekTo: _seekTo,
-            onOpenSubtitle: _openCurrentSubtitleSelector,
-            onOpenAudio: _openCurrentAudioSelector,
-            onOpenOptions: () => _showPlaybackOptions(
-              isTelevision: false,
-              settings: settings,
-            ),
-            onToggleFullscreen: _toggleEmbeddedMpvFullscreen,
-            onShowPictureInPicture:
-                _pictureInPictureSupported && !_isInPictureInPictureMode
-                    ? _enterPictureInPictureManually
-                    : null,
-            onShowAirPlay:
-                PlaybackSystemSessionController.supportsAirPlayPicker
-                    ? _showAirPlayRoutePicker
-                    : null,
-          ),
+    return video;
+  }
+
+  Widget _buildAdaptiveEmbeddedVideoControls(
+    VideoState state, {
+    required AppSettings settings,
+  }) {
+    final materialTopButtonBar = _buildAdaptiveMaterialTopButtonBar(
+      state,
+      settings: settings,
+    );
+    final desktopTopButtonBar = _buildAdaptiveDesktopTopButtonBar(
+      state,
+      settings: settings,
+    );
+    return MaterialVideoControlsTheme(
+      normal: MaterialVideoControlsThemeData(
+        topButtonBar: materialTopButtonBar,
+      ),
+      fullscreen: MaterialVideoControlsThemeData(
+        topButtonBar: materialTopButtonBar,
+      ),
+      child: MaterialDesktopVideoControlsTheme(
+        normal: MaterialDesktopVideoControlsThemeData(
+          topButtonBar: desktopTopButtonBar,
         ),
-      ],
+        fullscreen: MaterialDesktopVideoControlsThemeData(
+          topButtonBar: desktopTopButtonBar,
+        ),
+        child: AdaptiveVideoControls(state),
+      ),
     );
   }
 
-  bool get _showDesktopVolumeSliderForMpv {
-    if (kIsWeb) {
-      return false;
+  List<Widget> _buildAdaptiveMaterialTopButtonBar(
+    VideoState state, {
+    required AppSettings settings,
+  }) {
+    return [
+      Tooltip(
+        message: '返回',
+        child: MaterialCustomButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () {
+            unawaited(_handleAdaptiveControlsBack(state));
+          },
+        ),
+      ),
+      const Spacer(),
+      Tooltip(
+        message: '更多',
+        child: MaterialCustomButton(
+          icon: const Icon(Icons.more_horiz_rounded),
+          onPressed: () {
+            unawaited(
+              _showPlaybackOptions(
+                isTelevision: false,
+                settings: settings,
+              ),
+            );
+          },
+        ),
+      ),
+    ];
+  }
+
+  List<Widget> _buildAdaptiveDesktopTopButtonBar(
+    VideoState state, {
+    required AppSettings settings,
+  }) {
+    return [
+      Tooltip(
+        message: '返回',
+        child: MaterialDesktopCustomButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () {
+            unawaited(_handleAdaptiveControlsBack(state));
+          },
+        ),
+      ),
+      const Spacer(),
+      Tooltip(
+        message: '更多',
+        child: MaterialDesktopCustomButton(
+          icon: const Icon(Icons.more_horiz_rounded),
+          onPressed: () {
+            unawaited(
+              _showPlaybackOptions(
+                isTelevision: false,
+                settings: settings,
+              ),
+            );
+          },
+        ),
+      ),
+    ];
+  }
+
+  Widget _buildNonTvTransientTopChrome({
+    required AppSettings settings,
+    bool showMoreButton = true,
+  }) {
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: _adaptiveTopChromeController.pingActivity,
+        child: PlayerAdaptiveTopChrome(
+          controller: _adaptiveTopChromeController,
+          onBack: () {
+            unawaited(
+              _handleDesktopBack(reason: 'transient-top-chrome-back'),
+            );
+          },
+          onMore: showMoreButton
+              ? () {
+                  unawaited(
+                    _showPlaybackOptions(
+                      isTelevision: false,
+                      settings: settings,
+                    ),
+                  );
+                }
+              : null,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleAdaptiveControlsBack(VideoState state) async {
+    if (_isEmbeddedMpvFullscreen) {
+      state.toggleFullscreen();
+      if (_useWindowManagedEmbeddedMpvFullscreen) {
+        await _setEmbeddedMpvFullscreen(
+          false,
+          reason: 'adaptive-controls-back',
+        );
+      }
+      return;
     }
-    return switch (defaultTargetPlatform) {
-      TargetPlatform.windows ||
-      TargetPlatform.macOS ||
-      TargetPlatform.linux =>
-        true,
-      _ => false,
-    };
+    await _handleDesktopBack(reason: 'adaptive-controls-back');
+  }
+
+  void _handleObservedEmbeddedMpvFullscreenChanged(bool isFullscreen) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _isEmbeddedMpvFullscreen == isFullscreen) {
+        return;
+      }
+      unawaited(_syncEmbeddedMpvFullscreen(isFullscreen));
+    });
   }
 
   void _bindWindowsMpvTraceStreams(Player player) {
@@ -828,4 +905,54 @@ extension _PlayerPageStateControls on _PlayerPageState {
       );
     }
   }
+}
+
+class _EmbeddedMpvFullscreenControlsBridge extends StatefulWidget {
+  const _EmbeddedMpvFullscreenControlsBridge({
+    required this.onFullscreenChanged,
+    required this.child,
+  });
+
+  final ValueChanged<bool> onFullscreenChanged;
+  final Widget child;
+
+  @override
+  State<_EmbeddedMpvFullscreenControlsBridge> createState() =>
+      _EmbeddedMpvFullscreenControlsBridgeState();
+}
+
+class _EmbeddedMpvFullscreenControlsBridgeState
+    extends State<_EmbeddedMpvFullscreenControlsBridge> {
+  bool _isFullscreen = false;
+  bool? _lastDispatchedFullscreen;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isFullscreen = FullscreenInheritedWidget.maybeOf(context) != null;
+    _dispatchFullscreenChanged(_isFullscreen);
+  }
+
+  void _dispatchFullscreenChanged(bool isFullscreen) {
+    if (_lastDispatchedFullscreen == isFullscreen) {
+      return;
+    }
+    _lastDispatchedFullscreen = isFullscreen;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.onFullscreenChanged(isFullscreen);
+    });
+  }
+
+  @override
+  void dispose() {
+    if (_lastDispatchedFullscreen == true) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onFullscreenChanged(false);
+      });
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

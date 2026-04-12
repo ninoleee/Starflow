@@ -472,6 +472,117 @@ void main() {
     expect(heroArtwork.alignment, Alignment.center);
   });
 
+  testWidgets('home page skips spacer for featured source module',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const heroTarget = MediaDetailTarget(
+      title: 'Hero Show',
+      posterUrl: 'https://example.com/hero.jpg',
+      overview: 'Hero overview',
+      year: 2026,
+      sourceName: 'NAS',
+    );
+    const sectionTarget = MediaDetailTarget(
+      title: 'Section Show',
+      posterUrl: 'https://example.com/section.jpg',
+      overview: 'Section overview',
+      year: 2026,
+      sourceName: 'NAS',
+    );
+    const featuredSection = HomeSectionViewModel(
+      id: 'module-a',
+      title: 'Module A',
+      subtitle: '',
+      emptyMessage: '',
+      layout: HomeSectionLayout.posterRail,
+      items: [
+        HomeCardViewModel(
+          id: 'hero-item',
+          title: 'Hero Show',
+          subtitle: '',
+          posterUrl: 'https://example.com/hero.jpg',
+          detailTarget: heroTarget,
+        ),
+      ],
+    );
+    const regularSection = HomeSectionViewModel(
+      id: 'module-b',
+      title: 'Module B',
+      subtitle: '',
+      emptyMessage: '',
+      layout: HomeSectionLayout.posterRail,
+      items: [
+        HomeCardViewModel(
+          id: 'section-item',
+          title: 'Section Show',
+          subtitle: '',
+          posterUrl: 'https://example.com/section.jpg',
+          detailTarget: sectionTarget,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              homeModules: const [
+                HomeModuleConfig(
+                  id: HomeModuleConfig.heroModuleId,
+                  type: HomeModuleType.hero,
+                  title: 'Hero',
+                  enabled: true,
+                ),
+                HomeModuleConfig(
+                  id: 'module-a',
+                  type: HomeModuleType.doubanList,
+                  title: 'Module A',
+                  enabled: true,
+                  doubanListUrl: 'https://example.com/a',
+                ),
+                HomeModuleConfig(
+                  id: 'module-b',
+                  type: HomeModuleType.doubanList,
+                  title: 'Module B',
+                  enabled: true,
+                  doubanListUrl: 'https://example.com/b',
+                ),
+              ],
+              homeHeroSourceModuleId: 'module-a',
+              homeHeroBackgroundEnabled: false,
+            ),
+          ),
+          homeSectionsProvider.overrideWith(
+            (ref) async => [featuredSection, regularSection],
+          ),
+          homeSectionProvider.overrideWith((ref, moduleId) async {
+            return switch (moduleId) {
+              'module-a' => featuredSection,
+              'module-b' => regularSection,
+              _ => null,
+            };
+          }),
+        ],
+        child: const MaterialApp(home: HomePage()),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 600));
+
+    expect(find.text('Module A'), findsNothing);
+    expect(find.text('Module B'), findsOneWidget);
+
+    final moduleBTop = tester.getTopLeft(find.text('Module B')).dy;
+    expect(moduleBTop, lessThan(465));
+  });
+
   testWidgets(
       'episode detail overview keeps series title when file name is unavailable',
       (WidgetTester tester) async {

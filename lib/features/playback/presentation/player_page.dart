@@ -21,6 +21,8 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
+import 'package:starflow/features/playback/application/playback_remote_preflight.dart';
+import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/application/playback_engine_router.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/application/playback_startup_coordinator.dart';
@@ -33,8 +35,9 @@ import 'package:starflow/features/playback/data/system_playback_launcher.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
+import 'package:starflow/features/playback/presentation/widgets/mpv_stall_watchdog.dart';
+import 'package:starflow/features/playback/presentation/widgets/player_adaptive_top_chrome.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_dialogs.dart';
-import 'package:starflow/features/playback/presentation/widgets/player_mpv_controls_overlay.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_formatters.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_options_dialog.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_overlays.dart';
@@ -134,6 +137,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _tvPlaybackChromeVisible = false;
   final ValueNotifier<_TvPlaybackState> _tvPlaybackStateNotifier =
       ValueNotifier(const _TvPlaybackState());
+  final PlayerAdaptiveTopChromeController _adaptiveTopChromeController =
+      PlayerAdaptiveTopChromeController(
+        visible: true,
+        autoHideEnabled: true,
+      );
+  final PlaybackRemotePreflight _playbackRemotePreflight =
+      PlaybackRemotePreflight();
+  PlaybackRemotePreflightResult? _lastRemotePreflight;
 
   void _updateTvPlaybackState({
     Duration? position,
@@ -171,8 +182,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   late final ProviderContainer _providerContainer;
   late final StateController<bool> _playbackPerformanceModeController;
   Timer? _tvPlaybackChromeHideTimer;
+  Timer? _mpvStallWatchdogTimer;
   Future<void>? _exitPlaybackFuture;
   int? _activePlaybackCleanupToken;
+  MpvStallWatchdog? _mpvStallWatchdog;
+  bool _mpvStallRecoveryInProgress = false;
 
   @override
   void initState() {
@@ -200,6 +214,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _tvPlaybackChromeHideTimer?.cancel();
+    _stopMpvStallWatchdog();
     if (_useWindowManagedEmbeddedMpvFullscreen && _isEmbeddedMpvFullscreen) {
       unawaited(defaultExitNativeFullscreen());
     }
@@ -221,15 +236,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       ),
     );
     _tvPlaybackStateNotifier.dispose();
+    _adaptiveTopChromeController.dispose();
     super.dispose();
   }
 
-  Player? _detachActivePlayerState() {
+  Player? _detachActivePlayerState({
+    bool clearStallRecoveryFlag = true,
+  }) {
     final player = _player;
     _player = null;
     _videoController = null;
     _isReady = false;
     _isEmbeddedMpvFullscreen = false;
+    _stopMpvStallWatchdog(clearRecoveryFlag: clearStallRecoveryFlag);
     return player;
   }
 
@@ -354,6 +373,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   bool get _startupProbeEnabled =>
       _playbackSettings.effectiveStartupProbeEnabled;
+
+  double? get _startupProbeMegabitsPerSecond {
+    final bytesPerSecond = _startupProbe.estimatedSpeedBytesPerSecond;
+    if (bytesPerSecond == null || bytesPerSecond <= 0) {
+      return null;
+    }
+    return (bytesPerSecond * 8) / 1000000;
+  }
 
   bool get _shouldTraceWindowsMpv {
     if (kIsWeb) {
@@ -533,9 +560,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             settings.effectiveLeanPlaybackUiEnabled(isTelevision: isTelevision),
       ),
     );
-    final viewportSize = MediaQuery.sizeOf(context);
-    final expandEmbeddedMpvSurfaceInPortrait =
-        !isTelevision && viewportSize.height > viewportSize.width;
     final showMinimalPlayerChrome =
         _isInPictureInPictureMode || leanPlaybackUiEnabled;
 
@@ -637,72 +661,56 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             canRequestFocus: isTelevision,
             child: Scaffold(
               backgroundColor: Colors.black,
-              body: showMinimalPlayerChrome
-                  ? ColoredBox(
-                      color: Colors.black,
-                      child: expandEmbeddedMpvSurfaceInPortrait
-                          ? _buildVideoSurface(
-                              theme,
-                              isTelevision: isTelevision,
-                              settings: playbackSettings,
-                            )
-                          : Center(
-                              child: AspectRatio(
-                                aspectRatio: _currentAspectRatio(),
-                                child: _buildVideoSurface(
-                                  theme,
-                                  isTelevision: isTelevision,
-                                  settings: playbackSettings,
-                                ),
-                              ),
-                            ),
-                    )
-                  : !isTelevision
-                      ? _buildVideoSurface(
+              body: !isTelevision
+                  ? KeyedSubtree(
+                      key: ValueKey(showMinimalPlayerChrome),
+                      child: ColoredBox(
+                        color: Colors.black,
+                        child: _buildVideoSurface(
                           theme,
-                          isTelevision: isTelevision,
+                          isTelevision: false,
                           settings: playbackSettings,
-                        )
-                      : PlayerTvPlaybackSurface(
-                          aspectRatio: _currentAspectRatio(),
-                          videoSurface: _buildVideoSurface(
-                            theme,
-                            isTelevision: true,
-                            settings: playbackSettings,
-                          ),
-                          chrome: !_tvPlaybackChromeVisible
-                              ? null
-                              : ValueListenableBuilder<_TvPlaybackState>(
-                                  valueListenable: _tvPlaybackStateNotifier,
-                                  builder: (context, state, child) {
-                                    final player = _player;
-                                    if (player == null) {
-                                      return const SizedBox.shrink();
-                                    }
-                                    return PlayerTvPlaybackChrome(
-                                      position: state.position,
-                                      duration: state.duration,
-                                      playing: state.playing,
-                                      bufferingPercentage:
-                                          state.bufferingPercentage,
-                                      onOpenSubtitle: () {
-                                        _showTvPlaybackChrome(
-                                            autoHide: false);
-                                        unawaited(
-                                          _openCurrentSubtitleSelector(),
-                                        );
-                                      },
-                                      onOpenAudio: () {
-                                        _showTvPlaybackChrome(
-                                            autoHide: false);
-                                        unawaited(
-                                          _openCurrentAudioSelector(),
-                                        );
-                                      },
+                        ),
+                      ),
+                    )
+                  : PlayerTvPlaybackSurface(
+                      aspectRatio: _currentAspectRatio(),
+                      videoSurface: _buildVideoSurface(
+                        theme,
+                        isTelevision: true,
+                        settings: playbackSettings,
+                      ),
+                      chrome: !_tvPlaybackChromeVisible
+                          ? null
+                          : ValueListenableBuilder<_TvPlaybackState>(
+                              valueListenable: _tvPlaybackStateNotifier,
+                              builder: (context, state, child) {
+                                final player = _player;
+                                if (player == null) {
+                                  return const SizedBox.shrink();
+                                }
+                                return PlayerTvPlaybackChrome(
+                                  position: state.position,
+                                  duration: state.duration,
+                                  playing: state.playing,
+                                  bufferingPercentage:
+                                      state.bufferingPercentage,
+                                  onOpenSubtitle: () {
+                                    _showTvPlaybackChrome(autoHide: false);
+                                    unawaited(
+                                      _openCurrentSubtitleSelector(),
                                     );
                                   },
-                                ),
-                        ),
+                                  onOpenAudio: () {
+                                    _showTvPlaybackChrome(autoHide: false);
+                                    unawaited(
+                                      _openCurrentAudioSelector(),
+                                    );
+                                  },
+                                );
+                              },
+                            ),
+                    ),
             ),
           ),
         ),

@@ -8,6 +8,10 @@
 // it for both the runner and the Flutter library.
 void CreateAndAttachConsole();
 
+// Filters noisy Windows-only stderr output emitted by the Flutter engine while
+// preserving all other native logs.
+void InstallStderrFilter();
+
 // Takes a null-terminated wchar_t* encoded in UTF-16 and returns a std::string
 // encoded in UTF-8. Returns an empty std::string on failure.
 std::string Utf8FromUtf16(const wchar_t* utf16_string);

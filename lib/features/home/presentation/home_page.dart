@@ -20,6 +20,7 @@ import 'package:starflow/features/details/application/detail_rating_prefetch_coo
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/home/application/home_hero_prefetch_coordinator.dart';
+import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -53,6 +54,8 @@ class _HomePageState extends ConsumerState<HomePage>
   List<HomeModuleConfig> _cachedEnabledModules = const [];
   AsyncValue<List<HomeSectionViewModel>>? _cachedResolvedSectionsAsync;
   List<String> _lastFeaturedHeroIds = const [];
+  int _observedHomeMetadataAutoRefreshRevision = 0;
+  int _scheduledHeroMetadataAutoRefreshRevision = 0;
 
   bool get _showHeroPagerButtons {
     if (kIsWeb) {
@@ -153,6 +156,9 @@ class _HomePageState extends ConsumerState<HomePage>
         (settings) => settings.performanceLightweightHomeHeroEnabled,
       ),
     );
+    final homeMetadataAutoRefreshRevision = ref.watch(
+      homeMetadataAutoRefreshRevisionProvider,
+    );
     final effectiveTranslucentEffectsEnabled =
         translucentEffectsEnabled && !performanceLightweightHomeHeroEnabled;
     final effectiveHeroBackgroundEnabled = heroBackgroundEnabled;
@@ -186,6 +192,8 @@ class _HomePageState extends ConsumerState<HomePage>
                 staticHomeHeroEnabled: performanceStaticHomeHeroEnabled,
                 lightweightHomeHeroEnabled:
                     performanceLightweightHomeHeroEnabled,
+                homeMetadataAutoRefreshRevision:
+                    homeMetadataAutoRefreshRevision,
                 isTelevision: isTelevision,
                 heroDisplayMode: heroDisplayMode,
               ),
@@ -206,9 +214,17 @@ class _HomePageState extends ConsumerState<HomePage>
     required bool translucentEffectsEnabled,
     required bool staticHomeHeroEnabled,
     required bool lightweightHomeHeroEnabled,
+    required int homeMetadataAutoRefreshRevision,
     required bool isTelevision,
     required HomeHeroDisplayMode heroDisplayMode,
   }) {
+    if (homeMetadataAutoRefreshRevision !=
+        _observedHomeMetadataAutoRefreshRevision) {
+      _heroPrefetchCoordinator.reset();
+      _observedHomeMetadataAutoRefreshRevision =
+          homeMetadataAutoRefreshRevision;
+    }
+
     final featuredSection = heroEnabled
         ? _resolveStableHeroSection(
             resolvedSections: resolvedSections,
@@ -229,23 +245,35 @@ class _HomePageState extends ConsumerState<HomePage>
         featuredItems.map((item) => item.id.trim()).toList(growable: false);
     final heroListChanged = !listEquals(currentHeroIds, _lastFeaturedHeroIds);
     _lastFeaturedHeroIds = currentHeroIds;
-    if (heroListChanged) {
+    if (isPageVisible &&
+        featuredItems.isNotEmpty &&
+        _scheduledHeroMetadataAutoRefreshRevision !=
+            homeMetadataAutoRefreshRevision) {
       _heroPrefetchCoordinator.schedulePrefetch(
         ref: ref,
         targets: featuredItems.map((item) => item.detailTarget),
         isPageActive: () => mounted && isPageVisible,
       );
+      _scheduledHeroMetadataAutoRefreshRevision =
+          homeMetadataAutoRefreshRevision;
+    }
+    if (heroListChanged) {
       _scheduleHeroSelectionSync(activeHero);
     }
     final featuredSectionId = featuredSection?.id;
+    final visibleModules = featuredSectionId == null
+        ? enabledModules
+        : enabledModules
+            .where((module) => module.id != featuredSectionId)
+            .toList(growable: false);
     final firstFocusableSectionId = _resolveFirstFocusableSectionId(
-      enabledModules: enabledModules,
+      enabledModules: visibleModules,
       featuredSectionId: featuredSectionId,
     );
     final hasHeroListSlot =
         heroEnabled && (featuredItems.isNotEmpty || hasPendingSections);
     final moduleListOffset = hasHeroListSlot ? 1 : 0;
-    final listItemCount = moduleListOffset + enabledModules.length + 2;
+    final listItemCount = moduleListOffset + visibleModules.length + 2;
 
     final content = RefreshIndicator(
       color: Colors.white,
@@ -286,8 +314,8 @@ class _HomePageState extends ConsumerState<HomePage>
           }
 
           final moduleIndex = index - moduleListOffset;
-          if (moduleIndex >= 0 && moduleIndex < enabledModules.length) {
-            final module = enabledModules[moduleIndex];
+          if (moduleIndex >= 0 && moduleIndex < visibleModules.length) {
+            final module = visibleModules[moduleIndex];
             return Padding(
               padding: EdgeInsets.only(
                 top: !heroEnabled && moduleIndex == 0 ? 20 : 0,
@@ -301,11 +329,13 @@ class _HomePageState extends ConsumerState<HomePage>
                 useHeroNextSectionFocusNode:
                     module.id == firstFocusableSectionId,
                 heroNextSectionFocusNode: _heroNextSectionFocusNode,
+                homeMetadataAutoRefreshRevision:
+                    homeMetadataAutoRefreshRevision,
               ),
             );
           }
 
-          final trailingIndex = moduleIndex - enabledModules.length;
+          final trailingIndex = moduleIndex - visibleModules.length;
           if (trailingIndex == 0) {
             return const SizedBox(height: 6);
           }

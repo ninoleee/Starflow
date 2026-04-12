@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/utils/metadata_search_trace.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
@@ -38,16 +39,72 @@ class SearchFavoriteMetadataService {
     required String query,
     required AppSettings settings,
   }) async {
+    metadataSearchTrace(
+      'favorite.enrich.start',
+      fields: <String, Object?>{
+        'query': query,
+        'resultTitle': result.title,
+        'favoriteFolderName': result.favoriteFolderName,
+        'originalSearchTitle': result.originalSearchTitle,
+        'detailTitle': result.detailTarget?.title ?? '',
+        'detailSearchQuery': result.detailTarget?.searchQuery ?? '',
+        'doubanId': result.doubanId,
+        'imdbId': result.imdbId,
+        'tmdbId': result.tmdbId,
+      },
+    );
     final seeded = _seedResult(result, query);
+    metadataSearchTrace(
+      'favorite.enrich.seeded',
+      fields: <String, Object?>{
+        'title': seeded.title,
+        'favoriteFolderName': seeded.favoriteFolderName,
+        'originalSearchTitle': seeded.originalSearchTitle,
+        'metadataMediaType': seeded.metadataMediaType,
+        'detailTitle': seeded.detailTarget?.title ?? '',
+        'detailSearchQuery': seeded.detailTarget?.searchQuery ?? '',
+        'doubanId': seeded.doubanId,
+        'imdbId': seeded.imdbId,
+        'tmdbId': seeded.tmdbId,
+      },
+    );
     if (_hasResolvedFavoriteMetadata(seeded)) {
+      metadataSearchTrace(
+        'favorite.enrich.skip-resolved',
+        fields: <String, Object?>{
+          'title': seeded.title,
+          'favoriteFolderName': seeded.favoriteFolderName,
+          'tmdbId': seeded.tmdbId,
+        },
+      );
       return seeded;
     }
 
     final request = _buildRequest(seeded, query);
+    metadataSearchTrace(
+      'favorite.enrich.request',
+      fields: <String, Object?>{
+        'query': request.query,
+        'doubanId': request.doubanId,
+        'imdbId': request.imdbId,
+        'year': request.year,
+        'preferSeries': request.preferSeries,
+        'firstActor': request.actors.isEmpty ? '' : request.actors.first,
+      },
+    );
     if (_resolveMatch == null ||
         (request.query.trim().isEmpty &&
             request.doubanId.trim().isEmpty &&
             request.imdbId.trim().isEmpty)) {
+      metadataSearchTrace(
+        'favorite.enrich.skip-request',
+        fields: <String, Object?>{
+          'hasResolver': _resolveMatch != null,
+          'query': request.query,
+          'doubanId': request.doubanId,
+          'imdbId': request.imdbId,
+        },
+      );
       return seeded;
     }
 
@@ -59,10 +116,40 @@ class SearchFavoriteMetadataService {
         request: request,
       );
       if (match == null) {
+        metadataSearchTrace(
+          'favorite.enrich.no-match',
+          fields: <String, Object?>{
+            'query': request.query,
+            'doubanId': request.doubanId,
+            'imdbId': request.imdbId,
+          },
+        );
         return seeded;
       }
-      return _applyMatch(seeded, match);
-    } catch (_) {
+      final applied = _applyMatch(seeded, match);
+      metadataSearchTrace(
+        'favorite.enrich.matched',
+        fields: <String, Object?>{
+          'provider': match.provider.name,
+          'matchTitle': match.title,
+          'matchImdbId': match.imdbId,
+          'matchTmdbId': match.tmdbId,
+          'nextTitle': applied.title,
+          'nextFavoriteFolderName': applied.favoriteFolderName,
+        },
+      );
+      return applied;
+    } catch (error, stackTrace) {
+      metadataSearchTrace(
+        'favorite.enrich.failed',
+        fields: <String, Object?>{
+          'query': request.query,
+          'doubanId': request.doubanId,
+          'imdbId': request.imdbId,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       return seeded;
     }
   }

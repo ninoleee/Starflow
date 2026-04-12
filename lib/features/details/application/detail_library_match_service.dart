@@ -1,4 +1,5 @@
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -381,6 +382,127 @@ class DetailLibraryMatchService {
     return DetailManualMatchCategory.unknown;
   }
 
+  List<MediaItem> filterManualMatchCandidateItems({
+    required MediaDetailTarget target,
+    required List<MediaItem> items,
+    MetadataMatchResult? metadataMatch,
+  }) {
+    if (items.isEmpty) {
+      return const <MediaItem>[];
+    }
+
+    final useSeriesLevelCandidates = usesSeriesLevelLibraryMatch(
+      target,
+      metadataMatch: metadataMatch,
+    );
+    if (useSeriesLevelCandidates) {
+      final seriesLevelItems =
+          items.where(_isSeriesLevelLibraryMatchItem).toList(growable: false);
+      if (seriesLevelItems.isNotEmpty) {
+        return seriesLevelItems;
+      }
+    }
+
+    final nonEpisodeItems = items
+        .where(
+          (item) =>
+              !_isEpisodeLikeLibraryMatchItem(item) &&
+              !_isSeasonLikeLibraryMatchItem(item),
+        )
+        .toList(growable: false);
+    if (nonEpisodeItems.isNotEmpty) {
+      return nonEpisodeItems;
+    }
+    return items;
+  }
+
+  List<DetailLibraryMatchCandidate> buildManualMatchCandidates({
+    required MediaDetailTarget target,
+    required List<MediaItem> items,
+    required Iterable<String> titles,
+    required int year,
+    MetadataMatchResult? metadataMatch,
+    int maxResults = 32,
+  }) {
+    if (items.isEmpty) {
+      return const <DetailLibraryMatchCandidate>[];
+    }
+
+    final candidateItems = filterManualMatchCandidateItems(
+      target: target,
+      items: items,
+      metadataMatch: metadataMatch,
+    );
+    if (candidateItems.isEmpty) {
+      return const <DetailLibraryMatchCandidate>[];
+    }
+
+    final doubanId = resolveManualMatchDoubanId(target, metadataMatch);
+    final imdbId = resolveManualMatchImdbId(target, metadataMatch);
+    final tmdbId = resolveManualMatchTmdbId(target, metadataMatch);
+    final tvdbId = resolveManualMatchTvdbId(target);
+    final wikidataId = resolveManualMatchWikidataId(target);
+    final exactMatchedItems = listMediaItemsMatchingExternalIds(
+      candidateItems,
+      doubanId: doubanId,
+      imdbId: imdbId,
+      tmdbId: tmdbId,
+      tvdbId: tvdbId,
+      wikidataId: wikidataId,
+    );
+    if (exactMatchedItems.isNotEmpty) {
+      return exactMatchedItems
+          .map(
+            (item) => DetailLibraryMatchCandidate(
+              item: item,
+              matchReason: externalIdMatchReason(
+                item,
+                doubanId: doubanId,
+                imdbId: imdbId,
+                tmdbId: tmdbId,
+                tvdbId: tvdbId,
+                wikidataId: wikidataId,
+              ),
+              score: 1e9,
+            ),
+          )
+          .toList(growable: false);
+    }
+
+    return listScoredMediaItemsMatchingTitles(
+      candidateItems,
+      titles: titles,
+      year: year,
+      maxResults: maxResults,
+    )
+        .map(
+          (scored) => DetailLibraryMatchCandidate(
+            item: scored.item,
+            matchReason: titleMatchReason(year),
+            score: scored.score,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  bool usesSeriesLevelLibraryMatch(
+    MediaDetailTarget target, {
+    MetadataMatchResult? metadataMatch,
+  }) {
+    final itemType = target.itemType.trim().toLowerCase();
+    if (itemType == 'series' || itemType == 'season' || itemType == 'episode') {
+      return true;
+    }
+
+    final category = resolveManualMatchCategory(
+      target,
+      metadataMatch: metadataMatch,
+    );
+    return category == DetailManualMatchCategory.series ||
+        category == DetailManualMatchCategory.animation ||
+        category == DetailManualMatchCategory.variety;
+  }
+
   MediaDetailTarget mergeMatchedLibraryTarget({
     required MediaDetailTarget current,
     required MediaDetailTarget matched,
@@ -759,6 +881,35 @@ class DetailLibraryMatchService {
         target.seasonNumber! >= 0 &&
         target.episodeNumber != null &&
         target.episodeNumber! > 0;
+  }
+
+  bool _isEpisodeLikeLibraryMatchItem(MediaItem item) {
+    return item.itemType.trim().toLowerCase() == 'episode' ||
+        (item.episodeNumber != null && item.episodeNumber! > 0);
+  }
+
+  bool _isSeasonLikeLibraryMatchItem(MediaItem item) {
+    final itemType = item.itemType.trim().toLowerCase();
+    if (itemType == 'season') {
+      return true;
+    }
+    return item.seasonNumber != null &&
+        item.seasonNumber! > 0 &&
+        item.episodeNumber == null &&
+        (item.isFolder || !item.isPlayable);
+  }
+
+  bool _isSeriesLevelLibraryMatchItem(MediaItem item) {
+    final itemType = item.itemType.trim().toLowerCase();
+    if (itemType == 'series') {
+      return true;
+    }
+    if (_isEpisodeLikeLibraryMatchItem(item) ||
+        _isSeasonLikeLibraryMatchItem(item) ||
+        itemType == 'movie') {
+      return false;
+    }
+    return item.isFolder || (!item.isPlayable && itemType.isEmpty);
   }
 
   List<String> mergeLabels(List<String> primary, List<String> secondary) {

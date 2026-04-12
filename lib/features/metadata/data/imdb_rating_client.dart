@@ -58,6 +58,46 @@ class ImdbRatingClient {
     );
   }
 
+  Future<List<ImdbRatingPreview>> previewMatches({
+    required String query,
+    int year = 0,
+    bool preferSeries = false,
+    int maxResults = 3,
+  }) async {
+    final cleanedQuery = _cleanQuery(query);
+    if (cleanedQuery.isEmpty || maxResults <= 0) {
+      return const <ImdbRatingPreview>[];
+    }
+
+    final matches = await _matchSuggestions(
+      query: cleanedQuery,
+      year: year,
+      preferSeries: preferSeries,
+    );
+    if (matches.isEmpty) {
+      return const <ImdbRatingPreview>[];
+    }
+
+    final previews = <ImdbRatingPreview>[];
+    for (final match in matches.take(maxResults)) {
+      final rating = await _lookupRating(match.id);
+      previews.add(
+        ImdbRatingPreview(
+          imdbId: match.id,
+          title: match.title,
+          year: match.year,
+          typeLabel: match.type,
+          posterUrl: match.posterUrl,
+          ratingLabel: rating == null
+              ? ''
+              : 'IMDb ${rating.averageRating.toStringAsFixed(1)}',
+          voteCount: rating?.voteCount ?? 0,
+        ),
+      );
+    }
+    return previews;
+  }
+
   Future<ImdbRatingMatch?> matchRating({
     required String query,
     int year = 0,
@@ -108,9 +148,25 @@ class ImdbRatingClient {
     required int year,
     required bool preferSeries,
   }) async {
+    final matches = await _matchSuggestions(
+      query: query,
+      year: year,
+      preferSeries: preferSeries,
+    );
+    if (matches.isEmpty) {
+      return null;
+    }
+    return matches.first;
+  }
+
+  Future<List<_ImdbSuggestionItem>> _matchSuggestions({
+    required String query,
+    required int year,
+    required bool preferSeries,
+  }) async {
     final cleanedQuery = _cleanQuery(query);
     if (cleanedQuery.isEmpty) {
-      return null;
+      return const <_ImdbSuggestionItem>[];
     }
 
     final response = await _client.get(
@@ -128,18 +184,18 @@ class ImdbRatingClient {
       utf8.decode(response.bodyBytes, allowMalformed: true),
     );
     if (decoded is! Map<String, dynamic>) {
-      return null;
+      return const <_ImdbSuggestionItem>[];
     }
 
     final matches = (decoded['d'] as List<dynamic>? ?? const [])
         .map((item) => _ImdbSuggestionItem.fromJson(item))
         .whereType<_ImdbSuggestionItem>()
-        .toList();
+        .toList(growable: false);
     if (matches.isEmpty) {
-      return null;
+      return const <_ImdbSuggestionItem>[];
     }
 
-    return _pickBestMatch(
+    return _rankMatches(
       matches,
       query: cleanedQuery,
       year: year,
@@ -207,30 +263,38 @@ class ImdbRatingClient {
     );
   }
 
-  _ImdbSuggestionItem? _pickBestMatch(
+  List<_ImdbSuggestionItem> _rankMatches(
     List<_ImdbSuggestionItem> items, {
     required String query,
     required int year,
     required bool preferSeries,
   }) {
     final normalizedQuery = _normalizeTitle(query);
-    _ImdbSuggestionItem? best;
-    var bestScore = double.negativeInfinity;
+    final scored = items
+        .map(
+          (item) => (
+            item: item,
+            score: _scoreMatch(
+              item,
+              normalizedQuery: normalizedQuery,
+              year: year,
+              preferSeries: preferSeries,
+            ),
+          ),
+        )
+        .where((entry) => entry.score >= 0)
+        .toList(growable: false)
+      ..sort((left, right) => right.score.compareTo(left.score));
 
-    for (final item in items) {
-      final score = _scoreMatch(
-        item,
-        normalizedQuery: normalizedQuery,
-        year: year,
-        preferSeries: preferSeries,
-      );
-      if (score > bestScore) {
-        bestScore = score;
-        best = item;
+    final seen = <String>{};
+    final ranked = <_ImdbSuggestionItem>[];
+    for (final entry in scored) {
+      if (!seen.add(entry.item.id)) {
+        continue;
       }
+      ranked.add(entry.item);
     }
-
-    return bestScore < 0 ? null : best;
+    return ranked;
   }
 
   double _scoreMatch(

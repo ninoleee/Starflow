@@ -54,6 +54,33 @@ bool isHeavyPlaybackTargetMetadata(PlaybackTarget target) {
   return is4k || veryHighBitrate || heavyHevc || heavyAv1;
 }
 
+bool isHighRiskRemotePlaybackContainer(PlaybackTarget target) {
+  const riskyContainers = <String>{
+    'mkv',
+    'ts',
+    'm2ts',
+    'mts',
+    'flv',
+    'avi',
+  };
+  final container = target.container.trim().toLowerCase();
+  if (riskyContainers.contains(container)) {
+    return true;
+  }
+
+  final candidateUrl = isLoopbackPlaybackRelayUrl(target.streamUrl)
+      ? target.actualAddress
+      : target.streamUrl;
+  final uri = Uri.tryParse(candidateUrl.trim());
+  final path = (uri?.path ?? candidateUrl).toLowerCase();
+  final dotIndex = path.lastIndexOf('.');
+  if (dotIndex < 0 || dotIndex >= path.length - 1) {
+    return false;
+  }
+  final extension = path.substring(dotIndex + 1).trim();
+  return riskyContainers.contains(extension);
+}
+
 PlaybackMpvQualityPreset resolveEffectivePlaybackMpvQualityPreset({
   required PlaybackMpvQualityPreset requestedPreset,
   required PlaybackTarget target,
@@ -62,16 +89,48 @@ PlaybackMpvQualityPreset resolveEffectivePlaybackMpvQualityPreset({
   required bool isFullscreen,
   required bool aggressiveTuningEnabled,
   required PlaybackDecodeMode decodeMode,
+  bool? remotePlaybackOverride,
+  bool? highRiskContainerOverride,
+  double? startupProbeMegabitsPerSecond,
 }) {
   if (requestedPreset == PlaybackMpvQualityPreset.performanceFirst) {
     return requestedPreset;
   }
 
+  final codec = target.videoCodec.trim().toLowerCase();
+  final isHevc = codec == 'hevc' || codec == 'h265' || codec == 'x265';
+  final isAv1 = codec == 'av1';
+  final codecComplexityRisk = isHevc || isAv1;
   final heavyPlayback = isHeavyPlaybackTargetMetadata(target);
-  final remotePlayback = isLikelyRemotePlaybackTargetTransport(target);
+  final remotePlayback =
+      remotePlaybackOverride ?? isLikelyRemotePlaybackTargetTransport(target);
+  final highRiskContainer = highRiskContainerOverride ?? false;
+  final quarkPlayback = isLikelyQuarkPlaybackTarget(target);
+  final measuredSpeedMbps = startupProbeMegabitsPerSecond;
+  final lowStartupSpeed =
+      measuredSpeedMbps != null && measuredSpeedMbps > 0 && measuredSpeedMbps < 12;
+  final criticalStartupSpeed =
+      measuredSpeedMbps != null && measuredSpeedMbps > 0 && measuredSpeedMbps < 6;
   final windowedWindows = isWindowsPlatform && !isTelevision && !isFullscreen;
+  final riskyRemotePlayback = remotePlayback &&
+      (quarkPlayback ||
+          heavyPlayback ||
+          codecComplexityRisk ||
+          highRiskContainer ||
+          lowStartupSpeed);
 
   if (requestedPreset == PlaybackMpvQualityPreset.qualityFirst) {
+    if (remotePlayback && (criticalStartupSpeed || (quarkPlayback && lowStartupSpeed))) {
+      return PlaybackMpvQualityPreset.performanceFirst;
+    }
+    if (remotePlayback &&
+        heavyPlayback &&
+        (codecComplexityRisk || highRiskContainer || lowStartupSpeed)) {
+      return PlaybackMpvQualityPreset.performanceFirst;
+    }
+    if (riskyRemotePlayback) {
+      return PlaybackMpvQualityPreset.balanced;
+    }
     if (heavyPlayback) {
       return windowedWindows
           ? PlaybackMpvQualityPreset.performanceFirst
@@ -83,10 +142,17 @@ PlaybackMpvQualityPreset resolveEffectivePlaybackMpvQualityPreset({
   }
 
   if (requestedPreset == PlaybackMpvQualityPreset.balanced &&
-      windowedWindows &&
-      heavyPlayback &&
-      (aggressiveTuningEnabled ||
-          decodeMode == PlaybackDecodeMode.softwarePreferred)) {
+      ((windowedWindows &&
+              heavyPlayback &&
+              (aggressiveTuningEnabled ||
+                  decodeMode == PlaybackDecodeMode.softwarePreferred)) ||
+          (remotePlayback &&
+              (criticalStartupSpeed ||
+                  (heavyPlayback && (codecComplexityRisk || highRiskContainer)) ||
+                  (aggressiveTuningEnabled && lowStartupSpeed) ||
+                  (decodeMode == PlaybackDecodeMode.softwarePreferred &&
+                      (heavyPlayback || lowStartupSpeed)) ||
+                  (quarkPlayback && lowStartupSpeed))))) {
     return PlaybackMpvQualityPreset.performanceFirst;
   }
 
@@ -119,11 +185,19 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
   required PlaybackTarget target,
   required bool aggressiveTuning,
   required bool heavyPlayback,
+  double? startupProbeMegabitsPerSecond,
+  bool? highRiskContainerOverride,
 }) {
   final transportUrl = isLoopbackPlaybackRelayUrl(target.streamUrl)
       ? target.actualAddress
       : target.streamUrl;
   final scheme = playbackUrlScheme(transportUrl);
+  final measuredSpeedMbps = startupProbeMegabitsPerSecond;
+  final lowStartupSpeed =
+      measuredSpeedMbps != null && measuredSpeedMbps > 0 && measuredSpeedMbps < 12;
+  final criticalStartupSpeed =
+      measuredSpeedMbps != null && measuredSpeedMbps > 0 && measuredSpeedMbps < 6;
+  final highRiskContainer = highRiskContainerOverride ?? false;
   if (_kLowLatencyRemotePlaybackSchemes.contains(scheme)) {
     return MpvRemotePlaybackTuningProfile(
       networkTimeoutSeconds: aggressiveTuning || heavyPlayback ? '8' : '5',
@@ -139,6 +213,30 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
 
   if (_kBufferedRemotePlaybackSchemes.contains(scheme)) {
     if (isLikelyQuarkPlaybackTarget(target)) {
+      if (criticalStartupSpeed) {
+        return const MpvRemotePlaybackTuningProfile(
+          networkTimeoutSeconds: '35',
+          cacheOnDisk: 'no',
+          cacheSecs: '180',
+          demuxerReadaheadSecs: '48',
+          demuxerHysteresisSecs: '24',
+          cachePauseWait: '6.0',
+          cachePauseInitial: 'yes',
+          lowLatency: false,
+        );
+      }
+      if (lowStartupSpeed || highRiskContainer) {
+        return MpvRemotePlaybackTuningProfile(
+          networkTimeoutSeconds: aggressiveTuning || heavyPlayback ? '30' : '28',
+          cacheOnDisk: 'no',
+          cacheSecs: aggressiveTuning || heavyPlayback ? '165' : '150',
+          demuxerReadaheadSecs: aggressiveTuning || heavyPlayback ? '44' : '40',
+          demuxerHysteresisSecs: aggressiveTuning || heavyPlayback ? '22' : '20',
+          cachePauseWait: aggressiveTuning || heavyPlayback ? '5.5' : '5.0',
+          cachePauseInitial: 'yes',
+          lowLatency: false,
+        );
+      }
       return MpvRemotePlaybackTuningProfile(
         networkTimeoutSeconds: aggressiveTuning || heavyPlayback ? '25' : '20',
         cacheOnDisk: 'no',
@@ -158,6 +256,18 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
             : heavyPlayback
                 ? '3.0'
                 : '2.5',
+        cachePauseInitial: 'yes',
+        lowLatency: false,
+      );
+    }
+    if (criticalStartupSpeed || (highRiskContainer && (heavyPlayback || lowStartupSpeed))) {
+      return const MpvRemotePlaybackTuningProfile(
+        networkTimeoutSeconds: '22',
+        cacheOnDisk: 'no',
+        cacheSecs: '70',
+        demuxerReadaheadSecs: '24',
+        demuxerHysteresisSecs: '12',
+        cachePauseWait: '2.8',
         cachePauseInitial: 'yes',
         lowLatency: false,
       );

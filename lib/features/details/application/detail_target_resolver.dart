@@ -2,11 +2,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
-import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
@@ -128,7 +126,10 @@ class DetailTargetResolver {
           'poster=${target.posterUrl.trim().isNotEmpty} overview=${target.hasUsefulOverview} '
           'ratings=${target.ratingLabels.join(' | ')}',
     );
-    final cachedTarget = await _detailCache.loadDetailTarget(target);
+    final cachedState = await _detailCache.loadDetailState(target);
+    final cachedTarget = cachedState?.target;
+    final refreshStatus =
+        cachedState?.metadataRefreshStatus ?? DetailMetadataRefreshStatus.never;
     DebugTraceOnce.logMetadata(
       traceKey,
       'cache-load',
@@ -144,7 +145,13 @@ class DetailTargetResolver {
           ? target
           : _mergeCachedDetailTarget(target, cachedTarget),
     );
-    if (_shouldAutoEnrichMetadataTarget(
+    if (refreshStatus != DetailMetadataRefreshStatus.never) {
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'auto-enrich',
+        'skipped refreshStatus=${refreshStatus.name}',
+      );
+    } else if (_shouldAutoEnrichMetadataTarget(
         target: nextTarget, settings: _settings)) {
       DebugTraceOnce.logMetadata(
         traceKey,
@@ -158,7 +165,6 @@ class DetailTargetResolver {
         target: nextTarget,
         wmdbMetadataClient: _ref.read(wmdbMetadataClientProvider),
         tmdbMetadataClient: _ref.read(tmdbMetadataClientProvider),
-        imdbRatingClient: _ref.read(imdbRatingClientProvider),
         traceKey: traceKey,
       );
     } else {
@@ -325,12 +331,9 @@ bool _shouldAutoEnrichMetadataTarget({
   final needsTmdb = settings.tmdbMetadataMatchEnabled &&
       settings.tmdbReadAccessToken.trim().isNotEmpty &&
       (target.needsMetadataMatch ||
-          target.imdbId.trim().isEmpty ||
           target.backdropUrl.trim().isEmpty ||
           target.logoUrl.trim().isEmpty);
-  final needsImdb = _shouldUseStandaloneImdbRating(settings) &&
-      _needsStandaloneImdbFallback(target);
-  return needsWmdb || needsTmdb || needsImdb;
+  return needsWmdb || needsTmdb;
 }
 
 Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
@@ -338,90 +341,11 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
   required MediaDetailTarget target,
   required WmdbMetadataClient wmdbMetadataClient,
   required TmdbMetadataClient tmdbMetadataClient,
-  required ImdbRatingClient imdbRatingClient,
   required String traceKey,
 }) async {
   var nextTarget = target;
   final initialQuery = _detailMetadataQuery(target);
-  final preferredImdbId = _resolvePreferredImdbId(target.imdbId, initialQuery);
-  var imdbIdMetadataMatched = false;
-  if (preferredImdbId.isNotEmpty &&
-      settings.tmdbMetadataMatchEnabled &&
-      settings.tmdbReadAccessToken.trim().isNotEmpty) {
-    try {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'tmdb',
-        'request imdbId=$preferredImdbId preferSeries=${_prefersSeriesMetadata(nextTarget)}',
-      );
-      final tmdbMatch = await tmdbMetadataClient.matchByImdbId(
-        imdbId: preferredImdbId,
-        readAccessToken: settings.tmdbReadAccessToken.trim(),
-        preferSeries: _prefersSeriesMetadata(nextTarget),
-      );
-      if (tmdbMatch != null) {
-        imdbIdMetadataMatched = true;
-        DebugTraceOnce.logMetadata(
-          traceKey,
-          'tmdb',
-          'matched title=${tmdbMatch.title} imdbId=${tmdbMatch.imdbId}',
-        );
-        final resolvedBackdropUrl = await _resolveTmdbBackdropForTarget(
-          settings: settings,
-          tmdbMetadataClient: tmdbMetadataClient,
-          target: nextTarget,
-          match: tmdbMatch,
-        );
-        nextTarget = _applyMetadataMatchToDetailTarget(
-          nextTarget,
-          MetadataMatchResult(
-            provider: MetadataMatchProvider.tmdb,
-            title: tmdbMatch.title,
-            originalTitle: tmdbMatch.originalTitle,
-            posterUrl: tmdbMatch.posterUrl,
-            backdropUrl: resolvedBackdropUrl,
-            logoUrl: tmdbMatch.logoUrl,
-            bannerUrl: _resolveTmdbBannerForTarget(
-              target: nextTarget,
-              match: tmdbMatch,
-              resolvedBackdropUrl: resolvedBackdropUrl,
-            ),
-            extraBackdropUrls: _resolveTmdbExtraBackdropUrlsForTarget(
-              target: nextTarget,
-              match: tmdbMatch,
-              resolvedBackdropUrl: resolvedBackdropUrl,
-            ),
-            overview: tmdbMatch.overview,
-            year: tmdbMatch.year,
-            durationLabel: tmdbMatch.durationLabel,
-            genres: tmdbMatch.genres,
-            directors: tmdbMatch.directors,
-            directorProfiles: tmdbMatch.directorProfiles
-                .map((item) => MetadataPersonProfile(
-                    name: item.name, avatarUrl: item.avatarUrl))
-                .toList(),
-            actors: tmdbMatch.actors,
-            actorProfiles: tmdbMatch.actorProfiles
-                .map((item) => MetadataPersonProfile(
-                    name: item.name, avatarUrl: item.avatarUrl))
-                .toList(),
-            platforms: tmdbMatch.platforms,
-            platformProfiles: tmdbMatch.platformProfiles
-                .map((item) => MetadataPersonProfile(
-                    name: item.name, avatarUrl: item.avatarUrl))
-                .toList(),
-            ratingLabels: tmdbMatch.ratingLabels,
-            imdbId: tmdbMatch.imdbId,
-            tmdbId: '${tmdbMatch.tmdbId}',
-          ),
-        );
-      }
-    } catch (_) {
-      // ignore
-    }
-  }
   if (settings.wmdbMetadataMatchEnabled &&
-      !imdbIdMetadataMatched &&
       (nextTarget.needsMetadataMatch ||
           _needsRatingLabel(nextTarget, keyword: '豆瓣') ||
           nextTarget.needsImdbRatingMatch ||
@@ -453,61 +377,7 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
       // ignore
     }
   }
-  if (_shouldUseStandaloneImdbRating(settings) &&
-      _needsStandaloneImdbFallback(nextTarget)) {
-    try {
-      final currentQuery = _detailMetadataQuery(nextTarget);
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'imdb',
-        'request query=${currentQuery.isEmpty ? initialQuery : currentQuery} '
-            'year=${nextTarget.year} imdbId=${nextTarget.imdbId}',
-      );
-      final ratingMatch = await imdbRatingClient.matchRating(
-        query: currentQuery.isEmpty ? initialQuery : currentQuery,
-        year: nextTarget.year,
-        preferSeries: _prefersSeriesMetadata(nextTarget),
-        imdbId: nextTarget.imdbId,
-      );
-      if (ratingMatch != null) {
-        final nextRatingLabel = ratingMatch.ratingLabel.trim();
-        nextTarget = nextTarget.copyWith(
-          ratingLabels: _mergeLabels(
-            nextTarget.ratingLabels,
-            nextRatingLabel.isEmpty ? const <String>[] : [nextRatingLabel],
-          ),
-          imdbId: nextTarget.imdbId.trim().isEmpty
-              ? ratingMatch.imdbId
-              : nextTarget.imdbId,
-        );
-      }
-    } catch (_) {
-      // ignore
-    }
-  }
   return normalizeRatingLabelsInTarget(nextTarget);
-}
-
-String _resolvePreferredImdbId(String currentImdbId, String query) {
-  final normalizedCurrent = _normalizeImdbId(currentImdbId);
-  if (normalizedCurrent.isNotEmpty) {
-    return normalizedCurrent;
-  }
-  return _extractImdbIdFromText(query);
-}
-
-String _extractImdbIdFromText(String value) {
-  final match =
-      RegExp(r'\btt\d{7,9}\b', caseSensitive: false).firstMatch(value);
-  return _normalizeImdbId(match?.group(0) ?? '');
-}
-
-String _normalizeImdbId(String input) {
-  final normalized = input.trim().toLowerCase();
-  if (!RegExp(r'^tt\d{7,9}$').hasMatch(normalized)) {
-    return '';
-  }
-  return normalized;
 }
 
 bool _prefersSeriesMetadata(MediaDetailTarget target) {
@@ -526,72 +396,6 @@ bool _hasRatingLabelKeyword(Iterable<String> labels, String keyword) {
   }
   return labels
       .any((label) => label.trim().toLowerCase().contains(normalizedKeyword));
-}
-
-bool _shouldUseStandaloneImdbRating(DetailEnrichmentSettings settings) {
-  return settings.imdbRatingMatchEnabled;
-}
-
-bool _needsStandaloneImdbFallback(MediaDetailTarget target) {
-  return resolvePreferredPosterRatingLabel(target.ratingLabels).isEmpty;
-}
-
-Future<String> _resolveTmdbBackdropForTarget({
-  required DetailEnrichmentSettings settings,
-  required TmdbMetadataClient tmdbMetadataClient,
-  required MediaDetailTarget target,
-  required TmdbMetadataMatch match,
-}) async {
-  if (_isEpisodeLikeTarget(target) &&
-      match.isSeries &&
-      match.tmdbId > 0 &&
-      settings.tmdbReadAccessToken.trim().isNotEmpty) {
-    try {
-      final stillUrl = await tmdbMetadataClient.fetchEpisodeStillUrl(
-        seriesId: match.tmdbId,
-        seasonNumber: target.seasonNumber!,
-        episodeNumber: target.episodeNumber!,
-        readAccessToken: settings.tmdbReadAccessToken.trim(),
-      );
-      if (stillUrl.trim().isNotEmpty) {
-        return stillUrl.trim();
-      }
-    } catch (_) {
-      // continue
-    }
-  }
-  return match.backdropUrl.trim();
-}
-
-String _resolveTmdbBannerForTarget({
-  required MediaDetailTarget target,
-  required TmdbMetadataMatch match,
-  required String resolvedBackdropUrl,
-}) {
-  if (!_isEpisodeLikeTarget(target)) {
-    return '';
-  }
-  final seriesBackdrop = match.backdropUrl.trim();
-  if (seriesBackdrop.isEmpty || seriesBackdrop == resolvedBackdropUrl.trim()) {
-    return '';
-  }
-  return seriesBackdrop;
-}
-
-List<String> _resolveTmdbExtraBackdropUrlsForTarget({
-  required MediaDetailTarget target,
-  required TmdbMetadataMatch match,
-  required String resolvedBackdropUrl,
-}) {
-  final bannerUrl = _resolveTmdbBannerForTarget(
-    target: target,
-    match: match,
-    resolvedBackdropUrl: resolvedBackdropUrl,
-  );
-  return {
-    if (bannerUrl.isNotEmpty) bannerUrl,
-    ...match.extraBackdropUrls,
-  }.where((item) => item != resolvedBackdropUrl.trim()).toList(growable: false);
 }
 
 bool _isEpisodeLikeTarget(MediaDetailTarget target) {

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:sembast/sembast_memory.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
@@ -15,12 +16,19 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   group('AppMediaRepository synced Quark delete', () {
     test(
         'deletes the matched Quark directory after deleting a file inside the selected WebDAV scope',
@@ -43,6 +51,7 @@ void main() {
         ],
       );
       final cacheRepository = _RecordingLocalStorageCacheRepository();
+      final playbackRepository = _RecordingPlaybackMemoryRepository();
       final indexer = _FakeNasMediaIndexer();
       final container = ProviderContainer(
         overrides: [
@@ -77,6 +86,8 @@ void main() {
           nasMediaIndexerProvider.overrideWithValue(indexer),
           localStorageCacheRepositoryProvider
               .overrideWithValue(cacheRepository),
+          playbackMemoryRepositoryProvider
+              .overrideWithValue(playbackRepository),
         ],
       );
       addTearDown(container.dispose);
@@ -101,6 +112,14 @@ void main() {
         resourcePath,
       );
       expect(cacheRepository.clearedResources.single.treatAsScope, isFalse);
+      expect(playbackRepository.clearedResources, hasLength(1));
+      expect(
+          playbackRepository.clearedResources.single.resourceId, resourcePath);
+      expect(
+        playbackRepository.clearedResources.single.resourcePath,
+        resourcePath,
+      );
+      expect(playbackRepository.clearedResources.single.treatAsScope, isFalse);
     });
 
     test(
@@ -334,6 +353,7 @@ void main() {
         },
       );
       final cacheRepository = _RecordingLocalStorageCacheRepository();
+      final playbackRepository = _RecordingPlaybackMemoryRepository();
       final indexer = _FakeNasMediaIndexer(
         scopeRecordsByPath: {
           '/影视/圆桌派': [
@@ -373,6 +393,8 @@ void main() {
           nasMediaIndexerProvider.overrideWithValue(indexer),
           localStorageCacheRepositoryProvider
               .overrideWithValue(cacheRepository),
+          playbackMemoryRepositoryProvider
+              .overrideWithValue(playbackRepository),
         ],
       );
       addTearDown(container.dispose);
@@ -393,6 +415,13 @@ void main() {
         '/影视/圆桌派',
       );
       expect(cacheRepository.clearedResources.single.treatAsScope, isTrue);
+      expect(playbackRepository.clearedResources, hasLength(1));
+      expect(playbackRepository.clearedResources.single.resourceId, isEmpty);
+      expect(
+        playbackRepository.clearedResources.single.resourcePath,
+        '/影视/圆桌派',
+      );
+      expect(playbackRepository.clearedResources.single.treatAsScope, isTrue);
     });
   });
 }
@@ -582,6 +611,30 @@ class _RecordingLocalStorageCacheRepository
 
   @override
   Future<void> clearDetailCacheForResource({
+    required String sourceId,
+    String resourceId = '',
+    required String resourcePath,
+    bool treatAsScope = false,
+  }) async {
+    clearedResources.add(
+      _ClearedResourceRequest(
+        sourceId: sourceId,
+        resourceId: resourceId,
+        resourcePath: resourcePath,
+        treatAsScope: treatAsScope,
+      ),
+    );
+  }
+}
+
+class _RecordingPlaybackMemoryRepository extends PlaybackMemoryRepository {
+  _RecordingPlaybackMemoryRepository();
+
+  final List<_ClearedResourceRequest> clearedResources =
+      <_ClearedResourceRequest>[];
+
+  @override
+  Future<void> clearEntriesForResource({
     required String sourceId,
     String resourceId = '',
     required String resourcePath,

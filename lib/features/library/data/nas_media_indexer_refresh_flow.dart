@@ -278,7 +278,9 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         targetIndices.map((index) => records[index]).toList(growable: false);
     final shouldAttemptSidecar = source.webDavSidecarScrapingEnabled &&
         selectedRecords.any(
-          (record) => !_hasAttemptStatus(record.sidecarStatus),
+          (record) =>
+              !record.manualMetadataLocked &&
+              !_hasAttemptStatus(record.sidecarStatus),
         );
     final shouldAttemptOnline = selectedRecords.any(
       (record) => _hasPendingOnlineAttempts(record, settings),
@@ -312,6 +314,89 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
           ? target.title
           : target.searchQuery.trim(),
     );
+  }
+
+  Future<void> markDetailTargetMetadataManuallyManaged(
+    MediaDetailTarget target,
+  ) async {
+    final sourceId = target.sourceId.trim();
+    final resourceId = target.itemId.trim();
+    if (sourceId.isEmpty || resourceId.isEmpty) {
+      return;
+    }
+
+    final records = await _loadSourceRecordsCached(sourceId);
+    if (records.isEmpty) {
+      return;
+    }
+
+    final targetIndices = _resolveWritableRecordIndices(
+      records,
+      resourceId,
+      resourceScopePath: target.resourcePath,
+    );
+    if (targetIndices.isEmpty) {
+      return;
+    }
+
+    final nextRecords = [...records];
+    var changed = false;
+    final now = DateTime.now();
+    for (final targetIndex in targetIndices) {
+      final currentRecord = nextRecords[targetIndex];
+      if (currentRecord.manualMetadataLocked) {
+        continue;
+      }
+      nextRecords[targetIndex] = NasMediaIndexRecord(
+        id: currentRecord.id,
+        sourceId: currentRecord.sourceId,
+        sectionId: currentRecord.sectionId,
+        sectionName: currentRecord.sectionName,
+        resourceId: currentRecord.resourceId,
+        resourcePath: currentRecord.resourcePath,
+        fingerprint: currentRecord.fingerprint,
+        fileSizeBytes: currentRecord.fileSizeBytes,
+        modifiedAt: currentRecord.modifiedAt,
+        indexedAt: now,
+        scrapedAt: currentRecord.scrapedAt,
+        recognizedTitle: currentRecord.recognizedTitle,
+        searchQuery: currentRecord.searchQuery,
+        originalFileName: currentRecord.originalFileName,
+        parentTitle: currentRecord.parentTitle,
+        recognizedYear: currentRecord.recognizedYear,
+        recognizedItemType: currentRecord.recognizedItemType,
+        preferSeries: currentRecord.preferSeries,
+        recognizedSeasonNumber: currentRecord.recognizedSeasonNumber,
+        recognizedEpisodeNumber: currentRecord.recognizedEpisodeNumber,
+        sidecarStatus: currentRecord.sidecarStatus,
+        wmdbStatus: currentRecord.wmdbStatus,
+        tmdbStatus: currentRecord.tmdbStatus,
+        imdbStatus: currentRecord.imdbStatus,
+        manualMetadataLocked: true,
+        item: currentRecord.item,
+      );
+      changed = true;
+    }
+
+    if (!changed) {
+      return;
+    }
+
+    final existingState = await _store.loadSourceState(sourceId);
+    await _persistSourceRecords(
+      sourceId: sourceId,
+      records: nextRecords,
+      state: NasMediaIndexSourceState(
+        sourceId: sourceId,
+        lastIndexedAt: now,
+        recordCount: nextRecords.length,
+        scopeKey: existingState?.scopeKey ?? '',
+        emptyAutoRebuildAttempted: nextRecords.isNotEmpty
+            ? false
+            : (existingState?.emptyAutoRebuildAttempted ?? false),
+      ),
+    );
+    _notifyIndexChangedSafely();
   }
 
   Future<List<MediaItem>> loadLibrary(
@@ -713,6 +798,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         imdbStatus: (imdbRatingMatch?.ratingLabel.trim().isNotEmpty ?? false)
             ? NasMetadataFetchStatus.succeeded
             : currentRecord.imdbStatus,
+        manualMetadataLocked: true,
         item: nextItem,
       );
     }
@@ -946,8 +1032,10 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         fileSizeBytes: scannedItem.fileSizeBytes,
       );
       final existing = existingRecords[scannedItem.resourceId];
-      final hasRequiredSidecar =
-          !includeSidecarMetadata || _hasAttemptStatus(existing?.sidecarStatus);
+      final preserveManualMetadata = existing?.manualMetadataLocked == true;
+      final hasRequiredSidecar = !includeSidecarMetadata ||
+          preserveManualMetadata ||
+          _hasAttemptStatus(existing?.sidecarStatus);
       final hasRequiredOnlineMetadata = !includeOnlineMetadata ||
           _hasCompletedOnlineAttempts(existing, settings);
       final canReuse = existing != null &&
@@ -998,12 +1086,15 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
             scannedItem,
             indexedAt: now,
             fingerprint: fingerprint,
-            existingRecord:
-                existing != null && existing.fingerprint == fingerprint
-                    ? existing
-                    : null,
-            applyOnlineMetadata: includeOnlineMetadata,
-            markSidecarAttempt: includeSidecarMetadata,
+            existingRecord: existing != null &&
+                    (existing.fingerprint == fingerprint ||
+                        preserveManualMetadata)
+                ? existing
+                : null,
+            applyOnlineMetadata:
+                includeOnlineMetadata && !preserveManualMetadata,
+            markSidecarAttempt:
+                includeSidecarMetadata && !preserveManualMetadata,
           ),
         );
       }
@@ -1143,9 +1234,12 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         continue;
       }
       final currentRecord = nextRecords[recordIndex];
+      final isManualMetadataLocked = currentRecord.manualMetadataLocked;
       final shouldAttemptSidecar = includeSidecarMetadata &&
+          !isManualMetadataLocked &&
           !_hasAttemptStatus(currentRecord.sidecarStatus);
       final shouldAttemptOnline = includeOnlineMetadata &&
+          !isManualMetadataLocked &&
           _hasPendingOnlineAttempts(currentRecord, settings);
       if (!shouldAttemptSidecar && !shouldAttemptOnline) {
         if (reportProgress) {

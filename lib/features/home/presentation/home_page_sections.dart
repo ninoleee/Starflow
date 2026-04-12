@@ -8,6 +8,7 @@ class _HomeSectionSlot extends ConsumerStatefulWidget {
     required this.featuredSectionId,
     required this.useHeroNextSectionFocusNode,
     required this.heroNextSectionFocusNode,
+    required this.homeMetadataAutoRefreshRevision,
   });
 
   final HomeModuleConfig module;
@@ -15,6 +16,7 @@ class _HomeSectionSlot extends ConsumerStatefulWidget {
   final String? featuredSectionId;
   final bool useHeroNextSectionFocusNode;
   final FocusNode heroNextSectionFocusNode;
+  final int homeMetadataAutoRefreshRevision;
 
   @override
   ConsumerState<_HomeSectionSlot> createState() => _HomeSectionSlotState();
@@ -24,6 +26,8 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot> {
   AsyncValue<HomeSectionViewModel?>? _cachedState;
   final DetailRatingPrefetchCoordinator _ratingPrefetchCoordinator =
       DetailRatingPrefetchCoordinator();
+  int _observedHomeMetadataAutoRefreshRevision = 0;
+  int _scheduledHomeMetadataAutoRefreshRevision = 0;
 
   @override
   void didUpdateWidget(covariant _HomeSectionSlot oldWidget) {
@@ -71,14 +75,25 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot> {
     BuildContext context,
     HomeSectionViewModel section,
   ) {
-    if (section.layout == HomeSectionLayout.posterRail &&
-        section.items.isNotEmpty) {
+    if (widget.homeMetadataAutoRefreshRevision !=
+        _observedHomeMetadataAutoRefreshRevision) {
+      _ratingPrefetchCoordinator.reset();
+      _observedHomeMetadataAutoRefreshRevision =
+          widget.homeMetadataAutoRefreshRevision;
+    }
+    if (widget.isPageVisible &&
+        section.layout == HomeSectionLayout.posterRail &&
+        section.items.isNotEmpty &&
+        _scheduledHomeMetadataAutoRefreshRevision !=
+            widget.homeMetadataAutoRefreshRevision) {
       _ratingPrefetchCoordinator.schedulePrefetch(
         ref: ref,
         targets: section.items.map((item) => item.detailTarget),
         isPageActive: () => mounted && widget.isPageVisible,
         preferDoubanOnly: _isHomeDoubanPosterModule(widget.module),
       );
+      _scheduledHomeMetadataAutoRefreshRevision =
+          widget.homeMetadataAutoRefreshRevision;
     }
     final viewAllTarget = section.viewAllTarget;
     final openViewAll = viewAllTarget == null

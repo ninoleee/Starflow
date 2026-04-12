@@ -31,6 +31,78 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
         _isStructureInferredEpisodeLike(source, scannedItem);
     final useSeriesLevelScrape =
         _shouldUseStructureInferredSeriesLevelScrape(source, scannedItem);
+    final manualMetadataLocked = existingRecord?.manualMetadataLocked ?? false;
+
+    if (manualMetadataLocked && existingRecord != null) {
+      final existingItem = existingRecord.item;
+      final resolvedPlaybackItemId =
+          scannedItem.playbackItemId.trim().isNotEmpty
+              ? scannedItem.playbackItemId
+              : existingItem.playbackItemId;
+      final resolvedStreamUrl = scannedItem.streamUrl.trim().isNotEmpty
+          ? scannedItem.streamUrl
+          : existingItem.streamUrl;
+      final resolvedStreamHeaders = scannedItem.streamHeaders.isNotEmpty
+          ? scannedItem.streamHeaders
+          : existingItem.streamHeaders;
+      final resolvedContainer = seed.container.trim().isNotEmpty
+          ? seed.container.trim()
+          : existingItem.container;
+      final resolvedVideoCodec = seed.videoCodec.trim().isNotEmpty
+          ? seed.videoCodec.trim()
+          : existingItem.videoCodec;
+      final resolvedAudioCodec = seed.audioCodec.trim().isNotEmpty
+          ? seed.audioCodec.trim()
+          : existingItem.audioCodec;
+      final refreshedItem = existingItem.copyWith(
+        id: scannedItem.resourceId,
+        sectionId: scannedItem.sectionId,
+        sectionName: scannedItem.sectionName,
+        sourceId: source.id,
+        sourceName: source.name,
+        sourceKind: source.kind,
+        streamUrl: resolvedStreamUrl,
+        actualAddress: scannedItem.actualAddress,
+        streamHeaders: resolvedStreamHeaders,
+        playbackItemId: resolvedPlaybackItemId,
+        container: resolvedContainer,
+        videoCodec: resolvedVideoCodec,
+        audioCodec: resolvedAudioCodec,
+        width: seed.width ?? existingItem.width,
+        height: seed.height ?? existingItem.height,
+        bitrate: seed.bitrate ?? existingItem.bitrate,
+        fileSizeBytes: scannedItem.fileSizeBytes,
+        addedAt: scannedItem.addedAt,
+      );
+      return NasMediaIndexRecord(
+        id: existingRecord.id,
+        sourceId: existingRecord.sourceId,
+        sectionId: scannedItem.sectionId,
+        sectionName: scannedItem.sectionName,
+        resourceId: scannedItem.resourceId,
+        resourcePath: scannedItem.actualAddress,
+        fingerprint: fingerprint,
+        fileSizeBytes: scannedItem.fileSizeBytes,
+        modifiedAt: scannedItem.modifiedAt,
+        indexedAt: indexedAt,
+        scrapedAt: existingRecord.scrapedAt,
+        recognizedTitle: existingRecord.recognizedTitle,
+        searchQuery: existingRecord.searchQuery,
+        originalFileName: scannedItem.fileName,
+        parentTitle: existingRecord.parentTitle,
+        recognizedYear: existingRecord.recognizedYear,
+        recognizedItemType: existingRecord.recognizedItemType,
+        preferSeries: existingRecord.preferSeries,
+        recognizedSeasonNumber: existingRecord.recognizedSeasonNumber,
+        recognizedEpisodeNumber: existingRecord.recognizedEpisodeNumber,
+        sidecarStatus: existingRecord.sidecarStatus,
+        wmdbStatus: existingRecord.wmdbStatus,
+        tmdbStatus: existingRecord.tmdbStatus,
+        imdbStatus: existingRecord.imdbStatus,
+        manualMetadataLocked: true,
+        item: refreshedItem,
+      );
+    }
 
     var title =
         seed.title.trim().isNotEmpty ? seed.title.trim() : recognition.title;
@@ -127,167 +199,14 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       fallbackTitle:
           title.trim().isNotEmpty ? title.trim() : recognition.searchQuery,
     );
-    var preferredImdbId = _normalizeImdbId(
-      imdbId.trim().isNotEmpty ? imdbId : baseQuery,
-    );
-    var imdbIdMetadataMatched = false;
     var preferSeries = recognition.preferSeries ||
         itemType.trim().toLowerCase() == 'episode' ||
         itemType.trim().toLowerCase() == 'series';
     var resolvedOnlineMovieType = false;
 
     if (applyOnlineMetadata &&
-        tmdbStatus == NasMetadataFetchStatus.never &&
-        preferredImdbId.isNotEmpty &&
-        settings.tmdbMetadataMatchEnabled &&
-        settings.tmdbReadAccessToken.trim().isNotEmpty) {
-      final needsTmdb = (!posterLocked && posterUrl.trim().isEmpty) ||
-          (!backdropLocked && backdropUrl.trim().isEmpty) ||
-          (!logoLocked && logoUrl.trim().isEmpty) ||
-          (!overviewLocked && overview.trim().isEmpty) ||
-          (!peopleLocked && (directors.isEmpty || actors.isEmpty)) ||
-          (!genresLocked && genres.isEmpty) ||
-          (!durationLocked && durationLabel.trim().isEmpty);
-      if (needsTmdb) {
-        try {
-          final tmdbMatch = await _tmdbMetadataClient.matchByImdbId(
-            imdbId: preferredImdbId,
-            readAccessToken: settings.tmdbReadAccessToken.trim(),
-            preferSeries: preferSeries,
-          );
-          if (tmdbMatch != null) {
-            if (!typeLocked && !tmdbMatch.isSeries) {
-              resolvedOnlineMovieType = true;
-              itemType = 'movie';
-              if (!seasonLocked) {
-                seasonNumber = null;
-              }
-              if (!episodeLocked) {
-                episodeNumber = null;
-              }
-              preferSeries = false;
-            }
-            var episodeStillUrl = '';
-            if (!useSeriesLevelScrape &&
-                itemType.trim().toLowerCase() == 'episode' &&
-                tmdbMatch.isSeries &&
-                seasonNumber != null &&
-                seasonNumber >= 0 &&
-                episodeNumber != null &&
-                episodeNumber > 0) {
-              try {
-                episodeStillUrl =
-                    await _tmdbMetadataClient.fetchEpisodeStillUrl(
-                  seriesId: tmdbMatch.tmdbId,
-                  seasonNumber: seasonNumber,
-                  episodeNumber: episodeNumber,
-                  readAccessToken: settings.tmdbReadAccessToken.trim(),
-                );
-              } catch (_) {
-                episodeStillUrl = '';
-              }
-            }
-            tmdbStatus = NasMetadataFetchStatus.succeeded;
-            imdbIdMetadataMatched = true;
-            final canOverrideStructureInferredTitle =
-                structureInferredMovieLikeHints &&
-                    seed.episodeNumber == null &&
-                    !tmdbMatch.isSeries;
-            if ((!titleLocked || canOverrideStructureInferredTitle) &&
-                tmdbMatch.title.trim().isNotEmpty) {
-              title = tmdbMatch.title.trim();
-            }
-            if (originalTitle.trim().isEmpty &&
-                tmdbMatch.originalTitle.trim().isNotEmpty) {
-              originalTitle = tmdbMatch.originalTitle.trim();
-            }
-            if (!posterLocked && tmdbMatch.posterUrl.trim().isNotEmpty) {
-              posterUrl = tmdbMatch.posterUrl.trim();
-              posterHeaders = const {};
-            }
-            final resolvedTmdbBackdrop = episodeStillUrl.trim().isNotEmpty
-                ? episodeStillUrl.trim()
-                : tmdbMatch.backdropUrl.trim();
-            if (!backdropLocked &&
-                backdropUrl.trim().isEmpty &&
-                resolvedTmdbBackdrop.isNotEmpty) {
-              backdropUrl = resolvedTmdbBackdrop;
-              backdropHeaders = const {};
-            }
-            if (!logoLocked && tmdbMatch.logoUrl.trim().isNotEmpty) {
-              logoUrl = tmdbMatch.logoUrl.trim();
-              logoHeaders = const {};
-            }
-            if (!bannerLocked &&
-                bannerUrl.trim().isEmpty &&
-                itemType.trim().toLowerCase() == 'episode' &&
-                tmdbMatch.backdropUrl.trim().isNotEmpty &&
-                tmdbMatch.backdropUrl.trim() != backdropUrl.trim()) {
-              bannerUrl = tmdbMatch.backdropUrl.trim();
-              bannerHeaders = const {};
-            }
-            if (!extraBackdropsLocked &&
-                tmdbMatch.extraBackdropUrls.isNotEmpty) {
-              extraBackdropUrls = _dedupe([
-                if (itemType.trim().toLowerCase() == 'episode' &&
-                    tmdbMatch.backdropUrl.trim().isNotEmpty &&
-                    tmdbMatch.backdropUrl.trim() != backdropUrl.trim())
-                  tmdbMatch.backdropUrl.trim(),
-                ...tmdbMatch.extraBackdropUrls,
-              ]);
-              extraBackdropHeaders = const {};
-            }
-            if (!overviewLocked &&
-                overview.trim().isEmpty &&
-                tmdbMatch.overview.trim().isNotEmpty) {
-              overview = tmdbMatch.overview.trim();
-            }
-            if (!yearLocked && year <= 0 && tmdbMatch.year > 0) {
-              year = tmdbMatch.year;
-            }
-            if (!durationLocked &&
-                (durationLabel.trim().isEmpty ||
-                    durationLabel.trim() == '文件' ||
-                    durationLabel.trim() == '剧集') &&
-                tmdbMatch.durationLabel.trim().isNotEmpty) {
-              durationLabel = tmdbMatch.durationLabel.trim();
-            }
-            if (!genresLocked &&
-                genres.isEmpty &&
-                tmdbMatch.genres.isNotEmpty) {
-              genres = _dedupe(tmdbMatch.genres);
-            }
-            if (!peopleLocked) {
-              if (directors.isEmpty && tmdbMatch.directors.isNotEmpty) {
-                directors = _dedupe(tmdbMatch.directors);
-              }
-              if (actors.isEmpty && tmdbMatch.actors.isNotEmpty) {
-                actors = _dedupe(tmdbMatch.actors);
-              }
-            }
-            ratingLabels = _mergeLabels(ratingLabels, tmdbMatch.ratingLabels);
-            if (imdbId.trim().isEmpty && tmdbMatch.imdbId.trim().isNotEmpty) {
-              imdbId = tmdbMatch.imdbId.trim();
-            }
-            if (tmdbId.trim().isEmpty && tmdbMatch.tmdbId > 0) {
-              tmdbId = '${tmdbMatch.tmdbId}';
-            }
-            preferredImdbId = _normalizeImdbId(
-              imdbId.trim().isNotEmpty ? imdbId : preferredImdbId,
-            );
-          } else {
-            tmdbStatus = NasMetadataFetchStatus.failed;
-          }
-        } catch (_) {
-          tmdbStatus = NasMetadataFetchStatus.failed;
-        }
-      }
-    }
-
-    if (applyOnlineMetadata &&
         wmdbStatus == NasMetadataFetchStatus.never &&
         settings.wmdbMetadataMatchEnabled &&
-        !imdbIdMetadataMatched &&
         baseQuery.isNotEmpty) {
       try {
         final wmdbMatch = await _wmdbMetadataClient.matchTitle(
@@ -357,7 +276,6 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
           }
           if (imdbId.trim().isEmpty && wmdbMatch.imdbId.trim().isNotEmpty) {
             imdbId = wmdbMatch.imdbId.trim();
-            preferredImdbId = _normalizeImdbId(imdbId);
           }
           if (tmdbId.trim().isEmpty && wmdbMatch.tmdbId.trim().isNotEmpty) {
             tmdbId = wmdbMatch.tmdbId.trim();
@@ -374,9 +292,7 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
         tmdbStatus == NasMetadataFetchStatus.never &&
         settings.tmdbMetadataMatchEnabled &&
         settings.tmdbReadAccessToken.trim().isNotEmpty &&
-        !imdbIdMetadataMatched &&
-        baseQuery.isNotEmpty &&
-        preferredImdbId.isEmpty) {
+        baseQuery.isNotEmpty) {
       final needsTmdb = (!posterLocked && posterUrl.trim().isEmpty) ||
           (!backdropLocked && backdropUrl.trim().isEmpty) ||
           (!logoLocked && logoUrl.trim().isEmpty) ||
@@ -505,7 +421,6 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
             ratingLabels = _mergeLabels(ratingLabels, tmdbMatch.ratingLabels);
             if (imdbId.trim().isEmpty && tmdbMatch.imdbId.trim().isNotEmpty) {
               imdbId = tmdbMatch.imdbId.trim();
-              preferredImdbId = _normalizeImdbId(imdbId);
             }
             if (tmdbId.trim().isEmpty && tmdbMatch.tmdbId > 0) {
               tmdbId = '${tmdbMatch.tmdbId}';
@@ -516,37 +431,6 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
         } catch (_) {
           tmdbStatus = NasMetadataFetchStatus.failed;
         }
-      }
-    }
-
-    if (applyOnlineMetadata &&
-        imdbStatus == NasMetadataFetchStatus.never &&
-        _shouldUseStandaloneImdbRating(settings) &&
-        resolvePreferredPosterRatingLabel(ratingLabels).isEmpty &&
-        baseQuery.isNotEmpty) {
-      try {
-        final imdbMatch = await _imdbRatingClient.matchRating(
-          query: preferredImdbId.isNotEmpty
-              ? preferredImdbId
-              : (title.trim().isNotEmpty ? title.trim() : baseQuery),
-          year: year,
-          preferSeries: preferSeries,
-          imdbId: preferredImdbId.isNotEmpty ? preferredImdbId : imdbId,
-        );
-        if (imdbMatch != null) {
-          imdbStatus = NasMetadataFetchStatus.succeeded;
-          if (imdbId.trim().isEmpty && imdbMatch.imdbId.trim().isNotEmpty) {
-            imdbId = imdbMatch.imdbId.trim();
-          }
-          if (imdbMatch.ratingLabel.trim().isNotEmpty) {
-            ratingLabels =
-                _mergeLabels(ratingLabels, [imdbMatch.ratingLabel.trim()]);
-          }
-        } else {
-          imdbStatus = NasMetadataFetchStatus.failed;
-        }
-      } catch (_) {
-        imdbStatus = NasMetadataFetchStatus.failed;
       }
     }
 
@@ -672,6 +556,7 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       wmdbStatus: wmdbStatus,
       tmdbStatus: tmdbStatus,
       imdbStatus: imdbStatus,
+      manualMetadataLocked: manualMetadataLocked,
       item: item,
     );
   }
@@ -726,16 +611,6 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
           RegExp(r'[\s\-_.,:;!?/\\|()\[\]{}<>《》【】"“”·]+'),
           '',
         );
-  }
-
-  String _normalizeImdbId(String value) {
-    final match =
-        RegExp(r'\btt\d{7,9}\b', caseSensitive: false).firstMatch(value);
-    final normalized = (match?.group(0) ?? '').trim().toLowerCase();
-    if (!RegExp(r'^tt\d{7,9}$').hasMatch(normalized)) {
-      return '';
-    }
-    return normalized;
   }
 
   String _seriesTitleFromScannedItem(

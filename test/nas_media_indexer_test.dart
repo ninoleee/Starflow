@@ -992,6 +992,165 @@ void main() {
     expect(records.single.searchQuery, '黑客帝国');
     expect(records.single.wmdbMatched, isTrue);
     expect(records.single.wmdbStatus, NasMetadataFetchStatus.succeeded);
+    expect(records.single.manualMetadataLocked, isTrue);
+  });
+
+  test(
+      'NasMediaIndexer skips automatic indexed enrichment after manual metadata management',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-manual-lock-skip',
+      name: 'WebDAV Manual Lock Skip',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Movies/',
+      enabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'movie-lock-skip-1',
+          path: 'Movies/Lock.Skip.Movie.2024.mkv',
+          title: 'Lock Skip Movie',
+          itemType: 'movie',
+          seasonNumber: 0,
+          episodeNumber: 0,
+        ),
+      ],
+    );
+    var tmdbRequestCount = 0;
+    final settings = SeedData.defaultSettings.copyWith(
+      mediaSources: [source],
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: true,
+      tmdbReadAccessToken: 'tmdb-token',
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async {
+          tmdbRequestCount += 1;
+          return http.Response('Not found', 404);
+        }),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    final library = await indexer.loadLibrary(source, limit: 20);
+    final updatedTarget = await indexer.applyManualMetadata(
+      target: MediaDetailTarget.fromMediaItem(library.single),
+      searchQuery: '手动锁定标题',
+      metadataMatch: const MetadataMatchResult(
+        provider: MetadataMatchProvider.wmdb,
+        mediaType: MetadataMediaType.movie,
+        title: '手动锁定标题',
+        imdbId: 'tt0133093',
+      ),
+    );
+
+    expect(updatedTarget, isNotNull);
+    expect(
+      (await store.loadSourceRecords(source.id)).single.manualMetadataLocked,
+      isTrue,
+    );
+
+    final enriched = await indexer.enrichDetailTargetMetadataIfNeeded(
+      updatedTarget!,
+    );
+
+    expect(enriched, isNotNull);
+    expect(tmdbRequestCount, 0);
+    final records = await store.loadSourceRecords(source.id);
+    expect(records.single.item.title, '手动锁定标题');
+    expect(records.single.tmdbStatus, NasMetadataFetchStatus.never);
+  });
+
+  test(
+      'NasMediaIndexer preserves manually managed metadata after source reindex',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-manual-lock-preserve',
+      name: 'WebDAV Manual Lock Preserve',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/Movies/',
+      enabled: true,
+    );
+    final scannedItems = <_PendingTestItem>[
+      const _PendingTestItem(
+        id: 'movie-lock-preserve-1',
+        path: 'Movies/Original.Movie.2024.mkv',
+        title: 'Original Movie',
+        itemType: 'movie',
+        seasonNumber: 0,
+        episodeNumber: 0,
+      ),
+    ];
+    final client = _FakeWebDavNasClient(scannedItems: scannedItems);
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    final library = await indexer.loadLibrary(source, limit: 20);
+    await indexer.applyManualMetadata(
+      target: MediaDetailTarget.fromMediaItem(library.single),
+      searchQuery: '手动保留标题',
+      metadataMatch: const MetadataMatchResult(
+        provider: MetadataMatchProvider.tmdb,
+        mediaType: MetadataMediaType.movie,
+        title: '手动保留标题',
+        overview: '这是需要在重扫后保留的简介。',
+        imdbId: 'tt1234567',
+        tmdbId: '123456',
+      ),
+    );
+
+    scannedItems[0] = const _PendingTestItem(
+      id: 'movie-lock-preserve-1',
+      path: 'Movies/Renamed.Movie.2024.mkv',
+      title: 'Renamed Movie',
+      itemType: 'movie',
+      seasonNumber: 0,
+      episodeNumber: 0,
+    );
+
+    await indexer.refreshSource(source, forceFullRescan: true);
+
+    final records = await store.loadSourceRecords(source.id);
+    expect(records, hasLength(1));
+    expect(records.single.manualMetadataLocked, isTrue);
+    expect(records.single.item.title, '手动保留标题');
+    expect(records.single.item.overview, '这是需要在重扫后保留的简介。');
+    expect(records.single.resourcePath, 'Movies/Renamed.Movie.2024.mkv');
+    expect(records.single.item.actualAddress, 'Movies/Renamed.Movie.2024.mkv');
   });
 
   test('NasMediaIndexer reuses indexed cache for WebDAV id matching', () async {
@@ -3303,7 +3462,8 @@ void main() {
     );
   });
 
-  test('NasMediaIndexer prioritizes imdb id for TMDB indexing', () async {
+  test('NasMediaIndexer keeps WMDB title matching without TMDB imdb-id lookup',
+      () async {
     final store = _MemoryNasMediaIndexStore();
     final source = const MediaSourceConfig(
       id: 'webdav-imdb-priority',
@@ -3412,7 +3572,7 @@ void main() {
     await indexer.refreshSource(source);
     await _drainAsyncTasks();
 
-    expect(tmdbFindRequests, 1);
+    expect(tmdbFindRequests, 0);
     expect(wmdbSearchRequests, 1);
 
     final records = await store.loadSourceRecords(source.id);

@@ -1179,6 +1179,190 @@ void main() {
     expect(cacheRepository.lastSavedState?.subtitleSearchChoices.length, 1);
     expect(cacheRepository.lastSavedState?.selectedSubtitleSearchIndex, -1);
   });
+
+  testWidgets(
+      'series overview rebuilds multi-source choices and prefers the entry source',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const seedTarget = MediaDetailTarget(
+      title: '乘风2026',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '已匹配：Emby · 客厅 Emby',
+      searchQuery: '乘风2026',
+      sourceId: 'emby-main',
+      itemId: 'series-seed',
+      itemType: 'series',
+      sectionId: 'shows',
+      sectionName: '综艺',
+      resourcePath: '/shows/乘风2026',
+      tmdbId: 'tmdb-2026',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: '客厅 Emby',
+    );
+    const cachedQuarkTarget = MediaDetailTarget(
+      title: '乘风2026',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '已匹配：Quark · 夸克',
+      searchQuery: '乘风2026',
+      sourceId: 'quark-main',
+      itemId: 'series-quark',
+      itemType: 'series',
+      sectionId: 'quark',
+      sectionName: '夸克',
+      resourcePath: '/乘风2026',
+      tmdbId: 'tmdb-2026',
+      sourceKind: MediaSourceKind.quark,
+      sourceName: '夸克',
+    );
+
+    final cacheRepository = _RecordingRestoreCacheRepository();
+    await cacheRepository.saveDetailTarget(
+      seedTarget: seedTarget,
+      resolvedTarget: cachedQuarkTarget,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [
+                {
+                  'id': 'emby-main',
+                  'name': '客厅 Emby',
+                  'kind': 'emby',
+                  'endpoint': 'https://emby.example',
+                  'enabled': true,
+                },
+                {
+                  'id': 'quark-main',
+                  'name': '夸克',
+                  'kind': 'quark',
+                  'endpoint': 'folder-1',
+                  'enabled': true,
+                },
+              ],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'tmdbMetadataMatchEnabled': false,
+              'wmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+              'detailAutoLibraryMatchEnabled': true,
+            }),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            const _SeriesOverviewMultiSourceMediaRepository(),
+          ),
+          localStorageCacheRepositoryProvider
+              .overrideWithValue(cacheRepository),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(target: seedTarget),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('本地资源'), findsOneWidget);
+    expect(find.text('播放版本'), findsNothing);
+    expect(find.text('Emby 第1集'), findsOneWidget);
+
+    final dropdown = tester.widget<DropdownButton<int>>(
+      find.byType(DropdownButton<int>),
+    );
+    final labels = dropdown.items!
+        .map((item) => (item.child as Text).data ?? '')
+        .toList(growable: false);
+
+    expect(dropdown.value, 0);
+    expect(labels.first, startsWith('客厅 Emby'));
+    expect(labels.any((label) => label.startsWith('夸克')), isTrue);
+    expect(cacheRepository.lastSavedState?.libraryMatchChoices.length, 2);
+    expect(cacheRepository.lastSavedState?.target.sourceId, 'emby-main');
+
+    await tester.tap(find.byType(DropdownButton<int>).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('夸克 · 乘风2026').last);
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Quark 第1集'), findsOneWidget);
+    expect(find.text('Emby 第1集'), findsNothing);
+    expect(cacheRepository.lastSavedState?.target.sourceId, 'quark-main');
+    expect(cacheRepository.lastSavedState?.selectedLibraryMatchIndex, 1);
+  });
+
+  testWidgets('episode detail page does not auto match local resources on open',
+      (tester) async {
+    const seedTarget = MediaDetailTarget(
+      title: '乘风2026 第1集',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '无',
+      searchQuery: '乘风2026 第1集',
+      itemType: 'episode',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      tmdbId: 'tmdb-2026',
+      sourceName: '豆瓣',
+    );
+
+    final mediaRepository = _RecordingEpisodeAutoMatchMediaRepository();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [
+                {
+                  'id': 'emby-main',
+                  'name': '客厅 Emby',
+                  'kind': 'emby',
+                  'endpoint': 'https://emby.example',
+                  'enabled': true,
+                },
+              ],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'tmdbMetadataMatchEnabled': false,
+              'wmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+              'detailAutoLibraryMatchEnabled': true,
+            }),
+          ),
+          mediaRepositoryProvider.overrideWithValue(mediaRepository),
+          localStorageCacheRepositoryProvider.overrideWithValue(
+            _FakeRestoreCacheRepository(cachedState: null),
+          ),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(target: seedTarget),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(mediaRepository.fetchCollectionsCallCount, 0);
+    expect(mediaRepository.fetchLibraryCallCount, 0);
+    expect(find.text('匹配资源库'), findsOneWidget);
+  });
 }
 
 class _FakeRestoreCacheRepository extends LocalStorageCacheRepository {
@@ -1436,6 +1620,69 @@ class _NoopMediaRepository implements MediaRepository {
   }) async {}
 }
 
+class _RecordingEpisodeAutoMatchMediaRepository extends _NoopMediaRepository {
+  int fetchCollectionsCallCount = 0;
+  int fetchLibraryCallCount = 0;
+
+  @override
+  Future<List<MediaCollection>> fetchCollections({
+    MediaSourceKind? kind,
+    String? sourceId,
+  }) async {
+    fetchCollectionsCallCount++;
+    if (kind != MediaSourceKind.emby || sourceId != 'emby-main') {
+      return const <MediaCollection>[];
+    }
+    return const [
+      MediaCollection(
+        id: 'shows',
+        title: '综艺',
+        sourceId: 'emby-main',
+        sourceName: '客厅 Emby',
+        sourceKind: MediaSourceKind.emby,
+      ),
+    ];
+  }
+
+  @override
+  Future<List<MediaItem>> fetchLibrary({
+    MediaSourceKind? kind,
+    String? sourceId,
+    String? sectionId,
+    int limit = 200,
+  }) async {
+    fetchLibraryCallCount++;
+    if (kind != MediaSourceKind.emby ||
+        sourceId != 'emby-main' ||
+        sectionId != 'shows') {
+      return const <MediaItem>[];
+    }
+    return [
+      MediaItem(
+        id: 'episode-1',
+        title: '乘风2026 第1集',
+        overview: '',
+        posterUrl: '',
+        year: 2026,
+        durationLabel: '45 分钟',
+        genres: const [],
+        itemType: 'episode',
+        sectionId: 'shows',
+        sectionName: '综艺',
+        sourceId: 'emby-main',
+        sourceName: '客厅 Emby',
+        sourceKind: MediaSourceKind.emby,
+        streamUrl: 'https://emby.example/Items/episode-1/stream.mkv',
+        playbackItemId: 'episode-1',
+        seasonNumber: 1,
+        episodeNumber: 1,
+        tmdbId: 'tmdb-2026',
+        addedAt: DateTime.utc(2026, 4, 7),
+      ),
+    ];
+  }
+}
+
 class _SingleMatchMediaRepository implements MediaRepository {
   const _SingleMatchMediaRepository();
 
@@ -1605,6 +1852,186 @@ class _SeriesRestoreMediaRepository extends _NoopMediaRepository {
           seasonNumber: 1,
           episodeNumber: 1,
           addedAt: DateTime.utc(2026, 4, 7),
+        ),
+      ];
+    }
+    return const <MediaItem>[];
+  }
+}
+
+class _SeriesOverviewMultiSourceMediaRepository extends _NoopMediaRepository {
+  const _SeriesOverviewMultiSourceMediaRepository();
+
+  @override
+  Future<List<MediaCollection>> fetchCollections({
+    MediaSourceKind? kind,
+    String? sourceId,
+  }) async {
+    if (kind != MediaSourceKind.emby || sourceId != 'emby-main') {
+      return const <MediaCollection>[];
+    }
+    return const [
+      MediaCollection(
+        id: 'shows',
+        title: '综艺',
+        sourceId: 'emby-main',
+        sourceName: '客厅 Emby',
+        sourceKind: MediaSourceKind.emby,
+      ),
+    ];
+  }
+
+  @override
+  Future<List<MediaItem>> fetchLibrary({
+    MediaSourceKind? kind,
+    String? sourceId,
+    String? sectionId,
+    int limit = 200,
+  }) async {
+    if (kind == MediaSourceKind.emby &&
+        sourceId == 'emby-main' &&
+        sectionId == 'shows') {
+      return [
+        MediaItem(
+          id: 'series-emby',
+          title: '乘风2026',
+          overview: '',
+          posterUrl: '',
+          year: 2026,
+          durationLabel: '',
+          genres: const [],
+          itemType: 'series',
+          sectionId: 'shows',
+          sectionName: '综艺',
+          sourceId: 'emby-main',
+          sourceName: '客厅 Emby',
+          sourceKind: MediaSourceKind.emby,
+          streamUrl: '',
+          tmdbId: 'tmdb-2026',
+          addedAt: DateTime(2026, 1, 1),
+        ),
+        MediaItem(
+          id: 'episode-emby-candidate',
+          title: '乘风2026 第1集',
+          overview: '',
+          posterUrl: '',
+          year: 2026,
+          durationLabel: '',
+          genres: const [],
+          itemType: 'episode',
+          sectionId: 'shows',
+          sectionName: '综艺',
+          sourceId: 'emby-main',
+          sourceName: '客厅 Emby',
+          sourceKind: MediaSourceKind.emby,
+          streamUrl:
+              'https://emby.example/Items/episode-emby-candidate/stream.mkv',
+          tmdbId: 'tmdb-2026',
+          seasonNumber: 1,
+          episodeNumber: 1,
+          addedAt: DateTime(2026, 1, 1),
+        ),
+      ];
+    }
+    if (kind == MediaSourceKind.quark && sourceId == 'quark-main') {
+      return [
+        MediaItem(
+          id: 'series-quark',
+          title: '乘风2026',
+          overview: '',
+          posterUrl: '',
+          year: 2026,
+          durationLabel: '',
+          genres: const [],
+          itemType: 'series',
+          sectionId: 'quark',
+          sectionName: '夸克',
+          sourceId: 'quark-main',
+          sourceName: '夸克',
+          sourceKind: MediaSourceKind.quark,
+          streamUrl: '',
+          actualAddress: '/乘风2026',
+          tmdbId: 'tmdb-2026',
+          addedAt: DateTime(2026, 1, 1),
+        ),
+        MediaItem(
+          id: 'episode-quark-candidate',
+          title: '乘风2026 第1集',
+          overview: '',
+          posterUrl: '',
+          year: 2026,
+          durationLabel: '',
+          genres: const [],
+          itemType: 'episode',
+          sectionId: 'quark',
+          sectionName: '夸克',
+          sourceId: 'quark-main',
+          sourceName: '夸克',
+          sourceKind: MediaSourceKind.quark,
+          streamUrl: 'https://quark.example/episode-quark-candidate.mkv',
+          actualAddress: '/乘风2026/第1集.mkv',
+          tmdbId: 'tmdb-2026',
+          seasonNumber: 1,
+          episodeNumber: 1,
+          addedAt: DateTime(2026, 1, 1),
+        ),
+      ];
+    }
+    return const <MediaItem>[];
+  }
+
+  @override
+  Future<List<MediaItem>> fetchChildren({
+    required String sourceId,
+    required String parentId,
+    String sectionId = '',
+    String sectionName = '',
+    int limit = 200,
+  }) async {
+    if (sourceId == 'emby-main' && parentId == 'series-emby') {
+      return [
+        MediaItem(
+          id: 'emby-episode-1',
+          title: 'Emby 第1集',
+          overview: '',
+          posterUrl: '',
+          year: 2026,
+          durationLabel: '45 分钟',
+          genres: const [],
+          itemType: 'episode',
+          sectionId: 'shows',
+          sectionName: '综艺',
+          sourceId: 'emby-main',
+          sourceName: '客厅 Emby',
+          sourceKind: MediaSourceKind.emby,
+          streamUrl: 'https://emby.example/Items/emby-episode-1/stream.mkv',
+          seasonNumber: 1,
+          episodeNumber: 1,
+          addedAt: DateTime(2026, 1, 1),
+        ),
+      ];
+    }
+    if (sourceId == 'quark-main' && parentId == 'series-quark') {
+      return [
+        MediaItem(
+          id: 'quark-episode-1',
+          title: 'Quark 第1集',
+          overview: '',
+          posterUrl: '',
+          year: 2026,
+          durationLabel: '45 分钟',
+          genres: const [],
+          itemType: 'episode',
+          sectionId: 'quark',
+          sectionName: '夸克',
+          sourceId: 'quark-main',
+          sourceName: '夸克',
+          sourceKind: MediaSourceKind.quark,
+          streamUrl: 'https://quark.example/quark-episode-1.mkv',
+          actualAddress: '/乘风2026/Quark 第1集.mkv',
+          seasonNumber: 1,
+          episodeNumber: 1,
+          addedAt: DateTime(2026, 1, 1),
         ),
       ];
     }

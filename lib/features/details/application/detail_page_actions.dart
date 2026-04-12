@@ -51,6 +51,18 @@ class DetailCachedStateRestorePlan {
   final MediaDetailTarget structuralSeedTarget;
 }
 
+class DetailLibraryMatchPreferenceResult {
+  const DetailLibraryMatchPreferenceResult({
+    required this.choices,
+    required this.selectedIndex,
+    required this.matchedPreferredSource,
+  });
+
+  final List<MediaDetailTarget> choices;
+  final int selectedIndex;
+  final bool matchedPreferredSource;
+}
+
 class DetailCachedStateRestorer {
   DetailCachedStateRestorer({
     DetailLibraryMatchService? libraryMatchService,
@@ -93,7 +105,11 @@ class DetailCachedStateRestorer {
         : 0;
     final shouldRestoreSingleResolvedTarget = !hasMultiChoices &&
         structuralSeed.isSeries &&
-        _hasResolvedStructuralResourceState(preservedResolvedTarget);
+        _hasResolvedStructuralResourceState(preservedResolvedTarget) &&
+        shouldRestoreSeriesSourceScopedTarget(
+          pageSeedTarget: pageSeedTarget,
+          restoredTarget: preservedResolvedTarget,
+        );
 
     final normalizedSubtitleIndex = normalizeSubtitleSearchIndex(
       cachedState.selectedSubtitleSearchIndex,
@@ -116,12 +132,230 @@ class DetailCachedStateRestorer {
   }
 }
 
+DetailLibraryMatchPreferenceResult prioritizeDetailLibraryMatchChoices({
+  required MediaDetailTarget pageSeedTarget,
+  required List<MediaDetailTarget> choices,
+  int fallbackSelectedIndex = 0,
+}) {
+  if (choices.isEmpty) {
+    return const DetailLibraryMatchPreferenceResult(
+      choices: <MediaDetailTarget>[],
+      selectedIndex: 0,
+      matchedPreferredSource: false,
+    );
+  }
+
+  final normalizedFallbackIndex = fallbackSelectedIndex.clamp(
+    0,
+    choices.length - 1,
+  );
+  final preferredIndex = _preferredDetailLibraryMatchIndex(
+    pageSeedTarget: pageSeedTarget,
+    choices: choices,
+  );
+  if (preferredIndex < 0) {
+    return DetailLibraryMatchPreferenceResult(
+      choices: List<MediaDetailTarget>.unmodifiable(choices),
+      selectedIndex: normalizedFallbackIndex,
+      matchedPreferredSource: false,
+    );
+  }
+
+  final prioritized = <MediaDetailTarget>[
+    choices[preferredIndex],
+    for (var index = 0; index < choices.length; index++)
+      if (index != preferredIndex) choices[index],
+  ];
+  return DetailLibraryMatchPreferenceResult(
+    choices: List<MediaDetailTarget>.unmodifiable(prioritized),
+    selectedIndex: 0,
+    matchedPreferredSource: true,
+  );
+}
+
+bool shouldAutoMatchSeriesOverviewSources({
+  required MediaDetailTarget pageSeedTarget,
+  required List<MediaDetailTarget> libraryMatchChoices,
+}) {
+  return pageSeedTarget.isSeries &&
+      libraryMatchChoices.length <= 1 &&
+      _hasDetailTargetSourcePreference(pageSeedTarget);
+}
+
+bool shouldRestoreSeriesSourceScopedTarget({
+  required MediaDetailTarget pageSeedTarget,
+  required MediaDetailTarget restoredTarget,
+}) {
+  if (!_hasDetailTargetSourcePreference(pageSeedTarget)) {
+    return true;
+  }
+  return _matchesDetailTargetPreferredSource(
+    pageSeedTarget: pageSeedTarget,
+    candidate: restoredTarget,
+  );
+}
+
+MediaDetailTarget buildSeriesOverviewSourceMatchSeed({
+  required MediaDetailTarget pageSeedTarget,
+  required MediaDetailTarget resolvedTarget,
+}) {
+  if (!pageSeedTarget.isSeries) {
+    return resolvedTarget;
+  }
+
+  return pageSeedTarget.copyWith(
+    title: resolvedTarget.title.trim().isNotEmpty
+        ? resolvedTarget.title
+        : pageSeedTarget.title,
+    posterUrl: resolvedTarget.posterUrl.trim().isNotEmpty
+        ? resolvedTarget.posterUrl
+        : pageSeedTarget.posterUrl,
+    posterHeaders: resolvedTarget.posterUrl.trim().isNotEmpty
+        ? resolvedTarget.posterHeaders
+        : pageSeedTarget.posterHeaders,
+    backdropUrl: resolvedTarget.backdropUrl.trim().isNotEmpty
+        ? resolvedTarget.backdropUrl
+        : pageSeedTarget.backdropUrl,
+    backdropHeaders: resolvedTarget.backdropUrl.trim().isNotEmpty
+        ? resolvedTarget.backdropHeaders
+        : pageSeedTarget.backdropHeaders,
+    logoUrl: resolvedTarget.logoUrl.trim().isNotEmpty
+        ? resolvedTarget.logoUrl
+        : pageSeedTarget.logoUrl,
+    logoHeaders: resolvedTarget.logoUrl.trim().isNotEmpty
+        ? resolvedTarget.logoHeaders
+        : pageSeedTarget.logoHeaders,
+    bannerUrl: resolvedTarget.bannerUrl.trim().isNotEmpty
+        ? resolvedTarget.bannerUrl
+        : pageSeedTarget.bannerUrl,
+    bannerHeaders: resolvedTarget.bannerUrl.trim().isNotEmpty
+        ? resolvedTarget.bannerHeaders
+        : pageSeedTarget.bannerHeaders,
+    extraBackdropUrls: resolvedTarget.extraBackdropUrls.isNotEmpty
+        ? resolvedTarget.extraBackdropUrls
+        : pageSeedTarget.extraBackdropUrls,
+    extraBackdropHeaders: resolvedTarget.extraBackdropUrls.isNotEmpty
+        ? resolvedTarget.extraBackdropHeaders
+        : pageSeedTarget.extraBackdropHeaders,
+    overview: resolvedTarget.overview.trim().isNotEmpty
+        ? resolvedTarget.overview
+        : pageSeedTarget.overview,
+    year: resolvedTarget.year > 0 ? resolvedTarget.year : pageSeedTarget.year,
+    durationLabel: resolvedTarget.durationLabel.trim().isNotEmpty
+        ? resolvedTarget.durationLabel
+        : pageSeedTarget.durationLabel,
+    ratingLabels: resolvedTarget.ratingLabels.isNotEmpty
+        ? resolvedTarget.ratingLabels
+        : pageSeedTarget.ratingLabels,
+    genres: resolvedTarget.genres.isNotEmpty
+        ? resolvedTarget.genres
+        : pageSeedTarget.genres,
+    directors: resolvedTarget.directors.isNotEmpty
+        ? resolvedTarget.directors
+        : pageSeedTarget.directors,
+    directorProfiles: resolvedTarget.directorProfiles.isNotEmpty
+        ? resolvedTarget.directorProfiles
+        : pageSeedTarget.directorProfiles,
+    actors: resolvedTarget.actors.isNotEmpty
+        ? resolvedTarget.actors
+        : pageSeedTarget.actors,
+    actorProfiles: resolvedTarget.actorProfiles.isNotEmpty
+        ? resolvedTarget.actorProfiles
+        : pageSeedTarget.actorProfiles,
+    platforms: resolvedTarget.platforms.isNotEmpty
+        ? resolvedTarget.platforms
+        : pageSeedTarget.platforms,
+    platformProfiles: resolvedTarget.platformProfiles.isNotEmpty
+        ? resolvedTarget.platformProfiles
+        : pageSeedTarget.platformProfiles,
+    searchQuery: resolvedTarget.searchQuery.trim().isNotEmpty
+        ? resolvedTarget.searchQuery
+        : pageSeedTarget.searchQuery,
+    doubanId: resolvedTarget.doubanId.trim().isNotEmpty
+        ? resolvedTarget.doubanId
+        : pageSeedTarget.doubanId,
+    imdbId: resolvedTarget.imdbId.trim().isNotEmpty
+        ? resolvedTarget.imdbId
+        : pageSeedTarget.imdbId,
+    tmdbId: resolvedTarget.tmdbId.trim().isNotEmpty
+        ? resolvedTarget.tmdbId
+        : pageSeedTarget.tmdbId,
+    tvdbId: resolvedTarget.tvdbId.trim().isNotEmpty
+        ? resolvedTarget.tvdbId
+        : pageSeedTarget.tvdbId,
+    wikidataId: resolvedTarget.wikidataId.trim().isNotEmpty
+        ? resolvedTarget.wikidataId
+        : pageSeedTarget.wikidataId,
+    tmdbSetId: resolvedTarget.tmdbSetId.trim().isNotEmpty
+        ? resolvedTarget.tmdbSetId
+        : pageSeedTarget.tmdbSetId,
+    providerIds: resolvedTarget.providerIds.isNotEmpty
+        ? resolvedTarget.providerIds
+        : pageSeedTarget.providerIds,
+  );
+}
+
 bool _hasResolvedStructuralResourceState(MediaDetailTarget target) {
   final availability = target.availabilityLabel.trim();
   return target.isPlayable ||
       (availability.isNotEmpty && availability != '无') ||
       target.sourceId.trim().isNotEmpty ||
       target.itemId.trim().isNotEmpty;
+}
+
+bool _hasDetailTargetSourcePreference(MediaDetailTarget target) {
+  return target.sourceId.trim().isNotEmpty || target.sourceKind != null;
+}
+
+bool _matchesDetailTargetPreferredSource({
+  required MediaDetailTarget pageSeedTarget,
+  required MediaDetailTarget candidate,
+}) {
+  final preferredSourceId = pageSeedTarget.sourceId.trim();
+  if (preferredSourceId.isNotEmpty) {
+    return candidate.sourceId.trim() == preferredSourceId ||
+        candidate.playbackTarget?.sourceId.trim() == preferredSourceId;
+  }
+
+  final preferredKind = pageSeedTarget.sourceKind;
+  if (preferredKind != null && candidate.sourceKind != preferredKind) {
+    return false;
+  }
+
+  final preferredSourceName = pageSeedTarget.sourceName.trim();
+  if (preferredSourceName.isEmpty) {
+    return preferredKind != null;
+  }
+  return candidate.sourceName.trim() == preferredSourceName;
+}
+
+int _preferredDetailLibraryMatchIndex({
+  required MediaDetailTarget pageSeedTarget,
+  required List<MediaDetailTarget> choices,
+}) {
+  final preferredSourceId = pageSeedTarget.sourceId.trim();
+  if (preferredSourceId.isNotEmpty) {
+    final exactSourceId = choices.indexWhere(
+      (choice) =>
+          choice.sourceId.trim() == preferredSourceId ||
+          choice.playbackTarget?.sourceId.trim() == preferredSourceId,
+    );
+    if (exactSourceId >= 0) {
+      return exactSourceId;
+    }
+  }
+
+  final preferredSourceName = pageSeedTarget.sourceName.trim();
+  final preferredKind = pageSeedTarget.sourceKind;
+  if (preferredKind == null && preferredSourceName.isEmpty) {
+    return -1;
+  }
+  return choices.indexWhere(
+    (choice) =>
+        (preferredKind == null || choice.sourceKind == preferredKind) &&
+        (preferredSourceName.isEmpty ||
+            choice.sourceName.trim() == preferredSourceName),
+  );
 }
 
 int normalizeSubtitleSearchIndex(

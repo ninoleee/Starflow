@@ -12,6 +12,7 @@ import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/nas_media_recognition.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -369,14 +370,21 @@ class AppMediaRepository implements MediaRepository {
         sourceId: normalizedSourceId,
         resourcePath: effectiveResourcePath,
       );
+      final treatAsScope =
+          !_looksLikePlayableResourcePath(effectiveResourcePath);
       await ref
           .read(localStorageCacheRepositoryProvider)
           .clearDetailCacheForResource(
             sourceId: normalizedSourceId,
             resourceId: parsed != null ? directResourceId : '',
             resourcePath: effectiveResourcePath,
-            treatAsScope:
-                !_looksLikePlayableResourcePath(effectiveResourcePath),
+            treatAsScope: treatAsScope,
+          );
+      await ref.read(playbackMemoryRepositoryProvider).clearEntriesForResource(
+            sourceId: normalizedSourceId,
+            resourceId: parsed != null ? directResourceId : '',
+            resourcePath: effectiveResourcePath,
+            treatAsScope: treatAsScope,
           );
       return;
     }
@@ -416,13 +424,20 @@ class AppMediaRepository implements MediaRepository {
       sourceId: normalizedSourceId,
       resourcePath: effectiveResourcePath,
     );
+    final treatAsScope = !_looksLikePlayableResourcePath(effectiveResourcePath);
     await ref
         .read(localStorageCacheRepositoryProvider)
         .clearDetailCacheForResource(
           sourceId: normalizedSourceId,
           resourceId: isDirectResourceId ? normalizedResourcePath : '',
           resourcePath: effectiveResourcePath,
-          treatAsScope: !_looksLikePlayableResourcePath(effectiveResourcePath),
+          treatAsScope: treatAsScope,
+        );
+    await ref.read(playbackMemoryRepositoryProvider).clearEntriesForResource(
+          sourceId: normalizedSourceId,
+          resourceId: isDirectResourceId ? normalizedResourcePath : '',
+          resourcePath: effectiveResourcePath,
+          treatAsScope: treatAsScope,
         );
   }
 

@@ -94,15 +94,17 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       if (!shouldOpen) {
         return;
       }
-      if (_startupProbeEnabled) {
-        unawaited(_runStartupProbe(resolvedTarget));
-      } else if (_startupProbe.estimatedSpeedBytesPerSecond != null) {
-        setState(() {
-          _startupProbe = const _StartupProbeResult();
-        });
-      }
+      _adaptiveTopChromeController.setVisible(true);
+      final diagnostics = await _prepareStartupDiagnostics(resolvedTarget);
+      final preflight = diagnostics.preflight;
+      final probe = diagnostics.probe;
       final settings = outcome.settings;
-      final timeoutSeconds = settings.playbackOpenTimeoutSeconds.clamp(1, 600);
+      final timeoutSeconds = _resolvePlaybackOpenTimeoutSeconds(
+        baseSeconds: settings.playbackOpenTimeoutSeconds.clamp(1, 600),
+        target: resolvedTarget,
+        preflight: preflight,
+        probe: probe,
+      );
       _traceWindowsMpv(
         'windows-mpv.initialize.open-start',
         fields: {
@@ -164,7 +166,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       setState(() {
         _player = playback.player;
         _videoController = playback.videoController;
-        _isReady = true;
+        _isReady = false;
         _error = null;
         _latestPosition = playback.player.state.position;
         _latestDuration = playback.player.state.duration;
@@ -172,6 +174,22 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       await _syncSubtitleDelayState(playback.player);
       await _restorePlaybackProgress(playback.player, resumeEntry);
       _syncSkipFlagsWithCurrentPosition();
+      await _awaitStrictPlaybackReady(
+        playback.player,
+        target: resolvedTarget,
+        timeout: Duration(seconds: timeoutSeconds),
+        stageLabel: 'post-resume',
+        progressBaseline: playback.player.state.position > _latestPosition
+            ? playback.player.state.position
+            : _latestPosition,
+      );
+      if (!mounted || _player != playback.player) {
+        return;
+      }
+      setState(() {
+        _isReady = true;
+      });
+      _startMpvStallWatchdog(playback.player, resolvedTarget);
       _traceWindowsMpv(
         'windows-mpv.initialize.ready',
         fields: {
@@ -198,6 +216,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       if (!mounted) {
         return;
       }
+      _adaptiveTopChromeController.setVisible(true);
       setState(() {
         _error = _buildPlaybackErrorMessage(error);
       });
@@ -336,6 +355,15 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         deadline: deadline,
         beginStartupWait: beginStartupWait,
       );
+      startupError = Completer<String>();
+      await _awaitStrictPlaybackReady(
+        player,
+        target: resolvedTarget,
+        timeout: _remainingMpvOpenTimeout(deadline),
+        startupError: startupError!.future,
+        stageLabel: 'open-attempt',
+        progressBaseline: player.state.position,
+      );
       awaitingStartup = false;
       startupError = null;
       _traceWindowsMpv(
@@ -376,6 +404,425 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     await _applyStartupPlaybackPreferences(playback.player);
     await _applyStartupExternalSubtitle(playback.player, resolvedTarget);
     return playback;
+  }
+
+  Future<({PlaybackRemotePreflightResult? preflight, _StartupProbeResult probe})>
+  _prepareStartupDiagnostics(PlaybackTarget target) async {
+    final preflightFuture = _shouldRunRemotePreflight(target)
+        ? _playbackRemotePreflight.probe(target)
+        : Future<PlaybackRemotePreflightResult?>.value(null);
+    final probeFuture = _startupProbeEnabled
+        ? _probeStartup(target)
+        : Future<_StartupProbeResult>.value(const _StartupProbeResult());
+
+    final results = await Future.wait<Object?>([
+      preflightFuture,
+      probeFuture,
+    ]);
+    final preflight = results[0] as PlaybackRemotePreflightResult?;
+    final probe = results[1] as _StartupProbeResult;
+
+    if (preflight != null) {
+      _traceWindowsMpv(
+        'windows-mpv.remote-preflight.result',
+        fields: {
+          'statusCode': preflight.statusCode,
+          'supportsByteRange': preflight.supportsByteRange,
+          'sampledBytes': preflight.sampledBytes,
+          'durationMs': preflight.duration.inMilliseconds,
+          'failureReason': preflight.failureReason.name,
+          'authLikelyInvalid': preflight.authLikelyInvalid,
+          'linkLikelyExpired': preflight.linkLikelyExpired,
+        },
+      );
+    }
+
+    if (mounted) {
+      setState(() {
+        _lastRemotePreflight = preflight;
+        _startupProbe = probe;
+      });
+    } else {
+      _lastRemotePreflight = preflight;
+      _startupProbe = probe;
+    }
+
+    if (preflight != null && preflight.hasHardFailure) {
+      throw _PlayerOpenException(
+        _buildRemotePreflightFailureMessage(preflight),
+      );
+    }
+
+    return (preflight: preflight, probe: probe);
+  }
+
+  bool _shouldRunRemotePreflight(PlaybackTarget target) {
+    final transportUrl = isLoopbackPlaybackRelayUrl(target.streamUrl)
+        ? target.actualAddress.trim()
+        : target.streamUrl.trim();
+    final scheme = Uri.tryParse(transportUrl)?.scheme.toLowerCase() ?? '';
+    return scheme == 'http' || scheme == 'https';
+  }
+
+  int _resolvePlaybackOpenTimeoutSeconds({
+    required int baseSeconds,
+    required PlaybackTarget target,
+    PlaybackRemotePreflightResult? preflight,
+    required _StartupProbeResult probe,
+  }) {
+    var resolved = baseSeconds;
+    final startupProbeMegabitsPerSecond = probe.estimatedSpeedBytesPerSecond ==
+            null
+        ? null
+        : (probe.estimatedSpeedBytesPerSecond! * 8) / 1000000;
+    final lowStartupSpeed = startupProbeMegabitsPerSecond != null &&
+        startupProbeMegabitsPerSecond > 0 &&
+        startupProbeMegabitsPerSecond < 12;
+    final criticalStartupSpeed = startupProbeMegabitsPerSecond != null &&
+        startupProbeMegabitsPerSecond > 0 &&
+        startupProbeMegabitsPerSecond < 6;
+    final remotePlayback = _isLikelyRemotePlaybackTarget(target);
+
+    if (remotePlayback && lowStartupSpeed) {
+      resolved += 6;
+    }
+    if (remotePlayback && criticalStartupSpeed) {
+      resolved += 8;
+    }
+    if (preflight != null && !preflight.supportsByteRange) {
+      resolved += 4;
+    }
+    if (remotePlayback && isLikelyQuarkPlaybackTarget(target)) {
+      resolved += 4;
+    }
+    return resolved.clamp(1, 90);
+  }
+
+  String _buildRemotePreflightFailureMessage(
+    PlaybackRemotePreflightResult result,
+  ) {
+    return switch (result.failureReason) {
+      PlaybackRemotePreflightFailureReason.emptyUrl => '播放地址为空',
+      PlaybackRemotePreflightFailureReason.unsupportedScheme =>
+        '当前播放地址协议暂不支持预检',
+      PlaybackRemotePreflightFailureReason.timeout =>
+        '播放链接预检超时，远端响应过慢',
+      PlaybackRemotePreflightFailureReason.unauthorized =>
+        '播放链接鉴权失败，请重新登录或刷新授权',
+      PlaybackRemotePreflightFailureReason.forbidden =>
+        '播放链接已被拒绝，请检查会员/VIP 或权限状态',
+      PlaybackRemotePreflightFailureReason.notFound =>
+        '播放链接已失效或文件不存在',
+      PlaybackRemotePreflightFailureReason.linkExpired =>
+        '播放链接已过期，请重新获取播放地址',
+      PlaybackRemotePreflightFailureReason.serverError =>
+        '远端服务暂时不可用，请稍后重试',
+      PlaybackRemotePreflightFailureReason.networkError =>
+        '播放链接预检失败，请检查网络或远端连接',
+      PlaybackRemotePreflightFailureReason.none => '远程流预检失败',
+    };
+  }
+
+  Future<void> _awaitStrictPlaybackReady(
+    Player player, {
+    required PlaybackTarget target,
+    required Duration timeout,
+    required String stageLabel,
+    Duration? progressBaseline,
+    Future<String>? startupError,
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    final readyCompleter = Completer<void>();
+    final subscriptions = <StreamSubscription<dynamic>>[];
+    final startupFailureFuture = startupError?.then<void>((message) {
+      throw _PlayerOpenException(message);
+    });
+    final baseline = progressBaseline ?? player.state.position;
+    final watchdog = MpvStallWatchdog(
+      config: _resolveStartupStallWatchdogConfig(target),
+    );
+
+    void evaluateReady() {
+      if (readyCompleter.isCompleted) {
+        return;
+      }
+      if (_isStrictPlaybackReady(player, progressBaseline: baseline)) {
+        readyCompleter.complete();
+      }
+    }
+
+    subscriptions.addAll([
+      player.stream.position.listen((_) => evaluateReady()),
+      player.stream.duration.listen((_) => evaluateReady()),
+      player.stream.width.listen((_) => evaluateReady()),
+      player.stream.height.listen((_) => evaluateReady()),
+      player.stream.playing.listen((_) => evaluateReady()),
+      player.stream.buffering.listen((_) => evaluateReady()),
+    ]);
+    evaluateReady();
+
+    try {
+      while (!readyCompleter.isCompleted) {
+        final remaining = deadline.difference(DateTime.now());
+        if (remaining <= Duration.zero) {
+          throw TimeoutException('播放器打开后长时间没有开始播放');
+        }
+        final tick = remaining > const Duration(seconds: 1)
+            ? const Duration(seconds: 1)
+            : remaining;
+        final waiters = <Future<void>>[
+          readyCompleter.future,
+          Future<void>.delayed(tick),
+        ];
+        if (startupFailureFuture != null) {
+          waiters.add(startupFailureFuture);
+        }
+        await Future.any(waiters);
+        if (readyCompleter.isCompleted) {
+          break;
+        }
+        evaluateReady();
+        if (readyCompleter.isCompleted) {
+          break;
+        }
+        final decision = watchdog.evaluate(
+          MpvPlaybackSnapshot.fromPlayer(player),
+        );
+        if (!decision.triggered) {
+          continue;
+        }
+        _traceWindowsMpv(
+          'windows-mpv.startup.stall-detected',
+          fields: {
+            'stage': stageLabel,
+            'level': decision.level.name,
+            'positionMs': decision.position.inMilliseconds,
+            'bufferingForMs': decision.bufferingFor.inMilliseconds,
+            'stagnantForMs': decision.stagnantFor.inMilliseconds,
+            'bufferingPercentage': decision.bufferingPercentage,
+            'reason': decision.reason,
+          },
+        );
+        if (decision.level == MpvStallRecoveryLevel.soft) {
+          await _performSoftMpvStallRecovery(
+            player,
+            decision,
+            stageLabel: '$stageLabel-soft',
+          );
+          evaluateReady();
+          continue;
+        }
+        throw TimeoutException('播放器启动后持续缓冲且进度未前进，已自动重试');
+      }
+    } finally {
+      for (final subscription in subscriptions) {
+        await subscription.cancel();
+      }
+    }
+  }
+
+  bool _isStrictPlaybackReady(
+    Player player, {
+    required Duration progressBaseline,
+  }) {
+    final state = player.state;
+    final positionDelta = state.position - progressBaseline;
+    final hasProgress = positionDelta >= const Duration(milliseconds: 250);
+    final hasMetadata = _hasStrictPlaybackMetadata(player);
+    return state.playing && hasProgress && (hasMetadata || !state.buffering);
+  }
+
+  bool _hasStrictPlaybackMetadata(Player player) {
+    final state = player.state;
+    final width = state.width ?? 0;
+    final height = state.height ?? 0;
+    return state.duration > Duration.zero || (width > 0 && height > 0);
+  }
+
+  MpvStallWatchdogConfig _resolveStartupStallWatchdogConfig(
+    PlaybackTarget target,
+  ) {
+    final remotePlayback = _isLikelyRemotePlaybackTarget(target);
+    final quarkPlayback = isLikelyQuarkPlaybackTarget(target);
+    if (quarkPlayback) {
+      return const MpvStallWatchdogConfig(
+        minBufferingBeforeCheck: Duration(seconds: 2),
+        softRecoverAfter: Duration(seconds: 6),
+        hardRecoverAfter: Duration(seconds: 12),
+        requirePlaying: false,
+      );
+    }
+    if (remotePlayback) {
+      return const MpvStallWatchdogConfig(
+        minBufferingBeforeCheck: Duration(seconds: 2),
+        softRecoverAfter: Duration(seconds: 5),
+        hardRecoverAfter: Duration(seconds: 10),
+        requirePlaying: false,
+      );
+    }
+    return const MpvStallWatchdogConfig(
+      minBufferingBeforeCheck: Duration(seconds: 2),
+      softRecoverAfter: Duration(seconds: 4),
+      hardRecoverAfter: Duration(seconds: 8),
+      requirePlaying: false,
+    );
+  }
+
+  MpvStallWatchdogConfig _resolveRuntimeStallWatchdogConfig(
+    PlaybackTarget target,
+  ) {
+    if (isLikelyQuarkPlaybackTarget(target)) {
+      return const MpvStallWatchdogConfig(
+        minBufferingBeforeCheck: Duration(seconds: 2),
+        softRecoverAfter: Duration(seconds: 6),
+        hardRecoverAfter: Duration(seconds: 12),
+      );
+    }
+    if (_isLikelyRemotePlaybackTarget(target)) {
+      return const MpvStallWatchdogConfig(
+        minBufferingBeforeCheck: Duration(seconds: 2),
+        softRecoverAfter: Duration(seconds: 5),
+        hardRecoverAfter: Duration(seconds: 10),
+      );
+    }
+    return const MpvStallWatchdogConfig(
+      minBufferingBeforeCheck: Duration(seconds: 3),
+      softRecoverAfter: Duration(seconds: 6),
+      hardRecoverAfter: Duration(seconds: 12),
+    );
+  }
+
+  Future<void> _performSoftMpvStallRecovery(
+    Player player,
+    MpvStallDecision decision, {
+    required String stageLabel,
+  }) async {
+    _traceWindowsMpv(
+      'windows-mpv.stall.recover-soft',
+      fields: {
+        'stage': stageLabel,
+        'positionMs': decision.position.inMilliseconds,
+        'bufferingForMs': decision.bufferingFor.inMilliseconds,
+        'stagnantForMs': decision.stagnantFor.inMilliseconds,
+      },
+    );
+    await player.play();
+    await player.seek(decision.position);
+  }
+
+  void _startMpvStallWatchdog(Player player, PlaybackTarget target) {
+    _stopMpvStallWatchdog();
+    _mpvStallWatchdog = MpvStallWatchdog(
+      config: _resolveRuntimeStallWatchdogConfig(target),
+    );
+    _mpvStallWatchdogTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      unawaited(_tickMpvStallWatchdog(player, target));
+    });
+  }
+
+  void _stopMpvStallWatchdog({bool clearRecoveryFlag = true}) {
+    _mpvStallWatchdogTimer?.cancel();
+    _mpvStallWatchdogTimer = null;
+    _mpvStallWatchdog = null;
+    if (clearRecoveryFlag) {
+      _mpvStallRecoveryInProgress = false;
+    }
+  }
+
+  Future<void> _tickMpvStallWatchdog(
+    Player player,
+    PlaybackTarget target,
+  ) async {
+    if (!mounted ||
+        !_isReady ||
+        _error != null ||
+        _player != player ||
+        _mpvStallRecoveryInProgress) {
+      return;
+    }
+    final watchdog = _mpvStallWatchdog;
+    if (watchdog == null) {
+      return;
+    }
+    final decision = watchdog.evaluate(
+      MpvPlaybackSnapshot.fromPlayer(player),
+    );
+    if (!decision.triggered) {
+      return;
+    }
+    if (decision.level == MpvStallRecoveryLevel.soft) {
+      _mpvStallRecoveryInProgress = true;
+      try {
+        await _performSoftMpvStallRecovery(
+          player,
+          decision,
+          stageLabel: 'runtime',
+        );
+      } finally {
+        _mpvStallRecoveryInProgress = false;
+      }
+      return;
+    }
+    await _performHardMpvStallRecovery(player, target, decision);
+  }
+
+  Future<void> _performHardMpvStallRecovery(
+    Player player,
+    PlaybackTarget target,
+    MpvStallDecision decision,
+  ) async {
+    if (_mpvStallRecoveryInProgress || _player != player) {
+      return;
+    }
+    _mpvStallRecoveryInProgress = true;
+    _traceWindowsMpv(
+      'windows-mpv.stall.recover-hard',
+      fields: {
+        'positionMs': decision.position.inMilliseconds,
+        'bufferingForMs': decision.bufferingFor.inMilliseconds,
+        'stagnantForMs': decision.stagnantFor.inMilliseconds,
+        'targetTitle': target.title,
+      },
+    );
+    try {
+      _latestPosition = decision.position;
+      if (player.state.duration > Duration.zero) {
+        _latestDuration = player.state.duration;
+      }
+      final detachedPlayer = _detachActivePlayerState(
+        clearStallRecoveryFlag: false,
+      );
+      if (mounted) {
+        setState(() {
+          _error = null;
+        });
+      } else {
+        _error = null;
+      }
+      await _shutdownDetachedPlayer(
+        detachedPlayer,
+        reason: 'mpv-stall-hard-recover',
+        persistProgress: true,
+        teardownPlatformState: true,
+      );
+      if (!mounted) {
+        return;
+      }
+      await _initialize();
+    } catch (error, stackTrace) {
+      _traceWindowsMpv(
+        'windows-mpv.stall.recover-hard-failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (mounted) {
+        setState(() {
+          _error = _buildPlaybackErrorMessage(error);
+        });
+      }
+    } finally {
+      _mpvStallRecoveryInProgress = false;
+    }
   }
 
   Future<void> _launchWithSystemPlayer(PlaybackTarget target) async {
@@ -934,6 +1381,14 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     if (_aggressivePlaybackTuningEnabled) {
       return true;
     }
+    final startupProbeMegabitsPerSecond = _startupProbeMegabitsPerSecond;
+    final lowStartupSpeed = startupProbeMegabitsPerSecond != null &&
+        startupProbeMegabitsPerSecond > 0 &&
+        startupProbeMegabitsPerSecond < 12;
+    if (_isLikelyRemotePlaybackTarget(target) &&
+        (_remotePreflightIndicatesRangeRisk || lowStartupSpeed)) {
+      return true;
+    }
     if (!_isHeavyPlaybackTarget(target)) {
       return false;
     }
@@ -957,6 +1412,11 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       isFullscreen: _isEmbeddedMpvFullscreen,
       aggressiveTuningEnabled: _aggressivePlaybackTuningEnabled,
       decodeMode: _playbackDecodeMode,
+      remotePlaybackOverride: _isLikelyRemotePlaybackTarget(target),
+      highRiskContainerOverride:
+          isHighRiskRemotePlaybackContainer(target) ||
+          _remotePreflightIndicatesRangeRisk,
+      startupProbeMegabitsPerSecond: _startupProbeMegabitsPerSecond,
     );
   }
 
@@ -993,10 +1453,14 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     final requestedQualityPreset = _playbackMpvQualityPreset;
     final qualityPreset = _resolveEffectiveMpvQualityPreset(target);
     final bufferSizeBytes = _resolveMpvBufferSizeBytes(target);
+    final highRiskContainer = isHighRiskRemotePlaybackContainer(target) ||
+        _remotePreflightIndicatesRangeRisk;
     final remoteProfile = resolveMpvRemotePlaybackTuningProfile(
       target: target,
       aggressiveTuning: aggressiveTuning,
       heavyPlayback: heavyPlayback,
+      startupProbeMegabitsPerSecond: _startupProbeMegabitsPerSecond,
+      highRiskContainerOverride: highRiskContainer,
     );
     final backBufferBytes = _resolveMpvBackBufferSizeBytes(
       target,
@@ -1087,6 +1551,9 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         'bufferSizeBytes': bufferSizeBytes,
         'backBufferBytes': backBufferBytes,
         'quarkTuning': isLikelyQuarkPlaybackTarget(target),
+        'startupProbeMbps':
+            _startupProbeMegabitsPerSecond?.toStringAsFixed(2) ?? '',
+        'rangeRisk': _remotePreflightIndicatesRangeRisk,
         'remoteProfile': remoteProfile == null
             ? ''
             : remoteProfile.lowLatency
@@ -1111,5 +1578,12 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       backBufferBytes = maxBackBufferBytes;
     }
     return backBufferBytes;
+  }
+
+  bool get _remotePreflightIndicatesRangeRisk {
+    final preflight = _lastRemotePreflight;
+    return preflight != null &&
+        preflight.attempted &&
+        !preflight.supportsByteRange;
   }
 }

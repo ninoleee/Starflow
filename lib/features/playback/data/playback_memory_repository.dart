@@ -266,6 +266,94 @@ class PlaybackMemoryRepository {
     _notifyChanged?.call();
   }
 
+  Future<void> clearEntriesForResource({
+    required String sourceId,
+    String resourceId = '',
+    required String resourcePath,
+    bool treatAsScope = false,
+  }) async {
+    final normalizedSourceId = sourceId.trim();
+    final normalizedResourceId = resourceId.trim();
+    final normalizedResourcePath = resourcePath.trim();
+    if (normalizedSourceId.isEmpty ||
+        (normalizedResourceId.isEmpty && normalizedResourcePath.isEmpty)) {
+      return;
+    }
+
+    final snapshot = await _loadSnapshot();
+    if (snapshot.items.isEmpty &&
+        snapshot.series.isEmpty &&
+        snapshot.skipPreferences.isEmpty) {
+      return;
+    }
+
+    var changed = false;
+    final removedSeriesKeys = <String>{};
+    final nextItems = <String, PlaybackProgressEntry>{};
+    for (final entry in snapshot.items.entries) {
+      if (_playbackTargetMatchesDeletedResource(
+        entry.value.target,
+        sourceId: normalizedSourceId,
+        resourceId: normalizedResourceId,
+        resourcePath: normalizedResourcePath,
+        treatAsScope: treatAsScope,
+      )) {
+        changed = true;
+        final seriesKey = entry.value.seriesKey.trim();
+        if (seriesKey.isNotEmpty) {
+          removedSeriesKeys.add(seriesKey);
+        }
+        continue;
+      }
+      nextItems[entry.key] = entry.value;
+    }
+
+    final nextSeries = <String, PlaybackProgressEntry>{};
+    for (final entry in snapshot.series.entries) {
+      final seriesKey = entry.key.trim();
+      final matchesDeletedTarget = _playbackTargetMatchesDeletedResource(
+        entry.value.target,
+        sourceId: normalizedSourceId,
+        resourceId: normalizedResourceId,
+        resourcePath: normalizedResourcePath,
+        treatAsScope: treatAsScope,
+      );
+      final matchesRemovedSeriesKey =
+          seriesKey.isNotEmpty && removedSeriesKeys.contains(seriesKey);
+      if (matchesDeletedTarget || matchesRemovedSeriesKey) {
+        changed = true;
+        if (seriesKey.isNotEmpty) {
+          removedSeriesKeys.add(seriesKey);
+        }
+        continue;
+      }
+      nextSeries[entry.key] = entry.value;
+    }
+
+    final nextSkipPreferences = <String, SeriesSkipPreference>{};
+    for (final entry in snapshot.skipPreferences.entries) {
+      final seriesKey = entry.key.trim();
+      if (seriesKey.isNotEmpty && removedSeriesKeys.contains(seriesKey)) {
+        changed = true;
+        continue;
+      }
+      nextSkipPreferences[entry.key] = entry.value;
+    }
+
+    if (!changed) {
+      return;
+    }
+
+    await _saveSnapshot(
+      PlaybackMemorySnapshot(
+        items: nextItems,
+        series: nextSeries,
+        skipPreferences: nextSkipPreferences,
+      ),
+    );
+    _notifyChanged?.call();
+  }
+
   Future<LocalStorageCacheSummary> inspectSummary() async {
     final raw = await _preferences.getString(_storageKey) ?? '';
     final snapshot = await _loadSnapshot();
@@ -445,6 +533,94 @@ String buildPlaybackItemKey(PlaybackTarget target) {
     return 'path|$normalizedFallback';
   }
   return '';
+}
+
+bool _playbackTargetMatchesDeletedResource(
+  PlaybackTarget target, {
+  required String sourceId,
+  required String resourceId,
+  required String resourcePath,
+  required bool treatAsScope,
+}) {
+  final normalizedSourceId = sourceId.trim();
+  if (normalizedSourceId.isEmpty ||
+      target.sourceId.trim() != normalizedSourceId) {
+    return false;
+  }
+
+  final normalizedResourceId = resourceId.trim();
+  if (normalizedResourceId.isNotEmpty &&
+      target.itemId.trim() == normalizedResourceId) {
+    return true;
+  }
+
+  final normalizedResourcePath = resourcePath.trim();
+  if (normalizedResourcePath.isEmpty) {
+    return false;
+  }
+
+  final candidates = <String>[
+    target.actualAddress,
+    target.itemId,
+  ];
+  if (treatAsScope) {
+    return candidates.any(
+      (candidate) => _playbackPathMatchesDeletedScope(
+        candidate,
+        normalizedResourcePath,
+      ),
+    );
+  }
+  return candidates.any(
+    (candidate) => _playbackPathEqualsDeletedResource(
+      candidate,
+      normalizedResourcePath,
+    ),
+  );
+}
+
+bool _playbackPathEqualsDeletedResource(String candidate, String expectedPath) {
+  final left = _normalizedPlaybackPath(candidate);
+  final right = _normalizedPlaybackPath(expectedPath);
+  return left.isNotEmpty && left == right;
+}
+
+bool _playbackPathMatchesDeletedScope(String candidate, String scopePath) {
+  final candidateSegments = _playbackPathSegments(candidate);
+  final scopeSegments = _playbackPathSegments(scopePath);
+  if (candidateSegments.isEmpty ||
+      scopeSegments.isEmpty ||
+      candidateSegments.length < scopeSegments.length) {
+    return false;
+  }
+  for (var index = 0; index < scopeSegments.length; index++) {
+    if (candidateSegments[index] != scopeSegments[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+String _normalizedPlaybackPath(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  final uri = Uri.tryParse(trimmed);
+  final rawPath = (uri != null && uri.hasScheme) ? uri.path : trimmed;
+  final normalized = rawPath.replaceAll('\\', '/').trim();
+  if (normalized.isEmpty) {
+    return '';
+  }
+  return normalized.replaceAll(RegExp(r'/+'), '/');
+}
+
+List<String> _playbackPathSegments(String value) {
+  return _normalizedPlaybackPath(value)
+      .split('/')
+      .map((segment) => segment.trim())
+      .where((segment) => segment.isNotEmpty)
+      .toList(growable: false);
 }
 
 String buildSeriesKeyForTarget(PlaybackTarget target) {

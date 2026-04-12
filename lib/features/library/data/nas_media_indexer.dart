@@ -2,7 +2,6 @@ import 'dart:collection';
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/core/utils/webdav_trace.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/application/nas_media_index_revision.dart';
@@ -196,6 +195,12 @@ class NasMediaIndexer {
       _NasMediaIndexerRefreshFlowX(this).enrichDetailTargetMetadataIfNeeded(
         target,
       );
+
+  Future<void> markDetailTargetMetadataManuallyManaged(
+    MediaDetailTarget target,
+  ) =>
+      _NasMediaIndexerRefreshFlowX(this)
+          .markDetailTargetMetadataManuallyManaged(target);
 
   Future<List<MediaItem>> loadLibrary(
     MediaSourceConfig source, {
@@ -777,6 +782,9 @@ class NasMediaIndexer {
     if (record == null) {
       return false;
     }
+    if (record.manualMetadataLocked) {
+      return true;
+    }
     if (settings.wmdbMetadataMatchEnabled && !record.wmdbStatus.hasAttempted) {
       return false;
     }
@@ -796,10 +804,6 @@ class NasMediaIndexer {
     AppSettings settings,
   ) {
     return !_hasCompletedOnlineAttempts(record, settings);
-  }
-
-  bool _shouldUseStandaloneImdbRating(AppSettings settings) {
-    return settings.imdbRatingMatchEnabled;
   }
 
   void _clearProgressSafely(String sourceId) {

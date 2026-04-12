@@ -101,7 +101,7 @@ extension _LibraryRefreshSourceKindX on _LibraryRefreshSourceKind {
       case _LibraryRefreshSourceKind.indexed:
         return '这会同时对当前启用的 WebDAV 和 Quark 媒体源执行全量重扫，忽略已有指纹并重新建立本地索引。';
       case _LibraryRefreshSourceKind.webDav:
-        return '这会对当前启用的 WebDAV 媒体源执行全量重扫，忽略已有指纹并重新抓取 sidecar、WMDB、TMDB 和 IMDb 信息。';
+        return '这会对当前启用的 WebDAV 媒体源执行全量重扫，忽略已有指纹并重新抓取 sidecar、WMDB 和 TMDB 信息。';
       case _LibraryRefreshSourceKind.quark:
         return '这会对当前启用的 Quark 媒体源执行全量重扫，并重新扫描目录结构推断、本地刮削与媒体条目。';
     }
@@ -144,9 +144,7 @@ class _LibraryRefreshScope {
   final List<String> sourceIds;
 
   String get incrementalButtonLabel =>
-      kind == _LibraryRefreshSourceKind.indexed
-          ? '增量更新'
-          : '增量更新 ${kind.label}';
+      kind == _LibraryRefreshSourceKind.indexed ? '增量更新' : '增量更新 ${kind.label}';
 
   String get rebuildButtonLabel => kind == _LibraryRefreshSourceKind.indexed
       ? '重建索引'
@@ -749,7 +747,9 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
-        child: Wrap(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
