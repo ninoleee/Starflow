@@ -2,12 +2,14 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/library/application/library_cached_items.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 
 class _PreviousLibraryPageIntent extends Intent {
@@ -18,10 +20,11 @@ class _NextLibraryPageIntent extends Intent {
   const _NextLibraryPageIntent();
 }
 
-class LibraryPagedGrid extends StatelessWidget {
+class LibraryPagedGrid extends ConsumerWidget {
   const LibraryPagedGrid({
     super.key,
-    required this.items,
+    required this.pageItems,
+    required this.totalItems,
     required this.currentPage,
     required this.onPageChanged,
     required this.isTelevision,
@@ -32,7 +35,8 @@ class LibraryPagedGrid extends StatelessWidget {
     this.header,
   });
 
-  final List<MediaItem> items;
+  final List<MediaItem> pageItems;
+  final int totalItems;
   final int currentPage;
   final ValueChanged<int> onPageChanged;
   final bool isTelevision;
@@ -43,10 +47,10 @@ class LibraryPagedGrid extends StatelessWidget {
   final Widget? header;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final normalizedPageSize = math.max(1, pageSize);
-    if (items.isEmpty) {
+    if (totalItems <= 0) {
       return Text(
         emptyMessage,
         style: theme.textTheme.bodyMedium?.copyWith(
@@ -55,12 +59,8 @@ class LibraryPagedGrid extends StatelessWidget {
       );
     }
 
-    final totalPages = math.max(1, (items.length / normalizedPageSize).ceil());
+    final totalPages = math.max(1, (totalItems / normalizedPageSize).ceil());
     final safePage = currentPage.clamp(0, totalPages - 1);
-    final pageItems = items
-        .skip(safePage * normalizedPageSize)
-        .take(normalizedPageSize)
-        .toList(growable: false);
 
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -70,7 +70,7 @@ class LibraryPagedGrid extends StatelessWidget {
           const SizedBox(height: 16),
         ],
         _LibraryPagerSummary(
-          totalItems: items.length,
+          totalItems: totalItems,
           currentPage: safePage,
           totalPages: totalPages,
           onPageChanged: onPageChanged,
@@ -101,7 +101,12 @@ class LibraryPagedGrid extends StatelessWidget {
                 childAspectRatio: childAspectRatio,
               ),
               itemBuilder: (context, index) {
-                final item = pageItems[index];
+                final seedItem = pageItems[index];
+                final item = ref.watch(
+                  libraryResolvedItemProvider(
+                    LibraryItemOverlayRequest(seedItem),
+                  ),
+                );
                 final posterAssets = _resolveLibraryPosterAssets(item);
                 final posterAsset = posterAssets.isNotEmpty
                     ? posterAssets.first
@@ -145,7 +150,7 @@ class LibraryPagedGrid extends StatelessWidget {
         if (totalPages > 1) ...[
           const SizedBox(height: 18),
           _LibraryPagerSummary(
-            totalItems: items.length,
+            totalItems: totalItems,
             currentPage: safePage,
             totalPages: totalPages,
             onPageChanged: onPageChanged,

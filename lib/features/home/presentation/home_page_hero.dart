@@ -245,6 +245,118 @@ class _FeaturedHeroItem {
   }
 }
 
+class _FeaturedHeroOverlayRequest {
+  _FeaturedHeroOverlayRequest(this.item)
+      : identity = jsonEncode({
+          'id': item.id,
+          'title': item.title,
+          'metadata': item.metadata,
+          'overview': item.overview,
+          'detailTarget': item.detailTarget.toJson(),
+          'landscape': item.landscapeImage.url,
+          'portrait': item.portraitImage.url,
+          'background': item.backgroundImage.url,
+        });
+
+  final _FeaturedHeroItem item;
+  final String identity;
+
+  LocalStorageDetailCacheScope get cacheScope => LocalStorageDetailCacheScope(
+        lookupKeys: {
+          ...LocalStorageCacheRepository.buildLookupKeys(item.detailTarget),
+        },
+      );
+
+  @override
+  bool operator ==(Object other) {
+    return other is _FeaturedHeroOverlayRequest &&
+        other.identity == identity;
+  }
+
+  @override
+  int get hashCode => identity.hashCode;
+}
+
+final _featuredHeroItemOverlayProvider =
+    Provider.family<_FeaturedHeroItem, _FeaturedHeroOverlayRequest>((
+  ref,
+  request,
+) {
+  final cacheScope = request.cacheScope;
+  if (!cacheScope.isEmpty) {
+    ref.watch(
+      localStorageDetailCacheChangeProvider.select(
+        (state) => state.revisionForScope(
+          cacheScope,
+          changedFields: _homePresentationCacheChangedFields,
+        ),
+      ),
+    );
+  }
+  final cachedTarget = ref
+      .read(localStorageCacheRepositoryProvider)
+      .peekDetailTarget(request.item.detailTarget);
+  if (cachedTarget == null) {
+    return request.item;
+  }
+  final mergedTarget = mergeCachedHomeDetailTarget(
+    seed: request.item.detailTarget,
+    cached: cachedTarget,
+  );
+  return _overlayFeaturedHeroItem(
+    seed: request.item,
+    mergedTarget: mergedTarget,
+  );
+});
+
+_FeaturedHeroItem _overlayFeaturedHeroItem({
+  required _FeaturedHeroItem seed,
+  required MediaDetailTarget mergedTarget,
+}) {
+  if (identical(mergedTarget, seed.detailTarget)) {
+    return seed;
+  }
+  final landscapeImage = _resolveFeaturedHeroLandscapeImage(
+    target: mergedTarget,
+    fallbackImage: seed.landscapeImage,
+  );
+  final portraitImage = _resolveFeaturedHeroPortraitImage(
+    target: mergedTarget,
+    fallbackImage: seed.portraitImage.preferContain
+        ? seed.portraitImage
+        : seed.landscapeImage,
+    landscapeImage: landscapeImage,
+  );
+  return _FeaturedHeroItem(
+    id: seed.id,
+    title: mergedTarget.title.trim().isNotEmpty ? mergedTarget.title : seed.title,
+    landscapeImage: landscapeImage,
+    portraitImage: portraitImage,
+    backgroundImage: _resolveFeaturedHeroBackgroundImage(
+      target: mergedTarget,
+      fallbackImage: seed.backgroundImage,
+    ),
+    metadata: _buildHeroMetadata(mergedTarget, fallback: seed.metadata),
+    overview: mergedTarget.overview.trim().isNotEmpty
+        ? mergedTarget.overview
+        : seed.overview,
+    detailTarget: mergedTarget,
+  );
+}
+
+String _featuredHeroVisualFingerprint(_FeaturedHeroItem item) {
+  return [
+    item.id,
+    item.title,
+    item.metadata,
+    item.overview,
+    item.landscapeImage.url,
+    item.portraitImage.url,
+    item.backgroundImage.url,
+    item.detailTarget.logoUrl,
+  ].join('|');
+}
+
 class _FeaturedHeroImage {
   const _FeaturedHeroImage({
     required this.url,
@@ -388,7 +500,7 @@ String _buildHeroMetadata(
   return entries.join(' · ');
 }
 
-class _FeaturedHero extends StatefulWidget {
+class _FeaturedHero extends ConsumerStatefulWidget {
   const _FeaturedHero({
     super.key,
     required this.items,
@@ -417,10 +529,10 @@ class _FeaturedHero extends StatefulWidget {
   final ValueChanged<_FeaturedHeroItem>? onFocusedItemChanged;
 
   @override
-  State<_FeaturedHero> createState() => _FeaturedHeroState();
+  ConsumerState<_FeaturedHero> createState() => _FeaturedHeroState();
 }
 
-class _FeaturedHeroState extends State<_FeaturedHero> {
+class _FeaturedHeroState extends ConsumerState<_FeaturedHero> {
   late PageController _controller;
   final ValueNotifier<double> _pageNotifier = ValueNotifier<double>(0);
   final Map<String, FocusNode> _cardFocusNodes = <String, FocusNode>{};
@@ -431,6 +543,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
   double _page = 0;
   int _lastReportedIndex = -1;
   String _lastReportedItemId = '';
+  String _lastReportedVisualFingerprint = '';
 
   @override
   void initState() {
@@ -460,6 +573,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
       _pageNotifier.value = _page;
       _lastReportedIndex = -1;
       _lastReportedItemId = '';
+      _lastReportedVisualFingerprint = '';
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) {
           return;
@@ -553,12 +667,20 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     if (index < 0 || index >= widget.items.length) {
       return;
     }
-    final currentItem = widget.items[index];
-    if (_lastReportedIndex == index && _lastReportedItemId == currentItem.id) {
+    final currentItem = ref.read(
+      _featuredHeroItemOverlayProvider(
+        _FeaturedHeroOverlayRequest(widget.items[index]),
+      ),
+    );
+    final visualFingerprint = _featuredHeroVisualFingerprint(currentItem);
+    if (_lastReportedIndex == index &&
+        _lastReportedItemId == currentItem.id &&
+        _lastReportedVisualFingerprint == visualFingerprint) {
       return;
     }
     _lastReportedIndex = index;
     _lastReportedItemId = currentItem.id;
+    _lastReportedVisualFingerprint = visualFingerprint;
     widget.onFocusedItemChanged?.call(currentItem);
   }
 
@@ -568,6 +690,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
       _pageNotifier.value = _page;
       _lastReportedIndex = -1;
       _lastReportedItemId = '';
+      _lastReportedVisualFingerprint = '';
       return;
     }
     final maxPage = (widget.items.length - 1).toDouble();
@@ -634,6 +757,21 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
   @override
   Widget build(BuildContext context) {
     final simplifyVisualEffects = widget.lightweightVisualEnabled;
+    final selectedOverlayItem = widget.items.isEmpty
+        ? null
+        : ref.watch(
+            _featuredHeroItemOverlayProvider(
+              _FeaturedHeroOverlayRequest(widget.items[_currentPageIndex]),
+            ),
+          );
+    if (selectedOverlayItem != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        _notifyFocusedItem(_currentPageIndex);
+      });
+    }
 
     return Column(
       children: [
@@ -841,7 +979,7 @@ class _HeroPagerButton extends StatelessWidget {
   }
 }
 
-class _FeaturedHeroCard extends StatelessWidget {
+class _FeaturedHeroCard extends ConsumerWidget {
   const _FeaturedHeroCard({
     required this.item,
     required this.displayMode,
@@ -871,7 +1009,10 @@ class _FeaturedHeroCard extends StatelessWidget {
   final VoidCallback? onFocusBelowControl;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final resolvedItem = ref.watch(
+      _featuredHeroItemOverlayProvider(_FeaturedHeroOverlayRequest(item)),
+    );
     final usesCompositeBackdrop =
         !simplifyVisualEffects && displayMode.usesFrostedBackdrop;
     final borderRadius = BorderRadius.circular(displayMode.cardBorderRadius);
@@ -955,7 +1096,7 @@ class _FeaturedHeroCard extends StatelessWidget {
                       ),
               ),
             _FeaturedHeroArtwork(
-              item: item,
+              item: resolvedItem,
               displayMode: displayMode,
             ),
             Align(
@@ -979,29 +1120,29 @@ class _FeaturedHeroCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Spacer(),
-                  if (item.metadata.trim().isNotEmpty)
+                  if (resolvedItem.metadata.trim().isNotEmpty)
                     Text(
-                      item.metadata,
+                      resolvedItem.metadata,
                       style: const TextStyle(
                         color: Color(0xFFDCE7FF),
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                  if (item.metadata.trim().isNotEmpty)
+                  if (resolvedItem.metadata.trim().isNotEmpty)
                     const SizedBox(height: 10),
                   _HeroTitle(
-                    item: item,
+                    item: resolvedItem,
                     displayMode: displayMode,
                     logoTitleEnabled: logoTitleEnabled,
                     simplifyVisualEffects: simplifyVisualEffects,
                   ),
                   const SizedBox(height: 10),
-                  if (item.overview.trim().isNotEmpty)
+                  if (resolvedItem.overview.trim().isNotEmpty)
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 460),
                       child: Text(
-                        item.overview,
+                        resolvedItem.overview,
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -1033,7 +1174,8 @@ class _FeaturedHeroCard extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: borderRadius,
-          onTap: () => context.pushNamed('detail', extra: item.detailTarget),
+          onTap: () =>
+              context.pushNamed('detail', extra: resolvedItem.detailTarget),
           child: card,
         ),
       );
@@ -1075,7 +1217,8 @@ class _FeaturedHeroCard extends StatelessWidget {
         ),
       },
       child: TvFocusableAction(
-        onPressed: () => context.pushNamed('detail', extra: item.detailTarget),
+        onPressed: () =>
+            context.pushNamed('detail', extra: resolvedItem.detailTarget),
         focusNode: focusNode,
         focusId: focusId,
         autofocus: autofocus,

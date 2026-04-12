@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
-import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
+import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 final localStorageCacheRepositoryProvider =
@@ -69,14 +71,52 @@ class LocalStorageCacheRepository {
   Timer? _detailCacheChangeNotificationTimer;
   final Set<String> _pendingDetailCacheChangedSourceIds = <String>{};
   final Set<String> _pendingDetailCacheChangedLookupKeys = <String>{};
+  final Set<String> _pendingDetailCacheChangedRecordIds = <String>{};
+  final Set<LocalStorageDetailCacheChangedField> _pendingDetailCacheChangedFields =
+      <LocalStorageDetailCacheChangedField>{};
   bool _pendingDetailCacheInvalidateAll = false;
+  _DetailCachePayload? _detailPayloadCache;
+  Future<_DetailCachePayload>? _detailPayloadLoadFuture;
 
   void dispose() {
     _detailCacheChangeNotificationTimer?.cancel();
     _detailCacheChangeNotificationTimer = null;
     _pendingDetailCacheChangedSourceIds.clear();
     _pendingDetailCacheChangedLookupKeys.clear();
+    _pendingDetailCacheChangedRecordIds.clear();
+    _pendingDetailCacheChangedFields.clear();
     _pendingDetailCacheInvalidateAll = false;
+    _detailPayloadCache = null;
+    _detailPayloadLoadFuture = null;
+  }
+
+  Future<void> primeDetailPayload() async {
+    await _loadDetailPayload();
+  }
+
+  CachedDetailState? peekDetailState(
+    MediaDetailTarget seedTarget, {
+    bool allowStructuralMismatch = false,
+  }) {
+    final payload = _detailPayloadCache;
+    if (payload == null) {
+      return null;
+    }
+    return _loadDetailStateFromPayload(
+      payload,
+      seedTarget,
+      allowStructuralMismatch: allowStructuralMismatch,
+    );
+  }
+
+  MediaDetailTarget? peekDetailTarget(
+    MediaDetailTarget seedTarget, {
+    bool allowStructuralMismatch = false,
+  }) {
+    return peekDetailState(
+      seedTarget,
+      allowStructuralMismatch: allowStructuralMismatch,
+    )?.target;
   }
 
   Future<CachedDetailState?> loadDetailState(
@@ -248,6 +288,15 @@ class LocalStorageCacheRepository {
           existing?.metadataRefreshStatus ??
           DetailMetadataRefreshStatus.never,
     );
+    final changedFields = _resolveRecordChangedFields(
+      previous: existing,
+      next: nextRecord,
+    );
+    if (existing != null &&
+        changedFields.isEmpty &&
+        _sameStringList(existing.lookupKeys, nextRecord.lookupKeys)) {
+      return;
+    }
 
     final nextRecords = <String, _CachedDetailRecord>{
       ...payload.records,
@@ -275,7 +324,9 @@ class LocalStorageCacheRepository {
             nextRecord.target.sourceId.trim(),
           }.where((item) => item.isNotEmpty).toSet(),
           lookupKeys: mergedLookupKeys.toSet(),
+          recordIds: {recordId},
         ),
+        changedFields: changedFields,
       ),
     );
   }
@@ -292,6 +343,8 @@ class LocalStorageCacheRepository {
 
   Future<void> clearDetailCache() async {
     await _preferences.remove(_detailCacheKey);
+    _detailPayloadCache = const _DetailCachePayload();
+    _detailPayloadLoadFuture = null;
     _scheduleDetailCacheChangedNotification(
       const LocalStorageDetailCacheChangeEvent(invalidateAll: true),
     );
@@ -339,7 +392,9 @@ class LocalStorageCacheRepository {
         scope: LocalStorageDetailCacheScope(
           sourceIds: {normalizedSourceId},
           lookupKeys: removedLookupKeys,
+          recordIds: recordIdsToRemove,
         ),
+        changedFields: allLocalStorageDetailCacheChangedFields,
       ),
     );
   }
@@ -366,6 +421,7 @@ class LocalStorageCacheRepository {
     var changed = false;
     final changedSourceIds = <String>{normalizedSourceId};
     final changedLookupKeys = <String>{};
+    final changedRecordIds = <String>{};
     final nextRecords = <String, _CachedDetailRecord>{};
     for (final record in payload.records.values) {
       final nextRecord = _removeResourceRelationsFromRecord(
@@ -377,6 +433,7 @@ class LocalStorageCacheRepository {
       );
       if (!identical(nextRecord, record)) {
         changed = true;
+        changedRecordIds.add(record.id);
         changedLookupKeys.addAll(record.lookupKeys);
         changedLookupKeys.addAll(nextRecord.lookupKeys);
         final currentSourceId = record.target.sourceId.trim();
@@ -420,7 +477,14 @@ class LocalStorageCacheRepository {
         scope: LocalStorageDetailCacheScope(
           sourceIds: changedSourceIds,
           lookupKeys: changedLookupKeys,
+          recordIds: changedRecordIds,
         ),
+        changedFields: const {
+          LocalStorageDetailCacheChangedField.availability,
+          LocalStorageDetailCacheChangedField.playback,
+          LocalStorageDetailCacheChangedField.structure,
+          LocalStorageDetailCacheChangedField.choices,
+        },
       ),
     );
   }
@@ -536,6 +600,26 @@ class LocalStorageCacheRepository {
   }
 
   Future<_DetailCachePayload> _loadDetailPayload() async {
+    final cached = _detailPayloadCache;
+    if (cached != null) {
+      return cached;
+    }
+    final existingLoad = _detailPayloadLoadFuture;
+    if (existingLoad != null) {
+      return existingLoad;
+    }
+    final loadFuture = _loadDetailPayloadFromStorage();
+    _detailPayloadLoadFuture = loadFuture;
+    try {
+      final payload = await loadFuture;
+      _detailPayloadCache = payload;
+      return payload;
+    } finally {
+      _detailPayloadLoadFuture = null;
+    }
+  }
+
+  Future<_DetailCachePayload> _loadDetailPayloadFromStorage() async {
     final raw = await _preferences.getString(_detailCacheKey);
     if (raw == null || raw.isEmpty) {
       return const _DetailCachePayload();
@@ -551,6 +635,8 @@ class LocalStorageCacheRepository {
   }
 
   Future<void> _saveDetailPayload(_DetailCachePayload payload) async {
+    _detailPayloadCache = payload;
+    _detailPayloadLoadFuture = null;
     await _preferences.setString(_detailCacheKey, jsonEncode(payload.toJson()));
   }
 
@@ -565,6 +651,8 @@ class LocalStorageCacheRepository {
       _pendingDetailCacheInvalidateAll = true;
       _pendingDetailCacheChangedSourceIds.clear();
       _pendingDetailCacheChangedLookupKeys.clear();
+      _pendingDetailCacheChangedRecordIds.clear();
+      _pendingDetailCacheChangedFields.clear();
     } else if (!_pendingDetailCacheInvalidateAll) {
       _pendingDetailCacheChangedSourceIds.addAll(
         event.scope.sourceIds
@@ -576,6 +664,12 @@ class LocalStorageCacheRepository {
             .map((item) => item.trim())
             .where((item) => item.isNotEmpty),
       );
+      _pendingDetailCacheChangedRecordIds.addAll(
+        event.scope.recordIds
+            .map((item) => item.trim())
+            .where((item) => item.isNotEmpty),
+      );
+      _pendingDetailCacheChangedFields.addAll(event.effectiveChangedFields);
     }
     if (detailCacheChangeNotificationDelay <= Duration.zero) {
       _detailCacheChangeNotificationTimer?.cancel();
@@ -597,18 +691,26 @@ class LocalStorageCacheRepository {
   ) {
     final event = _pendingDetailCacheInvalidateAll ||
             _pendingDetailCacheChangedSourceIds.isNotEmpty ||
-            _pendingDetailCacheChangedLookupKeys.isNotEmpty
+            _pendingDetailCacheChangedLookupKeys.isNotEmpty ||
+            _pendingDetailCacheChangedRecordIds.isNotEmpty
         ? LocalStorageDetailCacheChangeEvent(
             scope: LocalStorageDetailCacheScope(
               sourceIds: Set<String>.from(_pendingDetailCacheChangedSourceIds),
               lookupKeys:
                   Set<String>.from(_pendingDetailCacheChangedLookupKeys),
+              recordIds: Set<String>.from(_pendingDetailCacheChangedRecordIds),
             ),
             invalidateAll: _pendingDetailCacheInvalidateAll,
+            changedFields:
+                Set<LocalStorageDetailCacheChangedField>.from(
+              _pendingDetailCacheChangedFields,
+            ),
           )
         : fallback;
     _pendingDetailCacheChangedSourceIds.clear();
     _pendingDetailCacheChangedLookupKeys.clear();
+    _pendingDetailCacheChangedRecordIds.clear();
+    _pendingDetailCacheChangedFields.clear();
     _pendingDetailCacheInvalidateAll = false;
     return event;
   }
@@ -690,6 +792,147 @@ class LocalStorageCacheRepository {
       metadataRefreshStatus: record.metadataRefreshStatus,
     );
   }
+}
+
+Set<LocalStorageDetailCacheChangedField> _resolveRecordChangedFields({
+  required _CachedDetailRecord? previous,
+  required _CachedDetailRecord next,
+}) {
+  if (previous == null) {
+    return allLocalStorageDetailCacheChangedFields;
+  }
+
+  final changedFields = <LocalStorageDetailCacheChangedField>{};
+  if (!_sameStringList(previous.lookupKeys, next.lookupKeys) ||
+      !_sameProviderIds(
+        previous.target.providerIds,
+        next.target.providerIds,
+      ) ||
+      previous.target.itemId != next.target.itemId ||
+      previous.target.sourceId != next.target.sourceId ||
+      previous.target.itemType != next.target.itemType ||
+      previous.target.seasonNumber != next.target.seasonNumber ||
+      previous.target.episodeNumber != next.target.episodeNumber ||
+      previous.target.sectionId != next.target.sectionId ||
+      previous.target.sectionName != next.target.sectionName ||
+      previous.target.sourceKind != next.target.sourceKind ||
+      previous.target.sourceName != next.target.sourceName ||
+      previous.target.searchQuery != next.target.searchQuery ||
+      previous.target.doubanId != next.target.doubanId ||
+      previous.target.imdbId != next.target.imdbId ||
+      previous.target.tmdbId != next.target.tmdbId ||
+      previous.target.tvdbId != next.target.tvdbId ||
+      previous.target.wikidataId != next.target.wikidataId ||
+      previous.target.tmdbSetId != next.target.tmdbSetId) {
+    changedFields.add(LocalStorageDetailCacheChangedField.structure);
+  }
+  if (previous.target.title != next.target.title ||
+      previous.target.overview != next.target.overview ||
+      previous.target.year != next.target.year ||
+      previous.target.durationLabel != next.target.durationLabel ||
+      !_sameStringList(previous.target.genres, next.target.genres) ||
+      !_sameStringList(previous.target.directors, next.target.directors) ||
+      !_sameJsonEncodedObjects(
+        previous.target.directorProfiles.map((item) => item.toJson()).toList(),
+        next.target.directorProfiles.map((item) => item.toJson()).toList(),
+      ) ||
+      !_sameStringList(previous.target.actors, next.target.actors) ||
+      !_sameJsonEncodedObjects(
+        previous.target.actorProfiles.map((item) => item.toJson()).toList(),
+        next.target.actorProfiles.map((item) => item.toJson()).toList(),
+      ) ||
+      !_sameStringList(previous.target.platforms, next.target.platforms) ||
+      !_sameJsonEncodedObjects(
+        previous.target.platformProfiles.map((item) => item.toJson()).toList(),
+        next.target.platformProfiles.map((item) => item.toJson()).toList(),
+      )) {
+    changedFields.add(LocalStorageDetailCacheChangedField.summary);
+  }
+  if (previous.target.posterUrl != next.target.posterUrl ||
+      !_sameStringMap(previous.target.posterHeaders, next.target.posterHeaders) ||
+      previous.target.backdropUrl != next.target.backdropUrl ||
+      !_sameStringMap(
+        previous.target.backdropHeaders,
+        next.target.backdropHeaders,
+      ) ||
+      previous.target.logoUrl != next.target.logoUrl ||
+      !_sameStringMap(previous.target.logoHeaders, next.target.logoHeaders) ||
+      previous.target.bannerUrl != next.target.bannerUrl ||
+      !_sameStringMap(
+        previous.target.bannerHeaders,
+        next.target.bannerHeaders,
+      ) ||
+      !_sameStringList(
+        previous.target.extraBackdropUrls,
+        next.target.extraBackdropUrls,
+      ) ||
+      !_sameStringMap(
+        previous.target.extraBackdropHeaders,
+        next.target.extraBackdropHeaders,
+      )) {
+    changedFields.add(LocalStorageDetailCacheChangedField.artwork);
+  }
+  if (!_sameStringList(
+    previous.target.ratingLabels,
+    next.target.ratingLabels,
+  )) {
+    changedFields.add(LocalStorageDetailCacheChangedField.ratings);
+  }
+  if (previous.target.availabilityLabel != next.target.availabilityLabel ||
+      previous.target.resourcePath != next.target.resourcePath) {
+    changedFields.add(LocalStorageDetailCacheChangedField.availability);
+  }
+  if (!_samePlaybackTargets(
+    previous.target.playbackTarget,
+    next.target.playbackTarget,
+  )) {
+    changedFields.add(LocalStorageDetailCacheChangedField.playback);
+  }
+  if (!_sameJsonEncodedObjects(
+        previous.libraryMatchChoices.map((item) => item.toJson()).toList(),
+        next.libraryMatchChoices.map((item) => item.toJson()).toList(),
+      ) ||
+      previous.selectedLibraryMatchIndex != next.selectedLibraryMatchIndex ||
+      !_sameJsonEncodedObjects(
+        previous.subtitleSearchChoices.map((item) => item.toJson()).toList(),
+        next.subtitleSearchChoices.map((item) => item.toJson()).toList(),
+      ) ||
+      previous.selectedSubtitleSearchIndex !=
+          next.selectedSubtitleSearchIndex) {
+    changedFields.add(LocalStorageDetailCacheChangedField.choices);
+  }
+  if (previous.metadataRefreshStatus != next.metadataRefreshStatus) {
+    changedFields.add(LocalStorageDetailCacheChangedField.metadataStatus);
+  }
+  return changedFields;
+}
+
+bool _sameStringList(Iterable<String> left, Iterable<String> right) {
+  final leftList = left is List<String> ? left : left.toList(growable: false);
+  final rightList = right is List<String> ? right : right.toList(growable: false);
+  return listEquals(leftList, rightList);
+}
+
+bool _sameStringMap(Map<String, String> left, Map<String, String> right) {
+  return mapEquals(left, right);
+}
+
+bool _sameProviderIds(Map<String, String> left, Map<String, String> right) {
+  return mapEquals(left, right);
+}
+
+bool _samePlaybackTargets(PlaybackTarget? left, PlaybackTarget? right) {
+  if (identical(left, right)) {
+    return true;
+  }
+  if (left == null || right == null) {
+    return left == right;
+  }
+  return _sameJsonEncodedObjects(left.toJson(), right.toJson());
+}
+
+bool _sameJsonEncodedObjects(Object? left, Object? right) {
+  return jsonEncode(left) == jsonEncode(right);
 }
 
 String _detailLookupKind(MediaDetailTarget target) {

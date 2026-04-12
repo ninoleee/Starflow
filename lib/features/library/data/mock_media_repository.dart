@@ -199,13 +199,19 @@ class AppMediaRepository implements MediaRepository {
       return;
     }
 
+    final previousIndexedRecords = await _nasMediaIndexer.loadSourceRecords(
+      source.id,
+    );
+
     if (source.hasExplicitNoSectionsSelected) {
       await _nasMediaIndexer.clearSource(source.id);
+      await _clearIndexedSourceLocalState(source.id, previousIndexedRecords);
       return;
     }
     final selectedCollections = await _selectedCollectionsForSource(source);
     if (_hasScopedSections(source) && selectedCollections.isEmpty) {
       await _nasMediaIndexer.clearSource(source.id);
+      await _clearIndexedSourceLocalState(source.id, previousIndexedRecords);
       return;
     }
     if (forceFullRescan) {
@@ -220,6 +226,66 @@ class AppMediaRepository implements MediaRepository {
           _hasScopedSections(source) ? selectedCollections : null,
       forceFullRescan: forceFullRescan,
     );
+    if (!forceFullRescan) {
+      final nextIndexedRecords = await _nasMediaIndexer.loadSourceRecords(
+        source.id,
+      );
+      await _clearRemovedIndexedResources(
+        sourceId: source.id,
+        previousRecords: previousIndexedRecords,
+        nextRecords: nextIndexedRecords,
+      );
+    }
+  }
+
+  Future<void> _clearIndexedSourceLocalState(
+    String sourceId,
+    List<NasMediaIndexRecord> previousRecords,
+  ) async {
+    await ref
+        .read(localStorageCacheRepositoryProvider)
+        .clearDetailCacheForSource(sourceId);
+    for (final record in previousRecords) {
+      await ref.read(playbackMemoryRepositoryProvider).clearEntriesForResource(
+            sourceId: sourceId,
+            resourceId: record.resourceId,
+            resourcePath: record.resourcePath,
+          );
+    }
+  }
+
+  Future<void> _clearRemovedIndexedResources({
+    required String sourceId,
+    required List<NasMediaIndexRecord> previousRecords,
+    required List<NasMediaIndexRecord> nextRecords,
+  }) async {
+    if (previousRecords.isEmpty) {
+      return;
+    }
+    final remainingIds = nextRecords
+        .map((record) => record.resourceId.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    final removedRecords = previousRecords
+        .where((record) => !remainingIds.contains(record.resourceId.trim()))
+        .toList(growable: false);
+    if (removedRecords.isEmpty) {
+      return;
+    }
+    for (final record in removedRecords) {
+      await ref
+          .read(localStorageCacheRepositoryProvider)
+          .clearDetailCacheForResource(
+            sourceId: sourceId,
+            resourceId: record.resourceId,
+            resourcePath: record.resourcePath,
+          );
+      await ref.read(playbackMemoryRepositoryProvider).clearEntriesForResource(
+            sourceId: sourceId,
+            resourceId: record.resourceId,
+            resourcePath: record.resourcePath,
+          );
+    }
   }
 
   // ignore: unused_element

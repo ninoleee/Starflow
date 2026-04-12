@@ -47,3 +47,17 @@ EdgeInsets overlayToolbarPagePadding(
     bottomPadding,
   );
 }
+
+Widget appPageBottomSpacer({
+  double height = kBottomReservedSpacing,
+}) {
+  return SizedBox(height: height);
+}
+
+Widget appPageBottomSliverSpacer({
+  double height = kBottomReservedSpacing,
+}) {
+  return SliverToBoxAdapter(
+    child: SizedBox(height: height),
+  );
+}

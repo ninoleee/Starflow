@@ -189,6 +189,9 @@ class NasMediaIndexer {
         resourcePath: resourcePath,
       );
 
+  Future<List<NasMediaIndexRecord>> loadSourceRecords(String sourceId) =>
+      _loadSourceRecordsCached(sourceId);
+
   Future<MediaDetailTarget?> enrichDetailTargetMetadataIfNeeded(
     MediaDetailTarget target,
   ) =>

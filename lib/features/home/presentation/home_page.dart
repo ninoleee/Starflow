@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -23,6 +24,8 @@ import 'package:starflow/features/home/application/home_hero_prefetch_coordinato
 import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
+import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 part 'home_page_hero.dart';
 part 'home_page_sections.dart';
@@ -33,6 +36,151 @@ class HomePage extends ConsumerStatefulWidget {
   @override
   ConsumerState<HomePage> createState() => _HomePageState();
 }
+
+class _HomeKeepAlive extends StatefulWidget {
+  const _HomeKeepAlive({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_HomeKeepAlive> createState() => _HomeKeepAliveState();
+}
+
+class _HomeKeepAliveState extends State<_HomeKeepAlive>
+    with AutomaticKeepAliveClientMixin<_HomeKeepAlive> {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
+const Set<LocalStorageDetailCacheChangedField>
+    _homePresentationCacheChangedFields = {
+  LocalStorageDetailCacheChangedField.artwork,
+  LocalStorageDetailCacheChangedField.summary,
+  LocalStorageDetailCacheChangedField.ratings,
+  LocalStorageDetailCacheChangedField.availability,
+  LocalStorageDetailCacheChangedField.playback,
+  LocalStorageDetailCacheChangedField.structure,
+};
+
+class _HomeCardOverlayRequest {
+  _HomeCardOverlayRequest(this.item)
+      : identity = jsonEncode({
+          'id': item.id,
+          'title': item.title,
+          'subtitle': item.subtitle,
+          'posterUrl': item.posterUrl,
+          'detailTarget': item.detailTarget.toJson(),
+        });
+
+  final HomeCardViewModel item;
+  final String identity;
+
+  LocalStorageDetailCacheScope get cacheScope => LocalStorageDetailCacheScope(
+        lookupKeys: {
+          ...LocalStorageCacheRepository.buildLookupKeys(item.detailTarget),
+        },
+      );
+
+  @override
+  bool operator ==(Object other) {
+    return other is _HomeCardOverlayRequest && other.identity == identity;
+  }
+
+  @override
+  int get hashCode => identity.hashCode;
+}
+
+class _HomeCarouselOverlayRequest {
+  _HomeCarouselOverlayRequest(this.item)
+      : identity = jsonEncode({
+          'id': item.id,
+          'title': item.title,
+          'subtitle': item.subtitle,
+          'imageUrl': item.imageUrl,
+          'detailTarget': item.detailTarget.toJson(),
+        });
+
+  final HomeCarouselItemViewModel item;
+  final String identity;
+
+  LocalStorageDetailCacheScope get cacheScope => LocalStorageDetailCacheScope(
+        lookupKeys: {
+          ...LocalStorageCacheRepository.buildLookupKeys(item.detailTarget),
+        },
+      );
+
+  @override
+  bool operator ==(Object other) {
+    return other is _HomeCarouselOverlayRequest && other.identity == identity;
+  }
+
+  @override
+  int get hashCode => identity.hashCode;
+}
+
+final _homeResolvedCardProvider =
+    Provider.family<HomeCardViewModel, _HomeCardOverlayRequest>((
+  ref,
+  request,
+) {
+  final cacheScope = request.cacheScope;
+  if (!cacheScope.isEmpty) {
+    ref.watch(
+      localStorageDetailCacheChangeProvider.select(
+        (state) => state.revisionForScope(
+          cacheScope,
+          changedFields: _homePresentationCacheChangedFields,
+        ),
+      ),
+    );
+  }
+  final cachedTarget = ref
+      .read(localStorageCacheRepositoryProvider)
+      .peekDetailTarget(request.item.detailTarget);
+  if (cachedTarget == null) {
+    return request.item;
+  }
+  final mergedTarget = mergeCachedHomeDetailTarget(
+    seed: request.item.detailTarget,
+    cached: cachedTarget,
+  );
+  return mergeCachedHomeCardItem(request.item, mergedTarget);
+});
+
+final _homeResolvedCarouselItemProvider =
+    Provider.family<HomeCarouselItemViewModel, _HomeCarouselOverlayRequest>((
+  ref,
+  request,
+) {
+  final cacheScope = request.cacheScope;
+  if (!cacheScope.isEmpty) {
+    ref.watch(
+      localStorageDetailCacheChangeProvider.select(
+        (state) => state.revisionForScope(
+          cacheScope,
+          changedFields: _homePresentationCacheChangedFields,
+        ),
+      ),
+    );
+  }
+  final cachedTarget = ref
+      .read(localStorageCacheRepositoryProvider)
+      .peekDetailTarget(request.item.detailTarget);
+  if (cachedTarget == null) {
+    return request.item;
+  }
+  final mergedTarget = mergeCachedHomeDetailTarget(
+    seed: request.item.detailTarget,
+    cached: cachedTarget,
+  );
+  return mergeCachedHomeCarouselItem(request.item, mergedTarget);
+});
 
 class _HomePageState extends ConsumerState<HomePage>
     with PageActivityMixin<HomePage> {
@@ -52,10 +200,12 @@ class _HomePageState extends ConsumerState<HomePage>
   int _heroFocusBelowRequestVersion = 0;
   HomeModuleConfig? _cachedHeroModule;
   List<HomeModuleConfig> _cachedEnabledModules = const [];
-  AsyncValue<List<HomeSectionViewModel>>? _cachedResolvedSectionsAsync;
+  HomeResolvedSectionsState _cachedResolvedSectionsState =
+      const HomeResolvedSectionsState();
   List<String> _lastFeaturedHeroIds = const [];
   int _observedHomeMetadataAutoRefreshRevision = 0;
   int _scheduledHeroMetadataAutoRefreshRevision = 0;
+  int _scheduledHeroExplicitRefreshRevision = 0;
 
   bool get _showHeroPagerButtons {
     if (kIsWeb) {
@@ -107,14 +257,12 @@ class _HomePageState extends ConsumerState<HomePage>
     if (isPageVisible) {
       _cachedEnabledModules = enabledModules;
     }
-    final watchedResolvedSectionsAsync =
-        isPageVisible ? ref.watch(homeSectionsProvider) : null;
-    final resolvedSectionsAsync = resolveRetainedAsyncValue(
-      activeValue: watchedResolvedSectionsAsync,
-      cachedValue: _cachedResolvedSectionsAsync,
-      cacheValue: (value) => _cachedResolvedSectionsAsync = value,
-      fallbackValue: const AsyncLoading<List<HomeSectionViewModel>>(),
-    );
+    final resolvedSectionsState = isPageVisible
+        ? ref.watch(homeResolvedSectionsProvider)
+        : _cachedResolvedSectionsState;
+    if (isPageVisible) {
+      _cachedResolvedSectionsState = resolvedSectionsState;
+    }
     final heroDisplayMode = ref.watch(
       appSettingsProvider.select((settings) => settings.homeHeroDisplayMode),
     );
@@ -159,11 +307,15 @@ class _HomePageState extends ConsumerState<HomePage>
     final homeMetadataAutoRefreshRevision = ref.watch(
       homeMetadataAutoRefreshRevisionProvider,
     );
+    final homeExplicitRefreshRevision = ref.watch(
+      homeExplicitRefreshRevisionProvider,
+    );
     final effectiveTranslucentEffectsEnabled =
         translucentEffectsEnabled && !performanceLightweightHomeHeroEnabled;
     final effectiveHeroBackgroundEnabled = heroBackgroundEnabled;
-    final resolvedSections = resolvedSectionsAsync.value ?? const [];
-    final hasPendingSections = resolvedSectionsAsync.isLoading;
+    final simplifyHeroBackdrop = performanceLightweightHomeHeroEnabled;
+    final resolvedSections = resolvedSectionsState.sections;
+    final hasPendingSections = resolvedSectionsState.hasPendingSections;
 
     return TvPageFocusScope(
       controller: _tvFocusMemoryController,
@@ -192,8 +344,10 @@ class _HomePageState extends ConsumerState<HomePage>
                 staticHomeHeroEnabled: performanceStaticHomeHeroEnabled,
                 lightweightHomeHeroEnabled:
                     performanceLightweightHomeHeroEnabled,
+                simplifyHeroBackdrop: simplifyHeroBackdrop,
                 homeMetadataAutoRefreshRevision:
                     homeMetadataAutoRefreshRevision,
+                homeExplicitRefreshRevision: homeExplicitRefreshRevision,
                 isTelevision: isTelevision,
                 heroDisplayMode: heroDisplayMode,
               ),
@@ -215,8 +369,10 @@ class _HomePageState extends ConsumerState<HomePage>
     required bool staticHomeHeroEnabled,
     required bool lightweightHomeHeroEnabled,
     required int homeMetadataAutoRefreshRevision,
+    required int homeExplicitRefreshRevision,
     required bool isTelevision,
     required HomeHeroDisplayMode heroDisplayMode,
+    required bool simplifyHeroBackdrop,
   }) {
     if (homeMetadataAutoRefreshRevision !=
         _observedHomeMetadataAutoRefreshRevision) {
@@ -245,17 +401,22 @@ class _HomePageState extends ConsumerState<HomePage>
         featuredItems.map((item) => item.id.trim()).toList(growable: false);
     final heroListChanged = !listEquals(currentHeroIds, _lastFeaturedHeroIds);
     _lastFeaturedHeroIds = currentHeroIds;
+    final shouldForceHeroMetadataRefresh =
+        _scheduledHeroExplicitRefreshRevision != homeExplicitRefreshRevision;
     if (isPageVisible &&
         featuredItems.isNotEmpty &&
-        _scheduledHeroMetadataAutoRefreshRevision !=
-            homeMetadataAutoRefreshRevision) {
+        (_scheduledHeroMetadataAutoRefreshRevision !=
+                homeMetadataAutoRefreshRevision ||
+            shouldForceHeroMetadataRefresh)) {
       _heroPrefetchCoordinator.schedulePrefetch(
         ref: ref,
         targets: featuredItems.map((item) => item.detailTarget),
         isPageActive: () => mounted && isPageVisible,
+        forceMetadataRefresh: shouldForceHeroMetadataRefresh,
       );
       _scheduledHeroMetadataAutoRefreshRevision =
           homeMetadataAutoRefreshRevision;
+      _scheduledHeroExplicitRefreshRevision = homeExplicitRefreshRevision;
     }
     if (heroListChanged) {
       _scheduleHeroSelectionSync(activeHero);
@@ -289,48 +450,58 @@ class _HomePageState extends ConsumerState<HomePage>
         itemBuilder: (context, index) {
           if (hasHeroListSlot && index == 0) {
             if (featuredItems.isNotEmpty) {
-              return Padding(
-                padding: heroDisplayMode.heroPadding(context),
-                child: _FeaturedHero(
-                  key: _featuredHeroKey,
-                  items: featuredItems,
-                  isTelevision: isTelevision,
-                  staticModeEnabled: staticHomeHeroEnabled,
-                  lightweightVisualEnabled: lightweightHomeHeroEnabled,
-                  showPagerButtons: _showHeroPagerButtons || isTelevision,
-                  logoTitleEnabled: heroLogoTitleEnabled,
-                  translucentEffectsEnabled: translucentEffectsEnabled,
-                  displayMode: heroDisplayMode,
-                  focusScopePrefix: 'home:hero',
-                  onFocusBelowControl: _focusBelowHeroContent,
-                  onFocusedItemChanged: _handleFocusedHeroChanged,
+              return RepaintBoundary(
+                child: _HomeKeepAlive(
+                  child: Padding(
+                    padding: heroDisplayMode.heroPadding(context),
+                    child: _FeaturedHero(
+                      key: _featuredHeroKey,
+                      items: featuredItems,
+                      isTelevision: isTelevision,
+                      staticModeEnabled: staticHomeHeroEnabled,
+                      lightweightVisualEnabled: lightweightHomeHeroEnabled,
+                      showPagerButtons: _showHeroPagerButtons || isTelevision,
+                      logoTitleEnabled: heroLogoTitleEnabled,
+                      translucentEffectsEnabled: translucentEffectsEnabled,
+                      displayMode: heroDisplayMode,
+                      focusScopePrefix: 'home:hero',
+                      onFocusBelowControl: _focusBelowHeroContent,
+                      onFocusedItemChanged: _handleFocusedHeroChanged,
+                    ),
+                  ),
                 ),
               );
             }
-            return Padding(
-              padding: heroDisplayMode.heroPadding(context),
-              child: _HomeHeroPlaceholder(displayMode: heroDisplayMode),
+            return RepaintBoundary(
+              child: _HomeKeepAlive(
+                child: Padding(
+                  padding: heroDisplayMode.heroPadding(context),
+                  child: _HomeHeroPlaceholder(displayMode: heroDisplayMode),
+                ),
+              ),
             );
           }
 
           final moduleIndex = index - moduleListOffset;
           if (moduleIndex >= 0 && moduleIndex < visibleModules.length) {
             final module = visibleModules[moduleIndex];
-            return Padding(
-              padding: EdgeInsets.only(
-                top: !heroEnabled && moduleIndex == 0 ? 20 : 0,
-                bottom: 26,
-              ),
-              child: _HomeSectionSlot(
-                key: ValueKey<String>('home:section-slot:${module.id}'),
-                module: module,
-                isPageVisible: isPageVisible,
-                featuredSectionId: featuredSectionId,
-                useHeroNextSectionFocusNode:
-                    module.id == firstFocusableSectionId,
-                heroNextSectionFocusNode: _heroNextSectionFocusNode,
-                homeMetadataAutoRefreshRevision:
-                    homeMetadataAutoRefreshRevision,
+            return RepaintBoundary(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  top: !heroEnabled && moduleIndex == 0 ? 20 : 0,
+                  bottom: 26,
+                ),
+                child: _HomeSectionSlot(
+                  key: ValueKey<String>('home:section-slot:${module.id}'),
+                  module: module,
+                  isPageVisible: isPageVisible,
+                  featuredSectionId: featuredSectionId,
+                  useHeroNextSectionFocusNode:
+                      module.id == firstFocusableSectionId,
+                  heroNextSectionFocusNode: _heroNextSectionFocusNode,
+                  homeMetadataAutoRefreshRevision:
+                      homeMetadataAutoRefreshRevision,
+                ),
               ),
             );
           }
@@ -339,7 +510,7 @@ class _HomePageState extends ConsumerState<HomePage>
           if (trailingIndex == 0) {
             return const SizedBox(height: 6);
           }
-          return const _HomeEditButton();
+          return const RepaintBoundary(child: _HomeEditButton());
         },
       ),
     );
@@ -353,6 +524,7 @@ class _HomePageState extends ConsumerState<HomePage>
           backgroundImageHeaders:
               heroBackgroundEnabled ? selection.imageHeaders : const {},
           translucentEffectsEnabled: translucentEffectsEnabled,
+          simplifyHeroBackdrop: simplifyHeroBackdrop,
           child: child!,
         );
       },

@@ -423,7 +423,137 @@ void main() {
       );
       expect(playbackRepository.clearedResources.single.treatAsScope, isTrue);
     });
+
+    test(
+        'incremental refresh clears removed indexed resources from cache and playback memory',
+        () async {
+      const source = MediaSourceConfig(
+        id: 'nas-refresh-remove',
+        name: '家庭 NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/dav/',
+        enabled: true,
+      );
+      final keepRecord = _nasIndexRecord(
+        source: source,
+        resourceId: 'keep-1',
+        path: '/movies/Keep.mkv',
+      );
+      final removedRecord = _nasIndexRecord(
+        source: source,
+        resourceId: 'removed-1',
+        path: '/movies/Removed.mkv',
+      );
+      final cacheRepository = _RecordingLocalStorageCacheRepository();
+      final playbackRepository = _RecordingPlaybackMemoryRepository();
+      final indexer = _FakeNasMediaIndexer(
+        sourceRecordsBySource: {
+          source.id: [keepRecord, removedRecord],
+        },
+        sourceRecordsAfterRefreshBySource: {
+          source.id: [keepRecord],
+        },
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [source],
+              searchProviders: const [],
+              homeModules: const [],
+            ),
+          ),
+          embyApiClientProvider.overrideWithValue(
+            EmbyApiClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          webDavNasClientProvider
+              .overrideWithValue(_RecordingWebDavNasClient()),
+          quarkSaveClientProvider.overrideWithValue(
+            _RecordingQuarkSaveClient(directories: const []),
+          ),
+          nasMediaIndexerProvider.overrideWithValue(indexer),
+          localStorageCacheRepositoryProvider
+              .overrideWithValue(cacheRepository),
+          playbackMemoryRepositoryProvider
+              .overrideWithValue(playbackRepository),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final repository = container.read(mediaRepositoryProvider);
+      await repository.refreshSource(sourceId: source.id);
+
+      expect(indexer.refreshedSources, [source.id]);
+      expect(cacheRepository.clearedResources, hasLength(1));
+      expect(cacheRepository.clearedResources.single.resourceId, 'removed-1');
+      expect(
+        cacheRepository.clearedResources.single.resourcePath,
+        '/movies/Removed.mkv',
+      );
+      expect(playbackRepository.clearedResources, hasLength(1));
+      expect(
+          playbackRepository.clearedResources.single.resourceId, 'removed-1');
+      expect(
+        playbackRepository.clearedResources.single.resourcePath,
+        '/movies/Removed.mkv',
+      );
+    });
   });
+}
+
+NasMediaIndexRecord _nasIndexRecord({
+  required MediaSourceConfig source,
+  required String resourceId,
+  required String path,
+}) {
+  final fileName = path.split('/').last;
+  final item = MediaItem(
+    id: resourceId,
+    title: fileName,
+    overview: '',
+    posterUrl: '',
+    year: 0,
+    durationLabel: '文件',
+    genres: const [],
+    itemType: 'movie',
+    sourceId: source.id,
+    sourceName: source.name,
+    sourceKind: source.kind,
+    streamUrl: '',
+    actualAddress: path,
+    playbackItemId: resourceId,
+    addedAt: DateTime(2026, 4, 12),
+  );
+  return NasMediaIndexRecord(
+    id: NasMediaIndexRecord.buildRecordId(
+      sourceId: source.id,
+      resourceId: resourceId,
+    ),
+    sourceId: source.id,
+    sectionId: '',
+    sectionName: '',
+    resourceId: resourceId,
+    resourcePath: path,
+    fingerprint: 'fp-$resourceId',
+    fileSizeBytes: 0,
+    modifiedAt: DateTime(2026, 4, 12),
+    indexedAt: DateTime(2026, 4, 12),
+    scrapedAt: DateTime(2026, 4, 12),
+    recognizedTitle: fileName,
+    searchQuery: fileName,
+    originalFileName: fileName,
+    parentTitle: 'movies',
+    recognizedYear: 0,
+    recognizedItemType: item.itemType,
+    preferSeries: false,
+    sidecarStatus: NasMetadataFetchStatus.never,
+    wmdbStatus: NasMetadataFetchStatus.never,
+    tmdbStatus: NasMetadataFetchStatus.never,
+    imdbStatus: NasMetadataFetchStatus.never,
+    item: item,
+  );
 }
 
 NasMediaIndexRecord _quarkIndexRecord({
@@ -549,8 +679,16 @@ class _FakeNasMediaIndexer extends NasMediaIndexer {
   _FakeNasMediaIndexer({
     Map<String, NasMediaIndexRecord> recordsByResourceId = const {},
     Map<String, List<NasMediaIndexRecord>> scopeRecordsByPath = const {},
+    Map<String, List<NasMediaIndexRecord>> sourceRecordsBySource = const {},
+    Map<String, List<NasMediaIndexRecord>> sourceRecordsAfterRefreshBySource =
+        const {},
   })  : _recordsByResourceId = recordsByResourceId,
         _scopeRecordsByPath = scopeRecordsByPath,
+        _sourceRecordsBySource = {
+          for (final entry in sourceRecordsBySource.entries)
+            entry.key: List<NasMediaIndexRecord>.from(entry.value),
+        },
+        _sourceRecordsAfterRefreshBySource = sourceRecordsAfterRefreshBySource,
         super(
           store: SembastNasMediaIndexStore(
             databaseOpener: () => databaseFactoryMemory.openDatabase(
@@ -575,7 +713,11 @@ class _FakeNasMediaIndexer extends NasMediaIndexer {
 
   final Map<String, NasMediaIndexRecord> _recordsByResourceId;
   final Map<String, List<NasMediaIndexRecord>> _scopeRecordsByPath;
+  final Map<String, List<NasMediaIndexRecord>> _sourceRecordsBySource;
+  final Map<String, List<NasMediaIndexRecord>>
+      _sourceRecordsAfterRefreshBySource;
   final List<String> removedScopes = <String>[];
+  final List<String> refreshedSources = <String>[];
 
   @override
   Future<NasMediaIndexRecord?> loadRecord({
@@ -599,6 +741,31 @@ class _FakeNasMediaIndexer extends NasMediaIndexer {
     required String resourcePath,
   }) async {
     return _scopeRecordsByPath[resourcePath] ?? const <NasMediaIndexRecord>[];
+  }
+
+  @override
+  Future<List<NasMediaIndexRecord>> loadSourceRecords(String sourceId) async {
+    return _sourceRecordsBySource[sourceId] ?? const <NasMediaIndexRecord>[];
+  }
+
+  @override
+  Future<void> clearSource(String sourceId) async {
+    _sourceRecordsBySource[sourceId] = const <NasMediaIndexRecord>[];
+  }
+
+  @override
+  Future<void> refreshSource(
+    MediaSourceConfig source, {
+    List<MediaCollection>? scopedCollections,
+    int limitPerCollection = 200,
+    bool forceFullRescan = false,
+  }) async {
+    refreshedSources.add(source.id);
+    final nextRecords = _sourceRecordsAfterRefreshBySource[source.id];
+    if (nextRecords != null) {
+      _sourceRecordsBySource[source.id] =
+          List<NasMediaIndexRecord>.from(nextRecords);
+    }
   }
 }
 

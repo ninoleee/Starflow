@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
+import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -74,6 +75,7 @@ class AppNavigationShell extends ConsumerStatefulWidget {
 }
 
 class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
+  static const int _homeBranchIndex = 0;
   bool _isBottomBarVisible = true;
   ProviderSubscription<bool>? _autoHideNavigationBarSubscription;
 
@@ -119,6 +121,16 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
     setState(() {
       _isBottomBarVisible = visible;
     });
+  }
+
+  void _handleDestinationSelected(int index) {
+    final shouldRefreshHome = index == _homeBranchIndex &&
+        widget.navigationShell.currentIndex == _homeBranchIndex;
+    _setBottomBarVisible(true);
+    widget.navigationShell.goBranch(index);
+    if (shouldRefreshHome) {
+      unawaited(refreshHomeModules(ref));
+    }
   }
 
   @override
@@ -175,10 +187,7 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
                       currentIndex: widget.navigationShell.currentIndex,
                       staticNavigationEnabled:
                           performanceStaticNavigationEnabled,
-                      onDestinationSelected: (index) {
-                        _setBottomBarVisible(true);
-                        widget.navigationShell.goBranch(index);
-                      },
+                      onDestinationSelected: _handleDestinationSelected,
                     ),
                   ),
                 )
@@ -193,10 +202,7 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
                   child: _FloatingNavigationBar(
                     currentIndex: widget.navigationShell.currentIndex,
                     staticNavigationEnabled: performanceStaticNavigationEnabled,
-                    onDestinationSelected: (index) {
-                      _setBottomBarVisible(true);
-                      widget.navigationShell.goBranch(index);
-                    },
+                    onDestinationSelected: _handleDestinationSelected,
                   ),
                 ),
         ),
@@ -209,7 +215,7 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
       body: isTelevision
           ? _TelevisionNavigationShell(
               currentIndex: widget.navigationShell.currentIndex,
-              onDestinationSelected: widget.navigationShell.goBranch,
+              onDestinationSelected: _handleDestinationSelected,
               translucentEffectsEnabled: translucentEffectsEnabled,
               autoHideNavigationBarEnabled: autoHideNavigationBarEnabled,
               staticNavigationEnabled: performanceStaticNavigationEnabled,

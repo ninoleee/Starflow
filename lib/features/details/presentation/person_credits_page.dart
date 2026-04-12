@@ -212,6 +212,7 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
                       message: '加载关联影片失败：$error',
                     ),
                   ),
+                  appPageBottomSpacer(),
                 ],
               ),
             ),

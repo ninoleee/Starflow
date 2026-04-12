@@ -7,6 +7,7 @@ export 'package:starflow/features/details/presentation/detail_page_providers.dar
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/navigation/page_activity_mixin.dart';
 import 'package:starflow/core/navigation/retained_async_controller.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
@@ -3175,6 +3176,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                               },
                             ),
                           ),
+                        appPageBottomSpacer(),
                       ],
                     ),
                   ),

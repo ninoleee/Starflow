@@ -279,6 +279,13 @@ Future<List<MediaDetailTarget>> _resolveCachedHomeDetailTargetsBatch({
       : List<MediaDetailTarget>.unmodifiable(resolved);
 }
 
+MediaDetailTarget mergeCachedHomeDetailTarget({
+  required MediaDetailTarget seed,
+  required MediaDetailTarget cached,
+}) {
+  return _mergeCachedHomeDetailTarget(seed, cached);
+}
+
 MediaDetailTarget _mergeCachedHomeDetailTarget(
   MediaDetailTarget seed,
   MediaDetailTarget cached,
@@ -495,6 +502,13 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
   );
 }
 
+HomeCardViewModel mergeCachedHomeCardItem(
+  HomeCardViewModel item,
+  MediaDetailTarget mergedTarget,
+) {
+  return _mergeCachedHomeCardItem(item, mergedTarget);
+}
+
 HomeCardViewModel _mergeCachedHomeCardItem(
   HomeCardViewModel item,
   MediaDetailTarget mergedTarget,
@@ -516,6 +530,13 @@ HomeCardViewModel _mergeCachedHomeCardItem(
     posterUrl: resolvedPosterUrl,
     detailTarget: mergedTarget,
   );
+}
+
+HomeCarouselItemViewModel mergeCachedHomeCarouselItem(
+  HomeCarouselItemViewModel item,
+  MediaDetailTarget mergedTarget,
+) {
+  return _mergeCachedHomeCarouselItem(item, mergedTarget);
 }
 
 HomeCarouselItemViewModel _mergeCachedHomeCarouselItem(

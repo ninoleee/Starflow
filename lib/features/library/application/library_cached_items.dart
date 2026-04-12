@@ -1,7 +1,32 @@
+import 'dart:convert';
+import 'dart:math' as math;
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
+
+class LibraryVisiblePageItemsResult {
+  const LibraryVisiblePageItemsResult({
+    required this.totalItems,
+    required this.items,
+  });
+
+  final int totalItems;
+  final List<MediaItem> items;
+}
+
+const Set<LocalStorageDetailCacheChangedField>
+    libraryPresentationCacheChangedFields = {
+  LocalStorageDetailCacheChangedField.artwork,
+  LocalStorageDetailCacheChangedField.summary,
+  LocalStorageDetailCacheChangedField.ratings,
+  LocalStorageDetailCacheChangedField.availability,
+  LocalStorageDetailCacheChangedField.playback,
+  LocalStorageDetailCacheChangedField.structure,
+};
 
 Future<List<MediaItem>> resolveLibraryItemsWithCachedDetails({
   required List<MediaItem> items,
@@ -34,6 +59,130 @@ Future<List<MediaItem>> resolveLibraryItemsWithCachedDetails({
   }
 
   return resolved == null ? items : List<MediaItem>.unmodifiable(resolved);
+}
+
+MediaItem mergeLibraryItemWithCachedDetails({
+  required MediaItem item,
+  MediaDetailTarget? cachedTarget,
+}) {
+  if (cachedTarget == null) {
+    return item;
+  }
+  return _mergeCachedLibraryItem(item, cachedTarget);
+}
+
+class LibraryItemOverlayRequest {
+  LibraryItemOverlayRequest(this.item)
+      : seedTarget = MediaDetailTarget.fromMediaItem(item),
+        identity = jsonEncode(item.toJson());
+
+  final MediaItem item;
+  final MediaDetailTarget seedTarget;
+  final String identity;
+
+  LocalStorageDetailCacheScope get cacheScope => LocalStorageDetailCacheScope(
+        lookupKeys: {
+          ...LocalStorageCacheRepository.buildLookupKeys(seedTarget),
+        },
+      );
+
+  @override
+  bool operator ==(Object other) {
+    return other is LibraryItemOverlayRequest && other.identity == identity;
+  }
+
+  @override
+  int get hashCode => identity.hashCode;
+}
+
+final libraryResolvedItemProvider =
+    Provider.family<MediaItem, LibraryItemOverlayRequest>((ref, request) {
+  final cacheScope = request.cacheScope;
+  if (!cacheScope.isEmpty) {
+    ref.watch(
+      localStorageDetailCacheChangeProvider.select(
+        (state) => state.revisionForScope(
+          cacheScope,
+          changedFields: libraryPresentationCacheChangedFields,
+        ),
+      ),
+    );
+  }
+  final cachedTarget = ref
+      .read(localStorageCacheRepositoryProvider)
+      .peekDetailTarget(request.seedTarget);
+  return mergeLibraryItemWithCachedDetails(
+    item: request.item,
+    cachedTarget: cachedTarget,
+  );
+});
+
+List<MediaItem> visibleLibraryPageItems({
+  required List<MediaItem> items,
+  required int page,
+  required int pageSize,
+}) {
+  if (items.isEmpty) {
+    return const <MediaItem>[];
+  }
+  final safePageSize = math.max(1, pageSize);
+  final totalPages = (items.length / safePageSize).ceil();
+  final safePage = totalPages <= 0 ? 0 : page.clamp(0, totalPages - 1);
+  return items
+      .skip(safePage * safePageSize)
+      .take(safePageSize)
+      .toList(growable: false);
+}
+
+LocalStorageDetailCacheScope buildVisibleLibraryPageCacheScope({
+  required List<MediaItem> items,
+  required int page,
+  required int pageSize,
+}) {
+  final visibleItems = visibleLibraryPageItems(
+    items: items,
+    page: page,
+    pageSize: pageSize,
+  );
+  return LocalStorageDetailCacheScope(
+    lookupKeys: {
+      for (final item in visibleItems)
+        ...LocalStorageCacheRepository.buildLookupKeys(
+          MediaDetailTarget.fromMediaItem(item),
+        ),
+    },
+  );
+}
+
+Future<LibraryVisiblePageItemsResult> resolveVisibleLibraryPageItemsWithCachedDetails({
+  required List<MediaItem> items,
+  required int page,
+  required int pageSize,
+  required LocalStorageCacheRepository localStorageCacheRepository,
+}) async {
+  final visibleItems = visibleLibraryPageItems(
+    items: items,
+    page: page,
+    pageSize: pageSize,
+  );
+  if (visibleItems.isEmpty) {
+    return LibraryVisiblePageItemsResult(
+      totalItems: items.length,
+      items: const <MediaItem>[],
+    );
+  }
+  final seedTargets = visibleItems
+      .map(MediaDetailTarget.fromMediaItem)
+      .toList(growable: false);
+  final resolvedItems = await resolveLibraryItemsWithCachedDetails(
+    items: visibleItems,
+    localStorageCacheRepository: localStorageCacheRepository,
+    seedTargets: seedTargets,
+  );
+  return LibraryVisiblePageItemsResult(
+    totalItems: items.length,
+    items: resolvedItems,
+  );
 }
 
 MediaItem _mergeCachedLibraryItem(

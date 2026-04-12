@@ -69,3 +69,13 @@ class HomeSectionViewModel {
   final List<HomeCarouselItemViewModel> carouselItems;
   final HomeSectionViewAllTarget? viewAllTarget;
 }
+
+class HomeResolvedSectionsState {
+  const HomeResolvedSectionsState({
+    this.sections = const <HomeSectionViewModel>[],
+    this.hasPendingSections = false,
+  });
+
+  final List<HomeSectionViewModel> sections;
+  final bool hasPendingSections;
+}

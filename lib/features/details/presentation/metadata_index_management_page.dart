@@ -464,6 +464,7 @@ class _MetadataIndexManagementPageState
 
   void _invalidateReaders() {
     for (final filter in LibraryFilter.values) {
+      ref.invalidate(librarySeedItemsProvider(filter));
       ref.invalidate(libraryItemsProvider(filter));
     }
     ref.invalidate(libraryCollectionItemsProvider);
@@ -843,6 +844,7 @@ class _MetadataIndexManagementPageState
                           onApply: _applyMetadataMatch,
                         ),
                         const SizedBox(height: 24),
+                        appPageBottomSpacer(),
                       ],
                     );
                   },

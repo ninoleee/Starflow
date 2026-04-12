@@ -449,6 +449,11 @@ void main() {
               homeHeroBackgroundEnabled: false,
             ),
           ),
+          homeResolvedSectionsProvider.overrideWith(
+            (ref) => const HomeResolvedSectionsState(
+              sections: [heroSection],
+            ),
+          ),
           homeSectionsProvider.overrideWith((ref) async => [heroSection]),
         ],
         child: const MaterialApp(home: HomePage()),
@@ -559,6 +564,11 @@ void main() {
           ),
           homeSectionsProvider.overrideWith(
             (ref) async => [featuredSection, regularSection],
+          ),
+          homeResolvedSectionsProvider.overrideWith(
+            (ref) => const HomeResolvedSectionsState(
+              sections: [featuredSection, regularSection],
+            ),
           ),
           homeSectionProvider.overrideWith((ref, moduleId) async {
             return switch (moduleId) {

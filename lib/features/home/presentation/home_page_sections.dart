@@ -22,12 +22,16 @@ class _HomeSectionSlot extends ConsumerStatefulWidget {
   ConsumerState<_HomeSectionSlot> createState() => _HomeSectionSlotState();
 }
 
-class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot> {
+class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
+    with AutomaticKeepAliveClientMixin<_HomeSectionSlot> {
   AsyncValue<HomeSectionViewModel?>? _cachedState;
   final DetailRatingPrefetchCoordinator _ratingPrefetchCoordinator =
       DetailRatingPrefetchCoordinator();
   int _observedHomeMetadataAutoRefreshRevision = 0;
   int _scheduledHomeMetadataAutoRefreshRevision = 0;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void didUpdateWidget(covariant _HomeSectionSlot oldWidget) {
@@ -39,6 +43,7 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final activeState = widget.isPageVisible
         ? ref.watch(homeSectionProvider(widget.module.id))
         : null;
@@ -137,15 +142,9 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot> {
                           );
                         }
                         final item = section.items[index];
-                        return MediaPosterTile(
-                          title: item.title,
-                          subtitle: item.subtitle,
-                          posterUrl: item.posterUrl,
-                          imageBadgeText: _resolveHomePosterBadgeText(
-                            module: widget.module,
-                            item: item,
-                          ),
-                          tvPosterFocusOutlineOnly: true,
+                        return _HomePosterTile(
+                          module: widget.module,
+                          item: item,
                           focusNode:
                               widget.useHeroNextSectionFocusNode && index == 0
                                   ? widget.heroNextSectionFocusNode
@@ -153,17 +152,6 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot> {
                           focusId:
                               'home:section:${section.id}:item:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
                           autofocus: index == 0,
-                          posterHeaders: item.detailTarget.posterHeaders,
-                          posterFallbackSources:
-                              _buildPosterFallbackSources(item.detailTarget),
-                          titleColor: Colors.white,
-                          subtitleColor: const Color(0xFF98A7C2),
-                          onTap: () {
-                            context.pushNamed(
-                              'detail',
-                              extra: item.detailTarget,
-                            );
-                          },
                         );
                       },
                     ),
@@ -193,17 +181,66 @@ String _resolveHomePosterBadgeText({
   );
 }
 
+class _HomePosterTile extends ConsumerWidget {
+  const _HomePosterTile({
+    required this.module,
+    required this.item,
+    this.focusNode,
+    this.focusId,
+    required this.autofocus,
+  });
+
+  final HomeModuleConfig module;
+  final HomeCardViewModel item;
+  final FocusNode? focusNode;
+  final String? focusId;
+  final bool autofocus;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final resolvedItem = ref.watch(
+      _homeResolvedCardProvider(_HomeCardOverlayRequest(item)),
+    );
+    return MediaPosterTile(
+      title: resolvedItem.title,
+      subtitle: resolvedItem.subtitle,
+      posterUrl: resolvedItem.posterUrl,
+      imageBadgeText: _resolveHomePosterBadgeText(
+        module: module,
+        item: resolvedItem,
+      ),
+      tvPosterFocusOutlineOnly: true,
+      focusNode: focusNode,
+      focusId: focusId,
+      autofocus: autofocus,
+      posterHeaders: resolvedItem.detailTarget.posterHeaders,
+      posterFallbackSources:
+          _buildPosterFallbackSources(resolvedItem.detailTarget),
+      titleColor: Colors.white,
+      subtitleColor: const Color(0xFF98A7C2),
+      onTap: () {
+        context.pushNamed(
+          'detail',
+          extra: resolvedItem.detailTarget,
+        );
+      },
+    );
+  }
+}
+
 class _HomeShell extends StatelessWidget {
   const _HomeShell({
     required this.backgroundImageUrl,
     this.backgroundImageHeaders = const {},
     this.translucentEffectsEnabled = true,
+    this.simplifyHeroBackdrop = false,
     required this.child,
   });
 
   final String backgroundImageUrl;
   final Map<String, String> backgroundImageHeaders;
   final bool translucentEffectsEnabled;
+  final bool simplifyHeroBackdrop;
   final Widget child;
 
   @override
@@ -219,25 +256,16 @@ class _HomeShell extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        _DynamicHeroBackdrop(
-          imageUrl: backgroundImageUrl,
-          imageHeaders: backgroundImageHeaders,
-          translucentEffectsEnabled: translucentEffectsEnabled,
-        ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Colors.black.withValues(alpha: 0.08),
-                const Color(0x7A07111D),
-                const Color(0x52030914),
-                Colors.transparent,
-              ],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              stops: const [0, 0.42, 0.82, 1],
-            ),
+        RepaintBoundary(
+          child: _DynamicHeroBackdrop(
+            imageUrl: backgroundImageUrl,
+            imageHeaders: backgroundImageHeaders,
+            translucentEffectsEnabled: translucentEffectsEnabled,
+            simplifyVisualEffects: simplifyHeroBackdrop,
           ),
+        ),
+        const RepaintBoundary(
+          child: _HomeShellForegroundMask(),
         ),
         Padding(
           padding: verticalInsets,
@@ -248,28 +276,53 @@ class _HomeShell extends StatelessWidget {
   }
 }
 
+class _HomeShellForegroundMask extends StatelessWidget {
+  const _HomeShellForegroundMask();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.black.withValues(alpha: 0.08),
+            const Color(0x7A07111D),
+            const Color(0x52030914),
+            Colors.transparent,
+          ],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          stops: const [0, 0.42, 0.82, 1],
+        ),
+      ),
+    );
+  }
+}
+
 class _DynamicHeroBackdrop extends StatelessWidget {
   const _DynamicHeroBackdrop({
     required this.imageUrl,
     this.imageHeaders = const {},
     this.translucentEffectsEnabled = true,
+    this.simplifyVisualEffects = false,
   });
 
   final String imageUrl;
   final Map<String, String> imageHeaders;
   final bool translucentEffectsEnabled;
+  final bool simplifyVisualEffects;
 
   @override
   Widget build(BuildContext context) {
-    if (!translucentEffectsEnabled) {
-      return IgnorePointer(
-        child: _DynamicHeroBackdropLayer(
-          key: ValueKey(imageUrl.trim().isEmpty ? 'empty' : imageUrl),
-          imageUrl: imageUrl,
-          imageHeaders: imageHeaders,
-          translucentEffectsEnabled: translucentEffectsEnabled,
-        ),
-      );
+    final layer = _DynamicHeroBackdropLayer(
+      key: ValueKey(imageUrl.trim().isEmpty ? 'empty' : imageUrl),
+      imageUrl: imageUrl,
+      imageHeaders: imageHeaders,
+      translucentEffectsEnabled: translucentEffectsEnabled,
+      simplifyVisualEffects: simplifyVisualEffects,
+    );
+    if (!translucentEffectsEnabled || simplifyVisualEffects) {
+      return IgnorePointer(child: layer);
     }
 
     return IgnorePointer(
@@ -280,13 +333,34 @@ class _DynamicHeroBackdrop extends StatelessWidget {
         transitionBuilder: (child, animation) {
           return FadeTransition(opacity: animation, child: child);
         },
-        child: _DynamicHeroBackdropLayer(
-          key: ValueKey(imageUrl.trim().isEmpty ? 'empty' : imageUrl),
-          imageUrl: imageUrl,
-          imageHeaders: imageHeaders,
-          translucentEffectsEnabled: translucentEffectsEnabled,
-        ),
+        child: layer,
       ),
+    );
+  }
+}
+
+@visibleForTesting
+class HomeHeroBackdrop extends StatelessWidget {
+  const HomeHeroBackdrop({
+    super.key,
+    required this.imageUrl,
+    this.imageHeaders = const {},
+    this.translucentEffectsEnabled = true,
+    this.simplifyVisualEffects = false,
+  });
+
+  final String imageUrl;
+  final Map<String, String> imageHeaders;
+  final bool translucentEffectsEnabled;
+  final bool simplifyVisualEffects;
+
+  @override
+  Widget build(BuildContext context) {
+    return _DynamicHeroBackdrop(
+      imageUrl: imageUrl,
+      imageHeaders: imageHeaders,
+      translucentEffectsEnabled: translucentEffectsEnabled,
+      simplifyVisualEffects: simplifyVisualEffects,
     );
   }
 }
@@ -297,64 +371,73 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
     required this.imageUrl,
     this.imageHeaders = const {},
     this.translucentEffectsEnabled = true,
+    this.simplifyVisualEffects = false,
   });
 
   final String imageUrl;
   final Map<String, String> imageHeaders;
   final bool translucentEffectsEnabled;
+  final bool simplifyVisualEffects;
 
   @override
   Widget build(BuildContext context) {
     final viewportSize = MediaQuery.sizeOf(context);
     final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final backdropScale = simplifyVisualEffects ? 1.0 : 1.16;
     final cacheWidth = _resolveCacheDimension(
       viewportSize.width,
       devicePixelRatio,
-      scale: 1.16,
-      max: 1920,
+      scale: backdropScale,
+      max: simplifyVisualEffects ? 1440 : 1920,
     );
     final cacheHeight = _resolveCacheDimension(
       viewportSize.height,
       devicePixelRatio,
-      scale: 1.16,
-      max: 1200,
+      scale: backdropScale,
+      max: simplifyVisualEffects ? 900 : 1200,
     );
+    final trimmedUrl = imageUrl.trim();
+    Widget? backgroundImage;
+    if (trimmedUrl.isNotEmpty) {
+      final image = AppNetworkImage(
+        trimmedUrl,
+        headers: imageHeaders,
+        fit: BoxFit.cover,
+        alignment: Alignment.topCenter,
+        cacheWidth: cacheWidth,
+        cacheHeight: cacheHeight,
+      );
+      if (simplifyVisualEffects) {
+        backgroundImage = Opacity(
+          opacity: 0.64,
+          child: image,
+        );
+      } else if (translucentEffectsEnabled) {
+        backgroundImage = Transform.scale(
+          scale: backdropScale,
+          child: ImageFiltered(
+            imageFilter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+            child: Opacity(
+              opacity: 0.72,
+              child: image,
+            ),
+          ),
+        );
+      } else {
+        backgroundImage = Opacity(
+          opacity: 0.12,
+          child: image,
+        );
+      }
+    }
+
     return DecoratedBox(
       decoration: const BoxDecoration(color: Color(0xFF030914)),
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (imageUrl.trim().isNotEmpty)
-            Transform.scale(
-              scale: 1.16,
-              child: translucentEffectsEnabled
-                  ? ImageFiltered(
-                      imageFilter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
-                      child: Opacity(
-                        opacity: 0.72,
-                        child: AppNetworkImage(
-                          imageUrl,
-                          headers: imageHeaders,
-                          fit: BoxFit.cover,
-                          alignment: Alignment.topCenter,
-                          cacheWidth: cacheWidth,
-                          cacheHeight: cacheHeight,
-                        ),
-                      ),
-                    )
-                  : Opacity(
-                      opacity: 0.12,
-                      child: AppNetworkImage(
-                        imageUrl,
-                        headers: imageHeaders,
-                        fit: BoxFit.cover,
-                        alignment: Alignment.topCenter,
-                        cacheWidth: cacheWidth,
-                        cacheHeight: cacheHeight,
-                      ),
-                    ),
-            ),
-          if (!translucentEffectsEnabled)
+          if (backgroundImage != null) backgroundImage,
+          if (!translucentEffectsEnabled && !simplifyVisualEffects)
             DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -746,16 +829,13 @@ class _HomeCarouselState extends ConsumerState<_HomeCarousel> {
             final item = items[index];
             return SizedBox(
               width: 320,
-              child: TvFocusableAction(
+              child: _HomeCarouselTile(
+                item: item,
+                isTelevision: true,
                 focusId:
                     '${widget.focusScopePrefix}:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
                 focusNode: index == 0 ? widget.firstItemFocusNode : null,
                 autofocus: index == 0,
-                onPressed: () {
-                  context.pushNamed('detail', extra: item.detailTarget);
-                },
-                borderRadius: BorderRadius.circular(18),
-                child: _HomeCarouselCard(item: item),
               ),
             );
           },
@@ -772,16 +852,55 @@ class _HomeCarouselState extends ConsumerState<_HomeCarousel> {
           final item = items[index];
           return Padding(
             padding: EdgeInsets.only(right: index == items.length - 1 ? 0 : 6),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(18),
-              onTap: () {
-                context.pushNamed('detail', extra: item.detailTarget);
-              },
-              child: _HomeCarouselCard(item: item),
+            child: _HomeCarouselTile(
+              item: item,
+              isTelevision: false,
             ),
           );
         },
       ),
+    );
+  }
+}
+
+class _HomeCarouselTile extends ConsumerWidget {
+  const _HomeCarouselTile({
+    required this.item,
+    required this.isTelevision,
+    this.focusId,
+    this.focusNode,
+    this.autofocus = false,
+  });
+
+  final HomeCarouselItemViewModel item;
+  final bool isTelevision;
+  final String? focusId;
+  final FocusNode? focusNode;
+  final bool autofocus;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final resolvedItem = ref.watch(
+      _homeResolvedCarouselItemProvider(_HomeCarouselOverlayRequest(item)),
+    );
+    if (isTelevision) {
+      return TvFocusableAction(
+        focusId: focusId,
+        focusNode: focusNode,
+        autofocus: autofocus,
+        onPressed: () {
+          context.pushNamed('detail', extra: resolvedItem.detailTarget);
+        },
+        borderRadius: BorderRadius.circular(18),
+        child: _HomeCarouselCard(item: resolvedItem),
+      );
+    }
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: () {
+        context.pushNamed('detail', extra: resolvedItem.detailTarget);
+      },
+      child: _HomeCarouselCard(item: resolvedItem),
     );
   }
 }

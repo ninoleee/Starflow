@@ -80,6 +80,7 @@ class _HomeModuleCollectionPageState
                         const Center(child: CircularProgressIndicator()),
                     error: (error, stackTrace) => Text('加载失败：$error'),
                   ),
+                  appPageBottomSpacer(),
                 ],
               ),
             ),

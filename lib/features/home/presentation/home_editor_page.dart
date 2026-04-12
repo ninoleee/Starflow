@@ -303,6 +303,7 @@ class HomeEditorPage extends ConsumerWidget {
                     ],
                   ),
                 ),
+                appPageBottomSpacer(),
               ],
             ),
           ),

@@ -29,6 +29,7 @@ class HomeHeroPrefetchCoordinator {
     required WidgetRef ref,
     required Iterable<MediaDetailTarget> targets,
     required bool Function() isPageActive,
+    bool forceMetadataRefresh = false,
   }) {
     if (!isPageActive() || ref.read(backgroundEnrichmentSuspendedProvider)) {
       return;
@@ -63,6 +64,7 @@ class HomeHeroPrefetchCoordinator {
           targets: candidates,
           sessionId: sessionId,
           isPageActive: isPageActive,
+          forceMetadataRefresh: forceMetadataRefresh,
         ),
       );
     });
@@ -83,6 +85,7 @@ class HomeHeroPrefetchCoordinator {
     required List<MediaDetailTarget> targets,
     required int sessionId,
     required bool Function() isPageActive,
+    required bool forceMetadataRefresh,
   }) async {
     if (!_isRefreshSessionActive(
       ref: ref,
@@ -99,6 +102,7 @@ class HomeHeroPrefetchCoordinator {
             target: target,
             sessionId: sessionId,
             isPageActive: isPageActive,
+            forceMetadataRefresh: forceMetadataRefresh,
           ),
         ),
         eagerError: false,
@@ -113,6 +117,7 @@ class HomeHeroPrefetchCoordinator {
     required MediaDetailTarget target,
     required int sessionId,
     required bool Function() isPageActive,
+    required bool forceMetadataRefresh,
   }) async {
     if (!_isRefreshSessionActive(
       ref: ref,
@@ -171,17 +176,19 @@ class HomeHeroPrefetchCoordinator {
         return;
       }
 
-      final refreshStatus =
-          await cacheRepository.loadDetailMetadataRefreshStatus(target);
-      if (!_isRefreshSessionActive(
-        ref: ref,
-        sessionId: sessionId,
-        isPageActive: isPageActive,
-      )) {
-        return;
-      }
-      if (refreshStatus != DetailMetadataRefreshStatus.never) {
-        return;
+      if (!forceMetadataRefresh) {
+        final refreshStatus =
+            await cacheRepository.loadDetailMetadataRefreshStatus(target);
+        if (!_isRefreshSessionActive(
+          ref: ref,
+          sessionId: sessionId,
+          isPageActive: isPageActive,
+        )) {
+          return;
+        }
+        if (refreshStatus != DetailMetadataRefreshStatus.never) {
+          return;
+        }
       }
 
       try {

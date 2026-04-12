@@ -4,6 +4,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
+import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -15,7 +16,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(
-      'home section provider ignores unrelated cache scope updates and avoids refetching seed data',
+      'home section provider stays stable across cache writes until an explicit refresh boundary',
       () async {
     final discoveryRepository = _CountingDiscoveryRepository(
       entries: const [
@@ -105,7 +106,17 @@ void main() {
       homeSectionProvider(module.id).future,
     );
     expect(updatedSection, isNotNull);
-    expect(updatedSection!.items.single.title, '肖申克的救赎（缓存）');
+    expect(updatedSection!.items.single.title, '肖申克的救赎');
+    expect(discoveryRepository.fetchEntriesCallCount, 1);
+    expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
+
+    container.read(homeMetadataAutoRefreshRevisionProvider.notifier).state++;
+
+    final refreshedSection = await container.read(
+      homeSectionProvider(module.id).future,
+    );
+    expect(refreshedSection, isNotNull);
+    expect(refreshedSection!.items.single.title, '肖申克的救赎（缓存）');
     expect(discoveryRepository.fetchEntriesCallCount, 1);
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 2);
   });

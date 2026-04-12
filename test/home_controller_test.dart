@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,6 +6,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
+import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
@@ -30,7 +32,7 @@ void main() {
 
     test('HomePageController resolveSections keeps order and filters null',
         () async {
-      const controller = HomePageController();
+      final controller = HomePageController();
       final modules = [
         const HomeModuleConfig(
           id: 'module-a',
@@ -81,6 +83,115 @@ void main() {
         'module-a',
         'module-c',
       ]);
+    });
+
+    test('resolveSections reuses previous list when sections unchanged',
+        () async {
+      final controller = HomePageController();
+      const modules = [
+        HomeModuleConfig(
+          id: 'module-a',
+          type: HomeModuleType.recentlyAdded,
+          title: '最近新增',
+          enabled: true,
+        )
+      ];
+      const section = HomeSectionViewModel(
+        id: 'module-a',
+        title: 'A',
+        subtitle: '',
+        emptyMessage: '无',
+        layout: HomeSectionLayout.posterRail,
+      );
+
+      final first = await controller.resolveSections(
+        enabledModules: modules,
+        loadSection: (_) async => section,
+      );
+      final second = await controller.resolveSections(
+        enabledModules: modules,
+        loadSection: (_) async => section,
+      );
+
+      expect(identical(first, second), isTrue);
+    });
+
+    test('resolveSectionStates reuses previous state when snapshots unchanged',
+        () {
+      final controller = HomePageController();
+      const modules = [
+        HomeModuleConfig(
+          id: 'module-a',
+          type: HomeModuleType.recentlyAdded,
+          title: '最近新增',
+          enabled: true,
+        ),
+      ];
+      const section = HomeSectionViewModel(
+        id: 'module-a',
+        title: 'A',
+        subtitle: '',
+        emptyMessage: '无',
+        layout: HomeSectionLayout.posterRail,
+      );
+
+      final first = controller.resolveSectionStates(
+        enabledModules: modules,
+        loadSectionState: (_) => const AsyncData(section),
+      );
+      final second = controller.resolveSectionStates(
+        enabledModules: modules,
+        loadSectionState: (_) => const AsyncData(section),
+      );
+
+      expect(identical(first, second), isTrue);
+      expect(identical(first.sections, second.sections), isTrue);
+      expect(first.hasPendingSections, isFalse);
+    });
+
+    testWidgets('refreshHomeModules bumps home refresh revisions', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: Consumer(
+              builder: (context, ref, child) {
+                final metadataRevision =
+                    ref.watch(homeMetadataAutoRefreshRevisionProvider);
+                final explicitRevision =
+                    ref.watch(homeExplicitRefreshRevisionProvider);
+                return Column(
+                  children: [
+                    Text(
+                      'metadata:$metadataRevision',
+                      textDirection: TextDirection.ltr,
+                    ),
+                    Text(
+                      'explicit:$explicitRevision',
+                      textDirection: TextDirection.ltr,
+                    ),
+                    TextButton(
+                      onPressed: () => refreshHomeModules(ref),
+                      child: const Text('refresh'),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('metadata:1'), findsOneWidget);
+      expect(find.text('explicit:0'), findsOneWidget);
+
+      await tester.tap(find.text('refresh'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 160));
+
+      expect(find.text('metadata:2'), findsOneWidget);
+      expect(find.text('explicit:1'), findsOneWidget);
     });
   });
 

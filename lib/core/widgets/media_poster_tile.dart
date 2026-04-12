@@ -214,23 +214,11 @@ class MediaPosterTile extends ConsumerWidget {
   }
 
   Widget _buildPosterPlaceholder(ThemeData theme) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        gradient: LinearGradient(
-          colors: [
-            theme.colorScheme.surfaceContainerHighest,
-            theme.colorScheme.surfaceContainer,
-          ],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ),
-      ),
-      child: Center(
-        child: Icon(
-          Icons.movie_creation_outlined,
-          size: 32,
-          color: theme.colorScheme.primary,
+    return RepaintBoundary(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(16),
         ),
       ),
     );

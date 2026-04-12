@@ -4,6 +4,7 @@ import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
+import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/library/application/library_refresh_revision.dart';
 import 'package:starflow/features/library/application/nas_media_index_revision.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
@@ -13,7 +14,6 @@ import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
-import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'home_settings_slices.dart';
@@ -24,7 +24,7 @@ part 'home_feed_repository.dart';
 const int _defaultHomeSectionItemLimit = 20;
 
 class HomePageController {
-  const HomePageController();
+  HomePageController();
 
   Future<List<HomeSectionViewModel>> resolveSections({
     required List<HomeModuleConfig> enabledModules,
@@ -34,7 +34,71 @@ class HomePageController {
     final sections = await Future.wait(
       enabledModules.map(loadSection),
     );
-    return sections.whereType<HomeSectionViewModel>().toList(growable: false);
+    return _resolveCanonicalSections(
+      sections.whereType<HomeSectionViewModel>(),
+    );
+  }
+
+  HomeResolvedSectionsState resolveSectionStates({
+    required List<HomeModuleConfig> enabledModules,
+    required AsyncValue<HomeSectionViewModel?> Function(HomeModuleConfig module)
+        loadSectionState,
+  }) {
+    var hasPendingSections = false;
+    final sections = <HomeSectionViewModel>[];
+    for (final module in enabledModules) {
+      final sectionState = loadSectionState(module);
+      if (sectionState.isLoading) {
+        hasPendingSections = true;
+      }
+      if (!sectionState.hasValue) {
+        continue;
+      }
+      final section = sectionState.value;
+      if (section != null) {
+        sections.add(section);
+      }
+    }
+
+    final resolvedSections = _resolveCanonicalSections(sections);
+    final cachedState = _cachedResolvedSectionsState;
+    if (identical(resolvedSections, cachedState.sections) &&
+        hasPendingSections == cachedState.hasPendingSections) {
+      return cachedState;
+    }
+
+    _cachedResolvedSectionsState = HomeResolvedSectionsState(
+      sections: resolvedSections,
+      hasPendingSections: hasPendingSections,
+    );
+    return _cachedResolvedSectionsState;
+  }
+
+  bool _sectionsUnchanged(List<HomeSectionViewModel> sections) {
+    if (sections.length != _cachedSections.length) {
+      return false;
+    }
+    for (var i = 0; i < sections.length; i += 1) {
+      if (!identical(sections[i], _cachedSections[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  List<HomeSectionViewModel> _cachedSections = const [];
+  HomeResolvedSectionsState _cachedResolvedSectionsState =
+      const HomeResolvedSectionsState();
+
+  List<HomeSectionViewModel> _resolveCanonicalSections(
+    Iterable<HomeSectionViewModel> sections,
+  ) {
+    final mergedSections = sections.toList(growable: false);
+    if (_sectionsUnchanged(mergedSections)) {
+      return _cachedSections;
+    }
+    _cachedSections = List<HomeSectionViewModel>.unmodifiable(mergedSections);
+    return _cachedSections;
   }
 
   void primeModulesWithReader(
@@ -62,6 +126,8 @@ class HomePageController {
     ref.invalidate(_homeSectionSeedProvider);
     ref.invalidate(homeSectionProvider);
     ref.invalidate(homeSectionsProvider);
+    ref.read(homeExplicitRefreshRevisionProvider.notifier).state += 1;
+    ref.read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
     primeModulesWithReader(ref.read);
     await Future<void>.delayed(const Duration(milliseconds: 140));
   }
@@ -72,7 +138,7 @@ final homeFeedRepositoryProvider = Provider<HomeFeedRepository>((ref) {
 });
 
 final homePageControllerProvider = Provider<HomePageController>((ref) {
-  return const HomePageController();
+  return HomePageController();
 });
 
 final homeEnabledModulesProvider = Provider<List<HomeModuleConfig>>((ref) {
@@ -168,18 +234,14 @@ final _homeSectionSeedProvider = FutureProvider.autoDispose
 
 final homeSectionProvider =
     FutureProvider.family<HomeSectionViewModel?, String>((ref, moduleId) async {
+  // Keep Home visually stable after initial load. Cached metadata should only
+  // be reapplied on explicit refresh boundaries such as startup/settings save,
+  // instead of every background cache write.
+  ref.watch(homeMetadataAutoRefreshRevisionProvider);
   final seedSection =
       await ref.watch(_homeSectionSeedProvider(moduleId).future);
   if (seedSection == null) {
     return null;
-  }
-  final cacheScope = _homeSectionDetailCacheScope(seedSection);
-  if (!cacheScope.isEmpty) {
-    ref.watch(
-      localStorageDetailCacheChangeProvider.select(
-        (state) => state.revisionForScope(cacheScope),
-      ),
-    );
   }
   return ref.read(homeFeedRepositoryProvider).applyCachedSection(
         section: seedSection,
@@ -199,6 +261,14 @@ final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
       );
 });
 
+final homeResolvedSectionsProvider = Provider<HomeResolvedSectionsState>((ref) {
+  final enabledModules = ref.watch(homeEnabledModulesProvider);
+  return ref.read(homePageControllerProvider).resolveSectionStates(
+        enabledModules: enabledModules,
+        loadSectionState: (module) => ref.watch(homeSectionProvider(module.id)),
+      );
+});
+
 void primeHomeModules(Ref ref) {
   ref.read(homePageControllerProvider).primeModulesWithReader(ref.read);
 }
@@ -209,17 +279,4 @@ void primeHomeModulesFromWidget(WidgetRef ref) {
 
 Future<void> refreshHomeModules(WidgetRef ref) async {
   return ref.read(homePageControllerProvider).refreshModules(ref);
-}
-
-LocalStorageDetailCacheScope _homeSectionDetailCacheScope(
-  HomeSectionViewModel section,
-) {
-  if (section.layout == HomeSectionLayout.posterRail) {
-    return LocalStorageCacheRepository.buildScopeForTargets(
-      section.items.map((item) => item.detailTarget),
-    );
-  }
-  return LocalStorageCacheRepository.buildScopeForTargets(
-    section.carouselItems.map((item) => item.detailTarget),
-  );
 }

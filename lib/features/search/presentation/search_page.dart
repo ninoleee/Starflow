@@ -841,7 +841,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
                           childCount: displayedResults.length,
                         ),
                       ),
-                    const SliverToBoxAdapter(child: SizedBox(height: 8)),
+                    appPageBottomSliverSpacer(),
                   ],
                 ),
               ),

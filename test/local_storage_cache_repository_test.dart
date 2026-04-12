@@ -234,6 +234,7 @@ void main() {
     expect(notifications, hasLength(1));
     expect(notifications.single.invalidateAll, isFalse);
     expect(notifications.single.scope.sourceIds, contains('emby-main'));
+    expect(notifications.single.scope.recordIds, isNotEmpty);
     expect(
       notifications.single.scope.lookupKeys,
       contains('library|emby-main|movie-1'),
@@ -242,6 +243,55 @@ void main() {
       notifications.single.scope.lookupKeys,
       contains('library|emby-main|movie-2'),
     );
+    expect(
+      notifications.single.changedFields,
+      contains(LocalStorageDetailCacheChangedField.artwork),
+    );
+    expect(
+      notifications.single.changedFields,
+      contains(LocalStorageDetailCacheChangedField.summary),
+    );
+  });
+
+  test('skips detail cache write notifications when content is unchanged',
+      () async {
+    final prefs = await SharedPreferences.getInstance();
+    final notifications = <LocalStorageDetailCacheChangeEvent>[];
+    final repository = LocalStorageCacheRepository(
+      sharedPreferences: prefs,
+      notifyDetailCacheChanged: notifications.add,
+    );
+    addTearDown(repository.dispose);
+
+    const seedTarget = MediaDetailTarget(
+      title: 'Same Movie',
+      posterUrl: '',
+      overview: '',
+      sourceId: 'emby-main',
+      itemId: 'movie-1',
+      itemType: 'movie',
+    );
+    const resolvedTarget = MediaDetailTarget(
+      title: 'Same Movie',
+      posterUrl: 'https://image.example.com/movie.jpg',
+      overview: 'cached',
+      sourceId: 'emby-main',
+      itemId: 'movie-1',
+      itemType: 'movie',
+      sourceKind: MediaSourceKind.emby,
+      sourceName: 'Living Room',
+    );
+
+    await repository.saveDetailTarget(
+      seedTarget: seedTarget,
+      resolvedTarget: resolvedTarget,
+    );
+    await repository.saveDetailTarget(
+      seedTarget: seedTarget,
+      resolvedTarget: resolvedTarget,
+    );
+
+    expect(notifications, hasLength(1));
   });
 
   test(
