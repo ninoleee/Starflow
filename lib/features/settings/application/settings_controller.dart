@@ -26,16 +26,26 @@ final appSettingsProvider = Provider<AppSettings>((ref) {
       SeedData.defaultSettings;
 });
 
+bool? _resolveTelevisionState(AsyncValue<bool> state) {
+  return state is AsyncData<bool> ? state.value : null;
+}
+
 final effectivePerformanceLiveItemHeroOverlayEnabledProvider = Provider<bool>((
   ref,
 ) {
-  final configuredEnabled = ref.watch(
-    appSettingsProvider.select(
-      (settings) => settings.performanceLiveItemHeroOverlayEnabled,
-    ),
+  final settings = ref.watch(appSettingsProvider);
+  final isTelevision = _resolveTelevisionState(ref.watch(isTelevisionProvider));
+  return settings.effectivePerformanceLiveItemHeroOverlayEnabled(
+    isTelevision: isTelevision,
   );
-  final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
-  return configuredEnabled && !isTelevision;
+});
+
+final effectivePlaybackBackgroundEnabledProvider = Provider<bool>((ref) {
+  final settings = ref.watch(appSettingsProvider);
+  final isTelevision = _resolveTelevisionState(ref.watch(isTelevisionProvider));
+  return settings.effectiveBackgroundPlaybackEnabled(
+    isTelevision: isTelevision,
+  );
 });
 
 class SettingsController extends AsyncNotifier<AppSettings> {
@@ -234,6 +244,10 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     required PlaybackEngine playbackEngine,
     required PlaybackDecodeMode playbackDecodeMode,
     required PlaybackMpvQualityPreset playbackMpvQualityPreset,
+    bool? playbackMpvDoubleTapToSeekEnabled,
+    bool? playbackMpvSwipeToSeekEnabled,
+    bool? playbackMpvLongPressSpeedBoostEnabled,
+    bool? playbackMpvStallAutoRecoveryEnabled,
   }) async {
     final current = state.value ?? await _repository.load();
     if (current.playbackBackgroundPlaybackEnabled &&
@@ -254,6 +268,16 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         playbackEngine: playbackEngine,
         playbackDecodeMode: playbackDecodeMode,
         playbackMpvQualityPreset: playbackMpvQualityPreset,
+        playbackMpvDoubleTapToSeekEnabled: playbackMpvDoubleTapToSeekEnabled ??
+            current.playbackMpvDoubleTapToSeekEnabled,
+        playbackMpvSwipeToSeekEnabled: playbackMpvSwipeToSeekEnabled ??
+            current.playbackMpvSwipeToSeekEnabled,
+        playbackMpvLongPressSpeedBoostEnabled:
+            playbackMpvLongPressSpeedBoostEnabled ??
+                current.playbackMpvLongPressSpeedBoostEnabled,
+        playbackMpvStallAutoRecoveryEnabled:
+            playbackMpvStallAutoRecoveryEnabled ??
+                current.playbackMpvStallAutoRecoveryEnabled,
         playbackTraceEnabled: false,
         subtitleSearchTraceEnabled: false,
       ),
@@ -303,40 +327,9 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   Future<void> setHighPerformanceModeEnabled(bool enabled) async {
     final current = state.value ?? await _repository.load();
-    final next = enabled && !current.highPerformanceModeEnabled
-        ? current.copyWith(
-            highPerformanceModeEnabled: true,
-            translucentEffectsEnabled: false,
-            autoHideNavigationBarEnabled: false,
-            homeHeroBackgroundEnabled: false,
-            performanceReduceDecorationsEnabled: true,
-            performanceReduceMotionEnabled: true,
-            performanceStaticNavigationEnabled: true,
-            performanceLightweightTvFocusEnabled: true,
-            performanceStaticHomeHeroEnabled: true,
-            performanceLightweightHomeHeroEnabled: true,
-            performanceLiveItemHeroOverlayEnabled: false,
-            performanceSlimDetailHeroEnabled: true,
-            performanceLeanPlaybackUiEnabled: true,
-            performanceAggressivePlaybackTuningEnabled: true,
-            performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          )
-        : enabled
-            ? current.copyWith(highPerformanceModeEnabled: true)
-            : current.copyWith(
-                highPerformanceModeEnabled: false,
-                performanceReduceDecorationsEnabled: false,
-                performanceReduceMotionEnabled: false,
-                performanceStaticNavigationEnabled: false,
-                performanceLightweightTvFocusEnabled: false,
-                performanceStaticHomeHeroEnabled: false,
-                performanceLightweightHomeHeroEnabled: false,
-                performanceLiveItemHeroOverlayEnabled: true,
-                performanceSlimDetailHeroEnabled: false,
-                performanceLeanPlaybackUiEnabled: false,
-                performanceAggressivePlaybackTuningEnabled: false,
-                performanceAutoDowngradeHeavyPlaybackEnabled: false,
-              );
+    final next = enabled
+        ? current.applyHighPerformancePreset()
+        : current.clearHighPerformancePresetMarker();
     await _persist(next);
   }
 

@@ -1,7 +1,5 @@
 import 'dart:async';
-import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -24,7 +22,6 @@ import 'package:starflow/features/library/domain/library_collection_models.dart'
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/presentation/widgets/library_paged_grid.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
-import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 enum LibraryFilter {
@@ -169,24 +166,8 @@ final librarySeedItemsProvider =
 });
 
 final libraryItemsProvider =
-    FutureProvider.family<List<MediaItem>, LibraryFilter>((ref, filter) async {
-  final items = await ref.watch(librarySeedItemsProvider(filter).future);
-  final seedTargets =
-      items.map(MediaDetailTarget.fromMediaItem).toList(growable: false);
-  final cacheScope =
-      LocalStorageCacheRepository.buildScopeForTargets(seedTargets);
-  if (!cacheScope.isEmpty) {
-    ref.watch(
-      localStorageDetailCacheChangeProvider.select(
-        (state) => state.revisionForScope(cacheScope),
-      ),
-    );
-  }
-  return resolveLibraryItemsWithCachedDetails(
-    items: items,
-    localStorageCacheRepository: ref.read(localStorageCacheRepositoryProvider),
-    seedTargets: seedTargets,
-  );
+    FutureProvider.family<List<MediaItem>, LibraryFilter>((ref, filter) {
+  return ref.watch(librarySeedItemsProvider(filter).future);
 });
 
 class LibraryVisiblePageRequest {
@@ -270,8 +251,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       TvFocusMemoryController();
   final DetailRatingPrefetchCoordinator _ratingPrefetchCoordinator =
       DetailRatingPrefetchCoordinator();
-  final Map<LibraryFilter, AsyncValue<List<MediaItem>>> _cachedItemsByFilter =
-      <LibraryFilter, AsyncValue<List<MediaItem>>>{};
   final Map<LibraryVisiblePageRequest,
           AsyncValue<LibraryVisiblePageItemsResult>>
       _cachedVisibleItemsByRequest =
@@ -318,24 +297,21 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   Widget build(BuildContext context) {
     final mediaSources = ref.watch(libraryMediaSourcesSettingsSliceProvider);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
-    final seedItemsAsync = resolveRetainedAsyncValue(
-      activeValue:
-          isPageVisible ? ref.watch(librarySeedItemsProvider(_filter)) : null,
-      cachedValue: _cachedItemsByFilter[_filter],
-      cacheValue: (value) => _cachedItemsByFilter[_filter] = value,
-      fallbackValue: const AsyncLoading<List<MediaItem>>(),
-    );
     final visiblePageRequest = LibraryVisiblePageRequest(
       filter: _filter,
       page: _currentPage,
       pageSize: _gridPageSize,
     );
-    final displayAsync = _resolveVisiblePageItemsAsync(
-      request: visiblePageRequest,
+    final displayAsync = resolveRetainedAsyncValue(
       activeValue: isPageVisible
           ? ref.watch(libraryVisiblePageItemsProvider(visiblePageRequest))
           : null,
-      seedItemsAsync: seedItemsAsync,
+      cachedValue: _cachedVisibleItemsByRequest[visiblePageRequest],
+      cacheValue: (value) {
+        _cachedVisibleItemsByRequest[visiblePageRequest] = value;
+        _pruneVisiblePageCache(visiblePageRequest);
+      },
+      fallbackValue: const AsyncLoading<LibraryVisiblePageItemsResult>(),
     );
     final collectionsAsync = resolveRetainedAsyncValue(
       activeValue:
@@ -585,42 +561,14 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     );
   }
 
-  List<MediaItem> _visibleItemsForCurrentPage(List<MediaItem> items) {
-    return visibleLibraryPageItems(
-      items: items,
-      page: _currentPage,
-      pageSize: _gridPageSize,
-    );
-  }
-
-  AsyncValue<LibraryVisiblePageItemsResult> _resolveVisiblePageItemsAsync({
-    required LibraryVisiblePageRequest request,
-    required AsyncValue<LibraryVisiblePageItemsResult>? activeValue,
-    required AsyncValue<List<MediaItem>> seedItemsAsync,
-  }) {
-    final cachedValue = _cachedVisibleItemsByRequest[request];
-    if (activeValue == null) {
-      return cachedValue ?? _seedVisiblePageItemsFallback(seedItemsAsync);
-    }
-    if (activeValue.hasValue || activeValue.hasError) {
-      _cachedVisibleItemsByRequest[request] = activeValue;
-      return activeValue;
-    }
-    return cachedValue ?? _seedVisiblePageItemsFallback(seedItemsAsync);
-  }
-
-  AsyncValue<LibraryVisiblePageItemsResult> _seedVisiblePageItemsFallback(
-    AsyncValue<List<MediaItem>> seedItemsAsync,
-  ) {
-    final items = seedItemsAsync.asData?.value;
-    if (items == null) {
-      return const AsyncLoading<LibraryVisiblePageItemsResult>();
-    }
-    return AsyncData(
-      LibraryVisiblePageItemsResult(
-        totalItems: items.length,
-        items: _visibleItemsForCurrentPage(items),
-      ),
+  void _pruneVisiblePageCache(LibraryVisiblePageRequest request) {
+    pruneRetainedVisiblePageCacheEntries(
+      entries: _cachedVisibleItemsByRequest,
+      currentRequest: request,
+      pageOf: (entry) => entry.page,
+      isSameScope: (entry, currentRequest) =>
+          entry.filter == currentRequest.filter &&
+          entry.pageSize == currentRequest.pageSize,
     );
   }
 
@@ -766,6 +714,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     setState(() {
       _filter = filter;
       _currentPage = 0;
+      _cachedVisibleItemsByRequest.clear();
     });
   }
 
@@ -776,6 +725,13 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     setState(() {
       _currentPage = page;
     });
+    _pruneVisiblePageCache(
+      LibraryVisiblePageRequest(
+        filter: _filter,
+        page: page,
+        pageSize: _gridPageSize,
+      ),
+    );
   }
 
   Future<void> _confirmForceRescan(_LibraryRefreshScope scope) async {
@@ -1175,17 +1131,11 @@ List<MediaItem> visibleLibraryGridPageItems({
   required int page,
   required int pageSize,
 }) {
-  if (items.isEmpty) {
-    return const [];
-  }
-  final safePageSize = math.max(1, pageSize);
-  final totalPages = (items.length / safePageSize).ceil();
-  final safePage =
-      totalPages <= 0 ? 0 : math.min(math.max(page, 0), totalPages - 1);
-  return items
-      .skip(safePage * safePageSize)
-      .take(safePageSize)
-      .toList(growable: false);
+  return visibleLibraryPageItems(
+    items: items,
+    page: page,
+    pageSize: pageSize,
+  );
 }
 
 @visibleForTesting
@@ -1195,48 +1145,10 @@ bool libraryPageVisibleSegmentChanged({
   required int page,
   required int pageSize,
 }) {
-  final previousVisible = visibleLibraryGridPageItems(
-    items: previousItems,
+  return visibleLibraryPageSegmentChanged(
+    previousItems: previousItems,
+    nextItems: nextItems,
     page: page,
     pageSize: pageSize,
   );
-  final nextVisible = visibleLibraryGridPageItems(
-    items: nextItems,
-    page: page,
-    pageSize: pageSize,
-  );
-  if (previousVisible.length != nextVisible.length) {
-    return true;
-  }
-  for (var index = 0; index < previousVisible.length; index++) {
-    if (!_libraryGridMediaItemsVisuallyEquivalent(
-      previousVisible[index],
-      nextVisible[index],
-    )) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool _libraryGridMediaItemsVisuallyEquivalent(MediaItem a, MediaItem b) {
-  if (a.id != b.id) {
-    return false;
-  }
-  if (a.title != b.title || a.year != b.year) {
-    return false;
-  }
-  if (a.durationLabel != b.durationLabel) {
-    return false;
-  }
-  if (a.posterUrl != b.posterUrl) {
-    return false;
-  }
-  if (!mapEquals(a.posterHeaders, b.posterHeaders)) {
-    return false;
-  }
-  if (!listEquals(a.ratingLabels, b.ratingLabels)) {
-    return false;
-  }
-  return true;
 }

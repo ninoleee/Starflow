@@ -38,9 +38,11 @@ Future<PlaybackStartupPreparationResult> preparePlaybackStartup(
   PlaybackStartupPreparationInput input, {
   required PlaybackMemoryRepository playbackMemoryRepository,
 }) async {
-  final resumeEntry = await playbackMemoryRepository.loadEntryForTarget(
-    input.resolvedTarget,
-  );
+  final resumeEntry = input.resolvedTarget.allowResume
+      ? await playbackMemoryRepository.loadEntryForTarget(
+          input.resolvedTarget,
+        )
+      : null;
   final skipPreference = await playbackMemoryRepository.loadSkipPreference(
     input.resolvedTarget,
   );

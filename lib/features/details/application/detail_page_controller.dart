@@ -1,8 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'package:starflow/features/details/application/detail_subtitle_controller.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
-
-const Object detailPageViewStateUnchanged = Object();
 
 @immutable
 class DetailLibraryMatchViewState {
@@ -36,51 +35,7 @@ class DetailLibraryMatchViewState {
   }
 }
 
-@immutable
-class DetailSubtitleSearchViewState {
-  const DetailSubtitleSearchViewState({
-    this.choices = const <CachedSubtitleSearchOption>[],
-    this.selectedIndex = -1,
-    this.isSearching = false,
-    this.busyResultId,
-    this.statusMessage,
-  });
-
-  final List<CachedSubtitleSearchOption> choices;
-  final int selectedIndex;
-  final bool isSearching;
-  final String? busyResultId;
-  final String? statusMessage;
-
-  int get effectiveSelectedIndex {
-    if (choices.isEmpty) {
-      return -1;
-    }
-    return selectedIndex.clamp(-1, choices.length - 1);
-  }
-
-  DetailSubtitleSearchViewState copyWith({
-    List<CachedSubtitleSearchOption>? choices,
-    int? selectedIndex,
-    bool? isSearching,
-    Object? busyResultId = detailPageViewStateUnchanged,
-    Object? statusMessage = detailPageViewStateUnchanged,
-  }) {
-    return DetailSubtitleSearchViewState(
-      choices: choices ?? this.choices,
-      selectedIndex: selectedIndex ?? this.selectedIndex,
-      isSearching: isSearching ?? this.isSearching,
-      busyResultId: identical(busyResultId, detailPageViewStateUnchanged)
-          ? this.busyResultId
-          : busyResultId as String?,
-      statusMessage: identical(statusMessage, detailPageViewStateUnchanged)
-          ? this.statusMessage
-          : statusMessage as String?,
-    );
-  }
-}
-
-class DetailPageController extends ChangeNotifier {
+class DetailPageController {
   DetailPageController({
     int initialSessionId = 0,
     MediaDetailTarget? initialManualOverrideTarget,
@@ -137,14 +92,12 @@ class DetailPageController extends ChangeNotifier {
 
   int startNewSession() {
     _detailSessionId += 1;
-    notifyListeners();
     return _detailSessionId;
   }
 
   int cancelDetailTasks() {
     cancelActiveLibraryMatch();
     _detailSessionId += 1;
-    notifyListeners();
     return _detailSessionId;
   }
 
@@ -183,7 +136,6 @@ class DetailPageController extends ChangeNotifier {
   void setManualOverrideTarget(MediaDetailTarget? target) {
     _manualOverrideTarget = target;
     _manualOverrideTargetNotifier.value = target;
-    notifyListeners();
   }
 
   void resetForTargetChange() {
@@ -203,7 +155,6 @@ class DetailPageController extends ChangeNotifier {
       statusMessage: null,
     );
     _subtitleSearchViewNotifier.value = _subtitleSearchView;
-    notifyListeners();
   }
 
   void resetForPageInactive() {
@@ -214,7 +165,6 @@ class DetailPageController extends ChangeNotifier {
       busyResultId: null,
     );
     _subtitleSearchViewNotifier.value = _subtitleSearchView;
-    notifyListeners();
   }
 
   void updateLibraryMatchView({
@@ -228,15 +178,14 @@ class DetailPageController extends ChangeNotifier {
       isMatching: isMatching,
     );
     _libraryMatchViewNotifier.value = _libraryMatchView;
-    notifyListeners();
   }
 
   void updateSubtitleSearchView({
     List<CachedSubtitleSearchOption>? choices,
     int? selectedIndex,
     bool? isSearching,
-    Object? busyResultId = detailPageViewStateUnchanged,
-    Object? statusMessage = detailPageViewStateUnchanged,
+    Object? busyResultId = detailSubtitleSearchViewUnchanged,
+    Object? statusMessage = detailSubtitleSearchViewUnchanged,
   }) {
     _subtitleSearchView = _subtitleSearchView.copyWith(
       choices: choices,
@@ -246,22 +195,13 @@ class DetailPageController extends ChangeNotifier {
       statusMessage: statusMessage,
     );
     _subtitleSearchViewNotifier.value = _subtitleSearchView;
-    notifyListeners();
-  }
-
-  int normalizeSubtitleSearchIndex(
-    int index, {
-    List<CachedSubtitleSearchOption>? choices,
-  }) {
-    final resolvedChoices = choices ?? _subtitleSearchView.choices;
-    if (resolvedChoices.isEmpty) {
-      return -1;
-    }
-    return index.clamp(-1, resolvedChoices.length - 1);
   }
 
   int get currentSubtitleSearchIndex {
-    return normalizeSubtitleSearchIndex(_subtitleSearchView.selectedIndex);
+    return normalizeSubtitleSearchIndex(
+      _subtitleSearchView.selectedIndex,
+      choices: _subtitleSearchView.choices,
+    );
   }
 
   CachedSubtitleSearchOption? get selectedSubtitleSearchChoice {
@@ -283,44 +223,12 @@ class DetailPageController extends ChangeNotifier {
     _libraryMatchViewNotifier.value = _libraryMatchView;
     _manualOverrideTarget = resolvedTarget;
     _manualOverrideTargetNotifier.value = resolvedTarget;
-    notifyListeners();
     return resolvedTarget;
   }
 
-  List<MediaDetailTarget> resolveProviderInvalidationTargets({
-    required MediaDetailTarget seedTarget,
-    Iterable<MediaDetailTarget> additionalTargets = const [],
-  }) {
-    final seenKeys = <String>{};
-    final result = <MediaDetailTarget>[];
-    final targets = <MediaDetailTarget>[
-      seedTarget,
-      if (_manualOverrideTarget != null) _manualOverrideTarget!,
-      ...additionalTargets,
-    ];
-    for (final target in targets) {
-      if (seenKeys.add(buildProviderInvalidationKey(target))) {
-        result.add(target);
-      }
-    }
-    return result;
-  }
-
-  static String buildProviderInvalidationKey(MediaDetailTarget target) {
-    return <String>[
-      target.sourceId.trim(),
-      target.itemId.trim(),
-      target.title.trim(),
-      target.searchQuery.trim(),
-      target.itemType.trim(),
-    ].join('|');
-  }
-
-  @override
   void dispose() {
     _manualOverrideTargetNotifier.dispose();
     _libraryMatchViewNotifier.dispose();
     _subtitleSearchViewNotifier.dispose();
-    super.dispose();
   }
 }

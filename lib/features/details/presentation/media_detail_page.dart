@@ -1618,8 +1618,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     List<CachedSubtitleSearchOption>? choices,
     int? selectedIndex,
     bool? isSearching,
-    Object? busyResultId = detailPageViewStateUnchanged,
-    Object? statusMessage = detailPageViewStateUnchanged,
+    Object? busyResultId = detailSubtitleSearchViewUnchanged,
+    Object? statusMessage = detailSubtitleSearchViewUnchanged,
   }) {
     _pageController.updateSubtitleSearchView(
       choices: choices,
@@ -2557,7 +2557,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     int index, {
     List<CachedSubtitleSearchOption>? choices,
   }) {
-    return _pageController.normalizeSubtitleSearchIndex(
+    return normalizeSubtitleSearchIndex(
       index,
       choices: choices ?? _subtitleSearchChoices,
     );
@@ -2567,11 +2567,11 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     return _pageController.currentSubtitleSearchIndex;
   }
 
-  DetailSubtitleSearchViewData get _currentSubtitleSearchViewData {
-    return _subtitleSearchViewDataFromState(_subtitleSearchView);
+  DetailSubtitleSearchViewState get _currentSubtitleSearchView {
+    return _subtitleSearchView;
   }
 
-  void _applySubtitleSearchViewData(DetailSubtitleSearchViewData viewData) {
+  void _applySubtitleSearchView(DetailSubtitleSearchViewState viewData) {
     _updateSubtitleSearchView(
       choices: viewData.choices,
       selectedIndex: viewData.selectedIndex,
@@ -2581,25 +2581,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     );
   }
 
-  DetailSubtitleSearchViewData _subtitleSearchViewDataFromState(
-    DetailSubtitleSearchViewState subtitleView,
-  ) {
-    return DetailSubtitleSearchViewData(
-      choices: subtitleView.choices,
-      selectedIndex: subtitleView.selectedIndex,
-      isSearching: subtitleView.isSearching,
-      busyResultId: subtitleView.busyResultId,
-      statusMessage: subtitleView.statusMessage,
-    );
-  }
-
   MediaDetailTarget _decorateTargetWithSubtitleView(
     MediaDetailTarget target,
     DetailSubtitleSearchViewState subtitleView,
   ) {
     return _detailSubtitleController.decorateTargetWithSelectedSubtitle(
       target,
-      viewData: _subtitleSearchViewDataFromState(subtitleView),
+      viewData: subtitleView,
     );
   }
 
@@ -2688,10 +2676,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       return;
     }
 
-    final currentViewData = _currentSubtitleSearchViewData;
+    final currentViewData = _currentSubtitleSearchView;
 
     if (_isSessionActive(activeSessionId)) {
-      _applySubtitleSearchViewData(
+      _applySubtitleSearchView(
         currentViewData.copyWith(
           isSearching: true,
           statusMessage: null,
@@ -2717,7 +2705,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         },
       );
       final resolveResult = _detailSubtitleController.resolveSearchResults(
-        currentViewData: _currentSubtitleSearchViewData,
+        currentViewData: _currentSubtitleSearchView,
         results: results,
         maxChoices: 10,
       );
@@ -2738,7 +2726,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       if (!_isSessionActive(activeSessionId)) {
         return;
       }
-      _applySubtitleSearchViewData(resolveResult.nextViewData);
+      _applySubtitleSearchView(resolveResult.nextViewData);
       await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
             seedTarget: widget.target,
             resolvedTarget: target,
@@ -2771,8 +2759,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       if (!_isSessionActive(activeSessionId)) {
         return;
       }
-      _applySubtitleSearchViewData(
-        _currentSubtitleSearchViewData.copyWith(
+      _applySubtitleSearchView(
+        _currentSubtitleSearchView.copyWith(
           isSearching: false,
           statusMessage: '$error',
         ),
@@ -2794,7 +2782,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     if (!_isSessionActive(activeSessionId)) {
       return;
     }
-    final currentViewData = _currentSubtitleSearchViewData;
+    final currentViewData = _currentSubtitleSearchView;
     final decision = _detailSubtitleController.decideSelectionAction(
       currentViewData: currentViewData,
       requestedIndex: index,
@@ -2812,7 +2800,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     }
 
     if (_isSessionActive(activeSessionId)) {
-      _applySubtitleSearchViewData(decision.nextViewData);
+      _applySubtitleSearchView(decision.nextViewData);
     }
 
     if (decision is DetailSubtitleSelectionCleared) {
@@ -2870,7 +2858,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         selectionIndex: downloadDecision.selectionIndex,
         selection: selection,
       );
-      _applySubtitleSearchViewData(nextViewData);
+      _applySubtitleSearchView(nextViewData);
       await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
             seedTarget: widget.target,
             resolvedTarget: target,
@@ -2902,9 +2890,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       if (!_isSessionActive(activeSessionId)) {
         return;
       }
-      _applySubtitleSearchViewData(
+      _applySubtitleSearchView(
         _detailSubtitleController.applyDownloadedSelectionFailure(
-          currentViewData: _currentSubtitleSearchViewData,
+          currentViewData: _currentSubtitleSearchView,
           error: error,
         ),
       );
@@ -3220,14 +3208,15 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                               _buildSeriesSection(target, seriesAsync),
                             if (target.overview.trim().isNotEmpty)
                               DetailBlock(
-                                title: _overviewSectionTitle(
+                                title: resolveDetailPrimaryTitle(
                                   currentTarget: target,
                                   pageTarget: widget.target,
+                                  emptyFallback: '剧情简介',
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    if (_episodeDetailSubtitleLine(
+                                    if (resolveDetailEpisodeTitleLine(
                                       currentTarget: target,
                                       pageTarget: widget.target,
                                     )
@@ -3255,25 +3244,21 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                 ),
                               ),
                             if (target.overview.trim().isEmpty &&
-                                (_episodeDetailSubtitleLine(
-                                          currentTarget: target,
-                                          pageTarget: widget.target,
-                                        ) !=
-                                        null ||
-                                    _episodeDetailFileNameLine(
-                                          currentTarget: target,
-                                          pageTarget: widget.target,
-                                        ) !=
-                                        null))
+                                resolveDetailEpisodeTitleLine(
+                                      currentTarget: target,
+                                      pageTarget: widget.target,
+                                    ) !=
+                                    null)
                               DetailBlock(
-                                title: _overviewSectionTitle(
+                                title: resolveDetailPrimaryTitle(
                                   currentTarget: target,
                                   pageTarget: widget.target,
+                                  emptyFallback: '剧情简介',
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    if (_episodeDetailSubtitleLine(
+                                    if (resolveDetailEpisodeTitleLine(
                                       currentTarget: target,
                                       pageTarget: widget.target,
                                     )
@@ -3287,26 +3272,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                           height: 1.4,
                                         ),
                                       ),
-                                    if (_episodeDetailFileNameLine(
-                                      currentTarget: target,
-                                      pageTarget: widget.target,
-                                    )
-                                        case final fileName?) ...[
-                                      if (_episodeDetailSubtitleLine(
-                                            currentTarget: target,
-                                            pageTarget: widget.target,
-                                          ) !=
-                                          null)
-                                        const SizedBox(height: 8),
-                                      Text(
-                                        fileName,
-                                        style: const TextStyle(
-                                          color: Color(0xFFB9C8DE),
-                                          fontSize: 14,
-                                          height: 1.5,
-                                        ),
-                                      ),
-                                    ],
                                   ],
                                 ),
                               ),
@@ -3429,99 +3394,6 @@ String _detailFocusScopeId(MediaDetailTarget target) {
       target.title,
     ],
   );
-}
-
-String _overviewSectionTitle({
-  required MediaDetailTarget currentTarget,
-  required MediaDetailTarget pageTarget,
-}) {
-  final pageItemType = pageTarget.itemType.trim().toLowerCase();
-  final seriesTitle = currentTarget.playbackTarget?.seriesTitle.trim() ?? '';
-  if (pageItemType == 'episode') {
-    if (seriesTitle.isNotEmpty) {
-      return seriesTitle;
-    }
-    final query = currentTarget.searchQuery.trim();
-    if (query.isNotEmpty) {
-      return query;
-    }
-  }
-  final pageTitle = pageTarget.title.trim();
-  if (pageTitle.isNotEmpty) {
-    return pageTitle;
-  }
-  if (seriesTitle.isNotEmpty) {
-    return seriesTitle;
-  }
-  final title = currentTarget.title.trim();
-  if (title.isNotEmpty) {
-    return title;
-  }
-  final query = currentTarget.searchQuery.trim();
-  if (query.isNotEmpty) {
-    return query;
-  }
-  return '剧情简介';
-}
-
-String? _episodeDetailSubtitleLine({
-  required MediaDetailTarget currentTarget,
-  required MediaDetailTarget pageTarget,
-}) {
-  if (pageTarget.itemType.trim().toLowerCase() != 'episode') {
-    return null;
-  }
-  final fileName = _resolvedEpisodeDetailFileName(currentTarget);
-  if (fileName.isEmpty) {
-    return null;
-  }
-  final primaryTitle = _overviewSectionTitle(
-    currentTarget: currentTarget,
-    pageTarget: pageTarget,
-  );
-  if (fileName == primaryTitle) {
-    return null;
-  }
-  return fileName;
-}
-
-String? _episodeDetailFileNameLine({
-  required MediaDetailTarget currentTarget,
-  required MediaDetailTarget pageTarget,
-}) {
-  if (pageTarget.itemType.trim().toLowerCase() != 'episode') {
-    return null;
-  }
-  return null;
-}
-
-String _resolvedEpisodeDetailFileName(MediaDetailTarget currentTarget) {
-  for (final value in [
-    currentTarget.playbackTarget?.actualAddress ?? '',
-    currentTarget.resourcePath,
-    currentTarget.playbackTarget?.streamUrl ?? '',
-  ]) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) {
-      continue;
-    }
-    final uri = Uri.tryParse(trimmed);
-    final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
-    final normalized = rawPath.replaceAll('\\', '/').trim();
-    if (normalized.isEmpty) {
-      continue;
-    }
-    final fileName = normalized.split('/').last.trim();
-    if (fileName.isEmpty) {
-      continue;
-    }
-    try {
-      return Uri.decodeComponent(fileName);
-    } on ArgumentError {
-      return fileName;
-    }
-  }
-  return '';
 }
 
 String _availabilityFeedbackLabel(String label) {

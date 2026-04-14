@@ -150,6 +150,10 @@ class DetailTargetResolver {
           ? target
           : _mergeCachedDetailTarget(target, cachedTarget),
     );
+    final metadataNeeds = _resolveAutomaticMetadataNeeds(
+      target: nextTarget,
+      settings: _settings,
+    );
     if (!forceMetadataRefresh &&
         refreshStatus != DetailMetadataRefreshStatus.never) {
       DebugTraceOnce.logMetadata(
@@ -157,15 +161,16 @@ class DetailTargetResolver {
         'auto-enrich',
         'skipped refreshStatus=${refreshStatus.name}',
       );
-    } else if (_shouldAutoEnrichMetadataTarget(
-        target: nextTarget, settings: _settings)) {
+    } else if (metadataNeeds.shouldEnrich) {
       DebugTraceOnce.logMetadata(
         traceKey,
         'auto-enrich',
         '${forceMetadataRefresh ? 'forced' : 'enabled'} '
             'query=${_detailMetadataQuery(nextTarget)} '
             'needsMetadata=${nextTarget.needsMetadataMatch} '
-            'needsImdb=${nextTarget.needsImdbRatingMatch} ',
+            'needsImdb=${nextTarget.needsImdbRatingMatch} '
+            'needsWmdb=${metadataNeeds.needsWmdb} '
+            'needsTmdb=${metadataNeeds.needsTmdb}',
       );
       nextTarget = await _resolveAutomaticMetadataIfNeeded(
         settings: _settings,
@@ -173,6 +178,7 @@ class DetailTargetResolver {
         wmdbMetadataClient: _ref.read(wmdbMetadataClientProvider),
         tmdbMetadataClient: _ref.read(tmdbMetadataClientProvider),
         traceKey: traceKey,
+        initialNeeds: metadataNeeds,
       );
     } else {
       DebugTraceOnce.logMetadata(traceKey, 'auto-enrich', 'skipped');
@@ -318,16 +324,35 @@ String _detailMetadataQuery(MediaDetailTarget target) {
   return raw.trim();
 }
 
-bool _shouldAutoEnrichMetadataTarget({
+class _DetailAutomaticMetadataNeeds {
+  const _DetailAutomaticMetadataNeeds({
+    required this.needsWmdb,
+    required this.needsTmdb,
+  });
+
+  final bool needsWmdb;
+  final bool needsTmdb;
+
+  bool get shouldEnrich => needsWmdb || needsTmdb;
+}
+
+_DetailAutomaticMetadataNeeds _resolveAutomaticMetadataNeeds({
   required MediaDetailTarget target,
   required DetailEnrichmentSettings settings,
 }) {
   if (target.sourceKind == MediaSourceKind.nas &&
       target.sourceId.trim().isNotEmpty) {
-    return false;
+    return const _DetailAutomaticMetadataNeeds(
+      needsWmdb: false,
+      needsTmdb: false,
+    );
   }
-  if (_detailMetadataQuery(target).isEmpty && target.doubanId.trim().isEmpty) {
-    return false;
+  final query = _detailMetadataQuery(target);
+  if (query.isEmpty && target.doubanId.trim().isEmpty) {
+    return const _DetailAutomaticMetadataNeeds(
+      needsWmdb: false,
+      needsTmdb: false,
+    );
   }
   final needsWmdb = settings.wmdbMetadataMatchEnabled &&
       (target.needsMetadataMatch ||
@@ -337,10 +362,14 @@ bool _shouldAutoEnrichMetadataTarget({
           target.imdbId.trim().isEmpty);
   final needsTmdb = settings.tmdbMetadataMatchEnabled &&
       settings.tmdbReadAccessToken.trim().isNotEmpty &&
+      query.isNotEmpty &&
       (target.needsMetadataMatch ||
           target.backdropUrl.trim().isEmpty ||
           target.logoUrl.trim().isEmpty);
-  return needsWmdb || needsTmdb;
+  return _DetailAutomaticMetadataNeeds(
+    needsWmdb: needsWmdb,
+    needsTmdb: needsTmdb,
+  );
 }
 
 Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
@@ -349,15 +378,16 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
   required WmdbMetadataClient wmdbMetadataClient,
   required TmdbMetadataClient tmdbMetadataClient,
   required String traceKey,
+  _DetailAutomaticMetadataNeeds? initialNeeds,
 }) async {
   var nextTarget = target;
+  var metadataNeeds = initialNeeds ??
+      _resolveAutomaticMetadataNeeds(
+        target: nextTarget,
+        settings: settings,
+      );
   final initialQuery = _detailMetadataQuery(target);
-  if (settings.wmdbMetadataMatchEnabled &&
-      (nextTarget.needsMetadataMatch ||
-          _needsRatingLabel(nextTarget, keyword: '豆瓣') ||
-          nextTarget.needsImdbRatingMatch ||
-          nextTarget.doubanId.trim().isEmpty ||
-          nextTarget.imdbId.trim().isEmpty)) {
+  if (metadataNeeds.needsWmdb) {
     try {
       DebugTraceOnce.logMetadata(
         traceKey,
@@ -391,11 +421,13 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
     } catch (_) {
       DebugTraceOnce.logMetadata(traceKey, 'wmdb', 'failed');
     }
+    metadataNeeds = _resolveAutomaticMetadataNeeds(
+      target: nextTarget,
+      settings: settings,
+    );
   }
 
-  if (settings.tmdbMetadataMatchEnabled &&
-      settings.tmdbReadAccessToken.trim().isNotEmpty &&
-      _detailMetadataQuery(nextTarget).isNotEmpty) {
+  if (metadataNeeds.needsTmdb) {
     try {
       final currentQuery = _detailMetadataQuery(nextTarget);
       DebugTraceOnce.logMetadata(

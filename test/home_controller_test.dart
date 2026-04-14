@@ -30,8 +30,8 @@ void main() {
           isA<HomePageController>());
     });
 
-    test('HomePageController resolveSections keeps order and filters null',
-        () async {
+    test('HomePageController resolveSectionStates keeps order and filters null',
+        () {
       final controller = HomePageController();
       final modules = [
         const HomeModuleConfig(
@@ -68,25 +68,24 @@ void main() {
         layout: HomeSectionLayout.posterRail,
       );
 
-      final sections = await controller.resolveSections(
+      final state = controller.resolveSectionStates(
         enabledModules: modules,
-        loadSection: (module) async {
+        loadSectionState: (module) {
           return switch (module.id) {
-            'module-a' => sectionA,
-            'module-c' => sectionC,
-            _ => null,
+            'module-a' => const AsyncData(sectionA),
+            'module-c' => const AsyncData(sectionC),
+            _ => const AsyncData(null),
           };
         },
       );
 
-      expect(sections.map((item) => item.id).toList(growable: false), [
+      expect(state.sections.map((item) => item.id).toList(growable: false), [
         'module-a',
         'module-c',
       ]);
     });
 
-    test('resolveSections reuses previous list when sections unchanged',
-        () async {
+    test('resolveSectionStates exposes resolved sections list', () {
       final controller = HomePageController();
       const modules = [
         HomeModuleConfig(
@@ -104,16 +103,12 @@ void main() {
         layout: HomeSectionLayout.posterRail,
       );
 
-      final first = await controller.resolveSections(
+      final state = controller.resolveSectionStates(
         enabledModules: modules,
-        loadSection: (_) async => section,
-      );
-      final second = await controller.resolveSections(
-        enabledModules: modules,
-        loadSection: (_) async => section,
+        loadSectionState: (_) => const AsyncData(section),
       );
 
-      expect(identical(first, second), isTrue);
+      expect(state.sections, [section]);
     });
 
     test('resolveSectionStates reuses previous state when snapshots unchanged',
@@ -249,7 +244,7 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      final sections = await container.read(homeSectionsProvider.future);
+      final sections = await _readResolvedHomeSections(container);
       expect(sections, hasLength(1));
       expect(sections.first.items.first.posterUrl, isEmpty);
       expect(sections.first.items.first.detailTarget.sourceId, isEmpty);
@@ -330,7 +325,7 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      final sections = await container.read(homeSectionsProvider.future);
+      final sections = await _readResolvedHomeSections(container);
       expect(sections, hasLength(2));
       expect(mediaRepository.fetchLibraryCallCount, 0);
       expect(mediaRepository.fetchRecentlyAddedCallCount, 1);
@@ -434,7 +429,7 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      final sections = await container.read(homeSectionsProvider.future);
+      final sections = await _readResolvedHomeSections(container);
       expect(sections, hasLength(1));
       expect(sections.first.title, '最近播放');
       expect(sections.first.items, hasLength(1));
@@ -493,7 +488,7 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      final sections = await container.read(homeSectionsProvider.future);
+      final sections = await _readResolvedHomeSections(container);
       expect(sections, hasLength(1));
       expect(sections.first.items, hasLength(1));
       expect(sections.first.items.first.title, '人生切割术');
@@ -588,7 +583,7 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      final sections = await container.read(homeSectionsProvider.future);
+      final sections = await _readResolvedHomeSections(container);
       expect(sections, hasLength(1));
       expect(sections.first.items, hasLength(2));
       expect(sections.first.items.first.title, '人生切割术');
@@ -675,7 +670,7 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      final sections = await container.read(homeSectionsProvider.future);
+      final sections = await _readResolvedHomeSections(container);
       expect(sections, hasLength(1));
       expect(sections.first.items, hasLength(1));
       expect(sections.first.items.first.title, '人生切割术（已关联）');
@@ -754,7 +749,7 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      final sections = await container.read(homeSectionsProvider.future);
+      final sections = await _readResolvedHomeSections(container);
       expect(sections, hasLength(1));
       expect(
         sections.first.items.first.posterUrl,
@@ -849,6 +844,17 @@ void main() {
       expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
     });
   });
+}
+
+Future<List<HomeSectionViewModel>> _readResolvedHomeSections(
+  ProviderContainer container,
+) async {
+  final modules = container.read(homeEnabledModulesProvider);
+  await Future.wait(
+    modules
+        .map((module) => container.read(homeSectionProvider(module.id).future)),
+  );
+  return container.read(homeSectionsProvider);
 }
 
 class _FakeMediaRepository implements MediaRepository {

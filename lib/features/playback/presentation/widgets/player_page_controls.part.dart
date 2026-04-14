@@ -400,7 +400,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
               );
             },
       fill: Colors.black,
-      fit: BoxFit.contain,
+      fit: _resolvedVideoBoxFit(),
+      aspectRatio: _resolvedVideoAspectRatioOverride(),
       subtitleViewConfiguration: _buildSubtitleViewConfiguration(
         settings,
         isTelevision: isTelevision,
@@ -492,6 +493,12 @@ extension _PlayerPageStateControls on _PlayerPageState {
               )
             : EdgeInsets.zero;
     return MaterialVideoControlsThemeData(
+      volumeGesture: true,
+      brightnessGesture: true,
+      seekGesture: _mpvSwipeToSeekEnabled,
+      seekOnDoubleTap: _mpvDoubleTapToSeekEnabled,
+      seekOnDoubleTapEnabledWhileControlsVisible: _mpvDoubleTapToSeekEnabled,
+      speedUpOnLongPress: _mpvLongPressSpeedBoostEnabled,
       padding: controlsPadding,
       topButtonBar: materialTopButtonBar,
       topButtonBarMargin: EdgeInsets.fromLTRB(16, isPortrait ? 12 : 0, 16, 0),
@@ -768,6 +775,10 @@ extension _PlayerPageStateControls on _PlayerPageState {
   }
 
   double _currentAspectRatio() {
+    final aspectRatioOverride = _resolvedVideoAspectRatioOverride();
+    if (aspectRatioOverride != null && aspectRatioOverride > 0) {
+      return aspectRatioOverride;
+    }
     final player = _player;
     if (!_isReady || player == null) {
       return 16 / 9;
@@ -779,6 +790,24 @@ extension _PlayerPageStateControls on _PlayerPageState {
       return 16 / 9;
     }
     return width / height;
+  }
+
+  BoxFit _resolvedVideoBoxFit() {
+    return switch (_videoLayoutMode) {
+      _PlaybackVideoLayoutMode.fit => BoxFit.contain,
+      _PlaybackVideoLayoutMode.fill => BoxFit.cover,
+      _PlaybackVideoLayoutMode.stretch => BoxFit.fill,
+      _PlaybackVideoLayoutMode.aspect16x9 => BoxFit.contain,
+      _PlaybackVideoLayoutMode.aspect4x3 => BoxFit.contain,
+    };
+  }
+
+  double? _resolvedVideoAspectRatioOverride() {
+    return switch (_videoLayoutMode) {
+      _PlaybackVideoLayoutMode.aspect16x9 => 16 / 9,
+      _PlaybackVideoLayoutMode.aspect4x3 => 4 / 3,
+      _ => null,
+    };
   }
 
   SubtitleViewConfiguration _buildSubtitleViewConfiguration(
@@ -832,6 +861,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
           player: player,
           target: _resolvedTarget ?? widget.target,
           isTelevision: isTelevision,
+          videoLayoutLabel: _videoLayoutMode.label,
           defaultSubtitleScaleLabel: settings.playbackSubtitleScale.label,
           subtitleDelayLabel: formatSubtitleDelayLabel(
             _subtitleDelaySeconds,
@@ -842,6 +872,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
             target: _resolvedTarget ?? widget.target,
           ),
           onSelectMpvQualityPreset: _selectPlaybackMpvQualityPreset,
+          onSelectVideoLayout: _selectVideoLayoutMode,
           onSelectSpeed: (currentRate) =>
               _selectPlaybackSpeed(player, currentRate),
           onSelectSubtitle: (tracks, current) =>
@@ -896,6 +927,37 @@ extension _PlayerPageStateControls on _PlayerPageState {
       await _applyMpvPerformanceTuning(player, target);
     }
     _showMessage('MPV 画质策略已切换为 ${selection.label}');
+  }
+
+  Future<void> _selectVideoLayoutMode() async {
+    final selection = await showDialog<_PlaybackVideoLayoutMode>(
+      context: context,
+      builder: (dialogContext) {
+        return SimpleDialog(
+          title: const Text('画面适配'),
+          children: [
+            for (final mode in _PlaybackVideoLayoutMode.values)
+              SimpleDialogOption(
+                onPressed: () => Navigator.of(dialogContext).pop(mode),
+                child: Text(
+                  mode == _videoLayoutMode ? '${mode.label}  当前' : mode.label,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+    if (selection == null || selection == _videoLayoutMode) {
+      return;
+    }
+    if (!mounted) {
+      _videoLayoutMode = selection;
+      return;
+    }
+    setState(() {
+      _videoLayoutMode = selection;
+    });
+    _showMessage('画面适配已切换为 ${selection.label}');
   }
 
   Future<void> _selectPlaybackSpeed(Player player, double currentRate) async {

@@ -20,6 +20,10 @@ class PlaybackSettingsPage extends ConsumerStatefulWidget {
     required this.initialPlaybackEngine,
     required this.initialPlaybackDecodeMode,
     required this.initialPlaybackMpvQualityPreset,
+    required this.initialPlaybackMpvDoubleTapToSeekEnabled,
+    required this.initialPlaybackMpvSwipeToSeekEnabled,
+    required this.initialPlaybackMpvLongPressSpeedBoostEnabled,
+    required this.initialPlaybackMpvStallAutoRecoveryEnabled,
   });
 
   final int initialTimeoutSeconds;
@@ -31,6 +35,10 @@ class PlaybackSettingsPage extends ConsumerStatefulWidget {
   final PlaybackEngine initialPlaybackEngine;
   final PlaybackDecodeMode initialPlaybackDecodeMode;
   final PlaybackMpvQualityPreset initialPlaybackMpvQualityPreset;
+  final bool initialPlaybackMpvDoubleTapToSeekEnabled;
+  final bool initialPlaybackMpvSwipeToSeekEnabled;
+  final bool initialPlaybackMpvLongPressSpeedBoostEnabled;
+  final bool initialPlaybackMpvStallAutoRecoveryEnabled;
 
   @override
   ConsumerState<PlaybackSettingsPage> createState() =>
@@ -49,6 +57,14 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   late PlaybackEngine _draftPlaybackEngine;
   late PlaybackDecodeMode _draftPlaybackDecodeMode;
   late PlaybackMpvQualityPreset _draftPlaybackMpvQualityPreset;
+  late final bool _initialMpvDoubleTapToSeekEnabled;
+  late final bool _initialMpvSwipeToSeekEnabled;
+  late final bool _initialMpvLongPressSpeedBoostEnabled;
+  late final bool _initialMpvStallAutoRecoveryEnabled;
+  late bool _draftMpvDoubleTapToSeekEnabled;
+  late bool _draftMpvSwipeToSeekEnabled;
+  late bool _draftMpvLongPressSpeedBoostEnabled;
+  late bool _draftMpvStallAutoRecoveryEnabled;
   bool _skipAutoSaveOnPop = false;
 
   @override
@@ -66,6 +82,17 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     _draftPlaybackEngine = widget.initialPlaybackEngine;
     _draftPlaybackDecodeMode = widget.initialPlaybackDecodeMode;
     _draftPlaybackMpvQualityPreset = widget.initialPlaybackMpvQualityPreset;
+    _initialMpvDoubleTapToSeekEnabled =
+        widget.initialPlaybackMpvDoubleTapToSeekEnabled;
+    _initialMpvSwipeToSeekEnabled = widget.initialPlaybackMpvSwipeToSeekEnabled;
+    _initialMpvLongPressSpeedBoostEnabled =
+        widget.initialPlaybackMpvLongPressSpeedBoostEnabled;
+    _initialMpvStallAutoRecoveryEnabled =
+        widget.initialPlaybackMpvStallAutoRecoveryEnabled;
+    _draftMpvDoubleTapToSeekEnabled = _initialMpvDoubleTapToSeekEnabled;
+    _draftMpvSwipeToSeekEnabled = _initialMpvSwipeToSeekEnabled;
+    _draftMpvLongPressSpeedBoostEnabled = _initialMpvLongPressSpeedBoostEnabled;
+    _draftMpvStallAutoRecoveryEnabled = _initialMpvStallAutoRecoveryEnabled;
   }
 
   @override
@@ -80,18 +107,22 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   }
 
   Future<void> _saveDraft({bool popAfterSave = true}) async {
-    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     await ref.read(settingsControllerProvider.notifier).savePlaybackPreferences(
           openTimeoutSeconds: _draftSeconds(),
           defaultSpeed: _draftPlaybackSpeed,
           subtitlePreference: _draftSubtitlePreference,
           subtitleScale: _draftSubtitleScale,
           onlineSubtitleSources: _draftOnlineSubtitleSources,
-          backgroundPlaybackEnabled:
-              isTelevision ? false : _draftBackgroundPlaybackEnabled,
+          backgroundPlaybackEnabled: _draftBackgroundPlaybackEnabled,
           playbackEngine: _draftPlaybackEngine,
           playbackDecodeMode: _draftPlaybackDecodeMode,
           playbackMpvQualityPreset: _draftPlaybackMpvQualityPreset,
+          playbackMpvDoubleTapToSeekEnabled: _draftMpvDoubleTapToSeekEnabled,
+          playbackMpvSwipeToSeekEnabled: _draftMpvSwipeToSeekEnabled,
+          playbackMpvLongPressSpeedBoostEnabled:
+              _draftMpvLongPressSpeedBoostEnabled,
+          playbackMpvStallAutoRecoveryEnabled:
+              _draftMpvStallAutoRecoveryEnabled,
         );
     if (popAfterSave && mounted) {
       _skipAutoSaveOnPop = true;
@@ -113,7 +144,13 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
         _draftPlaybackEngine != widget.initialPlaybackEngine ||
         _draftPlaybackDecodeMode != widget.initialPlaybackDecodeMode ||
         _draftPlaybackMpvQualityPreset !=
-            widget.initialPlaybackMpvQualityPreset;
+            widget.initialPlaybackMpvQualityPreset ||
+        _draftMpvDoubleTapToSeekEnabled != _initialMpvDoubleTapToSeekEnabled ||
+        _draftMpvSwipeToSeekEnabled != _initialMpvSwipeToSeekEnabled ||
+        _draftMpvLongPressSpeedBoostEnabled !=
+            _initialMpvLongPressSpeedBoostEnabled ||
+        _draftMpvStallAutoRecoveryEnabled !=
+            _initialMpvStallAutoRecoveryEnabled;
   }
 
   Future<void> _discardAndClose() async {
@@ -205,6 +242,78 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
           const SizedBox(height: 8),
           Text(
             _buildPlaybackMpvQualityPresetDescription(),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            'MPV 触屏交互',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 10),
+          ...buildSettingsTileGroup(
+            [
+              SettingsToggleTile(
+                title: '双击快进/快退',
+                subtitle: '双击屏幕左右两侧按步进快进或快退。',
+                value: _draftMpvDoubleTapToSeekEnabled,
+                onChanged: (value) {
+                  setState(() {
+                    _draftMpvDoubleTapToSeekEnabled = value;
+                  });
+                },
+              ),
+              SettingsToggleTile(
+                title: '左右滑动调进度',
+                subtitle: '横向滑动直接调整播放进度，适合触屏拖拽。',
+                value: _draftMpvSwipeToSeekEnabled,
+                onChanged: (value) {
+                  setState(() {
+                    _draftMpvSwipeToSeekEnabled = value;
+                  });
+                },
+              ),
+              SettingsToggleTile(
+                title: '长按临时 2 倍速',
+                subtitle: '长按时临时加速，松手恢复正常速度。',
+                value: _draftMpvLongPressSpeedBoostEnabled,
+                onChanged: (value) {
+                  setState(() {
+                    _draftMpvLongPressSpeedBoostEnabled = value;
+                  });
+                },
+              ),
+            ],
+            spacing: 12,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _draftPlaybackEngine == PlaybackEngine.embeddedMpv
+                ? '以上交互仅作用于内置 MPV。'
+                : '当前不是内置 MPV，以上交互项暂不生效。',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 18),
+          SettingsToggleTile(
+            title: 'MPV 卡顿自动恢复',
+            subtitle: '缓冲卡住时自动尝试恢复播放，降低“卡住不动”的概率。',
+            value: _draftMpvStallAutoRecoveryEnabled,
+            onChanged: (value) {
+              setState(() {
+                _draftMpvStallAutoRecoveryEnabled = value;
+              });
+            },
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _draftPlaybackEngine == PlaybackEngine.embeddedMpv
+                ? '建议保持开启，除非你在排查特殊兼容问题。'
+                : '当前不是内置 MPV，此项暂不生效。',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),

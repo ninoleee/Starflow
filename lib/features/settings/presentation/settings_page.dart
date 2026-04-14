@@ -22,6 +22,7 @@ import 'package:starflow/features/settings/presentation/performance_settings_pag
 import 'package:starflow/features/settings/presentation/playback_settings_page.dart';
 import 'package:starflow/features/settings/presentation/search_provider_editor_page.dart';
 import 'package:starflow/features/settings/presentation/settings_management_page.dart';
+import 'package:starflow/features/settings/presentation/settings_version_label.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 final Future<PackageInfo> _settingsPagePackageInfoFuture =
@@ -249,10 +250,7 @@ class SettingsPage extends ConsumerStatefulWidget {
                     children: [
                       _SettingsNavigationTile(
                         title: '高性能与轻量模式',
-                        subtitle: _performanceSettingsSummary(
-                          performanceSlice,
-                          isTelevision: isTelevision,
-                        ),
+                        subtitle: performanceSettingsSummary(performanceSlice),
                         onTap: () => _openPerformanceSettings(context),
                       ),
                       const SizedBox(height: 18),
@@ -516,11 +514,19 @@ class SettingsPage extends ConsumerStatefulWidget {
           initialSubtitleScale: playbackSlice.playbackSubtitleScale,
           initialOnlineSubtitleSources: playbackSlice.onlineSubtitleSources,
           initialBackgroundPlaybackEnabled:
-              playbackSlice.playbackBackgroundPlaybackEnabled,
+              playbackSlice.configuredBackgroundPlaybackEnabled,
           initialPlaybackEngine: playbackSlice.playbackEngine,
           initialPlaybackDecodeMode: playbackSlice.playbackDecodeMode,
           initialPlaybackMpvQualityPreset:
               playbackSlice.playbackMpvQualityPreset,
+          initialPlaybackMpvDoubleTapToSeekEnabled:
+              playbackSlice.playbackMpvDoubleTapToSeekEnabled,
+          initialPlaybackMpvSwipeToSeekEnabled:
+              playbackSlice.playbackMpvSwipeToSeekEnabled,
+          initialPlaybackMpvLongPressSpeedBoostEnabled:
+              playbackSlice.playbackMpvLongPressSpeedBoostEnabled,
+          initialPlaybackMpvStallAutoRecoveryEnabled:
+              playbackSlice.playbackMpvStallAutoRecoveryEnabled,
         ),
       ),
     );
@@ -600,29 +606,69 @@ class _SettingsPageVersionFooter extends StatelessWidget {
       future: _settingsPagePackageInfoFuture,
       builder: (context, snapshot) {
         final info = snapshot.data;
-        final version = info?.version.trim() ?? '';
-        if (version.isEmpty) {
+        if (info == null) {
           return const SizedBox(height: kBottomReservedSpacing);
         }
-        final buildNumber = info?.buildNumber.trim() ?? '';
-        final versionLabel = buildNumber.isEmpty
-            ? '版本 $version · Nino'
-            : '版本 $version ($buildNumber) · Nino';
+        final footerInfo = resolveSettingsVersionFooterInfo(info);
+        if (footerInfo == null) {
+          return const SizedBox(height: kBottomReservedSpacing);
+        }
         return Padding(
           padding: const EdgeInsets.only(
             top: 18,
             bottom: kBottomReservedSpacing,
           ),
           child: Center(
-            child: Text(
-              versionLabel,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant.withValues(
-                  alpha: 0.72,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  footerInfo.author,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant.withValues(
+                      alpha: 0.72,
+                    ),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-                fontWeight: FontWeight.w600,
-              ),
+                const SizedBox(height: 6),
+                TvFocusableAction(
+                  focusId: 'settings-root-footer:version',
+                  onPressed: () {},
+                  visualStyle: TvFocusVisualStyle.subtle,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    child: Text(
+                      footerInfo.version,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.82,
+                        ),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                if (footerInfo.buildDate.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    footerInfo.buildDate,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant.withValues(
+                        alpha: 0.72,
+                      ),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         );
@@ -700,13 +746,21 @@ String _playbackSettingsSummary(
     playbackSlice.playbackEngine.label,
     playbackSlice.playbackDecodeMode.label,
     'MPV ${playbackSlice.playbackMpvQualityPreset.label}',
+    if (playbackSlice.playbackEngine == PlaybackEngine.embeddedMpv)
+      playbackSlice.playbackMpvDoubleTapToSeekEnabled ||
+              playbackSlice.playbackMpvSwipeToSeekEnabled ||
+              playbackSlice.playbackMpvLongPressSpeedBoostEnabled
+          ? 'MPV 触控增强'
+          : 'MPV 触控精简',
+    if (playbackSlice.playbackEngine == PlaybackEngine.embeddedMpv)
+      playbackSlice.playbackMpvStallAutoRecoveryEnabled ? '自动恢复开' : '自动恢复关',
     '${playbackSlice.playbackOpenTimeoutSeconds}s 超时',
     '${_formatPlaybackSpeedLabel(playbackSlice.playbackDefaultSpeed)} 默认倍速',
     '字幕 ${playbackSlice.playbackSubtitlePreference.label}',
     playbackSlice.playbackSubtitleScale.label,
     isTelevision
         ? 'TV 端后台播放禁用'
-        : playbackSlice.playbackBackgroundPlaybackEnabled
+        : playbackSlice.configuredBackgroundPlaybackEnabled
             ? '后台播放开'
             : '后台播放关',
   ].join(' · ');
@@ -784,33 +838,6 @@ String _libraryMatchSourceSummary({
     return selectedNames.join('、');
   }
   return '${selectedNames.take(2).join('、')} 等 ${selectedNames.length} 个来源';
-}
-
-String _performanceSettingsSummary(
-  SettingsPerformanceSlice performanceSlice, {
-  required bool isTelevision,
-}) {
-  final enabledItems = <String>[
-    if (!performanceSlice.translucentEffectsEnabled) '磨砂关闭',
-    if (!performanceSlice.autoHideNavigationBarEnabled) '菜单常驻',
-    if (!performanceSlice.homeHeroBackgroundEnabled) 'Hero 背景关闭',
-    if (isTelevision || !performanceSlice.performanceLiveItemHeroOverlayEnabled)
-      '局部实时更新关闭',
-  ];
-
-  if (enabledItems.isEmpty) {
-    return performanceSlice.highPerformanceModeEnabled
-        ? '预设已开，当前轻量项已手动调回'
-        : '按需管理界面、Hero 与局部更新策略';
-  }
-
-  final itemsLabel = enabledItems.length <= 2
-      ? enabledItems.join('、')
-      : '${enabledItems.take(2).join('、')} 等 ${enabledItems.length} 项';
-  if (!performanceSlice.highPerformanceModeEnabled) {
-    return itemsLabel;
-  }
-  return '预设已开 · $itemsLabel';
 }
 
 bool _isSelectableLocalMediaSource(MediaSourceConfig source) {

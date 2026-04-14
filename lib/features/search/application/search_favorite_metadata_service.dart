@@ -110,9 +110,7 @@ class SearchFavoriteMetadataService {
 
     try {
       final match = await _resolveMatch(
-        settings: settings.copyWith(
-          metadataMatchPriority: MetadataMatchProvider.tmdb,
-        ),
+        settings: settings,
         request: request,
       );
       if (match == null) {

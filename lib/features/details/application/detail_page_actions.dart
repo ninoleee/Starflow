@@ -1,4 +1,5 @@
 import 'package:starflow/features/details/application/detail_library_match_service.dart';
+import 'package:starflow/features/details/application/detail_subtitle_controller.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
@@ -472,17 +473,6 @@ String _normalizeDetailLibraryChoicePath(String value) {
   final uri = Uri.tryParse(trimmed);
   final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
   return rawPath.replaceAll('\\', '/').trim();
-}
-
-int normalizeSubtitleSearchIndex(
-  int index, {
-  List<CachedSubtitleSearchOption>? choices,
-}) {
-  final resolvedChoices = choices ?? const <CachedSubtitleSearchOption>[];
-  if (resolvedChoices.isEmpty) {
-    return -1;
-  }
-  return index.clamp(-1, resolvedChoices.length - 1);
 }
 
 class DetailStartupPlan {

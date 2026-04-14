@@ -1,10 +1,12 @@
+import 'package:flutter/foundation.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 
-const Object _detailSubtitleViewStateUnchanged = Object();
+const Object detailSubtitleSearchViewUnchanged = Object();
 
-class DetailSubtitleSearchViewData {
-  const DetailSubtitleSearchViewData({
+@immutable
+class DetailSubtitleSearchViewState {
+  const DetailSubtitleSearchViewState({
     this.choices = const <CachedSubtitleSearchOption>[],
     this.selectedIndex = -1,
     this.isSearching = false,
@@ -33,21 +35,21 @@ class DetailSubtitleSearchViewData {
     return choices[index];
   }
 
-  DetailSubtitleSearchViewData copyWith({
+  DetailSubtitleSearchViewState copyWith({
     List<CachedSubtitleSearchOption>? choices,
     int? selectedIndex,
     bool? isSearching,
-    Object? busyResultId = _detailSubtitleViewStateUnchanged,
-    Object? statusMessage = _detailSubtitleViewStateUnchanged,
+    Object? busyResultId = detailSubtitleSearchViewUnchanged,
+    Object? statusMessage = detailSubtitleSearchViewUnchanged,
   }) {
-    return DetailSubtitleSearchViewData(
+    return DetailSubtitleSearchViewState(
       choices: choices ?? this.choices,
       selectedIndex: selectedIndex ?? this.selectedIndex,
       isSearching: isSearching ?? this.isSearching,
-      busyResultId: identical(busyResultId, _detailSubtitleViewStateUnchanged)
+      busyResultId: identical(busyResultId, detailSubtitleSearchViewUnchanged)
           ? this.busyResultId
           : busyResultId as String?,
-      statusMessage: identical(statusMessage, _detailSubtitleViewStateUnchanged)
+      statusMessage: identical(statusMessage, detailSubtitleSearchViewUnchanged)
           ? this.statusMessage
           : statusMessage as String?,
     );
@@ -59,7 +61,7 @@ sealed class DetailSubtitleSelectionDecision {
     required this.nextViewData,
   });
 
-  final DetailSubtitleSearchViewData nextViewData;
+  final DetailSubtitleSearchViewState nextViewData;
 }
 
 class DetailSubtitleSelectionIgnored extends DetailSubtitleSelectionDecision {
@@ -110,28 +112,28 @@ class DetailSubtitleSearchResolveResult {
     required this.statusMessage,
   });
 
-  final DetailSubtitleSearchViewData nextViewData;
+  final DetailSubtitleSearchViewState nextViewData;
   final List<CachedSubtitleSearchOption> usableChoices;
   final String? statusMessage;
+}
+
+int normalizeSubtitleSearchIndex(
+  int index, {
+  List<CachedSubtitleSearchOption>? choices,
+}) {
+  final resolvedChoices = choices ?? const <CachedSubtitleSearchOption>[];
+  if (resolvedChoices.isEmpty) {
+    return -1;
+  }
+  return index.clamp(-1, resolvedChoices.length - 1);
 }
 
 class DetailSubtitleController {
   const DetailSubtitleController();
 
-  int normalizeSubtitleSearchIndex(
-    int index, {
-    List<CachedSubtitleSearchOption>? choices,
-  }) {
-    final resolvedChoices = choices ?? const <CachedSubtitleSearchOption>[];
-    if (resolvedChoices.isEmpty) {
-      return -1;
-    }
-    return index.clamp(-1, resolvedChoices.length - 1);
-  }
-
   MediaDetailTarget decorateTargetWithSelectedSubtitle(
     MediaDetailTarget target, {
-    required DetailSubtitleSearchViewData viewData,
+    required DetailSubtitleSearchViewState viewData,
   }) {
     final playbackTarget = target.playbackTarget;
     if (playbackTarget == null) {
@@ -149,7 +151,7 @@ class DetailSubtitleController {
   }
 
   DetailSubtitleSearchResolveResult resolveSearchResults({
-    required DetailSubtitleSearchViewData currentViewData,
+    required DetailSubtitleSearchViewState currentViewData,
     required List<SubtitleSearchResult> results,
     int maxChoices = 10,
   }) {
@@ -186,7 +188,7 @@ class DetailSubtitleController {
   }
 
   DetailSubtitleSelectionDecision decideSelectionAction({
-    required DetailSubtitleSearchViewData currentViewData,
+    required DetailSubtitleSearchViewState currentViewData,
     required int requestedIndex,
   }) {
     if (currentViewData.isSearching || currentViewData.choices.isEmpty) {
@@ -246,8 +248,8 @@ class DetailSubtitleController {
     );
   }
 
-  DetailSubtitleSearchViewData applyDownloadedSelectionSuccess({
-    required DetailSubtitleSearchViewData currentViewData,
+  DetailSubtitleSearchViewState applyDownloadedSelectionSuccess({
+    required DetailSubtitleSearchViewState currentViewData,
     required int selectionIndex,
     required SubtitleSearchSelection selection,
   }) {
@@ -272,8 +274,8 @@ class DetailSubtitleController {
     );
   }
 
-  DetailSubtitleSearchViewData applyDownloadedSelectionFailure({
-    required DetailSubtitleSearchViewData currentViewData,
+  DetailSubtitleSearchViewState applyDownloadedSelectionFailure({
+    required DetailSubtitleSearchViewState currentViewData,
     required Object error,
   }) {
     return currentViewData.copyWith(

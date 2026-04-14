@@ -3,6 +3,7 @@ import 'package:starflow/core/utils/detail_resource_switch_trace.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_library_match_service.dart';
 import 'package:starflow/features/details/application/detail_page_controller.dart';
+import 'package:starflow/features/details/application/detail_subtitle_controller.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_subtitle_section.dart';
@@ -49,7 +50,7 @@ String detailLibraryMatchOptionLabel(MediaDetailTarget target) {
 
 String detailPlayableVariantOptionLabel(MediaDetailTarget target) {
   final source = target.sourceName.trim();
-  final fileLabel = _detailPathTail(
+  final fileLabel = resolveDetailPathTail(
     target.playbackTarget?.actualAddress ?? target.resourcePath,
   );
   if (fileLabel.isNotEmpty) {
@@ -620,26 +621,4 @@ List<_DetailResourceFact> _buildDetailResourceFacts(MediaDetailTarget target) {
 bool _isMeaningfulDurationLabel(String label) {
   final trimmed = label.trim();
   return trimmed.isNotEmpty && trimmed != '时长未知' && trimmed != '文件';
-}
-
-String _detailPathTail(String value) {
-  final trimmed = value.trim();
-  if (trimmed.isEmpty) {
-    return '';
-  }
-  final uri = Uri.tryParse(trimmed);
-  final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
-  final normalized = rawPath.replaceAll('\\', '/').trim();
-  if (normalized.isEmpty) {
-    return '';
-  }
-  final tail = normalized.split('/').last.trim();
-  if (tail.isEmpty) {
-    return '';
-  }
-  try {
-    return Uri.decodeComponent(tail);
-  } on ArgumentError {
-    return tail;
-  }
 }

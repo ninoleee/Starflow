@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
@@ -86,22 +87,24 @@ class DetailHeroSection extends ConsumerWidget {
           );
     final resumeEntry =
         ref.watch(playbackResumeForDetailTargetProvider(target)).value;
-    final showResumeAction =
-        resumeEntry != null && (target.isSeries || resumeEntry.canResume);
-    final primaryPlaybackTarget = resolvePrimaryPlaybackTarget(
+    final startPlaybackTarget = resolveStartPlaybackTarget(target);
+    final resumePlaybackTarget = resolveResumePlaybackTarget(
       target,
       resumeEntry,
-      preferResume: showResumeAction,
     );
-    final hasHeroAction = primaryPlaybackTarget != null;
-    final primaryBackdropAsset = resolvePrimaryBackdropAsset(target);
+    final hasHeroAction =
+        startPlaybackTarget != null || resumePlaybackTarget != null;
+    final primaryBackdropSources = buildDetailBackdropImageSourcesForTarget(
+      target,
+    );
+    final primaryBackdropAsset = primaryBackdropSources.primary;
     final heroArtwork = Stack(
       fit: StackFit.expand,
       children: [
         DetailBackdropImage(
           imageUrl: primaryBackdropAsset.url,
           imageHeaders: primaryBackdropAsset.headers,
-          fallbackSources: buildPrimaryBackdropFallbackSources(target),
+          fallbackSources: primaryBackdropSources.fallbackSources,
           cachePolicy: primaryBackdropAsset.cachePolicy,
         ),
         IgnorePointer(
@@ -166,8 +169,8 @@ class DetailHeroSection extends ConsumerWidget {
                     peopleLine: peopleLine,
                     simplifyVisualEffects: simplifyVisualEffects,
                     isTelevision: isTelevision,
-                    primaryPlaybackTarget: primaryPlaybackTarget,
-                    showResumeAction: showResumeAction,
+                    startPlaybackTarget: startPlaybackTarget,
+                    resumePlaybackTarget: resumePlaybackTarget,
                     artworkFocusNode: artworkFocusNode,
                     playFocusNode: playFocusNode,
                   );
@@ -202,8 +205,8 @@ class DetailHeroContent extends StatelessWidget {
     required this.peopleLine,
     required this.simplifyVisualEffects,
     required this.isTelevision,
-    required this.primaryPlaybackTarget,
-    required this.showResumeAction,
+    required this.startPlaybackTarget,
+    required this.resumePlaybackTarget,
     this.artworkFocusNode,
     this.playFocusNode,
   });
@@ -213,17 +216,22 @@ class DetailHeroContent extends StatelessWidget {
   final String peopleLine;
   final bool simplifyVisualEffects;
   final bool isTelevision;
-  final PlaybackTarget? primaryPlaybackTarget;
-  final bool showResumeAction;
+  final PlaybackTarget? startPlaybackTarget;
+  final PlaybackTarget? resumePlaybackTarget;
   final FocusNode? artworkFocusNode;
   final FocusNode? playFocusNode;
 
   @override
   Widget build(BuildContext context) {
     final hasLogo = target.logoUrl.trim().isNotEmpty;
-    final primaryTitle = _resolveDetailHeroPrimaryTitle(target);
-    final episodeTitle = _resolveDetailHeroEpisodeTitle(target);
-    final primaryPlaybackLabel = showResumeAction ? '继续播放' : '立即播放';
+    final primaryTitle = resolveDetailPrimaryTitle(
+      currentTarget: target,
+      preferResolvedSeriesTitle: true,
+    );
+    final episodeTitle = resolveDetailEpisodeTitleLine(
+      currentTarget: target,
+      preferResolvedSeriesTitle: true,
+    );
     final metadataChipPadding = EdgeInsets.symmetric(
       horizontal: simplifyVisualEffects ? 10 : 11,
       vertical: simplifyVisualEffects ? 5 : 6,
@@ -239,6 +247,99 @@ class DetailHeroContent extends StatelessWidget {
         child: child,
       );
     }
+
+    Future<void> openPlaybackTarget(PlaybackTarget playbackTarget) async {
+      await ActivePlaybackCleanupCoordinator.cleanupAll(
+        reason: 'open-new-playback',
+      );
+      if (!context.mounted) {
+        return;
+      }
+      context.pushNamed(
+        'player',
+        extra: playbackTarget,
+      );
+    }
+
+    Widget buildPlaybackButton({
+      required String label,
+      required IconData icon,
+      required PlaybackTarget playbackTarget,
+      required String focusId,
+      FocusNode? focusNode,
+      bool autofocus = false,
+      TvButtonVariant televisionVariant = TvButtonVariant.filled,
+    }) {
+      if (isTelevision) {
+        return TvAdaptiveButton(
+          label: label,
+          icon: icon,
+          variant: televisionVariant,
+          focusNode: focusNode,
+          focusId: focusId,
+          autofocus: autofocus,
+          onPressed: () => openPlaybackTarget(playbackTarget),
+        );
+      }
+      if (televisionVariant == TvButtonVariant.outlined) {
+        return OutlinedButton.icon(
+          onPressed: () => openPlaybackTarget(playbackTarget),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.white,
+            side: BorderSide(
+              color: Colors.white.withValues(alpha: 0.36),
+            ),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 18,
+              vertical: 15,
+            ),
+          ),
+          icon: Icon(icon),
+          label: Text(label),
+        );
+      }
+      return FilledButton.icon(
+        onPressed: () => openPlaybackTarget(playbackTarget),
+        style: FilledButton.styleFrom(
+          backgroundColor: Colors.white,
+          foregroundColor: const Color(0xFF081120),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 15,
+          ),
+        ),
+        icon: Icon(icon),
+        label: Text(label),
+      );
+    }
+
+    final playbackActions = <Widget>[
+      if (startPlaybackTarget != null)
+        buildPlaybackButton(
+          label: '从头播放',
+          icon: Icons.play_arrow_rounded,
+          playbackTarget: startPlaybackTarget!,
+          focusNode: playFocusNode,
+          focusId: 'detail:hero:play:start',
+          autofocus: true,
+        ),
+      if (resumePlaybackTarget != null)
+        buildPlaybackButton(
+          label: '继续播放',
+          icon: Icons.history_rounded,
+          playbackTarget: resumePlaybackTarget!,
+          focusNode: startPlaybackTarget == null ? playFocusNode : null,
+          focusId: 'detail:hero:play:resume',
+          autofocus: startPlaybackTarget == null,
+          televisionVariant: TvButtonVariant.outlined,
+        ),
+    ];
+
+    final actionRow = Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: playbackActions,
+    );
 
     final titleStyle = Theme.of(context).textTheme.headlineSmall?.copyWith(
           color: Colors.white,
@@ -387,146 +488,20 @@ class DetailHeroContent extends StatelessWidget {
                 ? (simplifyVisualEffects ? 18 : 24)
                 : (simplifyVisualEffects ? 16 : 20),
           ),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              if (primaryPlaybackTarget != null)
-                isTelevision
-                    ? wrapTelevisionDirectionalHandling(
-                        onDirection: (direction) {
-                          switch (direction) {
-                            case TraversalDirection.right:
-                              return true;
-                            case TraversalDirection.left:
-                            case TraversalDirection.down:
-                              return false;
-                            case TraversalDirection.up:
-                              return requestDetailFocus([artworkFocusNode]);
-                          }
-                        },
-                        child: TvAdaptiveButton(
-                          label: primaryPlaybackLabel,
-                          icon: Icons.play_arrow_rounded,
-                          focusNode: playFocusNode,
-                          focusId: 'detail:hero:play',
-                          autofocus: true,
-                          onPressed: () async {
-                            await ActivePlaybackCleanupCoordinator.cleanupAll(
-                              reason: 'open-new-playback',
-                            );
-                            if (!context.mounted) {
-                              return;
-                            }
-                            context.pushNamed(
-                              'player',
-                              extra: primaryPlaybackTarget,
-                            );
-                          },
-                        ),
-                      )
-                    : FilledButton.icon(
-                        onPressed: () async {
-                          await ActivePlaybackCleanupCoordinator.cleanupAll(
-                            reason: 'open-new-playback',
-                          );
-                          if (!context.mounted) {
-                            return;
-                          }
-                          context.pushNamed(
-                            'player',
-                            extra: primaryPlaybackTarget,
-                          );
-                        },
-                        style: FilledButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xFF081120),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 15,
-                          ),
-                        ),
-                        icon: const Icon(Icons.play_arrow_rounded),
-                        label: Text(primaryPlaybackLabel),
-                      ),
-            ],
-          ),
+          if (playbackActions.isNotEmpty)
+            wrapTelevisionDirectionalHandling(
+              onDirection: (direction) {
+                if (direction == TraversalDirection.up) {
+                  return requestDetailFocus([artworkFocusNode]);
+                }
+                return false;
+              },
+              child: actionRow,
+            ),
         ],
       ),
     );
   }
-}
-
-bool _isEpisodeDetailTarget(MediaDetailTarget target) {
-  return target.itemType.trim().toLowerCase() == 'episode';
-}
-
-String _resolveDetailHeroPrimaryTitle(MediaDetailTarget target) {
-  final title = target.title.trim();
-  final query = target.searchQuery.trim();
-  final seriesTitle = target.playbackTarget?.resolvedSeriesTitle.trim() ?? '';
-  if (_isEpisodeDetailTarget(target)) {
-    if (seriesTitle.isNotEmpty) {
-      return seriesTitle;
-    }
-    if (query.isNotEmpty && query != title) {
-      return query;
-    }
-  }
-  if (title.isNotEmpty) {
-    return title;
-  }
-  if (seriesTitle.isNotEmpty) {
-    return seriesTitle;
-  }
-  if (query.isNotEmpty) {
-    return query;
-  }
-  return '';
-}
-
-String? _resolveDetailHeroEpisodeTitle(MediaDetailTarget target) {
-  if (!_isEpisodeDetailTarget(target)) {
-    return null;
-  }
-  final fileName = _resolveDetailEpisodeFileName(target);
-  if (fileName.isEmpty) {
-    return null;
-  }
-  final primaryTitle = _resolveDetailHeroPrimaryTitle(target);
-  if (fileName == primaryTitle) {
-    return null;
-  }
-  return fileName;
-}
-
-String _resolveDetailEpisodeFileName(MediaDetailTarget target) {
-  for (final value in [
-    target.playbackTarget?.actualAddress ?? '',
-    target.resourcePath,
-    target.playbackTarget?.streamUrl ?? '',
-  ]) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) {
-      continue;
-    }
-    final uri = Uri.tryParse(trimmed);
-    final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
-    final normalized = rawPath.replaceAll('\\', '/').trim();
-    if (normalized.isEmpty) {
-      continue;
-    }
-    final fileName = normalized.split('/').last.trim();
-    if (fileName.isEmpty) {
-      continue;
-    }
-    try {
-      return Uri.decodeComponent(fileName);
-    } on ArgumentError {
-      return fileName;
-    }
-  }
-  return '';
 }
 
 bool requestDetailFocus(Iterable<FocusNode?> nodes) {
@@ -618,120 +593,40 @@ _DetailBackdropDecodeSize? _resolveDetailBackdropDecodeSize(
   );
 }
 
-class DetailHeroImageAsset {
-  const DetailHeroImageAsset({
-    required this.url,
-    this.headers = const {},
-    this.cachePolicy = AppNetworkImageCachePolicy.persistent,
-  });
-
-  final String url;
-  final Map<String, String> headers;
-  final AppNetworkImageCachePolicy cachePolicy;
-}
-
-DetailHeroImageAsset resolvePrimaryBackdropAsset(MediaDetailTarget target) {
-  if (target.backdropUrl.trim().isNotEmpty) {
-    return DetailHeroImageAsset(
-      url: target.backdropUrl.trim(),
-      headers: target.backdropHeaders,
-      cachePolicy: _shouldBypassPersistentCacheForBackdrop(target)
-          ? AppNetworkImageCachePolicy.networkOnly
-          : AppNetworkImageCachePolicy.persistent,
-    );
-  }
-  if (target.bannerUrl.trim().isNotEmpty) {
-    return DetailHeroImageAsset(
-      url: target.bannerUrl.trim(),
-      headers: target.bannerHeaders,
-    );
-  }
-  if (target.extraBackdropUrls.isNotEmpty) {
-    return DetailHeroImageAsset(
-      url: target.extraBackdropUrls.first,
-      headers: target.extraBackdropHeaders,
-      cachePolicy: AppNetworkImageCachePolicy.networkOnly,
-    );
-  }
-  if (target.posterUrl.trim().isNotEmpty) {
-    return DetailHeroImageAsset(
-      url: target.posterUrl.trim(),
-      headers: target.posterHeaders,
-    );
-  }
-  return const DetailHeroImageAsset(url: '');
+DetailImageAsset resolvePrimaryBackdropAsset(MediaDetailTarget target) {
+  return buildDetailBackdropImageSourcesForTarget(target).primary;
 }
 
 List<AppNetworkImageSource> buildPrimaryBackdropFallbackSources(
   MediaDetailTarget target,
 ) {
-  final sources = <AppNetworkImageSource>[];
-  final seen = <String>{target.backdropUrl.trim()};
-
-  void add(
-    String url,
-    Map<String, String> headers,
-    AppNetworkImageCachePolicy cachePolicy,
-  ) {
-    final trimmedUrl = url.trim();
-    if (trimmedUrl.isEmpty || !seen.add(trimmedUrl)) {
-      return;
-    }
-    sources.add(
-      AppNetworkImageSource(
-        url: trimmedUrl,
-        headers: headers,
-        cachePolicy: cachePolicy,
-      ),
-    );
-  }
-
-  add(
-    target.bannerUrl,
-    target.bannerHeaders,
-    AppNetworkImageCachePolicy.persistent,
-  );
-  for (final url in target.extraBackdropUrls) {
-    add(
-      url,
-      target.extraBackdropHeaders,
-      AppNetworkImageCachePolicy.networkOnly,
-    );
-  }
-  add(
-    target.posterUrl,
-    target.posterHeaders,
-    AppNetworkImageCachePolicy.persistent,
-  );
-  return sources;
+  return buildDetailBackdropImageSourcesForTarget(target).fallbackSources;
 }
 
-bool _shouldBypassPersistentCacheForBackdrop(MediaDetailTarget target) {
-  final itemType = target.itemType.trim().toLowerCase();
-  if (itemType != 'episode') {
-    return false;
-  }
-  final backdropUrl = target.backdropUrl.trim();
-  final bannerUrl = target.bannerUrl.trim();
-  return backdropUrl.isNotEmpty &&
-      bannerUrl.isNotEmpty &&
-      backdropUrl != bannerUrl;
-}
-
-PlaybackTarget? resolvePrimaryPlaybackTarget(
+PlaybackTarget? resolveStartPlaybackTarget(
   MediaDetailTarget target,
-  PlaybackProgressEntry? resumeEntry, {
-  required bool preferResume,
-}) {
-  if (resumeEntry != null && preferResume) {
-    final targetSubtitle = target.playbackTarget;
-    if (targetSubtitle == null) {
-      return resumeEntry.target;
-    }
-    return resumeEntry.target.copyWith(
-      externalSubtitleFilePath: targetSubtitle.externalSubtitleFilePath,
-      externalSubtitleDisplayName: targetSubtitle.externalSubtitleDisplayName,
-    );
+) {
+  final playbackTarget = target.playbackTarget;
+  if (playbackTarget == null) {
+    return null;
   }
-  return target.playbackTarget;
+  return playbackTarget.copyWith(allowResume: false);
+}
+
+PlaybackTarget? resolveResumePlaybackTarget(
+  MediaDetailTarget target,
+  PlaybackProgressEntry? resumeEntry,
+) {
+  if (resumeEntry == null || !resumeEntry.canResume) {
+    return null;
+  }
+  final targetSubtitle = target.playbackTarget;
+  if (targetSubtitle == null) {
+    return resumeEntry.target.copyWith(allowResume: true);
+  }
+  return resumeEntry.target.copyWith(
+    allowResume: true,
+    externalSubtitleFilePath: targetSubtitle.externalSubtitleFilePath,
+    externalSubtitleDisplayName: targetSubtitle.externalSubtitleDisplayName,
+  );
 }

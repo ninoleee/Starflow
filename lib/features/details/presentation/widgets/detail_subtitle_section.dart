@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
-import 'package:starflow/features/details/application/detail_page_controller.dart';
+import 'package:starflow/features/details/application/detail_subtitle_controller.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
@@ -49,11 +49,13 @@ class DetailSubtitleSection extends StatelessWidget {
                   label: subtitleActionLabel,
                   icon: Icons.subtitles_rounded,
                   focusId: 'detail:resource:search-subtitle',
-                  onPressed: subtitleView.isSearching ? null : onSearchSubtitles,
+                  onPressed:
+                      subtitleView.isSearching ? null : onSearchSubtitles,
                   variant: TvButtonVariant.text,
                 )
               : TextButton.icon(
-                  onPressed: subtitleView.isSearching ? null : onSearchSubtitles,
+                  onPressed:
+                      subtitleView.isSearching ? null : onSearchSubtitles,
                   icon: subtitleView.isSearching
                       ? const SizedBox(
                           width: 14,

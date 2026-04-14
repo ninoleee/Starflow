@@ -27,6 +27,10 @@ class MetadataMatchResolver {
     required MetadataMatchRequest request,
   }) async {
     final providers = _orderedEnabledProviders(settings);
+    Object? lastError;
+    StackTrace? lastStackTrace;
+    var hadDefinitiveNoMatch = false;
+    var attemptedProviders = 0;
     metadataSearchTrace(
       'resolver.match.start',
       fields: <String, Object?>{
@@ -39,130 +43,32 @@ class MetadataMatchResolver {
       },
     );
     for (final provider in providers) {
-      switch (provider) {
-        case MetadataMatchProvider.tmdb:
-          final token = settings.tmdbReadAccessToken.trim();
-          if (!settings.tmdbMetadataMatchEnabled || token.isEmpty) {
-            continue;
-          }
-          metadataSearchTrace(
-            'resolver.provider.start',
-            fields: <String, Object?>{
-              'provider': provider.name,
-              'mode': 'title',
-              'query': request.query,
-              'year': request.year,
-              'preferSeries': request.preferSeries,
-            },
-          );
-          try {
-            final match = await _tmdbMetadataClient.matchTitle(
-              query: request.query,
-              readAccessToken: token,
-              year: request.year,
-              preferSeries: request.preferSeries,
-            );
-            if (match != null) {
-              final result = _mapTmdbMatch(match);
-              metadataSearchTrace(
-                'resolver.provider.match',
-                fields: <String, Object?>{
-                  'provider': provider.name,
-                  'mode': 'title',
-                  'query': request.query,
-                  'title': result.title,
-                  'imdbId': result.imdbId,
-                  'tmdbId': result.tmdbId,
-                },
-              );
-              return result;
-            }
-            metadataSearchTrace(
-              'resolver.provider.no-match',
-              fields: <String, Object?>{
-                'provider': provider.name,
-                'mode': 'title',
-                'query': request.query,
-              },
-            );
-          } catch (error, stackTrace) {
-            metadataSearchTrace(
-              'resolver.provider.failed',
-              fields: <String, Object?>{
-                'provider': provider.name,
-                'mode': 'title',
-                'query': request.query,
-              },
-              error: error,
-              stackTrace: stackTrace,
-            );
-            rethrow;
-          }
-        case MetadataMatchProvider.wmdb:
-          if (!settings.wmdbMetadataMatchEnabled) {
-            continue;
-          }
-          final doubanId = request.doubanId.trim();
-          metadataSearchTrace(
-            'resolver.provider.start',
-            fields: <String, Object?>{
-              'provider': provider.name,
-              'mode': doubanId.isNotEmpty ? 'doubanId' : 'title',
-              'query': request.query,
-              'doubanId': doubanId,
-              'year': request.year,
-              'preferSeries': request.preferSeries,
-              'firstActor': request.actors.isEmpty ? '' : request.actors.first,
-            },
-          );
-          try {
-            final match = doubanId.isNotEmpty
-                ? await _wmdbMetadataClient.matchByDoubanId(doubanId: doubanId)
-                : await _wmdbMetadataClient.matchTitle(
-                    query: request.query,
-                    year: request.year,
-                    preferSeries: request.preferSeries,
-                    actors: request.actors,
-                  );
-            if (match != null) {
-              metadataSearchTrace(
-                'resolver.provider.match',
-                fields: <String, Object?>{
-                  'provider': provider.name,
-                  'mode': doubanId.isNotEmpty ? 'doubanId' : 'title',
-                  'query': request.query,
-                  'doubanId': match.doubanId,
-                  'imdbId': match.imdbId,
-                  'tmdbId': match.tmdbId,
-                  'title': match.title,
-                },
-              );
-              return match;
-            }
-            metadataSearchTrace(
-              'resolver.provider.no-match',
-              fields: <String, Object?>{
-                'provider': provider.name,
-                'mode': doubanId.isNotEmpty ? 'doubanId' : 'title',
-                'query': request.query,
-                'doubanId': doubanId,
-              },
-            );
-          } catch (error, stackTrace) {
-            metadataSearchTrace(
-              'resolver.provider.failed',
-              fields: <String, Object?>{
-                'provider': provider.name,
-                'mode': doubanId.isNotEmpty ? 'doubanId' : 'title',
-                'query': request.query,
-                'doubanId': doubanId,
-              },
-              error: error,
-              stackTrace: stackTrace,
-            );
-            rethrow;
-          }
+      final attempt = switch (provider) {
+        MetadataMatchProvider.tmdb =>
+          await _matchTmdbProvider(settings: settings, request: request),
+        MetadataMatchProvider.wmdb =>
+          await _matchWmdbProvider(settings: settings, request: request),
+      };
+      if (!attempt.wasAttempted) {
+        continue;
       }
+      attemptedProviders += 1;
+      if (attempt.result != null) {
+        return attempt.result;
+      }
+      if (attempt.error != null) {
+        lastError = attempt.error;
+        lastStackTrace = attempt.stackTrace;
+        continue;
+      }
+      hadDefinitiveNoMatch = true;
+    }
+
+    if (!hadDefinitiveNoMatch &&
+        attemptedProviders > 0 &&
+        lastError != null &&
+        lastStackTrace != null) {
+      Error.throwWithStackTrace(lastError, lastStackTrace);
     }
 
     metadataSearchTrace(
@@ -181,6 +87,152 @@ class MetadataMatchResolver {
     return preferred == MetadataMatchProvider.wmdb
         ? const [MetadataMatchProvider.wmdb, MetadataMatchProvider.tmdb]
         : const [MetadataMatchProvider.tmdb, MetadataMatchProvider.wmdb];
+  }
+
+  Future<_ResolverAttempt> _matchTmdbProvider({
+    required AppSettings settings,
+    required MetadataMatchRequest request,
+  }) async {
+    final token = settings.tmdbReadAccessToken.trim();
+    if (!settings.tmdbMetadataMatchEnabled || token.isEmpty) {
+      return const _ResolverAttempt.skipped();
+    }
+    final imdbId = request.imdbId.trim().toLowerCase();
+    final mode = imdbId.isNotEmpty ? 'imdbId' : 'title';
+    metadataSearchTrace(
+      'resolver.provider.start',
+      fields: <String, Object?>{
+        'provider': MetadataMatchProvider.tmdb.name,
+        'mode': mode,
+        'query': request.query,
+        'imdbId': imdbId,
+        'year': request.year,
+        'preferSeries': request.preferSeries,
+      },
+    );
+    try {
+      final match = imdbId.isNotEmpty
+          ? await _tmdbMetadataClient.matchByImdbId(
+              imdbId: imdbId,
+              readAccessToken: token,
+              preferSeries: request.preferSeries,
+            )
+          : await _tmdbMetadataClient.matchTitle(
+              query: request.query,
+              readAccessToken: token,
+              year: request.year,
+              preferSeries: request.preferSeries,
+            );
+      if (match == null) {
+        metadataSearchTrace(
+          'resolver.provider.no-match',
+          fields: <String, Object?>{
+            'provider': MetadataMatchProvider.tmdb.name,
+            'mode': mode,
+            'query': request.query,
+            'imdbId': imdbId,
+          },
+        );
+        return const _ResolverAttempt.noMatch();
+      }
+      final result = _mapTmdbMatch(match);
+      metadataSearchTrace(
+        'resolver.provider.match',
+        fields: <String, Object?>{
+          'provider': MetadataMatchProvider.tmdb.name,
+          'mode': mode,
+          'query': request.query,
+          'title': result.title,
+          'imdbId': result.imdbId,
+          'tmdbId': result.tmdbId,
+        },
+      );
+      return _ResolverAttempt.matched(result);
+    } catch (error, stackTrace) {
+      metadataSearchTrace(
+        'resolver.provider.failed',
+        fields: <String, Object?>{
+          'provider': MetadataMatchProvider.tmdb.name,
+          'mode': mode,
+          'query': request.query,
+          'imdbId': imdbId,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return _ResolverAttempt.failed(error, stackTrace);
+    }
+  }
+
+  Future<_ResolverAttempt> _matchWmdbProvider({
+    required AppSettings settings,
+    required MetadataMatchRequest request,
+  }) async {
+    if (!settings.wmdbMetadataMatchEnabled) {
+      return const _ResolverAttempt.skipped();
+    }
+    final doubanId = request.doubanId.trim();
+    final mode = doubanId.isNotEmpty ? 'doubanId' : 'title';
+    metadataSearchTrace(
+      'resolver.provider.start',
+      fields: <String, Object?>{
+        'provider': MetadataMatchProvider.wmdb.name,
+        'mode': mode,
+        'query': request.query,
+        'doubanId': doubanId,
+        'year': request.year,
+        'preferSeries': request.preferSeries,
+        'firstActor': request.actors.isEmpty ? '' : request.actors.first,
+      },
+    );
+    try {
+      final match = doubanId.isNotEmpty
+          ? await _wmdbMetadataClient.matchByDoubanId(doubanId: doubanId)
+          : await _wmdbMetadataClient.matchTitle(
+              query: request.query,
+              year: request.year,
+              preferSeries: request.preferSeries,
+              actors: request.actors,
+            );
+      if (match == null) {
+        metadataSearchTrace(
+          'resolver.provider.no-match',
+          fields: <String, Object?>{
+            'provider': MetadataMatchProvider.wmdb.name,
+            'mode': mode,
+            'query': request.query,
+            'doubanId': doubanId,
+          },
+        );
+        return const _ResolverAttempt.noMatch();
+      }
+      metadataSearchTrace(
+        'resolver.provider.match',
+        fields: <String, Object?>{
+          'provider': MetadataMatchProvider.wmdb.name,
+          'mode': mode,
+          'query': request.query,
+          'doubanId': match.doubanId,
+          'imdbId': match.imdbId,
+          'tmdbId': match.tmdbId,
+          'title': match.title,
+        },
+      );
+      return _ResolverAttempt.matched(match);
+    } catch (error, stackTrace) {
+      metadataSearchTrace(
+        'resolver.provider.failed',
+        fields: <String, Object?>{
+          'provider': MetadataMatchProvider.wmdb.name,
+          'mode': mode,
+          'query': request.query,
+          'doubanId': doubanId,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return _ResolverAttempt.failed(error, stackTrace);
+    }
   }
 
   MetadataMatchResult _mapTmdbMatch(TmdbMetadataMatch match) {
@@ -230,4 +282,32 @@ class MetadataMatchResolver {
       tmdbId: '${match.tmdbId}',
     );
   }
+}
+
+class _ResolverAttempt {
+  const _ResolverAttempt._({
+    required this.wasAttempted,
+    this.result,
+    this.error,
+    this.stackTrace,
+  });
+
+  const _ResolverAttempt.skipped() : this._(wasAttempted: false);
+
+  const _ResolverAttempt.noMatch() : this._(wasAttempted: true);
+
+  const _ResolverAttempt.matched(MetadataMatchResult result)
+      : this._(wasAttempted: true, result: result);
+
+  const _ResolverAttempt.failed(Object error, StackTrace stackTrace)
+      : this._(
+          wasAttempted: true,
+          error: error,
+          stackTrace: stackTrace,
+        );
+
+  final bool wasAttempted;
+  final MetadataMatchResult? result;
+  final Object? error;
+  final StackTrace? stackTrace;
 }

@@ -760,6 +760,10 @@ class AppSettings {
     this.playbackEngine = PlaybackEngine.embeddedMpv,
     this.playbackDecodeMode = PlaybackDecodeMode.auto,
     this.playbackMpvQualityPreset = PlaybackMpvQualityPreset.balanced,
+    this.playbackMpvDoubleTapToSeekEnabled = true,
+    this.playbackMpvSwipeToSeekEnabled = true,
+    this.playbackMpvLongPressSpeedBoostEnabled = true,
+    this.playbackMpvStallAutoRecoveryEnabled = true,
     this.playbackTraceEnabled = false,
     this.subtitleSearchTraceEnabled = false,
   });
@@ -805,6 +809,10 @@ class AppSettings {
   final PlaybackEngine playbackEngine;
   final PlaybackDecodeMode playbackDecodeMode;
   final PlaybackMpvQualityPreset playbackMpvQualityPreset;
+  final bool playbackMpvDoubleTapToSeekEnabled;
+  final bool playbackMpvSwipeToSeekEnabled;
+  final bool playbackMpvLongPressSpeedBoostEnabled;
+  final bool playbackMpvStallAutoRecoveryEnabled;
   final bool playbackTraceEnabled;
   final bool subtitleSearchTraceEnabled;
 
@@ -850,6 +858,10 @@ class AppSettings {
     PlaybackEngine? playbackEngine,
     PlaybackDecodeMode? playbackDecodeMode,
     PlaybackMpvQualityPreset? playbackMpvQualityPreset,
+    bool? playbackMpvDoubleTapToSeekEnabled,
+    bool? playbackMpvSwipeToSeekEnabled,
+    bool? playbackMpvLongPressSpeedBoostEnabled,
+    bool? playbackMpvStallAutoRecoveryEnabled,
     bool? playbackTraceEnabled,
     bool? subtitleSearchTraceEnabled,
   }) {
@@ -932,6 +944,16 @@ class AppSettings {
       playbackDecodeMode: playbackDecodeMode ?? this.playbackDecodeMode,
       playbackMpvQualityPreset:
           playbackMpvQualityPreset ?? this.playbackMpvQualityPreset,
+      playbackMpvDoubleTapToSeekEnabled: playbackMpvDoubleTapToSeekEnabled ??
+          this.playbackMpvDoubleTapToSeekEnabled,
+      playbackMpvSwipeToSeekEnabled:
+          playbackMpvSwipeToSeekEnabled ?? this.playbackMpvSwipeToSeekEnabled,
+      playbackMpvLongPressSpeedBoostEnabled:
+          playbackMpvLongPressSpeedBoostEnabled ??
+              this.playbackMpvLongPressSpeedBoostEnabled,
+      playbackMpvStallAutoRecoveryEnabled:
+          playbackMpvStallAutoRecoveryEnabled ??
+              this.playbackMpvStallAutoRecoveryEnabled,
       playbackTraceEnabled: playbackTraceEnabled ?? this.playbackTraceEnabled,
       subtitleSearchTraceEnabled:
           subtitleSearchTraceEnabled ?? this.subtitleSearchTraceEnabled,
@@ -988,6 +1010,12 @@ class AppSettings {
       'playbackEngine': playbackEngine.name,
       'playbackDecodeMode': playbackDecodeMode.name,
       'playbackMpvQualityPreset': playbackMpvQualityPreset.name,
+      'playbackMpvDoubleTapToSeekEnabled': playbackMpvDoubleTapToSeekEnabled,
+      'playbackMpvSwipeToSeekEnabled': playbackMpvSwipeToSeekEnabled,
+      'playbackMpvLongPressSpeedBoostEnabled':
+          playbackMpvLongPressSpeedBoostEnabled,
+      'playbackMpvStallAutoRecoveryEnabled':
+          playbackMpvStallAutoRecoveryEnabled,
       'playbackTraceEnabled': playbackTraceEnabled,
       'subtitleSearchTraceEnabled': subtitleSearchTraceEnabled,
     };
@@ -1115,6 +1143,14 @@ class AppSettings {
       playbackMpvQualityPreset: PlaybackMpvQualityPresetX.fromName(
         json['playbackMpvQualityPreset'] as String? ?? '',
       ),
+      playbackMpvDoubleTapToSeekEnabled:
+          json['playbackMpvDoubleTapToSeekEnabled'] as bool? ?? true,
+      playbackMpvSwipeToSeekEnabled:
+          json['playbackMpvSwipeToSeekEnabled'] as bool? ?? true,
+      playbackMpvLongPressSpeedBoostEnabled:
+          json['playbackMpvLongPressSpeedBoostEnabled'] as bool? ?? true,
+      playbackMpvStallAutoRecoveryEnabled:
+          json['playbackMpvStallAutoRecoveryEnabled'] as bool? ?? true,
       playbackTraceEnabled: json['playbackTraceEnabled'] as bool? ?? false,
       subtitleSearchTraceEnabled:
           json['subtitleSearchTraceEnabled'] as bool? ?? false,
@@ -1129,11 +1165,31 @@ enum AppUiPerformanceTier {
 }
 
 extension AppSettingsPerformanceX on AppSettings {
-  AppUiPerformanceTier get effectiveUiPerformanceTier {
-    if (highPerformanceModeEnabled) {
-      return AppUiPerformanceTier.performance;
-    }
+  AppSettings applyHighPerformancePreset() {
+    return copyWith(
+      highPerformanceModeEnabled: true,
+      translucentEffectsEnabled: false,
+      autoHideNavigationBarEnabled: false,
+      homeHeroBackgroundEnabled: false,
+      performanceReduceDecorationsEnabled: true,
+      performanceReduceMotionEnabled: true,
+      performanceStaticNavigationEnabled: true,
+      performanceLightweightTvFocusEnabled: true,
+      performanceStaticHomeHeroEnabled: true,
+      performanceLightweightHomeHeroEnabled: true,
+      performanceLiveItemHeroOverlayEnabled: false,
+      performanceSlimDetailHeroEnabled: true,
+      performanceLeanPlaybackUiEnabled: true,
+      performanceAggressivePlaybackTuningEnabled: true,
+      performanceAutoDowngradeHeavyPlaybackEnabled: true,
+    );
+  }
 
+  AppSettings clearHighPerformancePresetMarker() {
+    return copyWith(highPerformanceModeEnabled: false);
+  }
+
+  AppUiPerformanceTier get effectiveUiPerformanceTier {
     final enabledPerformanceToggles = <bool>[
       performanceReduceDecorationsEnabled,
       performanceReduceMotionEnabled,
@@ -1176,6 +1232,22 @@ extension AppSettingsPerformanceX on AppSettings {
 
   bool get effectiveNavigationAutoHideEnabled {
     return autoHideNavigationBarEnabled && !effectiveStaticNavigationEnabled;
+  }
+
+  bool effectivePerformanceLiveItemHeroOverlayEnabled({
+    required bool? isTelevision,
+  }) {
+    if (isTelevision != false) {
+      return false;
+    }
+    return performanceLiveItemHeroOverlayEnabled;
+  }
+
+  bool effectiveBackgroundPlaybackEnabled({required bool? isTelevision}) {
+    if (isTelevision != false) {
+      return false;
+    }
+    return playbackBackgroundPlaybackEnabled;
   }
 
   bool effectiveLeanPlaybackUiEnabled({required bool isTelevision}) {

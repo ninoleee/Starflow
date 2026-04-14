@@ -6,6 +6,7 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
+import 'package:starflow/features/settings/presentation/settings_version_label.dart';
 
 enum SettingsCloseAction {
   cancel,
@@ -80,29 +81,69 @@ class _SettingsVersionFooter extends StatelessWidget {
       future: _settingsPackageInfoFuture,
       builder: (context, snapshot) {
         final info = snapshot.data;
-        final version = info?.version.trim() ?? '';
-        if (version.isEmpty) {
+        if (info == null) {
           return SizedBox(height: bottomSpacing);
         }
-        final buildNumber = info?.buildNumber.trim() ?? '';
-        final versionLabel = buildNumber.isEmpty
-            ? '版本 $version · Nino'
-            : '版本 $version ($buildNumber) · Nino';
+        final footerInfo = resolveSettingsVersionFooterInfo(info);
+        if (footerInfo == null) {
+          return SizedBox(height: bottomSpacing);
+        }
         return Padding(
           padding: EdgeInsets.only(
             top: 18,
             bottom: bottomSpacing,
           ),
           child: Center(
-            child: Text(
-              versionLabel,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant.withValues(
-                  alpha: 0.72,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  footerInfo.author,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant.withValues(
+                      alpha: 0.72,
+                    ),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-                fontWeight: FontWeight.w600,
-              ),
+                const SizedBox(height: 6),
+                TvFocusableAction(
+                  focusId: 'settings-footer:version',
+                  onPressed: () {},
+                  visualStyle: TvFocusVisualStyle.subtle,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    child: Text(
+                      footerInfo.version,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.82,
+                        ),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                if (footerInfo.buildDate.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    footerInfo.buildDate,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant.withValues(
+                        alpha: 0.72,
+                      ),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         );

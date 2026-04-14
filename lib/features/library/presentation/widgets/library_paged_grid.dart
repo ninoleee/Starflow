@@ -102,10 +102,14 @@ class LibraryPagedGrid extends ConsumerWidget {
               ),
               itemBuilder: (context, index) {
                 final seedItem = pageItems[index];
-                final item = ref.watch(
-                  libraryResolvedItemProvider(
+                final cachedTarget = ref.watch(
+                  libraryCachedDetailTargetProvider(
                     LibraryItemOverlayRequest(seedItem),
                   ),
+                );
+                final item = mergeLibraryItemWithCachedDetails(
+                  item: seedItem,
+                  cachedTarget: cachedTarget,
                 );
                 final posterAssets = _resolveLibraryPosterAssets(item);
                 final posterAsset = posterAssets.isNotEmpty

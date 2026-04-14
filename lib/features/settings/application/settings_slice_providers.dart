@@ -59,37 +59,58 @@ final settingsHeroSliceProvider = Provider<SettingsHeroSlice>(
 );
 
 final settingsPlaybackSliceProvider = Provider<SettingsPlaybackSlice>(
-  (ref) => ref.watch(
-    appSettingsProvider.select(
-      (settings) => SettingsPlaybackSlice(
-        playbackEngine: settings.playbackEngine,
-        playbackDecodeMode: settings.playbackDecodeMode,
-        playbackMpvQualityPreset: settings.playbackMpvQualityPreset,
-        playbackOpenTimeoutSeconds: settings.playbackOpenTimeoutSeconds,
-        playbackDefaultSpeed: settings.playbackDefaultSpeed,
-        playbackSubtitlePreference: settings.playbackSubtitlePreference,
-        playbackSubtitleScale: settings.playbackSubtitleScale,
-        onlineSubtitleSources: settings.onlineSubtitleSources,
-        playbackBackgroundPlaybackEnabled:
-            settings.playbackBackgroundPlaybackEnabled,
+  (ref) {
+    final effectiveBackgroundPlaybackEnabled = ref.watch(
+      effectivePlaybackBackgroundEnabledProvider,
+    );
+    return ref.watch(
+      appSettingsProvider.select(
+        (settings) => SettingsPlaybackSlice(
+          playbackEngine: settings.playbackEngine,
+          playbackDecodeMode: settings.playbackDecodeMode,
+          playbackMpvQualityPreset: settings.playbackMpvQualityPreset,
+          playbackMpvDoubleTapToSeekEnabled:
+              settings.playbackMpvDoubleTapToSeekEnabled,
+          playbackMpvSwipeToSeekEnabled: settings.playbackMpvSwipeToSeekEnabled,
+          playbackMpvLongPressSpeedBoostEnabled:
+              settings.playbackMpvLongPressSpeedBoostEnabled,
+          playbackMpvStallAutoRecoveryEnabled:
+              settings.playbackMpvStallAutoRecoveryEnabled,
+          playbackOpenTimeoutSeconds: settings.playbackOpenTimeoutSeconds,
+          playbackDefaultSpeed: settings.playbackDefaultSpeed,
+          playbackSubtitlePreference: settings.playbackSubtitlePreference,
+          playbackSubtitleScale: settings.playbackSubtitleScale,
+          onlineSubtitleSources: settings.onlineSubtitleSources,
+          configuredBackgroundPlaybackEnabled:
+              settings.playbackBackgroundPlaybackEnabled,
+          effectiveBackgroundPlaybackEnabled:
+              effectiveBackgroundPlaybackEnabled,
+        ),
       ),
-    ),
-  ),
+    );
+  },
 );
 
 final settingsPerformanceSliceProvider = Provider<SettingsPerformanceSlice>(
-  (ref) => ref.watch(
-    appSettingsProvider.select(
-      (settings) => SettingsPerformanceSlice(
-        highPerformanceModeEnabled: settings.highPerformanceModeEnabled,
-        translucentEffectsEnabled: settings.translucentEffectsEnabled,
-        autoHideNavigationBarEnabled: settings.autoHideNavigationBarEnabled,
-        homeHeroBackgroundEnabled: settings.homeHeroBackgroundEnabled,
-        performanceLiveItemHeroOverlayEnabled:
-            settings.performanceLiveItemHeroOverlayEnabled,
+  (ref) {
+    final effectiveLiveItemHeroOverlayEnabled = ref.watch(
+      effectivePerformanceLiveItemHeroOverlayEnabledProvider,
+    );
+    return ref.watch(
+      appSettingsProvider.select(
+        (settings) => SettingsPerformanceSlice(
+          highPerformanceModeEnabled: settings.highPerformanceModeEnabled,
+          translucentEffectsEnabled: settings.translucentEffectsEnabled,
+          autoHideNavigationBarEnabled: settings.autoHideNavigationBarEnabled,
+          homeHeroBackgroundEnabled: settings.homeHeroBackgroundEnabled,
+          configuredLiveItemHeroOverlayEnabled:
+              settings.performanceLiveItemHeroOverlayEnabled,
+          effectiveLiveItemHeroOverlayEnabled:
+              effectiveLiveItemHeroOverlayEnabled,
+        ),
       ),
-    ),
-  ),
+    );
+  },
 );
 
 final settingsMetadataMatchSliceProvider = Provider<SettingsMetadataMatchSlice>(
@@ -164,23 +185,33 @@ class SettingsPlaybackSlice {
     required this.playbackEngine,
     required this.playbackDecodeMode,
     required this.playbackMpvQualityPreset,
+    required this.playbackMpvDoubleTapToSeekEnabled,
+    required this.playbackMpvSwipeToSeekEnabled,
+    required this.playbackMpvLongPressSpeedBoostEnabled,
+    required this.playbackMpvStallAutoRecoveryEnabled,
     required this.playbackOpenTimeoutSeconds,
     required this.playbackDefaultSpeed,
     required this.playbackSubtitlePreference,
     required this.playbackSubtitleScale,
     required this.onlineSubtitleSources,
-    required this.playbackBackgroundPlaybackEnabled,
+    required this.configuredBackgroundPlaybackEnabled,
+    required this.effectiveBackgroundPlaybackEnabled,
   });
 
   final PlaybackEngine playbackEngine;
   final PlaybackDecodeMode playbackDecodeMode;
   final PlaybackMpvQualityPreset playbackMpvQualityPreset;
+  final bool playbackMpvDoubleTapToSeekEnabled;
+  final bool playbackMpvSwipeToSeekEnabled;
+  final bool playbackMpvLongPressSpeedBoostEnabled;
+  final bool playbackMpvStallAutoRecoveryEnabled;
   final int playbackOpenTimeoutSeconds;
   final double playbackDefaultSpeed;
   final PlaybackSubtitlePreference playbackSubtitlePreference;
   final PlaybackSubtitleScale playbackSubtitleScale;
   final List<OnlineSubtitleSource> onlineSubtitleSources;
-  final bool playbackBackgroundPlaybackEnabled;
+  final bool configuredBackgroundPlaybackEnabled;
+  final bool effectiveBackgroundPlaybackEnabled;
 
   @override
   bool operator ==(Object other) {
@@ -189,6 +220,14 @@ class SettingsPlaybackSlice {
             other.playbackEngine == playbackEngine &&
             other.playbackDecodeMode == playbackDecodeMode &&
             other.playbackMpvQualityPreset == playbackMpvQualityPreset &&
+            other.playbackMpvDoubleTapToSeekEnabled ==
+                playbackMpvDoubleTapToSeekEnabled &&
+            other.playbackMpvSwipeToSeekEnabled ==
+                playbackMpvSwipeToSeekEnabled &&
+            other.playbackMpvLongPressSpeedBoostEnabled ==
+                playbackMpvLongPressSpeedBoostEnabled &&
+            other.playbackMpvStallAutoRecoveryEnabled ==
+                playbackMpvStallAutoRecoveryEnabled &&
             other.playbackOpenTimeoutSeconds == playbackOpenTimeoutSeconds &&
             other.playbackDefaultSpeed == playbackDefaultSpeed &&
             other.playbackSubtitlePreference == playbackSubtitlePreference &&
@@ -197,8 +236,10 @@ class SettingsPlaybackSlice {
               other.onlineSubtitleSources,
               onlineSubtitleSources,
             ) &&
-            other.playbackBackgroundPlaybackEnabled ==
-                playbackBackgroundPlaybackEnabled;
+            other.configuredBackgroundPlaybackEnabled ==
+                configuredBackgroundPlaybackEnabled &&
+            other.effectiveBackgroundPlaybackEnabled ==
+                effectiveBackgroundPlaybackEnabled;
   }
 
   @override
@@ -206,12 +247,17 @@ class SettingsPlaybackSlice {
         playbackEngine,
         playbackDecodeMode,
         playbackMpvQualityPreset,
+        playbackMpvDoubleTapToSeekEnabled,
+        playbackMpvSwipeToSeekEnabled,
+        playbackMpvLongPressSpeedBoostEnabled,
+        playbackMpvStallAutoRecoveryEnabled,
         playbackOpenTimeoutSeconds,
         playbackDefaultSpeed,
         playbackSubtitlePreference,
         playbackSubtitleScale,
         Object.hashAll(onlineSubtitleSources),
-        playbackBackgroundPlaybackEnabled,
+        configuredBackgroundPlaybackEnabled,
+        effectiveBackgroundPlaybackEnabled,
       );
 }
 
@@ -222,14 +268,16 @@ class SettingsPerformanceSlice {
     required this.translucentEffectsEnabled,
     required this.autoHideNavigationBarEnabled,
     required this.homeHeroBackgroundEnabled,
-    required this.performanceLiveItemHeroOverlayEnabled,
+    required this.configuredLiveItemHeroOverlayEnabled,
+    required this.effectiveLiveItemHeroOverlayEnabled,
   });
 
   final bool highPerformanceModeEnabled;
   final bool translucentEffectsEnabled;
   final bool autoHideNavigationBarEnabled;
   final bool homeHeroBackgroundEnabled;
-  final bool performanceLiveItemHeroOverlayEnabled;
+  final bool configuredLiveItemHeroOverlayEnabled;
+  final bool effectiveLiveItemHeroOverlayEnabled;
 
   @override
   bool operator ==(Object other) {
@@ -240,8 +288,10 @@ class SettingsPerformanceSlice {
             other.autoHideNavigationBarEnabled ==
                 autoHideNavigationBarEnabled &&
             other.homeHeroBackgroundEnabled == homeHeroBackgroundEnabled &&
-            other.performanceLiveItemHeroOverlayEnabled ==
-                performanceLiveItemHeroOverlayEnabled;
+            other.configuredLiveItemHeroOverlayEnabled ==
+                configuredLiveItemHeroOverlayEnabled &&
+            other.effectiveLiveItemHeroOverlayEnabled ==
+                effectiveLiveItemHeroOverlayEnabled;
   }
 
   @override
@@ -250,7 +300,8 @@ class SettingsPerformanceSlice {
         translucentEffectsEnabled,
         autoHideNavigationBarEnabled,
         homeHeroBackgroundEnabled,
-        performanceLiveItemHeroOverlayEnabled,
+        configuredLiveItemHeroOverlayEnabled,
+        effectiveLiveItemHeroOverlayEnabled,
       );
 }
 

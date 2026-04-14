@@ -93,7 +93,7 @@ List<MediaSourceConfig> _resolveVisibleLocalSources({
         ),
       )
       .toList(growable: false);
-  return filteredSources.isEmpty ? availableSources : filteredSources;
+  return filteredSources;
 }
 
 List<SearchProviderConfig> _resolveVisibleSearchProviders({
@@ -114,7 +114,7 @@ List<SearchProviderConfig> _resolveVisibleSearchProviders({
         ),
       )
       .toList(growable: false);
-  return filteredProviders.isEmpty ? availableProviders : filteredProviders;
+  return filteredProviders;
 }
 
 class SearchPage extends ConsumerStatefulWidget {
@@ -134,6 +134,7 @@ class SearchPage extends ConsumerStatefulWidget {
 class _SearchPageState extends ConsumerState<SearchPage>
     with PageActivityMixin<SearchPage> {
   static const Duration _searchUiCommitInterval = Duration(milliseconds: 120);
+  static const String _emptySelectionSentinel = '__empty__';
 
   late final TextEditingController _controller;
   final ScrollController _scrollController = ScrollController();
@@ -231,10 +232,13 @@ class _SearchPageState extends ConsumerState<SearchPage>
           .take(8)
           .toList(growable: false);
       if (selectedTargets.isNotEmpty) {
-        _selectedTargetIds = selectedTargets
+        final normalized = selectedTargets
             .map((item) => item.trim())
             .where((item) => item.isNotEmpty)
             .toSet();
+        _selectedTargetIds = normalized.contains(_emptySelectionSentinel)
+            ? const <String>{}
+            : normalized;
       }
       _favoriteResults = favoriteResults;
       _favoriteResultKeys =
@@ -244,7 +248,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
 
   Future<void> _persistSelectedTargets() async {
     await ref.read(searchPreferencesRepositoryProvider).saveSelectedTargetIds(
-          _selectedTargetIds.toList(growable: false),
+          _selectedTargetIds.isEmpty
+              ? const [_emptySelectionSentinel]
+              : _selectedTargetIds.toList(growable: false),
         );
   }
 
@@ -506,11 +512,16 @@ class _SearchPageState extends ConsumerState<SearchPage>
     }
 
     final selectedTargets = _resolveSelectedTargets(targets);
+    final normalizedSelectedTargetIds =
+        selectedTargets.map((item) => item.id).toSet();
+    final selectionChanged =
+        normalizedSelectedTargetIds.length != _selectedTargetIds.length ||
+            !normalizedSelectedTargetIds.containsAll(_selectedTargetIds);
     _cancelPendingSearchUiCommit(clearState: true);
 
     setState(() {
       _showFavoriteResults = false;
-      _selectedTargetIds = selectedTargets.map((item) => item.id).toSet();
+      _selectedTargetIds = normalizedSelectedTargetIds;
       _isSearching = true;
       _results = const [];
       _errorMessage = null;
@@ -518,6 +529,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
       _completedSearchTaskCount = 0;
       _filteredResultCount = 0;
     });
+    if (selectionChanged) {
+      unawaited(_persistSelectedTargets());
+    }
 
     final repository = ref.read(searchRepositoryProvider);
     final requestId = ++_activeSearchRequestId;
@@ -535,6 +549,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
       }
       setState(() {
         _isSearching = false;
+        _errorMessage = selectedTargets.isEmpty ? '当前没有启用搜索目标。' : null;
       });
       return;
     }
@@ -794,7 +809,11 @@ class _SearchPageState extends ConsumerState<SearchPage>
                             if (!_showFavoriteResults && _errorMessage != null)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
-                                child: Text('搜索失败：$_errorMessage'),
+                                child: Text(
+                                  _errorMessage == '当前没有启用搜索目标。'
+                                      ? _errorMessage!
+                                      : '搜索失败：$_errorMessage',
+                                ),
                               )
                             else if (displayedResults.isEmpty)
                               Padding(
@@ -1077,12 +1096,13 @@ class _SearchPageState extends ConsumerState<SearchPage>
       return [targets.first];
     }
 
+    if (_selectedTargetIds.isEmpty) {
+      return const [];
+    }
+
     final selected = targets
         .where((item) => _selectedTargetIds.contains(item.id))
         .toList(growable: false);
-    if (selected.isEmpty) {
-      return [targets.first];
-    }
     return selected;
   }
 
@@ -1095,6 +1115,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
       setState(() {
         _selectedTargetIds = {_SearchTarget.allId};
       });
+      unawaited(_persistSelectedTargets());
       return;
     }
 
@@ -1106,7 +1127,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
     }
 
     setState(() {
-      _selectedTargetIds = next.isEmpty ? {_SearchTarget.allId} : next;
+      _selectedTargetIds = next;
     });
     unawaited(_persistSelectedTargets());
   }

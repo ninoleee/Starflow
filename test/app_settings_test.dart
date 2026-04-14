@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/core/utils/seed_data.dart';
+import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -21,6 +22,13 @@ void main() {
       'playbackBackgroundPlaybackEnabled': false,
       'playbackEngine': 'systemPlayer',
       'playbackDecodeMode': 'softwarePreferred',
+      'playbackMpvQualityPreset': 'performanceFirst',
+      'playbackMpvDoubleTapToSeekEnabled': false,
+      'playbackMpvSwipeToSeekEnabled': false,
+      'playbackMpvLongPressSpeedBoostEnabled': false,
+      'playbackMpvStallAutoRecoveryEnabled': false,
+      'performanceAggressivePlaybackTuningEnabled': true,
+      'performanceAutoDowngradeHeavyPlaybackEnabled': true,
       'playbackTraceEnabled': true,
       'subtitleSearchTraceEnabled': true,
     });
@@ -45,6 +53,16 @@ void main() {
       settings.playbackDecodeMode,
       PlaybackDecodeMode.softwarePreferred,
     );
+    expect(
+      settings.playbackMpvQualityPreset,
+      PlaybackMpvQualityPreset.performanceFirst,
+    );
+    expect(settings.playbackMpvDoubleTapToSeekEnabled, isFalse);
+    expect(settings.playbackMpvSwipeToSeekEnabled, isFalse);
+    expect(settings.playbackMpvLongPressSpeedBoostEnabled, isFalse);
+    expect(settings.playbackMpvStallAutoRecoveryEnabled, isFalse);
+    expect(settings.performanceAggressivePlaybackTuningEnabled, isTrue);
+    expect(settings.performanceAutoDowngradeHeavyPlaybackEnabled, isTrue);
     expect(settings.playbackTraceEnabled, isTrue);
     expect(settings.subtitleSearchTraceEnabled, isTrue);
     expect(settings.toJson()['homeHeroDisplayMode'], 'borderless');
@@ -61,6 +79,22 @@ void main() {
     expect(settings.toJson()['playbackBackgroundPlaybackEnabled'], isFalse);
     expect(settings.toJson()['playbackEngine'], 'systemPlayer');
     expect(settings.toJson()['playbackDecodeMode'], 'softwarePreferred');
+    expect(settings.toJson()['playbackMpvQualityPreset'], 'performanceFirst');
+    expect(settings.toJson()['playbackMpvDoubleTapToSeekEnabled'], isFalse);
+    expect(settings.toJson()['playbackMpvSwipeToSeekEnabled'], isFalse);
+    expect(
+      settings.toJson()['playbackMpvLongPressSpeedBoostEnabled'],
+      isFalse,
+    );
+    expect(settings.toJson()['playbackMpvStallAutoRecoveryEnabled'], isFalse);
+    expect(
+      settings.toJson()['performanceAggressivePlaybackTuningEnabled'],
+      isTrue,
+    );
+    expect(
+      settings.toJson()['performanceAutoDowngradeHeavyPlaybackEnabled'],
+      isTrue,
+    );
     expect(settings.toJson()['playbackTraceEnabled'], isTrue);
     expect(settings.toJson()['subtitleSearchTraceEnabled'], isTrue);
   });
@@ -91,9 +125,78 @@ void main() {
     expect(settings.playbackBackgroundPlaybackEnabled, isTrue);
     expect(settings.playbackEngine, PlaybackEngine.embeddedMpv);
     expect(settings.playbackDecodeMode, PlaybackDecodeMode.auto);
+    expect(
+        settings.playbackMpvQualityPreset, PlaybackMpvQualityPreset.balanced);
+    expect(settings.playbackMpvDoubleTapToSeekEnabled, isTrue);
+    expect(settings.playbackMpvSwipeToSeekEnabled, isTrue);
+    expect(settings.playbackMpvLongPressSpeedBoostEnabled, isTrue);
+    expect(settings.playbackMpvStallAutoRecoveryEnabled, isTrue);
+    expect(settings.performanceAggressivePlaybackTuningEnabled, isFalse);
+    expect(settings.performanceAutoDowngradeHeavyPlaybackEnabled, isFalse);
     expect(settings.playbackTraceEnabled, isFalse);
     expect(settings.subtitleSearchTraceEnabled, isFalse);
     expect(settings.detailAutoLibraryMatchEnabled, isFalse);
+  });
+
+  test(
+      'high performance preset marker no longer overrides runtime effective settings',
+      () {
+    final settings = AppSettings.fromJson({
+      'highPerformanceModeEnabled': true,
+      'translucentEffectsEnabled': true,
+      'autoHideNavigationBarEnabled': true,
+      'performanceReduceMotionEnabled': false,
+      'performanceStaticNavigationEnabled': false,
+      'performanceLeanPlaybackUiEnabled': false,
+    });
+
+    expect(settings.effectiveUiPerformanceTier, AppUiPerformanceTier.rich);
+    expect(settings.effectiveTranslucentEffectsEnabled, isTrue);
+    expect(settings.effectiveNavigationAutoHideEnabled, isTrue);
+    expect(
+      settings.effectiveLeanPlaybackUiEnabled(isTelevision: false),
+      isFalse,
+    );
+  });
+
+  test(
+      'tv-safe effective overlay and background playback stay off until non-tv is confirmed',
+      () {
+    final settings = AppSettings.fromJson({
+      'performanceLiveItemHeroOverlayEnabled': true,
+      'playbackBackgroundPlaybackEnabled': true,
+    });
+
+    expect(
+      settings.effectivePerformanceLiveItemHeroOverlayEnabled(
+        isTelevision: null,
+      ),
+      isFalse,
+    );
+    expect(
+      settings.effectivePerformanceLiveItemHeroOverlayEnabled(
+        isTelevision: true,
+      ),
+      isFalse,
+    );
+    expect(
+      settings.effectivePerformanceLiveItemHeroOverlayEnabled(
+        isTelevision: false,
+      ),
+      isTrue,
+    );
+    expect(
+      settings.effectiveBackgroundPlaybackEnabled(isTelevision: null),
+      isFalse,
+    );
+    expect(
+      settings.effectiveBackgroundPlaybackEnabled(isTelevision: true),
+      isFalse,
+    );
+    expect(
+      settings.effectiveBackgroundPlaybackEnabled(isTelevision: false),
+      isTrue,
+    );
   });
 
   test('legacy poster hero style migrates to poster artwork style', () {
@@ -286,5 +389,46 @@ void main() {
         'https://m.douban.com/subject_collection/show_hot',
       ],
     );
+  });
+
+  test('playback numeric settings are clamped to safe bounds', () {
+    final settings = AppSettings.fromJson({
+      'playbackOpenTimeoutSeconds': 0,
+      'playbackDefaultSpeed': 5.0,
+    });
+
+    expect(settings.playbackOpenTimeoutSeconds, 1);
+    expect(settings.playbackDefaultSpeed, 2.0);
+
+    final copied = settings.copyWith(
+      playbackOpenTimeoutSeconds: 900,
+      playbackDefaultSpeed: 0.1,
+    );
+
+    expect(copied.playbackOpenTimeoutSeconds, 900);
+    expect(copied.playbackDefaultSpeed, 0.75);
+  });
+
+  test('unknown subtitle source list falls back to assrt only', () {
+    final settings = AppSettings.fromJson({
+      'onlineSubtitleSources': ['invalid-source'],
+    });
+
+    expect(settings.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
+  });
+
+  test('high performance preset turns on playback tuning flags', () {
+    final settings = const AppSettings(
+      mediaSources: [],
+      searchProviders: [],
+      doubanAccount: DoubanAccountConfig(enabled: false),
+      homeModules: [],
+    ).applyHighPerformancePreset();
+
+    expect(settings.performanceAggressivePlaybackTuningEnabled, isTrue);
+    expect(settings.performanceAutoDowngradeHeavyPlaybackEnabled, isTrue);
+    expect(
+        settings.effectiveUiPerformanceTier, AppUiPerformanceTier.performance);
+    expect(settings.effectiveStartupProbeEnabled, isFalse);
   });
 }

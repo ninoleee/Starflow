@@ -19,7 +19,8 @@ void main() {
       expect(asset.url, 'https://example.com/backdrop.jpg');
     });
 
-    test('resolvePrimaryBackdropAsset falls back through banner extra and poster',
+    test(
+        'resolvePrimaryBackdropAsset falls back through banner extra and poster',
         () {
       const bannerTarget = MediaDetailTarget(
         title: '测试影片',
@@ -54,7 +55,8 @@ void main() {
       );
     });
 
-    test('buildPrimaryBackdropFallbackSources keeps unique remaining sources', () {
+    test('buildPrimaryBackdropFallbackSources keeps unique remaining sources',
+        () {
       const target = MediaDetailTarget(
         title: '测试影片',
         posterUrl: 'https://example.com/poster.jpg',

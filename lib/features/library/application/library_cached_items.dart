@@ -1,6 +1,6 @@
-import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -73,31 +73,126 @@ MediaItem mergeLibraryItemWithCachedDetails({
 }
 
 class LibraryItemOverlayRequest {
-  LibraryItemOverlayRequest(this.item)
-      : seedTarget = MediaDetailTarget.fromMediaItem(item),
-        identity = jsonEncode(item.toJson());
+  LibraryItemOverlayRequest(MediaItem item)
+      : this._(MediaDetailTarget.fromMediaItem(item));
 
-  final MediaItem item;
+  LibraryItemOverlayRequest._(this.seedTarget)
+      : _identity = _LibraryItemOverlayIdentity.fromTarget(seedTarget),
+        cacheScope = LocalStorageDetailCacheScope(
+          lookupKeys: {
+            ...LocalStorageCacheRepository.buildLookupKeys(seedTarget),
+          },
+        );
+
   final MediaDetailTarget seedTarget;
-  final String identity;
+  final _LibraryItemOverlayIdentity _identity;
+  final LocalStorageDetailCacheScope cacheScope;
 
-  LocalStorageDetailCacheScope get cacheScope => LocalStorageDetailCacheScope(
-        lookupKeys: {
-          ...LocalStorageCacheRepository.buildLookupKeys(seedTarget),
-        },
-      );
+  @override
+  bool operator ==(Object other) =>
+      other is LibraryItemOverlayRequest && other._identity == _identity;
+
+  @override
+  int get hashCode => _identity.hashCode;
+}
+
+class _LibraryItemOverlayIdentity {
+  const _LibraryItemOverlayIdentity({
+    required this.sourceKind,
+    required this.sourceId,
+    required this.itemId,
+    required this.itemType,
+    required this.sectionId,
+    required this.seasonNumber,
+    required this.episodeNumber,
+    required this.doubanId,
+    required this.imdbId,
+    required this.tmdbId,
+    required this.tvdbId,
+    required this.wikidataId,
+    required this.tmdbSetId,
+    required this.title,
+    required this.year,
+  });
+
+  factory _LibraryItemOverlayIdentity.fromTarget(MediaDetailTarget target) {
+    return _LibraryItemOverlayIdentity(
+      sourceKind: target.sourceKind,
+      sourceId: target.sourceId.trim(),
+      itemId: target.itemId.trim(),
+      itemType: target.itemType.trim(),
+      sectionId: target.sectionId.trim(),
+      seasonNumber: target.seasonNumber,
+      episodeNumber: target.episodeNumber,
+      doubanId: target.doubanId.trim(),
+      imdbId: target.imdbId.trim().toLowerCase(),
+      tmdbId: target.tmdbId.trim(),
+      tvdbId: target.tvdbId.trim(),
+      wikidataId: target.wikidataId.trim().toUpperCase(),
+      tmdbSetId: target.tmdbSetId.trim(),
+      title: target.title.trim(),
+      year: target.year,
+    );
+  }
+
+  final MediaSourceKind? sourceKind;
+  final String sourceId;
+  final String itemId;
+  final String itemType;
+  final String sectionId;
+  final int? seasonNumber;
+  final int? episodeNumber;
+  final String doubanId;
+  final String imdbId;
+  final String tmdbId;
+  final String tvdbId;
+  final String wikidataId;
+  final String tmdbSetId;
+  final String title;
+  final int year;
 
   @override
   bool operator ==(Object other) {
-    return other is LibraryItemOverlayRequest && other.identity == identity;
+    return other is _LibraryItemOverlayIdentity &&
+        other.sourceKind == sourceKind &&
+        other.sourceId == sourceId &&
+        other.itemId == itemId &&
+        other.itemType == itemType &&
+        other.sectionId == sectionId &&
+        other.seasonNumber == seasonNumber &&
+        other.episodeNumber == episodeNumber &&
+        other.doubanId == doubanId &&
+        other.imdbId == imdbId &&
+        other.tmdbId == tmdbId &&
+        other.tvdbId == tvdbId &&
+        other.wikidataId == wikidataId &&
+        other.tmdbSetId == tmdbSetId &&
+        other.title == title &&
+        other.year == year;
   }
 
   @override
-  int get hashCode => identity.hashCode;
+  int get hashCode => Object.hash(
+        sourceKind,
+        sourceId,
+        itemId,
+        itemType,
+        sectionId,
+        seasonNumber,
+        episodeNumber,
+        doubanId,
+        imdbId,
+        tmdbId,
+        tvdbId,
+        wikidataId,
+        tmdbSetId,
+        title,
+        year,
+      );
 }
 
-final libraryResolvedItemProvider =
-    Provider.autoDispose.family<MediaItem, LibraryItemOverlayRequest>((
+final libraryCachedDetailTargetProvider =
+    Provider.autoDispose.family<MediaDetailTarget?, LibraryItemOverlayRequest>((
   ref,
   request,
 ) {
@@ -105,7 +200,7 @@ final libraryResolvedItemProvider =
     effectivePerformanceLiveItemHeroOverlayEnabledProvider,
   );
   if (!liveOverlayEnabled) {
-    return request.item;
+    return null;
   }
   final cacheScope = request.cacheScope;
   if (!cacheScope.isEmpty) {
@@ -121,10 +216,7 @@ final libraryResolvedItemProvider =
   final cachedTarget = ref
       .read(localStorageCacheRepositoryProvider)
       .peekDetailTarget(request.seedTarget);
-  return mergeLibraryItemWithCachedDetails(
-    item: request.item,
-    cachedTarget: cachedTarget,
-  );
+  return cachedTarget;
 });
 
 List<MediaItem> visibleLibraryPageItems({
@@ -142,26 +234,6 @@ List<MediaItem> visibleLibraryPageItems({
       .skip(safePage * safePageSize)
       .take(safePageSize)
       .toList(growable: false);
-}
-
-LocalStorageDetailCacheScope buildVisibleLibraryPageCacheScope({
-  required List<MediaItem> items,
-  required int page,
-  required int pageSize,
-}) {
-  final visibleItems = visibleLibraryPageItems(
-    items: items,
-    page: page,
-    pageSize: pageSize,
-  );
-  return LocalStorageDetailCacheScope(
-    lookupKeys: {
-      for (final item in visibleItems)
-        ...LocalStorageCacheRepository.buildLookupKeys(
-          MediaDetailTarget.fromMediaItem(item),
-        ),
-    },
-  );
 }
 
 Future<LibraryVisiblePageItemsResult>
@@ -193,6 +265,51 @@ Future<LibraryVisiblePageItemsResult>
     totalItems: items.length,
     items: resolvedItems,
   );
+}
+
+bool visibleLibraryPageSegmentChanged({
+  required List<MediaItem> previousItems,
+  required List<MediaItem> nextItems,
+  required int page,
+  required int pageSize,
+}) {
+  final previousVisible = visibleLibraryPageItems(
+    items: previousItems,
+    page: page,
+    pageSize: pageSize,
+  );
+  final nextVisible = visibleLibraryPageItems(
+    items: nextItems,
+    page: page,
+    pageSize: pageSize,
+  );
+  if (previousVisible.length != nextVisible.length) {
+    return true;
+  }
+  for (var index = 0; index < previousVisible.length; index++) {
+    if (!_libraryGridMediaItemsVisuallyEquivalent(
+      previousVisible[index],
+      nextVisible[index],
+    )) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void pruneRetainedVisiblePageCacheEntries<K, V>({
+  required Map<K, V> entries,
+  required K currentRequest,
+  required int Function(K request) pageOf,
+  required bool Function(K entry, K currentRequest) isSameScope,
+  int keepRadius = 1,
+}) {
+  entries.removeWhere((key, _) {
+    if (!isSameScope(key, currentRequest)) {
+      return true;
+    }
+    return (pageOf(key) - pageOf(currentRequest)).abs() > keepRadius;
+  });
 }
 
 MediaItem _mergeCachedLibraryItem(
@@ -339,6 +456,28 @@ bool _sameStringMap(Map<String, String> left, Map<String, String> right) {
     if (right[entry.key] != entry.value) {
       return false;
     }
+  }
+  return true;
+}
+
+bool _libraryGridMediaItemsVisuallyEquivalent(MediaItem a, MediaItem b) {
+  if (a.id != b.id) {
+    return false;
+  }
+  if (a.title != b.title || a.year != b.year) {
+    return false;
+  }
+  if (a.durationLabel != b.durationLabel) {
+    return false;
+  }
+  if (a.posterUrl != b.posterUrl) {
+    return false;
+  }
+  if (!mapEquals(a.posterHeaders, b.posterHeaders)) {
+    return false;
+  }
+  if (!listEquals(a.ratingLabels, b.ratingLabels)) {
+    return false;
   }
   return true;
 }

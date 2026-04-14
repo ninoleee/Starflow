@@ -1,16 +1,5 @@
 part of 'home_page.dart';
 
-List<_FeaturedHeroItem> _fallbackFeaturedItems(
-  List<HomeSectionViewModel> sections,
-) {
-  for (final section in sections) {
-    if (section.items.isNotEmpty) {
-      return section.items.take(5).map(_FeaturedHeroItem.fromPoster).toList();
-    }
-  }
-  return const [];
-}
-
 HomeSectionViewModel? _pickHeroSectionCandidate({
   required List<HomeSectionViewModel> resolvedSections,
 }) {
@@ -38,8 +27,6 @@ bool _sectionHasHeroContent(HomeSectionViewModel? section) {
 
 List<_FeaturedHeroItem> _buildFeaturedItems({
   required HomeSectionViewModel? featuredSection,
-  required List<HomeSectionViewModel> resolvedSections,
-  required String preferredModuleId,
 }) {
   if (featuredSection == null) {
     return const [];
@@ -57,14 +44,13 @@ List<_FeaturedHeroItem> _buildFeaturedItems({
         .map(_FeaturedHeroItem.fromPoster)
         .toList();
   }
-  if (preferredModuleId.trim().isNotEmpty) {
-    return _fallbackFeaturedItems(
-      resolvedSections
-          .where((section) => section.id != preferredModuleId)
-          .toList(),
-    );
+  if (featuredSection.carouselItems.isNotEmpty) {
+    return featuredSection.carouselItems
+        .take(5)
+        .map(_FeaturedHeroItem.fromCarousel)
+        .toList();
   }
-  return _fallbackFeaturedItems(resolvedSections);
+  return const [];
 }
 
 class _HomeHeroSelection {
@@ -245,111 +231,6 @@ class _FeaturedHeroItem {
   }
 }
 
-class _FeaturedHeroOverlayRequest {
-  _FeaturedHeroOverlayRequest(this.item)
-      : identity = jsonEncode({
-          'id': item.id,
-          'title': item.title,
-          'metadata': item.metadata,
-          'overview': item.overview,
-          'detailTarget': item.detailTarget.toJson(),
-          'landscape': item.landscapeImage.url,
-          'portrait': item.portraitImage.url,
-          'background': item.backgroundImage.url,
-        });
-
-  final _FeaturedHeroItem item;
-  final String identity;
-
-  LocalStorageDetailCacheScope get cacheScope => LocalStorageDetailCacheScope(
-        lookupKeys: {
-          ...LocalStorageCacheRepository.buildLookupKeys(item.detailTarget),
-        },
-      );
-
-  @override
-  bool operator ==(Object other) {
-    return other is _FeaturedHeroOverlayRequest && other.identity == identity;
-  }
-
-  @override
-  int get hashCode => identity.hashCode;
-}
-
-final _featuredHeroItemOverlayProvider = Provider.autoDispose
-    .family<_FeaturedHeroItem, _FeaturedHeroOverlayRequest>((
-  ref,
-  request,
-) {
-  final liveOverlayEnabled = ref.watch(
-    effectivePerformanceLiveItemHeroOverlayEnabledProvider,
-  );
-  if (!liveOverlayEnabled) {
-    return request.item;
-  }
-  final cacheScope = request.cacheScope;
-  if (!cacheScope.isEmpty) {
-    ref.watch(
-      localStorageDetailCacheChangeProvider.select(
-        (state) => state.revisionForScope(
-          cacheScope,
-          changedFields: _homePresentationCacheChangedFields,
-        ),
-      ),
-    );
-  }
-  final cachedTarget = ref
-      .read(localStorageCacheRepositoryProvider)
-      .peekDetailTarget(request.item.detailTarget);
-  if (cachedTarget == null) {
-    return request.item;
-  }
-  final mergedTarget = mergeCachedHomeDetailTarget(
-    seed: request.item.detailTarget,
-    cached: cachedTarget,
-  );
-  return _overlayFeaturedHeroItem(
-    seed: request.item,
-    mergedTarget: mergedTarget,
-  );
-});
-
-_FeaturedHeroItem _overlayFeaturedHeroItem({
-  required _FeaturedHeroItem seed,
-  required MediaDetailTarget mergedTarget,
-}) {
-  if (identical(mergedTarget, seed.detailTarget)) {
-    return seed;
-  }
-  final landscapeImage = _resolveFeaturedHeroLandscapeImage(
-    target: mergedTarget,
-    fallbackImage: seed.landscapeImage,
-  );
-  final portraitImage = _resolveFeaturedHeroPortraitImage(
-    target: mergedTarget,
-    fallbackImage: seed.portraitImage.preferContain
-        ? seed.portraitImage
-        : seed.landscapeImage,
-    landscapeImage: landscapeImage,
-  );
-  return _FeaturedHeroItem(
-    id: seed.id,
-    title:
-        mergedTarget.title.trim().isNotEmpty ? mergedTarget.title : seed.title,
-    landscapeImage: landscapeImage,
-    portraitImage: portraitImage,
-    backgroundImage: _resolveFeaturedHeroBackgroundImage(
-      target: mergedTarget,
-      fallbackImage: seed.backgroundImage,
-    ),
-    metadata: _buildHeroMetadata(mergedTarget, fallback: seed.metadata),
-    overview: mergedTarget.overview.trim().isNotEmpty
-        ? mergedTarget.overview
-        : seed.overview,
-    detailTarget: mergedTarget,
-  );
-}
-
 String _featuredHeroVisualFingerprint(_FeaturedHeroItem item) {
   return [
     item.id,
@@ -494,7 +375,7 @@ String _buildHeroMetadata(
   return entries.join(' · ');
 }
 
-class _FeaturedHero extends ConsumerStatefulWidget {
+class _FeaturedHero extends StatefulWidget {
   const _FeaturedHero({
     super.key,
     required this.items,
@@ -523,10 +404,10 @@ class _FeaturedHero extends ConsumerStatefulWidget {
   final ValueChanged<_FeaturedHeroItem>? onFocusedItemChanged;
 
   @override
-  ConsumerState<_FeaturedHero> createState() => _FeaturedHeroState();
+  State<_FeaturedHero> createState() => _FeaturedHeroState();
 }
 
-class _FeaturedHeroState extends ConsumerState<_FeaturedHero> {
+class _FeaturedHeroState extends State<_FeaturedHero> {
   late PageController _controller;
   final ValueNotifier<double> _pageNotifier = ValueNotifier<double>(0);
   final Map<String, FocusNode> _cardFocusNodes = <String, FocusNode>{};
@@ -661,11 +542,7 @@ class _FeaturedHeroState extends ConsumerState<_FeaturedHero> {
     if (index < 0 || index >= widget.items.length) {
       return;
     }
-    final currentItem = ref.read(
-      _featuredHeroItemOverlayProvider(
-        _FeaturedHeroOverlayRequest(widget.items[index]),
-      ),
-    );
+    final currentItem = widget.items[index];
     final visualFingerprint = _featuredHeroVisualFingerprint(currentItem);
     if (_lastReportedIndex == index &&
         _lastReportedItemId == currentItem.id &&
@@ -751,21 +628,6 @@ class _FeaturedHeroState extends ConsumerState<_FeaturedHero> {
   @override
   Widget build(BuildContext context) {
     final simplifyVisualEffects = widget.lightweightVisualEnabled;
-    final selectedOverlayItem = widget.items.isEmpty
-        ? null
-        : ref.watch(
-            _featuredHeroItemOverlayProvider(
-              _FeaturedHeroOverlayRequest(widget.items[_currentPageIndex]),
-            ),
-          );
-    if (selectedOverlayItem != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) {
-          return;
-        }
-        _notifyFocusedItem(_currentPageIndex);
-      });
-    }
 
     return Column(
       children: [
@@ -973,7 +835,7 @@ class _HeroPagerButton extends StatelessWidget {
   }
 }
 
-class _FeaturedHeroCard extends ConsumerWidget {
+class _FeaturedHeroCard extends StatelessWidget {
   const _FeaturedHeroCard({
     required this.item,
     required this.displayMode,
@@ -1003,10 +865,7 @@ class _FeaturedHeroCard extends ConsumerWidget {
   final VoidCallback? onFocusBelowControl;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final resolvedItem = ref.watch(
-      _featuredHeroItemOverlayProvider(_FeaturedHeroOverlayRequest(item)),
-    );
+  Widget build(BuildContext context) {
     final usesCompositeBackdrop =
         !simplifyVisualEffects && displayMode.usesFrostedBackdrop;
     final borderRadius = BorderRadius.circular(displayMode.cardBorderRadius);
@@ -1090,7 +949,7 @@ class _FeaturedHeroCard extends ConsumerWidget {
                       ),
               ),
             _FeaturedHeroArtwork(
-              item: resolvedItem,
+              item: item,
               displayMode: displayMode,
             ),
             Align(
@@ -1114,29 +973,29 @@ class _FeaturedHeroCard extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Spacer(),
-                  if (resolvedItem.metadata.trim().isNotEmpty)
+                  if (item.metadata.trim().isNotEmpty)
                     Text(
-                      resolvedItem.metadata,
+                      item.metadata,
                       style: const TextStyle(
                         color: Color(0xFFDCE7FF),
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                  if (resolvedItem.metadata.trim().isNotEmpty)
+                  if (item.metadata.trim().isNotEmpty)
                     const SizedBox(height: 10),
                   _HeroTitle(
-                    item: resolvedItem,
+                    item: item,
                     displayMode: displayMode,
                     logoTitleEnabled: logoTitleEnabled,
                     simplifyVisualEffects: simplifyVisualEffects,
                   ),
                   const SizedBox(height: 10),
-                  if (resolvedItem.overview.trim().isNotEmpty)
+                  if (item.overview.trim().isNotEmpty)
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 460),
                       child: Text(
-                        resolvedItem.overview,
+                        item.overview,
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -1168,8 +1027,7 @@ class _FeaturedHeroCard extends ConsumerWidget {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: borderRadius,
-          onTap: () =>
-              context.pushNamed('detail', extra: resolvedItem.detailTarget),
+          onTap: () => context.pushNamed('detail', extra: item.detailTarget),
           child: card,
         ),
       );
@@ -1211,8 +1069,7 @@ class _FeaturedHeroCard extends ConsumerWidget {
         ),
       },
       child: TvFocusableAction(
-        onPressed: () =>
-            context.pushNamed('detail', extra: resolvedItem.detailTarget),
+        onPressed: () => context.pushNamed('detail', extra: item.detailTarget),
         focusNode: focusNode,
         focusId: focusId,
         autofocus: autofocus,

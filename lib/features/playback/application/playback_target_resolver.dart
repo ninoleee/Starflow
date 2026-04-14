@@ -3,6 +3,7 @@ import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -123,8 +124,8 @@ class PlaybackTargetResolver {
   }
 
   PlaybackTarget _resetStaleQuarkRelayIfNeeded(PlaybackTarget target) {
-    if (target.sourceKind != MediaSourceKind.quark ||
-        !_isLoopbackPlaybackRelayUrl(target.streamUrl)) {
+    final sanitized = sanitizeLoopbackPlaybackRelayTarget(target);
+    if (identical(sanitized, target)) {
       return target;
     }
     _traceQuarkResolve(
@@ -136,10 +137,7 @@ class PlaybackTargetResolver {
         'itemId': target.itemId,
       },
     );
-    return target.copyWith(
-      streamUrl: '',
-      headers: const <String, String>{},
-    );
+    return sanitized;
   }
 
   Future<PlaybackTarget> _prepareDirectTargetIfNeeded(PlaybackTarget target) {
@@ -204,26 +202,6 @@ void _traceQuarkResolve(
     error: error,
     stackTrace: stackTrace,
   );
-}
-
-bool _isLoopbackPlaybackRelayUrl(String url) {
-  final uri = Uri.tryParse(url.trim());
-  if (uri == null) {
-    return false;
-  }
-  final scheme = uri.scheme.toLowerCase();
-  if (scheme != 'http' && scheme != 'https') {
-    return false;
-  }
-  final host = uri.host.trim().toLowerCase();
-  if (host != '127.0.0.1' && host != 'localhost' && host != '::1') {
-    return false;
-  }
-  final segments = uri.pathSegments
-      .map((item) => item.trim())
-      .where((item) => item.isNotEmpty)
-      .toList(growable: false);
-  return segments.isNotEmpty && segments.first == 'playback-relay';
 }
 
 _ParsedQuarkResourceId? _parseQuarkResourceId(String raw) {

@@ -1084,6 +1084,96 @@ void main() {
       expect(resolved.overview, '来自本地媒体库的简介');
     });
 
+    test('skips tmdb when wmdb already satisfies remaining metadata needs',
+        () async {
+      var tmdbRequests = 0;
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'wmdbMetadataMatchEnabled': true,
+              'tmdbMetadataMatchEnabled': true,
+              'tmdbReadAccessToken': 'tmdb-token',
+            }),
+          ),
+          wmdbMetadataClientProvider.overrideWithValue(
+            WmdbMetadataClient(
+              MockClient((request) async {
+                expect(request.url.path, '/api/v1/movie/search');
+                return http.Response(
+                  jsonEncode({
+                    'data': [
+                      {
+                        'data': [
+                          {
+                            'poster':
+                                'https://img.wmdb.tv/movie/poster/life.jpg',
+                            'name': '美丽人生',
+                            'genre': '剧情/喜剧',
+                            'description': '圭多用幽默守护家人。',
+                            'lang': 'Cn',
+                          },
+                        ],
+                        'originalName': 'La vita e bella',
+                        'imdbId': 'tt0118799',
+                        'tmdbId': '637',
+                        'doubanId': '1292063',
+                        'doubanRating': '9.6',
+                        'imdbRating': '8.6',
+                        'year': '1997',
+                      },
+                    ],
+                  }),
+                  200,
+                  headers: const {'content-type': 'application/json'},
+                );
+              }),
+            ),
+          ),
+          tmdbMetadataClientProvider.overrideWithValue(
+            TmdbMetadataClient(
+              MockClient((request) async {
+                tmdbRequests += 1;
+                throw TestFailure('WMDB 已满足需求时不应继续请求 TMDB: ${request.url}');
+              }),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const target = MediaDetailTarget(
+        title: '美丽人生',
+        posterUrl: '',
+        overview: '',
+        backdropUrl: 'https://emby.example.com/backdrop.jpg',
+        logoUrl: 'https://emby.example.com/logo.png',
+        year: 1997,
+        availabilityLabel: '无',
+        searchQuery: '美丽人生',
+        sourceId: 'emby-main',
+        sourceName: 'Home Emby',
+        sourceKind: MediaSourceKind.emby,
+      );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(target).future,
+      );
+
+      expect(tmdbRequests, 0);
+      expect(
+        resolved.posterUrl,
+        'https://img.wmdb.tv/movie/poster/life.jpg',
+      );
+      expect(resolved.overview, '圭多用幽默守护家人。');
+      expect(resolved.backdropUrl, 'https://emby.example.com/backdrop.jpg');
+      expect(resolved.logoUrl, 'https://emby.example.com/logo.png');
+    });
+
     test('auto enrich skips tmdb imdb-id lookup and keeps wmdb title match',
         () async {
       var wmdbRequests = 0;

@@ -5,7 +5,6 @@ class _HomeSectionSlot extends ConsumerStatefulWidget {
     super.key,
     required this.module,
     required this.isPageVisible,
-    required this.featuredSectionId,
     required this.useHeroNextSectionFocusNode,
     required this.heroNextSectionFocusNode,
     required this.homeMetadataAutoRefreshRevision,
@@ -13,7 +12,6 @@ class _HomeSectionSlot extends ConsumerStatefulWidget {
 
   final HomeModuleConfig module;
   final bool isPageVisible;
-  final String? featuredSectionId;
   final bool useHeroNextSectionFocusNode;
   final FocusNode heroNextSectionFocusNode;
   final int homeMetadataAutoRefreshRevision;
@@ -55,9 +53,6 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
     );
     final section = state.value;
     if (section != null) {
-      if (section.id == widget.featuredSectionId) {
-        return const SizedBox.shrink();
-      }
       return _buildResolvedSection(context, section);
     }
 
@@ -181,7 +176,7 @@ String _resolveHomePosterBadgeText({
   );
 }
 
-class _HomePosterTile extends ConsumerWidget {
+class _HomePosterTile extends StatelessWidget {
   const _HomePosterTile({
     required this.module,
     required this.item,
@@ -197,31 +192,27 @@ class _HomePosterTile extends ConsumerWidget {
   final bool autofocus;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final resolvedItem = ref.watch(
-      _homeResolvedCardProvider(_HomeCardOverlayRequest(item)),
-    );
+  Widget build(BuildContext context) {
     return MediaPosterTile(
-      title: resolvedItem.title,
-      subtitle: resolvedItem.subtitle,
-      posterUrl: resolvedItem.posterUrl,
+      title: item.title,
+      subtitle: item.subtitle,
+      posterUrl: item.posterUrl,
       imageBadgeText: _resolveHomePosterBadgeText(
         module: module,
-        item: resolvedItem,
+        item: item,
       ),
       tvPosterFocusOutlineOnly: true,
       focusNode: focusNode,
       focusId: focusId,
       autofocus: autofocus,
-      posterHeaders: resolvedItem.detailTarget.posterHeaders,
-      posterFallbackSources:
-          _buildPosterFallbackSources(resolvedItem.detailTarget),
+      posterHeaders: item.detailTarget.posterHeaders,
+      posterFallbackSources: _buildPosterFallbackSources(item.detailTarget),
       titleColor: Colors.white,
       subtitleColor: const Color(0xFF98A7C2),
       onTap: () {
         context.pushNamed(
           'detail',
-          extra: resolvedItem.detailTarget,
+          extra: item.detailTarget,
         );
       },
     );
@@ -863,7 +854,7 @@ class _HomeCarouselState extends ConsumerState<_HomeCarousel> {
   }
 }
 
-class _HomeCarouselTile extends ConsumerWidget {
+class _HomeCarouselTile extends StatelessWidget {
   const _HomeCarouselTile({
     required this.item,
     required this.isTelevision,
@@ -879,28 +870,25 @@ class _HomeCarouselTile extends ConsumerWidget {
   final bool autofocus;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final resolvedItem = ref.watch(
-      _homeResolvedCarouselItemProvider(_HomeCarouselOverlayRequest(item)),
-    );
+  Widget build(BuildContext context) {
     if (isTelevision) {
       return TvFocusableAction(
         focusId: focusId,
         focusNode: focusNode,
         autofocus: autofocus,
         onPressed: () {
-          context.pushNamed('detail', extra: resolvedItem.detailTarget);
+          context.pushNamed('detail', extra: item.detailTarget);
         },
         borderRadius: BorderRadius.circular(18),
-        child: _HomeCarouselCard(item: resolvedItem),
+        child: _HomeCarouselCard(item: item),
       );
     }
     return InkWell(
       borderRadius: BorderRadius.circular(18),
       onTap: () {
-        context.pushNamed('detail', extra: resolvedItem.detailTarget);
+        context.pushNamed('detail', extra: item.detailTarget);
       },
-      child: _HomeCarouselCard(item: resolvedItem),
+      child: _HomeCarouselCard(item: item),
     );
   }
 }

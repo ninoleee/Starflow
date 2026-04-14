@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -24,8 +23,6 @@ import 'package:starflow/features/home/application/home_hero_prefetch_coordinato
 import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
-import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
-import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 part 'home_page_hero.dart';
 part 'home_page_sections.dart';
@@ -93,142 +90,6 @@ class _HomeKeepAliveState extends State<_HomeKeepAlive>
     return widget.child;
   }
 }
-
-const Set<LocalStorageDetailCacheChangedField>
-    _homePresentationCacheChangedFields = {
-  LocalStorageDetailCacheChangedField.artwork,
-  LocalStorageDetailCacheChangedField.summary,
-  LocalStorageDetailCacheChangedField.ratings,
-  LocalStorageDetailCacheChangedField.availability,
-  LocalStorageDetailCacheChangedField.playback,
-  LocalStorageDetailCacheChangedField.structure,
-};
-
-class _HomeCardOverlayRequest {
-  _HomeCardOverlayRequest(this.item)
-      : identity = jsonEncode({
-          'id': item.id,
-          'title': item.title,
-          'subtitle': item.subtitle,
-          'posterUrl': item.posterUrl,
-          'detailTarget': item.detailTarget.toJson(),
-        });
-
-  final HomeCardViewModel item;
-  final String identity;
-
-  LocalStorageDetailCacheScope get cacheScope => LocalStorageDetailCacheScope(
-        lookupKeys: {
-          ...LocalStorageCacheRepository.buildLookupKeys(item.detailTarget),
-        },
-      );
-
-  @override
-  bool operator ==(Object other) {
-    return other is _HomeCardOverlayRequest && other.identity == identity;
-  }
-
-  @override
-  int get hashCode => identity.hashCode;
-}
-
-class _HomeCarouselOverlayRequest {
-  _HomeCarouselOverlayRequest(this.item)
-      : identity = jsonEncode({
-          'id': item.id,
-          'title': item.title,
-          'subtitle': item.subtitle,
-          'imageUrl': item.imageUrl,
-          'detailTarget': item.detailTarget.toJson(),
-        });
-
-  final HomeCarouselItemViewModel item;
-  final String identity;
-
-  LocalStorageDetailCacheScope get cacheScope => LocalStorageDetailCacheScope(
-        lookupKeys: {
-          ...LocalStorageCacheRepository.buildLookupKeys(item.detailTarget),
-        },
-      );
-
-  @override
-  bool operator ==(Object other) {
-    return other is _HomeCarouselOverlayRequest && other.identity == identity;
-  }
-
-  @override
-  int get hashCode => identity.hashCode;
-}
-
-final _homeResolvedCardProvider =
-    Provider.autoDispose.family<HomeCardViewModel, _HomeCardOverlayRequest>((
-  ref,
-  request,
-) {
-  final liveOverlayEnabled = ref.watch(
-    effectivePerformanceLiveItemHeroOverlayEnabledProvider,
-  );
-  if (!liveOverlayEnabled) {
-    return request.item;
-  }
-  final cacheScope = request.cacheScope;
-  if (!cacheScope.isEmpty) {
-    ref.watch(
-      localStorageDetailCacheChangeProvider.select(
-        (state) => state.revisionForScope(
-          cacheScope,
-          changedFields: _homePresentationCacheChangedFields,
-        ),
-      ),
-    );
-  }
-  final cachedTarget = ref
-      .read(localStorageCacheRepositoryProvider)
-      .peekDetailTarget(request.item.detailTarget);
-  if (cachedTarget == null) {
-    return request.item;
-  }
-  final mergedTarget = mergeCachedHomeDetailTarget(
-    seed: request.item.detailTarget,
-    cached: cachedTarget,
-  );
-  return mergeCachedHomeCardItem(request.item, mergedTarget);
-});
-
-final _homeResolvedCarouselItemProvider = Provider.autoDispose
-    .family<HomeCarouselItemViewModel, _HomeCarouselOverlayRequest>((
-  ref,
-  request,
-) {
-  final liveOverlayEnabled = ref.watch(
-    effectivePerformanceLiveItemHeroOverlayEnabledProvider,
-  );
-  if (!liveOverlayEnabled) {
-    return request.item;
-  }
-  final cacheScope = request.cacheScope;
-  if (!cacheScope.isEmpty) {
-    ref.watch(
-      localStorageDetailCacheChangeProvider.select(
-        (state) => state.revisionForScope(
-          cacheScope,
-          changedFields: _homePresentationCacheChangedFields,
-        ),
-      ),
-    );
-  }
-  final cachedTarget = ref
-      .read(localStorageCacheRepositoryProvider)
-      .peekDetailTarget(request.item.detailTarget);
-  if (cachedTarget == null) {
-    return request.item;
-  }
-  final mergedTarget = mergeCachedHomeDetailTarget(
-    seed: request.item.detailTarget,
-    cached: cachedTarget,
-  );
-  return mergeCachedHomeCarouselItem(request.item, mergedTarget);
-});
 
 class _HomePageState extends ConsumerState<HomePage>
     with PageActivityMixin<HomePage> {
@@ -318,16 +179,13 @@ class _HomePageState extends ConsumerState<HomePage>
       appSettingsProvider.select((settings) => settings.homeHeroSourceModuleId),
     );
     final preferredHeroModuleId = heroSourceModuleId.trim();
-    final preferredHeroSectionState = preferredHeroModuleId.isEmpty
-        ? null
-        : resolveRetainedAsyncValue(
-            activeValue: isPageVisible
-                ? ref.watch(homeSectionProvider(preferredHeroModuleId))
-                : null,
-            cachedValue: null,
-            cacheValue: (_) {},
-            fallbackValue: const AsyncLoading<HomeSectionViewModel?>(),
-          );
+    final preferredHeroSectionLoading = preferredHeroModuleId.isNotEmpty &&
+        isPageVisible &&
+        ref.watch(
+          homeSectionProvider(
+            preferredHeroModuleId,
+          ).select((state) => state.isLoading),
+        );
     final heroBackgroundEnabled = ref.watch(
       appSettingsProvider.select(
         (settings) => settings.homeHeroBackgroundEnabled,
@@ -382,8 +240,7 @@ class _HomePageState extends ConsumerState<HomePage>
                 enabledModules: enabledModules,
                 resolvedSections: resolvedSections,
                 hasPendingSections: hasPendingSections,
-                preferredHeroSectionLoading:
-                    preferredHeroSectionState?.isLoading ?? false,
+                preferredHeroSectionLoading: preferredHeroSectionLoading,
                 heroEnabled: heroModule?.enabled ?? false,
                 heroSourceModuleId: heroSourceModuleId,
                 heroLogoTitleEnabled: heroLogoTitleEnabled,
@@ -441,8 +298,6 @@ class _HomePageState extends ConsumerState<HomePage>
         ? const <_FeaturedHeroItem>[]
         : _buildFeaturedItems(
             featuredSection: featuredSection,
-            resolvedSections: resolvedSections,
-            preferredModuleId: heroSourceModuleId,
           );
     final activeHero = _resolveActiveHeroItem(featuredItems);
     final currentHeroIds =
@@ -472,15 +327,13 @@ class _HomePageState extends ConsumerState<HomePage>
     if (heroListChanged) {
       _scheduleHeroSelectionSync(activeHero);
     }
-    final featuredSectionId = featuredSection?.id;
-    final visibleModules = featuredSectionId == null
+    final visibleModules = featuredSection == null
         ? enabledModules
         : enabledModules
-            .where((module) => module.id != featuredSectionId)
+            .where((module) => module.id != featuredSection.id)
             .toList(growable: false);
     final firstFocusableSectionId = _resolveFirstFocusableSectionId(
       enabledModules: visibleModules,
-      featuredSectionId: featuredSectionId,
     );
     final hasHeroListSlot =
         heroEnabled && (featuredItems.isNotEmpty || hasPendingSections);
@@ -546,7 +399,6 @@ class _HomePageState extends ConsumerState<HomePage>
                   key: ValueKey<String>('home:section-slot:${module.id}'),
                   module: module,
                   isPageVisible: isPageVisible,
-                  featuredSectionId: featuredSectionId,
                   useHeroNextSectionFocusNode:
                       module.id == firstFocusableSectionId,
                   heroNextSectionFocusNode: _heroNextSectionFocusNode,
@@ -584,12 +436,8 @@ class _HomePageState extends ConsumerState<HomePage>
 
   String? _resolveFirstFocusableSectionId({
     required List<HomeModuleConfig> enabledModules,
-    required String? featuredSectionId,
   }) {
     for (final module in enabledModules) {
-      if (module.id == featuredSectionId) {
-        continue;
-      }
       return module.id;
     }
     return null;

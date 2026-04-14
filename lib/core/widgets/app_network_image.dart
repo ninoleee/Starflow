@@ -67,8 +67,6 @@ class AppNetworkImage extends ConsumerStatefulWidget {
   ConsumerState<AppNetworkImage> createState() => _AppNetworkImageState();
 }
 
-final Map<String, Future<_ResolvedImageContent>> _resolvedImageFutureCache = {};
-
 class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   Future<_ResolvedImageContent>? _resolvedImageFuture;
 
@@ -109,24 +107,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     if (candidates.isEmpty) {
       return null;
     }
-    if (!_shouldUseResolvedImageFutureCache(candidates)) {
-      return _loadAndAnalyze(candidates);
-    }
-    final cacheKey = _buildCandidatesCacheKey(candidates);
-    final cachedFuture = _resolvedImageFutureCache[cacheKey];
-    if (cachedFuture != null) {
-      return cachedFuture;
-    }
-    final future = _loadAndAnalyze(candidates);
-    _resolvedImageFutureCache[cacheKey] = future;
-    future.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace __) {
-        _resolvedImageFutureCache.remove(cacheKey);
-        return;
-      },
-    );
-    return future;
+    return _loadAndAnalyze(candidates);
   }
 
   Future<_ResolvedImageContent> _loadAndAnalyze(
@@ -278,26 +259,6 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     return candidates;
   }
 
-  bool _shouldUseResolvedImageFutureCache(
-    List<AppNetworkImageSource> candidates,
-  ) {
-    return candidates.every(
-      (candidate) =>
-          candidate.cachePolicy == AppNetworkImageCachePolicy.persistent,
-    );
-  }
-
-  String _buildCandidatesCacheKey(List<AppNetworkImageSource> candidates) {
-    return candidates
-        .map((candidate) =>
-            _buildSourceIdentity(
-              candidate.url,
-              candidate.headers,
-              cachePolicy: candidate.cachePolicy,
-            ))
-        .join('\u0000');
-  }
-
   Widget _buildError(
     BuildContext context,
     Object error, [
@@ -337,12 +298,10 @@ class _ResolvedImageContent {
 }
 
 bool _sameHeaders(Map<String, String>? left, Map<String, String>? right) {
-  final normalizedLeft = left == null || left.isEmpty
-      ? null
-      : Map<String, String>.from(left);
-  final normalizedRight = right == null || right.isEmpty
-      ? null
-      : Map<String, String>.from(right);
+  final normalizedLeft =
+      left == null || left.isEmpty ? null : Map<String, String>.from(left);
+  final normalizedRight =
+      right == null || right.isEmpty ? null : Map<String, String>.from(right);
   return mapEquals(normalizedLeft, normalizedRight);
 }
 

@@ -539,6 +539,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     final deadline = DateTime.now().add(timeout);
     final readyCompleter = Completer<void>();
     final subscriptions = <StreamSubscription<dynamic>>[];
+    DateTime? readyCandidateSince;
     final startupFailureFuture = startupError?.then<void>((message) {
       throw _PlayerOpenException(message);
     });
@@ -546,14 +547,22 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     final watchdog = MpvStallWatchdog(
       config: _resolveStartupStallWatchdogConfig(target),
     );
+    final readyConfirmWindow = _resolveStrictReadyConfirmWindow(target);
 
     void evaluateReady() {
       if (readyCompleter.isCompleted) {
         return;
       }
       if (_isStrictPlaybackReady(player, progressBaseline: baseline)) {
+        readyCandidateSince ??= DateTime.now();
+        if (DateTime.now().difference(readyCandidateSince!) <
+            readyConfirmWindow) {
+          return;
+        }
         readyCompleter.complete();
+        return;
       }
+      readyCandidateSince = null;
     }
 
     subscriptions.addAll([
@@ -608,8 +617,11 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
             'reason': decision.reason,
           },
         );
+        if (!_mpvStallAutoRecoveryEnabled) {
+          continue;
+        }
         if (decision.level == MpvStallRecoveryLevel.soft) {
-          await _performSoftMpvStallRecovery(
+          await _attemptSoftMpvStallRecovery(
             player,
             decision,
             stageLabel: '$stageLabel-soft',
@@ -635,6 +647,16 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     final hasProgress = positionDelta >= const Duration(milliseconds: 250);
     final hasMetadata = _hasStrictPlaybackMetadata(player);
     return state.playing && hasProgress && (hasMetadata || !state.buffering);
+  }
+
+  Duration _resolveStrictReadyConfirmWindow(PlaybackTarget target) {
+    if (isLikelyQuarkPlaybackTarget(target)) {
+      return const Duration(milliseconds: 650);
+    }
+    if (_isLikelyRemotePlaybackTarget(target)) {
+      return const Duration(milliseconds: 500);
+    }
+    return const Duration(milliseconds: 300);
   }
 
   bool _hasStrictPlaybackMetadata(Player player) {
@@ -711,12 +733,41 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         'stagnantForMs': decision.stagnantFor.inMilliseconds,
       },
     );
-    await player.play();
-    await player.seek(decision.position);
+    await player.play().timeout(const Duration(seconds: 2));
+    await player.seek(decision.position).timeout(const Duration(seconds: 2));
+  }
+
+  Future<void> _attemptSoftMpvStallRecovery(
+    Player player,
+    MpvStallDecision decision, {
+    required String stageLabel,
+  }) async {
+    try {
+      await _performSoftMpvStallRecovery(
+        player,
+        decision,
+        stageLabel: stageLabel,
+      );
+    } catch (error, stackTrace) {
+      _traceWindowsMpv(
+        'windows-mpv.stall.recover-soft-failed',
+        fields: {
+          'stage': stageLabel,
+          'positionMs': decision.position.inMilliseconds,
+          'bufferingForMs': decision.bufferingFor.inMilliseconds,
+          'stagnantForMs': decision.stagnantFor.inMilliseconds,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
   }
 
   void _startMpvStallWatchdog(Player player, PlaybackTarget target) {
     _stopMpvStallWatchdog();
+    if (!_mpvStallAutoRecoveryEnabled) {
+      return;
+    }
     _mpvStallWatchdog = MpvStallWatchdog(
       config: _resolveRuntimeStallWatchdogConfig(target),
     );
@@ -758,7 +809,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     if (decision.level == MpvStallRecoveryLevel.soft) {
       _mpvStallRecoveryInProgress = true;
       try {
-        await _performSoftMpvStallRecovery(
+        await _attemptSoftMpvStallRecovery(
           player,
           decision,
           stageLabel: 'runtime',

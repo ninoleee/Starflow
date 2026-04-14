@@ -454,7 +454,6 @@ void main() {
               sections: [heroSection],
             ),
           ),
-          homeSectionsProvider.overrideWith((ref) async => [heroSection]),
         ],
         child: const MaterialApp(home: HomePage()),
       ),
@@ -561,9 +560,6 @@ void main() {
               homeHeroSourceModuleId: 'module-a',
               homeHeroBackgroundEnabled: false,
             ),
-          ),
-          homeSectionsProvider.overrideWith(
-            (ref) async => [featuredSection, regularSection],
           ),
           homeResolvedSectionsProvider.overrideWith(
             (ref) => const HomeResolvedSectionsState(

@@ -179,7 +179,7 @@ extension SearchProviderKindX on SearchProviderKind {
     }
   }
 
-  static SearchProviderKind fromName(String raw) {
+  static SearchProviderKind? tryParseName(String raw) {
     switch (raw) {
       case 'panSou':
       case 'pansou':
@@ -191,8 +191,12 @@ extension SearchProviderKindX on SearchProviderKind {
       case 'cloudsaver':
         return SearchProviderKind.cloudSaver;
       default:
-        return SearchProviderKind.panSou;
+        return null;
     }
+  }
+
+  static SearchProviderKind fromName(String raw) {
+    return tryParseName(raw) ?? SearchProviderKind.panSou;
   }
 }
 
@@ -303,12 +307,15 @@ class SearchProviderConfig {
   }
 
   factory SearchProviderConfig.fromJson(Map<String, dynamic> json) {
+    final parsedKind = SearchProviderKindX.tryParseName(
+      json['kind'] as String? ?? '',
+    );
     return SearchProviderConfig(
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '',
-      kind: SearchProviderKindX.fromName(json['kind'] as String? ?? ''),
+      kind: parsedKind ?? SearchProviderKind.panSou,
       endpoint: json['endpoint'] as String? ?? '',
-      enabled: json['enabled'] as bool? ?? false,
+      enabled: parsedKind != null && (json['enabled'] as bool? ?? false),
       apiKey: json['apiKey'] as String? ?? '',
       parserHint: json['parserHint'] as String? ?? '',
       username: json['username'] as String? ?? '',

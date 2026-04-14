@@ -389,6 +389,47 @@ void main() {
       expect(detailRequests, 1);
     });
 
+    test('returns no match when details lookup fails after search hit',
+        () async {
+      final client = TmdbMetadataClient(
+        MockClient((request) async {
+          if (request.url.path == '/3/search/multi') {
+            return http.Response(
+              jsonEncode({
+                'results': [
+                  {
+                    'id': 603,
+                    'media_type': 'movie',
+                    'title': 'The Matrix',
+                    'original_title': 'The Matrix',
+                    'overview': '',
+                    'poster_path': '/matrix-search.jpg',
+                    'release_date': '1999-03-30',
+                    'popularity': 88.0,
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          if (request.url.path == '/3/movie/603') {
+            return http.Response('boom', 500);
+          }
+
+          throw UnsupportedError('Unexpected request: ${request.url}');
+        }),
+      );
+
+      final result = await client.matchTitle(
+        query: 'The Matrix',
+        readAccessToken: 'tmdb-token',
+        year: 1999,
+      );
+
+      expect(result, isNull);
+    });
+
     test('fetches related credits for actor and director entries', () async {
       final client = TmdbMetadataClient(
         MockClient((request) async {

@@ -156,5 +156,41 @@ void main() {
       expect(enriched.favoriteFolderName, '三体');
       expect(enriched.tmdbId, '205715');
     });
+
+    test('keeps caller metadata priority when resolving favorites', () async {
+      MetadataMatchProvider? capturedPriority;
+      final service = SearchFavoriteMetadataService(
+        resolveMatch: ({
+          required AppSettings settings,
+          required MetadataMatchRequest request,
+        }) async {
+          capturedPriority = settings.metadataMatchPriority;
+          return null;
+        },
+      );
+
+      const result = SearchResult(
+        id: 'favorite-3',
+        title: '沙丘',
+        posterUrl: '',
+        providerId: 'provider-1',
+        providerName: 'PanSou',
+        quality: '',
+        sizeLabel: '',
+        seeders: 0,
+        summary: '',
+        resourceUrl: 'https://pan.quark.cn/s/favorite-3',
+      );
+
+      await service.enrichFavorite(
+        result: result,
+        query: '沙丘',
+        settings: _testSettings().copyWith(
+          metadataMatchPriority: MetadataMatchProvider.wmdb,
+        ),
+      );
+
+      expect(capturedPriority, MetadataMatchProvider.wmdb);
+    });
   });
 }

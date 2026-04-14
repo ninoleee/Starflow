@@ -6,15 +6,13 @@ import 'package:starflow/features/settings/application/settings_slice_providers.
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 String performanceSettingsSummary(
-  SettingsPerformanceSlice settings, {
-  bool isTelevision = false,
-}) {
+  SettingsPerformanceSlice settings,
+) {
   final enabledItems = <String>[
     if (!settings.translucentEffectsEnabled) '磨砂关闭',
     if (!settings.autoHideNavigationBarEnabled) '菜单常驻',
     if (!settings.homeHeroBackgroundEnabled) 'Hero 背景关闭',
-    if (isTelevision || !settings.performanceLiveItemHeroOverlayEnabled)
-      '局部实时更新关闭',
+    if (!settings.effectiveLiveItemHeroOverlayEnabled) '局部实时更新关闭',
   ];
 
   if (enabledItems.isEmpty) {
@@ -41,8 +39,6 @@ class PerformanceSettingsPage extends ConsumerWidget {
     final controller = ref.read(settingsControllerProvider.notifier);
     final theme = Theme.of(context);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
-    final effectiveLiveOverlayEnabled =
-        !isTelevision && settings.performanceLiveItemHeroOverlayEnabled;
 
     return SettingsPageScaffold(
       onBack: () => Navigator.of(context).pop(),
@@ -56,8 +52,7 @@ class PerformanceSettingsPage extends ConsumerWidget {
         const SettingsSectionTitle(label: '预设'),
         SettingsToggleTile(
           title: '高性能模式',
-          subtitle:
-              '打开时会默认关闭透明磨砂、关闭菜单栏自动隐藏、关闭 Hero 背景图、关闭运行时卡片与 Hero 局部更新，并套用这页中的推荐值；未单独列出的其他轻量化处理也会一起生效。',
+          subtitle: '打开时会重新套用这一页的推荐轻量配置；关闭时只会清除“预设已开”标记，不会自动把下面这些项改回默认值。',
           value: settings.highPerformanceModeEnabled,
           onChanged: (value) {
             controller.setHighPerformanceModeEnabled(value);
@@ -100,7 +95,7 @@ class PerformanceSettingsPage extends ConsumerWidget {
             subtitle: isTelevision
                 ? 'TV 端为保证滚动和焦点稳定，已强制关闭这类运行时局部刷新；普通端仍可按需开启。'
                 : '关闭后首页 Hero 和列表卡片不会跟随后台 metadata 缓存变化做局部刷新，只会在应用启动、保存设置或手动刷新后更新。',
-            value: effectiveLiveOverlayEnabled,
+            value: settings.effectiveLiveItemHeroOverlayEnabled,
             onChanged: isTelevision
                 ? null
                 : (value) {

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
-import 'package:starflow/core/widgets/tv_focus.dart';
 
 class MediaPosterTile extends ConsumerStatefulWidget {
   const MediaPosterTile({
@@ -259,16 +259,11 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
     );
 
     if (isTelevision) {
-      return TvFocusableAction(
-        onPressed: widget.onTap,
-        onContextAction: widget.onContextAction,
-        focusId: widget.focusId,
+      return _TelevisionPosterAction(
         focusNode: _effectiveFocusNode,
         autofocus: widget.autofocus,
-        borderRadius: BorderRadius.circular(16),
-        visualStyle: enablePosterFocusOutline
-            ? TvFocusVisualStyle.none
-            : TvFocusVisualStyle.floating,
+        onPressed: widget.onTap,
+        onContextAction: widget.onContextAction,
         child: content,
       );
     }
@@ -288,6 +283,71 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
         decoration: BoxDecoration(
           color: theme.colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(16),
+        ),
+      ),
+    );
+  }
+}
+
+class _TelevisionPosterContextMenuIntent extends Intent {
+  const _TelevisionPosterContextMenuIntent();
+}
+
+class _TelevisionPosterAction extends StatelessWidget {
+  const _TelevisionPosterAction({
+    required this.child,
+    required this.onPressed,
+    required this.focusNode,
+    this.onContextAction,
+    this.autofocus = false,
+  });
+
+  final Widget child;
+  final VoidCallback onPressed;
+  final VoidCallback? onContextAction;
+  final FocusNode focusNode;
+  final bool autofocus;
+
+  @override
+  Widget build(BuildContext context) {
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.gameButtonA): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.contextMenu):
+            _TelevisionPosterContextMenuIntent(),
+        SingleActivator(LogicalKeyboardKey.gameButtonY):
+            _TelevisionPosterContextMenuIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              onPressed();
+              return null;
+            },
+          ),
+          _TelevisionPosterContextMenuIntent:
+              CallbackAction<_TelevisionPosterContextMenuIntent>(
+                onInvoke: (_) {
+                  onContextAction?.call();
+                  return null;
+                },
+              ),
+        },
+        child: Focus(
+          focusNode: focusNode,
+          autofocus: autofocus,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: onPressed,
+            onLongPress: onContextAction,
+            onSecondaryTap: onContextAction,
+            child: child,
+          ),
         ),
       ),
     );

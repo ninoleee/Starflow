@@ -2,13 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
-import 'package:starflow/features/settings/application/settings_controller.dart';
-
-final _tvFocusLightweightEnabledProvider = Provider<bool>((ref) {
-  return ref.watch(appSettingsProvider.select(
-    (settings) => settings.performanceLightweightTvFocusEnabled,
-  ));
-});
 
 enum TvButtonVariant {
   filled,
@@ -30,41 +23,7 @@ enum StarflowButtonVariant {
   danger,
 }
 
-class TvFocusMemoryController extends ChangeNotifier {
-  final Map<String, String> _rememberedFocusIds = <String, String>{};
-
-  String? rememberedFocusId(String scopeId) {
-    final normalizedScopeId = scopeId.trim();
-    if (normalizedScopeId.isEmpty) {
-      return null;
-    }
-    return _rememberedFocusIds[normalizedScopeId];
-  }
-
-  bool hasRememberedFocus(String scopeId) {
-    return (rememberedFocusId(scopeId) ?? '').isNotEmpty;
-  }
-
-  void remember(String scopeId, String focusId) {
-    final normalizedScopeId = scopeId.trim();
-    final normalizedFocusId = focusId.trim();
-    if (normalizedScopeId.isEmpty || normalizedFocusId.isEmpty) {
-      return;
-    }
-    if (_rememberedFocusIds[normalizedScopeId] == normalizedFocusId) {
-      return;
-    }
-    _rememberedFocusIds[normalizedScopeId] = normalizedFocusId;
-  }
-
-  void clear(String scopeId) {
-    final normalizedScopeId = scopeId.trim();
-    if (normalizedScopeId.isEmpty) {
-      return;
-    }
-    _rememberedFocusIds.remove(normalizedScopeId);
-  }
-}
+class TvFocusMemoryController extends ChangeNotifier {}
 
 class TvFocusMemoryScope extends InheritedWidget {
   const TvFocusMemoryScope({
@@ -223,13 +182,145 @@ class TvPageFocusScope extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TvFocusMemoryScope(
-      controller: controller,
-      scopeId: scopeId,
-      enabled: isTelevision,
-      child: TvDirectionalFocusBoundary(
-        onMoveLeftOut: onMoveLeftOut,
-        child: child,
+    return TvDirectionalFocusBoundary(
+      onMoveLeftOut: onMoveLeftOut,
+      child: child,
+    );
+  }
+}
+
+class _TvFocusOutlineFrame extends StatelessWidget {
+  const _TvFocusOutlineFrame({
+    required this.child,
+    required this.isFocused,
+    required this.borderRadius,
+    this.borderWidth = 2,
+  });
+
+  final Widget child;
+  final bool isFocused;
+  final BorderRadius borderRadius;
+  final double borderWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isFocused) {
+      return child;
+    }
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        child,
+        Positioned.fill(
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: borderRadius,
+                border: Border.all(
+                  color: Colors.white,
+                  width: borderWidth,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TvOutlinedFocusableAction extends StatefulWidget {
+  const _TvOutlinedFocusableAction({
+    required this.child,
+    required this.onPressed,
+    required this.borderRadius,
+    this.onFocused,
+    this.autofocus = false,
+    this.focusNode,
+    this.focusId,
+    this.borderWidth = 2,
+  });
+
+  final Widget child;
+  final VoidCallback? onPressed;
+  final VoidCallback? onFocused;
+  final bool autofocus;
+  final FocusNode? focusNode;
+  final String? focusId;
+  final BorderRadius borderRadius;
+  final double borderWidth;
+
+  @override
+  State<_TvOutlinedFocusableAction> createState() =>
+      _TvOutlinedFocusableActionState();
+}
+
+class _TvOutlinedFocusableActionState extends State<_TvOutlinedFocusableAction> {
+  FocusNode? _ownedFocusNode;
+  bool _isFocused = false;
+
+  FocusNode get _effectiveFocusNode =>
+      widget.focusNode ??
+      (_ownedFocusNode ??=
+          FocusNode(debugLabel: 'tv-outlined:${widget.focusId ?? widget.key}'));
+
+  @override
+  void initState() {
+    super.initState();
+    _effectiveFocusNode.addListener(_handleFocusChanged);
+    _handleFocusChanged();
+  }
+
+  @override
+  void didUpdateWidget(covariant _TvOutlinedFocusableAction oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final previousFocusNode = oldWidget.focusNode ?? _ownedFocusNode;
+    final nextFocusNode = _effectiveFocusNode;
+    if (!identical(previousFocusNode, nextFocusNode)) {
+      previousFocusNode?.removeListener(_handleFocusChanged);
+      nextFocusNode.addListener(_handleFocusChanged);
+      _handleFocusChanged();
+      if (oldWidget.focusNode == null && widget.focusNode != null) {
+        _ownedFocusNode?.dispose();
+        _ownedFocusNode = null;
+      }
+    }
+  }
+
+  void _handleFocusChanged() {
+    final isFocused =
+        _effectiveFocusNode.hasFocus || _effectiveFocusNode.hasPrimaryFocus;
+    if (_isFocused == isFocused) {
+      return;
+    }
+    setState(() {
+      _isFocused = isFocused;
+    });
+  }
+
+  @override
+  void dispose() {
+    final currentFocusNode = widget.focusNode ?? _ownedFocusNode;
+    currentFocusNode?.removeListener(_handleFocusChanged);
+    _ownedFocusNode?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocusableAction(
+      onPressed: widget.onPressed,
+      onFocused: widget.onFocused,
+      autofocus: widget.autofocus,
+      focusNode: _effectiveFocusNode,
+      focusId: widget.focusId,
+      borderRadius: widget.borderRadius,
+      visualStyle: TvFocusVisualStyle.none,
+      child: _TvFocusOutlineFrame(
+        isFocused: _isFocused,
+        borderRadius: widget.borderRadius,
+        borderWidth: widget.borderWidth,
+        child: widget.child,
       ),
     );
   }
@@ -340,11 +431,8 @@ class TvFocusableAction extends ConsumerStatefulWidget {
 }
 
 class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
-  final ValueNotifier<bool> _isFocusedNotifier = ValueNotifier<bool>(false);
   FocusNode? _ownedFocusNode;
-  String? _queuedRestoreFocusId;
-  bool _didAttemptFocusRestore = false;
-  String _lastRestoreKey = '';
+  bool _isFocused = false;
 
   FocusNode get _effectiveFocusNode =>
       widget.focusNode ??
@@ -358,65 +446,12 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
       _ownedFocusNode?.dispose();
       _ownedFocusNode = null;
     }
-    if (oldWidget.focusId != widget.focusId) {
-      _didAttemptFocusRestore = false;
-      _lastRestoreKey = '';
-    }
   }
 
   @override
   void dispose() {
-    _isFocusedNotifier.dispose();
     _ownedFocusNode?.dispose();
     super.dispose();
-  }
-
-  void _scheduleFocusRestore(FocusNode focusNode, String focusId) {
-    if (_queuedRestoreFocusId == focusId) {
-      return;
-    }
-    _queuedRestoreFocusId = focusId;
-    _didAttemptFocusRestore = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      if (_queuedRestoreFocusId != focusId) {
-        return;
-      }
-      _queuedRestoreFocusId = null;
-      final currentPrimaryFocus = FocusManager.instance.primaryFocus;
-      if (currentPrimaryFocus != null &&
-          currentPrimaryFocus != focusNode &&
-          currentPrimaryFocus.context != null) {
-        return;
-      }
-      if (!focusNode.canRequestFocus ||
-          focusNode.hasPrimaryFocus ||
-          focusNode.hasFocus) {
-        return;
-      }
-      focusNode.requestFocus();
-    });
-  }
-
-  void _handleFocusHighlightChange({
-    required bool value,
-    required bool memoryEnabled,
-    required TvFocusMemoryScope? memoryScope,
-    required String focusId,
-    required bool trackVisualFocus,
-  }) {
-    if (value && memoryEnabled && memoryScope != null && focusId.isNotEmpty) {
-      memoryScope.controller.remember(memoryScope.scopeId, focusId);
-    }
-    if (value) {
-      widget.onFocused?.call();
-    }
-    if (!trackVisualFocus || _isFocusedNotifier.value == value) {
-      return;
-    }
-    _isFocusedNotifier.value = value;
   }
 
   Map<Type, Action<Intent>> _buildTelevisionActions(BuildContext context) {
@@ -442,149 +477,24 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
   }
 
   Widget _buildFocusVisualFrame({
-    required bool isFocused,
-    required bool lightweightTvFocusEnabled,
-    required bool hasContextAction,
     required Widget child,
   }) {
-    final useSubtleVisualStyle =
-        widget.visualStyle == TvFocusVisualStyle.subtle;
-    final useFloatingVisualStyle =
-        widget.visualStyle == TvFocusVisualStyle.floating;
-
-    if (widget.visualStyle == TvFocusVisualStyle.none) {
+    if (widget.visualStyle == TvFocusVisualStyle.none || !_isFocused) {
       return child;
     }
-
-    if (lightweightTvFocusEnabled) {
-      if (useFloatingVisualStyle) {
-        return DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: widget.borderRadius,
-            boxShadow: isFocused
-                ? [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.24),
-                      blurRadius: 20,
-                      offset: const Offset(0, 10),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Transform.translate(
-            offset: Offset(0, isFocused ? -5 : 0),
-            child: child,
-          ),
-        );
-      }
-      return Container(
-        padding: EdgeInsets.all(useSubtleVisualStyle ? 1 : 2),
-        decoration: BoxDecoration(
-          borderRadius: widget.borderRadius,
-          border: Border.all(
-            color: isFocused
-                ? Colors.white
-                : hasContextAction
-                    ? Colors.white.withValues(alpha: 0.08)
-                    : Colors.white.withValues(alpha: 0),
-            width: isFocused ? (useSubtleVisualStyle ? 1.8 : 2.2) : 1,
-          ),
-          color: isFocused
-              ? Colors.white.withValues(
-                  alpha: useSubtleVisualStyle ? 0.02 : 0.035,
-                )
-              : Colors.transparent,
-        ),
-        child: child,
-      );
-    }
-
-    if (useFloatingVisualStyle) {
-      return AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
-        transform: Matrix4.translationValues(0, isFocused ? -6 : 0, 0),
-        decoration: BoxDecoration(
-          borderRadius: widget.borderRadius,
-          boxShadow: isFocused
-              ? [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.22),
-                    blurRadius: 20,
-                    offset: const Offset(0, 10),
-                  ),
-                ]
-              : null,
-        ),
-        child: child,
-      );
-    }
-
-    return AnimatedScale(
-      scale: isFocused ? (useSubtleVisualStyle ? 1.008 : 1.03) : 1,
-      duration: const Duration(milliseconds: 140),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
-        decoration: BoxDecoration(
-          borderRadius: widget.borderRadius,
-          border: Border.all(
-            color: isFocused
-                ? Colors.white
-                : hasContextAction
-                    ? Colors.white.withValues(alpha: 0.04)
-                    : Colors.white.withValues(alpha: 0),
-            width: useSubtleVisualStyle ? 1.6 : 2,
-          ),
-          boxShadow: isFocused
-              ? [
-                  BoxShadow(
-                    color: useSubtleVisualStyle
-                        ? Colors.black.withValues(alpha: 0.18)
-                        : Colors.white.withValues(alpha: 0.18),
-                    blurRadius: useSubtleVisualStyle ? 12 : 28,
-                    spreadRadius: useSubtleVisualStyle ? 0 : 2,
-                  ),
-                ]
-              : null,
-          color: isFocused && useSubtleVisualStyle
-              ? Colors.white.withValues(alpha: 0.018)
-              : Colors.transparent,
-        ),
-        child: child,
-      ),
+    return _TvFocusOutlineFrame(
+      isFocused: true,
+      borderRadius: widget.borderRadius,
+      borderWidth:
+          widget.visualStyle == TvFocusVisualStyle.subtle ? 1.6 : 2,
+      child: child,
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
-    final lightweightTvFocusEnabled =
-        ref.watch(_tvFocusLightweightEnabledProvider);
     final enabled = widget.onPressed != null;
-    final hasContextAction = widget.onContextAction != null;
-    final memoryScope = TvFocusMemoryScope.maybeOf(context);
-    final memoryEnabled = memoryScope?.enabled ?? false;
-    final focusId = widget.focusId?.trim() ?? '';
-    final restoreKey = memoryScope == null
-        ? focusId
-        : '${memoryScope.scopeId.trim()}::$focusId';
-    if (_lastRestoreKey != restoreKey) {
-      _lastRestoreKey = restoreKey;
-      _didAttemptFocusRestore = false;
-    }
-    final rememberedFocusId = memoryEnabled && memoryScope != null
-        ? memoryScope.controller.rememberedFocusId(memoryScope.scopeId)
-        : null;
-    final shouldRestoreFocus = focusId.isNotEmpty &&
-        rememberedFocusId == focusId &&
-        enabled &&
-        isTelevision &&
-        !_didAttemptFocusRestore;
-    final shouldAutofocus = widget.autofocus &&
-        !(memoryEnabled &&
-            memoryScope != null &&
-            memoryScope.controller.hasRememberedFocus(memoryScope.scopeId));
 
     if (!isTelevision) {
       return InkWell(
@@ -596,24 +506,19 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
       );
     }
 
-    final effectiveFocusNode = _effectiveFocusNode;
-    if (shouldRestoreFocus) {
-      _scheduleFocusRestore(effectiveFocusNode, focusId);
-    }
-
-    final trackVisualFocus = widget.visualStyle != TvFocusVisualStyle.none;
     return FocusableActionDetector(
-      focusNode: effectiveFocusNode,
-      autofocus: shouldAutofocus,
+      focusNode: _effectiveFocusNode,
+      autofocus: widget.autofocus,
       enabled: enabled,
-      onShowFocusHighlight: (value) {
-        _handleFocusHighlightChange(
-          value: value,
-          memoryEnabled: memoryEnabled,
-          memoryScope: memoryScope,
-          focusId: focusId,
-          trackVisualFocus: trackVisualFocus,
-        );
+      onFocusChange: (value) {
+        if (_isFocused != value) {
+          setState(() {
+            _isFocused = value;
+          });
+        }
+        if (value) {
+          widget.onFocused?.call();
+        }
       },
       shortcuts: const <ShortcutActivator, Intent>{
         SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
@@ -625,18 +530,7 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
         SingleActivator(LogicalKeyboardKey.gameButtonY): TvContextMenuIntent(),
       },
       actions: _buildTelevisionActions(context),
-      child: ValueListenableBuilder<bool>(
-        valueListenable: _isFocusedNotifier,
-        child: widget.child,
-        builder: (context, isFocused, child) {
-          return _buildFocusVisualFrame(
-            isFocused: isFocused,
-            lightweightTvFocusEnabled: lightweightTvFocusEnabled,
-            hasContextAction: hasContextAction,
-            child: child!,
-          );
-        },
-      ),
+      child: _buildFocusVisualFrame(child: widget.child),
     );
   }
 }
@@ -787,14 +681,13 @@ class StarflowButton extends StatelessWidget {
         ),
       ),
     );
-    return TvFocusableAction(
+    return _TvOutlinedFocusableAction(
       onPressed: loading ? null : onPressed,
       autofocus: autofocus,
       focusNode: focusNode,
       focusId: focusId,
       borderRadius: radius,
-      visualStyle:
-          compact ? TvFocusVisualStyle.subtle : TvFocusVisualStyle.prominent,
+      borderWidth: compact ? 1.6 : 2,
       child: expand
           ? SizedBox(
               width: double.infinity,
@@ -835,13 +728,13 @@ class StarflowIconButton extends StatelessWidget {
       enabled: onPressed != null,
     );
     final radius = BorderRadius.circular(14);
-    final child = TvFocusableAction(
+    final child = _TvOutlinedFocusableAction(
       onPressed: onPressed,
       autofocus: autofocus,
       focusNode: focusNode,
       focusId: focusId,
       borderRadius: radius,
-      visualStyle: TvFocusVisualStyle.subtle,
+      borderWidth: 1.6,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: palette.backgroundColor,
@@ -918,14 +811,14 @@ class StarflowChipButton extends StatelessWidget {
       height: 1.2,
       leadingDistribution: TextLeadingDistribution.even,
     );
-    return TvFocusableAction(
+    return _TvOutlinedFocusableAction(
       onPressed: onPressed,
       onFocused: onFocused,
       autofocus: autofocus,
       focusNode: focusNode,
       focusId: focusId,
       borderRadius: BorderRadius.circular(999),
-      visualStyle: TvFocusVisualStyle.subtle,
+      borderWidth: 1.6,
       child: Opacity(
         opacity: enabled ? 1 : 0.5,
         child: DecoratedBox(
@@ -996,12 +889,13 @@ class StarflowSelectionTile extends StatelessWidget {
     final theme = Theme.of(context);
     final effectiveSubtitle =
         value.trim().isNotEmpty ? value.trim() : subtitle.trim();
-    return TvFocusableAction(
+    return _TvOutlinedFocusableAction(
       onPressed: onPressed,
       autofocus: autofocus,
       focusNode: focusNode,
       focusId: focusId,
       borderRadius: BorderRadius.circular(18),
+      borderWidth: 1.8,
       child: Opacity(
         opacity: onPressed == null ? 0.5 : 1,
         child: Container(

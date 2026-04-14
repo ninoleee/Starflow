@@ -20,7 +20,10 @@ void main() {
       'performanceLightweightHomeHeroEnabled': false,
     });
     final container = ProviderContainer(
-      overrides: [appSettingsProvider.overrideWithValue(settings)],
+      overrides: [
+        appSettingsProvider.overrideWithValue(settings),
+        isTelevisionProvider.overrideWith((ref) => false),
+      ],
     );
     addTearDown(container.dispose);
 
@@ -62,6 +65,10 @@ void main() {
         playbackEngine: PlaybackEngine.nativeContainer,
         playbackDecodeMode: PlaybackDecodeMode.hardwarePreferred,
         playbackMpvQualityPreset: PlaybackMpvQualityPreset.performanceFirst,
+        playbackMpvDoubleTapToSeekEnabled: true,
+        playbackMpvSwipeToSeekEnabled: true,
+        playbackMpvLongPressSpeedBoostEnabled: true,
+        playbackMpvStallAutoRecoveryEnabled: true,
         playbackOpenTimeoutSeconds: 60,
         playbackDefaultSpeed: 1.5,
         playbackSubtitlePreference: PlaybackSubtitlePreference.off,
@@ -70,8 +77,25 @@ void main() {
           OnlineSubtitleSource.assrt,
           OnlineSubtitleSource.subhd,
         ],
-        playbackBackgroundPlaybackEnabled: false,
+        configuredBackgroundPlaybackEnabled: false,
+        effectiveBackgroundPlaybackEnabled: false,
       ),
+    );
+  });
+
+  test('playback slice falls back to balanced mpv preset for unknown value',
+      () {
+    final settings = AppSettings.fromJson({
+      'playbackMpvQualityPreset': 'unknown-preset',
+    });
+    final container = ProviderContainer(
+      overrides: [appSettingsProvider.overrideWithValue(settings)],
+    );
+    addTearDown(container.dispose);
+
+    expect(
+      container.read(settingsPlaybackSliceProvider).playbackMpvQualityPreset,
+      PlaybackMpvQualityPreset.balanced,
     );
   });
 
@@ -84,7 +108,10 @@ void main() {
       'performanceLiveItemHeroOverlayEnabled': false,
     });
     final container = ProviderContainer(
-      overrides: [appSettingsProvider.overrideWithValue(settings)],
+      overrides: [
+        appSettingsProvider.overrideWithValue(settings),
+        isTelevisionProvider.overrideWith((ref) => false),
+      ],
     );
     addTearDown(container.dispose);
 
@@ -95,7 +122,8 @@ void main() {
         translucentEffectsEnabled: false,
         autoHideNavigationBarEnabled: false,
         homeHeroBackgroundEnabled: false,
-        performanceLiveItemHeroOverlayEnabled: false,
+        configuredLiveItemHeroOverlayEnabled: false,
+        effectiveLiveItemHeroOverlayEnabled: false,
       ),
     );
   });
@@ -123,5 +151,75 @@ void main() {
       container.read(effectivePerformanceLiveItemHeroOverlayEnabledProvider),
       isFalse,
     );
+  });
+
+  test(
+      'playback slice keeps configured background playback but forces effect off on television',
+      () async {
+    final container = ProviderContainer(
+      overrides: [
+        appSettingsProvider.overrideWithValue(
+          const AppSettings(
+            mediaSources: [],
+            searchProviders: [],
+            doubanAccount: DoubanAccountConfig(enabled: false),
+            homeModules: [],
+            playbackBackgroundPlaybackEnabled: true,
+          ),
+        ),
+        isTelevisionProvider.overrideWith((ref) => true),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(isTelevisionProvider.future);
+
+    expect(
+      container.read(settingsPlaybackSliceProvider),
+      const SettingsPlaybackSlice(
+        playbackEngine: PlaybackEngine.embeddedMpv,
+        playbackDecodeMode: PlaybackDecodeMode.auto,
+        playbackMpvQualityPreset: PlaybackMpvQualityPreset.balanced,
+        playbackMpvDoubleTapToSeekEnabled: true,
+        playbackMpvSwipeToSeekEnabled: true,
+        playbackMpvLongPressSpeedBoostEnabled: true,
+        playbackMpvStallAutoRecoveryEnabled: true,
+        playbackOpenTimeoutSeconds: 20,
+        playbackDefaultSpeed: 1.0,
+        playbackSubtitlePreference: PlaybackSubtitlePreference.auto,
+        playbackSubtitleScale: PlaybackSubtitleScale.standard,
+        onlineSubtitleSources: [OnlineSubtitleSource.assrt],
+        configuredBackgroundPlaybackEnabled: true,
+        effectiveBackgroundPlaybackEnabled: false,
+      ),
+    );
+    expect(container.read(effectivePlaybackBackgroundEnabledProvider), isFalse);
+  });
+
+  test(
+      'playback slice keeps both configured and effective background playback on non-tv',
+      () async {
+    final container = ProviderContainer(
+      overrides: [
+        appSettingsProvider.overrideWithValue(
+          const AppSettings(
+            mediaSources: [],
+            searchProviders: [],
+            doubanAccount: DoubanAccountConfig(enabled: false),
+            homeModules: [],
+            playbackBackgroundPlaybackEnabled: true,
+          ),
+        ),
+        isTelevisionProvider.overrideWith((ref) => false),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(isTelevisionProvider.future);
+
+    final slice = container.read(settingsPlaybackSliceProvider);
+    expect(slice.configuredBackgroundPlaybackEnabled, isTrue);
+    expect(slice.effectiveBackgroundPlaybackEnabled, isTrue);
+    expect(container.read(effectivePlaybackBackgroundEnabledProvider), isTrue);
   });
 }

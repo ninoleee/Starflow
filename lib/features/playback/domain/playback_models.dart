@@ -7,6 +7,7 @@ class PlaybackTarget {
     required this.streamUrl,
     required this.sourceName,
     required this.sourceKind,
+    this.allowResume = true,
     this.actualAddress = '',
     this.itemId = '',
     this.itemType = '',
@@ -34,6 +35,7 @@ class PlaybackTarget {
   final String streamUrl;
   final String sourceName;
   final MediaSourceKind sourceKind;
+  final bool allowResume;
   final String actualAddress;
   final String itemId;
   final String itemType;
@@ -61,6 +63,7 @@ class PlaybackTarget {
     String? streamUrl,
     String? sourceName,
     MediaSourceKind? sourceKind,
+    bool? allowResume,
     String? actualAddress,
     String? itemId,
     String? itemType,
@@ -88,6 +91,7 @@ class PlaybackTarget {
       streamUrl: streamUrl ?? this.streamUrl,
       sourceName: sourceName ?? this.sourceName,
       sourceKind: sourceKind ?? this.sourceKind,
+      allowResume: allowResume ?? this.allowResume,
       actualAddress: actualAddress ?? this.actualAddress,
       itemId: itemId ?? this.itemId,
       itemType: itemType ?? this.itemType,
@@ -230,6 +234,7 @@ class PlaybackTarget {
       'streamUrl': streamUrl,
       'sourceName': sourceName,
       'sourceKind': sourceKind.name,
+      'allowResume': allowResume,
       'actualAddress': actualAddress,
       'itemId': itemId,
       'itemType': itemType,
@@ -261,6 +266,7 @@ class PlaybackTarget {
       sourceName: json['sourceName'] as String? ?? '',
       sourceKind:
           MediaSourceKindX.fromName(json['sourceKind'] as String? ?? ''),
+      allowResume: json['allowResume'] as bool? ?? true,
       actualAddress: json['actualAddress'] as String? ?? '',
       itemId: json['itemId'] as String? ?? '',
       itemType: json['itemType'] as String? ?? '',

@@ -26,19 +26,6 @@ const int _defaultHomeSectionItemLimit = 20;
 class HomePageController {
   HomePageController();
 
-  Future<List<HomeSectionViewModel>> resolveSections({
-    required List<HomeModuleConfig> enabledModules,
-    required Future<HomeSectionViewModel?> Function(HomeModuleConfig module)
-        loadSection,
-  }) async {
-    final sections = await Future.wait(
-      enabledModules.map(loadSection),
-    );
-    return _resolveCanonicalSections(
-      sections.whereType<HomeSectionViewModel>(),
-    );
-  }
-
   HomeResolvedSectionsState resolveSectionStates({
     required List<HomeModuleConfig> enabledModules,
     required AsyncValue<HomeSectionViewModel?> Function(HomeModuleConfig module)
@@ -125,7 +112,6 @@ class HomePageController {
     ref.invalidate(homeCarouselItemsProvider);
     ref.invalidate(_homeSectionSeedProvider);
     ref.invalidate(homeSectionProvider);
-    ref.invalidate(homeSectionsProvider);
     ref.read(homeExplicitRefreshRevisionProvider.notifier).state += 1;
     ref.read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
     primeModulesWithReader(ref.read);
@@ -250,15 +236,10 @@ final homeSectionProvider =
       );
 });
 
-final homeSectionsProvider = FutureProvider<List<HomeSectionViewModel>>((
-  ref,
-) async {
-  final enabledModules = ref.watch(homeEnabledModulesProvider);
-  return ref.read(homePageControllerProvider).resolveSections(
-        enabledModules: enabledModules,
-        loadSection: (module) =>
-            ref.watch(homeSectionProvider(module.id).future),
-      );
+final homeSectionsProvider = Provider<List<HomeSectionViewModel>>((ref) {
+  return ref.watch(
+    homeResolvedSectionsProvider.select((state) => state.sections),
+  );
 });
 
 final homeResolvedSectionsProvider = Provider<HomeResolvedSectionsState>((ref) {

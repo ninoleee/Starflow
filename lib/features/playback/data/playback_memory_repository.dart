@@ -22,31 +22,39 @@ final playbackMemoryRepositoryProvider = Provider<PlaybackMemoryRepository>((
   );
 });
 
+final playbackMemorySnapshotProvider = FutureProvider<PlaybackMemorySnapshot>((
+  ref,
+) async {
+  ref.watch(playbackHistoryRevisionProvider);
+  return ref.read(playbackMemoryRepositoryProvider).loadSnapshot();
+});
+
 final playbackResumeForDetailTargetProvider =
     FutureProvider.family<PlaybackProgressEntry?, MediaDetailTarget>((
   ref,
   target,
 ) async {
-  ref.watch(playbackHistoryRevisionProvider);
-  return ref.read(playbackMemoryRepositoryProvider).loadResumeForDetailTarget(
-        target,
-      );
+  final snapshot = await ref.watch(playbackMemorySnapshotProvider.future);
+  return ref
+      .read(playbackMemoryRepositoryProvider)
+      .resumeEntryForDetailTargetFromSnapshot(snapshot, target);
 });
 
 final playbackEntryForMediaItemProvider =
     FutureProvider.family<PlaybackProgressEntry?, MediaItem>((ref, item) async {
-  ref.watch(playbackHistoryRevisionProvider);
-  return ref.read(playbackMemoryRepositoryProvider).loadEntryForTarget(
+  final snapshot = await ref.watch(playbackMemorySnapshotProvider.future);
+  return ref.read(playbackMemoryRepositoryProvider).entryForTargetFromSnapshot(
+        snapshot,
         PlaybackTarget.fromMediaItem(item),
       );
 });
 
 final recentPlaybackEntriesProvider =
     FutureProvider.family<List<PlaybackProgressEntry>, int>((ref, limit) async {
-  ref.watch(playbackHistoryRevisionProvider);
-  return ref.read(playbackMemoryRepositoryProvider).loadRecentDisplayEntries(
-        limit: limit,
-      );
+  final snapshot = await ref.watch(playbackMemorySnapshotProvider.future);
+  return ref
+      .read(playbackMemoryRepositoryProvider)
+      .recentDisplayEntriesFromSnapshot(snapshot, limit: limit);
 });
 
 class PlaybackMemoryRepository {
@@ -68,19 +76,34 @@ class PlaybackMemoryRepository {
   final void Function()? _notifyChanged;
 
   Future<PlaybackProgressEntry?> loadEntryForTarget(
-      PlaybackTarget target) async {
+    PlaybackTarget target,
+  ) async {
+    final snapshot = await loadSnapshot();
+    return entryForTargetFromSnapshot(snapshot, target);
+  }
+
+  PlaybackProgressEntry? entryForTargetFromSnapshot(
+    PlaybackMemorySnapshot snapshot,
+    PlaybackTarget target,
+  ) {
     final key = buildPlaybackItemKey(target);
     if (key.isEmpty) {
       return null;
     }
-    final snapshot = await _loadSnapshot();
     return _normalizeEntry(snapshot.items[key]);
   }
 
   Future<PlaybackProgressEntry?> loadResumeForDetailTarget(
     MediaDetailTarget target,
   ) async {
-    final snapshot = await _loadSnapshot();
+    final snapshot = await loadSnapshot();
+    return resumeEntryForDetailTargetFromSnapshot(snapshot, target);
+  }
+
+  PlaybackProgressEntry? resumeEntryForDetailTargetFromSnapshot(
+    PlaybackMemorySnapshot snapshot,
+    MediaDetailTarget target,
+  ) {
     final normalizedItemType = target.itemType.trim().toLowerCase();
     if (normalizedItemType == 'series') {
       final seriesKey = buildSeriesKeyForMetadata(
@@ -108,7 +131,14 @@ class PlaybackMemoryRepository {
 
   Future<List<PlaybackProgressEntry>> loadRecentEntries(
       {int limit = 20}) async {
-    final snapshot = await _loadSnapshot();
+    final snapshot = await loadSnapshot();
+    return recentEntriesFromSnapshot(snapshot, limit: limit);
+  }
+
+  List<PlaybackProgressEntry> recentEntriesFromSnapshot(
+    PlaybackMemorySnapshot snapshot, {
+    int limit = 20,
+  }) {
     final entries = snapshot.items.values
         .map(_normalizeEntry)
         .whereType<PlaybackProgressEntry>()
@@ -122,7 +152,14 @@ class PlaybackMemoryRepository {
   Future<List<PlaybackProgressEntry>> loadRecentDisplayEntries({
     int limit = 20,
   }) async {
-    final snapshot = await _loadSnapshot();
+    final snapshot = await loadSnapshot();
+    return recentDisplayEntriesFromSnapshot(snapshot, limit: limit);
+  }
+
+  List<PlaybackProgressEntry> recentDisplayEntriesFromSnapshot(
+    PlaybackMemorySnapshot snapshot, {
+    int limit = 20,
+  }) {
     final combined = <String, PlaybackProgressEntry>{};
 
     void addEntry(String key, PlaybackProgressEntry entry) {
@@ -168,12 +205,20 @@ class PlaybackMemoryRepository {
   }
 
   Future<SeriesSkipPreference?> loadSkipPreference(
-      PlaybackTarget target) async {
+    PlaybackTarget target,
+  ) async {
+    final snapshot = await loadSnapshot();
+    return skipPreferenceForTargetFromSnapshot(snapshot, target);
+  }
+
+  SeriesSkipPreference? skipPreferenceForTargetFromSnapshot(
+    PlaybackMemorySnapshot snapshot,
+    PlaybackTarget target,
+  ) {
     final seriesKey = buildSeriesKeyForTarget(target);
     if (seriesKey.isEmpty) {
       return null;
     }
-    final snapshot = await _loadSnapshot();
     return snapshot.skipPreferences[seriesKey];
   }
 
@@ -202,7 +247,7 @@ class PlaybackMemoryRepository {
       duration: clampedDuration,
       progress: progress,
     );
-    final snapshot = await _loadSnapshot();
+    final snapshot = await loadSnapshot();
     final now = _nextUpdatedAt(snapshot);
 
     final seriesKey = buildSeriesKeyForTarget(target);
@@ -246,7 +291,7 @@ class PlaybackMemoryRepository {
     if (seriesKey.isEmpty) {
       return;
     }
-    final snapshot = await _loadSnapshot();
+    final snapshot = await loadSnapshot();
     final nextPreferences = <String, SeriesSkipPreference>{
       ...snapshot.skipPreferences,
       seriesKey: preference,
@@ -280,7 +325,7 @@ class PlaybackMemoryRepository {
       return;
     }
 
-    final snapshot = await _loadSnapshot();
+    final snapshot = await loadSnapshot();
     if (snapshot.items.isEmpty &&
         snapshot.series.isEmpty &&
         snapshot.skipPreferences.isEmpty) {
@@ -356,12 +401,16 @@ class PlaybackMemoryRepository {
 
   Future<LocalStorageCacheSummary> inspectSummary() async {
     final raw = await _preferences.getString(_storageKey) ?? '';
-    final snapshot = await _loadSnapshot();
+    final snapshot = await loadSnapshot();
     return LocalStorageCacheSummary(
       type: LocalStorageCacheType.playbackMemory,
       entryCount: snapshot.items.length + snapshot.skipPreferences.length,
       totalBytes: utf8.encode(raw).length,
     );
+  }
+
+  Future<PlaybackMemorySnapshot> loadSnapshot() async {
+    return _loadSnapshot();
   }
 
   Future<PlaybackMemorySnapshot> _loadSnapshot() async {
@@ -444,14 +493,7 @@ class PlaybackMemoryRepository {
   }
 
   PlaybackTarget _normalizeTargetForPersistence(PlaybackTarget target) {
-    if (target.sourceKind != MediaSourceKind.quark ||
-        !_isLoopbackPlaybackRelayUrl(target.streamUrl)) {
-      return target;
-    }
-    return target.copyWith(
-      streamUrl: '',
-      headers: const <String, String>{},
-    );
+    return sanitizeLoopbackPlaybackRelayTarget(target);
   }
 
   bool _samePlaybackTargets(PlaybackTarget left, PlaybackTarget right) {
@@ -495,7 +537,7 @@ class PlaybackMemoryRepository {
   }
 }
 
-bool _isLoopbackPlaybackRelayUrl(String url) {
+bool isLoopbackPlaybackRelayUrl(String url) {
   final uri = Uri.tryParse(url.trim());
   if (uri == null) {
     return false;
@@ -513,6 +555,21 @@ bool _isLoopbackPlaybackRelayUrl(String url) {
       .where((item) => item.isNotEmpty)
       .toList(growable: false);
   return segments.isNotEmpty && segments.first == 'playback-relay';
+}
+
+bool shouldSanitizeLoopbackPlaybackRelayTarget(PlaybackTarget target) {
+  return target.sourceKind == MediaSourceKind.quark &&
+      isLoopbackPlaybackRelayUrl(target.streamUrl);
+}
+
+PlaybackTarget sanitizeLoopbackPlaybackRelayTarget(PlaybackTarget target) {
+  if (!shouldSanitizeLoopbackPlaybackRelayTarget(target)) {
+    return target;
+  }
+  return target.copyWith(
+    streamUrl: '',
+    headers: const <String, String>{},
+  );
 }
 
 String buildPlaybackItemKey(PlaybackTarget target) {

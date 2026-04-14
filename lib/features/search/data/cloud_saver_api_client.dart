@@ -290,11 +290,7 @@ class CloudSaverApiClient {
   }
 
   static bool supports(SearchProviderConfig provider) {
-    final hint = provider.parserHint.trim().toLowerCase();
-    final endpoint = provider.endpoint.trim().toLowerCase();
-    return provider.kind == SearchProviderKind.cloudSaver ||
-        hint == 'cloudsaver-api' ||
-        endpoint.contains('/api/search');
+    return provider.kind == SearchProviderKind.cloudSaver;
   }
 
   static String _trimTrailingSlash(String path) {

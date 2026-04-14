@@ -688,14 +688,14 @@ class TmdbMetadataClient {
     );
     if (detailsResponse.statusCode != 200) {
       metadataSearchTrace(
-        'tmdb.details.fallback',
+        'tmdb.details.unavailable',
         fields: <String, Object?>{
           'tmdbId': result.id,
           'mediaType': result.mediaType,
           'status': detailsResponse.statusCode,
         },
       );
-      return _buildSearchFallbackMatch(result);
+      return null;
     }
 
     final decodedDetails = jsonDecode(
@@ -709,7 +709,7 @@ class TmdbMetadataClient {
           'mediaType': result.mediaType,
         },
       );
-      return _buildSearchFallbackMatch(result);
+      return null;
     }
 
     final match = _mapDetails(result, decodedDetails);
@@ -725,31 +725,6 @@ class TmdbMetadataClient {
       },
     );
     return match;
-  }
-
-  TmdbMetadataMatch _buildSearchFallbackMatch(_TmdbSearchResult result) {
-    return TmdbMetadataMatch(
-      tmdbId: result.id,
-      isSeries: result.isSeries,
-      title: result.title,
-      originalTitle: result.originalTitle,
-      posterUrl: _resolveImageUrl(result.posterPath, size: 'w500'),
-      backdropUrl: '',
-      logoUrl: '',
-      extraBackdropUrls: const <String>[],
-      overview: result.overview,
-      year: result.year,
-      durationLabel: '',
-      genres: const <String>[],
-      directors: const <String>[],
-      directorProfiles: const <TmdbPersonProfile>[],
-      actors: const <String>[],
-      actorProfiles: const <TmdbPersonProfile>[],
-      platforms: const <String>[],
-      platformProfiles: const <TmdbPersonProfile>[],
-      ratingLabels: const <String>[],
-      imdbId: '',
-    );
   }
 
   TmdbMetadataMatch _mapDetails(

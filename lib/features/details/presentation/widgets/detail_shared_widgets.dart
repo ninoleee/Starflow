@@ -3,6 +3,7 @@ import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/desktop_horizontal_pager.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 
 class DetailBlock extends StatelessWidget {
   const DetailBlock({
@@ -300,6 +301,272 @@ class DetailImageAsset {
   final AppNetworkImageCachePolicy cachePolicy;
 }
 
+class DetailBackdropImageSources {
+  const DetailBackdropImageSources({
+    required this.primary,
+    this.fallbackSources = const <AppNetworkImageSource>[],
+  });
+
+  final DetailImageAsset primary;
+  final List<AppNetworkImageSource> fallbackSources;
+}
+
+bool isEpisodeDetailItemType(String itemType) {
+  return itemType.trim().toLowerCase() == 'episode';
+}
+
+String resolveDetailPathTail(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  final uri = Uri.tryParse(trimmed);
+  final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
+  final normalized = rawPath.replaceAll('\\', '/').trim();
+  if (normalized.isEmpty) {
+    return '';
+  }
+  final tail = normalized.split('/').last.trim();
+  if (tail.isEmpty) {
+    return '';
+  }
+  try {
+    return Uri.decodeComponent(tail);
+  } on ArgumentError {
+    return tail;
+  }
+}
+
+String resolveDetailTargetFileName(MediaDetailTarget target) {
+  for (final value in [
+    target.playbackTarget?.actualAddress ?? '',
+    target.resourcePath,
+    target.playbackTarget?.streamUrl ?? '',
+  ]) {
+    final fileName = resolveDetailPathTail(value);
+    if (fileName.isNotEmpty) {
+      return fileName;
+    }
+  }
+  return '';
+}
+
+String resolveDetailMediaItemFileName(MediaItem item) {
+  for (final value in [item.actualAddress, item.streamUrl]) {
+    final fileName = resolveDetailPathTail(value);
+    if (fileName.isNotEmpty) {
+      return fileName;
+    }
+  }
+  return '';
+}
+
+String resolveDetailPrimaryTitle({
+  required MediaDetailTarget currentTarget,
+  MediaDetailTarget? pageTarget,
+  bool preferResolvedSeriesTitle = false,
+  String emptyFallback = '',
+}) {
+  final title = currentTarget.title.trim();
+  final query = currentTarget.searchQuery.trim();
+  final playback = currentTarget.playbackTarget;
+  final seriesTitleCandidates = <String>[
+    if (preferResolvedSeriesTitle) playback?.resolvedSeriesTitle.trim() ?? '',
+    playback?.seriesTitle.trim() ?? '',
+  ];
+  final seriesTitle = seriesTitleCandidates.firstWhere(
+    (value) => value.isNotEmpty,
+    orElse: () => '',
+  );
+  final effectivePageTarget = pageTarget ?? currentTarget;
+  if (isEpisodeDetailItemType(effectivePageTarget.itemType)) {
+    if (seriesTitle.isNotEmpty) {
+      return seriesTitle;
+    }
+    if (query.isNotEmpty && (pageTarget != null || query != title)) {
+      return query;
+    }
+  }
+  final pageTitle = pageTarget?.title.trim() ?? '';
+  if (pageTitle.isNotEmpty) {
+    return pageTitle;
+  }
+  if (title.isNotEmpty) {
+    return title;
+  }
+  if (seriesTitle.isNotEmpty) {
+    return seriesTitle;
+  }
+  if (query.isNotEmpty) {
+    return query;
+  }
+  return emptyFallback;
+}
+
+String? resolveDetailEpisodeTitleLine({
+  required MediaDetailTarget currentTarget,
+  MediaDetailTarget? pageTarget,
+  bool preferResolvedSeriesTitle = false,
+}) {
+  final effectivePageTarget = pageTarget ?? currentTarget;
+  if (!isEpisodeDetailItemType(effectivePageTarget.itemType)) {
+    return null;
+  }
+  final fileName = resolveDetailTargetFileName(currentTarget);
+  if (fileName.isEmpty) {
+    return null;
+  }
+  final primaryTitle = resolveDetailPrimaryTitle(
+    currentTarget: currentTarget,
+    pageTarget: pageTarget,
+    preferResolvedSeriesTitle: preferResolvedSeriesTitle,
+  );
+  if (fileName == primaryTitle) {
+    return null;
+  }
+  return fileName;
+}
+
+bool shouldBypassPersistentCacheForDetailBackdrop({
+  required String itemType,
+  required String backdropUrl,
+  required String bannerUrl,
+}) {
+  if (!isEpisodeDetailItemType(itemType)) {
+    return false;
+  }
+  final normalizedBackdropUrl = backdropUrl.trim();
+  final normalizedBannerUrl = bannerUrl.trim();
+  return normalizedBackdropUrl.isNotEmpty &&
+      normalizedBannerUrl.isNotEmpty &&
+      normalizedBackdropUrl != normalizedBannerUrl;
+}
+
+DetailBackdropImageSources buildDetailBackdropImageSources({
+  required String itemType,
+  required String backdropUrl,
+  required Map<String, String> backdropHeaders,
+  required String bannerUrl,
+  required Map<String, String> bannerHeaders,
+  required List<String> extraBackdropUrls,
+  required Map<String, String> extraBackdropHeaders,
+  required String posterUrl,
+  required Map<String, String> posterHeaders,
+}) {
+  final shouldBypassPrimaryBackdropCache =
+      shouldBypassPersistentCacheForDetailBackdrop(
+    itemType: itemType,
+    backdropUrl: backdropUrl,
+    bannerUrl: bannerUrl,
+  );
+  DetailImageAsset primary = const DetailImageAsset(url: '');
+  if (backdropUrl.trim().isNotEmpty) {
+    primary = DetailImageAsset(
+      url: backdropUrl.trim(),
+      headers: backdropHeaders,
+      cachePolicy: shouldBypassPrimaryBackdropCache
+          ? AppNetworkImageCachePolicy.networkOnly
+          : AppNetworkImageCachePolicy.persistent,
+    );
+  } else if (bannerUrl.trim().isNotEmpty) {
+    primary = DetailImageAsset(
+      url: bannerUrl.trim(),
+      headers: bannerHeaders,
+    );
+  } else if (extraBackdropUrls.isNotEmpty) {
+    primary = DetailImageAsset(
+      url: extraBackdropUrls.first.trim(),
+      headers: extraBackdropHeaders,
+      cachePolicy: AppNetworkImageCachePolicy.networkOnly,
+    );
+  } else if (posterUrl.trim().isNotEmpty) {
+    primary = DetailImageAsset(
+      url: posterUrl.trim(),
+      headers: posterHeaders,
+    );
+  }
+
+  final seen = <String>{
+    if (primary.url.trim().isNotEmpty) primary.url.trim(),
+  };
+  final fallbackSources = <AppNetworkImageSource>[];
+
+  void addFallback(
+    String url,
+    Map<String, String> headers,
+    AppNetworkImageCachePolicy cachePolicy,
+  ) {
+    final trimmedUrl = url.trim();
+    if (trimmedUrl.isEmpty || !seen.add(trimmedUrl)) {
+      return;
+    }
+    fallbackSources.add(
+      AppNetworkImageSource(
+        url: trimmedUrl,
+        headers: headers,
+        cachePolicy: cachePolicy,
+      ),
+    );
+  }
+
+  addFallback(
+    bannerUrl,
+    bannerHeaders,
+    AppNetworkImageCachePolicy.persistent,
+  );
+  for (final url in extraBackdropUrls) {
+    addFallback(
+      url,
+      extraBackdropHeaders,
+      AppNetworkImageCachePolicy.networkOnly,
+    );
+  }
+  addFallback(
+    posterUrl,
+    posterHeaders,
+    AppNetworkImageCachePolicy.persistent,
+  );
+
+  return DetailBackdropImageSources(
+    primary: primary,
+    fallbackSources: List<AppNetworkImageSource>.unmodifiable(
+      fallbackSources,
+    ),
+  );
+}
+
+DetailBackdropImageSources buildDetailBackdropImageSourcesForTarget(
+  MediaDetailTarget target,
+) {
+  return buildDetailBackdropImageSources(
+    itemType: target.itemType,
+    backdropUrl: target.backdropUrl,
+    backdropHeaders: target.backdropHeaders,
+    bannerUrl: target.bannerUrl,
+    bannerHeaders: target.bannerHeaders,
+    extraBackdropUrls: target.extraBackdropUrls,
+    extraBackdropHeaders: target.extraBackdropHeaders,
+    posterUrl: target.posterUrl,
+    posterHeaders: target.posterHeaders,
+  );
+}
+
+DetailBackdropImageSources buildDetailBackdropImageSourcesForMediaItem(
+  MediaItem item,
+) {
+  return buildDetailBackdropImageSources(
+    itemType: item.itemType,
+    backdropUrl: item.backdropUrl,
+    backdropHeaders: item.backdropHeaders,
+    bannerUrl: item.bannerUrl,
+    bannerHeaders: item.bannerHeaders,
+    extraBackdropUrls: item.extraBackdropUrls,
+    extraBackdropHeaders: item.extraBackdropHeaders,
+    posterUrl: item.posterUrl,
+    posterHeaders: item.posterHeaders,
+  );
+}
+
 class DetailImageGallery extends StatelessWidget {
   const DetailImageGallery({
     super.key,
@@ -414,7 +681,11 @@ List<DetailImageAsset> buildDetailGalleryImages(MediaDetailTarget target) {
   add(
     target.backdropUrl,
     target.backdropHeaders,
-    _shouldBypassPersistentCacheForBackdrop(target)
+    shouldBypassPersistentCacheForDetailBackdrop(
+      itemType: target.itemType,
+      backdropUrl: target.backdropUrl,
+      bannerUrl: target.bannerUrl,
+    )
         ? AppNetworkImageCachePolicy.networkOnly
         : AppNetworkImageCachePolicy.persistent,
   );
@@ -431,16 +702,4 @@ List<DetailImageAsset> buildDetailGalleryImages(MediaDetailTarget target) {
     );
   }
   return images;
-}
-
-bool _shouldBypassPersistentCacheForBackdrop(MediaDetailTarget target) {
-  final itemType = target.itemType.trim().toLowerCase();
-  if (itemType != 'episode') {
-    return false;
-  }
-  final backdropUrl = target.backdropUrl.trim();
-  final bannerUrl = target.bannerUrl.trim();
-  return backdropUrl.isNotEmpty &&
-      bannerUrl.isNotEmpty &&
-      backdropUrl != bannerUrl;
 }

@@ -59,6 +59,7 @@ void main() {
     );
     expect(initialSection, isNotNull);
     expect(initialSection!.items.single.title, '肖申克的救赎');
+    expect(container.read(homeSectionsProvider), [initialSection]);
     expect(discoveryRepository.fetchEntriesCallCount, 1);
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
 
@@ -78,6 +79,7 @@ void main() {
     );
     expect(unchangedSection, isNotNull);
     expect(unchangedSection!.items.single.title, '肖申克的救赎');
+    expect(container.read(homeSectionsProvider), [unchangedSection]);
     expect(discoveryRepository.fetchEntriesCallCount, 1);
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
 
@@ -107,6 +109,7 @@ void main() {
     );
     expect(updatedSection, isNotNull);
     expect(updatedSection!.items.single.title, '肖申克的救赎');
+    expect(container.read(homeSectionsProvider), [updatedSection]);
     expect(discoveryRepository.fetchEntriesCallCount, 1);
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
 
@@ -117,6 +120,7 @@ void main() {
     );
     expect(refreshedSection, isNotNull);
     expect(refreshedSection!.items.single.title, '肖申克的救赎（缓存）');
+    expect(container.read(homeSectionsProvider), [refreshedSection]);
     expect(discoveryRepository.fetchEntriesCallCount, 1);
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 2);
   });

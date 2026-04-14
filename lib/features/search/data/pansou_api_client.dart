@@ -342,14 +342,7 @@ class PanSouApiClient {
   }
 
   static bool supports(SearchProviderConfig provider) {
-    final hint = provider.parserHint.trim().toLowerCase();
-    final endpoint = provider.endpoint.trim().toLowerCase();
-    return provider.kind == SearchProviderKind.panSou ||
-        hint == 'pansou-api' ||
-        endpoint.contains('so.252035.xyz') ||
-        (endpoint.contains('/api/search') &&
-            provider.kind != SearchProviderKind.cloudSaver &&
-            hint != 'cloudsaver-api');
+    return provider.kind == SearchProviderKind.panSou;
   }
 
   static String _trimTrailingSlash(String path) {

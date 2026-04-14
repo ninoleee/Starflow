@@ -8,9 +8,9 @@ import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/desktop_horizontal_pager.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/playback/application/playback_target_resolver.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -149,53 +149,6 @@ class _DetailSeasonEpisodesRequest {
   int get hashCode => _cacheKey.hashCode;
 }
 
-final detailEpisodeDisplayFileSizeProvider = FutureProvider.autoDispose
-    .family<int?, _DetailEpisodeFileSizeRequest>((ref, request) async {
-  final target = PlaybackTarget.fromMediaItem(request.item);
-  if (!target.needsResolution) {
-    return request.item.fileSizeBytes;
-  }
-
-  try {
-    final resolved = await PlaybackTargetResolver(read: ref.read).resolve(
-      target,
-    );
-    return resolved.fileSizeBytes ??
-        _fallbackEpisodeDisplayFileSizeBytes(request.item, target);
-  } catch (_) {
-    return _fallbackEpisodeDisplayFileSizeBytes(request.item, target);
-  }
-});
-
-class _DetailEpisodeFileSizeRequest {
-  const _DetailEpisodeFileSizeRequest(this.item);
-
-  final MediaItem item;
-
-  String get _cacheKey {
-    return [
-      item.sourceKind.name,
-      item.sourceId.trim(),
-      item.playbackItemId.trim(),
-      item.streamUrl.trim(),
-      item.actualAddress.trim(),
-      item.itemType.trim(),
-      item.title.trim(),
-      '${item.seasonNumber ?? ''}',
-      '${item.episodeNumber ?? ''}',
-    ].join('|');
-  }
-
-  @override
-  bool operator ==(Object other) {
-    return other is _DetailEpisodeFileSizeRequest &&
-        other._cacheKey == _cacheKey;
-  }
-
-  @override
-  int get hashCode => _cacheKey.hashCode;
-}
-
 class DetailSeriesBrowserState {
   const DetailSeriesBrowserState({required this.groups});
 
@@ -271,6 +224,16 @@ DetailEpisodeGroup resolveSelectedEpisodeGroup({
   return selectedGroup;
 }
 
+void _ensureDetailBrowserItemVisible(BuildContext context) {
+  unawaited(
+    Scrollable.ensureVisible(
+      context,
+      duration: const Duration(milliseconds: 140),
+      curve: Curves.easeOutCubic,
+    ),
+  );
+}
+
 class DetailEpisodeBrowser extends ConsumerStatefulWidget {
   const DetailEpisodeBrowser({
     super.key,
@@ -293,76 +256,20 @@ class DetailEpisodeBrowser extends ConsumerStatefulWidget {
 class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
   static const double _episodeCardWidth = 292;
   static const double _episodeCardSpacing = 14;
-  static const int _episodeVisiblePadding = 1;
-
-  final ScrollController _seasonScrollController = ScrollController();
-  final Map<String, FocusNode> _seasonFocusNodes = <String, FocusNode>{};
-  final Map<String, FocusNode> _episodeFocusNodes = <String, FocusNode>{};
-  ScrollController? _episodeScrollController;
-  String _activeEpisodeGroupId = '';
-  int _activeEpisodeCount = 0;
-  int _visibleEpisodeStart = 0;
-  int _visibleEpisodeEnd = -1;
-  int _focusedEpisodeIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    _syncFocusNodes();
     _prefetchSelectedSeasonGroup();
   }
 
   @override
   void didUpdateWidget(covariant DetailEpisodeBrowser oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _syncFocusNodes();
     if (oldWidget.selectedGroupId != widget.selectedGroupId ||
         oldWidget.seriesTarget != widget.seriesTarget) {
-      _focusedEpisodeIndex = 0;
-      _visibleEpisodeStart = 0;
-      _visibleEpisodeEnd = -1;
       _prefetchSelectedSeasonGroup();
     }
-  }
-
-  @override
-  void dispose() {
-    _episodeScrollController?.removeListener(_handleEpisodeListScroll);
-    _seasonScrollController.dispose();
-    for (final node in _seasonFocusNodes.values) {
-      node.dispose();
-    }
-    for (final node in _episodeFocusNodes.values) {
-      node.dispose();
-    }
-    super.dispose();
-  }
-
-  void _syncFocusNodes() {
-    final seasonIds = widget.groups.map((group) => group.id).toSet();
-    _disposeRemovedFocusNodes(_seasonFocusNodes, activeKeys: seasonIds);
-    for (final group in widget.groups) {
-      _seasonFocusNodes.putIfAbsent(
-        group.id,
-        () => FocusNode(debugLabel: 'detail-season-${group.id}'),
-      );
-    }
-  }
-
-  void _syncEpisodeFocusNodes(
-    DetailEpisodeGroup group,
-    List<MediaItem> episodes,
-  ) {
-    final episodeKeys = <String>{};
-    for (var index = 0; index < episodes.length; index++) {
-      final key = _episodeNodeKey(group, episodes[index], index);
-      episodeKeys.add(key);
-      _episodeFocusNodes.putIfAbsent(
-        key,
-        () => FocusNode(debugLabel: 'detail-episode-$key'),
-      );
-    }
-    _disposeRemovedFocusNodes(_episodeFocusNodes, activeKeys: episodeKeys);
   }
 
   void _prefetchSelectedSeasonGroup() {
@@ -391,113 +298,11 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
     );
   }
 
-  void _disposeRemovedFocusNodes(
-    Map<String, FocusNode> nodes, {
-    required Set<String> activeKeys,
-  }) {
-    final removedKeys = nodes.keys
-        .where((key) => !activeKeys.contains(key))
-        .toList(growable: false);
-    for (final key in removedKeys) {
-      nodes.remove(key)?.dispose();
-    }
-  }
-
-  String _episodeNodeKey(
-      DetailEpisodeGroup group, MediaItem episode, int index) {
-    final episodeSeed = episode.id.isNotEmpty
-        ? episode.id
-        : '${episode.seasonNumber ?? 0}-${episode.episodeNumber ?? index}';
-    return '${group.id}::$episodeSeed';
-  }
-
   String _episodeFocusId(MediaItem episode, int index) {
     final episodeSeed = episode.id.isNotEmpty
         ? episode.id
         : '${episode.seasonNumber ?? 0}-${episode.episodeNumber ?? index}';
     return 'detail:episode:$episodeSeed';
-  }
-
-  void _bindEpisodeListController(
-    ScrollController controller, {
-    required String groupId,
-    required int episodeCount,
-  }) {
-    var shouldScheduleRefresh = false;
-    if (!identical(_episodeScrollController, controller)) {
-      _episodeScrollController?.removeListener(_handleEpisodeListScroll);
-      _episodeScrollController = controller;
-      _episodeScrollController?.addListener(_handleEpisodeListScroll);
-      shouldScheduleRefresh = true;
-    }
-    if (_activeEpisodeGroupId != groupId) {
-      _activeEpisodeGroupId = groupId;
-      _focusedEpisodeIndex = 0;
-      _visibleEpisodeStart = 0;
-      _visibleEpisodeEnd =
-          episodeCount > 0 ? math.min(episodeCount - 1, 3) : -1;
-      shouldScheduleRefresh = true;
-    }
-    if (_activeEpisodeCount != episodeCount) {
-      _activeEpisodeCount = episodeCount;
-      if (_focusedEpisodeIndex >= _activeEpisodeCount) {
-        _focusedEpisodeIndex = 0;
-      }
-      shouldScheduleRefresh = true;
-    }
-    if (shouldScheduleRefresh) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) {
-          return;
-        }
-        _refreshVisibleEpisodeRange();
-      });
-    }
-  }
-
-  void _handleEpisodeListScroll() {
-    if (!mounted) {
-      return;
-    }
-    _refreshVisibleEpisodeRange();
-  }
-
-  void _refreshVisibleEpisodeRange() {
-    final count = _activeEpisodeCount;
-    var nextStart = 0;
-    var nextEnd = count > 0 ? math.min(count - 1, 3) : -1;
-    final controller = _episodeScrollController;
-    if (count > 0 && controller != null && controller.hasClients) {
-      const stride = _episodeCardWidth + _episodeCardSpacing;
-      final position = controller.position;
-      final maxScroll = math.max(position.maxScrollExtent, 0);
-      final offset = position.pixels.clamp(0.0, maxScroll);
-      final visibleStart = (offset / stride).floor();
-      final viewport = position.viewportDimension;
-      final visibleCount = math.max(1, (viewport / stride).ceil());
-      nextStart = math.max(0, visibleStart - _episodeVisiblePadding);
-      nextEnd = math.min(
-        count - 1,
-        visibleStart + visibleCount + _episodeVisiblePadding,
-      );
-    }
-    if (nextStart == _visibleEpisodeStart && nextEnd == _visibleEpisodeEnd) {
-      return;
-    }
-    setState(() {
-      _visibleEpisodeStart = nextStart;
-      _visibleEpisodeEnd = nextEnd;
-    });
-  }
-
-  bool _shouldResolveFileSizeForIndex(int index) {
-    if (index == _focusedEpisodeIndex) {
-      return true;
-    }
-    if (_visibleEpisodeEnd < _visibleEpisodeStart) {
-      return false;
-    }
-    return index >= _visibleEpisodeStart && index <= _visibleEpisodeEnd;
   }
 
   AsyncValue<DetailEpisodeGroup> _selectedGroupAsync(
@@ -519,20 +324,6 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
     );
   }
 
-  void _ensureFocusNodeVisible(FocusNode? node) {
-    final focusContext = node?.context;
-    if (focusContext == null) {
-      return;
-    }
-    unawaited(
-      Scrollable.ensureVisible(
-        focusContext,
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final selectedGroup = resolveSelectedEpisodeGroup(
@@ -547,36 +338,36 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
         if (widget.groups.length > 1) ...[
           SizedBox(
             height: 52,
-            child: ListView.separated(
-              controller: _seasonScrollController,
-              scrollDirection: Axis.horizontal,
-              itemCount: widget.groups.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 8),
-              itemBuilder: (context, index) {
-                final group = widget.groups[index];
-                final selected = group.id == selectedGroup.id;
-                return _DetailSeasonChip(
-                  label: group.label,
-                  selected: selected,
-                  focusNode: _seasonFocusNodes[group.id],
-                  focusId: 'detail:season:${group.id}',
-                  autofocus: index == 0,
-                  onFocused: () {
-                    _prefetchSeasonGroup(group);
-                    if (widget.selectedGroupId != group.id) {
-                      widget.onSeasonSelected(group.id);
-                    }
-                    _ensureFocusNodeVisible(_seasonFocusNodes[group.id]);
-                  },
-                  onTap: () {
-                    _prefetchSeasonGroup(group);
-                    if (widget.selectedGroupId != group.id) {
-                      widget.onSeasonSelected(group.id);
-                    }
-                    _ensureFocusNodeVisible(_seasonFocusNodes[group.id]);
-                  },
-                );
-              },
+            child: DesktopHorizontalPager(
+              builder: (context, controller) => ListView.separated(
+                controller: controller,
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                itemCount: widget.groups.length,
+                separatorBuilder: (context, index) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final group = widget.groups[index];
+                  final selected = group.id == selectedGroup.id;
+                  return _DetailSeasonChip(
+                    label: group.label,
+                    selected: selected,
+                    focusId: 'detail:season:${group.id}',
+                    autofocus: index == 0,
+                    onFocused: () {
+                      _prefetchSeasonGroup(group);
+                      if (widget.selectedGroupId != group.id) {
+                        widget.onSeasonSelected(group.id);
+                      }
+                    },
+                    onTap: () {
+                      _prefetchSeasonGroup(group);
+                      if (widget.selectedGroupId != group.id) {
+                        widget.onSeasonSelected(group.id);
+                      }
+                    },
+                  );
+                },
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -586,7 +377,6 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
           child: selectedGroupAsync.when(
             data: (resolvedGroup) {
               final episodes = resolvedGroup.episodes;
-              _syncEpisodeFocusNodes(resolvedGroup, episodes);
               if (episodes.isEmpty) {
                 return const Center(
                   child: Text(
@@ -598,56 +388,30 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
                   ),
                 );
               }
-              if (_focusedEpisodeIndex >= episodes.length) {
-                _focusedEpisodeIndex = 0;
-              }
               return DesktopHorizontalPager(
                 key: ValueKey<String>('detail-episodes:${resolvedGroup.id}'),
-                builder: (context, controller) {
-                  _bindEpisodeListController(
-                    controller,
-                    groupId: resolvedGroup.id,
-                    episodeCount: episodes.length,
-                  );
-                  return ListView.separated(
-                    controller: controller,
-                    scrollDirection: Axis.horizontal,
-                    clipBehavior: Clip.none,
-                    cacheExtent: _episodeCardWidth * 2,
-                    itemCount: episodes.length,
-                    separatorBuilder: (context, index) =>
-                        const SizedBox(width: _episodeCardSpacing),
-                    itemBuilder: (context, index) {
-                      final episode = episodes[index];
-                      final nodeKey =
-                          _episodeNodeKey(resolvedGroup, episode, index);
-                      final episodeFocusNode = _episodeFocusNodes.putIfAbsent(
-                        nodeKey,
-                        () => FocusNode(debugLabel: 'detail-episode-$nodeKey'),
-                      );
-                      return SizedBox(
-                        width: _episodeCardWidth,
-                        child: _DetailEpisodeCard(
-                          item: episode,
-                          seriesTarget: widget.seriesTarget,
-                          focusNode: episodeFocusNode,
-                          onFocused: () {
-                            if (_focusedEpisodeIndex != index) {
-                              setState(() {
-                                _focusedEpisodeIndex = index;
-                              });
-                            }
-                            _ensureFocusNodeVisible(episodeFocusNode);
-                          },
-                          focusId: _episodeFocusId(episode, index),
-                          autofocus: index == 0,
-                          enableFileSizeResolution:
-                              _shouldResolveFileSizeForIndex(index),
-                        ),
-                      );
-                    },
-                  );
-                },
+                builder: (context, controller) => ListView.separated(
+                  controller: controller,
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  clipBehavior: Clip.none,
+                  cacheExtent: _episodeCardWidth * 2,
+                  itemCount: episodes.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(width: _episodeCardSpacing),
+                  itemBuilder: (context, index) {
+                    final episode = episodes[index];
+                    return SizedBox(
+                      width: _episodeCardWidth,
+                      child: _DetailEpisodeCard(
+                        item: episode,
+                        seriesTarget: widget.seriesTarget,
+                        focusId: _episodeFocusId(episode, index),
+                        autofocus: index == 0,
+                      ),
+                    );
+                  },
+                ),
               );
             },
             loading: () => const Center(
@@ -675,7 +439,6 @@ class _DetailSeasonChip extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.onFocused,
-    this.focusNode,
     this.focusId,
     this.autofocus = false,
   });
@@ -684,7 +447,6 @@ class _DetailSeasonChip extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback? onFocused;
-  final FocusNode? focusNode;
   final String? focusId;
   final bool autofocus;
 
@@ -694,8 +456,10 @@ class _DetailSeasonChip extends StatelessWidget {
       label: label,
       selected: selected,
       onPressed: onTap,
-      onFocused: onFocused,
-      focusNode: focusNode,
+      onFocused: () {
+        onFocused?.call();
+        _ensureDetailBrowserItemVisible(context);
+      },
       focusId: focusId,
       autofocus: autofocus,
     );
@@ -706,18 +470,12 @@ class _DetailEpisodeCard extends ConsumerWidget {
   const _DetailEpisodeCard({
     required this.item,
     required this.seriesTarget,
-    required this.enableFileSizeResolution,
-    this.onFocused,
-    this.focusNode,
     this.focusId,
     this.autofocus = false,
   });
 
   final MediaItem item;
   final MediaDetailTarget seriesTarget;
-  final bool enableFileSizeResolution;
-  final VoidCallback? onFocused;
-  final FocusNode? focusNode;
   final String? focusId;
   final bool autofocus;
 
@@ -731,25 +489,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
       seriesTarget: seriesTarget,
     );
     final titleText = _episodeTitleText(item);
-    final playbackTarget = PlaybackTarget.fromMediaItem(item);
-    final needsFileSizeResolution = playbackTarget.needsResolution;
-    final fallbackFileSizeBytes = item.fileSizeBytes ??
-        _fallbackEpisodeDisplayFileSizeBytes(item, playbackTarget);
-    final resolvedFileSizeBytes = !needsFileSizeResolution
-        ? item.fileSizeBytes
-        : enableFileSizeResolution
-            ? ref
-                .watch(
-                  detailEpisodeDisplayFileSizeProvider(
-                    _DetailEpisodeFileSizeRequest(item),
-                  ),
-                )
-                .maybeWhen(
-                  data: (value) => value,
-                  orElse: () => fallbackFileSizeBytes,
-                )
-            : fallbackFileSizeBytes;
-    final fileSizeText = _episodeDisplayFileSizeLabel(resolvedFileSizeBytes);
+    final fileSizeText = _episodeDisplayFileSizeLabel(item.fileSizeBytes);
 
     void onOpenDetail() {
       context.pushNamed(
@@ -895,8 +635,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
     );
     return TvFocusableAction(
       onPressed: onOpenDetail,
-      onFocused: onFocused,
-      focusNode: focusNode,
+      onFocused: () => _ensureDetailBrowserItemVisible(context),
       focusId: effectiveFocusId.isEmpty ? null : effectiveFocusId,
       autofocus: autofocus,
       borderRadius: borderRadius,
@@ -960,7 +699,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
         item.durationLabel,
       if (!item.isPlayable) '当前没有可直接播放的资源',
     ];
-    final fileName = _episodeFileName(item);
+    final fileName = resolveDetailMediaItemFileName(item);
     if (fallback.isNotEmpty) {
       final detailLine = fallback.join(' · ');
       if (fileName.isNotEmpty) {
@@ -1004,41 +743,6 @@ String _episodeDisplayFileSizeLabel(int? fileSizeBytes) {
   return formatByteSize(fileSizeBytes).trim();
 }
 
-int? _fallbackEpisodeDisplayFileSizeBytes(
-  MediaItem item,
-  PlaybackTarget target,
-) {
-  if (target.sourceKind == MediaSourceKind.nas && target.needsResolution) {
-    return null;
-  }
-  return item.fileSizeBytes;
-}
-
-String _episodeFileName(MediaItem item) {
-  for (final value in [item.actualAddress, item.streamUrl]) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) {
-      continue;
-    }
-    final uri = Uri.tryParse(trimmed);
-    final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
-    final normalized = rawPath.replaceAll('\\', '/').trim();
-    if (normalized.isEmpty) {
-      continue;
-    }
-    final fileName = normalized.split('/').last.trim();
-    if (fileName.isEmpty) {
-      continue;
-    }
-    try {
-      return Uri.decodeComponent(fileName);
-    } on ArgumentError {
-      return fileName;
-    }
-  }
-  return '';
-}
-
 class _DetailEpisodeArtwork extends StatelessWidget {
   const _DetailEpisodeArtwork({required this.item});
 
@@ -1046,8 +750,9 @@ class _DetailEpisodeArtwork extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final artwork = _resolveEpisodeArtworkAsset(item);
-    if (artwork.url.isNotEmpty) {
+    final artwork = buildDetailBackdropImageSourcesForMediaItem(item);
+    final primaryArtwork = artwork.primary;
+    if (primaryArtwork.url.isNotEmpty) {
       return LayoutBuilder(
         builder: (context, constraints) {
           final decodeSize = _resolveEpisodeArtworkDecodeSize(
@@ -1057,10 +762,10 @@ class _DetailEpisodeArtwork extends StatelessWidget {
           return ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             child: AppNetworkImage(
-              artwork.url,
-              headers: artwork.headers,
-              fallbackSources: _buildEpisodeArtworkFallbackSources(item),
-              cachePolicy: artwork.cachePolicy,
+              primaryArtwork.url,
+              headers: primaryArtwork.headers,
+              fallbackSources: artwork.fallbackSources,
+              cachePolicy: primaryArtwork.cachePolicy,
               cacheWidth: decodeSize?.width,
               cacheHeight: decodeSize?.height,
               fit: BoxFit.cover,
@@ -1214,104 +919,4 @@ MediaDetailTarget episodeToDetailTarget(
         ? target.providerIds
         : seriesTarget.providerIds,
   );
-}
-
-class _DetailImageAsset {
-  const _DetailImageAsset({
-    required this.url,
-    this.headers = const {},
-    this.cachePolicy = AppNetworkImageCachePolicy.persistent,
-  });
-
-  final String url;
-  final Map<String, String> headers;
-  final AppNetworkImageCachePolicy cachePolicy;
-}
-
-_DetailImageAsset _resolveEpisodeArtworkAsset(MediaItem item) {
-  if (item.backdropUrl.trim().isNotEmpty) {
-    return _DetailImageAsset(
-      url: item.backdropUrl.trim(),
-      headers: item.backdropHeaders,
-      cachePolicy: _shouldBypassPersistentCacheForEpisodeBackdrop(item)
-          ? AppNetworkImageCachePolicy.networkOnly
-          : AppNetworkImageCachePolicy.persistent,
-    );
-  }
-  if (item.bannerUrl.trim().isNotEmpty) {
-    return _DetailImageAsset(
-      url: item.bannerUrl.trim(),
-      headers: item.bannerHeaders,
-    );
-  }
-  if (item.extraBackdropUrls.isNotEmpty) {
-    return _DetailImageAsset(
-      url: item.extraBackdropUrls.first,
-      headers: item.extraBackdropHeaders,
-      cachePolicy: AppNetworkImageCachePolicy.networkOnly,
-    );
-  }
-  if (item.posterUrl.trim().isNotEmpty) {
-    return _DetailImageAsset(
-      url: item.posterUrl.trim(),
-      headers: item.posterHeaders,
-    );
-  }
-  return const _DetailImageAsset(url: '');
-}
-
-List<AppNetworkImageSource> _buildEpisodeArtworkFallbackSources(
-  MediaItem item,
-) {
-  final sources = <AppNetworkImageSource>[];
-  final seen = <String>{item.backdropUrl.trim()};
-
-  void add(
-    String url,
-    Map<String, String> headers,
-    AppNetworkImageCachePolicy cachePolicy,
-  ) {
-    final trimmedUrl = url.trim();
-    if (trimmedUrl.isEmpty || !seen.add(trimmedUrl)) {
-      return;
-    }
-    sources.add(
-      AppNetworkImageSource(
-        url: trimmedUrl,
-        headers: headers,
-        cachePolicy: cachePolicy,
-      ),
-    );
-  }
-
-  add(
-    item.bannerUrl,
-    item.bannerHeaders,
-    AppNetworkImageCachePolicy.persistent,
-  );
-  for (final url in item.extraBackdropUrls) {
-    add(
-      url,
-      item.extraBackdropHeaders,
-      AppNetworkImageCachePolicy.networkOnly,
-    );
-  }
-  add(
-    item.posterUrl,
-    item.posterHeaders,
-    AppNetworkImageCachePolicy.persistent,
-  );
-  return sources;
-}
-
-bool _shouldBypassPersistentCacheForEpisodeBackdrop(MediaItem item) {
-  final itemType = item.itemType.trim().toLowerCase();
-  if (itemType != 'episode') {
-    return false;
-  }
-  final backdropUrl = item.backdropUrl.trim();
-  final bannerUrl = item.bannerUrl.trim();
-  return backdropUrl.isNotEmpty &&
-      bannerUrl.isNotEmpty &&
-      backdropUrl != bannerUrl;
 }

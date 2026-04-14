@@ -29,7 +29,8 @@ import 'package:starflow/features/playback/application/playback_startup_coordina
 import 'package:starflow/features/playback/application/playback_startup_executor.dart';
 import 'package:starflow/features/playback/application/playback_target_resolver.dart';
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
-import 'package:starflow/features/playback/data/playback_memory_repository.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart'
+    hide isLoopbackPlaybackRelayUrl;
 import 'package:starflow/features/playback/data/subtitle_file_picker.dart';
 import 'package:starflow/features/playback/data/system_playback_launcher.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
@@ -85,6 +86,24 @@ class _TvPlaybackState {
       bufferingPercentage: bufferingPercentage ?? this.bufferingPercentage,
     );
   }
+}
+
+enum _PlaybackVideoLayoutMode {
+  fit,
+  fill,
+  stretch,
+  aspect16x9,
+  aspect4x3,
+}
+
+extension _PlaybackVideoLayoutModeX on _PlaybackVideoLayoutMode {
+  String get label => switch (this) {
+        _PlaybackVideoLayoutMode.fit => '适应屏幕',
+        _PlaybackVideoLayoutMode.fill => '填满画面',
+        _PlaybackVideoLayoutMode.stretch => '拉伸铺满',
+        _PlaybackVideoLayoutMode.aspect16x9 => '16:9',
+        _PlaybackVideoLayoutMode.aspect4x3 => '4:3',
+      };
 }
 
 class PlayerPage extends ConsumerStatefulWidget {
@@ -172,6 +191,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _isEmbeddedMpvFullscreen = false;
   bool _introSkipApplied = false;
   bool _outroSkipApplied = false;
+  _PlaybackVideoLayoutMode _videoLayoutMode = _PlaybackVideoLayoutMode.fit;
   Duration _latestPosition = Duration.zero;
   Duration _latestDuration = Duration.zero;
   DateTime? _lastProgressPersistedAt;
@@ -348,8 +368,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 
   bool get _backgroundPlaybackEnabled =>
-      !_isTelevisionPlaybackDevice &&
-      ref.read(appSettingsProvider).playbackBackgroundPlaybackEnabled;
+      ref.read(effectivePlaybackBackgroundEnabledProvider);
 
   AppSettings get _playbackSettings => ref.read(appSettingsProvider);
 
@@ -374,6 +393,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   PlaybackMpvQualityPreset get _playbackMpvQualityPreset =>
       _playbackSettings.playbackMpvQualityPreset;
+
+  bool get _mpvDoubleTapToSeekEnabled =>
+      _playbackSettings.playbackMpvDoubleTapToSeekEnabled;
+
+  bool get _mpvSwipeToSeekEnabled =>
+      _playbackSettings.playbackMpvSwipeToSeekEnabled;
+
+  bool get _mpvLongPressSpeedBoostEnabled =>
+      _playbackSettings.playbackMpvLongPressSpeedBoostEnabled;
+
+  bool get _mpvStallAutoRecoveryEnabled =>
+      _playbackSettings.playbackMpvStallAutoRecoveryEnabled;
 
   bool get _autoDowngradePlaybackQualityEnabled =>
       _playbackSettings.performanceAutoDowngradeHeavyPlaybackEnabled;

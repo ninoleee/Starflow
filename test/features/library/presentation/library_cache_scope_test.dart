@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/application/library_cached_items.dart';
@@ -16,8 +17,7 @@ import 'package:starflow/features/storage/data/local_storage_cache_repository.da
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test(
-      'library items provider ignores unrelated cache scope updates and keeps seed fetch warm',
+  test('library items provider no longer rebuilds for cache scope updates',
       () async {
     final mediaRepository = _CountingMediaRepository(
       library: [
@@ -47,10 +47,12 @@ void main() {
             searchProviders: [],
             doubanAccount: DoubanAccountConfig(enabled: false),
             homeModules: [],
+            performanceLiveItemHeroOverlayEnabled: true,
           ),
         ),
         mediaRepositoryProvider.overrideWithValue(mediaRepository),
         localStorageCacheRepositoryProvider.overrideWithValue(cacheRepository),
+        isTelevisionProvider.overrideWithValue(const AsyncData(false)),
       ],
     );
     addTearDown(container.dispose);
@@ -60,7 +62,7 @@ void main() {
     );
     expect(initialItems.single.title, 'Original Title');
     expect(mediaRepository.fetchLibraryCallCount, 1);
-    expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
+    expect(cacheRepository.loadDetailTargetsBatchCallCount, 0);
 
     final revisionNotifier =
         container.read(localStorageDetailCacheChangeProvider.notifier);
@@ -78,7 +80,7 @@ void main() {
     );
     expect(unchangedItems.single.title, 'Original Title');
     expect(mediaRepository.fetchLibraryCallCount, 1);
-    expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
+    expect(cacheRepository.loadDetailTargetsBatchCallCount, 0);
 
     cacheRepository.targetsByLookupKey['library|emby-main|movie-1'] =
         const MediaDetailTarget(
@@ -103,9 +105,57 @@ void main() {
     final updatedItems = await container.read(
       libraryItemsProvider(LibraryFilter.all).future,
     );
-    expect(updatedItems.single.title, 'Cached Title');
+    expect(updatedItems.single.title, 'Original Title');
     expect(mediaRepository.fetchLibraryCallCount, 1);
-    expect(cacheRepository.loadDetailTargetsBatchCallCount, 2);
+    expect(cacheRepository.loadDetailTargetsBatchCallCount, 0);
+  });
+
+  test(
+      'pruneRetainedVisiblePageCacheEntries keeps only current scope neighbors',
+      () {
+    const first = LibraryVisiblePageRequest(
+      filter: LibraryFilter.all,
+      page: 0,
+      pageSize: 24,
+    );
+    const second = LibraryVisiblePageRequest(
+      filter: LibraryFilter.all,
+      page: 1,
+      pageSize: 24,
+    );
+    const third = LibraryVisiblePageRequest(
+      filter: LibraryFilter.all,
+      page: 2,
+      pageSize: 24,
+    );
+    const fourth = LibraryVisiblePageRequest(
+      filter: LibraryFilter.all,
+      page: 3,
+      pageSize: 24,
+    );
+    const otherFilter = LibraryVisiblePageRequest(
+      filter: LibraryFilter.nas,
+      page: 1,
+      pageSize: 24,
+    );
+    final entries = <LibraryVisiblePageRequest, String>{
+      first: 'first',
+      second: 'second',
+      third: 'third',
+      fourth: 'fourth',
+      otherFilter: 'other',
+    };
+
+    pruneRetainedVisiblePageCacheEntries(
+      entries: entries,
+      currentRequest: second,
+      pageOf: (request) => request.page,
+      isSameScope: (entry, currentRequest) =>
+          entry.filter == currentRequest.filter &&
+          entry.pageSize == currentRequest.pageSize,
+    );
+
+    expect(entries.keys, unorderedEquals([first, second, third]));
   });
 
   test('library visible page provider stays stable across cache updates',
@@ -153,10 +203,12 @@ void main() {
             searchProviders: [],
             doubanAccount: DoubanAccountConfig(enabled: false),
             homeModules: [],
+            performanceLiveItemHeroOverlayEnabled: true,
           ),
         ),
         mediaRepositoryProvider.overrideWithValue(mediaRepository),
         localStorageCacheRepositoryProvider.overrideWithValue(cacheRepository),
+        isTelevisionProvider.overrideWithValue(const AsyncData(false)),
       ],
     );
     addTearDown(container.dispose);
@@ -282,6 +334,7 @@ void main() {
         ),
         mediaRepositoryProvider.overrideWithValue(mediaRepository),
         localStorageCacheRepositoryProvider.overrideWithValue(cacheRepository),
+        isTelevisionProvider.overrideWithValue(const AsyncData(false)),
       ],
     );
     addTearDown(container.dispose);
@@ -332,7 +385,7 @@ void main() {
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
   });
 
-  test('library resolved item provider updates only the targeted visible item',
+  test('library cached detail target provider updates only the targeted item',
       () async {
     final mediaRepository = _CountingMediaRepository(
       library: [
@@ -377,10 +430,12 @@ void main() {
             searchProviders: [],
             doubanAccount: DoubanAccountConfig(enabled: false),
             homeModules: [],
+            performanceLiveItemHeroOverlayEnabled: true,
           ),
         ),
         mediaRepositoryProvider.overrideWithValue(mediaRepository),
         localStorageCacheRepositoryProvider.overrideWithValue(cacheRepository),
+        isTelevisionProvider.overrideWithValue(const AsyncData(false)),
       ],
     );
     addTearDown(container.dispose);
@@ -396,8 +451,12 @@ void main() {
     final seedItem = page.items.single;
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 0);
 
-    final initialResolved = container.read(
-      libraryResolvedItemProvider(LibraryItemOverlayRequest(seedItem)),
+    final overlayRequest = LibraryItemOverlayRequest(seedItem);
+    final initialResolved = mergeLibraryItemWithCachedDetails(
+      item: seedItem,
+      cachedTarget: container.read(
+        libraryCachedDetailTargetProvider(overlayRequest),
+      ),
     );
     expect(initialResolved.title, 'Page 1');
 
@@ -412,8 +471,11 @@ void main() {
       ),
     );
 
-    final stillUnchanged = container.read(
-      libraryResolvedItemProvider(LibraryItemOverlayRequest(seedItem)),
+    final stillUnchanged = mergeLibraryItemWithCachedDetails(
+      item: seedItem,
+      cachedTarget: container.read(
+        libraryCachedDetailTargetProvider(overlayRequest),
+      ),
     );
     expect(stillUnchanged.title, 'Page 1');
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 0);
@@ -441,14 +503,18 @@ void main() {
       ),
     );
 
-    final updated = container.read(
-      libraryResolvedItemProvider(LibraryItemOverlayRequest(seedItem)),
+    final updated = mergeLibraryItemWithCachedDetails(
+      item: seedItem,
+      cachedTarget: container.read(
+        libraryCachedDetailTargetProvider(overlayRequest),
+      ),
     );
     expect(updated.title, 'Page 1 Cached');
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 0);
   });
 
-  test('library resolved item provider skips runtime overlay when disabled',
+  test(
+      'library cached detail target provider skips runtime overlay when disabled',
       () async {
     final cacheRepository = _MutableLocalStorageCacheRepository();
     cacheRepository.targetsByLookupKey['library|emby-main|movie-1'] =
@@ -474,6 +540,7 @@ void main() {
           ),
         ),
         localStorageCacheRepositoryProvider.overrideWithValue(cacheRepository),
+        isTelevisionProvider.overrideWithValue(const AsyncData(false)),
       ],
     );
     addTearDown(container.dispose);
@@ -494,8 +561,12 @@ void main() {
       addedAt: DateTime(2026, 4, 12),
     );
 
-    final initialResolved = container.read(
-      libraryResolvedItemProvider(LibraryItemOverlayRequest(seedItem)),
+    final overlayRequest = LibraryItemOverlayRequest(seedItem);
+    final initialResolved = mergeLibraryItemWithCachedDetails(
+      item: seedItem,
+      cachedTarget: container.read(
+        libraryCachedDetailTargetProvider(overlayRequest),
+      ),
     );
     expect(initialResolved.title, 'Page 1');
 
@@ -513,8 +584,11 @@ void main() {
       ),
     );
 
-    final stillStatic = container.read(
-      libraryResolvedItemProvider(LibraryItemOverlayRequest(seedItem)),
+    final stillStatic = mergeLibraryItemWithCachedDetails(
+      item: seedItem,
+      cachedTarget: container.read(
+        libraryCachedDetailTargetProvider(overlayRequest),
+      ),
     );
     expect(stillStatic.title, 'Page 1');
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 0);
@@ -568,10 +642,12 @@ void main() {
             searchProviders: [],
             doubanAccount: DoubanAccountConfig(enabled: false),
             homeModules: [],
+            performanceLiveItemHeroOverlayEnabled: true,
           ),
         ),
         mediaRepositoryProvider.overrideWithValue(mediaRepository),
         localStorageCacheRepositoryProvider.overrideWithValue(cacheRepository),
+        isTelevisionProvider.overrideWithValue(const AsyncData(false)),
       ],
     );
     addTearDown(container.dispose);
@@ -679,6 +755,7 @@ void main() {
         ),
         mediaRepositoryProvider.overrideWithValue(mediaRepository),
         localStorageCacheRepositoryProvider.overrideWithValue(cacheRepository),
+        isTelevisionProvider.overrideWithValue(const AsyncData(false)),
       ],
     );
     addTearDown(container.dispose);

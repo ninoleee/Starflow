@@ -1,3 +1,4 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -294,4 +295,88 @@ void main() {
     );
     expect(await repository.loadSkipPreference(episodeTarget), isNull);
   });
+
+  test('shared snapshot provider serves multiple playback selectors', () async {
+    const target = PlaybackTarget(
+      title: '共享快照',
+      sourceId: 'nas-main',
+      streamUrl: 'https://nas.example.com/shared.mkv',
+      sourceName: '家庭 NAS',
+      sourceKind: MediaSourceKind.nas,
+      itemId: 'shared-1',
+      itemType: 'movie',
+    );
+    final snapshot = PlaybackMemorySnapshot(
+      items: {
+        buildPlaybackItemKey(target): PlaybackProgressEntry(
+          key: buildPlaybackItemKey(target),
+          target: target,
+          updatedAt: DateTime.utc(2026, 4, 14),
+          position: const Duration(minutes: 12),
+          duration: const Duration(hours: 2),
+          progress: 0.1,
+        ),
+      },
+    );
+    final repository = _CountingPlaybackMemoryRepository(snapshot);
+    final container = ProviderContainer(
+      overrides: [
+        playbackMemoryRepositoryProvider.overrideWithValue(repository),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final mediaItem = MediaItem(
+      id: 'shared-1',
+      title: '共享快照',
+      overview: '',
+      posterUrl: '',
+      year: 2026,
+      durationLabel: '',
+      genres: const [],
+      sourceId: 'nas-main',
+      sourceName: '家庭 NAS',
+      sourceKind: MediaSourceKind.nas,
+      streamUrl: 'https://nas.example.com/shared.mkv',
+      playbackItemId: 'shared-1',
+      itemType: 'movie',
+      addedAt: DateTime.utc(2026, 4, 14),
+    );
+    const detailTarget = MediaDetailTarget(
+      title: '共享快照',
+      posterUrl: '',
+      overview: '',
+      playbackTarget: target,
+      sourceId: 'nas-main',
+      itemId: 'shared-1',
+      itemType: 'movie',
+    );
+
+    final resume = await container.read(
+      playbackResumeForDetailTargetProvider(detailTarget).future,
+    );
+    final entry = await container.read(
+      playbackEntryForMediaItemProvider(mediaItem).future,
+    );
+    final recent =
+        await container.read(recentPlaybackEntriesProvider(5).future);
+
+    expect(resume, isNotNull);
+    expect(entry, isNotNull);
+    expect(recent, hasLength(1));
+    expect(repository.loadSnapshotCount, 1);
+  });
+}
+
+class _CountingPlaybackMemoryRepository extends PlaybackMemoryRepository {
+  _CountingPlaybackMemoryRepository(this.snapshot);
+
+  final PlaybackMemorySnapshot snapshot;
+  int loadSnapshotCount = 0;
+
+  @override
+  Future<PlaybackMemorySnapshot> loadSnapshot() async {
+    loadSnapshotCount += 1;
+    return snapshot;
+  }
 }

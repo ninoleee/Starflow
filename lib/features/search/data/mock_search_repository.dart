@@ -51,15 +51,12 @@ class AppSearchRepository implements SearchRepository {
       return SearchFetchResult(items: [], filteredCount: 0);
     }
 
-    List<SearchResult> rawResults;
-    if (PanSouApiClient.supports(provider)) {
-      rawResults = await _panSouApiClient.search(keyword, provider: provider);
-    } else if (CloudSaverApiClient.supports(provider)) {
-      rawResults =
-          await _cloudSaverApiClient.search(keyword, provider: provider);
-    } else {
-      return SearchFetchResult(items: [], filteredCount: 0);
-    }
+    final rawResults = switch (provider.kind) {
+      SearchProviderKind.panSou =>
+        await _panSouApiClient.search(keyword, provider: provider),
+      SearchProviderKind.cloudSaver =>
+        await _cloudSaverApiClient.search(keyword, provider: provider),
+    };
 
     if (rawResults.isEmpty) {
       return SearchFetchResult(items: [], filteredCount: 0);

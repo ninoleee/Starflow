@@ -100,6 +100,92 @@ void main() {
       expect(results.filteredCount, 0);
     });
 
+    test('searchOnline routes strictly by provider kind', () async {
+      var panSouRequests = 0;
+      var cloudSaverRequests = 0;
+      final repository = AppSearchRepository(
+        PanSouApiClient(
+          MockClient((request) async {
+            panSouRequests += 1;
+            return http.Response(
+              '''
+              {
+                "code": 0,
+                "data": {
+                  "merged_by_type": {
+                    "quark": [
+                      {"url":"https://pan.quark.cn/s/pansou-only","note":"PanSou 结果","password":""}
+                    ]
+                  }
+                }
+              }
+              ''',
+              200,
+              headers: const {'content-type': 'application/json'},
+            );
+          }),
+        ),
+        CloudSaverApiClient(
+          MockClient((request) async {
+            cloudSaverRequests += 1;
+            return http.Response(
+              '''
+              {
+                "success": true,
+                "code": 0,
+                "data": [
+                  {
+                    "id": "channel-1",
+                    "list": [
+                      {
+                        "title": "CloudSaver 结果",
+                        "content": "",
+                        "cloudLinks": ["https://pan.quark.cn/s/cloud-only"],
+                        "cloudType": "夸克网盘",
+                        "channel": "资源频道"
+                      }
+                    ]
+                  }
+                ]
+              }
+              ''',
+              200,
+              headers: const {'content-type': 'application/json'},
+            );
+          }),
+        ),
+        const _FakeMediaRepository(items: []),
+      );
+
+      final panSouResults = await repository.searchOnline(
+        '黑客帝国',
+        provider: const SearchProviderConfig(
+          id: 'provider-pan',
+          name: 'PanSou',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'http://localhost:3000/api/search',
+          parserHint: 'cloudsaver-api',
+          enabled: true,
+        ),
+      );
+      final cloudSaverResults = await repository.searchOnline(
+        '黑客帝国',
+        provider: const SearchProviderConfig(
+          id: 'provider-cloud',
+          name: 'CloudSaver',
+          kind: SearchProviderKind.cloudSaver,
+          endpoint: 'https://so.252035.xyz',
+          parserHint: 'pansou-api',
+          enabled: true,
+        ),
+      );
+
+      expect(panSouResults.items.single.title, 'PanSou 结果');
+      expect(cloudSaverResults.items.single.title, 'CloudSaver 结果');
+      expect(panSouRequests, 1);
+      expect(cloudSaverRequests, 1);
+    });
+
     test('searchOnline keeps deduplicated results from provider output',
         () async {
       final repository = AppSearchRepository(
