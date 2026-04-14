@@ -69,8 +69,25 @@ import UIKit
       name: "starflow/platform",
       binaryMessenger: controller.binaryMessenger
     )
+    attachSystemVolumeViewIfNeeded()
     channel.setMethodCallHandler { [weak self] call, result in
       switch call.method {
+      case "getSystemBrightnessLevel":
+        result(UIScreen.main.brightness)
+      case "setSystemBrightnessLevel":
+        let arguments = call.arguments as? [String: Any]
+        let value = arguments?["value"] as? Double ?? 0.5
+        DispatchQueue.main.async {
+          UIScreen.main.brightness = max(0.0, min(1.0, CGFloat(value)))
+          result(nil)
+        }
+      case "getSystemVolumeLevel":
+        result(self?.currentSystemVolumeLevel() ?? AVAudioSession.sharedInstance().outputVolume)
+      case "setSystemVolumeLevel":
+        let arguments = call.arguments as? [String: Any]
+        let value = arguments?["value"] as? Double ?? 0.5
+        self?.setSystemVolumeLevel(value)
+        result(nil)
       case "setBackgroundPlaybackEnabled":
         let arguments = call.arguments as? [String: Any]
         let enabled = arguments?["enabled"] as? Bool ?? false
@@ -114,6 +131,38 @@ import UIKit
       }
     }
     platformChannel = channel
+  }
+
+  private func attachSystemVolumeViewIfNeeded() {
+    guard let controller = resolveFlutterViewController() else {
+      return
+    }
+    if systemVolumeView.superview === controller.view {
+      return
+    }
+    systemVolumeView.isHidden = true
+    controller.view.addSubview(systemVolumeView)
+  }
+
+  private func currentSystemVolumeLevel() -> Float {
+    let session = AVAudioSession.sharedInstance()
+    try? session.setActive(true)
+    return session.outputVolume
+  }
+
+  private func setSystemVolumeLevel(_ value: Double) {
+    let clamped = Float(max(0.0, min(1.0, value)))
+    DispatchQueue.main.async { [weak self] in
+      self?.attachSystemVolumeViewIfNeeded()
+      guard
+        let slider = self?.systemVolumeView.subviews.compactMap({ $0 as? UISlider }).first
+      else {
+        return
+      }
+      slider.setValue(clamped, animated: false)
+      slider.sendActions(for: .valueChanged)
+      slider.sendActions(for: .touchUpInside)
+    }
   }
 
   private func installPlaybackSessionChannelIfNeeded() {

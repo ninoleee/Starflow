@@ -4,11 +4,15 @@ import android.app.PictureInPictureParams
 import android.app.PendingIntent
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.Context
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.util.Rational
 import android.content.pm.PackageManager
+import android.media.AudioManager
+import kotlin.math.roundToInt
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
@@ -18,6 +22,9 @@ class MainActivity : FlutterActivity() {
     private var playbackSessionChannel: MethodChannel? = null
     private var playbackPictureInPictureEnabled = false
     private var playbackPictureInPictureAspectRatio = Rational(16, 9)
+    private val audioManager by lazy {
+        getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
     private val playbackSystemSessionManager by lazy {
         PlaybackSystemSessionManager(
             context = applicationContext,
@@ -41,6 +48,22 @@ class MainActivity : FlutterActivity() {
         )
         platformChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
+                "getSystemBrightnessLevel" -> {
+                    result.success(getSystemBrightnessLevel())
+                }
+                "setSystemBrightnessLevel" -> {
+                    val value = call.argument<Double>("value") ?: 0.5
+                    setSystemBrightnessLevel(value)
+                    result.success(true)
+                }
+                "getSystemVolumeLevel" -> {
+                    result.success(getSystemVolumeLevel())
+                }
+                "setSystemVolumeLevel" -> {
+                    val value = call.argument<Double>("value") ?: 0.5
+                    setSystemVolumeLevel(value)
+                    result.success(true)
+                }
                 "isTelevision" -> {
                     val currentMode = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
                     result.success(currentMode == Configuration.UI_MODE_TYPE_TELEVISION)
@@ -231,5 +254,60 @@ class MainActivity : FlutterActivity() {
             0
         }
         return PendingIntent.getActivity(this, 0, launchIntent, flags)
+    }
+
+    private fun getSystemBrightnessLevel(): Double {
+        val windowBrightness = window.attributes.screenBrightness
+        if (windowBrightness in 0f..1f) {
+            return windowBrightness.toDouble()
+        }
+        return try {
+            Settings.System.getInt(
+                contentResolver,
+                Settings.System.SCREEN_BRIGHTNESS
+            ).toDouble().div(255.0).coerceIn(0.0, 1.0)
+        } catch (_: Throwable) {
+            0.5
+        }
+    }
+
+    private fun setSystemBrightnessLevel(value: Double) {
+        val clamped = value.coerceIn(0.0, 1.0)
+        val attributes = window.attributes
+        attributes.screenBrightness = clamped.toFloat()
+        window.attributes = attributes
+
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.System.canWrite(this)) {
+                Settings.System.putInt(
+                    contentResolver,
+                    Settings.System.SCREEN_BRIGHTNESS,
+                    (clamped * 255.0).roundToInt().coerceIn(0, 255)
+                )
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun getSystemVolumeLevel(): Double {
+        val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        if (max <= 0) {
+            return 1.0
+        }
+        val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        return current.toDouble().div(max.toDouble()).coerceIn(0.0, 1.0)
+    }
+
+    private fun setSystemVolumeLevel(value: Double) {
+        val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        if (max <= 0) {
+            return
+        }
+        val target = (value.coerceIn(0.0, 1.0) * max.toDouble()).roundToInt()
+        audioManager.setStreamVolume(
+            AudioManager.STREAM_MUSIC,
+            target.coerceIn(0, max),
+            0
+        )
     }
 }
