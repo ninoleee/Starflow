@@ -26,19 +26,27 @@ extension _PlayerPageStateControls on _PlayerPageState {
           builder: (dialogContext) {
             return PopScope(
               canPop: false,
-              child: AlertDialog(
-                title: const Text('退出播放'),
-                content: const Text('确认退出当前播放吗？'),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(false),
-                    child: const Text('继续播放'),
-                  ),
-                  FilledButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(true),
-                    child: const Text('退出'),
-                  ),
-                ],
+              child: wrapTelevisionDialogFieldTraversal(
+                enabled: true,
+                child: AlertDialog(
+                  title: const Text('退出播放'),
+                  content: const Text('确认退出当前播放吗？'),
+                  actions: [
+                    TvAdaptiveButton(
+                      label: '继续播放',
+                      icon: Icons.play_arrow_rounded,
+                      autofocus: true,
+                      variant: TvButtonVariant.text,
+                      onPressed: () => Navigator.of(dialogContext).pop(false),
+                    ),
+                    TvAdaptiveButton(
+                      label: '退出',
+                      icon: Icons.logout_rounded,
+                      variant: TvButtonVariant.outlined,
+                      onPressed: () => Navigator.of(dialogContext).pop(true),
+                    ),
+                  ],
+                ),
               ),
             );
           },

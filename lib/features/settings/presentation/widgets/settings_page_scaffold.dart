@@ -455,34 +455,44 @@ class SettingsCheckboxDialogSection<T> {
 Future<SettingsCloseAction> showSettingsCloseConfirmDialog(
   BuildContext context,
 ) async {
+  final isTelevision =
+      ProviderScope.containerOf(context, listen: false)
+          .read(isTelevisionProvider)
+          .value ??
+      false;
   final action = await showDialog<SettingsCloseAction>(
     context: context,
     builder: (dialogContext) {
-      return AlertDialog(
-        title: const Text('保存修改？'),
-        content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
-        actions: [
-          StarflowButton(
-            label: '取消',
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(SettingsCloseAction.cancel),
-            variant: StarflowButtonVariant.ghost,
-            compact: true,
-          ),
-          StarflowButton(
-            label: '不保存',
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(SettingsCloseAction.discard),
-            variant: StarflowButtonVariant.secondary,
-            compact: true,
-          ),
-          StarflowButton(
-            label: '保存',
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(SettingsCloseAction.save),
-            compact: true,
-          ),
-        ],
+      return wrapTelevisionDialogFieldTraversal(
+        enabled: isTelevision,
+        child: AlertDialog(
+          title: const Text('保存修改？'),
+          content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
+          actions: [
+            StarflowButton(
+              label: '取消',
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(SettingsCloseAction.cancel),
+              variant: StarflowButtonVariant.ghost,
+              compact: true,
+              autofocus: isTelevision,
+            ),
+            StarflowButton(
+              label: '不保存',
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(SettingsCloseAction.discard),
+              variant: StarflowButtonVariant.secondary,
+              compact: true,
+            ),
+            StarflowButton(
+              label: '保存',
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(SettingsCloseAction.save),
+              variant: StarflowButtonVariant.secondary,
+              compact: true,
+            ),
+          ],
+        ),
       );
     },
   );

@@ -1229,7 +1229,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   }
 }
 
-class _SearchResultCard extends ConsumerStatefulWidget {
+class _SearchResultCard extends ConsumerWidget {
   const _SearchResultCard({
     required this.result,
     required this.focusId,
@@ -1251,28 +1251,7 @@ class _SearchResultCard extends ConsumerStatefulWidget {
   final VoidCallback onToggleFavorite;
 
   @override
-  ConsumerState<_SearchResultCard> createState() => _SearchResultCardState();
-}
-
-class _SearchResultCardState extends ConsumerState<_SearchResultCard> {
-  late final FocusNode _openFocusNode =
-      FocusNode(debugLabel: 'search-result-open');
-  late final FocusNode _favoriteFocusNode =
-      FocusNode(debugLabel: 'search-result-favorite');
-  late final FocusNode _saveFocusNode =
-      FocusNode(debugLabel: 'search-result-save');
-
-  @override
-  void dispose() {
-    _openFocusNode.dispose();
-    _favoriteFocusNode.dispose();
-    _saveFocusNode.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final result = widget.result;
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final posterUrl = result.posterUrl.trim();
@@ -1375,15 +1354,15 @@ class _SearchResultCardState extends ConsumerState<_SearchResultCard> {
                     height: 32,
                     child: StarflowIconButton(
                       size: 32,
-                      tooltip: widget.isFavorite ? '取消收藏' : '收藏',
+                      tooltip: isFavorite ? '取消收藏' : '收藏',
                       variant: StarflowButtonVariant.ghost,
-                      onPressed: widget.onToggleFavorite,
-                      icon: widget.isFavorite
+                      onPressed: onToggleFavorite,
+                      icon: isFavorite
                           ? Icons.favorite_rounded
                           : Icons.favorite_border_rounded,
                     ),
                   ),
-                  if (widget.showSaveAction) ...[
+                  if (showSaveAction) ...[
                     const SizedBox(width: 4),
                     SizedBox(
                       width: 32,
@@ -1392,7 +1371,7 @@ class _SearchResultCardState extends ConsumerState<_SearchResultCard> {
                         size: 32,
                         tooltip: '保存到夸克',
                         variant: StarflowButtonVariant.ghost,
-                        onPressed: widget.isSaving ? null : widget.onSave,
+                        onPressed: isSaving ? null : onSave,
                         icon: Icons.bookmark_add_rounded,
                       ),
                     ),
@@ -1418,103 +1397,40 @@ class _SearchResultCardState extends ConsumerState<_SearchResultCard> {
         border: Border.all(color: theme.colorScheme.outlineVariant),
       );
 
-      final openCard = TvDirectionalActionPanel(
-        onDirection: (direction) {
-          if (direction != TraversalDirection.right) {
-            return false;
-          }
-          _favoriteFocusNode.requestFocus();
-          return true;
-        },
-        child: TvFocusableAction(
-          onPressed: onOpen,
-          onContextAction: () => _showDetailDialog(
-            context,
-            result,
-            isTelevision: true,
-          ),
-          focusNode: _openFocusNode,
-          focusId: widget.focusId,
-          autofocus: widget.autofocus,
-          borderRadius: BorderRadius.circular(18),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
-            child: Column(
-              children: [
-                mainContent,
-                const SizedBox(height: 8),
-                Divider(
-                  height: 1,
-                  thickness: 0.5,
-                  color: theme.colorScheme.outlineVariant.withValues(
-                    alpha: 0.3,
-                  ),
+      final openCard = TvFocusableAction(
+        onPressed: onOpen,
+        onContextAction: () => _showDetailDialog(
+          context,
+          result,
+          isTelevision: true,
+        ),
+        focusId: focusId,
+        autofocus: autofocus,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+          child: Column(
+            children: [
+              mainContent,
+              const SizedBox(height: 8),
+              Divider(
+                height: 1,
+                thickness: 0.5,
+                color: theme.colorScheme.outlineVariant.withValues(
+                  alpha: 0.3,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ),
-      );
-
-      final favoriteButton = TvDirectionalActionPanel(
-        onDirection: (direction) {
-          switch (direction) {
-            case TraversalDirection.left:
-              _openFocusNode.requestFocus();
-              return true;
-            case TraversalDirection.right:
-              if (widget.showSaveAction && !widget.isSaving) {
-                _saveFocusNode.requestFocus();
-                return true;
-              }
-              return false;
-            case TraversalDirection.up:
-            case TraversalDirection.down:
-              return false;
-          }
-        },
-        child: TvAdaptiveButton(
-          label: widget.isFavorite ? '取消收藏' : '收藏',
-          icon: widget.isFavorite
-              ? Icons.favorite_rounded
-              : Icons.favorite_border_rounded,
-          onPressed: widget.onToggleFavorite,
-          focusNode: _favoriteFocusNode,
-          focusId: '${widget.focusId}:favorite',
-          variant: TvButtonVariant.text,
-        ),
-      );
-
-      final saveButton = TvDirectionalActionPanel(
-        onDirection: (direction) {
-          switch (direction) {
-            case TraversalDirection.left:
-              _favoriteFocusNode.requestFocus();
-              return true;
-            case TraversalDirection.right:
-            case TraversalDirection.up:
-            case TraversalDirection.down:
-              return false;
-          }
-        },
-        child: TvAdaptiveButton(
-          label: widget.isSaving ? '保存中' : '保存',
-          icon: Icons.bookmark_add_rounded,
-          onPressed: widget.isSaving ? null : widget.onSave,
-          focusNode: _saveFocusNode,
-          focusId: '${widget.focusId}:save',
-          variant: TvButtonVariant.text,
         ),
       );
 
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        child: DecoratedBox(
-          decoration: cardDecoration,
+        child: FocusTraversalGroup(
+          policy: ReadingOrderTraversalPolicy(),
           child: DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-            ),
+            decoration: cardDecoration,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1525,10 +1441,24 @@ class _SearchResultCardState extends ConsumerState<_SearchResultCard> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      favoriteButton,
-                      if (widget.showSaveAction) ...[
+                      TvAdaptiveButton(
+                        label: isFavorite ? '取消收藏' : '收藏',
+                        icon: isFavorite
+                            ? Icons.favorite_rounded
+                            : Icons.favorite_border_rounded,
+                        onPressed: onToggleFavorite,
+                        focusId: '$focusId:favorite',
+                        variant: TvButtonVariant.text,
+                      ),
+                      if (showSaveAction) ...[
                         const SizedBox(height: 6),
-                        saveButton,
+                        TvAdaptiveButton(
+                          label: isSaving ? '保存中' : '保存',
+                          icon: Icons.bookmark_add_rounded,
+                          onPressed: isSaving ? null : onSave,
+                          focusId: '$focusId:save',
+                          variant: TvButtonVariant.text,
+                        ),
                       ],
                     ],
                   ),
