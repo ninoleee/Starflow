@@ -20,36 +20,27 @@ extension _PlayerPageStateControls on _PlayerPageState {
     }
 
     _tvExitDialogVisible = true;
-    final shouldExit = await showDialog<bool>(
-          barrierDismissible: false,
+    final shouldExit = await showStarflowActionDialog<bool>(
           context: context,
-          builder: (dialogContext) {
-            return PopScope(
-              canPop: false,
-              child: wrapTelevisionDialogFieldTraversal(
-                enabled: true,
-                child: AlertDialog(
-                  title: const Text('退出播放'),
-                  content: const Text('确认退出当前播放吗？'),
-                  actions: [
-                    TvAdaptiveButton(
-                      label: '继续播放',
-                      icon: Icons.play_arrow_rounded,
-                      autofocus: true,
-                      variant: TvButtonVariant.text,
-                      onPressed: () => Navigator.of(dialogContext).pop(false),
-                    ),
-                    TvAdaptiveButton(
-                      label: '退出',
-                      icon: Icons.logout_rounded,
-                      variant: TvButtonVariant.outlined,
-                      onPressed: () => Navigator.of(dialogContext).pop(true),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
+          title: '退出播放',
+          message: '确认退出当前播放吗？',
+          barrierDismissible: false,
+          allowSystemDismiss: false,
+          actions: const [
+            StarflowDialogAction<bool>(
+              label: '继续播放',
+              value: false,
+              icon: Icons.play_arrow_rounded,
+              variant: StarflowButtonVariant.ghost,
+              autofocus: true,
+            ),
+            StarflowDialogAction<bool>(
+              label: '退出',
+              value: true,
+              icon: Icons.logout_rounded,
+              variant: StarflowButtonVariant.secondary,
+            ),
+          ],
         ) ??
         false;
     _tvExitDialogVisible = false;
@@ -487,6 +478,10 @@ extension _PlayerPageStateControls on _PlayerPageState {
         : fullscreen
             ? 42.0
             : 0.0;
+    final enableVerticalGestureControls = _supportsAdaptiveVerticalGestures;
+    final normalizedPlayerVolume =
+        (state.player.state.volume / 100.0).clamp(0.0, 1.0).toDouble();
+    _adaptiveGestureVolume = normalizedPlayerVolume;
     final seekBarMargin = isPortrait
         ? EdgeInsets.only(
             left: 16,
@@ -501,12 +496,20 @@ extension _PlayerPageStateControls on _PlayerPageState {
               )
             : EdgeInsets.zero;
     return MaterialVideoControlsThemeData(
-      volumeGesture: true,
-      brightnessGesture: true,
+      volumeGesture: enableVerticalGestureControls,
+      brightnessGesture: enableVerticalGestureControls,
       seekGesture: _mpvSwipeToSeekEnabled,
       seekOnDoubleTap: _mpvDoubleTapToSeekEnabled,
       seekOnDoubleTapEnabledWhileControlsVisible: _mpvDoubleTapToSeekEnabled,
       speedUpOnLongPress: _mpvLongPressSpeedBoostEnabled,
+      onVolumeChanged: enableVerticalGestureControls
+          ? _handleAdaptiveVolumeGestureChanged
+          : null,
+      initialVolume: _adaptiveGestureVolume,
+      onBrightnessChanged: enableVerticalGestureControls
+          ? _handleAdaptiveBrightnessGestureChanged
+          : null,
+      initialBrightness: _adaptiveGestureBrightness,
       padding: controlsPadding,
       topButtonBar: materialTopButtonBar,
       topButtonBarMargin: EdgeInsets.fromLTRB(16, isPortrait ? 12 : 0, 16, 0),
@@ -559,6 +562,53 @@ extension _PlayerPageStateControls on _PlayerPageState {
   bool _shouldInsetAdaptivePortraitControls(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     return size.height > size.width;
+  }
+
+  bool get _supportsAdaptiveVerticalGestures {
+    if (kIsWeb) {
+      return false;
+    }
+    return defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+  }
+
+  void _handleAdaptiveVolumeGestureChanged(double value) {
+    final clamped = value.clamp(0.0, 1.0);
+    if ((_adaptiveGestureVolume - clamped).abs() < 0.01) {
+      return;
+    }
+    _adaptiveGestureVolume = clamped;
+    final player = _player;
+    if (player == null) {
+      return;
+    }
+    unawaited(player.setVolume(clamped * 100.0));
+  }
+
+  void _handleAdaptiveBrightnessGestureChanged(double value) {
+    final clamped = value.clamp(0.0, 1.0);
+    if ((_adaptiveGestureBrightness - clamped).abs() < 0.01) {
+      return;
+    }
+    _adaptiveGestureBrightness = clamped;
+    final player = _player;
+    final native = player?.platform;
+    if (native == null) {
+      return;
+    }
+    final mpvBrightness = (clamped * 200.0) - 100.0;
+    unawaited(
+      Future<void>(() async {
+        try {
+          await (native as dynamic).setProperty(
+            'brightness',
+            mpvBrightness.toStringAsFixed(2),
+          );
+        } catch (_) {
+          // Keep gesture path resilient even on backends that do not expose MPV properties.
+        }
+      }),
+    );
   }
 
   List<Widget> _buildAdaptiveMaterialTopButtonBar(
@@ -801,21 +851,11 @@ extension _PlayerPageStateControls on _PlayerPageState {
   }
 
   BoxFit _resolvedVideoBoxFit() {
-    return switch (_videoLayoutMode) {
-      _PlaybackVideoLayoutMode.fit => BoxFit.contain,
-      _PlaybackVideoLayoutMode.fill => BoxFit.cover,
-      _PlaybackVideoLayoutMode.stretch => BoxFit.fill,
-      _PlaybackVideoLayoutMode.aspect16x9 => BoxFit.contain,
-      _PlaybackVideoLayoutMode.aspect4x3 => BoxFit.contain,
-    };
+    return BoxFit.contain;
   }
 
   double? _resolvedVideoAspectRatioOverride() {
-    return switch (_videoLayoutMode) {
-      _PlaybackVideoLayoutMode.aspect16x9 => 16 / 9,
-      _PlaybackVideoLayoutMode.aspect4x3 => 4 / 3,
-      _ => null,
-    };
+    return null;
   }
 
   SubtitleViewConfiguration _buildSubtitleViewConfiguration(
@@ -869,7 +909,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
           player: player,
           target: _resolvedTarget ?? widget.target,
           isTelevision: isTelevision,
-          videoLayoutLabel: _videoLayoutMode.label,
           defaultSubtitleScaleLabel: settings.playbackSubtitleScale.label,
           subtitleDelayLabel: formatSubtitleDelayLabel(
             _subtitleDelaySeconds,
@@ -880,9 +919,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
             target: _resolvedTarget ?? widget.target,
           ),
           onSelectMpvQualityPreset: _selectPlaybackMpvQualityPreset,
-          onSelectVideoLayout: _selectVideoLayoutMode,
-          onSelectSpeed: (currentRate) =>
-              _selectPlaybackSpeed(player, currentRate),
           onSelectSubtitle: (tracks, current) =>
               _selectSubtitleTrack(player, tracks, current),
           onSelectAudio: (tracks, current) =>
@@ -934,67 +970,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
       await _applyMpvPerformanceTuning(player, target);
     }
     _showMessage('MPV 画质策略已切换为 ${selection.label}');
-  }
-
-  Future<void> _selectVideoLayoutMode() async {
-    final selection = await showDialog<_PlaybackVideoLayoutMode>(
-      context: context,
-      builder: (dialogContext) {
-        return SimpleDialog(
-          title: const Text('画面适配'),
-          children: [
-            for (final mode in _PlaybackVideoLayoutMode.values)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(dialogContext).pop(mode),
-                child: Text(
-                  mode == _videoLayoutMode ? '${mode.label}  当前' : mode.label,
-                ),
-              ),
-          ],
-        );
-      },
-    );
-    if (selection == null || selection == _videoLayoutMode) {
-      return;
-    }
-    if (!mounted) {
-      _videoLayoutMode = selection;
-      return;
-    }
-    setState(() {
-      _videoLayoutMode = selection;
-    });
-    _showMessage('画面适配已切换为 ${selection.label}');
-  }
-
-  Future<void> _selectPlaybackSpeed(Player player, double currentRate) async {
-    final selection = await showDialog<double>(
-      context: context,
-      builder: (dialogContext) {
-        return SimpleDialog(
-          title: const Text('播放速度'),
-          children: [
-            for (final rate in _PlayerPageState._kSpeedOptions)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(dialogContext).pop(rate),
-                child: Text(
-                  rate == currentRate
-                      ? '${formatPlaybackSpeed(rate)}  当前'
-                      : formatPlaybackSpeed(rate),
-                ),
-              ),
-          ],
-        );
-      },
-    );
-    if (selection == null) {
-      return;
-    }
-
-    await _runPlayerCommand(
-      () => player.setRate(selection),
-      failureMessage: '切换播放速度失败',
-    );
   }
 
   Future<void> _selectSubtitleTrack(

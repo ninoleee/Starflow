@@ -17,6 +17,7 @@ import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
+import 'package:starflow/core/widgets/starflow_action_dialog.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
@@ -88,24 +89,6 @@ class _TvPlaybackState {
   }
 }
 
-enum _PlaybackVideoLayoutMode {
-  fit,
-  fill,
-  stretch,
-  aspect16x9,
-  aspect4x3,
-}
-
-extension _PlaybackVideoLayoutModeX on _PlaybackVideoLayoutMode {
-  String get label => switch (this) {
-        _PlaybackVideoLayoutMode.fit => '适应屏幕',
-        _PlaybackVideoLayoutMode.fill => '填满画面',
-        _PlaybackVideoLayoutMode.stretch => '拉伸铺满',
-        _PlaybackVideoLayoutMode.aspect16x9 => '16:9',
-        _PlaybackVideoLayoutMode.aspect4x3 => '4:3',
-      };
-}
-
 class PlayerPage extends ConsumerStatefulWidget {
   const PlayerPage({super.key, required this.target});
 
@@ -119,7 +102,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     with WidgetsBindingObserver {
   static const int _maxPlaybackAttempts = 3;
   static const _kSeekStep = Duration(seconds: 10);
-  static const _kSpeedOptions = <double>[0.75, 1.0, 1.25, 1.5, 2.0];
   static const _kSubtitleDelaySteps = <double>[-2, -1, -0.5, 0, 0.5, 1, 2];
   static const _kProgressPersistInterval = Duration(seconds: 8);
   static const int _kDefaultMpvBufferSizeBytes = 32 * 1024 * 1024;
@@ -189,9 +171,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   bool _tvExitDialogVisible = false;
   bool _isEmbeddedMpvFullscreen = false;
+  double _adaptiveGestureBrightness = 0.5;
+  double _adaptiveGestureVolume = 1.0;
   bool _introSkipApplied = false;
   bool _outroSkipApplied = false;
-  _PlaybackVideoLayoutMode _videoLayoutMode = _PlaybackVideoLayoutMode.fit;
   Duration _latestPosition = Duration.zero;
   Duration _latestDuration = Duration.zero;
   DateTime? _lastProgressPersistedAt;
@@ -382,9 +365,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   bool get _aggressivePlaybackTuningEnabled =>
       _playbackSettings.performanceAggressivePlaybackTuningEnabled;
-
-  bool get _prefersAggressiveHardwareDecoding =>
-      _aggressivePlaybackTuningEnabled;
 
   bool get _preferLeanPlaybackRendering => _leanPlaybackUiEnabled;
 

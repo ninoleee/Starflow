@@ -274,6 +274,10 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         if (attempt >= _PlayerPageState._maxPlaybackAttempts) {
           break;
         }
+        if (_isLikelyRemotePlaybackTarget(resolvedTarget)) {
+          final backoff = Duration(milliseconds: 650 * attempt);
+          await Future<void>.delayed(backoff);
+        }
       }
     }
 
@@ -486,25 +490,28 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
             : (probe.estimatedSpeedBytesPerSecond! * 8) / 1000000;
     final lowStartupSpeed = startupProbeMegabitsPerSecond != null &&
         startupProbeMegabitsPerSecond > 0 &&
-        startupProbeMegabitsPerSecond < 12;
+        startupProbeMegabitsPerSecond < 16;
     final criticalStartupSpeed = startupProbeMegabitsPerSecond != null &&
         startupProbeMegabitsPerSecond > 0 &&
-        startupProbeMegabitsPerSecond < 6;
+        startupProbeMegabitsPerSecond < 8;
     final remotePlayback = _isLikelyRemotePlaybackTarget(target);
 
-    if (remotePlayback && lowStartupSpeed) {
-      resolved += 6;
+    if (remotePlayback && resolved < 28) {
+      resolved = 28;
     }
-    if (remotePlayback && criticalStartupSpeed) {
+    if (remotePlayback && lowStartupSpeed) {
       resolved += 8;
     }
+    if (remotePlayback && criticalStartupSpeed) {
+      resolved += 10;
+    }
     if (preflight != null && !preflight.supportsByteRange) {
-      resolved += 4;
+      resolved += 8;
     }
     if (remotePlayback && isLikelyQuarkPlaybackTarget(target)) {
-      resolved += 4;
+      resolved += 10;
     }
-    return resolved.clamp(1, 90);
+    return resolved.clamp(1, 120);
   }
 
   String _buildRemotePreflightFailureMessage(
@@ -553,7 +560,11 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       if (readyCompleter.isCompleted) {
         return;
       }
-      if (_isStrictPlaybackReady(player, progressBaseline: baseline)) {
+      if (_isStrictPlaybackReady(
+        player,
+        target: target,
+        progressBaseline: baseline,
+      )) {
         readyCandidateSince ??= DateTime.now();
         if (DateTime.now().difference(readyCandidateSince!) <
             readyConfirmWindow) {
@@ -640,21 +651,33 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
 
   bool _isStrictPlaybackReady(
     Player player, {
+    required PlaybackTarget target,
     required Duration progressBaseline,
   }) {
     final state = player.state;
+    final isRemote = _isLikelyRemotePlaybackTarget(target);
     final positionDelta = state.position - progressBaseline;
-    final hasProgress = positionDelta >= const Duration(milliseconds: 250);
+    final hasProgress = positionDelta >=
+        (isRemote
+            ? const Duration(milliseconds: 450)
+            : const Duration(milliseconds: 250));
     final hasMetadata = _hasStrictPlaybackMetadata(player);
+    if (isRemote) {
+      final hasWarmPlaybackProgress =
+          positionDelta >= const Duration(milliseconds: 900);
+      return state.playing &&
+          hasProgress &&
+          (hasMetadata || (!state.buffering && hasWarmPlaybackProgress));
+    }
     return state.playing && hasProgress && (hasMetadata || !state.buffering);
   }
 
   Duration _resolveStrictReadyConfirmWindow(PlaybackTarget target) {
     if (isLikelyQuarkPlaybackTarget(target)) {
-      return const Duration(milliseconds: 650);
+      return const Duration(milliseconds: 900);
     }
     if (_isLikelyRemotePlaybackTarget(target)) {
-      return const Duration(milliseconds: 500);
+      return const Duration(milliseconds: 750);
     }
     return const Duration(milliseconds: 300);
   }
@@ -673,24 +696,24 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     final quarkPlayback = isLikelyQuarkPlaybackTarget(target);
     if (quarkPlayback) {
       return const MpvStallWatchdogConfig(
-        minBufferingBeforeCheck: Duration(seconds: 2),
-        softRecoverAfter: Duration(seconds: 6),
-        hardRecoverAfter: Duration(seconds: 12),
+        minBufferingBeforeCheck: Duration(seconds: 3),
+        softRecoverAfter: Duration(seconds: 8),
+        hardRecoverAfter: Duration(seconds: 16),
         requirePlaying: false,
       );
     }
     if (remotePlayback) {
       return const MpvStallWatchdogConfig(
-        minBufferingBeforeCheck: Duration(seconds: 2),
-        softRecoverAfter: Duration(seconds: 5),
-        hardRecoverAfter: Duration(seconds: 10),
+        minBufferingBeforeCheck: Duration(seconds: 3),
+        softRecoverAfter: Duration(seconds: 7),
+        hardRecoverAfter: Duration(seconds: 14),
         requirePlaying: false,
       );
     }
     return const MpvStallWatchdogConfig(
       minBufferingBeforeCheck: Duration(seconds: 2),
-      softRecoverAfter: Duration(seconds: 4),
-      hardRecoverAfter: Duration(seconds: 8),
+      softRecoverAfter: Duration(seconds: 5),
+      hardRecoverAfter: Duration(seconds: 10),
       requirePlaying: false,
     );
   }
@@ -700,16 +723,16 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   ) {
     if (isLikelyQuarkPlaybackTarget(target)) {
       return const MpvStallWatchdogConfig(
-        minBufferingBeforeCheck: Duration(seconds: 2),
-        softRecoverAfter: Duration(seconds: 6),
-        hardRecoverAfter: Duration(seconds: 12),
+        minBufferingBeforeCheck: Duration(seconds: 3),
+        softRecoverAfter: Duration(seconds: 8),
+        hardRecoverAfter: Duration(seconds: 16),
       );
     }
     if (_isLikelyRemotePlaybackTarget(target)) {
       return const MpvStallWatchdogConfig(
-        minBufferingBeforeCheck: Duration(seconds: 2),
-        softRecoverAfter: Duration(seconds: 5),
-        hardRecoverAfter: Duration(seconds: 10),
+        minBufferingBeforeCheck: Duration(seconds: 3),
+        softRecoverAfter: Duration(seconds: 7),
+        hardRecoverAfter: Duration(seconds: 14),
       );
     }
     return const MpvStallWatchdogConfig(
@@ -998,10 +1021,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   String _resolveMpvHardwareDecodeMode() {
     switch (_playbackDecodeMode) {
       case PlaybackDecodeMode.auto:
-        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-          return 'auto-safe';
-        }
-        return _prefersAggressiveHardwareDecoding ? 'auto' : 'auto-safe';
+        return 'auto-safe';
       case PlaybackDecodeMode.hardwarePreferred:
         return 'auto';
       case PlaybackDecodeMode.softwarePreferred:
@@ -1432,22 +1452,11 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   }
 
   bool _shouldUseAggressiveMpvTuning(PlaybackTarget target) {
-    if (_aggressivePlaybackTuningEnabled) {
-      return true;
-    }
-    final startupProbeMegabitsPerSecond = _startupProbeMegabitsPerSecond;
-    final lowStartupSpeed = startupProbeMegabitsPerSecond != null &&
-        startupProbeMegabitsPerSecond > 0 &&
-        startupProbeMegabitsPerSecond < 12;
-    if (_isLikelyRemotePlaybackTarget(target) &&
-        (_remotePreflightIndicatesRangeRisk || lowStartupSpeed)) {
-      return true;
-    }
-    if (!_isHeavyPlaybackTarget(target)) {
+    if (!_aggressivePlaybackTuningEnabled) {
       return false;
     }
-    return _isTelevisionPlaybackDevice ||
-        _playbackDecodeMode == PlaybackDecodeMode.softwarePreferred;
+    return _isHeavyPlaybackTarget(target) ||
+        _isLikelyRemotePlaybackTarget(target);
   }
 
   PlaybackMpvQualityPreset _resolveEffectiveMpvQualityPreset(

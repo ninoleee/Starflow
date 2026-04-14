@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/core/widgets/starflow_action_dialog.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
@@ -403,32 +404,25 @@ class _TelevisionNavigationShellState
     }
 
     _isExitDialogVisible = true;
-    final shouldExit = await showDialog<bool>(
+    final shouldExit = await showStarflowActionDialog<bool>(
           context: context,
-          builder: (dialogContext) {
-            return wrapTelevisionDialogFieldTraversal(
-              enabled: true,
-              child: AlertDialog(
-                title: const Text('退出 Starflow？'),
-                content: const Text('再次确认后将关闭当前应用。'),
-                actions: [
-                  TvAdaptiveButton(
-                    label: '取消',
-                    icon: Icons.close_rounded,
-                    autofocus: true,
-                    variant: TvButtonVariant.text,
-                    onPressed: () => Navigator.of(dialogContext).pop(false),
-                  ),
-                  TvAdaptiveButton(
-                    label: '退出',
-                    icon: Icons.logout_rounded,
-                    variant: TvButtonVariant.outlined,
-                    onPressed: () => Navigator.of(dialogContext).pop(true),
-                  ),
-                ],
-              ),
-            );
-          },
+          title: '退出 Starflow？',
+          message: '再次确认后将关闭当前应用。',
+          actions: const [
+            StarflowDialogAction<bool>(
+              label: '取消',
+              value: false,
+              icon: Icons.close_rounded,
+              variant: StarflowButtonVariant.ghost,
+              autofocus: true,
+            ),
+            StarflowDialogAction<bool>(
+              label: '退出',
+              value: true,
+              icon: Icons.logout_rounded,
+              variant: StarflowButtonVariant.secondary,
+            ),
+          ],
         ) ??
         false;
     _isExitDialogVisible = false;

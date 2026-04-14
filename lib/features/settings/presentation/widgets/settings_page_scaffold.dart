@@ -5,6 +5,7 @@ import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/core/widgets/starflow_action_dialog.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/settings/presentation/settings_version_label.dart';
 
@@ -455,46 +456,28 @@ class SettingsCheckboxDialogSection<T> {
 Future<SettingsCloseAction> showSettingsCloseConfirmDialog(
   BuildContext context,
 ) async {
-  final isTelevision =
-      ProviderScope.containerOf(context, listen: false)
-          .read(isTelevisionProvider)
-          .value ??
-      false;
-  final action = await showDialog<SettingsCloseAction>(
+  final action = await showStarflowActionDialog<SettingsCloseAction>(
     context: context,
-    builder: (dialogContext) {
-      return wrapTelevisionDialogFieldTraversal(
-        enabled: isTelevision,
-        child: AlertDialog(
-          title: const Text('保存修改？'),
-          content: const Text('当前页面有未保存的修改，返回前要怎么处理？'),
-          actions: [
-            StarflowButton(
-              label: '取消',
-              onPressed: () =>
-                  Navigator.of(dialogContext).pop(SettingsCloseAction.cancel),
-              variant: StarflowButtonVariant.ghost,
-              compact: true,
-              autofocus: isTelevision,
-            ),
-            StarflowButton(
-              label: '不保存',
-              onPressed: () =>
-                  Navigator.of(dialogContext).pop(SettingsCloseAction.discard),
-              variant: StarflowButtonVariant.secondary,
-              compact: true,
-            ),
-            StarflowButton(
-              label: '保存',
-              onPressed: () =>
-                  Navigator.of(dialogContext).pop(SettingsCloseAction.save),
-              variant: StarflowButtonVariant.secondary,
-              compact: true,
-            ),
-          ],
-        ),
-      );
-    },
+    title: '保存修改？',
+    message: '当前页面有未保存的修改，返回前要怎么处理？',
+    actions: const [
+      StarflowDialogAction<SettingsCloseAction>(
+        label: '取消',
+        value: SettingsCloseAction.cancel,
+        variant: StarflowButtonVariant.ghost,
+        autofocus: true,
+      ),
+      StarflowDialogAction<SettingsCloseAction>(
+        label: '不保存',
+        value: SettingsCloseAction.discard,
+        variant: StarflowButtonVariant.secondary,
+      ),
+      StarflowDialogAction<SettingsCloseAction>(
+        label: '保存',
+        value: SettingsCloseAction.save,
+        variant: StarflowButtonVariant.secondary,
+      ),
+    ],
   );
   return action ?? SettingsCloseAction.cancel;
 }

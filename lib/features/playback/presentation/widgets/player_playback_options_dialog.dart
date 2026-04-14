@@ -15,13 +15,10 @@ class PlaybackOptionsDialog extends ConsumerWidget {
     required this.player,
     required this.target,
     required this.isTelevision,
-    required this.videoLayoutLabel,
     required this.defaultSubtitleScaleLabel,
     required this.subtitleDelayLabel,
     required this.seriesSkipLabel,
     required this.onSelectMpvQualityPreset,
-    required this.onSelectVideoLayout,
-    required this.onSelectSpeed,
     required this.onSelectSubtitle,
     required this.onSelectAudio,
     required this.onAdjustSubtitleDelay,
@@ -33,13 +30,10 @@ class PlaybackOptionsDialog extends ConsumerWidget {
   final Player player;
   final PlaybackTarget target;
   final bool isTelevision;
-  final String videoLayoutLabel;
   final String defaultSubtitleScaleLabel;
   final String subtitleDelayLabel;
   final String seriesSkipLabel;
   final Future<void> Function() onSelectMpvQualityPreset;
-  final Future<void> Function() onSelectVideoLayout;
-  final Future<void> Function(double currentRate) onSelectSpeed;
   final Future<void> Function(
     List<SubtitleTrack> tracks,
     SubtitleTrack current,
@@ -94,14 +88,11 @@ class PlaybackOptionsDialog extends ConsumerWidget {
             player: player,
             target: target,
             isTelevision: isTelevision,
-            videoLayoutLabel: videoLayoutLabel,
             mpvQualityPresetLabel: mpvQualityPresetLabel,
             subtitleDelayLabel: subtitleDelayLabel,
             seriesSkipLabel: seriesSkipLabel,
             onOpenSubtitleOptionsDialog: _openSubtitleOptionsDialog,
             onSelectMpvQualityPreset: onSelectMpvQualityPreset,
-            onSelectVideoLayout: onSelectVideoLayout,
-            onSelectSpeed: onSelectSpeed,
             onSelectAudio: onSelectAudio,
             onConfigureSeriesSkip: onConfigureSeriesSkip,
           ),
@@ -122,14 +113,11 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
     required this.player,
     required this.target,
     required this.isTelevision,
-    required this.videoLayoutLabel,
     required this.mpvQualityPresetLabel,
     required this.subtitleDelayLabel,
     required this.seriesSkipLabel,
     required this.onOpenSubtitleOptionsDialog,
     required this.onSelectMpvQualityPreset,
-    required this.onSelectVideoLayout,
-    required this.onSelectSpeed,
     required this.onSelectAudio,
     required this.onConfigureSeriesSkip,
   });
@@ -137,7 +125,6 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
   final Player player;
   final PlaybackTarget target;
   final bool isTelevision;
-  final String videoLayoutLabel;
   final String mpvQualityPresetLabel;
   final String subtitleDelayLabel;
   final String seriesSkipLabel;
@@ -147,8 +134,6 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
     Track currentTrack,
   ) onOpenSubtitleOptionsDialog;
   final Future<void> Function() onSelectMpvQualityPreset;
-  final Future<void> Function() onSelectVideoLayout;
-  final Future<void> Function(double currentRate) onSelectSpeed;
   final Future<void> Function(
     List<AudioTrack> tracks,
     AudioTrack current,
@@ -392,19 +377,6 @@ class _PlaybackOptionsDialogBodyState
             color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
-        const SizedBox(height: 16),
-        _PlaybackInfoTile(
-          progressLabel: progressLabel,
-          videoSizeLabel: videoSizeLabel,
-          speedLabel: formatPlaybackSpeed(_viewState.rate),
-          playlistModeLabel: _formatPlaylistModeLabel(_viewState.playlistMode),
-          bufferingLabel: bufferLabel,
-          buffering: _viewState.buffering,
-          playing: _viewState.playing,
-          sourceLabel: widget.target.sourceName,
-          formatLabel: widget.target.formatLabel,
-          bitrateLabel: widget.target.bitrateLabel,
-        ),
         const SizedBox(height: 12),
         _SectionLabel(
           title: '快捷操作',
@@ -429,13 +401,6 @@ class _PlaybackOptionsDialogBodyState
         const SizedBox(height: 8),
         _PlaybackOptionTile(
           isTelevision: widget.isTelevision,
-          title: '播放速度',
-          value: formatPlaybackSpeed(_viewState.rate),
-          onPressed: () => widget.onSelectSpeed(_viewState.rate),
-        ),
-        const SizedBox(height: 8),
-        _PlaybackOptionTile(
-          isTelevision: widget.isTelevision,
           title: '循环播放',
           value: _formatPlaylistModeLabel(_viewState.playlistMode),
           onPressed: _selectPlaylistMode,
@@ -446,13 +411,6 @@ class _PlaybackOptionsDialogBodyState
           title: 'MPV 画质策略',
           value: widget.mpvQualityPresetLabel,
           onPressed: widget.onSelectMpvQualityPreset,
-        ),
-        const SizedBox(height: 8),
-        _PlaybackOptionTile(
-          isTelevision: widget.isTelevision,
-          title: '画面适配',
-          value: widget.videoLayoutLabel,
-          onPressed: widget.onSelectVideoLayout,
         ),
         const SizedBox(height: 8),
         _PlaybackOptionTile(
@@ -484,6 +442,19 @@ class _PlaybackOptionsDialogBodyState
           title: '本剧跳过片头片尾',
           value: widget.seriesSkipLabel,
           onPressed: widget.onConfigureSeriesSkip,
+        ),
+        const SizedBox(height: 16),
+        _PlaybackInfoTile(
+          progressLabel: progressLabel,
+          videoSizeLabel: videoSizeLabel,
+          speedLabel: formatPlaybackSpeed(_viewState.rate),
+          playlistModeLabel: _formatPlaylistModeLabel(_viewState.playlistMode),
+          bufferingLabel: bufferLabel,
+          buffering: _viewState.buffering,
+          playing: _viewState.playing,
+          sourceLabel: widget.target.sourceName,
+          formatLabel: widget.target.formatLabel,
+          bitrateLabel: widget.target.bitrateLabel,
         ),
       ],
     );
