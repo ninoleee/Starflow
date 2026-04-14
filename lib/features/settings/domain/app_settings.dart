@@ -1141,7 +1141,7 @@ class AppSettings {
         json['playbackDecodeMode'] as String? ?? '',
       ),
       playbackMpvQualityPreset: PlaybackMpvQualityPresetX.fromName(
-        json['playbackMpvQualityPreset'] as String? ?? '',
+        json['playbackMpvQualityPreset'] as String? ?? 'performanceFirst',
       ),
       playbackMpvDoubleTapToSeekEnabled:
           json['playbackMpvDoubleTapToSeekEnabled'] as bool? ?? true,

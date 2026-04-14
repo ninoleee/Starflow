@@ -593,7 +593,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
 
   Future<double?> _readSystemBrightnessLevel() async {
     try {
-      final raw = await _platformChannel.invokeMethod<num>(
+      final raw = await _PlayerPageState._platformChannel.invokeMethod<num>(
         'getSystemBrightnessLevel',
       );
       if (raw == null) {
@@ -607,7 +607,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
 
   Future<double?> _readSystemVolumeLevel() async {
     try {
-      final raw = await _platformChannel.invokeMethod<num>(
+      final raw = await _PlayerPageState._platformChannel.invokeMethod<num>(
         'getSystemVolumeLevel',
       );
       if (raw == null) {
@@ -621,9 +621,12 @@ extension _PlayerPageStateControls on _PlayerPageState {
 
   Future<void> _setSystemBrightnessLevel(double value) async {
     try {
-      await _platformChannel.invokeMethod<void>('setSystemBrightnessLevel', {
-        'value': value.clamp(0.0, 1.0),
-      });
+      await _PlayerPageState._platformChannel.invokeMethod<void>(
+        'setSystemBrightnessLevel',
+        {
+          'value': value.clamp(0.0, 1.0),
+        },
+      );
     } catch (_) {
       // System-level gesture must not crash playback page.
     }
@@ -631,9 +634,12 @@ extension _PlayerPageStateControls on _PlayerPageState {
 
   Future<void> _setSystemVolumeLevel(double value) async {
     try {
-      await _platformChannel.invokeMethod<void>('setSystemVolumeLevel', {
-        'value': value.clamp(0.0, 1.0),
-      });
+      await _PlayerPageState._platformChannel.invokeMethod<void>(
+        'setSystemVolumeLevel',
+        {
+          'value': value.clamp(0.0, 1.0),
+        },
+      );
     } catch (_) {
       // System-level gesture must not crash playback page.
     }

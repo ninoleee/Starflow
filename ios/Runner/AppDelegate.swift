@@ -10,6 +10,9 @@ import UIKit
   private static var didInstallTouchRateCorrectionWorkaround = false
   private var platformChannel: FlutterMethodChannel?
   private var playbackSessionChannel: FlutterMethodChannel?
+  private let systemVolumeView = MPVolumeView(
+    frame: CGRect(x: -1000, y: -1000, width: 1, height: 1)
+  )
   private let settingsDocumentExporter = SettingsDocumentExporter()
   private let nativePlaybackStore = NativePlaybackMemoryStore()
   private lazy var playbackSystemSessionBridge = PlaybackSystemSessionBridge {
