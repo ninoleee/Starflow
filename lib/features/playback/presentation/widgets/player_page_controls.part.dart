@@ -479,8 +479,9 @@ extension _PlayerPageStateControls on _PlayerPageState {
             ? 42.0
             : 0.0;
     final enableVerticalGestureControls = _supportsAdaptiveVerticalGestures;
-    final normalizedPlayerVolume =
-        (state.player.state.volume / 100.0).clamp(0.0, 1.0).toDouble();
+    final normalizedPlayerVolume = (((_player?.state.volume ?? 100.0) / 100.0)
+            .clamp(0.0, 1.0))
+        .toDouble();
     _adaptiveGestureVolume = normalizedPlayerVolume;
     final seekBarMargin = isPortrait
         ? EdgeInsets.only(
