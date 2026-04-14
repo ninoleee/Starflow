@@ -200,6 +200,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   int? _activePlaybackCleanupToken;
   MpvStallWatchdog? _mpvStallWatchdog;
   bool _mpvStallRecoveryInProgress = false;
+  DateTime? _lastRuntimeMpvErrorAt;
+  int _runtimeMpvErrorBurstCount = 0;
+  int _runtimeMpvErrorRecoveryAttempts = 0;
+  bool _runtimeMpvErrorRecoveryInProgress = false;
 
   @override
   void initState() {
@@ -263,6 +267,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _isReady = false;
     _isEmbeddedMpvFullscreen = false;
     _stopMpvStallWatchdog(clearRecoveryFlag: clearStallRecoveryFlag);
+    _lastRuntimeMpvErrorAt = null;
+    _runtimeMpvErrorBurstCount = 0;
+    _runtimeMpvErrorRecoveryAttempts = 0;
+    _runtimeMpvErrorRecoveryInProgress = false;
     return player;
   }
 
