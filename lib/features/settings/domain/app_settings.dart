@@ -239,9 +239,9 @@ extension PlaybackMpvQualityPresetX on PlaybackMpvQualityPreset {
       case PlaybackMpvQualityPreset.qualityFirst:
         return '优先保留去色带与更锐利的缩放策略，适合更在意观感的场景。';
       case PlaybackMpvQualityPreset.balanced:
-        return '默认推荐，兼顾清晰度、稳定性与设备负载。';
+        return '在清晰度、稳定性与设备负载之间取中间值。';
       case PlaybackMpvQualityPreset.performanceFirst:
-        return '优先降低缩放与后处理压力，适合较弱设备或高码率片源。';
+        return '默认推荐，优先稳播并降低缩放与后处理压力。';
     }
   }
 
@@ -759,7 +759,7 @@ class AppSettings {
     this.playbackBackgroundPlaybackEnabled = true,
     this.playbackEngine = PlaybackEngine.embeddedMpv,
     this.playbackDecodeMode = PlaybackDecodeMode.auto,
-    this.playbackMpvQualityPreset = PlaybackMpvQualityPreset.balanced,
+    this.playbackMpvQualityPreset = PlaybackMpvQualityPreset.performanceFirst,
     this.playbackMpvDoubleTapToSeekEnabled = true,
     this.playbackMpvSwipeToSeekEnabled = true,
     this.playbackMpvLongPressSpeedBoostEnabled = true,

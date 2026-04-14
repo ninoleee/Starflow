@@ -573,17 +573,79 @@ extension _PlayerPageStateControls on _PlayerPageState {
         defaultTargetPlatform == TargetPlatform.iOS;
   }
 
+  Future<void> _bindAdaptiveGestureSystemLevels() async {
+    if (!_supportsAdaptiveVerticalGestures) {
+      return;
+    }
+    final brightness = await _readSystemBrightnessLevel();
+    if (brightness != null && mounted) {
+      setState(() {
+        _adaptiveGestureBrightness = brightness;
+      });
+    }
+    final volume = await _readSystemVolumeLevel();
+    if (volume != null && mounted) {
+      setState(() {
+        _adaptiveGestureVolume = volume;
+      });
+    }
+  }
+
+  Future<double?> _readSystemBrightnessLevel() async {
+    try {
+      final raw = await _platformChannel.invokeMethod<num>(
+        'getSystemBrightnessLevel',
+      );
+      if (raw == null) {
+        return null;
+      }
+      return raw.toDouble().clamp(0.0, 1.0);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<double?> _readSystemVolumeLevel() async {
+    try {
+      final raw = await _platformChannel.invokeMethod<num>(
+        'getSystemVolumeLevel',
+      );
+      if (raw == null) {
+        return null;
+      }
+      return raw.toDouble().clamp(0.0, 1.0);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _setSystemBrightnessLevel(double value) async {
+    try {
+      await _platformChannel.invokeMethod<void>('setSystemBrightnessLevel', {
+        'value': value.clamp(0.0, 1.0),
+      });
+    } catch (_) {
+      // System-level gesture must not crash playback page.
+    }
+  }
+
+  Future<void> _setSystemVolumeLevel(double value) async {
+    try {
+      await _platformChannel.invokeMethod<void>('setSystemVolumeLevel', {
+        'value': value.clamp(0.0, 1.0),
+      });
+    } catch (_) {
+      // System-level gesture must not crash playback page.
+    }
+  }
+
   void _handleAdaptiveVolumeGestureChanged(double value) {
     final clamped = value.clamp(0.0, 1.0);
     if ((_adaptiveGestureVolume - clamped).abs() < 0.01) {
       return;
     }
     _adaptiveGestureVolume = clamped;
-    final player = _player;
-    if (player == null) {
-      return;
-    }
-    unawaited(player.setVolume(clamped * 100.0));
+    unawaited(_setSystemVolumeLevel(clamped));
   }
 
   void _handleAdaptiveBrightnessGestureChanged(double value) {
@@ -592,24 +654,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
       return;
     }
     _adaptiveGestureBrightness = clamped;
-    final player = _player;
-    final native = player?.platform;
-    if (native == null) {
-      return;
-    }
-    final mpvBrightness = (clamped * 200.0) - 100.0;
-    unawaited(
-      Future<void>(() async {
-        try {
-          await (native as dynamic).setProperty(
-            'brightness',
-            mpvBrightness.toStringAsFixed(2),
-          );
-        } catch (_) {
-          // Keep gesture path resilient even on backends that do not expose MPV properties.
-        }
-      }),
-    );
+    unawaited(_setSystemBrightnessLevel(clamped));
   }
 
   List<Widget> _buildAdaptiveMaterialTopButtonBar(

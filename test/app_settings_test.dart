@@ -126,7 +126,9 @@ void main() {
     expect(settings.playbackEngine, PlaybackEngine.embeddedMpv);
     expect(settings.playbackDecodeMode, PlaybackDecodeMode.auto);
     expect(
-        settings.playbackMpvQualityPreset, PlaybackMpvQualityPreset.balanced);
+      settings.playbackMpvQualityPreset,
+      PlaybackMpvQualityPreset.performanceFirst,
+    );
     expect(settings.playbackMpvDoubleTapToSeekEnabled, isTrue);
     expect(settings.playbackMpvSwipeToSeekEnabled, isTrue);
     expect(settings.playbackMpvLongPressSpeedBoostEnabled, isTrue);

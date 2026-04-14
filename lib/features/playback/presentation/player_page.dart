@@ -100,6 +100,9 @@ class PlayerPage extends ConsumerStatefulWidget {
 
 class _PlayerPageState extends ConsumerState<PlayerPage>
     with WidgetsBindingObserver {
+  static const MethodChannel _platformChannel = MethodChannel(
+    'starflow/platform',
+  );
   static const int _maxPlaybackAttempts = 3;
   static const _kSeekStep = Duration(seconds: 10);
   static const _kSubtitleDelaySteps = <double>[-2, -1, -0.5, 0, 0.5, 1, 2];
@@ -215,6 +218,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _activePlaybackCleanupToken = ActivePlaybackCleanupCoordinator.register(
       _handleExternalPlaybackCleanup,
     );
+    unawaited(_bindAdaptiveGestureSystemLevels());
     unawaited(_bindPictureInPictureSupport());
     unawaited(_bindPlaybackSystemSession());
     _initialize();

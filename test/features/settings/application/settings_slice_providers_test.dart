@@ -179,7 +179,7 @@ void main() {
       const SettingsPlaybackSlice(
         playbackEngine: PlaybackEngine.embeddedMpv,
         playbackDecodeMode: PlaybackDecodeMode.auto,
-        playbackMpvQualityPreset: PlaybackMpvQualityPreset.balanced,
+        playbackMpvQualityPreset: PlaybackMpvQualityPreset.performanceFirst,
         playbackMpvDoubleTapToSeekEnabled: true,
         playbackMpvSwipeToSeekEnabled: true,
         playbackMpvLongPressSpeedBoostEnabled: true,
