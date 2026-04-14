@@ -879,7 +879,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
               _selectSubtitleTrack(player, tracks, current),
           onSelectAudio: (tracks, current) =>
               _selectAudioTrack(player, tracks, current),
-          onSetVolume: (value) => player.setVolume(value),
           onAdjustSubtitleDelay: () => _openSubtitleDelayDialog(player),
           onLoadExternalSubtitle: () => _loadExternalSubtitle(player),
           onSearchSubtitlesOnline: () => _showOnlineSubtitleSearch(

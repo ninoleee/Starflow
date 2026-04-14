@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_formatters.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -23,7 +24,6 @@ class PlaybackOptionsDialog extends ConsumerWidget {
     required this.onSelectSpeed,
     required this.onSelectSubtitle,
     required this.onSelectAudio,
-    required this.onSetVolume,
     required this.onAdjustSubtitleDelay,
     required this.onLoadExternalSubtitle,
     required this.onSearchSubtitlesOnline,
@@ -48,7 +48,6 @@ class PlaybackOptionsDialog extends ConsumerWidget {
     List<AudioTrack> tracks,
     AudioTrack current,
   ) onSelectAudio;
-  final Future<void> Function(double value) onSetVolume;
   final Future<void> Function() onAdjustSubtitleDelay;
   final Future<void> Function() onLoadExternalSubtitle;
   final Future<void> Function() onSearchSubtitlesOnline;
@@ -85,33 +84,35 @@ class PlaybackOptionsDialog extends ConsumerWidget {
         (settings) => settings.playbackMpvQualityPreset.label,
       ),
     );
-    return AlertDialog(
-      title: const Text('播放设置'),
-      content: SizedBox(
-        width: 440,
-        child: _PlaybackOptionsDialogBody(
-          player: player,
-          target: target,
-          isTelevision: isTelevision,
-          videoLayoutLabel: videoLayoutLabel,
-          mpvQualityPresetLabel: mpvQualityPresetLabel,
-          subtitleDelayLabel: subtitleDelayLabel,
-          seriesSkipLabel: seriesSkipLabel,
-          onOpenSubtitleOptionsDialog: _openSubtitleOptionsDialog,
-          onSelectMpvQualityPreset: onSelectMpvQualityPreset,
-          onSelectVideoLayout: onSelectVideoLayout,
-          onSelectSpeed: onSelectSpeed,
-          onSelectAudio: onSelectAudio,
-          onSetVolume: onSetVolume,
-          onConfigureSeriesSkip: onConfigureSeriesSkip,
+    return wrapTelevisionDialogFieldTraversal(
+      enabled: isTelevision,
+      child: AlertDialog(
+        title: const Text('播放设置'),
+        content: SizedBox(
+          width: 440,
+          child: _PlaybackOptionsDialogBody(
+            player: player,
+            target: target,
+            isTelevision: isTelevision,
+            videoLayoutLabel: videoLayoutLabel,
+            mpvQualityPresetLabel: mpvQualityPresetLabel,
+            subtitleDelayLabel: subtitleDelayLabel,
+            seriesSkipLabel: seriesSkipLabel,
+            onOpenSubtitleOptionsDialog: _openSubtitleOptionsDialog,
+            onSelectMpvQualityPreset: onSelectMpvQualityPreset,
+            onSelectVideoLayout: onSelectVideoLayout,
+            onSelectSpeed: onSelectSpeed,
+            onSelectAudio: onSelectAudio,
+            onConfigureSeriesSkip: onConfigureSeriesSkip,
+          ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('关闭'),
-        ),
-      ],
     );
   }
 }
@@ -130,7 +131,6 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
     required this.onSelectVideoLayout,
     required this.onSelectSpeed,
     required this.onSelectAudio,
-    required this.onSetVolume,
     required this.onConfigureSeriesSkip,
   });
 
@@ -153,7 +153,6 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
     List<AudioTrack> tracks,
     AudioTrack current,
   ) onSelectAudio;
-  final Future<void> Function(double value) onSetVolume;
   final Future<void> Function() onConfigureSeriesSkip;
 
   @override
@@ -167,7 +166,6 @@ class _PlaybackOptionsDialogBodyState
   StreamSubscription<Track>? _trackSubscription;
   StreamSubscription<PlaylistMode>? _playlistModeSubscription;
   StreamSubscription<double>? _rateSubscription;
-  StreamSubscription<double>? _volumeSubscription;
   StreamSubscription<Duration>? _durationSubscription;
   StreamSubscription<Duration>? _positionSubscription;
   StreamSubscription<int?>? _widthSubscription;
@@ -176,7 +174,6 @@ class _PlaybackOptionsDialogBodyState
   StreamSubscription<bool>? _bufferingSubscription;
   StreamSubscription<double>? _bufferingPercentageSubscription;
   late _PlaybackDialogViewState _viewState;
-  double _lastNonZeroVolume = 100;
 
   @override
   void initState() {
@@ -201,9 +198,6 @@ class _PlaybackOptionsDialogBodyState
 
   void _bindPlayer(Player player) {
     _viewState = _PlaybackDialogViewState.fromPlayer(player);
-    if (_viewState.volume > 0) {
-      _lastNonZeroVolume = _viewState.volume;
-    }
     _tracksSubscription = player.stream.tracks.listen((tracks) {
       if (!mounted) {
         return;
@@ -236,17 +230,6 @@ class _PlaybackOptionsDialogBodyState
       }
       setState(() {
         _viewState = _viewState.copyWith(rate: rate);
-      });
-    });
-    _volumeSubscription = player.stream.volume.listen((volume) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _viewState = _viewState.copyWith(volume: volume);
-        if (volume > 0) {
-          _lastNonZeroVolume = volume;
-        }
       });
     });
     _durationSubscription = player.stream.duration.listen((duration) {
@@ -316,7 +299,6 @@ class _PlaybackOptionsDialogBodyState
     unawaited(_trackSubscription?.cancel());
     unawaited(_playlistModeSubscription?.cancel());
     unawaited(_rateSubscription?.cancel());
-    unawaited(_volumeSubscription?.cancel());
     unawaited(_durationSubscription?.cancel());
     unawaited(_positionSubscription?.cancel());
     unawaited(_widthSubscription?.cancel());
@@ -328,7 +310,6 @@ class _PlaybackOptionsDialogBodyState
     _trackSubscription = null;
     _playlistModeSubscription = null;
     _rateSubscription = null;
-    _volumeSubscription = null;
     _durationSubscription = null;
     _positionSubscription = null;
     _widthSubscription = null;
@@ -339,26 +320,6 @@ class _PlaybackOptionsDialogBodyState
   }
 
   Future<void> _setRate(double value) => widget.player.setRate(value);
-
-  Future<void> _setVolume(double value) async {
-    final normalized = value.clamp(0.0, 100.0);
-    await widget.onSetVolume(normalized);
-    if (normalized > 0) {
-      _lastNonZeroVolume = normalized;
-    }
-  }
-
-  Future<void> _adjustVolume(double delta) {
-    return _setVolume(_viewState.volume + delta);
-  }
-
-  Future<void> _toggleMute() {
-    final current = _viewState.volume;
-    if (current <= 0.5) {
-      return _setVolume(_lastNonZeroVolume.clamp(10.0, 100.0));
-    }
-    return _setVolume(0);
-  }
 
   Future<void> _selectPlaylistMode() async {
     final selection = await showDialog<PlaylistMode>(
@@ -402,7 +363,6 @@ class _PlaybackOptionsDialogBodyState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final volume = _viewState.volume.clamp(0.0, 100.0);
     final positionLabel = formatPlaybackClockDuration(_viewState.position);
     final durationLabel = _viewState.duration > Duration.zero
         ? formatPlaybackClockDuration(_viewState.duration)
@@ -414,7 +374,7 @@ class _PlaybackOptionsDialogBodyState
       _viewState.height,
       fallback: widget.target.resolutionLabel,
     );
-    return ListView(
+    final body = ListView(
       shrinkWrap: true,
       children: [
         Text(
@@ -452,19 +412,14 @@ class _PlaybackOptionsDialogBodyState
         ),
         const SizedBox(height: 8),
         _PlaybackQuickSpeedTile(
+          isTelevision: widget.isTelevision,
           currentRate: _viewState.rate,
           onSetRate: _setRate,
         ),
         const SizedBox(height: 8),
         _PlaybackQuickSeekTile(
+          isTelevision: widget.isTelevision,
           onSeekBy: _seekBy,
-        ),
-        const SizedBox(height: 8),
-        _PlaybackVolumeTile(
-          volume: volume,
-          onChanged: _setVolume,
-          onAdjustByStep: _adjustVolume,
-          onToggleMute: _toggleMute,
         ),
         const SizedBox(height: 12),
         _SectionLabel(
@@ -532,88 +487,7 @@ class _PlaybackOptionsDialogBodyState
         ),
       ],
     );
-  }
-}
-
-class _PlaybackVolumeTile extends StatelessWidget {
-  const _PlaybackVolumeTile({
-    required this.volume,
-    required this.onChanged,
-    required this.onAdjustByStep,
-    required this.onToggleMute,
-  });
-
-  final double volume;
-  final Future<void> Function(double value) onChanged;
-  final Future<void> Function(double delta) onAdjustByStep;
-  final Future<void> Function() onToggleMute;
-
-  @override
-  Widget build(BuildContext context) {
-    final isMuted = volume <= 0.5;
-    return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(12),
-      child: ListTile(
-        leading:
-            Icon(isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded),
-        title: const Text('音量'),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Slider(
-              min: 0,
-              max: 100,
-              value: volume,
-              onChanged: (value) {
-                unawaited(onChanged(value));
-              },
-            ),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                _ActionChipButton(
-                  label: isMuted ? '恢复' : '静音',
-                  icon: isMuted
-                      ? Icons.volume_up_rounded
-                      : Icons.volume_off_rounded,
-                  onTap: onToggleMute,
-                ),
-                _ActionChipButton(
-                  label: '-10',
-                  icon: Icons.remove_rounded,
-                  onTap: () => onAdjustByStep(-10),
-                ),
-                _ActionChipButton(
-                  label: '+10',
-                  icon: Icons.add_rounded,
-                  onTap: () => onAdjustByStep(10),
-                ),
-                _ActionChipButton(
-                  label: '50%',
-                  icon: Icons.adjust_rounded,
-                  onTap: () => onChanged(50),
-                ),
-                _ActionChipButton(
-                  label: '100%',
-                  icon: Icons.graphic_eq_rounded,
-                  onTap: () => onChanged(100),
-                ),
-              ],
-            ),
-          ],
-        ),
-        trailing: SizedBox(
-          width: 40,
-          child: Text(
-            volume.round().toString(),
-            textAlign: TextAlign.right,
-          ),
-        ),
-      ),
-    );
+    return body;
   }
 }
 
@@ -640,59 +514,63 @@ class _PlaybackSubtitleOptionsDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('字幕'),
-      content: SizedBox(
-        width: 440,
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            _PlaybackOptionTile(
-              isTelevision: isTelevision,
-              title: '字幕选择',
-              value: currentSubtitleLabel,
-              onPressed: onSelectSubtitle,
-            ),
-            const SizedBox(height: 10),
-            _PlaybackOptionTile(
-              isTelevision: isTelevision,
-              title: '字幕偏移',
-              value: subtitleDelayLabel,
-              onPressed: onAdjustSubtitleDelay,
-            ),
-            const SizedBox(height: 10),
-            _PlaybackOptionTile(
-              isTelevision: isTelevision,
-              title: '加载外部字幕',
-              value: '选择 SRT / ASS / SSA / VTT',
-              onPressed: onLoadExternalSubtitle,
-            ),
-            const SizedBox(height: 10),
-            _PlaybackOptionTile(
-              isTelevision: isTelevision,
-              title: '在线查找字幕',
-              value: 'SubHD / 搜索引擎',
-              onPressed: onSearchSubtitlesOnline,
-            ),
-            const SizedBox(height: 10),
-            Material(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(12),
-              child: ListTile(
-                leading: const Icon(Icons.format_size_rounded),
-                title: const Text('默认字幕大小'),
-                subtitle: Text('$defaultSubtitleScaleLabel，可在设置页修改'),
+    return wrapTelevisionDialogFieldTraversal(
+      enabled: isTelevision,
+      child: AlertDialog(
+        title: const Text('字幕'),
+        content: SizedBox(
+          width: 440,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              _PlaybackOptionTile(
+                isTelevision: isTelevision,
+                autofocus: isTelevision,
+                title: '字幕选择',
+                value: currentSubtitleLabel,
+                onPressed: onSelectSubtitle,
               ),
-            ),
-          ],
+              const SizedBox(height: 10),
+              _PlaybackOptionTile(
+                isTelevision: isTelevision,
+                title: '字幕偏移',
+                value: subtitleDelayLabel,
+                onPressed: onAdjustSubtitleDelay,
+              ),
+              const SizedBox(height: 10),
+              _PlaybackOptionTile(
+                isTelevision: isTelevision,
+                title: '加载外部字幕',
+                value: '选择 SRT / ASS / SSA / VTT',
+                onPressed: onLoadExternalSubtitle,
+              ),
+              const SizedBox(height: 10),
+              _PlaybackOptionTile(
+                isTelevision: isTelevision,
+                title: '在线查找字幕',
+                value: 'SubHD / 搜索引擎',
+                onPressed: onSearchSubtitlesOnline,
+              ),
+              const SizedBox(height: 10),
+              Material(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+                child: ListTile(
+                  leading: const Icon(Icons.format_size_rounded),
+                  title: const Text('默认字幕大小'),
+                  subtitle: Text('$defaultSubtitleScaleLabel，可在设置页修改'),
+                ),
+              ),
+            ],
+          ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('关闭'),
-        ),
-      ],
     );
   }
 }
@@ -703,15 +581,27 @@ class _PlaybackOptionTile extends StatelessWidget {
     required this.title,
     required this.value,
     required this.onPressed,
+    this.autofocus = false,
   });
 
   final bool isTelevision;
   final String title;
   final String value;
   final Future<void> Function() onPressed;
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
+    if (isTelevision) {
+      return StarflowSelectionTile(
+        title: title,
+        value: value,
+        onPressed: () {
+          unawaited(onPressed());
+        },
+        autofocus: autofocus,
+      );
+    }
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(12),
@@ -799,10 +689,12 @@ class _PlaybackInfoTile extends StatelessWidget {
 
 class _PlaybackQuickSpeedTile extends StatelessWidget {
   const _PlaybackQuickSpeedTile({
+    required this.isTelevision,
     required this.currentRate,
     required this.onSetRate,
   });
 
+  final bool isTelevision;
   final double currentRate;
   final Future<void> Function(double value) onSetRate;
 
@@ -838,8 +730,10 @@ class _PlaybackQuickSpeedTile extends StatelessWidget {
               children: _presetRates.map((rate) {
                 final selected = (currentRate - rate).abs() < 0.01;
                 return _ActionChipButton(
+                  isTelevision: isTelevision,
                   label: formatPlaybackSpeed(rate),
                   selected: selected,
+                  autofocus: isTelevision && rate == _presetRates.first,
                   onTap: () => onSetRate(rate),
                 );
               }).toList(growable: false),
@@ -853,9 +747,11 @@ class _PlaybackQuickSpeedTile extends StatelessWidget {
 
 class _PlaybackQuickSeekTile extends StatelessWidget {
   const _PlaybackQuickSeekTile({
+    required this.isTelevision,
     required this.onSeekBy,
   });
 
+  final bool isTelevision;
   final Future<void> Function(Duration delta) onSeekBy;
 
   static const List<Duration> _seekDeltas = <Duration>[
@@ -890,6 +786,7 @@ class _PlaybackQuickSeekTile extends StatelessWidget {
                 final seconds = delta.inSeconds;
                 final label = seconds > 0 ? '+${seconds}s' : '${seconds}s';
                 return _ActionChipButton(
+                  isTelevision: isTelevision,
                   label: label,
                   icon: seconds < 0
                       ? Icons.replay_10_rounded
@@ -945,19 +842,34 @@ class _InfoRow extends StatelessWidget {
 
 class _ActionChipButton extends StatelessWidget {
   const _ActionChipButton({
+    required this.isTelevision,
     required this.label,
     required this.onTap,
     this.icon,
     this.selected = false,
+    this.autofocus = false,
   });
 
+  final bool isTelevision;
   final String label;
   final IconData? icon;
   final Future<void> Function() onTap;
   final bool selected;
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
+    if (isTelevision) {
+      return StarflowChipButton(
+        label: label,
+        icon: icon,
+        selected: selected,
+        autofocus: autofocus,
+        onPressed: () {
+          unawaited(onTap());
+        },
+      );
+    }
     return ActionChip(
       avatar: icon == null ? null : Icon(icon, size: 18),
       label: Text(label),
@@ -1028,7 +940,6 @@ class _PlaybackDialogViewState {
     required this.currentTrack,
     required this.playlistMode,
     required this.rate,
-    required this.volume,
     required this.duration,
     required this.position,
     required this.width,
@@ -1044,7 +955,6 @@ class _PlaybackDialogViewState {
       currentTrack: player.state.track,
       playlistMode: player.state.playlistMode,
       rate: player.state.rate,
-      volume: player.state.volume,
       duration: player.state.duration,
       position: player.state.position,
       width: player.state.width,
@@ -1059,7 +969,6 @@ class _PlaybackDialogViewState {
   final Track currentTrack;
   final PlaylistMode playlistMode;
   final double rate;
-  final double volume;
   final Duration duration;
   final Duration position;
   final int? width;
@@ -1073,7 +982,6 @@ class _PlaybackDialogViewState {
     Track? currentTrack,
     PlaylistMode? playlistMode,
     double? rate,
-    double? volume,
     Duration? duration,
     Duration? position,
     int? width,
@@ -1087,7 +995,6 @@ class _PlaybackDialogViewState {
       currentTrack: currentTrack ?? this.currentTrack,
       playlistMode: playlistMode ?? this.playlistMode,
       rate: rate ?? this.rate,
-      volume: volume ?? this.volume,
       duration: duration ?? this.duration,
       position: position ?? this.position,
       width: width ?? this.width,

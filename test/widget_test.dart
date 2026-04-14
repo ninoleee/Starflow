@@ -85,7 +85,7 @@ void main() {
       findsAtLeastNWidgets(1),
     );
     expect(find.text('IMDb 8.7'), findsOneWidget);
-    expect(find.text('立即播放'), findsOneWidget);
+    expect(find.text('从头播放'), findsOneWidget);
   });
 
   testWidgets(

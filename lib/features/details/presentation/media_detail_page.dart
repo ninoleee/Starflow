@@ -153,17 +153,6 @@ bool _shouldAutoRefreshOverviewMetadata({
   );
 }
 
-bool _shouldRunEntryMetadataRefresh(MediaDetailTarget target) {
-  if (!_isOverviewMetadataRefreshTarget(target)) {
-    return false;
-  }
-  if (target.sourceKind == MediaSourceKind.nas &&
-      target.sourceId.trim().isNotEmpty) {
-    return false;
-  }
-  return target.title.trim().isNotEmpty || target.searchQuery.trim().isNotEmpty;
-}
-
 Future<String> _resolveTmdbBackdropForTarget({
   required DetailEnrichmentSettings settings,
   required TmdbMetadataClient tmdbMetadataClient,
@@ -1712,17 +1701,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       );
       var currentTarget = runtimePlan.effectiveTarget;
       final enrichmentSettings = ref.read(detailEnrichmentSettingsProvider);
-      if (_shouldRunEntryMetadataRefresh(currentTarget)) {
-        await _refreshMetadata(
-          currentTarget,
-          sessionId: sessionId,
-          showFeedback: false,
-        );
-        if (!_isSessionActive(sessionId)) {
-          return;
-        }
-        currentTarget = _manualOverrideTarget ?? currentTarget;
-      } else if (_shouldAutoRefreshOverviewMetadata(
+      if (_shouldAutoRefreshOverviewMetadata(
         pageTarget: widget.target,
         currentTarget: currentTarget,
         settings: enrichmentSettings,
