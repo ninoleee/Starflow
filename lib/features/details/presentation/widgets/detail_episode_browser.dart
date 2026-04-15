@@ -224,16 +224,6 @@ DetailEpisodeGroup resolveSelectedEpisodeGroup({
   return selectedGroup;
 }
 
-void _ensureDetailBrowserItemVisible(BuildContext context) {
-  unawaited(
-    Scrollable.ensureVisible(
-      context,
-      duration: const Duration(milliseconds: 140),
-      curve: Curves.easeOutCubic,
-    ),
-  );
-}
-
 class DetailEpisodeBrowser extends ConsumerStatefulWidget {
   const DetailEpisodeBrowser({
     super.key,
@@ -353,12 +343,6 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
                     selected: selected,
                     focusId: 'detail:season:${group.id}',
                     autofocus: index == 0,
-                    onFocused: () {
-                      _prefetchSeasonGroup(group);
-                      if (widget.selectedGroupId != group.id) {
-                        widget.onSeasonSelected(group.id);
-                      }
-                    },
                     onTap: () {
                       _prefetchSeasonGroup(group);
                       if (widget.selectedGroupId != group.id) {
@@ -438,7 +422,6 @@ class _DetailSeasonChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
-    this.onFocused,
     this.focusId,
     this.autofocus = false,
   });
@@ -446,7 +429,6 @@ class _DetailSeasonChip extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  final VoidCallback? onFocused;
   final String? focusId;
   final bool autofocus;
 
@@ -456,10 +438,6 @@ class _DetailSeasonChip extends StatelessWidget {
       label: label,
       selected: selected,
       onPressed: onTap,
-      onFocused: () {
-        onFocused?.call();
-        _ensureDetailBrowserItemVisible(context);
-      },
       focusId: focusId,
       autofocus: autofocus,
     );
@@ -635,7 +613,6 @@ class _DetailEpisodeCard extends ConsumerWidget {
     );
     return TvFocusableAction(
       onPressed: onOpenDetail,
-      onFocused: () => _ensureDetailBrowserItemVisible(context),
       focusId: effectiveFocusId.isEmpty ? null : effectiveFocusId,
       autofocus: autofocus,
       borderRadius: borderRadius,

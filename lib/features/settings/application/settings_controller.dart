@@ -225,13 +225,11 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(playbackEngine: playbackEngine));
   }
 
-  Future<void> setPlaybackMpvQualityPreset(
-    PlaybackMpvQualityPreset playbackMpvQualityPreset,
+  Future<void> setPlaybackSubtitleScale(
+    PlaybackSubtitleScale subtitleScale,
   ) async {
     final current = state.value ?? await _repository.load();
-    await _persist(
-      current.copyWith(playbackMpvQualityPreset: playbackMpvQualityPreset),
-    );
+    await _persist(current.copyWith(playbackSubtitleScale: subtitleScale));
   }
 
   Future<void> savePlaybackPreferences({
@@ -243,7 +241,6 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     required bool backgroundPlaybackEnabled,
     required PlaybackEngine playbackEngine,
     required PlaybackDecodeMode playbackDecodeMode,
-    required PlaybackMpvQualityPreset playbackMpvQualityPreset,
     bool? playbackMpvDoubleTapToSeekEnabled,
     bool? playbackMpvSwipeToSeekEnabled,
     bool? playbackMpvLongPressSpeedBoostEnabled,
@@ -267,7 +264,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         playbackBackgroundPlaybackEnabled: backgroundPlaybackEnabled,
         playbackEngine: playbackEngine,
         playbackDecodeMode: playbackDecodeMode,
-        playbackMpvQualityPreset: playbackMpvQualityPreset,
+        playbackMpvQualityPreset: PlaybackMpvQualityPreset.performanceFirst,
         playbackMpvDoubleTapToSeekEnabled: playbackMpvDoubleTapToSeekEnabled ??
             current.playbackMpvDoubleTapToSeekEnabled,
         playbackMpvSwipeToSeekEnabled: playbackMpvSwipeToSeekEnabled ??

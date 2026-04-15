@@ -83,7 +83,7 @@ void main() {
     );
   });
 
-  test('playback slice falls back to balanced mpv preset for unknown value',
+  test('playback slice falls back to performance mpv preset for unknown value',
       () {
     final settings = AppSettings.fromJson({
       'playbackMpvQualityPreset': 'unknown-preset',
@@ -95,7 +95,7 @@ void main() {
 
     expect(
       container.read(settingsPlaybackSliceProvider).playbackMpvQualityPreset,
-      PlaybackMpvQualityPreset.balanced,
+      PlaybackMpvQualityPreset.performanceFirst,
     );
   });
 

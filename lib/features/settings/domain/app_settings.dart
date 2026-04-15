@@ -245,13 +245,10 @@ extension PlaybackMpvQualityPresetX on PlaybackMpvQualityPreset {
     }
   }
 
-  static PlaybackMpvQualityPreset fromName(String raw) {
-    return switch (raw) {
-      'qualityFirst' => PlaybackMpvQualityPreset.qualityFirst,
-      'performanceFirst' => PlaybackMpvQualityPreset.performanceFirst,
-      'balanced' => PlaybackMpvQualityPreset.balanced,
-      _ => PlaybackMpvQualityPreset.balanced,
-    };
+  static PlaybackMpvQualityPreset fromName(String _) {
+    // Older settings may still contain removed presets; collapse everything
+    // to the fixed runtime default to keep playback behavior predictable.
+    return PlaybackMpvQualityPreset.performanceFirst;
   }
 }
 

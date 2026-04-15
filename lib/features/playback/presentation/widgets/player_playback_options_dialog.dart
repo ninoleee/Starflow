@@ -9,16 +9,15 @@ import 'package:starflow/features/playback/presentation/widgets/player_playback_
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
-class PlaybackOptionsDialog extends ConsumerWidget {
+class PlaybackOptionsDialog extends StatelessWidget {
   const PlaybackOptionsDialog({
     super.key,
     required this.player,
     required this.target,
     required this.isTelevision,
-    required this.defaultSubtitleScaleLabel,
     required this.subtitleDelayLabel,
     required this.seriesSkipLabel,
-    required this.onSelectMpvQualityPreset,
+    required this.onSelectSubtitleScale,
     required this.onSelectSubtitle,
     required this.onSelectAudio,
     required this.onAdjustSubtitleDelay,
@@ -30,10 +29,9 @@ class PlaybackOptionsDialog extends ConsumerWidget {
   final Player player;
   final PlaybackTarget target;
   final bool isTelevision;
-  final String defaultSubtitleScaleLabel;
   final String subtitleDelayLabel;
   final String seriesSkipLabel;
-  final Future<void> Function() onSelectMpvQualityPreset;
+  final Future<void> Function() onSelectSubtitleScale;
   final Future<void> Function(
     List<SubtitleTrack> tracks,
     SubtitleTrack current,
@@ -59,8 +57,8 @@ class PlaybackOptionsDialog extends ConsumerWidget {
           isTelevision: isTelevision,
           currentSubtitleLabel:
               formatPlaybackSubtitleTrackLabel(currentTrack.subtitle),
-          defaultSubtitleScaleLabel: defaultSubtitleScaleLabel,
           subtitleDelayLabel: subtitleDelayLabel,
+          onSelectSubtitleScale: onSelectSubtitleScale,
           onSelectSubtitle: () =>
               onSelectSubtitle(tracks.subtitle, currentTrack.subtitle),
           onAdjustSubtitleDelay: onAdjustSubtitleDelay,
@@ -72,12 +70,7 @@ class PlaybackOptionsDialog extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final mpvQualityPresetLabel = ref.watch(
-      appSettingsProvider.select(
-        (settings) => settings.playbackMpvQualityPreset.label,
-      ),
-    );
+  Widget build(BuildContext context) {
     return wrapTelevisionDialogFieldTraversal(
       enabled: isTelevision,
       child: AlertDialog(
@@ -88,11 +81,9 @@ class PlaybackOptionsDialog extends ConsumerWidget {
             player: player,
             target: target,
             isTelevision: isTelevision,
-            mpvQualityPresetLabel: mpvQualityPresetLabel,
             subtitleDelayLabel: subtitleDelayLabel,
             seriesSkipLabel: seriesSkipLabel,
             onOpenSubtitleOptionsDialog: _openSubtitleOptionsDialog,
-            onSelectMpvQualityPreset: onSelectMpvQualityPreset,
             onSelectAudio: onSelectAudio,
             onConfigureSeriesSkip: onConfigureSeriesSkip,
           ),
@@ -113,11 +104,9 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
     required this.player,
     required this.target,
     required this.isTelevision,
-    required this.mpvQualityPresetLabel,
     required this.subtitleDelayLabel,
     required this.seriesSkipLabel,
     required this.onOpenSubtitleOptionsDialog,
-    required this.onSelectMpvQualityPreset,
     required this.onSelectAudio,
     required this.onConfigureSeriesSkip,
   });
@@ -125,7 +114,6 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
   final Player player;
   final PlaybackTarget target;
   final bool isTelevision;
-  final String mpvQualityPresetLabel;
   final String subtitleDelayLabel;
   final String seriesSkipLabel;
   final Future<void> Function(
@@ -133,7 +121,6 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
     Tracks tracks,
     Track currentTrack,
   ) onOpenSubtitleOptionsDialog;
-  final Future<void> Function() onSelectMpvQualityPreset;
   final Future<void> Function(
     List<AudioTrack> tracks,
     AudioTrack current,
@@ -408,13 +395,6 @@ class _PlaybackOptionsDialogBodyState
         const SizedBox(height: 8),
         _PlaybackOptionTile(
           isTelevision: widget.isTelevision,
-          title: 'MPV 画质策略',
-          value: widget.mpvQualityPresetLabel,
-          onPressed: widget.onSelectMpvQualityPreset,
-        ),
-        const SizedBox(height: 8),
-        _PlaybackOptionTile(
-          isTelevision: widget.isTelevision,
           title: '字幕',
           value: buildPlaybackSubtitleOptionsSummary(
             _viewState.currentTrack.subtitle,
@@ -462,12 +442,12 @@ class _PlaybackOptionsDialogBodyState
   }
 }
 
-class _PlaybackSubtitleOptionsDialog extends StatelessWidget {
+class _PlaybackSubtitleOptionsDialog extends ConsumerWidget {
   const _PlaybackSubtitleOptionsDialog({
     required this.isTelevision,
     required this.currentSubtitleLabel,
-    required this.defaultSubtitleScaleLabel,
     required this.subtitleDelayLabel,
+    required this.onSelectSubtitleScale,
     required this.onSelectSubtitle,
     required this.onAdjustSubtitleDelay,
     required this.onLoadExternalSubtitle,
@@ -476,15 +456,20 @@ class _PlaybackSubtitleOptionsDialog extends StatelessWidget {
 
   final bool isTelevision;
   final String currentSubtitleLabel;
-  final String defaultSubtitleScaleLabel;
   final String subtitleDelayLabel;
+  final Future<void> Function() onSelectSubtitleScale;
   final Future<void> Function() onSelectSubtitle;
   final Future<void> Function() onAdjustSubtitleDelay;
   final Future<void> Function() onLoadExternalSubtitle;
   final Future<void> Function() onSearchSubtitlesOnline;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final defaultSubtitleScaleLabel = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.playbackSubtitleScale.label,
+      ),
+    );
     return wrapTelevisionDialogFieldTraversal(
       enabled: isTelevision,
       child: AlertDialog(
@@ -523,14 +508,11 @@ class _PlaybackSubtitleOptionsDialog extends StatelessWidget {
                 onPressed: onSearchSubtitlesOnline,
               ),
               const SizedBox(height: 10),
-              Material(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
-                child: ListTile(
-                  leading: const Icon(Icons.format_size_rounded),
-                  title: const Text('默认字幕大小'),
-                  subtitle: Text('$defaultSubtitleScaleLabel，可在设置页修改'),
-                ),
+              _PlaybackOptionTile(
+                isTelevision: isTelevision,
+                title: '字幕大小',
+                value: defaultSubtitleScaleLabel,
+                onPressed: onSelectSubtitleScale,
               ),
             ],
           ),

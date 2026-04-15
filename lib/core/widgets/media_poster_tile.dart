@@ -23,6 +23,8 @@ class MediaPosterTile extends ConsumerStatefulWidget {
     this.focusNode,
     this.autofocus = false,
     this.tvPosterFocusOutlineOnly = true,
+    this.tvPosterFocusShowBorder = true,
+    this.tvPosterFocusScale = 1.0,
   });
 
   final String title;
@@ -41,6 +43,8 @@ class MediaPosterTile extends ConsumerStatefulWidget {
   final FocusNode? focusNode;
   final bool autofocus;
   final bool tvPosterFocusOutlineOnly;
+  final bool tvPosterFocusShowBorder;
+  final double tvPosterFocusScale;
 
   @override
   ConsumerState<MediaPosterTile> createState() => _MediaPosterTileState();
@@ -52,8 +56,8 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
 
   FocusNode get _effectiveFocusNode =>
       widget.focusNode ??
-      (_ownedFocusNode ??=
-          FocusNode(debugLabel: 'media-poster:${widget.focusId ?? widget.key}'));
+      (_ownedFocusNode ??= FocusNode(
+          debugLabel: 'media-poster:${widget.focusId ?? widget.key}'));
 
   @override
   void initState() {
@@ -193,25 +197,31 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
         valueListenable: _isFocusedNotifier,
         child: posterFrame,
         builder: (context, isPosterFocused, child) {
-          if (!isPosterFocused) {
-            return child!;
-          }
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              child!,
-              IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: Colors.white,
-                      width: 2.4,
+          Widget currentChild = child!;
+          if (isPosterFocused && widget.tvPosterFocusShowBorder) {
+            currentChild = Stack(
+              fit: StackFit.expand,
+              children: [
+                currentChild,
+                IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Colors.white,
+                        width: 2.4,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            );
+          }
+          return AnimatedScale(
+            scale: isPosterFocused ? widget.tvPosterFocusScale : 1.0,
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
+            child: currentChild,
           );
         },
       );
@@ -332,11 +342,11 @@ class _TelevisionPosterAction extends StatelessWidget {
           ),
           _TelevisionPosterContextMenuIntent:
               CallbackAction<_TelevisionPosterContextMenuIntent>(
-                onInvoke: (_) {
-                  onContextAction?.call();
-                  return null;
-                },
-              ),
+            onInvoke: (_) {
+              onContextAction?.call();
+              return null;
+            },
+          ),
         },
         child: Focus(
           focusNode: focusNode,

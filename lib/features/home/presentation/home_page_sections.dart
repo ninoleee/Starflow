@@ -1,5 +1,8 @@
 part of 'home_page.dart';
 
+const double _kHomePosterRailFocusOverflowPadding = 10;
+const double _kHomeCarouselFocusOverflowPadding = 8;
+
 class _HomeSectionSlot extends ConsumerStatefulWidget {
   const _HomeSectionSlot({
     super.key,
@@ -117,13 +120,19 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
           : section.items.isEmpty
               ? _SectionEmptyState(message: section.emptyMessage)
               : SizedBox(
-                  height: 246,
+                  height: 246 + _kHomePosterRailFocusOverflowPadding,
                   child: DesktopHorizontalPager(
                     builder: (context, controller) => ListView.separated(
                       controller: controller,
                       primary: false,
                       physics: const BouncingScrollPhysics(),
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      padding: const EdgeInsets.fromLTRB(
+                        12,
+                        _kHomePosterRailFocusOverflowPadding,
+                        12,
+                        0,
+                      ),
+                      clipBehavior: Clip.none,
                       scrollDirection: Axis.horizontal,
                       itemCount:
                           section.items.length + (openViewAll == null ? 0 : 1),
@@ -146,7 +155,8 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
                                   : null,
                           focusId:
                               'home:section:${section.id}:item:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
-                          autofocus: index == 0,
+                          autofocus:
+                              widget.useHeroNextSectionFocusNode && index == 0,
                         );
                       },
                     ),
@@ -202,6 +212,8 @@ class _HomePosterTile extends StatelessWidget {
         item: item,
       ),
       tvPosterFocusOutlineOnly: true,
+      tvPosterFocusShowBorder: false,
+      tvPosterFocusScale: 1.03,
       focusNode: focusNode,
       focusId: focusId,
       autofocus: autofocus,
@@ -529,11 +541,17 @@ class _HomeSectionLoading extends StatelessWidget {
               ),
             )
           : SizedBox(
-              height: 246,
+              height: 246 + _kHomePosterRailFocusOverflowPadding,
               child: ListView.separated(
                 primary: false,
                 physics: const NeverScrollableScrollPhysics(),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: const EdgeInsets.fromLTRB(
+                  12,
+                  _kHomePosterRailFocusOverflowPadding,
+                  12,
+                  0,
+                ),
+                clipBehavior: Clip.none,
                 scrollDirection: Axis.horizontal,
                 itemCount: 3,
                 separatorBuilder: (context, index) => const SizedBox(width: 10),
@@ -811,8 +829,12 @@ class _HomeCarouselState extends ConsumerState<_HomeCarousel> {
 
     if (isTelevision) {
       return SizedBox(
-        height: 184,
+        height: 184 + _kHomeCarouselFocusOverflowPadding,
         child: ListView.separated(
+          padding: const EdgeInsets.only(
+            top: _kHomeCarouselFocusOverflowPadding,
+          ),
+          clipBehavior: Clip.none,
           scrollDirection: Axis.horizontal,
           itemCount: items.length,
           separatorBuilder: (context, index) => const SizedBox(width: 10),
@@ -826,7 +848,7 @@ class _HomeCarouselState extends ConsumerState<_HomeCarousel> {
                 focusId:
                     '${widget.focusScopePrefix}:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
                 focusNode: index == 0 ? widget.firstItemFocusNode : null,
-                autofocus: index == 0,
+                autofocus: widget.firstItemFocusNode != null && index == 0,
               ),
             );
           },
@@ -872,7 +894,7 @@ class _HomeCarouselTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (isTelevision) {
-      return TvFocusableAction(
+      return _HomeTvScaleAction(
         focusId: focusId,
         focusNode: focusNode,
         autofocus: autofocus,
@@ -880,6 +902,7 @@ class _HomeCarouselTile extends StatelessWidget {
           context.pushNamed('detail', extra: item.detailTarget);
         },
         borderRadius: BorderRadius.circular(18),
+        scale: 1.02,
         child: _HomeCarouselCard(item: item),
       );
     }
@@ -889,6 +912,104 @@ class _HomeCarouselTile extends StatelessWidget {
         context.pushNamed('detail', extra: item.detailTarget);
       },
       child: _HomeCarouselCard(item: item),
+    );
+  }
+}
+
+class _HomeTvScaleAction extends StatefulWidget {
+  const _HomeTvScaleAction({
+    required this.child,
+    required this.onPressed,
+    required this.borderRadius,
+    this.focusId,
+    this.focusNode,
+    this.autofocus = false,
+    this.scale = 1.02,
+  });
+
+  final Widget child;
+  final VoidCallback onPressed;
+  final BorderRadius borderRadius;
+  final String? focusId;
+  final FocusNode? focusNode;
+  final bool autofocus;
+  final double scale;
+
+  @override
+  State<_HomeTvScaleAction> createState() => _HomeTvScaleActionState();
+}
+
+class _HomeTvScaleActionState extends State<_HomeTvScaleAction> {
+  FocusNode? _ownedFocusNode;
+  final ValueNotifier<bool> _isFocusedNotifier = ValueNotifier<bool>(false);
+
+  FocusNode get _effectiveFocusNode =>
+      widget.focusNode ??
+      (_ownedFocusNode ??=
+          FocusNode(debugLabel: 'home-scale-focus:${widget.focusId}'));
+
+  @override
+  void initState() {
+    super.initState();
+    _effectiveFocusNode.addListener(_handleFocusChanged);
+    _handleFocusChanged();
+  }
+
+  @override
+  void didUpdateWidget(covariant _HomeTvScaleAction oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final previousFocusNode = oldWidget.focusNode ?? _ownedFocusNode;
+    final nextFocusNode = _effectiveFocusNode;
+    if (!identical(previousFocusNode, nextFocusNode)) {
+      previousFocusNode?.removeListener(_handleFocusChanged);
+      nextFocusNode.addListener(_handleFocusChanged);
+      _handleFocusChanged();
+      if (oldWidget.focusNode == null && widget.focusNode != null) {
+        _ownedFocusNode?.dispose();
+        _ownedFocusNode = null;
+      }
+    }
+  }
+
+  void _handleFocusChanged() {
+    final isFocused =
+        _effectiveFocusNode.hasFocus || _effectiveFocusNode.hasPrimaryFocus;
+    if (_isFocusedNotifier.value == isFocused) {
+      return;
+    }
+    _isFocusedNotifier.value = isFocused;
+  }
+
+  @override
+  void dispose() {
+    final currentFocusNode = widget.focusNode ?? _ownedFocusNode;
+    currentFocusNode?.removeListener(_handleFocusChanged);
+    _ownedFocusNode?.dispose();
+    _isFocusedNotifier.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: _isFocusedNotifier,
+      child: TvFocusableAction(
+        focusId: widget.focusId,
+        focusNode: _effectiveFocusNode,
+        autofocus: widget.autofocus,
+        onPressed: widget.onPressed,
+        borderRadius: widget.borderRadius,
+        visualStyle: TvFocusVisualStyle.none,
+        child: widget.child,
+      ),
+      builder: (context, isFocused, child) {
+        return AnimatedScale(
+          scale: isFocused ? widget.scale : 1.0,
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          child: child,
+        );
+      },
     );
   }
 }

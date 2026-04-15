@@ -695,7 +695,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
             unawaited(
               _showPlaybackOptions(
                 isTelevision: false,
-                settings: settings,
               ),
             );
           },
@@ -727,7 +726,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
             unawaited(
               _showPlaybackOptions(
                 isTelevision: false,
-                settings: settings,
               ),
             );
           },
@@ -756,7 +754,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
                   unawaited(
                     _showPlaybackOptions(
                       isTelevision: false,
-                      settings: settings,
                     ),
                   );
                 }
@@ -956,7 +953,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
 
   Future<void> _showPlaybackOptions({
     required bool isTelevision,
-    required AppSettings settings,
   }) async {
     final player = _player;
     if (player == null || !mounted) {
@@ -970,7 +966,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
           player: player,
           target: _resolvedTarget ?? widget.target,
           isTelevision: isTelevision,
-          defaultSubtitleScaleLabel: settings.playbackSubtitleScale.label,
           subtitleDelayLabel: formatSubtitleDelayLabel(
             _subtitleDelaySeconds,
             supported: _subtitleDelaySupported,
@@ -979,7 +974,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
             _seriesSkipPreference,
             target: _resolvedTarget ?? widget.target,
           ),
-          onSelectMpvQualityPreset: _selectPlaybackMpvQualityPreset,
+          onSelectSubtitleScale: _selectSubtitleScale,
           onSelectSubtitle: (tracks, current) =>
               _selectSubtitleTrack(player, tracks, current),
           onSelectAudio: (tracks, current) =>
@@ -996,41 +991,37 @@ extension _PlayerPageStateControls on _PlayerPageState {
     );
   }
 
-  Future<void> _selectPlaybackMpvQualityPreset() async {
-    final currentPreset = _playbackMpvQualityPreset;
-    final selection = await showDialog<PlaybackMpvQualityPreset>(
+  Future<void> _selectSubtitleScale() async {
+    final currentScale = ref.read(appSettingsProvider).playbackSubtitleScale;
+    final selection = await showDialog<PlaybackSubtitleScale>(
       context: context,
       builder: (dialogContext) {
         return SimpleDialog(
-          title: const Text('MPV 画质策略'),
+          title: const Text('字幕大小'),
           children: [
-            for (final preset in PlaybackMpvQualityPreset.values)
+            for (final scale in PlaybackSubtitleScale.values)
               SimpleDialogOption(
-                onPressed: () => Navigator.of(dialogContext).pop(preset),
+                onPressed: () => Navigator.of(dialogContext).pop(scale),
                 child: Text(
-                  preset == currentPreset
-                      ? '${preset.label}  当前'
-                      : preset.label,
+                  scale == currentScale ? '${scale.label}  当前' : scale.label,
                 ),
               ),
           ],
         );
       },
     );
-    if (selection == null || selection == currentPreset) {
+    if (selection == null || selection == currentScale) {
       return;
     }
 
     await ref
         .read(settingsControllerProvider.notifier)
-        .setPlaybackMpvQualityPreset(selection);
-
-    final player = _player;
-    final target = _resolvedTarget ?? widget.target;
-    if (player != null) {
-      await _applyMpvPerformanceTuning(player, target);
+        .setPlaybackSubtitleScale(selection);
+    if (!mounted) {
+      return;
     }
-    _showMessage('MPV 画质策略已切换为 ${selection.label}');
+    setState(() {});
+    _showMessage('字幕大小已切换为 ${selection.label}');
   }
 
   Future<void> _selectSubtitleTrack(

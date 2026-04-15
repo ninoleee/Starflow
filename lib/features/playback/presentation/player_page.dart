@@ -388,7 +388,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _playbackSettings.playbackDecodeMode;
 
   PlaybackMpvQualityPreset get _playbackMpvQualityPreset =>
-      _playbackSettings.playbackMpvQualityPreset;
+      PlaybackMpvQualityPreset.performanceFirst;
 
   bool get _mpvDoubleTapToSeekEnabled =>
       _playbackSettings.playbackMpvDoubleTapToSeekEnabled;
@@ -665,7 +665,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 }
                 _showPlaybackOptions(
                   isTelevision: isTelevision,
-                  settings: playbackSettings,
                 );
                 return null;
               },

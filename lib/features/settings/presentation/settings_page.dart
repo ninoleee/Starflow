@@ -517,8 +517,6 @@ class SettingsPage extends ConsumerStatefulWidget {
               playbackSlice.configuredBackgroundPlaybackEnabled,
           initialPlaybackEngine: playbackSlice.playbackEngine,
           initialPlaybackDecodeMode: playbackSlice.playbackDecodeMode,
-          initialPlaybackMpvQualityPreset:
-              playbackSlice.playbackMpvQualityPreset,
           initialPlaybackMpvDoubleTapToSeekEnabled:
               playbackSlice.playbackMpvDoubleTapToSeekEnabled,
           initialPlaybackMpvSwipeToSeekEnabled:
@@ -745,7 +743,6 @@ String _playbackSettingsSummary(
   return [
     playbackSlice.playbackEngine.label,
     playbackSlice.playbackDecodeMode.label,
-    'MPV ${playbackSlice.playbackMpvQualityPreset.label}',
     if (playbackSlice.playbackEngine == PlaybackEngine.embeddedMpv)
       playbackSlice.playbackMpvDoubleTapToSeekEnabled ||
               playbackSlice.playbackMpvSwipeToSeekEnabled ||
