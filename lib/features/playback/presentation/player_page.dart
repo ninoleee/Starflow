@@ -149,6 +149,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   final PlaybackRemotePreflight _playbackRemotePreflight =
       PlaybackRemotePreflight();
   PlaybackRemotePreflightResult? _lastRemotePreflight;
+  LogicalKeyboardKey? _tvSeekHoldKey;
+  DateTime? _tvSeekHoldStartedAt;
+  int _tvSeekHoldRepeatCount = 0;
 
   void _updateTvPlaybackState({
     Duration? position,
@@ -583,6 +586,72 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     context.pop();
   }
 
+  bool _isTvSeekKey(LogicalKeyboardKey key) {
+    return key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.arrowRight;
+  }
+
+  void _resetTvSeekHold({LogicalKeyboardKey? key}) {
+    if (key != null && _tvSeekHoldKey != key) {
+      return;
+    }
+    _tvSeekHoldKey = null;
+    _tvSeekHoldStartedAt = null;
+    _tvSeekHoldRepeatCount = 0;
+  }
+
+  Duration _resolveTvSeekStep({
+    required Duration heldFor,
+    required int repeatCount,
+  }) {
+    // Match common TV players: single press seeks a fixed step, long press
+    // progressively increases the jump size.
+    if (heldFor >= const Duration(seconds: 5) || repeatCount >= 12) {
+      return const Duration(minutes: 2);
+    }
+    if (heldFor >= const Duration(seconds: 3) || repeatCount >= 7) {
+      return const Duration(minutes: 1);
+    }
+    if (heldFor >= const Duration(milliseconds: 1500) || repeatCount >= 3) {
+      return const Duration(seconds: 30);
+    }
+    return _kSeekStep;
+  }
+
+  KeyEventResult _handleTvSeekKeyEvent(KeyEvent event) {
+    if (!_isTelevisionPlaybackDevice || !_isTvSeekKey(event.logicalKey)) {
+      return KeyEventResult.ignored;
+    }
+
+    final key = event.logicalKey;
+    if (event is KeyUpEvent) {
+      _resetTvSeekHold(key: key);
+      return KeyEventResult.handled;
+    }
+
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    if (_tvSeekHoldKey != key || _tvSeekHoldStartedAt == null) {
+      _tvSeekHoldKey = key;
+      _tvSeekHoldStartedAt = DateTime.now();
+      _tvSeekHoldRepeatCount = 0;
+    } else if (event is KeyRepeatEvent) {
+      _tvSeekHoldRepeatCount += 1;
+    }
+
+    final heldFor = DateTime.now().difference(_tvSeekHoldStartedAt!);
+    final step = _resolveTvSeekStep(
+      heldFor: heldFor,
+      repeatCount: _tvSeekHoldRepeatCount,
+    );
+    final direction = key == LogicalKeyboardKey.arrowLeft ? -1 : 1;
+    final delta = Duration(milliseconds: step.inMilliseconds * direction);
+    unawaited(_seekRelative(delta));
+    return KeyEventResult.handled;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -633,10 +702,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     _OpenPlaybackOptionsIntent(),
                 SingleActivator(LogicalKeyboardKey.gameButtonY):
                     _OpenPlaybackOptionsIntent(),
-                SingleActivator(LogicalKeyboardKey.arrowLeft):
-                    DirectionalFocusIntent(TraversalDirection.left),
-                SingleActivator(LogicalKeyboardKey.arrowRight):
-                    DirectionalFocusIntent(TraversalDirection.right),
               }
             : const <ShortcutActivator, Intent>{},
         child: Actions(
@@ -678,20 +743,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 return null;
               },
             ),
-            DirectionalFocusIntent: CallbackAction<DirectionalFocusIntent>(
-              onInvoke: (intent) {
-                if (intent.direction == TraversalDirection.left) {
-                  _seekRelative(-_kSeekStep);
-                } else if (intent.direction == TraversalDirection.right) {
-                  _seekRelative(_kSeekStep);
-                }
-                return null;
-              },
-            ),
           },
           child: Focus(
             autofocus: true,
             canRequestFocus: isTelevision,
+            onKeyEvent: (_, event) => _handleTvSeekKeyEvent(event),
             child: Scaffold(
               backgroundColor: Colors.black,
               body: !isTelevision
@@ -722,12 +778,29 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                 if (player == null) {
                                   return const SizedBox.shrink();
                                 }
+                                final resolvedPosition =
+                                    state.position > Duration.zero
+                                        ? state.position
+                                        : _latestPosition;
+                                final resolvedDuration =
+                                    state.duration > Duration.zero
+                                        ? state.duration
+                                        : (_latestDuration > Duration.zero
+                                            ? _latestDuration
+                                            : player.state.duration);
                                 return PlayerTvPlaybackChrome(
-                                  position: state.position,
-                                  duration: state.duration,
-                                  playing: state.playing,
+                                  title:
+                                      (_resolvedTarget ?? widget.target).title,
+                                  position: resolvedPosition,
+                                  duration: resolvedDuration,
+                                  playing:
+                                      state.playing || player.state.playing,
                                   bufferingPercentage:
                                       state.bufferingPercentage,
+                                  onBack: () {
+                                    unawaited(_handleTvBack());
+                                  },
+                                  onTogglePlayback: _togglePlayback,
                                   onOpenSubtitle: () {
                                     _showTvPlaybackChrome(autoHide: false);
                                     unawaited(
@@ -738,6 +811,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                     _showTvPlaybackChrome(autoHide: false);
                                     unawaited(
                                       _openCurrentAudioSelector(),
+                                    );
+                                  },
+                                  onOpenOptions: () {
+                                    _showTvPlaybackChrome(autoHide: false);
+                                    unawaited(
+                                      _showPlaybackOptions(isTelevision: true),
                                     );
                                   },
                                 );

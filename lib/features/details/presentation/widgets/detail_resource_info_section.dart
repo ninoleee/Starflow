@@ -477,7 +477,7 @@ class _DetailLibraryMatchSelectionControl extends StatelessWidget {
 
     final selectedIndex = viewData.effectiveSelectedIndex;
     if (isTelevision) {
-      return TvSelectionTile(
+      return _DetailTelevisionSelectionTile(
         title: title,
         value: labelBuilder(viewData.choices[selectedIndex]),
         onPressed: viewData.isMatching ? null : televisionOnPressed,
@@ -567,6 +567,70 @@ bool _canShowManualResourceMatchButton(MediaDetailTarget target) {
     return true;
   }
   return target.title.trim().isNotEmpty || target.searchQuery.trim().isNotEmpty;
+}
+
+class _DetailTelevisionSelectionTile extends StatelessWidget {
+  const _DetailTelevisionSelectionTile({
+    required this.title,
+    required this.value,
+    required this.onPressed,
+    this.focusId,
+  });
+
+  final String title;
+  final String value;
+  final VoidCallback? onPressed;
+  final String? focusId;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return TvFocusableAction(
+      onPressed: onPressed,
+      focusId: focusId,
+      borderRadius: BorderRadius.circular(18),
+      visualStyle: TvFocusVisualStyle.subtle,
+      focusScale: 1.03,
+      child: Opacity(
+        opacity: onPressed == null ? 0.5 : 1,
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(title),
+                    if (value.trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          value.trim(),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 List<_DetailResourceFact> _buildDetailResourceFacts(MediaDetailTarget target) {

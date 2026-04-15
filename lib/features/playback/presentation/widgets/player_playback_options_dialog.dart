@@ -17,7 +17,6 @@ class PlaybackOptionsDialog extends StatelessWidget {
     required this.isTelevision,
     required this.subtitleDelayLabel,
     required this.seriesSkipLabel,
-    required this.onSelectSubtitleScale,
     required this.onSelectSubtitle,
     required this.onSelectAudio,
     required this.onAdjustSubtitleDelay,
@@ -31,7 +30,6 @@ class PlaybackOptionsDialog extends StatelessWidget {
   final bool isTelevision;
   final String subtitleDelayLabel;
   final String seriesSkipLabel;
-  final Future<void> Function() onSelectSubtitleScale;
   final Future<void> Function(
     List<SubtitleTrack> tracks,
     SubtitleTrack current,
@@ -58,7 +56,6 @@ class PlaybackOptionsDialog extends StatelessWidget {
           currentSubtitleLabel:
               formatPlaybackSubtitleTrackLabel(currentTrack.subtitle),
           subtitleDelayLabel: subtitleDelayLabel,
-          onSelectSubtitleScale: onSelectSubtitleScale,
           onSelectSubtitle: () =>
               onSelectSubtitle(tracks.subtitle, currentTrack.subtitle),
           onAdjustSubtitleDelay: onAdjustSubtitleDelay,
@@ -134,6 +131,14 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
 
 class _PlaybackOptionsDialogBodyState
     extends State<_PlaybackOptionsDialogBody> {
+  static const List<double> _kPlaybackRatePresets = <double>[
+    0.75,
+    1.0,
+    1.25,
+    1.5,
+    2.0,
+  ];
+
   StreamSubscription<Tracks>? _tracksSubscription;
   StreamSubscription<Track>? _trackSubscription;
   StreamSubscription<PlaylistMode>? _playlistModeSubscription;
@@ -293,6 +298,32 @@ class _PlaybackOptionsDialogBodyState
 
   Future<void> _setRate(double value) => widget.player.setRate(value);
 
+  Future<void> _selectPlaybackSpeed() async {
+    final selection = await showDialog<double>(
+      context: context,
+      builder: (dialogContext) {
+        return SimpleDialog(
+          title: const Text('播放速度'),
+          children: [
+            for (final rate in _kPlaybackRatePresets)
+              SimpleDialogOption(
+                onPressed: () => Navigator.of(dialogContext).pop(rate),
+                child: Text(
+                  (rate - _viewState.rate).abs() < 0.01
+                      ? '${formatPlaybackSpeed(rate)}  当前'
+                      : formatPlaybackSpeed(rate),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+    if (selection == null || (selection - _viewState.rate).abs() < 0.01) {
+      return;
+    }
+    await _setRate(selection);
+  }
+
   Future<void> _selectPlaylistMode() async {
     final selection = await showDialog<PlaylistMode>(
       context: context,
@@ -317,19 +348,6 @@ class _PlaybackOptionsDialogBodyState
       return;
     }
     await widget.player.setPlaylistMode(selection);
-  }
-
-  Future<void> _seekBy(Duration delta) async {
-    final current = _viewState.position;
-    final duration = _viewState.duration;
-    var target = current + delta;
-    if (target < Duration.zero) {
-      target = Duration.zero;
-    }
-    if (duration > Duration.zero && target > duration) {
-      target = duration;
-    }
-    await widget.player.seek(target);
   }
 
   @override
@@ -366,24 +384,15 @@ class _PlaybackOptionsDialogBodyState
         ),
         const SizedBox(height: 12),
         _SectionLabel(
-          title: '快捷操作',
-          icon: Icons.flash_on_rounded,
-        ),
-        const SizedBox(height: 8),
-        _PlaybackQuickSpeedTile(
-          isTelevision: widget.isTelevision,
-          currentRate: _viewState.rate,
-          onSetRate: _setRate,
-        ),
-        const SizedBox(height: 8),
-        _PlaybackQuickSeekTile(
-          isTelevision: widget.isTelevision,
-          onSeekBy: _seekBy,
-        ),
-        const SizedBox(height: 12),
-        _SectionLabel(
           title: '详细设置',
           icon: Icons.tune_rounded,
+        ),
+        const SizedBox(height: 8),
+        _PlaybackOptionTile(
+          isTelevision: widget.isTelevision,
+          title: '速度',
+          value: formatPlaybackSpeed(_viewState.rate),
+          onPressed: _selectPlaybackSpeed,
         ),
         const SizedBox(height: 8),
         _PlaybackOptionTile(
@@ -447,7 +456,6 @@ class _PlaybackSubtitleOptionsDialog extends ConsumerWidget {
     required this.isTelevision,
     required this.currentSubtitleLabel,
     required this.subtitleDelayLabel,
-    required this.onSelectSubtitleScale,
     required this.onSelectSubtitle,
     required this.onAdjustSubtitleDelay,
     required this.onLoadExternalSubtitle,
@@ -457,7 +465,6 @@ class _PlaybackSubtitleOptionsDialog extends ConsumerWidget {
   final bool isTelevision;
   final String currentSubtitleLabel;
   final String subtitleDelayLabel;
-  final Future<void> Function() onSelectSubtitleScale;
   final Future<void> Function() onSelectSubtitle;
   final Future<void> Function() onAdjustSubtitleDelay;
   final Future<void> Function() onLoadExternalSubtitle;
@@ -465,11 +472,24 @@ class _PlaybackSubtitleOptionsDialog extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final defaultSubtitleScaleLabel = ref.watch(
+    final subtitleScale = ref.watch(
       appSettingsProvider.select(
-        (settings) => settings.playbackSubtitleScale.label,
+        (settings) => settings.playbackSubtitleScale,
       ),
     );
+    final subtitleScaleValues = PlaybackSubtitleScale.values;
+    final subtitleScaleIndex = subtitleScaleValues.indexOf(subtitleScale);
+
+    Future<void> shiftSubtitleScale(int delta) async {
+      final nextIndex = subtitleScaleIndex + delta;
+      if (nextIndex < 0 || nextIndex >= subtitleScaleValues.length) {
+        return;
+      }
+      await ref
+          .read(settingsControllerProvider.notifier)
+          .setPlaybackSubtitleScale(subtitleScaleValues[nextIndex]);
+    }
+
     return wrapTelevisionDialogFieldTraversal(
       enabled: isTelevision,
       child: AlertDialog(
@@ -508,11 +528,16 @@ class _PlaybackSubtitleOptionsDialog extends ConsumerWidget {
                 onPressed: onSearchSubtitlesOnline,
               ),
               const SizedBox(height: 10),
-              _PlaybackOptionTile(
+              _PlaybackStepperTile(
                 isTelevision: isTelevision,
                 title: '字幕大小',
-                value: defaultSubtitleScaleLabel,
-                onPressed: onSelectSubtitleScale,
+                value: subtitleScale.label,
+                onDecrease: subtitleScaleIndex > 0
+                    ? () => shiftSubtitleScale(-1)
+                    : null,
+                onIncrease: subtitleScaleIndex < subtitleScaleValues.length - 1
+                    ? () => shiftSubtitleScale(1)
+                    : null,
               ),
             ],
           ),
@@ -640,121 +665,6 @@ class _PlaybackInfoTile extends StatelessWidget {
   }
 }
 
-class _PlaybackQuickSpeedTile extends StatelessWidget {
-  const _PlaybackQuickSpeedTile({
-    required this.isTelevision,
-    required this.currentRate,
-    required this.onSetRate,
-  });
-
-  final bool isTelevision;
-  final double currentRate;
-  final Future<void> Function(double value) onSetRate;
-
-  static const List<double> _presetRates = <double>[
-    0.75,
-    1.0,
-    1.25,
-    1.5,
-    2.0,
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '速度快捷',
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: _presetRates.map((rate) {
-                final selected = (currentRate - rate).abs() < 0.01;
-                return _ActionChipButton(
-                  isTelevision: isTelevision,
-                  label: formatPlaybackSpeed(rate),
-                  selected: selected,
-                  autofocus: isTelevision && rate == _presetRates.first,
-                  onTap: () => onSetRate(rate),
-                );
-              }).toList(growable: false),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PlaybackQuickSeekTile extends StatelessWidget {
-  const _PlaybackQuickSeekTile({
-    required this.isTelevision,
-    required this.onSeekBy,
-  });
-
-  final bool isTelevision;
-  final Future<void> Function(Duration delta) onSeekBy;
-
-  static const List<Duration> _seekDeltas = <Duration>[
-    Duration(seconds: -30),
-    Duration(seconds: -10),
-    Duration(seconds: 10),
-    Duration(seconds: 30),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '快捷跳转',
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: _seekDeltas.map((delta) {
-                final seconds = delta.inSeconds;
-                final label = seconds > 0 ? '+${seconds}s' : '${seconds}s';
-                return _ActionChipButton(
-                  isTelevision: isTelevision,
-                  label: label,
-                  icon: seconds < 0
-                      ? Icons.replay_10_rounded
-                      : Icons.forward_10_rounded,
-                  onTap: () => onSeekBy(delta),
-                );
-              }).toList(growable: false),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _InfoRow extends StatelessWidget {
   const _InfoRow({
     required this.label,
@@ -793,44 +703,123 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-class _ActionChipButton extends StatelessWidget {
-  const _ActionChipButton({
+class _PlaybackStepperTile extends StatelessWidget {
+  const _PlaybackStepperTile({
+    required this.isTelevision,
+    required this.title,
+    required this.value,
+    required this.onDecrease,
+    required this.onIncrease,
+  });
+
+  final bool isTelevision;
+  final String title;
+  final String value;
+  final Future<void> Function()? onDecrease;
+  final Future<void> Function()? onIncrease;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Expanded(child: Text(title)),
+            const SizedBox(width: 12),
+            _PlaybackStepperActionButton(
+              isTelevision: isTelevision,
+              label: '-',
+              icon: Icons.remove_rounded,
+              onPressed: onDecrease,
+            ),
+            const SizedBox(width: 8),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: theme.colorScheme.outlineVariant),
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 76),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  child: Text(
+                    value,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            _PlaybackStepperActionButton(
+              isTelevision: isTelevision,
+              label: '+',
+              icon: Icons.add_rounded,
+              onPressed: onIncrease,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlaybackStepperActionButton extends StatelessWidget {
+  const _PlaybackStepperActionButton({
     required this.isTelevision,
     required this.label,
-    required this.onTap,
-    this.icon,
-    this.selected = false,
-    this.autofocus = false,
+    required this.icon,
+    required this.onPressed,
   });
 
   final bool isTelevision;
   final String label;
-  final IconData? icon;
-  final Future<void> Function() onTap;
-  final bool selected;
-  final bool autofocus;
+  final IconData icon;
+  final Future<void> Function()? onPressed;
 
   @override
   Widget build(BuildContext context) {
     if (isTelevision) {
-      return StarflowChipButton(
-        label: label,
-        icon: icon,
-        selected: selected,
-        autofocus: autofocus,
-        onPressed: () {
-          unawaited(onTap());
-        },
+      return SizedBox(
+        width: 56,
+        child: StarflowChipButton(
+          label: label,
+          selected: false,
+          onPressed: onPressed == null
+              ? null
+              : () {
+                  unawaited(onPressed!());
+                },
+        ),
       );
     }
-    return ActionChip(
-      avatar: icon == null ? null : Icon(icon, size: 18),
-      label: Text(label),
-      onPressed: () {
-        unawaited(onTap());
-      },
-      backgroundColor:
-          selected ? Theme.of(context).colorScheme.primaryContainer : null,
+    return SizedBox(
+      width: 42,
+      height: 42,
+      child: OutlinedButton(
+        onPressed: onPressed == null
+            ? null
+            : () {
+                unawaited(onPressed!());
+              },
+        style: OutlinedButton.styleFrom(
+          padding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+        child: Icon(icon, size: 18),
+      ),
     );
   }
 }

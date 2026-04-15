@@ -581,8 +581,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
     if (!mounted) {
       return;
     }
-    final brightnessChanged =
-        brightness != null &&
+    final brightnessChanged = brightness != null &&
         (_adaptiveGestureBrightness - brightness).abs() >= 0.01;
     final volumeChanged =
         volume != null && (_adaptiveGestureVolume - volume).abs() >= 0.01;
@@ -1000,7 +999,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
             _seriesSkipPreference,
             target: _resolvedTarget ?? widget.target,
           ),
-          onSelectSubtitleScale: _selectSubtitleScale,
           onSelectSubtitle: (tracks, current) =>
               _selectSubtitleTrack(player, tracks, current),
           onSelectAudio: (tracks, current) =>
@@ -1015,39 +1013,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
         );
       },
     );
-  }
-
-  Future<void> _selectSubtitleScale() async {
-    final currentScale = ref.read(appSettingsProvider).playbackSubtitleScale;
-    final selection = await showDialog<PlaybackSubtitleScale>(
-      context: context,
-      builder: (dialogContext) {
-        return SimpleDialog(
-          title: const Text('字幕大小'),
-          children: [
-            for (final scale in PlaybackSubtitleScale.values)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(dialogContext).pop(scale),
-                child: Text(
-                  scale == currentScale ? '${scale.label}  当前' : scale.label,
-                ),
-              ),
-          ],
-        );
-      },
-    );
-    if (selection == null || selection == currentScale) {
-      return;
-    }
-
-    await ref
-        .read(settingsControllerProvider.notifier)
-        .setPlaybackSubtitleScale(selection);
-    if (!mounted) {
-      return;
-    }
-    setState(() {});
-    _showMessage('字幕大小已切换为 ${selection.label}');
   }
 
   Future<void> _selectSubtitleTrack(

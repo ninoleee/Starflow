@@ -185,6 +185,14 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         _latestPosition = playback.player.state.position;
         _latestDuration = playback.player.state.duration;
       });
+      if (_isTelevisionPlaybackDevice) {
+        _updateTvPlaybackState(
+          position: playback.player.state.position,
+          duration: playback.player.state.duration,
+          playing: playback.player.state.playing,
+          bufferingPercentage: playback.player.state.bufferingPercentage,
+        );
+      }
       await _syncSubtitleDelayState(playback.player);
       await _restorePlaybackProgress(playback.player, resumeEntry);
       _syncSkipFlagsWithCurrentPosition();
@@ -437,16 +445,15 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     final lowerMessage = message.toLowerCase();
     final now = DateTime.now();
     if (_lastRuntimeMpvErrorAt != null &&
-        now.difference(_lastRuntimeMpvErrorAt!) <= _kRuntimeMpvErrorBurstWindow)
-    {
+        now.difference(_lastRuntimeMpvErrorAt!) <=
+            _kRuntimeMpvErrorBurstWindow) {
       _runtimeMpvErrorBurstCount += 1;
     } else {
       _runtimeMpvErrorBurstCount = 1;
     }
     _lastRuntimeMpvErrorAt = now;
 
-    final shouldEscalateImmediately =
-        _isFatalRuntimeMpvError(message) ||
+    final shouldEscalateImmediately = _isFatalRuntimeMpvError(message) ||
         (_runtimeMpvErrorBurstCount > 1 &&
             !_isRecoverableRuntimeMpvError(
               target: target,
@@ -567,8 +574,8 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         return false;
       }
       final state = player.state;
-      final progressed =
-          state.position - baselinePosition >= const Duration(milliseconds: 800);
+      final progressed = state.position - baselinePosition >=
+          const Duration(milliseconds: 800);
       final healthy = state.playing &&
           !state.buffering &&
           (progressed || _hasStrictPlaybackMetadata(player));
@@ -646,8 +653,8 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         widget.target.itemId.trim().isNotEmpty ? widget.target : target;
     final streamUrl = baseTarget.streamUrl.trim().toLowerCase();
     final actualAddress = baseTarget.actualAddress.trim().toLowerCase();
-    final needsFreshResolution =
-        baseTarget.sourceKind == MediaSourceKind.quark ||
+    final needsFreshResolution = baseTarget.sourceKind ==
+            MediaSourceKind.quark ||
         baseTarget.sourceKind == MediaSourceKind.emby ||
         (baseTarget.sourceKind == MediaSourceKind.nas &&
             (streamUrl.endsWith('.strm') || actualAddress.endsWith('.strm')));

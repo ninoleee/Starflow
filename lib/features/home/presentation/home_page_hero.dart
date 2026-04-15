@@ -829,8 +829,7 @@ class _HeroPagerButton extends StatelessWidget {
         focusNode: focusNode,
         focusId: focusId,
         borderRadius: BorderRadius.circular(999),
-        visualStyle: TvFocusVisualStyle.none,
-        focusScale: 1.08,
+        visualStyle: TvFocusVisualStyle.subtle,
         child: child,
       ),
     );
