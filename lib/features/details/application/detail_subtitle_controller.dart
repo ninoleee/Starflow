@@ -98,11 +98,13 @@ class DetailSubtitleSelectionNeedsDownload
     extends DetailSubtitleSelectionDecision {
   const DetailSubtitleSelectionNeedsDownload({
     required this.selectionIndex,
+    required this.previousSelectedIndex,
     required this.selectedOption,
     required super.nextViewData,
   });
 
   final int selectionIndex;
+  final int previousSelectedIndex;
   final CachedSubtitleSearchOption selectedOption;
 }
 
@@ -202,7 +204,8 @@ class DetailSubtitleController {
     final statusMessage = nextChoices.isEmpty ? '没有找到可直接加载的字幕结果' : null;
     final nextSelectedIndex = previousSelectedId == null
         ? -1
-        : nextChoices.indexWhere((item) => item.result.id == previousSelectedId);
+        : nextChoices
+            .indexWhere((item) => item.result.id == previousSelectedId);
     final resolvedSelectedIndex = normalizeSubtitleSearchIndex(
       nextSelectedIndex,
       choices: nextChoices,
@@ -263,10 +266,12 @@ class DetailSubtitleController {
 
     return DetailSubtitleSelectionNeedsDownload(
       selectionIndex: resolvedIndex,
+      previousSelectedIndex: currentViewData.selectedIndex,
       selectedOption: selected,
       nextViewData: currentViewData.copyWith(
+        selectedIndex: resolvedIndex,
         busyResultId: selected.result.id,
-        statusMessage: null,
+        statusMessage: '正在缓存所选字幕...',
       ),
     );
   }
@@ -304,14 +309,21 @@ class DetailSubtitleController {
       choices: nextChoices,
       selectedIndex: resolvedIndex,
       busyResultId: null,
+      statusMessage: null,
     );
   }
 
   DetailSubtitleSearchViewState applyDownloadedSelectionFailure({
     required DetailSubtitleSearchViewState currentViewData,
+    required int fallbackSelectedIndex,
     required Object error,
   }) {
+    final resolvedSelectedIndex = normalizeSubtitleSearchIndex(
+      fallbackSelectedIndex,
+      choices: currentViewData.choices,
+    );
     return currentViewData.copyWith(
+      selectedIndex: resolvedSelectedIndex,
       busyResultId: null,
       statusMessage: '$error',
     );
@@ -348,21 +360,20 @@ class DetailSubtitleController {
         .where((item) => item.canApply)
         .take(maxChoices)
         .map((candidate) {
-          final selection = SubtitleSearchSelection(
-            cachedPath: candidate.cachedPath,
-            displayName: candidate.displayName,
-            subtitleFilePath: candidate.subtitleFilePath,
+      final selection = SubtitleSearchSelection(
+        cachedPath: candidate.cachedPath,
+        displayName: candidate.displayName,
+        subtitleFilePath: candidate.subtitleFilePath,
+      );
+      return previousById[candidate.hit.id]?.copyWith(
+            result: candidate.toSearchResult(),
+            selection: selection,
+          ) ??
+          CachedSubtitleSearchOption(
+            result: candidate.toSearchResult(),
+            selection: selection,
           );
-          return previousById[candidate.hit.id]?.copyWith(
-                result: candidate.toSearchResult(),
-                selection: selection,
-              ) ??
-              CachedSubtitleSearchOption(
-                result: candidate.toSearchResult(),
-                selection: selection,
-              );
-        })
-        .toList(growable: false);
+    }).toList(growable: false);
   }
 
   String? buildSubtitleSearchStatusMessage({

@@ -449,7 +449,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 详情页与人物作品页已经收口到 `RetainedAsyncController`；页面 inactive、切回前台或播放期间页面让路时，会优先保留最近一次已解析结果
 - 详情页在 inactive 时会取消当前匹配 / 刷新 / 字幕搜索会话，但不会再无条件失效成功缓存；重新回到页面时优先复用已有详情结果
 - 网络图片在展示层支持候选图回退，主图 `404` 或解码失败时会自动尝试下一张候选 artwork
-- 详情页不再在进入时自动搜索字幕；只有已经拿到可播放目标并手动点击资源信息区里的“搜索字幕 / 刷新字幕”时，才会按 `设置 -> 播放 -> 字幕 -> 在线字幕来源` 搜索最多 `10` 条可自动挂载的字幕
+- 详情页不再在进入时自动搜索字幕；只有已经拿到可播放目标并手动点击资源信息区里的“搜索字幕 / 刷新字幕”时，才会按 `设置 -> 播放 -> 字幕` 里的配置手动搜索。页面会先走 `OnlineSubtitleRepository.searchStructured(...)` 结构化链路，只保留最多 `10` 条已经验证可直接挂载的结果；`ASSRT` 未填写 Token 时会直接走网页 `search(...)`，填写 Token 后则可按设置决定在结构化链没有命中可用结果时是否回退网页链路
 - 这组字幕候选和当前选中项会一并写入详情缓存；再次进入详情页时会恢复，进入播放器后会把已选外挂字幕带给内置 `MPV` 与 Android 原生播放器链路
 - 详情页资源信息区可直接切换播放器；这个入口最终会调用 `SettingsController.setPlaybackEngine(...)`，因此会和设置页里的全局默认播放器保持同一份持久化值
 
@@ -615,11 +615,14 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
   - 本地续播记忆
   - 在线字幕搜索
   - Android 原生音轨/字幕轨选择、外挂字幕加载与外挂字幕偏移
-- 详情页与播放器页复用同一个 `OnlineSubtitleRepository` 和本地字幕缓存目录；在线字幕来源由设置统一控制，当前已接入 `ASSRT / SubHD / YIFY`
-- 在线字幕查询会按站点自动做短查询 fallback，例如把 `片名 + SxxEyy` 或 `片名 + 年份` 逐步回退到纯片名
+- 详情页与播放器页复用同一个 `OnlineSubtitleRepository`；仓库内部已经拆成 `searchStructured(...)` 和 legacy `search(...)` 两条链路
+- `searchStructured(...)` 会基于当前播放目标、详情外部 ID 和本地文件信息组装 `OnlineSubtitleSearchRequest`，优先尝试文件哈希、`IMDb ID / TMDB ID`、季集号、年份和标题
+- 结构化源当前支持 `ASSRT API / OpenSubtitles / SubDL`；`ASSRT` Token 来自设置页，未填写时不会访问 API；`OpenSubtitles` API Key 通过 `--dart-define=STARFLOW_OPENSUBTITLES_API_KEY=...` 注入，账号密码来自设置页；`SubDL` API Key 直接来自设置页
+- `SubtitleValidationPipeline` 会在应用内预下载、解压并筛选结果，只向 UI 返回可直接挂载的 `SRT / ASS / SSA / VTT` 或可解压 `ZIP` 字幕
+- `ASSRT` 未填写 Token 时会直接走网页链路；已填写 Token 时，只有设置允许网页回退且 API 没有可用结果时，才会继续访问 `ASSRT` 网页搜索
+- `ASSRT` 网页查询仍会按站点自动做短查询 fallback，例如把 `片名 + SxxEyy` 或 `片名 + 年份` 逐步回退到纯片名
 - `ASSRT` 如果返回错误页会直接按源失败处理，不再把错误页误判成“0 结果”
-- `SubHD` 当前只支持应用内搜索结果浏览，不能在应用内直接下载；详情页会继续只保留可直接下载且可自动挂载的字幕结果
-- 下载后的在线字幕会缓存在应用支持目录下的 `starflow-subtitle-cache`；如果同一结果已经下载并解压过，再次选择时优先复用本地缓存
+- legacy 下载后的在线字幕会缓存在应用支持目录下的 `starflow-subtitle-cache`；如果同一结果已经下载并解压过，再次选择时优先复用本地缓存
 - 播放器页本身不再直接承载全部启动决策；目标解析、路由判定与执行分支已经拆到独立 application 文件，页面层主要负责装配、等待态和内置 `MPV` 运行期行为，便于 controller 级测试和后续替换策略
 - 播放器页 presentation 也已进一步拆开：`player_page.dart` 主要保留会话和流程编排，控制叠层、启动等待态、播放设置弹窗与平台会话子树分别沉到 `presentation/widgets` 与 `player_page_*.part.dart`
 
@@ -719,6 +722,9 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 默认倍速
 - 字幕大小
 - 在线字幕来源
+- 各在线字幕来源的专属配置（`ASSRT Token / OpenSubtitles 账号密码 / SubDL API Key`）
+- 优先语言与单次最多验证条数
+- `ASSRT` 网页回退
 - 播放器内核
 - 透明磨砂效果
 - 高性能模式
@@ -804,9 +810,16 @@ Android TV 下的设置页还额外做了遥控器适配：
 
 用于保存：
 
-- 在线字幕下载缓存 `starflow-subtitle-cache`
-- 解压后的字幕文件
+- legacy 在线字幕下载缓存 `starflow-subtitle-cache`
+- legacy 解压后的字幕文件
 - 详情页与播放器页复用的外挂字幕本地副本
+
+### 临时目录
+
+用于保存：
+
+- 结构化在线字幕验证缓存 `starflow/validated_online_subtitles`
+- 新链路预下载后筛出的可直接挂载字幕文件
 
 ### Sembast
 

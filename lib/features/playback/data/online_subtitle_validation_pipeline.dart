@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
+import 'package:starflow/features/playback/application/subtitle_language_preferences.dart';
 import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 
@@ -31,7 +32,8 @@ class SubtitleValidationPipeline {
     return results;
   }
 
-  Future<ValidatedSubtitleCandidate> validateHit(ProviderSubtitleHit hit) async {
+  Future<ValidatedSubtitleCandidate> validateHit(
+      ProviderSubtitleHit hit) async {
     if (!hit.canDownload) {
       return ValidatedSubtitleCandidate(
         hit: hit,
@@ -51,7 +53,8 @@ class SubtitleValidationPipeline {
 
     try {
       final cacheDirectory = await _cacheDirectory();
-      final bucket = Directory(p.join(cacheDirectory.path, _stableHash(hit.id)));
+      final bucket =
+          Directory(p.join(cacheDirectory.path, _stableHash(hit.id)));
       if (!await bucket.exists()) {
         await bucket.create(recursive: true);
       }
@@ -80,7 +83,8 @@ class SubtitleValidationPipeline {
         );
       }
 
-      final packagePath = p.join(bucket.path, _sanitizeFileName(hit.packageName));
+      final packagePath =
+          p.join(bucket.path, _sanitizeFileName(hit.packageName));
       final packageFile = File(packagePath);
       await packageFile.writeAsBytes(response.bodyBytes, flush: true);
 
@@ -245,6 +249,7 @@ int _subtitleCandidateScore({
   if (normalizedVersion.isNotEmpty && normalized.contains(normalizedVersion)) {
     score += 140;
   }
+  score += scorePreferredSubtitleText(fileName);
   for (final token in const ['中英', '双语', '简中', '繁中', 'chs', 'cht']) {
     if (normalized.contains(_normalizeToken(token))) {
       score += 32;

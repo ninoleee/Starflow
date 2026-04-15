@@ -19,13 +19,13 @@ void main() {
       'playbackSubtitlePreference': 'off',
       'playbackSubtitleScale': 'large',
       'onlineSubtitleSources': ['assrt'],
+      'assrtToken': 'assrt-token',
       'opensubtitlesEnabled': true,
       'opensubtitlesUsername': 'opensub-user',
       'opensubtitlesPassword': 'opensub-pass',
       'subdlEnabled': true,
       'subdlApiKey': 'subdl-key',
       'subtitlePreferredLanguages': ['zh-cn', 'en', 'zh-cn'],
-      'subtitleHearingImpairedPreferred': true,
       'subtitleSearchMaxValidatedCandidates': 9,
       'subtitleAllowLegacyProvidersFallback': false,
       'playbackBackgroundPlaybackEnabled': false,
@@ -56,15 +56,24 @@ void main() {
     );
     expect(settings.playbackSubtitleScale, 36.0);
     expect(settings.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
+    expect(settings.assrtToken, 'assrt-token');
     expect(settings.opensubtitlesEnabled, isTrue);
     expect(settings.opensubtitlesUsername, 'opensub-user');
     expect(settings.opensubtitlesPassword, 'opensub-pass');
     expect(settings.subdlEnabled, isTrue);
     expect(settings.subdlApiKey, 'subdl-key');
     expect(settings.subtitlePreferredLanguages, ['zh-cn', 'en']);
-    expect(settings.subtitleHearingImpairedPreferred, isTrue);
     expect(settings.subtitleSearchMaxValidatedCandidates, 9);
     expect(settings.subtitleAllowLegacyProvidersFallback, isFalse);
+    expect(
+      settings.configuredStructuredSubtitleSources,
+      [
+        OnlineSubtitleSource.assrt,
+        OnlineSubtitleSource.opensubtitles,
+        OnlineSubtitleSource.subdl,
+      ],
+    );
+    expect(settings.configuredLegacySubtitleSources, isEmpty);
     expect(settings.playbackBackgroundPlaybackEnabled, isFalse);
     expect(settings.playbackEngine, PlaybackEngine.systemPlayer);
     expect(
@@ -94,13 +103,13 @@ void main() {
     expect(settings.toJson()['playbackSubtitlePreference'], 'off');
     expect(settings.toJson()['playbackSubtitleScale'], 36.0);
     expect(settings.toJson()['onlineSubtitleSources'], ['assrt']);
+    expect(settings.toJson()['assrtToken'], 'assrt-token');
     expect(settings.toJson()['opensubtitlesEnabled'], isTrue);
     expect(settings.toJson()['opensubtitlesUsername'], 'opensub-user');
     expect(settings.toJson()['opensubtitlesPassword'], 'opensub-pass');
     expect(settings.toJson()['subdlEnabled'], isTrue);
     expect(settings.toJson()['subdlApiKey'], 'subdl-key');
     expect(settings.toJson()['subtitlePreferredLanguages'], ['zh-cn', 'en']);
-    expect(settings.toJson()['subtitleHearingImpairedPreferred'], isTrue);
     expect(settings.toJson()['subtitleSearchMaxValidatedCandidates'], 9);
     expect(
       settings.toJson()['subtitleAllowLegacyProvidersFallback'],
@@ -152,18 +161,23 @@ void main() {
     );
     expect(settings.playbackSubtitleScale, 32.0);
     expect(settings.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
+    expect(settings.assrtToken, isEmpty);
     expect(settings.opensubtitlesEnabled, isFalse);
     expect(settings.opensubtitlesUsername, isEmpty);
     expect(settings.opensubtitlesPassword, isEmpty);
     expect(settings.subdlEnabled, isFalse);
     expect(settings.subdlApiKey, isEmpty);
     expect(settings.subtitlePreferredLanguages, isEmpty);
-    expect(settings.subtitleHearingImpairedPreferred, isFalse);
     expect(
       settings.subtitleSearchMaxValidatedCandidates,
       kSubtitleSearchMaxValidatedCandidatesDefault,
     );
     expect(settings.subtitleAllowLegacyProvidersFallback, isTrue);
+    expect(settings.configuredStructuredSubtitleSources, isEmpty);
+    expect(
+      settings.configuredLegacySubtitleSources,
+      [OnlineSubtitleSource.assrt],
+    );
     expect(settings.playbackBackgroundPlaybackEnabled, isTrue);
     expect(settings.playbackEngine, PlaybackEngine.embeddedMpv);
     expect(settings.playbackDecodeMode, PlaybackDecodeMode.auto);
@@ -486,6 +500,21 @@ void main() {
     expect(
       copied.subtitleSearchMaxValidatedCandidates,
       kSubtitleSearchMaxValidatedCandidatesMin,
+    );
+  });
+
+  test('assrt falls back to legacy web search when token is empty', () {
+    final settings = AppSettings.fromJson({
+      'onlineSubtitleSources': ['assrt'],
+      'subtitleAllowLegacyProvidersFallback': false,
+    });
+
+    expect(settings.assrtApiSearchEnabled, isFalse);
+    expect(settings.assrtLegacySearchEnabled, isTrue);
+    expect(settings.configuredStructuredSubtitleSources, isEmpty);
+    expect(
+      settings.configuredLegacySubtitleSources,
+      [OnlineSubtitleSource.assrt],
     );
   });
 

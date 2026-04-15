@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
+import 'package:starflow/features/playback/application/subtitle_language_preferences.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/data/online_subtitle_provider_protocol.dart';
 import 'package:starflow/features/playback/data/online_subtitle_validation_pipeline.dart';
@@ -33,8 +34,6 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
 
   static const _assrtSearchMarker =
       '<div onmouseover="addclass(this,\'subitem_hover\')" onmouseout="redclass(this,\'subitem_hover\')" class="subitem"';
-  static const _subhdSearchMarker =
-      '<div class="bg-white shadow-sm rounded-3 mb-4">';
   static const _openSubtitlesApiKey = String.fromEnvironment(
     'STARFLOW_OPENSUBTITLES_API_KEY',
   );
@@ -72,6 +71,7 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
 
     final results = <SubtitleSearchResult>[];
     final errors = <String>[];
+    final preferredLanguages = _settingsProvider().subtitlePreferredLanguages;
 
     if (enabledSources.contains(OnlineSubtitleSource.assrt)) {
       try {
@@ -86,7 +86,8 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
           fields: {
             'source': OnlineSubtitleSource.assrt.name,
             'count': assrtResults.length,
-            'downloadable': assrtResults.where((item) => item.canDownload).length,
+            'downloadable':
+                assrtResults.where((item) => item.canDownload).length,
             'autoLoadable':
                 assrtResults.where((item) => item.canAutoLoad).length,
             'sample': _sampleResultTitles(assrtResults),
@@ -106,72 +107,6 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
       }
     }
 
-    if (enabledSources.contains(OnlineSubtitleSource.subhd)) {
-      try {
-        final subhdResults = await _searchSourceWithFallback(
-          normalizedQuery,
-          source: OnlineSubtitleSource.subhd,
-          searcher: _searchSubhd,
-        );
-        results.addAll(subhdResults);
-        subtitleSearchTrace(
-          'repository.search.source-finished',
-          fields: {
-            'source': OnlineSubtitleSource.subhd.name,
-            'count': subhdResults.length,
-            'downloadable': subhdResults.where((item) => item.canDownload).length,
-            'autoLoadable':
-                subhdResults.where((item) => item.canAutoLoad).length,
-            'sample': _sampleResultTitles(subhdResults),
-          },
-        );
-      } catch (error, stackTrace) {
-        errors.add('SubHD: $error');
-        subtitleSearchTrace(
-          'repository.search.source-failed',
-          fields: {
-            'source': OnlineSubtitleSource.subhd.name,
-            'query': normalizedQuery,
-          },
-          error: error,
-          stackTrace: stackTrace,
-        );
-      }
-    }
-
-    if (enabledSources.contains(OnlineSubtitleSource.yify)) {
-      try {
-        final yifyResults = await _searchSourceWithFallback(
-          normalizedQuery,
-          source: OnlineSubtitleSource.yify,
-          searcher: _searchYify,
-        );
-        results.addAll(yifyResults);
-        subtitleSearchTrace(
-          'repository.search.source-finished',
-          fields: {
-            'source': OnlineSubtitleSource.yify.name,
-            'count': yifyResults.length,
-            'downloadable': yifyResults.where((item) => item.canDownload).length,
-            'autoLoadable':
-                yifyResults.where((item) => item.canAutoLoad).length,
-            'sample': _sampleResultTitles(yifyResults),
-          },
-        );
-      } catch (error, stackTrace) {
-        errors.add('YIFY: $error');
-        subtitleSearchTrace(
-          'repository.search.source-failed',
-          fields: {
-            'source': OnlineSubtitleSource.yify.name,
-            'query': normalizedQuery,
-          },
-          error: error,
-          stackTrace: stackTrace,
-        );
-      }
-    }
-
     if (results.isEmpty && errors.isNotEmpty) {
       subtitleSearchTrace(
         'repository.search.failed',
@@ -183,7 +118,13 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
       throw StateError(errors.join('；'));
     }
 
-    results.sort(_compareSearchResults);
+    results.sort(
+      (left, right) => _compareSearchResults(
+        left,
+        right,
+        configuredLanguages: preferredLanguages,
+      ),
+    );
     final limitedResults = maxResults > 0 && results.length > maxResults
         ? results.take(maxResults).toList(growable: false)
         : results;
@@ -194,8 +135,7 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
         'total': results.length,
         'returned': limitedResults.length,
         'downloadable': limitedResults.where((item) => item.canDownload).length,
-        'autoLoadable':
-            limitedResults.where((item) => item.canAutoLoad).length,
+        'autoLoadable': limitedResults.where((item) => item.canAutoLoad).length,
         'sample': _sampleResultTitles(limitedResults),
       },
     );
@@ -206,6 +146,7 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
   Future<List<ValidatedSubtitleCandidate>> searchStructured(
     OnlineSubtitleSearchRequest request, {
     List<OnlineSubtitleSource> sources = const [
+      OnlineSubtitleSource.assrt,
       OnlineSubtitleSource.opensubtitles,
       OnlineSubtitleSource.subdl,
     ],
@@ -222,7 +163,8 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
         'query': request.normalizedQuery,
         'title': request.normalizedTitle,
         'sources': providers.map((item) => item.source.name).join('/'),
-        'plan': request.buildQueryPlan().map((item) => item.kind.name).join('/'),
+        'plan':
+            request.buildQueryPlan().map((item) => item.kind.name).join('/'),
       },
     );
     if (!request.hasStructuredIdentity || providers.isEmpty) {
@@ -255,6 +197,13 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
   List<OnlineSubtitleStructuredProvider> _buildStructuredProviders() {
     final settings = _settingsProvider();
     return <OnlineSubtitleStructuredProvider>[
+      AssrtStructuredProvider(
+        _client,
+        config: AssrtProviderConfig(
+          enabled: settings.assrtApiSearchEnabled,
+          token: settings.assrtToken,
+        ),
+      ),
       OpenSubtitlesStructuredProvider(
         _client,
         config: OpenSubtitlesProviderConfig(
@@ -399,207 +348,6 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
     return results;
   }
 
-  Future<List<SubtitleSearchResult>> _searchSubhd(String query) async {
-    final uri = Uri.parse(
-      'https://subhd.tv/search/${Uri.encodeComponent(query)}',
-    );
-    subtitleSearchTrace(
-      'repository.subhd.request',
-      fields: {
-        'query': query,
-        'uri': uri,
-      },
-    );
-    final response = await _client.get(uri, headers: const {
-      'Accept':
-          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'User-Agent': 'Mozilla/5.0',
-    });
-    final body = _readResponseBody(response);
-    subtitleSearchTrace(
-      'repository.subhd.response',
-      fields: {
-        'status': response.statusCode,
-        'bytes': response.bodyBytes.length,
-        'marker': body.contains(_subhdSearchMarker),
-        'snippet': _responseSnippet(body),
-      },
-    );
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError('字幕搜索失败：HTTP ${response.statusCode}');
-    }
-    final results = parseSubhdSearchHtml(body);
-    subtitleSearchTrace(
-      'repository.subhd.parsed',
-      fields: {
-        'query': query,
-        'count': results.length,
-        'downloadable': results.where((item) => item.canDownload).length,
-        'autoLoadable': results.where((item) => item.canAutoLoad).length,
-        'sample': _sampleResultTitles(results),
-      },
-    );
-    return results;
-  }
-
-  Future<List<SubtitleSearchResult>> _searchYify(String query) async {
-    if (_looksLikeEpisodeQuery(query)) {
-      subtitleSearchTrace(
-        'repository.yify.skip-episode-query',
-        fields: {'query': query},
-      );
-      return const [];
-    }
-
-    final ajaxUri = Uri.https('www.yifysubtitles.ch', '/ajax/search/', {
-      'mov': query,
-    });
-    subtitleSearchTrace(
-      'repository.yify.ajax-request',
-      fields: {
-        'query': query,
-        'uri': ajaxUri,
-      },
-    );
-    final ajaxResponse = await _client.get(ajaxUri, headers: const {
-      'Accept': 'application/json, text/plain, */*',
-      'User-Agent': 'Mozilla/5.0',
-      'X-Requested-With': 'XMLHttpRequest',
-    });
-    final ajaxBody = _readResponseBody(ajaxResponse);
-    subtitleSearchTrace(
-      'repository.yify.ajax-response',
-      fields: {
-        'status': ajaxResponse.statusCode,
-        'bytes': ajaxResponse.bodyBytes.length,
-        'snippet': _responseSnippet(ajaxBody),
-      },
-    );
-    if (ajaxResponse.statusCode < 200 || ajaxResponse.statusCode >= 300) {
-      throw StateError('字幕搜索失败：HTTP ${ajaxResponse.statusCode}');
-    }
-
-    final decoded = jsonDecode(ajaxBody);
-    if (decoded is! List) {
-      subtitleSearchTrace(
-        'repository.yify.ajax-invalid-payload',
-        fields: {
-          'query': query,
-          'runtimeType': decoded.runtimeType,
-        },
-      );
-      return const [];
-    }
-
-    final candidates = decoded
-        .whereType<Map>()
-        .map(
-          (item) => _YifyMovieCandidate(
-            title: (item['movie'] as String? ?? '').trim(),
-            imdbId: (item['imdb'] as String? ?? '').trim(),
-          ),
-        )
-        .where(
-          (item) => item.title.isNotEmpty && item.imdbId.trim().isNotEmpty,
-        )
-        .toList(growable: false);
-    if (candidates.isEmpty) {
-      subtitleSearchTrace(
-        'repository.yify.no-candidates',
-        fields: {'query': query},
-      );
-      return const [];
-    }
-    subtitleSearchTrace(
-      'repository.yify.candidates',
-      fields: {
-        'query': query,
-        'count': candidates.length,
-        'sample': candidates.take(3).map((item) => item.title).join(' | '),
-      },
-    );
-
-    final sortedCandidates = candidates.toList()
-      ..sort(
-        (left, right) => _scoreYifyCandidate(right, query).compareTo(
-          _scoreYifyCandidate(left, query),
-        ),
-      );
-
-    final results = <SubtitleSearchResult>[];
-    for (final candidate in sortedCandidates.take(3)) {
-      try {
-        final detailUri = Uri.https(
-          'www.yifysubtitles.ch',
-          '/movie-imdb/${candidate.imdbId}',
-        );
-        subtitleSearchTrace(
-          'repository.yify.detail-request',
-          fields: {
-            'query': query,
-            'imdbId': candidate.imdbId,
-            'title': candidate.title,
-            'uri': detailUri,
-          },
-        );
-        final detailResponse = await _client.get(detailUri, headers: const {
-          'Accept':
-              'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'User-Agent': 'Mozilla/5.0',
-        });
-        if (detailResponse.statusCode < 200 ||
-            detailResponse.statusCode >= 300) {
-          subtitleSearchTrace(
-            'repository.yify.detail-non-200',
-            fields: {
-              'imdbId': candidate.imdbId,
-              'status': detailResponse.statusCode,
-            },
-          );
-          continue;
-        }
-        final detailBody = _readResponseBody(detailResponse);
-        final parsed = parseYifyMoviePageHtml(
-          detailBody,
-          imdbId: candidate.imdbId,
-        ).take(12).toList(growable: false);
-        subtitleSearchTrace(
-          'repository.yify.detail-parsed',
-          fields: {
-            'imdbId': candidate.imdbId,
-            'count': parsed.length,
-            'sample': _sampleResultTitles(parsed),
-          },
-        );
-        results.addAll(
-          parsed,
-        );
-      } catch (error, stackTrace) {
-        subtitleSearchTrace(
-          'repository.yify.detail-failed',
-          fields: {
-            'query': query,
-            'imdbId': candidate.imdbId,
-            'title': candidate.title,
-          },
-          error: error,
-          stackTrace: stackTrace,
-        );
-      }
-    }
-
-    results.sort(_compareSearchResults);
-    subtitleSearchTrace(
-      'repository.yify.finished',
-      fields: {
-        'query': query,
-        'count': results.length,
-        'sample': _sampleResultTitles(results),
-      },
-    );
-    return results;
-  }
-
   @override
   Future<SubtitleDownloadResult> download(SubtitleSearchResult result) {
     switch (result.source) {
@@ -607,15 +355,6 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
         return _downloadAndCacheResult(
           result,
           referer: 'https://assrt.net/',
-        );
-      case OnlineSubtitleSource.subhd:
-        throw StateError('SubHD 当前暂不支持应用内直接下载字幕。');
-      case OnlineSubtitleSource.yify:
-        return _downloadAndCacheResult(
-          result,
-          referer: result.detailUrl.trim().isEmpty
-              ? 'https://www.yifysubtitles.ch/'
-              : result.detailUrl.trim(),
         );
       case OnlineSubtitleSource.opensubtitles:
       case OnlineSubtitleSource.subdl:
@@ -653,6 +392,7 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
       bucketDirectory,
       packageName: result.packageName,
       version: result.version,
+      preferredLanguages: _settingsProvider().subtitlePreferredLanguages,
     );
     if (existingExtracted != null) {
       subtitleSearchTrace(
@@ -716,6 +456,7 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
           bucketDirectory: bucketDirectory,
           version: result.version,
           packageName: result.packageName,
+          preferredLanguages: _settingsProvider().subtitlePreferredLanguages,
         );
         subtitleSearchTrace(
           'repository.download.finished',
@@ -826,258 +567,6 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
     return results;
   }
 
-  @visibleForTesting
-  static List<SubtitleSearchResult> parseSubhdSearchHtml(String html) {
-    final normalized = html.trim();
-    if (normalized.isEmpty || !normalized.contains(_subhdSearchMarker)) {
-      return const [];
-    }
-
-    final segments = normalized.split(_subhdSearchMarker);
-    final results = <SubtitleSearchResult>[];
-    for (final rawSegment in segments.skip(1)) {
-      final segment = rawSegment.trim();
-      final titleMatch = RegExp(
-        r"""<a class="link-dark align-middle" href=['"]([^'"]+)['"]>(.*?)</a>""",
-        dotAll: true,
-      ).firstMatch(segment);
-      if (titleMatch == null) {
-        continue;
-      }
-
-      final detailUrl =
-          _absoluteUrl('https://subhd.tv/', titleMatch.group(1) ?? '');
-      final id = RegExp(r'/a/([^/?#]+)').firstMatch(detailUrl)?.group(1) ??
-          _stableHash(detailUrl);
-      final title = _normalizeWhitespace(
-        _decodeHtmlTextWithBreaks(titleMatch.group(2) ?? ''),
-      );
-      final version = _normalizeWhitespace(
-        _decodeHtmlTextWithBreaks(
-          RegExp(
-                r'<div class="view-text text-secondary">.*?<a [^>]*>(.*?)</a>',
-                dotAll: true,
-              ).firstMatch(segment)?.group(1) ??
-              '',
-        ),
-      );
-      final languageLabel = RegExp(
-        r'<span class="p-1 fw-bold">(.*?)</span>',
-        dotAll: true,
-      )
-          .allMatches(segment)
-          .map(
-            (match) => _normalizeWhitespace(
-              _decodeHtmlText(match.group(1) ?? ''),
-            ),
-          )
-          .where((item) => item.isNotEmpty)
-          .toSet()
-          .join(' / ');
-      final formatLabel = _normalizeWhitespace(
-        _decodeHtmlText(
-          RegExp(
-                r'<span class="p-1 text-secondary">(.*?)</span>',
-                dotAll: true,
-              ).firstMatch(segment)?.group(1) ??
-              '',
-        ),
-      );
-      final typeLabel = _normalizeWhitespace(
-        _decodeHtmlText(
-          RegExp(
-                r'<span class="rounded p-1 me-1 text-white"[^>]*>(.*?)</span>',
-                dotAll: true,
-              ).firstMatch(segment)?.group(1) ??
-              '',
-        ),
-      );
-      final statsBlock = RegExp(
-        r'<div class="pt-2 text-secondary f12">(.*?)</div>',
-        dotAll: true,
-      ).firstMatch(segment)?.group(1);
-      final statValues = statsBlock == null
-          ? const <String>[]
-          : RegExp(
-              r'<span[^>]*>(.*?)</span>',
-              dotAll: true,
-            )
-              .allMatches(statsBlock)
-              .map(
-                (match) => _normalizeWhitespace(
-                  _decodeHtmlText(match.group(1) ?? ''),
-                ),
-              )
-              .where((item) => item.isNotEmpty)
-              .toList(growable: false);
-      final downloadCount =
-          statValues.length > 1 ? _parseLooseInt(statValues[1]) : 0;
-      final publishDateLabel = statValues.isNotEmpty ? statValues.last : '';
-      final publisher = _normalizeWhitespace(
-        _decodeHtmlText(
-          RegExp(
-                r'发布人\s*<a[^>]*>(.*?)</a>',
-                dotAll: true,
-              ).firstMatch(segment)?.group(1) ??
-              '',
-        ),
-      );
-      final extension = _defaultSubtitleExtension(formatLabel);
-      final packageName =
-          extension.isEmpty ? 'subhd-$id.bin' : 'subhd-$id$extension';
-      final packageKind = _resolvePackageKind(packageName);
-
-      results.add(
-        SubtitleSearchResult(
-          id: 'subhd:$id',
-          source: OnlineSubtitleSource.subhd,
-          providerLabel: 'SubHD',
-          title: title,
-          version: version,
-          formatLabel: formatLabel,
-          languageLabel: languageLabel,
-          sourceLabel: publisher,
-          publishDateLabel: publishDateLabel,
-          downloadCount: downloadCount,
-          ratingLabel: typeLabel,
-          downloadUrl: '',
-          detailUrl: detailUrl,
-          packageName: packageName,
-          packageKind: packageKind,
-        ),
-      );
-    }
-
-    results.sort(_compareSearchResults);
-    return results;
-  }
-
-  @visibleForTesting
-  static List<SubtitleSearchResult> parseYifyMoviePageHtml(
-    String html, {
-    required String imdbId,
-  }) {
-    final normalized = html.trim();
-    if (normalized.isEmpty || !normalized.contains('<tr data-id=')) {
-      return const [];
-    }
-
-    final movieTitle = _normalizeWhitespace(
-      _decodeHtmlTextWithBreaks(
-        RegExp(
-              r'<h2 class="movie-main-title">(.*?)</h2>',
-              dotAll: true,
-            ).firstMatch(normalized)?.group(1) ??
-            RegExp(r'<h2>(.*?)</h2>', dotAll: true)
-                .firstMatch(normalized)
-                ?.group(1) ??
-            '',
-      ),
-    );
-    final publishYear = _normalizeWhitespace(
-      _decodeHtmlText(
-        RegExp(
-              r'<div class="movie-year">(.*?)</div>',
-              dotAll: true,
-            ).firstMatch(normalized)?.group(1) ??
-            '',
-      ),
-    );
-
-    final results = <SubtitleSearchResult>[];
-    final matches = RegExp(
-      r'<tr data-id="(\d+)">(.*?)</tr>',
-      dotAll: true,
-    ).allMatches(normalized);
-
-    for (final match in matches) {
-      final rowId = match.group(1) ?? '';
-      final segment = match.group(2) ?? '';
-      final detailPath = RegExp(
-        r'<a href="([^"]*?/subtitles/[^"]+)">',
-        dotAll: true,
-      ).firstMatch(segment)?.group(1);
-      if (detailPath == null || detailPath.trim().isEmpty) {
-        continue;
-      }
-
-      final detailUrl = _absoluteUrl(
-        'https://www.yifysubtitles.ch/',
-        detailPath,
-      );
-      final slug = Uri.parse(detailUrl).pathSegments.isEmpty
-          ? rowId
-          : Uri.parse(detailUrl).pathSegments.last;
-      final releaseLines = _decodeHtmlTextWithBreaks(
-        RegExp(
-              r'<a href="[^"]*?/subtitles/[^"]+">(.*?)</a>',
-              dotAll: true,
-            ).firstMatch(segment)?.group(1) ??
-            '',
-      )
-          .split('\n')
-          .map(_normalizeWhitespace)
-          .where((item) => item.isNotEmpty)
-          .toList(growable: false);
-      var version = releaseLines.isEmpty ? '' : releaseLines.first;
-      if (version.toLowerCase().startsWith('subtitle ')) {
-        version = version.substring('subtitle '.length).trim();
-      }
-
-      final languageLabel = _normalizeWhitespace(
-        _decodeHtmlText(
-          RegExp(
-                r'<span class="sub-lang">(.*?)</span>',
-                dotAll: true,
-              ).firstMatch(segment)?.group(1) ??
-              '',
-        ),
-      );
-      final uploader = _normalizeWhitespace(
-        _decodeHtmlText(
-          RegExp(
-                r'<td class="uploader-cell"><a [^>]*>(.*?)</a></td>',
-                dotAll: true,
-              ).firstMatch(segment)?.group(1) ??
-              '',
-        ),
-      );
-      final ratingValue = _parseLooseInt(
-        RegExp(
-              r'<td class="rating-cell">.*?<(?:p class="rating"|span class="label(?: [^"]*)?")>([^<]+)</',
-              dotAll: true,
-            ).firstMatch(segment)?.group(1) ??
-            '',
-      );
-      final downloadUrl = 'https://www.yifysubtitles.ch/subtitle/$slug.zip';
-      final title =
-          publishYear.isEmpty ? movieTitle : '$movieTitle ($publishYear)';
-
-      results.add(
-        SubtitleSearchResult(
-          id: 'yify:$rowId',
-          source: OnlineSubtitleSource.yify,
-          providerLabel: 'YIFY',
-          title: title,
-          version: version,
-          formatLabel: '',
-          languageLabel: languageLabel,
-          sourceLabel: uploader,
-          publishDateLabel: '',
-          downloadCount: 0,
-          ratingLabel: ratingValue > 0 ? '评分 $ratingValue' : '',
-          downloadUrl: downloadUrl,
-          detailUrl: detailUrl,
-          packageName: '$slug.zip',
-          packageKind: SubtitlePackageKind.zipArchive,
-        ),
-      );
-    }
-
-    results.sort(_compareSearchResults);
-    return results;
-  }
-
   static String _extractAssrtField(
     String segment, {
     required String label,
@@ -1096,6 +585,7 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
     Directory bucketDirectory, {
     required String packageName,
     required String version,
+    required List<String> preferredLanguages,
   }) async {
     if (!await bucketDirectory.exists()) {
       return null;
@@ -1118,11 +608,13 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
         fileName: p.basename(right.path),
         packageName: packageName,
         version: version,
+        preferredLanguages: preferredLanguages,
       ).compareTo(
         _subtitleCandidateScore(
           fileName: p.basename(left.path),
           packageName: packageName,
           version: version,
+          preferredLanguages: preferredLanguages,
         ),
       ),
     );
@@ -1134,6 +626,7 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
     required Directory bucketDirectory,
     required String version,
     required String packageName,
+    required List<String> preferredLanguages,
   }) async {
     final archive = ZipDecoder().decodeBytes(
       await archiveFile.readAsBytes(),
@@ -1152,11 +645,13 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
         fileName: right.name,
         packageName: packageName,
         version: version,
+        preferredLanguages: preferredLanguages,
       ).compareTo(
         _subtitleCandidateScore(
           fileName: left.name,
           packageName: packageName,
           version: version,
+          preferredLanguages: preferredLanguages,
         ),
       ),
     );
@@ -1207,20 +702,24 @@ String _responseSnippet(String body) {
   return '${normalized.substring(0, 177)}...';
 }
 
-class _YifyMovieCandidate {
-  const _YifyMovieCandidate({
-    required this.title,
-    required this.imdbId,
-  });
-
-  final String title;
-  final String imdbId;
-}
-
 int _compareSearchResults(
   SubtitleSearchResult left,
-  SubtitleSearchResult right,
-) {
+  SubtitleSearchResult right, {
+  Iterable<String> configuredLanguages = const <String>[],
+}) {
+  final preferredLanguageOrder = scorePreferredSubtitleText(
+    _buildSubtitleLanguagePreferenceText(right),
+    configuredLanguages: configuredLanguages,
+  ).compareTo(
+    scorePreferredSubtitleText(
+      _buildSubtitleLanguagePreferenceText(left),
+      configuredLanguages: configuredLanguages,
+    ),
+  );
+  if (preferredLanguageOrder != 0) {
+    return preferredLanguageOrder;
+  }
+
   final downloadOrder = _compareBoolTrueFirst(
     left.canDownload,
     right.canDownload,
@@ -1264,6 +763,16 @@ int _compareSearchResults(
   }
 
   return left.providerLabel.compareTo(right.providerLabel);
+}
+
+String _buildSubtitleLanguagePreferenceText(SubtitleSearchResult result) {
+  return [
+    result.languageLabel,
+    result.title,
+    result.version,
+    result.formatLabel,
+    result.sourceLabel,
+  ].where((item) => item.trim().isNotEmpty).join(' ');
 }
 
 int _compareBoolTrueFirst(bool left, bool right) {
@@ -1320,45 +829,6 @@ int _ratingScore(String label) {
     return 6;
   }
   return 0;
-}
-
-int _scoreYifyCandidate(_YifyMovieCandidate candidate, String query) {
-  final normalizedTitle = _normalizeCandidateText(candidate.title);
-  final normalizedQuery = _normalizeCandidateText(query);
-  var score = 0;
-  if (normalizedTitle.isEmpty || normalizedQuery.isEmpty) {
-    return score;
-  }
-  if (normalizedTitle.contains(normalizedQuery)) {
-    score += 360;
-  }
-  if (normalizedQuery.contains(normalizedTitle)) {
-    score += 200;
-  }
-
-  final queryTokens = query
-      .split(RegExp(r'[\s:._-]+'))
-      .map(_normalizeCandidateText)
-      .where((item) => item.isNotEmpty)
-      .toSet();
-  for (final token in queryTokens) {
-    if (normalizedTitle.contains(token)) {
-      score += 28;
-    }
-  }
-  score -= candidate.title.length ~/ 16;
-  return score;
-}
-
-bool _looksLikeEpisodeQuery(String query) {
-  final normalized = query.trim().toLowerCase();
-  if (normalized.isEmpty) {
-    return false;
-  }
-  return RegExp(
-    r'\bs\d{1,2}e\d{1,2}\b|season\s*\d+\s*episode\s*\d+|第\s*\d+\s*季|第\s*\d+\s*集',
-    caseSensitive: false,
-  ).hasMatch(normalized);
 }
 
 @visibleForTesting
@@ -1452,26 +922,6 @@ String _extractPackageName(String downloadUrl) {
   }
 }
 
-String _defaultSubtitleExtension(String formatLabel) {
-  final normalized = formatLabel.trim().toLowerCase();
-  if (normalized.contains('ssa')) {
-    return '.ssa';
-  }
-  if (normalized.contains('ass')) {
-    return '.ass';
-  }
-  if (normalized.contains('srt')) {
-    return '.srt';
-  }
-  if (normalized.contains('vtt')) {
-    return '.vtt';
-  }
-  if (normalized.contains('sup')) {
-    return '.sup';
-  }
-  return '';
-}
-
 SubtitlePackageKind _resolvePackageKind(String packageName) {
   final extension = p.extension(packageName).toLowerCase();
   return switch (extension) {
@@ -1494,6 +944,7 @@ int _subtitleCandidateScore({
   required String fileName,
   required String packageName,
   required String version,
+  Iterable<String> preferredLanguages = const <String>[],
 }) {
   final normalized = _normalizeCandidateText(fileName);
   final normalizedPackageName = _normalizeCandidateText(packageName);
@@ -1515,6 +966,10 @@ int _subtitleCandidateScore({
   if (normalizedVersion.isNotEmpty && normalized.contains(normalizedVersion)) {
     score += 140;
   }
+  score += scorePreferredSubtitleText(
+    fileName,
+    configuredLanguages: preferredLanguages,
+  );
 
   const preferredTokens = <String>[
     '中英',
@@ -1533,12 +988,7 @@ int _subtitleCandidateScore({
     }
   }
 
-  const deprioritizedTokens = <String>[
-    'commentary',
-    'sdh',
-    'signs',
-    'forced',
-  ];
+  const deprioritizedTokens = <String>['commentary', 'signs', 'forced'];
   for (final token in deprioritizedTokens) {
     if (normalized.contains(token)) {
       score -= 25;
@@ -1547,11 +997,6 @@ int _subtitleCandidateScore({
 
   score -= p.basename(fileName).length ~/ 18;
   return score;
-}
-
-int _parseLooseInt(String value) {
-  final match = RegExp(r'(\d+)').firstMatch(value);
-  return int.tryParse(match?.group(1) ?? '') ?? 0;
 }
 
 String _stripTrailingEpisodeToken(String query) {
@@ -1597,20 +1042,6 @@ String _sanitizeFileName(String value) {
 
 String _decodeHtmlText(String value) {
   return value
-      .replaceAll(RegExp(r'<[^>]+>'), ' ')
-      .replaceAll('&nbsp;', ' ')
-      .replaceAll('&amp;', '&')
-      .replaceAll('&quot;', '"')
-      .replaceAll('&#39;', "'")
-      .replaceAll('&#x27;', "'")
-      .replaceAll('&lt;', '<')
-      .replaceAll('&gt;', '>');
-}
-
-String _decodeHtmlTextWithBreaks(String value) {
-  return value
-      .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
-      .replaceAll(RegExp(r'</p>', caseSensitive: false), '\n')
       .replaceAll(RegExp(r'<[^>]+>'), ' ')
       .replaceAll('&nbsp;', ' ')
       .replaceAll('&amp;', '&')

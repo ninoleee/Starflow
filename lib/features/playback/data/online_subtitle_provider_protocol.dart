@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
@@ -19,6 +20,26 @@ abstract class OnlineSubtitleStructuredProvider {
   Future<List<ProviderSubtitleHit>> search(
     OnlineSubtitleSearchRequest request,
   );
+}
+
+class AssrtProviderConfig {
+  const AssrtProviderConfig({
+    this.enabled = false,
+    this.token = '',
+    this.baseUrl = 'https://api.assrt.net',
+    this.userAgent = 'Starflow/1.0',
+    this.searchCount = 5,
+    this.maxDetailRequestsPerQuery = 4,
+  });
+
+  final bool enabled;
+  final String token;
+  final String baseUrl;
+  final String userAgent;
+  final int searchCount;
+  final int maxDetailRequestsPerQuery;
+
+  bool get isConfigured => enabled && token.trim().isNotEmpty;
 }
 
 class OpenSubtitlesProviderConfig {
@@ -57,6 +78,277 @@ class SubdlProviderConfig {
   final String baseUrl;
 
   bool get isConfigured => enabled && apiKey.trim().isNotEmpty;
+}
+
+class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
+  AssrtStructuredProvider(
+    this._client, {
+    this.config = const AssrtProviderConfig(),
+  });
+
+  final http.Client _client;
+  final AssrtProviderConfig config;
+
+  @override
+  OnlineSubtitleSource get source => OnlineSubtitleSource.assrt;
+
+  @override
+  String get providerLabel => 'ASSRT';
+
+  @override
+  bool get isConfigured => config.isConfigured;
+
+  @override
+  Future<List<ProviderSubtitleHit>> search(
+    OnlineSubtitleSearchRequest request,
+  ) async {
+    if (!isConfigured) {
+      subtitleSearchTrace(
+        'repository.structured.provider.skip-unconfigured',
+        fields: {'source': source.name},
+      );
+      return const [];
+    }
+
+    final queryPlan = _buildAssrtQueryPlan(request);
+    if (queryPlan.isEmpty) {
+      return const [];
+    }
+
+    for (final query in queryPlan) {
+      final response = await _client.get(
+        _buildAssrtSearchUri(query),
+        headers: _assrtHeaders(),
+      );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        subtitleSearchTrace(
+          'repository.structured.provider.request-failed',
+          fields: {
+            'source': source.name,
+            'status': response.statusCode,
+            'queryKind': query.kind,
+            'query': query.query,
+          },
+        );
+        continue;
+      }
+
+      final candidates = _parseAssrtSearchResponse(response.body)
+          .take(config.maxDetailRequestsPerQuery)
+          .toList(growable: false);
+      if (candidates.isEmpty) {
+        continue;
+      }
+
+      final hits = <ProviderSubtitleHit>[];
+      for (final candidate in candidates) {
+        final hit = await _loadAssrtDetail(candidate);
+        if (hit != null) {
+          hits.add(hit);
+        }
+      }
+      if (hits.isNotEmpty) {
+        return _dedupeHits(hits);
+      }
+    }
+    return const [];
+  }
+
+  Map<String, String> _assrtHeaders() {
+    return {
+      'Accept': 'application/json',
+      'Authorization': 'Bearer ${config.token.trim()}',
+      'User-Agent': config.userAgent.trim(),
+    };
+  }
+
+  Uri _buildAssrtSearchUri(_AssrtStructuredQuery query) {
+    return Uri.parse('${config.baseUrl}/v1/sub/search').replace(
+      queryParameters: {
+        'q': query.query,
+        'cnt': '${config.searchCount.clamp(1, 20)}',
+        'pos': '0',
+        'filelist': '1',
+        if (query.isFileQuery) 'is_file': '1',
+        if (query.noMuxer) 'no_muxer': '1',
+      },
+    );
+  }
+
+  List<_AssrtStructuredQuery> _buildAssrtQueryPlan(
+    OnlineSubtitleSearchRequest request,
+  ) {
+    final queries = <_AssrtStructuredQuery>[];
+    final seen = <String>{};
+
+    void addQuery(
+      String rawQuery, {
+      required String kind,
+      bool isFileQuery = false,
+      bool noMuxer = false,
+    }) {
+      final normalized = rawQuery.trim();
+      if (normalized.length < 3) {
+        return;
+      }
+      final key = '${normalized.toLowerCase()}|$kind|$isFileQuery|$noMuxer';
+      if (!seen.add(key)) {
+        return;
+      }
+      queries.add(
+        _AssrtStructuredQuery(
+          query: normalized,
+          kind: kind,
+          isFileQuery: isFileQuery,
+          noMuxer: noMuxer,
+        ),
+      );
+    }
+
+    final fileBaseName = _normalizedFileBaseName(request.normalizedFilePath);
+    if (fileBaseName.isNotEmpty) {
+      addQuery(
+        fileBaseName,
+        kind: 'fileName',
+        isFileQuery: true,
+        noMuxer: true,
+      );
+    }
+
+    for (final candidate in request.buildQueryPlan()) {
+      switch (candidate.kind) {
+        case StructuredSubtitleQueryKind.hash:
+        case StructuredSubtitleQueryKind.imdbId:
+        case StructuredSubtitleQueryKind.tmdbId:
+          continue;
+        case StructuredSubtitleQueryKind.episode:
+          addQuery(candidate.query, kind: 'episode');
+          break;
+        case StructuredSubtitleQueryKind.titleYear:
+          addQuery(candidate.query, kind: 'titleYear');
+          break;
+        case StructuredSubtitleQueryKind.titleOnly:
+          addQuery(candidate.query, kind: 'titleOnly');
+          break;
+      }
+    }
+
+    return queries;
+  }
+
+  Future<ProviderSubtitleHit?> _loadAssrtDetail(
+      _AssrtSearchCandidate item) async {
+    final response = await _client.get(
+      Uri.parse('${config.baseUrl}/v1/sub/detail').replace(
+        queryParameters: {'id': '${item.id}'},
+      ),
+      headers: _assrtHeaders(),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      subtitleSearchTrace(
+        'repository.structured.provider.request-failed',
+        fields: {
+          'source': source.name,
+          'status': response.statusCode,
+          'detailId': item.id,
+        },
+      );
+      return null;
+    }
+
+    final root = _tryDecodeJsonObject(response.body);
+    if (root == null || !_assrtSuccess(root)) {
+      return null;
+    }
+
+    final detail = _resolveAssrtDetailPayload(root);
+    if (detail == null) {
+      return null;
+    }
+
+    final version = _firstNonEmpty(
+      _readString(detail['videoname']),
+      item.videoName,
+      _readString(detail['filename']),
+    );
+    final title = _firstNonEmpty(
+      _readString(detail['title']),
+      _readString(detail['native_name']),
+      item.nativeName,
+      item.videoName,
+      version,
+    );
+    final fileChoice = _selectAssrtDownloadChoice(detail, version: version);
+    if (fileChoice == null) {
+      return null;
+    }
+
+    final lang = _readMap(detail['lang']);
+    final producer = _readMap(detail['producer']);
+    final voteScore = _readNum(detail['vote_score'])?.toDouble() ?? 0;
+    final ratingLabel = voteScore > 0
+        ? '评分 ${voteScore.toStringAsFixed(voteScore.truncateToDouble() == voteScore ? 0 : 1)}'
+        : '';
+
+    return ProviderSubtitleHit(
+      id: '${OnlineSubtitleSource.assrt.name}:${item.id}',
+      source: OnlineSubtitleSource.assrt,
+      providerLabel: providerLabel,
+      title: title,
+      downloadUrl: fileChoice.url,
+      packageName: fileChoice.packageName,
+      packageKind: fileChoice.packageKind,
+      detailUrl: Uri.parse('${config.baseUrl}/v1/sub/detail')
+          .replace(queryParameters: {'id': '${item.id}'}).toString(),
+      version: version,
+      formatLabel: _firstNonEmpty(
+        _readString(detail['subtype']),
+        _extensionLabel(fileChoice.packageName),
+      ),
+      languageLabel: _readString(lang['desc']),
+      sourceLabel: _firstNonEmpty(
+        _readString(detail['release_site']),
+        _readString(producer['source']),
+        _readString(producer['name']),
+      ),
+      publishDateLabel: _readString(detail['upload_time']),
+      ratingLabel: ratingLabel,
+      downloadCount:
+          _readNum(detail['down_count'])?.toInt() ?? item.downloadCount,
+      raw: {
+        'assrt_id': item.id,
+        'detail': detail,
+      },
+    );
+  }
+
+  List<_AssrtSearchCandidate> _parseAssrtSearchResponse(String body) {
+    final root = _tryDecodeJsonObject(body);
+    if (root == null || !_assrtSuccess(root)) {
+      return const [];
+    }
+    final payload = _readMap(root['sub']);
+    final items = _readList(payload['subs']);
+    return items
+        .map(_readMap)
+        .where((item) => item.isNotEmpty)
+        .map(_parseAssrtSearchCandidate)
+        .whereType<_AssrtSearchCandidate>()
+        .toList(growable: false);
+  }
+
+  _AssrtSearchCandidate? _parseAssrtSearchCandidate(Map<String, Object?> json) {
+    final id = _readNum(json['id'])?.toInt() ?? 0;
+    if (id <= 0) {
+      return null;
+    }
+    return _AssrtSearchCandidate(
+      id: id,
+      nativeName: _readString(json['native_name']),
+      videoName: _readString(json['videoname']),
+      downloadCount: _readNum(json['down_count'])?.toInt() ?? 0,
+    );
+  }
 }
 
 class OpenSubtitlesStructuredProvider
@@ -178,18 +470,21 @@ class OpenSubtitlesStructuredProvider
       'order_direction': 'desc',
       if (request.normalizedLanguages.isNotEmpty)
         'languages': request.normalizedLanguages.join(','),
-      if (request.preferHearingImpaired) 'hearing_impaired': 'include',
-      if (query.kind == StructuredSubtitleQueryKind.hash) 'moviehash': query.query,
+      if (query.kind == StructuredSubtitleQueryKind.hash)
+        'moviehash': query.query,
       if (query.kind == StructuredSubtitleQueryKind.hash &&
           request.fileSizeBytes != null)
         'moviebytesize': '${request.fileSizeBytes!}',
-      if (query.kind == StructuredSubtitleQueryKind.imdbId) 'imdb_id': query.query,
-      if (query.kind == StructuredSubtitleQueryKind.tmdbId) 'tmdb_id': query.query,
+      if (query.kind == StructuredSubtitleQueryKind.imdbId)
+        'imdb_id': query.query,
+      if (query.kind == StructuredSubtitleQueryKind.tmdbId)
+        'tmdb_id': query.query,
       if (query.kind != StructuredSubtitleQueryKind.hash &&
           query.kind != StructuredSubtitleQueryKind.imdbId &&
           query.kind != StructuredSubtitleQueryKind.tmdbId)
         'query': query.query,
-      if (request.seasonNumber != null) 'season_number': '${request.seasonNumber!}',
+      if (request.seasonNumber != null)
+        'season_number': '${request.seasonNumber!}',
       if (request.episodeNumber != null)
         'episode_number': '${request.episodeNumber!}',
       if ((request.year ?? 0) > 0) 'year': '${request.year!}',
@@ -315,7 +610,8 @@ List<ProviderSubtitleHit> _parseOpenSubtitlesSearchResponse(String body) {
   final root = jsonDecode(body) as Map<String, dynamic>;
   final items = (root['data'] as List<dynamic>? ?? const []);
   return items
-      .map((item) => _parseOpenSubtitlesHit(Map<String, dynamic>.from(item as Map)))
+      .map((item) =>
+          _parseOpenSubtitlesHit(Map<String, dynamic>.from(item as Map)))
       .whereType<ProviderSubtitleHit>()
       .toList(growable: false);
 }
@@ -382,8 +678,7 @@ ProviderSubtitleHit? _parseSubdlHit(Map<String, dynamic> json) {
       json['release_name'] as String? ??
       'subtitle.zip';
   return ProviderSubtitleHit(
-    id:
-        '${OnlineSubtitleSource.subdl.name}:${json['sd_id'] ?? json['id'] ?? fileName}',
+    id: '${OnlineSubtitleSource.subdl.name}:${json['sd_id'] ?? json['id'] ?? fileName}',
     source: OnlineSubtitleSource.subdl,
     providerLabel: 'SubDL',
     title: json['name'] as String? ?? fileName,
@@ -430,6 +725,90 @@ int _extractOpenSubtitlesFileId(ProviderSubtitleHit hit) {
   return 0;
 }
 
+_AssrtDownloadChoice? _selectAssrtDownloadChoice(
+  Map<String, Object?> detail, {
+  required String version,
+}) {
+  final fileEntries = _readList(detail['filelist'])
+      .map(_readMap)
+      .where((item) => item.isNotEmpty)
+      .map(
+        (item) => _AssrtDownloadChoice(
+          url: _readString(item['url']),
+          packageName: _readString(item['f']),
+          packageKind: _resolvePackageKind(_readString(item['f'])),
+        ),
+      )
+      .where((item) => item.url.isNotEmpty && item.packageName.isNotEmpty)
+      .toList(growable: false);
+  if (fileEntries.isNotEmpty) {
+    final sorted = fileEntries.toList()
+      ..sort(
+        (left, right) => _assrtFileScore(
+          right.packageName,
+          version: version,
+        ).compareTo(
+          _assrtFileScore(
+            left.packageName,
+            version: version,
+          ),
+        ),
+      );
+    return sorted.first;
+  }
+
+  final packageUrl = _readString(detail['url']);
+  final packageName = _firstNonEmpty(
+    _readString(detail['filename']),
+    'assrt-${_readNum(detail['id'])?.toInt() ?? 0}.bin',
+  );
+  if (packageUrl.isEmpty) {
+    return null;
+  }
+  return _AssrtDownloadChoice(
+    url: packageUrl,
+    packageName: packageName,
+    packageKind: _resolvePackageKind(packageName),
+  );
+}
+
+int _assrtFileScore(String fileName, {required String version}) {
+  final normalized = _normalizeToken(fileName);
+  final normalizedVersion = _normalizeToken(version);
+  var score = 0;
+  score += switch (_resolvePackageKind(fileName)) {
+    SubtitlePackageKind.subtitleFile => 600,
+    SubtitlePackageKind.zipArchive => 420,
+    SubtitlePackageKind.rarArchive => 320,
+    SubtitlePackageKind.unsupported => 0,
+  };
+  if (normalizedVersion.isNotEmpty && normalized.contains(normalizedVersion)) {
+    score += 140;
+  }
+  for (final token in const ['中英', '双语', '简中', '繁中', 'chs', 'cht']) {
+    if (normalized.contains(_normalizeToken(token))) {
+      score += 32;
+    }
+  }
+  return score - fileName.length ~/ 18;
+}
+
+String _normalizedFileBaseName(String filePath) {
+  final normalized = filePath.trim();
+  if (normalized.isEmpty) {
+    return '';
+  }
+  return p.basenameWithoutExtension(normalized).replaceAll('.', ' ').trim();
+}
+
+String _extensionLabel(String fileName) {
+  final extension = p.extension(fileName).trim().toLowerCase();
+  if (extension.isEmpty) {
+    return '';
+  }
+  return extension.substring(1).toUpperCase();
+}
+
 SubtitlePackageKind _resolvePackageKind(String packageName) {
   final normalized = packageName.trim().toLowerCase();
   if (normalized.endsWith('.srt') ||
@@ -445,6 +824,130 @@ SubtitlePackageKind _resolvePackageKind(String packageName) {
     return SubtitlePackageKind.rarArchive;
   }
   return SubtitlePackageKind.unsupported;
+}
+
+bool _assrtSuccess(Map<String, Object?> root) {
+  final status = _readNum(root['status'])?.toInt();
+  return status == null || status == 0;
+}
+
+Map<String, Object?>? _resolveAssrtDetailPayload(Map<String, Object?> root) {
+  final sub = _readMap(root['sub']);
+  if (sub.isNotEmpty) {
+    return sub;
+  }
+  final subs = _readList(root['subs']);
+  if (subs.isEmpty) {
+    return null;
+  }
+  final detail = _readMap(subs.first);
+  return detail.isEmpty ? null : detail;
+}
+
+Map<String, Object?>? _tryDecodeJsonObject(String body) {
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is Map) {
+      return decoded.map(
+        (key, value) => MapEntry('$key', value),
+      );
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
+Map<String, Object?> _readMap(Object? value) {
+  if (value is Map) {
+    return value.map((key, item) => MapEntry('$key', item));
+  }
+  return const <String, Object?>{};
+}
+
+List<Object?> _readList(Object? value) {
+  if (value is List) {
+    return value.cast<Object?>();
+  }
+  return const <Object?>[];
+}
+
+String _readString(Object? value) {
+  return switch (value) {
+    null => '',
+    String _ => value.trim(),
+    _ => '$value'.trim(),
+  };
+}
+
+num? _readNum(Object? value) {
+  if (value is num) {
+    return value;
+  }
+  if (value is String) {
+    return num.tryParse(value.trim());
+  }
+  return null;
+}
+
+String _firstNonEmpty(String first,
+    [String second = '',
+    String third = '',
+    String fourth = '',
+    String fifth = '']) {
+  for (final candidate in [first, second, third, fourth, fifth]) {
+    if (candidate.trim().isNotEmpty) {
+      return candidate.trim();
+    }
+  }
+  return '';
+}
+
+String _normalizeToken(String value) {
+  return value.trim().toLowerCase().replaceAll(
+        RegExp(r'[\s\-_.,:;!?/\\|()\[\]{}<>《》【】"“”·]+'),
+        '',
+      );
+}
+
+class _AssrtStructuredQuery {
+  const _AssrtStructuredQuery({
+    required this.query,
+    required this.kind,
+    required this.isFileQuery,
+    required this.noMuxer,
+  });
+
+  final String query;
+  final String kind;
+  final bool isFileQuery;
+  final bool noMuxer;
+}
+
+class _AssrtSearchCandidate {
+  const _AssrtSearchCandidate({
+    required this.id,
+    required this.nativeName,
+    required this.videoName,
+    required this.downloadCount,
+  });
+
+  final int id;
+  final String nativeName;
+  final String videoName;
+  final int downloadCount;
+}
+
+class _AssrtDownloadChoice {
+  const _AssrtDownloadChoice({
+    required this.url,
+    required this.packageName,
+    required this.packageKind,
+  });
+
+  final String url;
+  final String packageName;
+  final SubtitlePackageKind packageKind;
 }
 
 class _OpenSubtitlesSession {

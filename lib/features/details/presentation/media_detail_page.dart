@@ -2669,25 +2669,15 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
 
     try {
       final structuredSources = sources
-          .where(
-            (item) =>
-                item == OnlineSubtitleSource.opensubtitles ||
-                item == OnlineSubtitleSource.subdl,
-          )
+          .where(settings.configuredStructuredSubtitleSources.contains)
           .toList(growable: false);
-      final legacySources = settings.subtitleAllowLegacyProvidersFallback
-          ? sources
-              .where(
-                (item) =>
-                    item == OnlineSubtitleSource.assrt ||
-                    item == OnlineSubtitleSource.subhd ||
-                    item == OnlineSubtitleSource.yify,
-              )
-              .toList(growable: false)
-          : const <OnlineSubtitleSource>[];
+      final legacySources = sources
+          .where(settings.configuredLegacySubtitleSources.contains)
+          .toList(growable: false);
 
       if (structuredSources.isNotEmpty) {
-        final structuredRequest = await buildOnlineSubtitleSearchRequestForTarget(
+        final structuredRequest =
+            await buildOnlineSubtitleSearchRequestForTarget(
           target: playbackTarget,
           query: query,
           title: target.title.trim(),
@@ -2695,7 +2685,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           imdbId: target.imdbId.trim(),
           tmdbId: target.tmdbId.trim(),
           languages: settings.subtitlePreferredLanguages,
-          preferHearingImpaired: settings.subtitleHearingImpairedPreferred,
         );
         final validated = await repository.searchStructured(
           structuredRequest,
@@ -2944,6 +2933,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       _applySubtitleSearchView(
         _detailSubtitleController.applyDownloadedSelectionFailure(
           currentViewData: _currentSubtitleSearchView,
+          fallbackSelectedIndex: downloadDecision.previousSelectedIndex,
           error: error,
         ),
       );

@@ -44,7 +44,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     _controller = TextEditingController(
       text: _resolveInitialInput(widget.request),
     );
-    _availableSources = ref.read(appSettingsProvider).effectiveOnlineSubtitleSources;
+    _availableSources =
+        ref.read(appSettingsProvider).effectiveOnlineSubtitleSources;
     _selectedSources = _availableSources.toList(growable: false);
     subtitleSearchTrace(
       'page.init',
@@ -143,7 +144,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       subtitleSearchTrace('page.search.skip-empty-query');
       setState(() {
         _results = const [];
-        _validatedSelectionsByResultId = const <String, SubtitleSearchSelection>{};
+        _validatedSelectionsByResultId =
+            const <String, SubtitleSearchSelection>{};
         _isSearching = false;
         _errorMessage = '请先输入要搜索的字幕关键词';
       });
@@ -153,7 +155,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     setState(() {
       _isSearching = true;
       _results = const [];
-      _validatedSelectionsByResultId = const <String, SubtitleSearchSelection>{};
+      _validatedSelectionsByResultId =
+          const <String, SubtitleSearchSelection>{};
       _errorMessage = null;
     });
 
@@ -186,22 +189,11 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       }
       final repository = ref.read(onlineSubtitleRepositoryProvider);
       final structuredSources = sources
-          .where(
-            (item) =>
-                item == OnlineSubtitleSource.opensubtitles ||
-                item == OnlineSubtitleSource.subdl,
-          )
+          .where(settings.configuredStructuredSubtitleSources.contains)
           .toList(growable: false);
-      final legacySources = settings.subtitleAllowLegacyProvidersFallback
-          ? sources
-              .where(
-                (item) =>
-                    item == OnlineSubtitleSource.assrt ||
-                    item == OnlineSubtitleSource.subhd ||
-                    item == OnlineSubtitleSource.yify,
-              )
-              .toList(growable: false)
-          : const <OnlineSubtitleSource>[];
+      final legacySources = sources
+          .where(settings.configuredLegacySubtitleSources.contains)
+          .toList(growable: false);
 
       final nextResults = <SubtitleSearchResult>[];
       final validatedSelections = <String, SubtitleSearchSelection>{};
@@ -224,7 +216,6 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
             standalone: widget.request.standalone,
           ),
           languages: settings.subtitlePreferredLanguages,
-          preferHearingImpaired: settings.subtitleHearingImpairedPreferred,
         );
         final validated = await repository.searchStructured(
           structuredRequest,
@@ -287,7 +278,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       );
       setState(() {
         _results = const [];
-        _validatedSelectionsByResultId = const <String, SubtitleSearchSelection>{};
+        _validatedSelectionsByResultId =
+            const <String, SubtitleSearchSelection>{};
         _isSearching = false;
         _errorMessage = '$error';
       });

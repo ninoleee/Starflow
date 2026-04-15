@@ -531,7 +531,7 @@ class _PlaybackSubtitleOptionsDialog extends ConsumerWidget {
               _PlaybackOptionTile(
                 isTelevision: isTelevision,
                 title: '在线查找字幕',
-                value: 'SubHD / 搜索引擎',
+                value: '在线字幕源',
                 onPressed: onSearchSubtitlesOnline,
               ),
               const SizedBox(height: 10),

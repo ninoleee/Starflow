@@ -26,6 +26,7 @@ import 'package:starflow/features/playback/application/playback_remote_preflight
 import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/application/playback_engine_router.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
+import 'package:starflow/features/playback/application/subtitle_language_preferences.dart';
 import 'package:starflow/features/playback/application/playback_startup_coordinator.dart';
 import 'package:starflow/features/playback/application/playback_startup_executor.dart';
 import 'package:starflow/features/playback/application/playback_target_resolver.dart';

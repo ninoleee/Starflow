@@ -9,6 +9,7 @@ import 'package:starflow/core/widgets/no_animation_page_route.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -513,6 +514,7 @@ class SettingsPage extends ConsumerStatefulWidget {
           initialSubtitlePreference: playbackSlice.playbackSubtitlePreference,
           initialSubtitleScale: playbackSlice.playbackSubtitleScale,
           initialOnlineSubtitleSources: playbackSlice.onlineSubtitleSources,
+          initialAssrtToken: playbackSlice.assrtToken,
           initialOpensubtitlesEnabled: playbackSlice.opensubtitlesEnabled,
           initialOpensubtitlesUsername: playbackSlice.opensubtitlesUsername,
           initialOpensubtitlesPassword: playbackSlice.opensubtitlesPassword,
@@ -520,8 +522,6 @@ class SettingsPage extends ConsumerStatefulWidget {
           initialSubdlApiKey: playbackSlice.subdlApiKey,
           initialSubtitlePreferredLanguages:
               playbackSlice.subtitlePreferredLanguages,
-          initialSubtitleHearingImpairedPreferred:
-              playbackSlice.subtitleHearingImpairedPreferred,
           initialSubtitleSearchMaxValidatedCandidates:
               playbackSlice.subtitleSearchMaxValidatedCandidates,
           initialSubtitleAllowLegacyProvidersFallback:
@@ -768,8 +768,18 @@ String _playbackSettingsSummary(
     '${_formatPlaybackSpeedLabel(playbackSlice.playbackDefaultSpeed)} 默认倍速',
     '字幕 ${playbackSlice.playbackSubtitlePreference.label}',
     formatPlaybackSubtitleScaleLabel(playbackSlice.playbackSubtitleScale),
-    if (playbackSlice.opensubtitlesEnabled || playbackSlice.subdlEnabled)
+    if ((playbackSlice.onlineSubtitleSources.contains(
+              OnlineSubtitleSource.assrt,
+            ) &&
+            playbackSlice.assrtToken.trim().isNotEmpty) ||
+        playbackSlice.opensubtitlesEnabled ||
+        playbackSlice.subdlEnabled)
       [
+        if (playbackSlice.onlineSubtitleSources.contains(
+              OnlineSubtitleSource.assrt,
+            ) &&
+            playbackSlice.assrtToken.trim().isNotEmpty)
+          'ASSRT API',
         if (playbackSlice.opensubtitlesEnabled) 'OpenSubtitles',
         if (playbackSlice.subdlEnabled) 'SubDL',
       ].join('/'),

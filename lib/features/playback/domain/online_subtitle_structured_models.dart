@@ -34,7 +34,6 @@ class OnlineSubtitleSearchRequest {
     this.fileSizeBytes,
     this.fileHash = '',
     this.languages = const [],
-    this.preferHearingImpaired = false,
     this.preferForced = false,
     this.context = const {},
   });
@@ -51,7 +50,6 @@ class OnlineSubtitleSearchRequest {
   final int? fileSizeBytes;
   final String fileHash;
   final List<String> languages;
-  final bool preferHearingImpaired;
   final bool preferForced;
   final Map<String, String> context;
 

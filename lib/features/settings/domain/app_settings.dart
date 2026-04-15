@@ -775,13 +775,13 @@ class AppSettings {
     this.playbackSubtitlePreference = PlaybackSubtitlePreference.auto,
     this.playbackSubtitleScale = kPlaybackSubtitleScaleDefault,
     this.onlineSubtitleSources = const [OnlineSubtitleSource.assrt],
+    this.assrtToken = '',
     this.opensubtitlesEnabled = false,
     this.opensubtitlesUsername = '',
     this.opensubtitlesPassword = '',
     this.subdlEnabled = false,
     this.subdlApiKey = '',
     this.subtitlePreferredLanguages = const [],
-    this.subtitleHearingImpairedPreferred = false,
     this.subtitleSearchMaxValidatedCandidates =
         kSubtitleSearchMaxValidatedCandidatesDefault,
     this.subtitleAllowLegacyProvidersFallback = true,
@@ -834,13 +834,13 @@ class AppSettings {
   final PlaybackSubtitlePreference playbackSubtitlePreference;
   final double playbackSubtitleScale;
   final List<OnlineSubtitleSource> onlineSubtitleSources;
+  final String assrtToken;
   final bool opensubtitlesEnabled;
   final String opensubtitlesUsername;
   final String opensubtitlesPassword;
   final bool subdlEnabled;
   final String subdlApiKey;
   final List<String> subtitlePreferredLanguages;
-  final bool subtitleHearingImpairedPreferred;
   final int subtitleSearchMaxValidatedCandidates;
   final bool subtitleAllowLegacyProvidersFallback;
   final bool playbackBackgroundPlaybackEnabled;
@@ -892,13 +892,13 @@ class AppSettings {
     PlaybackSubtitlePreference? playbackSubtitlePreference,
     double? playbackSubtitleScale,
     List<OnlineSubtitleSource>? onlineSubtitleSources,
+    String? assrtToken,
     bool? opensubtitlesEnabled,
     String? opensubtitlesUsername,
     String? opensubtitlesPassword,
     bool? subdlEnabled,
     String? subdlApiKey,
     List<String>? subtitlePreferredLanguages,
-    bool? subtitleHearingImpairedPreferred,
     int? subtitleSearchMaxValidatedCandidates,
     bool? subtitleAllowLegacyProvidersFallback,
     bool? playbackBackgroundPlaybackEnabled,
@@ -986,8 +986,8 @@ class AppSettings {
           : clampPlaybackSubtitleScale(playbackSubtitleScale),
       onlineSubtitleSources:
           onlineSubtitleSources ?? this.onlineSubtitleSources,
-      opensubtitlesEnabled:
-          opensubtitlesEnabled ?? this.opensubtitlesEnabled,
+      assrtToken: assrtToken ?? this.assrtToken,
+      opensubtitlesEnabled: opensubtitlesEnabled ?? this.opensubtitlesEnabled,
       opensubtitlesUsername:
           opensubtitlesUsername ?? this.opensubtitlesUsername,
       opensubtitlesPassword:
@@ -996,9 +996,6 @@ class AppSettings {
       subdlApiKey: subdlApiKey ?? this.subdlApiKey,
       subtitlePreferredLanguages:
           subtitlePreferredLanguages ?? this.subtitlePreferredLanguages,
-      subtitleHearingImpairedPreferred:
-          subtitleHearingImpairedPreferred ??
-              this.subtitleHearingImpairedPreferred,
       subtitleSearchMaxValidatedCandidates:
           subtitleSearchMaxValidatedCandidates == null
               ? this.subtitleSearchMaxValidatedCandidates
@@ -1076,13 +1073,13 @@ class AppSettings {
       'playbackSubtitleScale': playbackSubtitleScale,
       'onlineSubtitleSources':
           onlineSubtitleSources.map((item) => item.name).toList(),
+      'assrtToken': assrtToken,
       'opensubtitlesEnabled': opensubtitlesEnabled,
       'opensubtitlesUsername': opensubtitlesUsername,
       'opensubtitlesPassword': opensubtitlesPassword,
       'subdlEnabled': subdlEnabled,
       'subdlApiKey': subdlApiKey,
       'subtitlePreferredLanguages': subtitlePreferredLanguages,
-      'subtitleHearingImpairedPreferred': subtitleHearingImpairedPreferred,
       'subtitleSearchMaxValidatedCandidates':
           subtitleSearchMaxValidatedCandidates,
       'subtitleAllowLegacyProvidersFallback':
@@ -1213,6 +1210,7 @@ class AppSettings {
       ),
       onlineSubtitleSources:
           _parseOnlineSubtitleSources(json['onlineSubtitleSources']),
+      assrtToken: json['assrtToken'] as String? ?? '',
       opensubtitlesEnabled: json['opensubtitlesEnabled'] as bool? ?? false,
       opensubtitlesUsername: json['opensubtitlesUsername'] as String? ?? '',
       opensubtitlesPassword: json['opensubtitlesPassword'] as String? ?? '',
@@ -1221,8 +1219,6 @@ class AppSettings {
       subtitlePreferredLanguages: parseSubtitlePreferredLanguages(
         json['subtitlePreferredLanguages'],
       ),
-      subtitleHearingImpairedPreferred:
-          json['subtitleHearingImpairedPreferred'] as bool? ?? false,
       subtitleSearchMaxValidatedCandidates:
           clampSubtitleSearchMaxValidatedCandidates(
         (json['subtitleSearchMaxValidatedCandidates'] as num?)?.toInt() ??
@@ -1364,27 +1360,40 @@ extension AppSettingsPerformanceX on AppSettings {
 }
 
 extension AppSettingsSubtitleSearchX on AppSettings {
+  bool get assrtApiSearchEnabled =>
+      onlineSubtitleSources.contains(OnlineSubtitleSource.assrt) &&
+      assrtToken.trim().isNotEmpty;
+
+  bool get opensubtitlesSearchEnabled =>
+      opensubtitlesEnabled &&
+      opensubtitlesUsername.trim().isNotEmpty &&
+      opensubtitlesPassword.trim().isNotEmpty;
+
+  bool get subdlSearchEnabled => subdlEnabled && subdlApiKey.trim().isNotEmpty;
+
+  bool get assrtLegacySearchEnabled {
+    if (!onlineSubtitleSources.contains(OnlineSubtitleSource.assrt)) {
+      return false;
+    }
+    if (assrtToken.trim().isEmpty) {
+      return true;
+    }
+    return subtitleAllowLegacyProvidersFallback;
+  }
+
   List<OnlineSubtitleSource> get configuredStructuredSubtitleSources {
     final sources = <OnlineSubtitleSource>[
-      if (opensubtitlesEnabled) OnlineSubtitleSource.opensubtitles,
-      if (subdlEnabled) OnlineSubtitleSource.subdl,
+      if (assrtApiSearchEnabled) OnlineSubtitleSource.assrt,
+      if (opensubtitlesSearchEnabled) OnlineSubtitleSource.opensubtitles,
+      if (subdlSearchEnabled) OnlineSubtitleSource.subdl,
     ];
     return sources.toSet().toList(growable: false);
   }
 
   List<OnlineSubtitleSource> get configuredLegacySubtitleSources {
-    if (!subtitleAllowLegacyProvidersFallback) {
-      return const <OnlineSubtitleSource>[];
-    }
-    return onlineSubtitleSources
-        .where(
-          (item) =>
-              item == OnlineSubtitleSource.assrt ||
-              item == OnlineSubtitleSource.subhd ||
-              item == OnlineSubtitleSource.yify,
-        )
-        .toSet()
-        .toList(growable: false);
+    return <OnlineSubtitleSource>[
+      if (assrtLegacySearchEnabled) OnlineSubtitleSource.assrt,
+    ];
   }
 
   List<OnlineSubtitleSource> get effectiveOnlineSubtitleSources {

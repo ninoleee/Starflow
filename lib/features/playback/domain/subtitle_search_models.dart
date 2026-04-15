@@ -89,8 +89,6 @@ class SubtitleSearchRequest {
 
 enum OnlineSubtitleSource {
   assrt,
-  subhd,
-  yify,
   opensubtitles,
   subdl;
 }
@@ -99,8 +97,6 @@ extension OnlineSubtitleSourceX on OnlineSubtitleSource {
   String get label {
     return switch (this) {
       OnlineSubtitleSource.assrt => 'ASSRT',
-      OnlineSubtitleSource.subhd => 'SubHD',
-      OnlineSubtitleSource.yify => 'YIFY',
       OnlineSubtitleSource.opensubtitles => 'OpenSubtitles',
       OnlineSubtitleSource.subdl => 'SubDL',
     };
@@ -108,9 +104,8 @@ extension OnlineSubtitleSourceX on OnlineSubtitleSource {
 
   String get description {
     return switch (this) {
-      OnlineSubtitleSource.assrt => '国内常用字幕站，适合电影和剧集常规搜索。',
-      OnlineSubtitleSource.subhd => '国内常用字幕社区，当前支持应用内搜索结果浏览。',
-      OnlineSubtitleSource.yify => '海外电影字幕站，支持电影搜索与 ZIP 字幕下载。',
+      OnlineSubtitleSource.assrt =>
+        'ASSRT。填写 Token 后优先走官方 API，否则继续走网页搜索。',
       OnlineSubtitleSource.opensubtitles =>
         'OpenSubtitles.com 官方 API 字幕源。',
       OnlineSubtitleSource.subdl => 'SubDL 官方 API 字幕源。',
@@ -120,8 +115,6 @@ extension OnlineSubtitleSourceX on OnlineSubtitleSource {
   static OnlineSubtitleSource fromName(String raw) {
     return switch (raw.trim()) {
       'assrt' => OnlineSubtitleSource.assrt,
-      'subhd' => OnlineSubtitleSource.subhd,
-      'yify' => OnlineSubtitleSource.yify,
       'opensubtitles' => OnlineSubtitleSource.opensubtitles,
       'subdl' => OnlineSubtitleSource.subdl,
       _ => OnlineSubtitleSource.assrt,

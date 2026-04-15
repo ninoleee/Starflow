@@ -21,6 +21,7 @@ abstract class OnlineSubtitleRepository {
   Future<List<ValidatedSubtitleCandidate>> searchStructured(
     OnlineSubtitleSearchRequest request, {
     List<OnlineSubtitleSource> sources = const [
+      OnlineSubtitleSource.assrt,
       OnlineSubtitleSource.opensubtitles,
       OnlineSubtitleSource.subdl,
     ],

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:starflow/features/playback/application/subtitle_language_preferences.dart';
 import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
@@ -13,7 +14,6 @@ Future<OnlineSubtitleSearchRequest> buildOnlineSubtitleSearchRequestForTarget({
   String imdbId = '',
   String tmdbId = '',
   List<String> languages = const <String>[],
-  bool preferHearingImpaired = false,
 }) async {
   final resolvedFilePath = await _resolveReadableLocalFilePath([
     target.actualAddress,
@@ -22,15 +22,18 @@ Future<OnlineSubtitleSearchRequest> buildOnlineSubtitleSearchRequestForTarget({
   final fileHash = resolvedFilePath.isEmpty
       ? ''
       : await _computeOpenSubtitlesHash(File(resolvedFilePath));
+  final effectiveLanguages = resolveEffectiveSubtitleSearchLanguages(languages);
   return OnlineSubtitleSearchRequest.fromPlaybackTarget(
     target,
-    query: query.trim().isNotEmpty ? query.trim() : buildSubtitleSearchQuery(target),
+    query: query.trim().isNotEmpty
+        ? query.trim()
+        : buildSubtitleSearchQuery(target),
     originalTitle: originalTitle,
     imdbId: imdbId,
     tmdbId: tmdbId,
     filePath: resolvedFilePath,
     fileHash: fileHash,
-    languages: languages,
+    languages: effectiveLanguages,
     context: {
       if (title.trim().isNotEmpty) 'display_title': title.trim(),
     },
@@ -40,12 +43,13 @@ Future<OnlineSubtitleSearchRequest> buildOnlineSubtitleSearchRequestForTarget({
 Future<OnlineSubtitleSearchRequest> buildOnlineSubtitleSearchRequestForRoute(
   SubtitleSearchRequest request, {
   List<String> languages = const <String>[],
-  bool preferHearingImpaired = false,
 }) async {
-  final resolvedFilePath = await _resolveReadableLocalFilePath([request.filePath]);
+  final resolvedFilePath =
+      await _resolveReadableLocalFilePath([request.filePath]);
   final fileHash = resolvedFilePath.isEmpty
       ? ''
       : await _computeOpenSubtitlesHash(File(resolvedFilePath));
+  final effectiveLanguages = resolveEffectiveSubtitleSearchLanguages(languages);
   return OnlineSubtitleSearchRequest(
     query: request.query,
     title: request.title,
@@ -57,12 +61,12 @@ Future<OnlineSubtitleSearchRequest> buildOnlineSubtitleSearchRequestForRoute(
     episodeNumber: request.episodeNumber,
     filePath: resolvedFilePath,
     fileHash: fileHash,
-    languages: languages,
-    preferHearingImpaired: preferHearingImpaired,
+    languages: effectiveLanguages,
   );
 }
 
-Future<String> _resolveReadableLocalFilePath(Iterable<String> candidates) async {
+Future<String> _resolveReadableLocalFilePath(
+    Iterable<String> candidates) async {
   for (final candidate in candidates) {
     final resolved = _tryNormalizeLocalFilePath(candidate);
     if (resolved.isEmpty) {

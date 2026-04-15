@@ -238,13 +238,13 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     required PlaybackSubtitlePreference subtitlePreference,
     required double subtitleScale,
     required List<OnlineSubtitleSource> onlineSubtitleSources,
+    required String assrtToken,
     required bool opensubtitlesEnabled,
     required String opensubtitlesUsername,
     required String opensubtitlesPassword,
     required bool subdlEnabled,
     required String subdlApiKey,
     required List<String> subtitlePreferredLanguages,
-    required bool subtitleHearingImpairedPreferred,
     required int subtitleSearchMaxValidatedCandidates,
     required bool subtitleAllowLegacyProvidersFallback,
     required bool backgroundPlaybackEnabled,
@@ -270,6 +270,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         playbackSubtitleScale: subtitleScale,
         onlineSubtitleSources:
             onlineSubtitleSources.toSet().toList(growable: false),
+        assrtToken: assrtToken.trim(),
         opensubtitlesEnabled: opensubtitlesEnabled,
         opensubtitlesUsername: opensubtitlesUsername.trim(),
         opensubtitlesPassword: opensubtitlesPassword,
@@ -280,8 +281,6 @@ class SettingsController extends AsyncNotifier<AppSettings> {
             .where((item) => item.isNotEmpty)
             .toSet()
             .toList(growable: false),
-        subtitleHearingImpairedPreferred:
-            subtitleHearingImpairedPreferred,
         subtitleSearchMaxValidatedCandidates:
             clampSubtitleSearchMaxValidatedCandidates(
           subtitleSearchMaxValidatedCandidates,

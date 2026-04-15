@@ -97,7 +97,10 @@ void main() {
               'searchProviders': const [],
               'doubanAccount': const {'enabled': false},
               'homeModules': const [],
-              'onlineSubtitleSources': ['assrt', 'subhd'],
+              'onlineSubtitleSources': ['assrt'],
+              'opensubtitlesEnabled': true,
+              'opensubtitlesUsername': 'tester',
+              'opensubtitlesPassword': 'secret',
             }),
           ),
           onlineSubtitleRepositoryProvider.overrideWithValue(repository),
@@ -116,7 +119,7 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    await tester.tap(find.text('SubHD'));
+    await tester.tap(find.text('OpenSubtitles'));
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.search_rounded));
     await tester.pump();
@@ -154,6 +157,7 @@ class _FakeOnlineSubtitleRepository implements OnlineSubtitleRepository {
   Future<List<ValidatedSubtitleCandidate>> searchStructured(
     OnlineSubtitleSearchRequest request, {
     List<OnlineSubtitleSource> sources = const [
+      OnlineSubtitleSource.assrt,
       OnlineSubtitleSource.opensubtitles,
       OnlineSubtitleSource.subdl,
     ],

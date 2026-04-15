@@ -81,14 +81,13 @@ final settingsPlaybackSliceProvider = Provider<SettingsPlaybackSlice>(
           playbackSubtitlePreference: settings.playbackSubtitlePreference,
           playbackSubtitleScale: settings.playbackSubtitleScale,
           onlineSubtitleSources: settings.onlineSubtitleSources,
+          assrtToken: settings.assrtToken,
           opensubtitlesEnabled: settings.opensubtitlesEnabled,
           opensubtitlesUsername: settings.opensubtitlesUsername,
           opensubtitlesPassword: settings.opensubtitlesPassword,
           subdlEnabled: settings.subdlEnabled,
           subdlApiKey: settings.subdlApiKey,
           subtitlePreferredLanguages: settings.subtitlePreferredLanguages,
-          subtitleHearingImpairedPreferred:
-              settings.subtitleHearingImpairedPreferred,
           subtitleSearchMaxValidatedCandidates:
               settings.subtitleSearchMaxValidatedCandidates,
           subtitleAllowLegacyProvidersFallback:
@@ -206,13 +205,13 @@ class SettingsPlaybackSlice {
     required this.playbackSubtitlePreference,
     required this.playbackSubtitleScale,
     required this.onlineSubtitleSources,
+    required this.assrtToken,
     required this.opensubtitlesEnabled,
     required this.opensubtitlesUsername,
     required this.opensubtitlesPassword,
     required this.subdlEnabled,
     required this.subdlApiKey,
     required this.subtitlePreferredLanguages,
-    required this.subtitleHearingImpairedPreferred,
     required this.subtitleSearchMaxValidatedCandidates,
     required this.subtitleAllowLegacyProvidersFallback,
     required this.configuredBackgroundPlaybackEnabled,
@@ -231,13 +230,13 @@ class SettingsPlaybackSlice {
   final PlaybackSubtitlePreference playbackSubtitlePreference;
   final double playbackSubtitleScale;
   final List<OnlineSubtitleSource> onlineSubtitleSources;
+  final String assrtToken;
   final bool opensubtitlesEnabled;
   final String opensubtitlesUsername;
   final String opensubtitlesPassword;
   final bool subdlEnabled;
   final String subdlApiKey;
   final List<String> subtitlePreferredLanguages;
-  final bool subtitleHearingImpairedPreferred;
   final int subtitleSearchMaxValidatedCandidates;
   final bool subtitleAllowLegacyProvidersFallback;
   final bool configuredBackgroundPlaybackEnabled;
@@ -266,6 +265,7 @@ class SettingsPlaybackSlice {
               other.onlineSubtitleSources,
               onlineSubtitleSources,
             ) &&
+            other.assrtToken == assrtToken &&
             other.opensubtitlesEnabled == opensubtitlesEnabled &&
             other.opensubtitlesUsername == opensubtitlesUsername &&
             other.opensubtitlesPassword == opensubtitlesPassword &&
@@ -275,8 +275,6 @@ class SettingsPlaybackSlice {
               other.subtitlePreferredLanguages,
               subtitlePreferredLanguages,
             ) &&
-            other.subtitleHearingImpairedPreferred ==
-                subtitleHearingImpairedPreferred &&
             other.subtitleSearchMaxValidatedCandidates ==
                 subtitleSearchMaxValidatedCandidates &&
             other.subtitleAllowLegacyProvidersFallback ==
@@ -304,13 +302,13 @@ class SettingsPlaybackSlice {
         ),
         Object.hash(
           Object.hashAll(onlineSubtitleSources),
+          assrtToken,
           opensubtitlesEnabled,
           opensubtitlesUsername,
           opensubtitlesPassword,
           subdlEnabled,
           subdlApiKey,
           Object.hashAll(subtitlePreferredLanguages),
-          subtitleHearingImpairedPreferred,
           subtitleSearchMaxValidatedCandidates,
           subtitleAllowLegacyProvidersFallback,
           configuredBackgroundPlaybackEnabled,

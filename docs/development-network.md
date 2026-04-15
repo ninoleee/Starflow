@@ -63,8 +63,8 @@
 - `lib/core/utils/playback_trace.dart`、`lib/core/utils/subtitle_search_trace.dart`、`lib/core/utils/metadata_search_trace.dart`、`lib/core/utils/detail_resource_switch_trace.dart` 当前都已静音；保留这些 helper 主要是为了兼容已有调用点和设置字段
 - 非 `TV` 叠层里的 fullscreen 状态透传、窗口态 click-only 唤醒、auto-hide 定时器取消、播放设置弹窗 Material 化和 dispose 保护也都属于本地 widget 生命周期修正，不涉及新的网络协议
 - `TV` 播放器新增的“首层极简 + 二层高级”交互，同样只是本地遥控器焦点与播放器控件拆分，不新增新的服务端接口
-- 详情页、独立字幕搜索页与播放器页的在线字幕搜索现在都走应用内实现，不依赖外部浏览器；是否真的发起请求由 `设置 -> 播放 -> 字幕 -> 在线字幕来源` 控制
-- 详情页和独立字幕搜索页都不再在进入时自动搜索字幕；只有手动点击搜索时才会发起请求，搜索结果和下载后的字幕文件都会优先复用本地缓存，避免重复请求
+- 详情页、独立字幕搜索页与播放器页的在线字幕搜索现在都走应用内实现，不依赖外部浏览器；是否真的发起请求由 `设置 -> 播放 -> 字幕` 里的在线字幕配置控制，当前来源统一为 `ASSRT / OpenSubtitles / SubDL`
+- 详情页和独立字幕搜索页都不再在进入时自动搜索字幕；只有手动点击搜索时才会发起请求。结构化字幕源会先在应用内下载并验证，只有可直接挂载的结果才会返回；`ASSRT` 未填写 Token 时会直接走网页搜索，填写 Token 后优先走官方 API，并可按设置决定是否在 API 没有可用结果时回退网页链路
 - 首页“最近播放”模块直接读取本地播放记忆与详情缓存，不引入新的网络请求
 - 最近播放从“具体单集记录”切到“剧集总名 + 单集副标题”的展示规则，也只是本地展示层映射调整，不增加新的网络请求
 - `WebDAV` 文件删除虽然仍然只用标准 `DELETE`，但客户端现在会在成功后再次检查父目录，确认远端文件真的已经消失；如果远端仍存在，就不会继续当作本地删除成功
@@ -266,21 +266,26 @@ PowerShell 下推荐使用包装脚本运行 Flutter：
 
 当前应用内在线字幕链路的要点：
 
-- 在线字幕来源由 `设置 -> 播放 -> 字幕 -> 在线字幕来源` 统一控制，当前已接入 `ASSRT / SubHD / YIFY`
+- 在线字幕来源由 `设置 -> 播放 -> 字幕` 统一控制；当前支持 `ASSRT / OpenSubtitles / SubDL`
 - 详情页内联字幕搜索、独立字幕搜索页和播放器页里的“在线查找字幕”复用同一个仓库实现
-- 搜索请求当前会按来源分别访问：
-  - `ASSRT`：`https://assrt.net/sub/`
-  - `SubHD`：`https://subhd.tv/search/...`
-  - `YIFY`：`https://www.yifysubtitles.ch/ajax/search/` 与对应影片详情页
-- 下载请求当前支持：
-  - `ASSRT` 下载地址
-  - `YIFY` ZIP 下载地址
-  - `SubHD` 当前仅支持搜索结果浏览，不支持应用内直接下载
-- 详情页只有在已经拿到可播放目标且手动点击“搜索字幕 / 刷新字幕”时才会发起搜索，并且最多保留 `10` 条可自动加载的结果；独立字幕搜索页进入后也只会预填查询词，不会自动发请求
-- 查询会按站点自动做短查询 fallback，例如把 `片名 + SxxEyy`、`片名 + 年份` 逐步回退为更短的片名
+- 结构化搜索会优先基于本地文件路径、文件哈希、文件大小、`IMDb ID / TMDB ID`、季集号、年份和标题生成查询请求，并在应用内先下载验证；只有可直接挂载的 `SRT / ASS / SSA / VTT` 或可解压 `ZIP` 结果才会回到 UI
+- 结构化源当前会按来源分别访问：
+  - `ASSRT API`：`https://api.assrt.net/v1/sub/search`、`/detail`
+  - `OpenSubtitles`：`https://api.opensubtitles.com/api/v1/login`、`/subtitles`、`/download`
+  - `SubDL`：`https://api.subdl.com/api/v1/subtitles`
+- `ASSRT` Token 当前保存在设置页；未填写时不会访问 API，而是直接走网页搜索
+- `OpenSubtitles` API Key 当前通过 `--dart-define=STARFLOW_OPENSUBTITLES_API_KEY=...` 注入；账号密码保存在设置页
+- `SubDL` API Key 当前直接保存在设置页
+- `ASSRT` 网页链路当前会在两种情况下访问 `https://assrt.net/sub/`：
+  - `ASSRT` 已启用但未填写 Token
+  - `ASSRT` 已填写 Token，且设置允许网页回退，同时 API 没有产出可用结果
+- `ASSRT` 网页下载当前仍直接请求站点返回的下载地址
+- 详情页只有在已经拿到可播放目标且手动点击“搜索字幕 / 刷新字幕”时才会发起搜索，并且最多保留 `10` 条已经验证可自动加载的结果；独立字幕搜索页进入后也只会预填查询词，不会自动发请求
+- `ASSRT` 网页查询会按站点自动做短查询 fallback，例如把 `片名 + SxxEyy`、`片名 + 年份` 逐步回退为更短的片名
 - `ASSRT` 如果返回站点错误页，会直接按来源失败处理，不再把错误页误判成“0 结果”
-- 下载后的字幕会缓存到应用支持目录下的 `starflow-subtitle-cache`
-- 如果某条字幕之前已经下载并解压过，再次选择时会优先复用本地缓存，不再重复下载
+- 结构化验证通过后的字幕会缓存到临时目录 `starflow/validated_online_subtitles`
+- `ASSRT` 网页下载后的字幕会缓存到应用支持目录下的 `starflow-subtitle-cache`
+- 如果某条字幕之前已经验证或下载过，再次选择时会优先复用本地缓存，不再重复下载
 - 如果在线字幕来源被全部关闭，则不会发起这类请求
 - Android `TV` 从原生播放器进入独立字幕搜索页时，会保留当前 `query / title / input`，因此后续手动搜索会沿用当前片名或剧集搜索词，不会再以空查询打开
 

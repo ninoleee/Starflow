@@ -20,7 +20,99 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       } catch (_) {
         // Ignore preference application failures to keep playback available.
       }
+      return;
     }
+
+    if (settings.playbackSubtitlePreference ==
+        PlaybackSubtitlePreference.auto) {
+      try {
+        await _applyAutoPreferredSubtitleTrack(
+          player,
+          configuredLanguages: settings.subtitlePreferredLanguages,
+        );
+      } catch (_) {
+        // Ignore preference application failures to keep playback available.
+      }
+    }
+  }
+
+  Future<void> _applyAutoPreferredSubtitleTrack(
+    Player player, {
+    required List<String> configuredLanguages,
+  }) async {
+    final tracks = await _awaitAvailableSubtitleTracks(player);
+    if (tracks.isEmpty) {
+      return;
+    }
+    final selectedTrack = _selectAutoPreferredSubtitleTrack(
+      tracks,
+      configuredLanguages: configuredLanguages,
+    );
+    if (selectedTrack == null) {
+      return;
+    }
+
+    final currentTrack = player.state.track.subtitle;
+    if (currentTrack.id == selectedTrack.id) {
+      return;
+    }
+    await player.setSubtitleTrack(selectedTrack);
+  }
+
+  Future<List<SubtitleTrack>> _awaitAvailableSubtitleTracks(
+      Player player) async {
+    final currentTracks = player.state.tracks.subtitle;
+    if (_hasSelectableSubtitleTracks(currentTracks)) {
+      return currentTracks;
+    }
+
+    try {
+      return await player.stream.tracks
+          .map((tracks) => tracks.subtitle)
+          .firstWhere(_hasSelectableSubtitleTracks)
+          .timeout(const Duration(seconds: 3));
+    } catch (_) {
+      return currentTracks;
+    }
+  }
+
+  bool _hasSelectableSubtitleTracks(List<SubtitleTrack> tracks) {
+    return tracks.any((track) => !_isSyntheticSubtitleTrack(track));
+  }
+
+  bool _isSyntheticSubtitleTrack(SubtitleTrack track) {
+    return track.id == 'auto' || track.id == 'no';
+  }
+
+  SubtitleTrack? _selectAutoPreferredSubtitleTrack(
+    List<SubtitleTrack> tracks, {
+    required List<String> configuredLanguages,
+  }) {
+    SubtitleTrack? bestTrack;
+    var bestScore = 0;
+
+    for (final track in tracks) {
+      if (_isSyntheticSubtitleTrack(track)) {
+        continue;
+      }
+      final score = scorePreferredSubtitleText(
+            [
+              track.title ?? '',
+              track.language ?? '',
+            ].where((item) => item.trim().isNotEmpty).join(' '),
+            configuredLanguages: configuredLanguages,
+          ) +
+          (track.isDefault == true ? 6 : 0);
+      if (score <= 0) {
+        continue;
+      }
+      if (bestTrack == null || score > bestScore) {
+        bestTrack = track;
+        bestScore = score;
+      }
+    }
+
+    return bestTrack;
   }
 
   Future<void> _persistPlaybackProgress({
@@ -53,7 +145,9 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     _lastProgressPersistedAt = now;
     _lastPersistedPosition = _latestPosition;
 
-    await _providerContainer.read(playbackMemoryRepositoryProvider).saveProgress(
+    await _providerContainer
+        .read(playbackMemoryRepositoryProvider)
+        .saveProgress(
           target: target,
           position: _latestPosition,
           duration: _latestDuration > Duration.zero
