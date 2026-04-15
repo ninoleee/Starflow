@@ -37,8 +37,6 @@ void main() {
       'playbackMpvStallAutoRecoveryEnabled': false,
       'performanceAggressivePlaybackTuningEnabled': true,
       'performanceAutoDowngradeHeavyPlaybackEnabled': true,
-      'playbackTraceEnabled': true,
-      'subtitleSearchTraceEnabled': true,
     });
 
     expect(settings.homeHeroDisplayMode, HomeHeroDisplayMode.borderless);
@@ -87,8 +85,6 @@ void main() {
     expect(settings.playbackMpvStallAutoRecoveryEnabled, isFalse);
     expect(settings.performanceAggressivePlaybackTuningEnabled, isTrue);
     expect(settings.performanceAutoDowngradeHeavyPlaybackEnabled, isTrue);
-    expect(settings.playbackTraceEnabled, isTrue);
-    expect(settings.subtitleSearchTraceEnabled, isTrue);
     expect(settings.toJson()['homeHeroDisplayMode'], 'borderless');
     expect(settings.toJson()['homeHeroStyle'], 'poster');
     expect(settings.toJson()['homeHeroBackgroundEnabled'], isFalse);
@@ -127,8 +123,6 @@ void main() {
       settings.toJson()['performanceAutoDowngradeHeavyPlaybackEnabled'],
       isTrue,
     );
-    expect(settings.toJson()['playbackTraceEnabled'], isTrue);
-    expect(settings.toJson()['subtitleSearchTraceEnabled'], isTrue);
   });
 
   test('app settings default hero display mode and style', () {
@@ -179,8 +173,6 @@ void main() {
     expect(settings.playbackMpvStallAutoRecoveryEnabled, isTrue);
     expect(settings.performanceAggressivePlaybackTuningEnabled, isFalse);
     expect(settings.performanceAutoDowngradeHeavyPlaybackEnabled, isFalse);
-    expect(settings.playbackTraceEnabled, isFalse);
-    expect(settings.subtitleSearchTraceEnabled, isFalse);
     expect(settings.detailAutoLibraryMatchEnabled, isFalse);
   });
 

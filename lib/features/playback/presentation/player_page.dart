@@ -450,14 +450,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 
   bool get _shouldTraceWindowsMpv {
-    if (kIsWeb) {
-      return false;
-    }
-    if (defaultTargetPlatform != TargetPlatform.windows) {
-      return false;
-    }
-    return _playbackSettings.playbackEngine == PlaybackEngine.embeddedMpv &&
-        _playbackSettings.playbackTraceEnabled;
+    return false;
   }
 
   bool get _useWindowManagedEmbeddedMpvFullscreen {

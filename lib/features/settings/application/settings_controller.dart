@@ -2,8 +2,6 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
-import 'package:starflow/core/utils/playback_trace.dart';
-import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
@@ -54,9 +52,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   @override
   FutureOr<AppSettings> build() async {
-    final settings = await _repository.load();
-    _syncRuntimeTraceSettings(settings);
-    return settings;
+    return _repository.load();
   }
 
   Future<void> toggleMediaSource(String id, bool enabled) async {
@@ -298,8 +294,6 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         playbackMpvStallAutoRecoveryEnabled:
             playbackMpvStallAutoRecoveryEnabled ??
                 current.playbackMpvStallAutoRecoveryEnabled,
-        playbackTraceEnabled: false,
-        subtitleSearchTraceEnabled: false,
       ),
     );
   }
@@ -474,14 +468,8 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   Future<void> _persist(AppSettings next) async {
     state = AsyncData(next);
-    _syncRuntimeTraceSettings(next);
     await _repository.save(next);
     ref.read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
-  }
-
-  void _syncRuntimeTraceSettings(AppSettings settings) {
-    setPlaybackTraceEnabled(false);
-    setSubtitleSearchTraceEnabled(true);
   }
 
   HomeModuleConfig _resolveHeroModule(AppSettings settings) {
