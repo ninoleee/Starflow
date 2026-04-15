@@ -1,7 +1,7 @@
 part of 'home_page.dart';
 
 const double _kHomePosterRailFocusOverflowPadding = 10;
-const double _kHomeCarouselFocusOverflowPadding = 8;
+const double _kHomeCarouselFocusOverflowPadding = 10;
 
 class _HomeSectionSlot extends ConsumerStatefulWidget {
   const _HomeSectionSlot({
@@ -213,7 +213,7 @@ class _HomePosterTile extends StatelessWidget {
       ),
       tvPosterFocusOutlineOnly: true,
       tvPosterFocusShowBorder: false,
-      tvPosterFocusScale: 1.03,
+      tvPosterFocusScale: 1.06,
       focusNode: focusNode,
       focusId: focusId,
       autofocus: autofocus,
@@ -894,7 +894,7 @@ class _HomeCarouselTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (isTelevision) {
-      return _HomeTvScaleAction(
+      return TvFocusableAction(
         focusId: focusId,
         focusNode: focusNode,
         autofocus: autofocus,
@@ -902,7 +902,8 @@ class _HomeCarouselTile extends StatelessWidget {
           context.pushNamed('detail', extra: item.detailTarget);
         },
         borderRadius: BorderRadius.circular(18),
-        scale: 1.02,
+        visualStyle: TvFocusVisualStyle.none,
+        focusScale: 1.06,
         child: _HomeCarouselCard(item: item),
       );
     }
@@ -912,104 +913,6 @@ class _HomeCarouselTile extends StatelessWidget {
         context.pushNamed('detail', extra: item.detailTarget);
       },
       child: _HomeCarouselCard(item: item),
-    );
-  }
-}
-
-class _HomeTvScaleAction extends StatefulWidget {
-  const _HomeTvScaleAction({
-    required this.child,
-    required this.onPressed,
-    required this.borderRadius,
-    this.focusId,
-    this.focusNode,
-    this.autofocus = false,
-    this.scale = 1.02,
-  });
-
-  final Widget child;
-  final VoidCallback onPressed;
-  final BorderRadius borderRadius;
-  final String? focusId;
-  final FocusNode? focusNode;
-  final bool autofocus;
-  final double scale;
-
-  @override
-  State<_HomeTvScaleAction> createState() => _HomeTvScaleActionState();
-}
-
-class _HomeTvScaleActionState extends State<_HomeTvScaleAction> {
-  FocusNode? _ownedFocusNode;
-  final ValueNotifier<bool> _isFocusedNotifier = ValueNotifier<bool>(false);
-
-  FocusNode get _effectiveFocusNode =>
-      widget.focusNode ??
-      (_ownedFocusNode ??=
-          FocusNode(debugLabel: 'home-scale-focus:${widget.focusId}'));
-
-  @override
-  void initState() {
-    super.initState();
-    _effectiveFocusNode.addListener(_handleFocusChanged);
-    _handleFocusChanged();
-  }
-
-  @override
-  void didUpdateWidget(covariant _HomeTvScaleAction oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final previousFocusNode = oldWidget.focusNode ?? _ownedFocusNode;
-    final nextFocusNode = _effectiveFocusNode;
-    if (!identical(previousFocusNode, nextFocusNode)) {
-      previousFocusNode?.removeListener(_handleFocusChanged);
-      nextFocusNode.addListener(_handleFocusChanged);
-      _handleFocusChanged();
-      if (oldWidget.focusNode == null && widget.focusNode != null) {
-        _ownedFocusNode?.dispose();
-        _ownedFocusNode = null;
-      }
-    }
-  }
-
-  void _handleFocusChanged() {
-    final isFocused =
-        _effectiveFocusNode.hasFocus || _effectiveFocusNode.hasPrimaryFocus;
-    if (_isFocusedNotifier.value == isFocused) {
-      return;
-    }
-    _isFocusedNotifier.value = isFocused;
-  }
-
-  @override
-  void dispose() {
-    final currentFocusNode = widget.focusNode ?? _ownedFocusNode;
-    currentFocusNode?.removeListener(_handleFocusChanged);
-    _ownedFocusNode?.dispose();
-    _isFocusedNotifier.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: _isFocusedNotifier,
-      child: TvFocusableAction(
-        focusId: widget.focusId,
-        focusNode: _effectiveFocusNode,
-        autofocus: widget.autofocus,
-        onPressed: widget.onPressed,
-        borderRadius: widget.borderRadius,
-        visualStyle: TvFocusVisualStyle.none,
-        child: widget.child,
-      ),
-      builder: (context, isFocused, child) {
-        return AnimatedScale(
-          scale: isFocused ? widget.scale : 1.0,
-          duration: const Duration(milliseconds: 140),
-          curve: Curves.easeOutCubic,
-          child: child,
-        );
-      },
     );
   }
 }

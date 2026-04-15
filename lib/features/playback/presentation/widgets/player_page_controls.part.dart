@@ -916,6 +916,31 @@ extension _PlayerPageStateControls on _PlayerPageState {
     return null;
   }
 
+  List<Shadow> _buildSubtitleOutlineShadows({
+    required bool simplifyForPerformance,
+  }) {
+    const strongOutline = Color(0xE0000000);
+    const softOutline = Color(0xB0000000);
+    if (simplifyForPerformance) {
+      return const [
+        Shadow(color: strongOutline, offset: Offset(-1.2, 0), blurRadius: 0),
+        Shadow(color: strongOutline, offset: Offset(1.2, 0), blurRadius: 0),
+        Shadow(color: strongOutline, offset: Offset(0, -1.2), blurRadius: 0),
+        Shadow(color: strongOutline, offset: Offset(0, 1.2), blurRadius: 0),
+      ];
+    }
+    return const [
+      Shadow(color: strongOutline, offset: Offset(-1.4, 0), blurRadius: 0),
+      Shadow(color: strongOutline, offset: Offset(1.4, 0), blurRadius: 0),
+      Shadow(color: strongOutline, offset: Offset(0, -1.4), blurRadius: 0),
+      Shadow(color: strongOutline, offset: Offset(0, 1.4), blurRadius: 0),
+      Shadow(color: softOutline, offset: Offset(-1.0, -1.0), blurRadius: 0),
+      Shadow(color: softOutline, offset: Offset(1.0, -1.0), blurRadius: 0),
+      Shadow(color: softOutline, offset: Offset(-1.0, 1.0), blurRadius: 0),
+      Shadow(color: softOutline, offset: Offset(1.0, 1.0), blurRadius: 0),
+    ];
+  }
+
   SubtitleViewConfiguration _buildSubtitleViewConfiguration(
     AppSettings settings, {
     required bool isTelevision,
@@ -934,9 +959,10 @@ extension _PlayerPageStateControls on _PlayerPageState {
             settings.playbackSubtitleScale.textScale,
         color: Colors.white,
         fontWeight: FontWeight.w600,
-        backgroundColor: simplifyForPerformance
-            ? Colors.transparent
-            : const Color(0xAA000000),
+        backgroundColor: Colors.transparent,
+        shadows: _buildSubtitleOutlineShadows(
+          simplifyForPerformance: simplifyForPerformance,
+        ),
       ),
       padding: EdgeInsets.fromLTRB(
         20,

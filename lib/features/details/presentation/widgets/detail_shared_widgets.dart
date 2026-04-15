@@ -615,12 +615,14 @@ class DetailImageGallery extends StatelessWidget {
     }
 
     return SizedBox(
-      height: 164,
+      height: 184,
       child: DesktopHorizontalPager(
         builder: (context, controller) => ListView.separated(
           controller: controller,
           scrollDirection: Axis.horizontal,
           physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          clipBehavior: Clip.none,
           itemCount: images.length,
           separatorBuilder: (context, index) => const SizedBox(width: 14),
           itemBuilder: (context, index) {
@@ -629,7 +631,8 @@ class DetailImageGallery extends StatelessWidget {
               onPressed: () => openPreview(image),
               focusId: '$focusIdPrefix:$index',
               borderRadius: BorderRadius.circular(22),
-              visualStyle: TvFocusVisualStyle.subtle,
+              visualStyle: TvFocusVisualStyle.none,
+              focusScale: 1.06,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(22),
                 child: AspectRatio(

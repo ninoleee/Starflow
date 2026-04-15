@@ -357,7 +357,7 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
           const SizedBox(height: 16),
         ],
         SizedBox(
-          height: 272,
+          height: 292,
           child: selectedGroupAsync.when(
             data: (resolvedGroup) {
               final episodes = resolvedGroup.episodes;
@@ -378,6 +378,7 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
                   controller: controller,
                   scrollDirection: Axis.horizontal,
                   physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
                   clipBehavior: Clip.none,
                   cacheExtent: _episodeCardWidth * 2,
                   itemCount: episodes.length,
@@ -617,32 +618,8 @@ class _DetailEpisodeCard extends ConsumerWidget {
       autofocus: autofocus,
       borderRadius: borderRadius,
       visualStyle: TvFocusVisualStyle.none,
-      child: Builder(
-        builder: (context) {
-          final focusState = Focus.of(context);
-          final isFocused = focusState.hasFocus || focusState.hasPrimaryFocus;
-          if (!isFocused) {
-            return cardChild;
-          }
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              cardChild,
-              IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: borderRadius,
-                    border: Border.all(
-                      color: Colors.white,
-                      width: 2.4,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
+      focusScale: 1.06,
+      child: cardChild,
     );
   }
 

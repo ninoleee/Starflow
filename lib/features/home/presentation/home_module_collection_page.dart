@@ -199,9 +199,10 @@ class _DoubanPagedGrid extends StatelessWidget {
             final childAspectRatio = itemWidth / itemHeight;
 
             return GridView.builder(
-              padding: EdgeInsets.zero,
+              padding: const EdgeInsets.symmetric(vertical: 10),
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
+              clipBehavior: Clip.none,
               itemCount: entries.length,
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: crossAxisCount,
@@ -217,6 +218,8 @@ class _DoubanPagedGrid extends StatelessWidget {
                   posterUrl: entry.posterUrl,
                   posterHeaders: const {},
                   tvPosterFocusOutlineOnly: true,
+                  tvPosterFocusShowBorder: false,
+                  tvPosterFocusScale: 1.06,
                   imageBadgeText: resolvePreferredPosterRatingLabel(
                     [entry.ratingLabel],
                     preferDoubanOnly: true,

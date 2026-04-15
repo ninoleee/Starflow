@@ -829,6 +829,8 @@ class _HeroPagerButton extends StatelessWidget {
         focusNode: focusNode,
         focusId: focusId,
         borderRadius: BorderRadius.circular(999),
+        visualStyle: TvFocusVisualStyle.none,
+        focusScale: 1.08,
         child: child,
       ),
     );
@@ -1074,6 +1076,8 @@ class _FeaturedHeroCard extends StatelessWidget {
         focusId: focusId,
         autofocus: autofocus,
         borderRadius: borderRadius,
+        visualStyle: TvFocusVisualStyle.none,
+        focusScale: 1.015,
         child: card,
       ),
     );

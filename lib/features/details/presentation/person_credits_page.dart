@@ -724,9 +724,10 @@ class _PersonCreditsGrid extends StatelessWidget {
         final childAspectRatio = itemWidth / itemHeight;
 
         return GridView.builder(
-          padding: EdgeInsets.zero,
+          padding: const EdgeInsets.symmetric(vertical: 10),
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
+          clipBehavior: Clip.none,
           itemCount: items.length,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: crossAxisCount,
@@ -741,6 +742,8 @@ class _PersonCreditsGrid extends StatelessWidget {
                   'person-credits:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
               autofocus: index == 0,
               tvPosterFocusOutlineOnly: true,
+              tvPosterFocusShowBorder: false,
+              tvPosterFocusScale: 1.06,
               title: item.title,
               subtitle: item.subtitle,
               imageBadgeText: item.ratingLabel,

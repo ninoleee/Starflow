@@ -90,9 +90,10 @@ class LibraryPagedGrid extends ConsumerWidget {
             final childAspectRatio = itemWidth / itemHeight;
 
             return GridView.builder(
-              padding: EdgeInsets.zero,
+              padding: const EdgeInsets.symmetric(vertical: 10),
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
+              clipBehavior: Clip.none,
               itemCount: pageItems.length,
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: crossAxisCount,
@@ -122,6 +123,8 @@ class LibraryPagedGrid extends ConsumerWidget {
                   ),
                   autofocus: index == 0,
                   tvPosterFocusOutlineOnly: true,
+                  tvPosterFocusShowBorder: false,
+                  tvPosterFocusScale: 1.06,
                   title: item.title,
                   subtitle: item.year > 0 ? '${item.year}' : '',
                   posterUrl: posterAsset.url,

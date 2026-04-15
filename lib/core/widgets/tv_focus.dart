@@ -255,7 +255,8 @@ class _TvOutlinedFocusableAction extends StatefulWidget {
       _TvOutlinedFocusableActionState();
 }
 
-class _TvOutlinedFocusableActionState extends State<_TvOutlinedFocusableAction> {
+class _TvOutlinedFocusableActionState
+    extends State<_TvOutlinedFocusableAction> {
   FocusNode? _ownedFocusNode;
   bool _isFocused = false;
 
@@ -414,6 +415,7 @@ class TvFocusableAction extends ConsumerStatefulWidget {
     this.focusId,
     this.borderRadius = const BorderRadius.all(Radius.circular(20)),
     this.visualStyle = TvFocusVisualStyle.prominent,
+    this.focusScale = 1.0,
   });
 
   final Widget child;
@@ -425,6 +427,7 @@ class TvFocusableAction extends ConsumerStatefulWidget {
   final String? focusId;
   final BorderRadius borderRadius;
   final TvFocusVisualStyle visualStyle;
+  final double focusScale;
 
   @override
   ConsumerState<TvFocusableAction> createState() => _TvFocusableActionState();
@@ -479,16 +482,24 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
   Widget _buildFocusVisualFrame({
     required Widget child,
   }) {
-    if (widget.visualStyle == TvFocusVisualStyle.none || !_isFocused) {
-      return child;
+    Widget currentChild = child;
+    if (widget.visualStyle != TvFocusVisualStyle.none && _isFocused) {
+      currentChild = _TvFocusOutlineFrame(
+        isFocused: true,
+        borderRadius: widget.borderRadius,
+        borderWidth: widget.visualStyle == TvFocusVisualStyle.subtle ? 1.6 : 2,
+        child: currentChild,
+      );
     }
-    return _TvFocusOutlineFrame(
-      isFocused: true,
-      borderRadius: widget.borderRadius,
-      borderWidth:
-          widget.visualStyle == TvFocusVisualStyle.subtle ? 1.6 : 2,
-      child: child,
-    );
+    if (widget.focusScale > 1.0) {
+      currentChild = AnimatedScale(
+        scale: _isFocused ? widget.focusScale : 1.0,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
+        child: currentChild,
+      );
+    }
+    return currentChild;
   }
 
   @override
