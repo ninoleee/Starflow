@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
@@ -142,6 +143,18 @@ class _FakeOnlineSubtitleRepository implements OnlineSubtitleRepository {
   Future<SubtitleDownloadResult> download(SubtitleSearchResult result) {
     throw UnimplementedError();
   }
+
+  @override
+  Future<LocalStorageCacheSummary> inspectCacheSummary() async {
+    return const LocalStorageCacheSummary(
+      type: LocalStorageCacheType.subtitleCache,
+      entryCount: 0,
+      totalBytes: 0,
+    );
+  }
+
+  @override
+  Future<void> clearCache() async {}
 
   @override
   Future<List<ValidatedSubtitleCandidate>> searchStructured(

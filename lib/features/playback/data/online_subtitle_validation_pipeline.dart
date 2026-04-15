@@ -10,6 +10,8 @@ import 'package:starflow/features/playback/domain/online_subtitle_structured_mod
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 
 class SubtitleValidationPipeline {
+  static const _defaultValidationConcurrency = 4;
+
   SubtitleValidationPipeline(
     this._client, {
     Future<Directory> Function()? cacheDirectoryProvider,
@@ -18,49 +20,123 @@ class SubtitleValidationPipeline {
 
   final http.Client _client;
   final Future<Directory> Function() _cacheDirectoryProvider;
-  Future<Directory>? _cacheDirectoryFuture;
 
   Future<List<ValidatedSubtitleCandidate>> validateHits(
     Iterable<ProviderSubtitleHit> hits, {
     int maxValidated = 0,
   }) async {
     final hitList = hits.toList(growable: false);
+    final workerCount = _resolveValidationWorkerCount(
+      hitCount: hitList.length,
+      maxValidated: maxValidated,
+    );
     subtitleSearchTrace(
       'repository.structured.validation.batch-start',
       fields: {
         'totalHits': hitList.length,
         'maxValidated': maxValidated,
+        'workers': workerCount,
         'sources': hitList.map((item) => item.source.name).toSet().join('/'),
       },
     );
-    final results = <ValidatedSubtitleCandidate>[];
+    if (hitList.isEmpty) {
+      subtitleSearchTrace(
+        'repository.structured.validation.batch-finished',
+        fields: {
+          'processed': 0,
+          'validated': 0,
+          'failed': 0,
+          'skipped': 0,
+        },
+      );
+      return const [];
+    }
+    final indexedResults = <_IndexedValidatedSubtitleCandidate>[];
     var validatedCount = 0;
-    for (final hit in hitList) {
-      final validated = await validateHit(hit);
-      results.add(validated);
-      if (validated.status == SubtitleValidationStatus.validated) {
-        validatedCount += 1;
+    var nextIndex = 0;
+
+    Future<void> worker() async {
+      while (true) {
         if (maxValidated > 0 && validatedCount >= maxValidated) {
-          break;
+          return;
+        }
+        if (nextIndex >= hitList.length) {
+          return;
+        }
+        final currentIndex = nextIndex;
+        nextIndex += 1;
+        final validated = await validateHit(hitList[currentIndex]);
+        indexedResults.add(
+          _IndexedValidatedSubtitleCandidate(
+            index: currentIndex,
+            candidate: validated,
+          ),
+        );
+        if (validated.status == SubtitleValidationStatus.validated) {
+          validatedCount += 1;
         }
       }
     }
+
+    await Future.wait(
+      List<Future<void>>.generate(workerCount, (_) => worker()),
+    );
+    indexedResults.sort((left, right) => left.index.compareTo(right.index));
+    final results =
+        indexedResults.map((item) => item.candidate).toList(growable: false);
+    final effectiveResults = maxValidated > 0
+        ? _truncateAfterValidated(results, maxValidated: maxValidated)
+        : results;
     subtitleSearchTrace(
       'repository.structured.validation.batch-finished',
       fields: {
-        'processed': results.length,
-        'validated': results
+        'processed': effectiveResults.length,
+        'validated': effectiveResults
             .where((item) => item.status == SubtitleValidationStatus.validated)
             .length,
-        'failed': results
+        'failed': effectiveResults
             .where((item) => item.status == SubtitleValidationStatus.failed)
             .length,
-        'skipped': results
+        'skipped': effectiveResults
             .where((item) => item.status == SubtitleValidationStatus.skipped)
             .length,
       },
     );
-    return results;
+    return effectiveResults;
+  }
+
+  int _resolveValidationWorkerCount({
+    required int hitCount,
+    required int maxValidated,
+  }) {
+    if (hitCount <= 1) {
+      return hitCount;
+    }
+    final target = maxValidated > 0
+        ? maxValidated.clamp(1, _defaultValidationConcurrency)
+        : _defaultValidationConcurrency;
+    return hitCount.clamp(1, target);
+  }
+
+  List<ValidatedSubtitleCandidate> _truncateAfterValidated(
+    List<ValidatedSubtitleCandidate> results, {
+    required int maxValidated,
+  }) {
+    if (maxValidated <= 0) {
+      return results;
+    }
+    final truncated = <ValidatedSubtitleCandidate>[];
+    var validatedCount = 0;
+    for (final result in results) {
+      truncated.add(result);
+      if (result.status == SubtitleValidationStatus.validated) {
+        validatedCount += 1;
+        if (validatedCount >= maxValidated) {
+          break;
+        }
+      }
+    }
+    return truncated;
   }
 
   Future<ValidatedSubtitleCandidate> validateHit(
@@ -99,79 +175,9 @@ class SubtitleValidationPipeline {
     try {
       final cacheDirectory = await _cacheDirectory();
       final bucket =
-          Directory(p.join(cacheDirectory.path, _validationBucketKey(hit)));
+          Directory(p.join(cacheDirectory.path, _operationBucketKey(hit)));
       if (!await bucket.exists()) {
         await bucket.create(recursive: true);
-      }
-
-      if (hit.packageKind == SubtitlePackageKind.zipArchive) {
-        final cachedArchive = await _findExistingPackageFile(
-          bucket,
-          packageName: hit.packageName,
-        );
-        if (cachedArchive != null) {
-          final extracted = await _extractBestSubtitleFromZip(
-            cachedArchive,
-            bucket,
-            version: hit.version,
-            packageName: hit.packageName,
-            seasonNumber: hit.seasonNumber,
-            episodeNumber: hit.episodeNumber,
-          );
-          if (extracted != null) {
-            final result = ValidatedSubtitleCandidate(
-              hit: hit,
-              status: SubtitleValidationStatus.validated,
-              cachedPath: bucket.path,
-              subtitleFilePath: extracted.path,
-              displayName: p.basenameWithoutExtension(extracted.path),
-              detectedFiles: [extracted.path],
-            );
-            subtitleSearchTrace(
-              'repository.structured.validation.cache-hit',
-              fields: {
-                'source': hit.source.name,
-                'id': hit.id,
-                'path': extracted.path,
-              },
-            );
-            _traceValidationOutcome(hit, result);
-            return result;
-          }
-        }
-      }
-
-      final existing = hit.packageKind == SubtitlePackageKind.subtitleFile
-          ? await _findExistingSubtitleByPackageName(
-              bucket,
-              packageName: hit.packageName,
-            )
-          : await _findExistingSubtitle(
-              bucket,
-              packageName: hit.packageName,
-              version: hit.version,
-              seasonNumber: hit.seasonNumber,
-              episodeNumber: hit.episodeNumber,
-            );
-      if (existing != null) {
-        final result = ValidatedSubtitleCandidate(
-          hit: hit,
-          status: SubtitleValidationStatus.validated,
-          cachedPath: bucket.path,
-          subtitleFilePath: existing.path,
-          displayName: p.basenameWithoutExtension(existing.path),
-          detectedFiles: [existing.path],
-        );
-        subtitleSearchTrace(
-          'repository.structured.validation.cache-hit',
-          fields: {
-            'source': hit.source.name,
-            'id': hit.id,
-            'path': existing.path,
-          },
-        );
-        _traceValidationOutcome(hit, result);
-        return result;
       }
 
       final response = await _client.get(
@@ -292,8 +298,18 @@ class SubtitleValidationPipeline {
   }
 
   Future<Directory> _cacheDirectory() {
-    return _cacheDirectoryFuture ??= _cacheDirectoryProvider();
+    return _cacheDirectoryProvider();
   }
+}
+
+class _IndexedValidatedSubtitleCandidate {
+  const _IndexedValidatedSubtitleCandidate({
+    required this.index,
+    required this.candidate,
+  });
+
+  final int index;
+  final ValidatedSubtitleCandidate candidate;
 }
 
 Future<Directory> _defaultValidationCacheDirectory() async {
@@ -322,89 +338,6 @@ void _traceValidationOutcome(
       'subtitleFilePath': result.subtitleFilePath ?? '',
     },
   );
-}
-
-Future<File?> _findExistingSubtitleByPackageName(
-  Directory bucket, {
-  required String packageName,
-}) async {
-  if (!await bucket.exists()) {
-    return null;
-  }
-  final normalizedName = _sanitizeFileName(packageName);
-  if (normalizedName.trim().isEmpty) {
-    return null;
-  }
-  final directFile = File(p.join(bucket.path, normalizedName));
-  if (await directFile.exists()) {
-    return directFile;
-  }
-  return null;
-}
-
-Future<File?> _findExistingSubtitle(
-  Directory bucket, {
-  required String packageName,
-  required String version,
-  int? seasonNumber,
-  int? episodeNumber,
-}) async {
-  if (!await bucket.exists()) {
-    return null;
-  }
-  final entities = await bucket.list().toList();
-  final files = entities.whereType<File>().where((file) {
-    final extension = p.extension(file.path).toLowerCase();
-    return extension == '.srt' ||
-        extension == '.ass' ||
-        extension == '.ssa' ||
-        extension == '.vtt';
-  }).toList(growable: false);
-  if (files.isEmpty) {
-    return null;
-  }
-  files.sort(
-    (left, right) => _subtitleCandidateScore(
-      fileName: p.basename(right.path),
-      packageName: packageName,
-      version: version,
-      seasonNumber: seasonNumber,
-      episodeNumber: episodeNumber,
-    ).compareTo(
-      _subtitleCandidateScore(
-        fileName: p.basename(left.path),
-        packageName: packageName,
-        version: version,
-        seasonNumber: seasonNumber,
-        episodeNumber: episodeNumber,
-      ),
-    ),
-  );
-  return files.first;
-}
-
-Future<File?> _findExistingPackageFile(
-  Directory bucket, {
-  required String packageName,
-}) async {
-  if (!await bucket.exists()) {
-    return null;
-  }
-  final directFile = File(p.join(bucket.path, _sanitizeFileName(packageName)));
-  if (await directFile.exists()) {
-    return directFile;
-  }
-  final packageExtension = p.extension(packageName).toLowerCase();
-  await for (final entity in bucket.list()) {
-    if (entity is! File) {
-      continue;
-    }
-    if (packageExtension.isNotEmpty &&
-        p.extension(entity.path).toLowerCase() == packageExtension) {
-      return entity;
-    }
-  }
-  return null;
 }
 
 Future<File?> _extractBestSubtitleFromZip(
@@ -521,7 +454,7 @@ String _stableHash(String value) {
   return hash.toRadixString(16);
 }
 
-String _validationBucketKey(ProviderSubtitleHit hit) {
+String _operationBucketKey(ProviderSubtitleHit hit) {
   final fingerprint = [
     hit.source.name,
     hit.id.trim(),
@@ -531,5 +464,5 @@ String _validationBucketKey(ProviderSubtitleHit hit) {
     '${hit.seasonNumber ?? ''}',
     '${hit.episodeNumber ?? ''}',
   ].join('|');
-  return _stableHash(fingerprint);
+  return '${DateTime.now().microsecondsSinceEpoch}-${_stableHash(fingerprint)}';
 }

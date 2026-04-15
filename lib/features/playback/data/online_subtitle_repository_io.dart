@@ -11,7 +11,6 @@ import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/features/playback/application/subtitle_language_preferences.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/data/online_subtitle_provider_protocol.dart';
-import 'package:starflow/features/playback/data/online_subtitle_validation_pipeline.dart';
 import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -28,8 +27,7 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
   AssrtSubtitleRepository(
     this._client, {
     required AppSettings Function() settingsProvider,
-  })  : _settingsProvider = settingsProvider,
-        _validationPipeline = SubtitleValidationPipeline(_client);
+  }) : _settingsProvider = settingsProvider;
 
   static const _openSubtitlesApiKey = String.fromEnvironment(
     'STARFLOW_OPENSUBTITLES_API_KEY',
@@ -37,8 +35,7 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
 
   final http.Client _client;
   final AppSettings Function() _settingsProvider;
-  final SubtitleValidationPipeline _validationPipeline;
-  Future<Directory>? _cacheDirectoryFuture;
+  Future<Directory>? _sessionDirectoryFuture;
 
   @override
   Future<List<ValidatedSubtitleCandidate>> searchStructured(
@@ -70,25 +67,37 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
       return const [];
     }
 
-    final hitLists = <List<ProviderSubtitleHit>>[];
-    final errors = <String>[];
-    for (final provider in providers) {
-      try {
-        hitLists.add(await provider.search(request));
-      } catch (error, stackTrace) {
-        errors.add('${provider.providerLabel}: $error');
-        subtitleSearchTrace(
-          'repository.structured.search.provider-failed',
-          fields: {
-            'source': provider.source.name,
-            'query': request.normalizedQuery,
-          },
-          error: error,
-          stackTrace: stackTrace,
-        );
-      }
-    }
-    final hits = hitLists.expand((item) => item).toList(growable: false);
+    final providerResults = await Future.wait(
+      providers.map(
+        (provider) async {
+          try {
+            return _StructuredProviderSearchResult(
+              hits: await provider.search(request),
+            );
+          } catch (error, stackTrace) {
+            subtitleSearchTrace(
+              'repository.structured.search.provider-failed',
+              fields: {
+                'source': provider.source.name,
+                'query': request.normalizedQuery,
+              },
+              error: error,
+              stackTrace: stackTrace,
+            );
+            return _StructuredProviderSearchResult(
+              hits: const <ProviderSubtitleHit>[],
+              errorMessage: '${provider.providerLabel}: $error',
+            );
+          }
+        },
+      ),
+    );
+    final hits =
+        providerResults.expand((item) => item.hits).toList(growable: false);
+    final errors = providerResults
+        .map((item) => item.errorMessage)
+        .whereType<String>()
+        .toList(growable: false);
     subtitleSearchTrace(
       'repository.structured.search.hits-collected',
       fields: {
@@ -106,24 +115,37 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
     final limitedHits = maxResults > 0 && hits.length > maxResults
         ? hits.take(maxResults).toList(growable: false)
         : hits;
-    final candidates = await _validationPipeline.validateHits(
-      limitedHits,
-      maxValidated: maxValidated,
-    );
+    if (limitedHits.isEmpty) {
+      subtitleSearchTrace(
+        'repository.structured.search.finished',
+        fields: {
+          'hits': 0,
+          'returned': 0,
+          'deferredDownload': 0,
+          'sources': providers.map((item) => item.source.name).join('/'),
+        },
+      );
+      return const [];
+    }
+    final resultLimit = maxValidated > 0
+        ? maxValidated.clamp(1, limitedHits.length)
+        : limitedHits.length;
+    final candidates = limitedHits
+        .take(resultLimit)
+        .map(
+          (hit) => ValidatedSubtitleCandidate(
+            hit: hit,
+            status: SubtitleValidationStatus.skipped,
+            failureReason: '搜索阶段不预下载，点选后再下载并加载',
+          ),
+        )
+        .toList(growable: false);
     subtitleSearchTrace(
       'repository.structured.search.finished',
       fields: {
         'hits': hits.length,
-        'processed': candidates.length,
-        'validated': candidates
-            .where((item) => item.status == SubtitleValidationStatus.validated)
-            .length,
-        'failed': candidates
-            .where((item) => item.status == SubtitleValidationStatus.failed)
-            .length,
-        'skipped': candidates
-            .where((item) => item.status == SubtitleValidationStatus.skipped)
-            .length,
+        'returned': candidates.length,
+        'deferredDownload': candidates.length,
         'sources': providers.map((item) => item.source.name).join('/'),
       },
     );
@@ -168,35 +190,24 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
           referer: 'https://assrt.net/',
         );
       case OnlineSubtitleSource.opensubtitles:
+        return _downloadAndCacheResult(result, referer: '');
       case OnlineSubtitleSource.subdl:
-        throw StateError('新结构化字幕源请走预验证后本地应用链路。');
+        return _downloadAndCacheResult(result, referer: '');
     }
   }
 
   @override
   Future<LocalStorageCacheSummary> inspectCacheSummary() async {
-    final downloadSummary =
-        await _inspectDirectorySummary(await _cacheDirectory());
-    final validationSummary =
-        await _inspectDirectorySummary(await _validationCacheDirectory());
-    return LocalStorageCacheSummary(
-      type: LocalStorageCacheType.subtitleCache,
-      entryCount: downloadSummary.entryCount + validationSummary.entryCount,
-      totalBytes: downloadSummary.totalBytes + validationSummary.totalBytes,
-    );
+    return _inspectDirectorySummary(await _sessionDirectory());
   }
 
   @override
   Future<void> clearCache() async {
-    final downloadDirectory = await _cacheDirectory();
-    if (await downloadDirectory.exists()) {
-      await downloadDirectory.delete(recursive: true);
+    final sessionDirectory = await _sessionDirectory();
+    if (await sessionDirectory.exists()) {
+      await sessionDirectory.delete(recursive: true);
     }
-    final validationDirectory = await _validationCacheDirectory();
-    if (await validationDirectory.exists()) {
-      await validationDirectory.delete(recursive: true);
-    }
-    _cacheDirectoryFuture = null;
+    _sessionDirectoryFuture = null;
   }
 
   Future<SubtitleDownloadResult> _downloadAndCacheResult(
@@ -219,69 +230,10 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
 
     final baseDirectory = await _cacheDirectory();
     final bucketDirectory = Directory(
-      p.join(baseDirectory.path, _stableHash(normalizedUrl)),
+      p.join(baseDirectory.path, _operationBucketKey(normalizedUrl)),
     );
     if (!await bucketDirectory.exists()) {
       await bucketDirectory.create(recursive: true);
-    }
-
-    if (result.packageKind == SubtitlePackageKind.zipArchive) {
-      final cachedArchive = await _findExistingPackageFile(
-        bucketDirectory,
-        packageName: result.packageName,
-      );
-      if (cachedArchive != null) {
-        final extracted = await _extractBestSubtitleFromZip(
-          archiveFile: cachedArchive,
-          bucketDirectory: bucketDirectory,
-          version: result.version,
-          packageName: result.packageName,
-          preferredLanguages: _settingsProvider().subtitlePreferredLanguages,
-          seasonNumber: result.seasonNumber,
-          episodeNumber: result.episodeNumber,
-        );
-        subtitleSearchTrace(
-          'repository.download.cache-hit',
-          fields: {
-            'id': result.id,
-            'path': extracted.path,
-          },
-        );
-        return SubtitleDownloadResult(
-          cachedPath: bucketDirectory.path,
-          displayName: p.basenameWithoutExtension(extracted.path),
-          subtitleFilePath: extracted.path,
-        );
-      }
-    }
-
-    final existingExtracted = result.packageKind ==
-            SubtitlePackageKind.subtitleFile
-        ? await _findExistingSubtitleFileByPackageName(
-            bucketDirectory,
-            packageName: result.packageName,
-          )
-        : await _findBestExistingSubtitleFile(
-            bucketDirectory,
-            packageName: result.packageName,
-            version: result.version,
-            preferredLanguages: _settingsProvider().subtitlePreferredLanguages,
-            seasonNumber: result.seasonNumber,
-            episodeNumber: result.episodeNumber,
-          );
-    if (existingExtracted != null) {
-      subtitleSearchTrace(
-        'repository.download.cache-hit',
-        fields: {
-          'id': result.id,
-          'path': existingExtracted.path,
-        },
-      );
-      return SubtitleDownloadResult(
-        cachedPath: bucketDirectory.path,
-        displayName: p.basenameWithoutExtension(existingExtracted.path),
-        subtitleFilePath: existingExtracted.path,
-      );
     }
 
     final response = await _client.get(
@@ -364,95 +316,6 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
     }
   }
 
-  Future<File?> _findBestExistingSubtitleFile(
-    Directory bucketDirectory, {
-    required String packageName,
-    required String version,
-    required List<String> preferredLanguages,
-    int? seasonNumber,
-    int? episodeNumber,
-  }) async {
-    if (!await bucketDirectory.exists()) {
-      return null;
-    }
-    final candidates = <File>[];
-    await for (final entity in bucketDirectory.list()) {
-      if (entity is! File) {
-        continue;
-      }
-      if (!_isSubtitleFileName(entity.path)) {
-        continue;
-      }
-      candidates.add(entity);
-    }
-    if (candidates.isEmpty) {
-      return null;
-    }
-    candidates.sort(
-      (left, right) => _subtitleCandidateScore(
-        fileName: p.basename(right.path),
-        packageName: packageName,
-        version: version,
-        preferredLanguages: preferredLanguages,
-        seasonNumber: seasonNumber,
-        episodeNumber: episodeNumber,
-      ).compareTo(
-        _subtitleCandidateScore(
-          fileName: p.basename(left.path),
-          packageName: packageName,
-          version: version,
-          preferredLanguages: preferredLanguages,
-          seasonNumber: seasonNumber,
-          episodeNumber: episodeNumber,
-        ),
-      ),
-    );
-    return candidates.first;
-  }
-
-  Future<File?> _findExistingSubtitleFileByPackageName(
-    Directory bucketDirectory, {
-    required String packageName,
-  }) async {
-    if (!await bucketDirectory.exists()) {
-      return null;
-    }
-    final normalizedName = _sanitizeFileName(packageName);
-    if (normalizedName.trim().isEmpty) {
-      return null;
-    }
-    final directFile = File(p.join(bucketDirectory.path, normalizedName));
-    if (await directFile.exists()) {
-      return directFile;
-    }
-    return null;
-  }
-
-  Future<File?> _findExistingPackageFile(
-    Directory bucketDirectory, {
-    required String packageName,
-  }) async {
-    if (!await bucketDirectory.exists()) {
-      return null;
-    }
-    final directFile =
-        File(p.join(bucketDirectory.path, _sanitizeFileName(packageName)));
-    if (await directFile.exists()) {
-      return directFile;
-    }
-    final packageExtension = p.extension(packageName).toLowerCase();
-    await for (final entity in bucketDirectory.list()) {
-      if (entity is! File) {
-        continue;
-      }
-      if (packageExtension.isNotEmpty &&
-          p.extension(entity.path).toLowerCase() == packageExtension) {
-        return entity;
-      }
-    }
-    return null;
-  }
-
   Future<File> _extractBestSubtitleFromZip({
     required File archiveFile,
     required Directory bucketDirectory,
@@ -509,23 +372,34 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
   }
 
   Future<Directory> _cacheDirectory() {
-    return _cacheDirectoryFuture ??= () async {
-      final baseDirectory = await getTemporaryDirectory();
+    return _downloadDirectory();
+  }
+
+  Future<Directory> _downloadDirectory() async {
+    final sessionDirectory = await _sessionDirectory();
+    final directory = Directory(p.join(sessionDirectory.path, 'downloads'));
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+    }
+    return directory;
+  }
+
+  Future<Directory> _sessionDirectory() {
+    return _sessionDirectoryFuture ??= () async {
+      final root = await getTemporaryDirectory();
+      final sessionId = [
+        DateTime.now().microsecondsSinceEpoch,
+        pid,
+        _stableHash(identityHashCode(this).toString()),
+      ].join('-');
       final directory = Directory(
-        p.join(baseDirectory.path, 'starflow', 'downloaded_online_subtitles'),
+        p.join(root.path, 'starflow', 'online_subtitles', 'session-$sessionId'),
       );
       if (!await directory.exists()) {
         await directory.create(recursive: true);
       }
       return directory;
     }();
-  }
-
-  Future<Directory> _validationCacheDirectory() async {
-    final root = await getTemporaryDirectory();
-    return Directory(
-      p.join(root.path, 'starflow', 'validated_online_subtitles'),
-    );
   }
 }
 
@@ -556,6 +430,16 @@ Future<LocalStorageCacheSummary> _inspectDirectorySummary(
     entryCount: entryCount,
     totalBytes: totalBytes,
   );
+}
+
+class _StructuredProviderSearchResult {
+  const _StructuredProviderSearchResult({
+    required this.hits,
+    this.errorMessage,
+  });
+
+  final List<ProviderSubtitleHit> hits;
+  final String? errorMessage;
 }
 
 bool _isSubtitleFileName(String fileName) {
@@ -654,4 +538,8 @@ String _stableHash(String value) {
     hash = (hash * 0x100000001b3) & 0x7fffffffffffffff;
   }
   return hash.toRadixString(16);
+}
+
+String _operationBucketKey(String seed) {
+  return '${DateTime.now().microsecondsSinceEpoch}-${_stableHash(seed)}';
 }

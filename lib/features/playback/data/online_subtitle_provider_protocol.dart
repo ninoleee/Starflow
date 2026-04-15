@@ -153,13 +153,13 @@ class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
         continue;
       }
 
-      final hits = <ProviderSubtitleHit>[];
-      for (final candidate in candidates) {
-        final hit = await _loadAssrtDetail(candidate, request: request);
-        if (hit != null) {
-          hits.add(hit);
-        }
-      }
+      final hits = (await Future.wait(
+        candidates.map(
+          (candidate) => _loadAssrtDetail(candidate, request: request),
+        ),
+      ))
+          .whereType<ProviderSubtitleHit>()
+          .toList(growable: false);
       if (hits.isNotEmpty) {
         return _dedupeHits(hits);
       }
@@ -393,6 +393,12 @@ class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
 
 class OpenSubtitlesStructuredProvider
     implements OnlineSubtitleStructuredProvider {
+  static const _sessionTtl = Duration(minutes: 15);
+  static final Map<String, _OpenSubtitlesSessionCacheEntry> _sessionCache =
+      <String, _OpenSubtitlesSessionCacheEntry>{};
+  static final Map<String, Future<_OpenSubtitlesSession>> _sessionFutures =
+      <String, Future<_OpenSubtitlesSession>>{};
+
   OpenSubtitlesStructuredProvider(
     this._client, {
     this.config = const OpenSubtitlesProviderConfig(),
@@ -455,10 +461,10 @@ class OpenSubtitlesStructuredProvider
         );
         continue;
       }
-      final hydratedHits = <ProviderSubtitleHit>[];
-      for (final hit in _parseOpenSubtitlesSearchResponse(response.body)) {
-        hydratedHits.add(await _hydrateOpenSubtitlesHit(hit, session));
-      }
+      final hydratedHits = await Future.wait(
+        _parseOpenSubtitlesSearchResponse(response.body)
+            .map((hit) => _hydrateOpenSubtitlesHit(hit, session)),
+      );
       results.addAll(hydratedHits);
       if (results.isNotEmpty) {
         break;
@@ -468,6 +474,44 @@ class OpenSubtitlesStructuredProvider
   }
 
   Future<_OpenSubtitlesSession> _login() async {
+    final cacheKey = _sessionCacheKey();
+    final now = DateTime.now();
+    final cached = _sessionCache[cacheKey];
+    if (cached != null && cached.expiresAt.isAfter(now)) {
+      return cached.session;
+    }
+    final inFlight = _sessionFutures[cacheKey];
+    if (inFlight != null) {
+      return inFlight;
+    }
+    final future = _performLogin();
+    _sessionFutures[cacheKey] = future;
+    try {
+      final session = await future;
+      if (session.isReady) {
+        _sessionCache[cacheKey] = _OpenSubtitlesSessionCacheEntry(
+          session: session,
+          expiresAt: now.add(_sessionTtl),
+        );
+      } else {
+        _sessionCache.remove(cacheKey);
+      }
+      return session;
+    } finally {
+      _sessionFutures.remove(cacheKey);
+    }
+  }
+
+  String _sessionCacheKey() {
+    return [
+      config.baseUrl.trim(),
+      config.apiKey.trim(),
+      config.username.trim(),
+      config.password.trim(),
+    ].join('|');
+  }
+
+  Future<_OpenSubtitlesSession> _performLogin() async {
     final response = await _client.post(
       Uri.parse('${config.baseUrl}/login'),
       headers: {
@@ -1019,4 +1063,14 @@ class _OpenSubtitlesSession {
   final String baseUrl;
 
   bool get isReady => token.trim().isNotEmpty && baseUrl.trim().isNotEmpty;
+}
+
+class _OpenSubtitlesSessionCacheEntry {
+  const _OpenSubtitlesSessionCacheEntry({
+    required this.session,
+    required this.expiresAt,
+  });
+
+  final _OpenSubtitlesSession session;
+  final DateTime expiresAt;
 }

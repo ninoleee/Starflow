@@ -356,22 +356,22 @@ class ValidatedSubtitleCandidate {
   bool get hasFailureReason => failureReason.trim().isNotEmpty;
 
   String get statusLabel => switch (status) {
-        SubtitleValidationStatus.validated => '已验证',
+        SubtitleValidationStatus.validated => '已就绪',
         SubtitleValidationStatus.failed => '验证失败',
-        SubtitleValidationStatus.skipped => '未预检',
-        SubtitleValidationStatus.pending => '待处理',
+        SubtitleValidationStatus.skipped => '待下载',
+        SubtitleValidationStatus.pending => '处理中',
       };
 
   String get statusDescription {
     final reason = failureReason.trim();
     return switch (status) {
       SubtitleValidationStatus.validated =>
-        canApply ? '已验证，可直接加载' : '已验证，但当前结果暂不能直接加载',
+        canApply ? '已准备好，可直接加载' : '已准备好，但当前结果暂不能直接加载',
       SubtitleValidationStatus.failed =>
         reason.isEmpty ? '预检失败，请稍后重试' : '预检失败：$reason',
       SubtitleValidationStatus.skipped =>
-        reason.isEmpty ? '当前结果未进入预检' : '未预检：$reason',
-      SubtitleValidationStatus.pending => '正在等待预检结果',
+        reason.isEmpty ? '搜索阶段未校验，点选时再下载并加载' : reason,
+      SubtitleValidationStatus.pending => '正在处理下载信息',
     };
   }
 

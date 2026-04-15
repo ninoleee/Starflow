@@ -492,6 +492,7 @@ class LocalStorageCacheRepository {
   Future<void> clearCache(LocalStorageCacheType type) async {
     switch (type) {
       case LocalStorageCacheType.nasMetadataIndex:
+      case LocalStorageCacheType.subtitleCache:
       case LocalStorageCacheType.playbackMemory:
       case LocalStorageCacheType.televisionSearchPreferences:
         return;

@@ -234,18 +234,9 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
           fields: {
             'query': query,
             'sources': structuredSources.map((item) => item.name).join('/'),
-            'processed': candidates.length,
-            'validated': candidates
-                .where(
-                  (item) => item.status == SubtitleValidationStatus.validated,
-                )
-                .length,
-            'failed': candidates
-                .where(
-                  (item) => item.status == SubtitleValidationStatus.failed,
-                )
-                .length,
-            'skipped': candidates
+            'returned': candidates.length,
+            'ready': candidates.where((item) => item.canApply).length,
+            'deferredDownload': candidates
                 .where(
                   (item) => item.status == SubtitleValidationStatus.skipped,
                 )
@@ -274,7 +265,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         fields: {
           'query': query,
           'count': nextResults.length,
-          'validated': validatedSelections.length,
+          'ready': validatedSelections.length,
           'downloadable': nextResults.where((item) => item.canDownload).length,
           'autoLoadable': nextResults.where((item) => item.canAutoLoad).length,
           'sample': _pageSubtitleResultSample(nextResults),
