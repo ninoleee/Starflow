@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/no_animation_page_route.dart';
@@ -7,6 +8,7 @@ import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
 class PlaybackSettingsPage extends ConsumerStatefulWidget {
   const PlaybackSettingsPage({
@@ -16,6 +18,15 @@ class PlaybackSettingsPage extends ConsumerStatefulWidget {
     required this.initialSubtitlePreference,
     required this.initialSubtitleScale,
     required this.initialOnlineSubtitleSources,
+    required this.initialOpensubtitlesEnabled,
+    required this.initialOpensubtitlesUsername,
+    required this.initialOpensubtitlesPassword,
+    required this.initialSubdlEnabled,
+    required this.initialSubdlApiKey,
+    required this.initialSubtitlePreferredLanguages,
+    required this.initialSubtitleHearingImpairedPreferred,
+    required this.initialSubtitleSearchMaxValidatedCandidates,
+    required this.initialSubtitleAllowLegacyProvidersFallback,
     required this.initialBackgroundPlaybackEnabled,
     required this.initialPlaybackEngine,
     required this.initialPlaybackDecodeMode,
@@ -28,8 +39,17 @@ class PlaybackSettingsPage extends ConsumerStatefulWidget {
   final int initialTimeoutSeconds;
   final double initialDefaultSpeed;
   final PlaybackSubtitlePreference initialSubtitlePreference;
-  final PlaybackSubtitleScale initialSubtitleScale;
+  final double initialSubtitleScale;
   final List<OnlineSubtitleSource> initialOnlineSubtitleSources;
+  final bool initialOpensubtitlesEnabled;
+  final String initialOpensubtitlesUsername;
+  final String initialOpensubtitlesPassword;
+  final bool initialSubdlEnabled;
+  final String initialSubdlApiKey;
+  final List<String> initialSubtitlePreferredLanguages;
+  final bool initialSubtitleHearingImpairedPreferred;
+  final int initialSubtitleSearchMaxValidatedCandidates;
+  final bool initialSubtitleAllowLegacyProvidersFallback;
   final bool initialBackgroundPlaybackEnabled;
   final PlaybackEngine initialPlaybackEngine;
   final PlaybackDecodeMode initialPlaybackDecodeMode;
@@ -49,8 +69,18 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   late final TextEditingController _timeoutController;
   late double _draftPlaybackSpeed;
   late PlaybackSubtitlePreference _draftSubtitlePreference;
-  late PlaybackSubtitleScale _draftSubtitleScale;
+  late double _draftSubtitleScale;
   late List<OnlineSubtitleSource> _draftOnlineSubtitleSources;
+  late final TextEditingController _opensubtitlesUsernameController;
+  late final TextEditingController _opensubtitlesPasswordController;
+  late final TextEditingController _subdlApiKeyController;
+  late final TextEditingController _subtitlePreferredLanguagesController;
+  late final TextEditingController
+      _subtitleSearchMaxValidatedCandidatesController;
+  late bool _draftOpensubtitlesEnabled;
+  late bool _draftSubdlEnabled;
+  late bool _draftSubtitleHearingImpairedPreferred;
+  late bool _draftSubtitleAllowLegacyProvidersFallback;
   late bool _draftBackgroundPlaybackEnabled;
   late PlaybackEngine _draftPlaybackEngine;
   late PlaybackDecodeMode _draftPlaybackDecodeMode;
@@ -75,6 +105,27 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     _draftSubtitleScale = widget.initialSubtitleScale;
     _draftOnlineSubtitleSources =
         widget.initialOnlineSubtitleSources.toList(growable: false);
+    _opensubtitlesUsernameController = TextEditingController(
+      text: widget.initialOpensubtitlesUsername,
+    );
+    _opensubtitlesPasswordController = TextEditingController(
+      text: widget.initialOpensubtitlesPassword,
+    );
+    _subdlApiKeyController = TextEditingController(
+      text: widget.initialSubdlApiKey,
+    );
+    _subtitlePreferredLanguagesController = TextEditingController(
+      text: widget.initialSubtitlePreferredLanguages.join(', '),
+    );
+    _subtitleSearchMaxValidatedCandidatesController = TextEditingController(
+      text: '${widget.initialSubtitleSearchMaxValidatedCandidates}',
+    );
+    _draftOpensubtitlesEnabled = widget.initialOpensubtitlesEnabled;
+    _draftSubdlEnabled = widget.initialSubdlEnabled;
+    _draftSubtitleHearingImpairedPreferred =
+        widget.initialSubtitleHearingImpairedPreferred;
+    _draftSubtitleAllowLegacyProvidersFallback =
+        widget.initialSubtitleAllowLegacyProvidersFallback;
     _draftBackgroundPlaybackEnabled = widget.initialBackgroundPlaybackEnabled;
     _draftPlaybackEngine = widget.initialPlaybackEngine;
     _draftPlaybackDecodeMode = widget.initialPlaybackDecodeMode;
@@ -94,12 +145,34 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   @override
   void dispose() {
     _timeoutController.dispose();
+    _opensubtitlesUsernameController.dispose();
+    _opensubtitlesPasswordController.dispose();
+    _subdlApiKeyController.dispose();
+    _subtitlePreferredLanguagesController.dispose();
+    _subtitleSearchMaxValidatedCandidatesController.dispose();
     super.dispose();
   }
 
   int _draftSeconds() {
     final parsed = int.tryParse(_timeoutController.text.trim()) ?? 20;
     return parsed.clamp(1, 600);
+  }
+
+  int _draftSubtitleSearchMaxValidatedCandidates() {
+    final parsed = int.tryParse(
+          _subtitleSearchMaxValidatedCandidatesController.text.trim(),
+        ) ??
+        kSubtitleSearchMaxValidatedCandidatesDefault;
+    return clampSubtitleSearchMaxValidatedCandidates(parsed);
+  }
+
+  List<String> _draftSubtitlePreferredLanguages() {
+    return _subtitlePreferredLanguagesController.text
+        .split(RegExp(r'[\s,，;；]+'))
+        .map((item) => item.trim().toLowerCase())
+        .where((item) => item.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
   }
 
   Future<void> _saveDraft({bool popAfterSave = true}) async {
@@ -109,6 +182,18 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
           subtitlePreference: _draftSubtitlePreference,
           subtitleScale: _draftSubtitleScale,
           onlineSubtitleSources: _draftOnlineSubtitleSources,
+          opensubtitlesEnabled: _draftOpensubtitlesEnabled,
+          opensubtitlesUsername: _opensubtitlesUsernameController.text,
+          opensubtitlesPassword: _opensubtitlesPasswordController.text,
+          subdlEnabled: _draftSubdlEnabled,
+          subdlApiKey: _subdlApiKeyController.text,
+          subtitlePreferredLanguages: _draftSubtitlePreferredLanguages(),
+          subtitleHearingImpairedPreferred:
+              _draftSubtitleHearingImpairedPreferred,
+          subtitleSearchMaxValidatedCandidates:
+              _draftSubtitleSearchMaxValidatedCandidates(),
+          subtitleAllowLegacyProvidersFallback:
+              _draftSubtitleAllowLegacyProvidersFallback,
           backgroundPlaybackEnabled: _draftBackgroundPlaybackEnabled,
           playbackEngine: _draftPlaybackEngine,
           playbackDecodeMode: _draftPlaybackDecodeMode,
@@ -134,6 +219,23 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
           _draftOnlineSubtitleSources,
           widget.initialOnlineSubtitleSources,
         ) ||
+        _draftOpensubtitlesEnabled != widget.initialOpensubtitlesEnabled ||
+        _opensubtitlesUsernameController.text !=
+            widget.initialOpensubtitlesUsername ||
+        _opensubtitlesPasswordController.text !=
+            widget.initialOpensubtitlesPassword ||
+        _draftSubdlEnabled != widget.initialSubdlEnabled ||
+        _subdlApiKeyController.text != widget.initialSubdlApiKey ||
+        !_sameStringSet(
+          _draftSubtitlePreferredLanguages(),
+          widget.initialSubtitlePreferredLanguages,
+        ) ||
+        _draftSubtitleHearingImpairedPreferred !=
+            widget.initialSubtitleHearingImpairedPreferred ||
+        _draftSubtitleSearchMaxValidatedCandidates() !=
+            widget.initialSubtitleSearchMaxValidatedCandidates ||
+        _draftSubtitleAllowLegacyProvidersFallback !=
+            widget.initialSubtitleAllowLegacyProvidersFallback ||
         _draftBackgroundPlaybackEnabled !=
             widget.initialBackgroundPlaybackEnabled ||
         _draftPlaybackEngine != widget.initialPlaybackEngine ||
@@ -373,6 +475,18 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
           initialSubtitlePreference: _draftSubtitlePreference,
           initialSubtitleScale: _draftSubtitleScale,
           initialOnlineSubtitleSources: _draftOnlineSubtitleSources,
+          initialOpensubtitlesEnabled: _draftOpensubtitlesEnabled,
+          initialOpensubtitlesUsername: _opensubtitlesUsernameController.text,
+          initialOpensubtitlesPassword: _opensubtitlesPasswordController.text,
+          initialSubdlEnabled: _draftSubdlEnabled,
+          initialSubdlApiKey: _subdlApiKeyController.text,
+          initialSubtitlePreferredLanguages: _draftSubtitlePreferredLanguages(),
+          initialSubtitleHearingImpairedPreferred:
+              _draftSubtitleHearingImpairedPreferred,
+          initialSubtitleSearchMaxValidatedCandidates:
+              _draftSubtitleSearchMaxValidatedCandidates(),
+          initialSubtitleAllowLegacyProvidersFallback:
+              _draftSubtitleAllowLegacyProvidersFallback,
         ),
       ),
     );
@@ -384,6 +498,19 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
       _draftSubtitleScale = result.scale;
       _draftOnlineSubtitleSources =
           result.onlineSubtitleSources.toList(growable: false);
+      _draftOpensubtitlesEnabled = result.opensubtitlesEnabled;
+      _opensubtitlesUsernameController.text = result.opensubtitlesUsername;
+      _opensubtitlesPasswordController.text = result.opensubtitlesPassword;
+      _draftSubdlEnabled = result.subdlEnabled;
+      _subdlApiKeyController.text = result.subdlApiKey;
+      _subtitlePreferredLanguagesController.text =
+          result.subtitlePreferredLanguages.join(', ');
+      _draftSubtitleHearingImpairedPreferred =
+          result.subtitleHearingImpairedPreferred;
+      _subtitleSearchMaxValidatedCandidatesController.text =
+          '${result.subtitleSearchMaxValidatedCandidates}';
+      _draftSubtitleAllowLegacyProvidersFallback =
+          result.subtitleAllowLegacyProvidersFallback;
     });
   }
 
@@ -427,10 +554,23 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   }
 
   String _subtitleSettingsSummary() {
+    final providerSummary = [
+      if (_draftOpensubtitlesEnabled) 'OpenSubtitles',
+      if (_draftSubdlEnabled) 'SubDL',
+    ].join(' / ');
     final sourceLabel = _draftOnlineSubtitleSources.isEmpty
         ? '未启用在线字幕源'
         : _draftOnlineSubtitleSources.map((item) => item.label).join(' / ');
-    return '${_draftSubtitlePreference.label} · ${_draftSubtitleScale.label} · $sourceLabel';
+    final languageLabel = _draftSubtitlePreferredLanguages().isEmpty
+        ? '语言未限制'
+        : _draftSubtitlePreferredLanguages().join('/');
+    return [
+      _draftSubtitlePreference.label,
+      formatPlaybackSubtitleScaleLabel(_draftSubtitleScale),
+      if (providerSummary.isNotEmpty) providerSummary,
+      sourceLabel,
+      languageLabel,
+    ].join(' · ');
   }
 
   String _buildPlaybackDecodeModeDescription() {
@@ -502,11 +642,29 @@ class PlaybackSubtitleSettingsPage extends ConsumerStatefulWidget {
     required this.initialSubtitlePreference,
     required this.initialSubtitleScale,
     required this.initialOnlineSubtitleSources,
+    required this.initialOpensubtitlesEnabled,
+    required this.initialOpensubtitlesUsername,
+    required this.initialOpensubtitlesPassword,
+    required this.initialSubdlEnabled,
+    required this.initialSubdlApiKey,
+    required this.initialSubtitlePreferredLanguages,
+    required this.initialSubtitleHearingImpairedPreferred,
+    required this.initialSubtitleSearchMaxValidatedCandidates,
+    required this.initialSubtitleAllowLegacyProvidersFallback,
   });
 
   final PlaybackSubtitlePreference initialSubtitlePreference;
-  final PlaybackSubtitleScale initialSubtitleScale;
+  final double initialSubtitleScale;
   final List<OnlineSubtitleSource> initialOnlineSubtitleSources;
+  final bool initialOpensubtitlesEnabled;
+  final String initialOpensubtitlesUsername;
+  final String initialOpensubtitlesPassword;
+  final bool initialSubdlEnabled;
+  final String initialSubdlApiKey;
+  final List<String> initialSubtitlePreferredLanguages;
+  final bool initialSubtitleHearingImpairedPreferred;
+  final int initialSubtitleSearchMaxValidatedCandidates;
+  final bool initialSubtitleAllowLegacyProvidersFallback;
 
   @override
   ConsumerState<PlaybackSubtitleSettingsPage> createState() =>
@@ -516,8 +674,18 @@ class PlaybackSubtitleSettingsPage extends ConsumerStatefulWidget {
 class _PlaybackSubtitleSettingsPageState
     extends ConsumerState<PlaybackSubtitleSettingsPage> {
   late PlaybackSubtitlePreference _draftSubtitlePreference;
-  late PlaybackSubtitleScale _draftSubtitleScale;
+  late double _draftSubtitleScale;
   late List<OnlineSubtitleSource> _draftOnlineSubtitleSources;
+  late final TextEditingController _opensubtitlesUsernameController;
+  late final TextEditingController _opensubtitlesPasswordController;
+  late final TextEditingController _subdlApiKeyController;
+  late final TextEditingController _subtitlePreferredLanguagesController;
+  late final TextEditingController
+      _subtitleSearchMaxValidatedCandidatesController;
+  late bool _draftOpensubtitlesEnabled;
+  late bool _draftSubdlEnabled;
+  late bool _draftSubtitleHearingImpairedPreferred;
+  late bool _draftSubtitleAllowLegacyProvidersFallback;
   bool _closingWithResult = false;
 
   @override
@@ -527,6 +695,54 @@ class _PlaybackSubtitleSettingsPageState
     _draftSubtitleScale = widget.initialSubtitleScale;
     _draftOnlineSubtitleSources =
         widget.initialOnlineSubtitleSources.toList(growable: false);
+    _opensubtitlesUsernameController = TextEditingController(
+      text: widget.initialOpensubtitlesUsername,
+    );
+    _opensubtitlesPasswordController = TextEditingController(
+      text: widget.initialOpensubtitlesPassword,
+    );
+    _subdlApiKeyController = TextEditingController(
+      text: widget.initialSubdlApiKey,
+    );
+    _subtitlePreferredLanguagesController = TextEditingController(
+      text: widget.initialSubtitlePreferredLanguages.join(', '),
+    );
+    _subtitleSearchMaxValidatedCandidatesController = TextEditingController(
+      text: '${widget.initialSubtitleSearchMaxValidatedCandidates}',
+    );
+    _draftOpensubtitlesEnabled = widget.initialOpensubtitlesEnabled;
+    _draftSubdlEnabled = widget.initialSubdlEnabled;
+    _draftSubtitleHearingImpairedPreferred =
+        widget.initialSubtitleHearingImpairedPreferred;
+    _draftSubtitleAllowLegacyProvidersFallback =
+        widget.initialSubtitleAllowLegacyProvidersFallback;
+  }
+
+  @override
+  void dispose() {
+    _opensubtitlesUsernameController.dispose();
+    _opensubtitlesPasswordController.dispose();
+    _subdlApiKeyController.dispose();
+    _subtitlePreferredLanguagesController.dispose();
+    _subtitleSearchMaxValidatedCandidatesController.dispose();
+    super.dispose();
+  }
+
+  List<String> _draftSubtitlePreferredLanguages() {
+    return _subtitlePreferredLanguagesController.text
+        .split(RegExp(r'[\s,，;；]+'))
+        .map((item) => item.trim().toLowerCase())
+        .where((item) => item.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+  }
+
+  int _draftSubtitleSearchMaxValidatedCandidates() {
+    final parsed = int.tryParse(
+          _subtitleSearchMaxValidatedCandidatesController.text.trim(),
+        ) ??
+        kSubtitleSearchMaxValidatedCandidatesDefault;
+    return clampSubtitleSearchMaxValidatedCandidates(parsed);
   }
 
   _PlaybackSubtitleDraft _buildDraft() {
@@ -534,6 +750,18 @@ class _PlaybackSubtitleSettingsPageState
       preference: _draftSubtitlePreference,
       scale: _draftSubtitleScale,
       onlineSubtitleSources: _draftOnlineSubtitleSources,
+      opensubtitlesEnabled: _draftOpensubtitlesEnabled,
+      opensubtitlesUsername: _opensubtitlesUsernameController.text.trim(),
+      opensubtitlesPassword: _opensubtitlesPasswordController.text,
+      subdlEnabled: _draftSubdlEnabled,
+      subdlApiKey: _subdlApiKeyController.text.trim(),
+      subtitlePreferredLanguages: _draftSubtitlePreferredLanguages(),
+      subtitleHearingImpairedPreferred:
+          _draftSubtitleHearingImpairedPreferred,
+      subtitleSearchMaxValidatedCandidates:
+          _draftSubtitleSearchMaxValidatedCandidates(),
+      subtitleAllowLegacyProvidersFallback:
+          _draftSubtitleAllowLegacyProvidersFallback,
     );
   }
 
@@ -590,10 +818,132 @@ class _PlaybackSubtitleSettingsPageState
                 ),
           ),
           const SizedBox(height: 18),
-          SettingsSelectionTile(
+          SettingsStepperTile(
             title: '字幕大小',
-            value: _draftSubtitleScale.label,
-            onPressed: _openSubtitleScalePicker,
+            subtitle: '按数字微调字号，播放器里会直接按这个字号渲染。',
+            value: formatPlaybackSubtitleScaleLabel(_draftSubtitleScale),
+            onDecrease: _draftSubtitleScale > kPlaybackSubtitleScaleMin
+                ? () {
+                    setState(() {
+                      _draftSubtitleScale = stepPlaybackSubtitleScale(
+                        _draftSubtitleScale,
+                        -1,
+                      );
+                    });
+                  }
+                : null,
+            onIncrease: _draftSubtitleScale < kPlaybackSubtitleScaleMax
+                ? () {
+                    setState(() {
+                      _draftSubtitleScale = stepPlaybackSubtitleScale(
+                        _draftSubtitleScale,
+                        1,
+                      );
+                    });
+                  }
+                : null,
+          ),
+          const SizedBox(height: 18),
+          Text(
+            '新在线字幕链路',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 10),
+          ...buildSettingsTileGroup(
+            [
+              SettingsToggleTile(
+                title: '启用 OpenSubtitles',
+                subtitle: '新链路主源之一，支持账号登录配置。',
+                value: _draftOpensubtitlesEnabled,
+                onChanged: (value) {
+                  setState(() {
+                    _draftOpensubtitlesEnabled = value;
+                  });
+                },
+              ),
+              SettingsToggleTile(
+                title: '启用 SubDL',
+                subtitle: '作为新链路备用源，需填写 API Key。',
+                value: _draftSubdlEnabled,
+                onChanged: (value) {
+                  setState(() {
+                    _draftSubdlEnabled = value;
+                  });
+                },
+              ),
+            ],
+            spacing: 12,
+          ),
+          const SizedBox(height: 12),
+          SettingsTextInputField(
+            controller: _opensubtitlesUsernameController,
+            labelText: 'OpenSubtitles 用户名',
+            hintText: '可留空',
+            autocorrect: false,
+          ),
+          const SizedBox(height: 12),
+          SettingsTextInputField(
+            controller: _opensubtitlesPasswordController,
+            labelText: 'OpenSubtitles 密码',
+            hintText: '可留空',
+            obscureText: true,
+            autocorrect: false,
+          ),
+          const SizedBox(height: 12),
+          SettingsTextInputField(
+            controller: _subdlApiKeyController,
+            labelText: 'SubDL API Key',
+            hintText: '可留空',
+            obscureText: true,
+            autocorrect: false,
+          ),
+          const SizedBox(height: 12),
+          SettingsTextInputField(
+            controller: _subtitlePreferredLanguagesController,
+            labelText: '优先语言',
+            hintText: '例如 zh-cn, zh-tw, en',
+            autocorrect: false,
+            summaryBuilder: (value) => value.isEmpty ? '未限制' : value,
+          ),
+          const SizedBox(height: 12),
+          SettingsTextInputField(
+            controller: _subtitleSearchMaxValidatedCandidatesController,
+            labelText: '单次最多验证条数',
+            hintText: '$kSubtitleSearchMaxValidatedCandidatesDefault',
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            summaryBuilder: (value) =>
+                value.isEmpty
+                    ? '$kSubtitleSearchMaxValidatedCandidatesDefault'
+                    : value,
+          ),
+          const SizedBox(height: 10),
+          ...buildSettingsTileGroup(
+            [
+              SettingsToggleTile(
+                title: '优先听障字幕',
+                subtitle: '新链路搜索时优先保留 HI/SDH 结果。',
+                value: _draftSubtitleHearingImpairedPreferred,
+                onChanged: (value) {
+                  setState(() {
+                    _draftSubtitleHearingImpairedPreferred = value;
+                  });
+                },
+              ),
+              SettingsToggleTile(
+                title: '允许旧来源回退',
+                subtitle: '保留现有 ASSRT / SubHD / YIFY 作为兜底，不影响新字段持久化。',
+                value: _draftSubtitleAllowLegacyProvidersFallback,
+                onChanged: (value) {
+                  setState(() {
+                    _draftSubtitleAllowLegacyProvidersFallback = value;
+                  });
+                },
+              ),
+            ],
+            spacing: 12,
           ),
           const SizedBox(height: 18),
           Text(
@@ -647,22 +997,6 @@ class _PlaybackSubtitleSettingsPageState
       _draftSubtitlePreference = selection;
     });
   }
-
-  Future<void> _openSubtitleScalePicker() async {
-    final selection = await showSettingsOptionDialog<PlaybackSubtitleScale>(
-      context: context,
-      title: '选择字幕大小',
-      options: PlaybackSubtitleScale.values,
-      currentValue: _draftSubtitleScale,
-      labelBuilder: (scale) => scale.label,
-    );
-    if (selection == null) {
-      return;
-    }
-    setState(() {
-      _draftSubtitleScale = selection;
-    });
-  }
 }
 
 class _PlaybackSubtitleDraft {
@@ -670,17 +1004,47 @@ class _PlaybackSubtitleDraft {
     required this.preference,
     required this.scale,
     required this.onlineSubtitleSources,
+    required this.opensubtitlesEnabled,
+    required this.opensubtitlesUsername,
+    required this.opensubtitlesPassword,
+    required this.subdlEnabled,
+    required this.subdlApiKey,
+    required this.subtitlePreferredLanguages,
+    required this.subtitleHearingImpairedPreferred,
+    required this.subtitleSearchMaxValidatedCandidates,
+    required this.subtitleAllowLegacyProvidersFallback,
   });
 
   final PlaybackSubtitlePreference preference;
-  final PlaybackSubtitleScale scale;
+  final double scale;
   final List<OnlineSubtitleSource> onlineSubtitleSources;
+  final bool opensubtitlesEnabled;
+  final String opensubtitlesUsername;
+  final String opensubtitlesPassword;
+  final bool subdlEnabled;
+  final String subdlApiKey;
+  final List<String> subtitlePreferredLanguages;
+  final bool subtitleHearingImpairedPreferred;
+  final int subtitleSearchMaxValidatedCandidates;
+  final bool subtitleAllowLegacyProvidersFallback;
 }
 
 bool _sameSubtitleSources(
   List<OnlineSubtitleSource> left,
   List<OnlineSubtitleSource> right,
 ) {
+  if (left.length != right.length) {
+    return false;
+  }
+  final leftSet = left.toSet();
+  final rightSet = right.toSet();
+  if (leftSet.length != rightSet.length) {
+    return false;
+  }
+  return leftSet.containsAll(rightSet);
+}
+
+bool _sameStringSet(List<String> left, List<String> right) {
   if (left.length != right.length) {
     return false;
   }

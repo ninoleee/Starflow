@@ -6,10 +6,14 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/core/platform/android_picture_in_picture.dart';
+import 'package:starflow/core/platform/background_playback.dart';
+import 'package:starflow/core/platform/playback_system_session.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/starflow_action_dialog.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
+import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -428,8 +432,24 @@ class _TelevisionNavigationShellState
     _isExitDialogVisible = false;
 
     if (shouldExit) {
-      await SystemNavigator.pop();
+      await _exitApplication();
     }
+  }
+
+  Future<void> _exitApplication() async {
+    await ActivePlaybackCleanupCoordinator.cleanupAll(reason: 'app-exit');
+    await PlaybackSystemSessionController.setActive(false);
+    await PlaybackSystemSessionController.detach();
+    if (AndroidPictureInPictureController.isSupportedPlatform) {
+      await AndroidPictureInPictureController.setPlaybackEnabled(
+        enabled: false,
+        aspectRatioWidth: 16,
+        aspectRatioHeight: 9,
+      );
+      await AndroidPictureInPictureController.detach();
+    }
+    await BackgroundPlaybackController.setEnabled(false);
+    await SystemNavigator.pop();
   }
 
   @override

@@ -174,7 +174,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
         _tvPlaybackChromeVisible = true;
       });
     }
-    if (autoHide) {
+    if (autoHide && !_hasFocusedTvChromeControl) {
       _scheduleTvPlaybackChromeHide();
     }
   }
@@ -182,7 +182,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
   void _scheduleTvPlaybackChromeHide() {
     _tvPlaybackChromeHideTimer?.cancel();
     _tvPlaybackChromeHideTimer = Timer(const Duration(seconds: 4), () {
-      if (!mounted || !_tvPlaybackChromeVisible) {
+      if (!mounted || !_tvPlaybackChromeVisible || _hasFocusedTvChromeControl) {
         return;
       }
       setState(() {
@@ -950,12 +950,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
     return SubtitleViewConfiguration(
       style: TextStyle(
         height: 1.35,
-        fontSize: (simplifyForPerformance
-                ? isTelevision
-                    ? 26
-                    : 28
-                : 32) *
-            settings.playbackSubtitleScale.textScale,
+        fontSize: settings.playbackSubtitleScale,
         color: Colors.white,
         fontWeight: FontWeight.w600,
         backgroundColor: Colors.transparent,

@@ -10,21 +10,38 @@ import 'package:path_provider/path_provider.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
+import 'package:starflow/features/playback/data/online_subtitle_provider_protocol.dart';
+import 'package:starflow/features/playback/data/online_subtitle_validation_pipeline.dart';
+import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 
 OnlineSubtitleRepository createOnlineSubtitleRepository(Ref ref) {
-  return AssrtSubtitleRepository(ref.read(starflowHttpClientProvider));
+  return AssrtSubtitleRepository(
+    ref.read(starflowHttpClientProvider),
+    settingsProvider: () => ref.read(appSettingsProvider),
+  );
 }
 
 class AssrtSubtitleRepository implements OnlineSubtitleRepository {
-  AssrtSubtitleRepository(this._client);
+  AssrtSubtitleRepository(
+    this._client, {
+    required AppSettings Function() settingsProvider,
+  })  : _settingsProvider = settingsProvider,
+        _validationPipeline = SubtitleValidationPipeline(_client);
 
   static const _assrtSearchMarker =
       '<div onmouseover="addclass(this,\'subitem_hover\')" onmouseout="redclass(this,\'subitem_hover\')" class="subitem"';
   static const _subhdSearchMarker =
       '<div class="bg-white shadow-sm rounded-3 mb-4">';
+  static const _openSubtitlesApiKey = String.fromEnvironment(
+    'STARFLOW_OPENSUBTITLES_API_KEY',
+  );
 
   final http.Client _client;
+  final AppSettings Function() _settingsProvider;
+  final SubtitleValidationPipeline _validationPipeline;
   Future<Directory>? _cacheDirectoryFuture;
 
   @override
@@ -183,6 +200,78 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
       },
     );
     return limitedResults;
+  }
+
+  @override
+  Future<List<ValidatedSubtitleCandidate>> searchStructured(
+    OnlineSubtitleSearchRequest request, {
+    List<OnlineSubtitleSource> sources = const [
+      OnlineSubtitleSource.opensubtitles,
+      OnlineSubtitleSource.subdl,
+    ],
+    int maxResults = 0,
+    int maxValidated = 0,
+  }) async {
+    final enabledSources = sources.toSet();
+    final providers = _buildStructuredProviders()
+        .where((provider) => enabledSources.contains(provider.source))
+        .toList(growable: false);
+    subtitleSearchTrace(
+      'repository.structured.search.start',
+      fields: {
+        'query': request.normalizedQuery,
+        'title': request.normalizedTitle,
+        'sources': providers.map((item) => item.source.name).join('/'),
+        'plan': request.buildQueryPlan().map((item) => item.kind.name).join('/'),
+      },
+    );
+    if (!request.hasStructuredIdentity || providers.isEmpty) {
+      subtitleSearchTrace('repository.structured.search.skip-empty-request');
+      return const [];
+    }
+
+    final hitLists = await Future.wait(
+      providers.map((provider) => provider.search(request)),
+    );
+    final hits = hitLists.expand((item) => item).toList(growable: false);
+    final limitedHits = maxResults > 0 && hits.length > maxResults
+        ? hits.take(maxResults).toList(growable: false)
+        : hits;
+    final validated = await _validationPipeline.validateHits(
+      limitedHits,
+      maxValidated: maxValidated,
+    );
+    subtitleSearchTrace(
+      'repository.structured.search.finished',
+      fields: {
+        'hits': hits.length,
+        'validated': validated.length,
+        'sources': providers.map((item) => item.source.name).join('/'),
+      },
+    );
+    return validated;
+  }
+
+  List<OnlineSubtitleStructuredProvider> _buildStructuredProviders() {
+    final settings = _settingsProvider();
+    return <OnlineSubtitleStructuredProvider>[
+      OpenSubtitlesStructuredProvider(
+        _client,
+        config: OpenSubtitlesProviderConfig(
+          enabled: settings.opensubtitlesEnabled,
+          apiKey: _openSubtitlesApiKey,
+          username: settings.opensubtitlesUsername,
+          password: settings.opensubtitlesPassword,
+        ),
+      ),
+      SubdlStructuredProvider(
+        _client,
+        config: SubdlProviderConfig(
+          enabled: settings.subdlEnabled,
+          apiKey: settings.subdlApiKey,
+        ),
+      ),
+    ];
   }
 
   Future<List<SubtitleSearchResult>> _searchSourceWithFallback(
@@ -528,6 +617,9 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
               ? 'https://www.yifysubtitles.ch/'
               : result.detailUrl.trim(),
         );
+      case OnlineSubtitleSource.opensubtitles:
+      case OnlineSubtitleSource.subdl:
+        throw StateError('新结构化字幕源请走预验证后本地应用链路。');
     }
   }
 

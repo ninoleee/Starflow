@@ -16,14 +16,28 @@ class SubtitleSearchRequest {
   const SubtitleSearchRequest({
     required this.query,
     this.title = '',
+    this.originalTitle = '',
     this.initialInput = '',
+    this.year,
+    this.imdbId = '',
+    this.tmdbId = '',
+    this.seasonNumber,
+    this.episodeNumber,
+    this.filePath = '',
     this.applyMode = SubtitleSearchApplyMode.downloadAndApply,
     this.standalone = false,
   });
 
   final String query;
   final String title;
+  final String originalTitle;
   final String initialInput;
+  final int? year;
+  final String imdbId;
+  final String tmdbId;
+  final int? seasonNumber;
+  final int? episodeNumber;
+  final String filePath;
   final SubtitleSearchApplyMode applyMode;
   final bool standalone;
 
@@ -31,7 +45,14 @@ class SubtitleSearchRequest {
     return {
       'q': query,
       if (title.trim().isNotEmpty) 'title': title.trim(),
+      if (originalTitle.trim().isNotEmpty) 'originalTitle': originalTitle.trim(),
       if (initialInput.trim().isNotEmpty) 'input': initialInput.trim(),
+      if ((year ?? 0) > 0) 'year': '${year!}',
+      if (imdbId.trim().isNotEmpty) 'imdbId': imdbId.trim(),
+      if (tmdbId.trim().isNotEmpty) 'tmdbId': tmdbId.trim(),
+      if (seasonNumber != null) 'season': '$seasonNumber',
+      if (episodeNumber != null) 'episode': '$episodeNumber',
+      if (filePath.trim().isNotEmpty) 'path': filePath.trim(),
       'mode': applyMode.name,
       if (standalone) 'standalone': '1',
     };
@@ -43,7 +64,14 @@ class SubtitleSearchRequest {
     return SubtitleSearchRequest(
       query: queryParameters['q']?.trim() ?? '',
       title: queryParameters['title']?.trim() ?? '',
+      originalTitle: queryParameters['originalTitle']?.trim() ?? '',
       initialInput: queryParameters['input']?.trim() ?? '',
+      year: int.tryParse(queryParameters['year']?.trim() ?? ''),
+      imdbId: queryParameters['imdbId']?.trim() ?? '',
+      tmdbId: queryParameters['tmdbId']?.trim() ?? '',
+      seasonNumber: int.tryParse(queryParameters['season']?.trim() ?? ''),
+      episodeNumber: int.tryParse(queryParameters['episode']?.trim() ?? ''),
+      filePath: queryParameters['path']?.trim() ?? '',
       applyMode: SubtitleSearchApplyMode.fromName(
         queryParameters['mode'] ?? '',
       ),
@@ -62,7 +90,9 @@ class SubtitleSearchRequest {
 enum OnlineSubtitleSource {
   assrt,
   subhd,
-  yify;
+  yify,
+  opensubtitles,
+  subdl;
 }
 
 extension OnlineSubtitleSourceX on OnlineSubtitleSource {
@@ -71,6 +101,8 @@ extension OnlineSubtitleSourceX on OnlineSubtitleSource {
       OnlineSubtitleSource.assrt => 'ASSRT',
       OnlineSubtitleSource.subhd => 'SubHD',
       OnlineSubtitleSource.yify => 'YIFY',
+      OnlineSubtitleSource.opensubtitles => 'OpenSubtitles',
+      OnlineSubtitleSource.subdl => 'SubDL',
     };
   }
 
@@ -79,6 +111,9 @@ extension OnlineSubtitleSourceX on OnlineSubtitleSource {
       OnlineSubtitleSource.assrt => '国内常用字幕站，适合电影和剧集常规搜索。',
       OnlineSubtitleSource.subhd => '国内常用字幕社区，当前支持应用内搜索结果浏览。',
       OnlineSubtitleSource.yify => '海外电影字幕站，支持电影搜索与 ZIP 字幕下载。',
+      OnlineSubtitleSource.opensubtitles =>
+        'OpenSubtitles.com 官方 API 字幕源。',
+      OnlineSubtitleSource.subdl => 'SubDL 官方 API 字幕源。',
     };
   }
 
@@ -87,6 +122,8 @@ extension OnlineSubtitleSourceX on OnlineSubtitleSource {
       'assrt' => OnlineSubtitleSource.assrt,
       'subhd' => OnlineSubtitleSource.subhd,
       'yify' => OnlineSubtitleSource.yify,
+      'opensubtitles' => OnlineSubtitleSource.opensubtitles,
+      'subdl' => OnlineSubtitleSource.subdl,
       _ => OnlineSubtitleSource.assrt,
     };
   }

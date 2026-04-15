@@ -39,6 +39,7 @@ import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
+import 'package:starflow/features/playback/application/online_subtitle_search_request_builder.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
@@ -2616,9 +2617,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       return;
     }
 
-    final sources = ref.read(
-      appSettingsProvider.select((settings) => settings.onlineSubtitleSources),
-    );
+    final settings = ref.read(appSettingsProvider);
+    final sources = settings.effectiveOnlineSubtitleSources;
     if (sources.isEmpty) {
       subtitleSearchTrace('detail.search.skip-empty-sources');
       if (_isSessionActive(activeSessionId)) {
@@ -2656,6 +2656,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     }
 
     final currentViewData = _currentSubtitleSearchView;
+    final repository = ref.read(onlineSubtitleRepositoryProvider);
 
     if (_isSessionActive(activeSessionId)) {
       _applySubtitleSearchView(
@@ -2667,16 +2668,87 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     }
 
     try {
-      final results = await ref.read(onlineSubtitleRepositoryProvider).search(
-            query,
-            sources: sources,
-            maxResults: 10,
+      final structuredSources = sources
+          .where(
+            (item) =>
+                item == OnlineSubtitleSource.opensubtitles ||
+                item == OnlineSubtitleSource.subdl,
+          )
+          .toList(growable: false);
+      final legacySources = settings.subtitleAllowLegacyProvidersFallback
+          ? sources
+              .where(
+                (item) =>
+                    item == OnlineSubtitleSource.assrt ||
+                    item == OnlineSubtitleSource.subhd ||
+                    item == OnlineSubtitleSource.yify,
+              )
+              .toList(growable: false)
+          : const <OnlineSubtitleSource>[];
+
+      if (structuredSources.isNotEmpty) {
+        final structuredRequest = await buildOnlineSubtitleSearchRequestForTarget(
+          target: playbackTarget,
+          query: query,
+          title: target.title.trim(),
+          originalTitle: target.title.trim(),
+          imdbId: target.imdbId.trim(),
+          tmdbId: target.tmdbId.trim(),
+          languages: settings.subtitlePreferredLanguages,
+          preferHearingImpaired: settings.subtitleHearingImpairedPreferred,
+        );
+        final validated = await repository.searchStructured(
+          structuredRequest,
+          sources: structuredSources,
+          maxResults: settings.subtitleSearchMaxValidatedCandidates * 4,
+          maxValidated: settings.subtitleSearchMaxValidatedCandidates,
+        );
+        subtitleSearchTrace(
+          'detail.search.structured-finished',
+          fields: {
+            'query': query,
+            'sources': structuredSources.map((item) => item.name).join('/'),
+            'validated': validated.length,
+          },
+        );
+        if (validated.isNotEmpty) {
+          final resolveResult =
+              _detailSubtitleController.resolveValidatedCandidates(
+            currentViewData: _currentSubtitleSearchView,
+            candidates: validated,
+            maxChoices: settings.subtitleSearchMaxValidatedCandidates,
           );
+          final nextChoices = resolveResult.usableChoices;
+          if (!_isSessionActive(activeSessionId)) {
+            return;
+          }
+          _applySubtitleSearchView(resolveResult.nextViewData);
+          await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
+                seedTarget: widget.target,
+                resolvedTarget: target,
+                subtitleSearchChoices: nextChoices,
+                selectedSubtitleSearchIndex:
+                    resolveResult.nextViewData.selectedIndex,
+              );
+          if (showFeedback && _isSessionActive(activeSessionId)) {
+            messenger?.showSnackBar(
+              SnackBar(content: Text('已找到 ${nextChoices.length} 条可直接加载字幕')),
+            );
+          }
+          return;
+        }
+      }
+
+      final results = await repository.search(
+        query,
+        sources: legacySources,
+        maxResults: 10,
+      );
       subtitleSearchTrace(
         'detail.search.repository-finished',
         fields: {
           'query': query,
-          'sources': sources.map((item) => item.name).join('/'),
+          'sources': legacySources.map((item) => item.name).join('/'),
           'count': results.length,
           'downloadable': results.where((item) => item.canDownload).length,
           'autoLoadable': results.where((item) => item.canAutoLoad).length,

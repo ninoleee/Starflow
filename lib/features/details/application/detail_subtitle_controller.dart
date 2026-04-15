@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 
 const Object detailSubtitleSearchViewUnchanged = Object();
@@ -187,6 +188,38 @@ class DetailSubtitleController {
     );
   }
 
+  DetailSubtitleSearchResolveResult resolveValidatedCandidates({
+    required DetailSubtitleSearchViewState currentViewData,
+    required List<ValidatedSubtitleCandidate> candidates,
+    int maxChoices = 10,
+  }) {
+    final previousSelectedId = currentViewData.selectedChoice?.result.id;
+    final nextChoices = mergeValidatedSubtitleSearchChoices(
+      previousChoices: currentViewData.choices,
+      candidates: candidates,
+      maxChoices: maxChoices,
+    );
+    final statusMessage = nextChoices.isEmpty ? '没有找到可直接加载的字幕结果' : null;
+    final nextSelectedIndex = previousSelectedId == null
+        ? -1
+        : nextChoices.indexWhere((item) => item.result.id == previousSelectedId);
+    final resolvedSelectedIndex = normalizeSubtitleSearchIndex(
+      nextSelectedIndex,
+      choices: nextChoices,
+    );
+    final nextView = currentViewData.copyWith(
+      choices: nextChoices,
+      selectedIndex: resolvedSelectedIndex,
+      isSearching: false,
+      statusMessage: statusMessage,
+    );
+    return DetailSubtitleSearchResolveResult(
+      nextViewData: nextView,
+      usableChoices: nextChoices,
+      statusMessage: statusMessage,
+    );
+  }
+
   DetailSubtitleSelectionDecision decideSelectionAction({
     required DetailSubtitleSearchViewState currentViewData,
     required int requestedIndex,
@@ -300,6 +333,35 @@ class DetailSubtitleController {
               previousById[result.id]?.copyWith(result: result) ??
               CachedSubtitleSearchOption(result: result),
         )
+        .toList(growable: false);
+  }
+
+  List<CachedSubtitleSearchOption> mergeValidatedSubtitleSearchChoices({
+    required List<CachedSubtitleSearchOption> previousChoices,
+    required List<ValidatedSubtitleCandidate> candidates,
+    int maxChoices = 10,
+  }) {
+    final previousById = <String, CachedSubtitleSearchOption>{
+      for (final choice in previousChoices) choice.result.id: choice,
+    };
+    return candidates
+        .where((item) => item.canApply)
+        .take(maxChoices)
+        .map((candidate) {
+          final selection = SubtitleSearchSelection(
+            cachedPath: candidate.cachedPath,
+            displayName: candidate.displayName,
+            subtitleFilePath: candidate.subtitleFilePath,
+          );
+          return previousById[candidate.hit.id]?.copyWith(
+                result: candidate.toSearchResult(),
+                selection: selection,
+              ) ??
+              CachedSubtitleSearchOption(
+                result: candidate.toSearchResult(),
+                selection: selection,
+              );
+        })
         .toList(growable: false);
   }
 

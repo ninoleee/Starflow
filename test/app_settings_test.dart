@@ -19,6 +19,15 @@ void main() {
       'playbackSubtitlePreference': 'off',
       'playbackSubtitleScale': 'large',
       'onlineSubtitleSources': ['assrt'],
+      'opensubtitlesEnabled': true,
+      'opensubtitlesUsername': 'opensub-user',
+      'opensubtitlesPassword': 'opensub-pass',
+      'subdlEnabled': true,
+      'subdlApiKey': 'subdl-key',
+      'subtitlePreferredLanguages': ['zh-cn', 'en', 'zh-cn'],
+      'subtitleHearingImpairedPreferred': true,
+      'subtitleSearchMaxValidatedCandidates': 9,
+      'subtitleAllowLegacyProvidersFallback': false,
       'playbackBackgroundPlaybackEnabled': false,
       'playbackEngine': 'systemPlayer',
       'playbackDecodeMode': 'softwarePreferred',
@@ -45,8 +54,17 @@ void main() {
       settings.playbackSubtitlePreference,
       PlaybackSubtitlePreference.off,
     );
-    expect(settings.playbackSubtitleScale, PlaybackSubtitleScale.large);
+    expect(settings.playbackSubtitleScale, 36.0);
     expect(settings.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
+    expect(settings.opensubtitlesEnabled, isTrue);
+    expect(settings.opensubtitlesUsername, 'opensub-user');
+    expect(settings.opensubtitlesPassword, 'opensub-pass');
+    expect(settings.subdlEnabled, isTrue);
+    expect(settings.subdlApiKey, 'subdl-key');
+    expect(settings.subtitlePreferredLanguages, ['zh-cn', 'en']);
+    expect(settings.subtitleHearingImpairedPreferred, isTrue);
+    expect(settings.subtitleSearchMaxValidatedCandidates, 9);
+    expect(settings.subtitleAllowLegacyProvidersFallback, isFalse);
     expect(settings.playbackBackgroundPlaybackEnabled, isFalse);
     expect(settings.playbackEngine, PlaybackEngine.systemPlayer);
     expect(
@@ -74,8 +92,20 @@ void main() {
     expect(settings.toJson()['playbackOpenTimeoutSeconds'], 45);
     expect(settings.toJson()['playbackDefaultSpeed'], 1.25);
     expect(settings.toJson()['playbackSubtitlePreference'], 'off');
-    expect(settings.toJson()['playbackSubtitleScale'], 'large');
+    expect(settings.toJson()['playbackSubtitleScale'], 36.0);
     expect(settings.toJson()['onlineSubtitleSources'], ['assrt']);
+    expect(settings.toJson()['opensubtitlesEnabled'], isTrue);
+    expect(settings.toJson()['opensubtitlesUsername'], 'opensub-user');
+    expect(settings.toJson()['opensubtitlesPassword'], 'opensub-pass');
+    expect(settings.toJson()['subdlEnabled'], isTrue);
+    expect(settings.toJson()['subdlApiKey'], 'subdl-key');
+    expect(settings.toJson()['subtitlePreferredLanguages'], ['zh-cn', 'en']);
+    expect(settings.toJson()['subtitleHearingImpairedPreferred'], isTrue);
+    expect(settings.toJson()['subtitleSearchMaxValidatedCandidates'], 9);
+    expect(
+      settings.toJson()['subtitleAllowLegacyProvidersFallback'],
+      isFalse,
+    );
     expect(settings.toJson()['playbackBackgroundPlaybackEnabled'], isFalse);
     expect(settings.toJson()['playbackEngine'], 'systemPlayer');
     expect(settings.toJson()['playbackDecodeMode'], 'softwarePreferred');
@@ -120,8 +150,20 @@ void main() {
       settings.playbackSubtitlePreference,
       PlaybackSubtitlePreference.auto,
     );
-    expect(settings.playbackSubtitleScale, PlaybackSubtitleScale.standard);
+    expect(settings.playbackSubtitleScale, 32.0);
     expect(settings.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
+    expect(settings.opensubtitlesEnabled, isFalse);
+    expect(settings.opensubtitlesUsername, isEmpty);
+    expect(settings.opensubtitlesPassword, isEmpty);
+    expect(settings.subdlEnabled, isFalse);
+    expect(settings.subdlApiKey, isEmpty);
+    expect(settings.subtitlePreferredLanguages, isEmpty);
+    expect(settings.subtitleHearingImpairedPreferred, isFalse);
+    expect(
+      settings.subtitleSearchMaxValidatedCandidates,
+      kSubtitleSearchMaxValidatedCandidatesDefault,
+    );
+    expect(settings.subtitleAllowLegacyProvidersFallback, isTrue);
     expect(settings.playbackBackgroundPlaybackEnabled, isTrue);
     expect(settings.playbackEngine, PlaybackEngine.embeddedMpv);
     expect(settings.playbackDecodeMode, PlaybackDecodeMode.auto);
@@ -397,18 +439,22 @@ void main() {
     final settings = AppSettings.fromJson({
       'playbackOpenTimeoutSeconds': 0,
       'playbackDefaultSpeed': 5.0,
+      'playbackSubtitleScale': 100,
     });
 
     expect(settings.playbackOpenTimeoutSeconds, 1);
     expect(settings.playbackDefaultSpeed, 2.0);
+    expect(settings.playbackSubtitleScale, kPlaybackSubtitleScaleMax);
 
     final copied = settings.copyWith(
       playbackOpenTimeoutSeconds: 900,
       playbackDefaultSpeed: 0.1,
+      playbackSubtitleScale: -20,
     );
 
     expect(copied.playbackOpenTimeoutSeconds, 900);
     expect(copied.playbackDefaultSpeed, 0.75);
+    expect(copied.playbackSubtitleScale, kPlaybackSubtitleScaleMin);
   });
 
   test('unknown subtitle source list falls back to assrt only', () {
@@ -417,6 +463,30 @@ void main() {
     });
 
     expect(settings.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
+  });
+
+  test('subtitle provider settings are normalized and clamped', () {
+    final settings = AppSettings.fromJson({
+      'subtitlePreferredLanguages': [' zh-CN ', 'en', '', 'EN'],
+      'subtitleSearchMaxValidatedCandidates': 99,
+    });
+
+    expect(settings.subtitlePreferredLanguages, ['zh-cn', 'en']);
+    expect(
+      settings.subtitleSearchMaxValidatedCandidates,
+      kSubtitleSearchMaxValidatedCandidatesMax,
+    );
+
+    final copied = settings.copyWith(
+      subtitlePreferredLanguages: ['zh-tw', 'zh-tw', 'ja'],
+      subtitleSearchMaxValidatedCandidates: 0,
+    );
+
+    expect(copied.subtitlePreferredLanguages, ['zh-tw', 'zh-tw', 'ja']);
+    expect(
+      copied.subtitleSearchMaxValidatedCandidates,
+      kSubtitleSearchMaxValidatedCandidatesMin,
+    );
   });
 
   test('high performance preset turns on playback tuning flags', () {

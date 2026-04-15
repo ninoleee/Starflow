@@ -279,6 +279,7 @@ class DetailHeroContent extends StatelessWidget {
           focusNode: focusNode,
           focusId: focusId,
           autofocus: autofocus,
+          focusScale: 1.06,
           onPressed: () => openPlaybackTarget(playbackTarget),
         );
       }

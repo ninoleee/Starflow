@@ -252,49 +252,71 @@ extension PlaybackMpvQualityPresetX on PlaybackMpvQualityPreset {
   }
 }
 
-enum PlaybackSubtitleScale {
-  compact,
-  standard,
-  large,
-  xLarge,
+const double kPlaybackSubtitleScaleMin = 20.0;
+const double kPlaybackSubtitleScaleMax = 78.0;
+const double kPlaybackSubtitleScaleStep = 1.0;
+const double kPlaybackSubtitleScaleDefault = 32.0;
+const int kSubtitleSearchMaxValidatedCandidatesMin = 1;
+const int kSubtitleSearchMaxValidatedCandidatesMax = 20;
+const int kSubtitleSearchMaxValidatedCandidatesDefault = 5;
+
+double clampPlaybackSubtitleScale(double value) {
+  final clamped = value.clamp(
+    kPlaybackSubtitleScaleMin,
+    kPlaybackSubtitleScaleMax,
+  );
+  return clamped.toDouble().roundToDouble();
 }
 
-extension PlaybackSubtitleScaleX on PlaybackSubtitleScale {
-  String get label {
-    switch (this) {
-      case PlaybackSubtitleScale.compact:
-        return '偏小';
-      case PlaybackSubtitleScale.standard:
-        return '标准';
-      case PlaybackSubtitleScale.large:
-        return '偏大';
-      case PlaybackSubtitleScale.xLarge:
-        return '超大';
-    }
-  }
+double stepPlaybackSubtitleScale(double current, int delta) {
+  return clampPlaybackSubtitleScale(
+    current + (delta * kPlaybackSubtitleScaleStep),
+  );
+}
 
-  double get textScale {
-    switch (this) {
-      case PlaybackSubtitleScale.compact:
-        return 0.9;
-      case PlaybackSubtitleScale.standard:
-        return 1.0;
-      case PlaybackSubtitleScale.large:
-        return 1.15;
-      case PlaybackSubtitleScale.xLarge:
-        return 1.3;
-    }
-  }
+String formatPlaybackSubtitleScaleLabel(double value) {
+  final normalized = clampPlaybackSubtitleScale(value);
+  return '${normalized.toStringAsFixed(0)}号';
+}
 
-  static PlaybackSubtitleScale fromName(String raw) {
-    return switch (raw) {
-      'compact' => PlaybackSubtitleScale.compact,
-      'large' => PlaybackSubtitleScale.large,
-      'xLarge' => PlaybackSubtitleScale.xLarge,
-      'standard' => PlaybackSubtitleScale.standard,
-      _ => PlaybackSubtitleScale.standard,
+double parsePlaybackSubtitleScale(Object? raw) {
+  if (raw is num) {
+    return clampPlaybackSubtitleScale(raw.toDouble());
+  }
+  if (raw is String) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      return kPlaybackSubtitleScaleDefault;
+    }
+    final parsed = double.tryParse(trimmed);
+    if (parsed != null) {
+      return clampPlaybackSubtitleScale(parsed);
+    }
+    return switch (trimmed) {
+      'compact' => 28.0,
+      'large' => 36.0,
+      'xLarge' => 40.0,
+      'standard' => kPlaybackSubtitleScaleDefault,
+      _ => kPlaybackSubtitleScaleDefault,
     };
   }
+  return kPlaybackSubtitleScaleDefault;
+}
+
+int clampSubtitleSearchMaxValidatedCandidates(int value) {
+  return value.clamp(
+    kSubtitleSearchMaxValidatedCandidatesMin,
+    kSubtitleSearchMaxValidatedCandidatesMax,
+  );
+}
+
+List<String> parseSubtitlePreferredLanguages(Object? raw) {
+  return (raw as List<dynamic>? ?? const <dynamic>[])
+      .whereType<String>()
+      .map((item) => item.trim().toLowerCase())
+      .where((item) => item.isNotEmpty)
+      .toSet()
+      .toList(growable: false);
 }
 
 class HomeModuleConfig {
@@ -751,8 +773,18 @@ class AppSettings {
     this.playbackOpenTimeoutSeconds = 20,
     this.playbackDefaultSpeed = 1.0,
     this.playbackSubtitlePreference = PlaybackSubtitlePreference.auto,
-    this.playbackSubtitleScale = PlaybackSubtitleScale.standard,
+    this.playbackSubtitleScale = kPlaybackSubtitleScaleDefault,
     this.onlineSubtitleSources = const [OnlineSubtitleSource.assrt],
+    this.opensubtitlesEnabled = false,
+    this.opensubtitlesUsername = '',
+    this.opensubtitlesPassword = '',
+    this.subdlEnabled = false,
+    this.subdlApiKey = '',
+    this.subtitlePreferredLanguages = const [],
+    this.subtitleHearingImpairedPreferred = false,
+    this.subtitleSearchMaxValidatedCandidates =
+        kSubtitleSearchMaxValidatedCandidatesDefault,
+    this.subtitleAllowLegacyProvidersFallback = true,
     this.playbackBackgroundPlaybackEnabled = true,
     this.playbackEngine = PlaybackEngine.embeddedMpv,
     this.playbackDecodeMode = PlaybackDecodeMode.auto,
@@ -800,8 +832,17 @@ class AppSettings {
   final int playbackOpenTimeoutSeconds;
   final double playbackDefaultSpeed;
   final PlaybackSubtitlePreference playbackSubtitlePreference;
-  final PlaybackSubtitleScale playbackSubtitleScale;
+  final double playbackSubtitleScale;
   final List<OnlineSubtitleSource> onlineSubtitleSources;
+  final bool opensubtitlesEnabled;
+  final String opensubtitlesUsername;
+  final String opensubtitlesPassword;
+  final bool subdlEnabled;
+  final String subdlApiKey;
+  final List<String> subtitlePreferredLanguages;
+  final bool subtitleHearingImpairedPreferred;
+  final int subtitleSearchMaxValidatedCandidates;
+  final bool subtitleAllowLegacyProvidersFallback;
   final bool playbackBackgroundPlaybackEnabled;
   final PlaybackEngine playbackEngine;
   final PlaybackDecodeMode playbackDecodeMode;
@@ -849,8 +890,17 @@ class AppSettings {
     int? playbackOpenTimeoutSeconds,
     double? playbackDefaultSpeed,
     PlaybackSubtitlePreference? playbackSubtitlePreference,
-    PlaybackSubtitleScale? playbackSubtitleScale,
+    double? playbackSubtitleScale,
     List<OnlineSubtitleSource>? onlineSubtitleSources,
+    bool? opensubtitlesEnabled,
+    String? opensubtitlesUsername,
+    String? opensubtitlesPassword,
+    bool? subdlEnabled,
+    String? subdlApiKey,
+    List<String>? subtitlePreferredLanguages,
+    bool? subtitleHearingImpairedPreferred,
+    int? subtitleSearchMaxValidatedCandidates,
+    bool? subtitleAllowLegacyProvidersFallback,
     bool? playbackBackgroundPlaybackEnabled,
     PlaybackEngine? playbackEngine,
     PlaybackDecodeMode? playbackDecodeMode,
@@ -931,10 +981,33 @@ class AppSettings {
           : playbackDefaultSpeed.clamp(0.75, 2.0),
       playbackSubtitlePreference:
           playbackSubtitlePreference ?? this.playbackSubtitlePreference,
-      playbackSubtitleScale:
-          playbackSubtitleScale ?? this.playbackSubtitleScale,
+      playbackSubtitleScale: playbackSubtitleScale == null
+          ? this.playbackSubtitleScale
+          : clampPlaybackSubtitleScale(playbackSubtitleScale),
       onlineSubtitleSources:
           onlineSubtitleSources ?? this.onlineSubtitleSources,
+      opensubtitlesEnabled:
+          opensubtitlesEnabled ?? this.opensubtitlesEnabled,
+      opensubtitlesUsername:
+          opensubtitlesUsername ?? this.opensubtitlesUsername,
+      opensubtitlesPassword:
+          opensubtitlesPassword ?? this.opensubtitlesPassword,
+      subdlEnabled: subdlEnabled ?? this.subdlEnabled,
+      subdlApiKey: subdlApiKey ?? this.subdlApiKey,
+      subtitlePreferredLanguages:
+          subtitlePreferredLanguages ?? this.subtitlePreferredLanguages,
+      subtitleHearingImpairedPreferred:
+          subtitleHearingImpairedPreferred ??
+              this.subtitleHearingImpairedPreferred,
+      subtitleSearchMaxValidatedCandidates:
+          subtitleSearchMaxValidatedCandidates == null
+              ? this.subtitleSearchMaxValidatedCandidates
+              : clampSubtitleSearchMaxValidatedCandidates(
+                  subtitleSearchMaxValidatedCandidates,
+                ),
+      subtitleAllowLegacyProvidersFallback:
+          subtitleAllowLegacyProvidersFallback ??
+              this.subtitleAllowLegacyProvidersFallback,
       playbackBackgroundPlaybackEnabled: playbackBackgroundPlaybackEnabled ??
           this.playbackBackgroundPlaybackEnabled,
       playbackEngine: playbackEngine ?? this.playbackEngine,
@@ -1000,9 +1073,20 @@ class AppSettings {
       'playbackOpenTimeoutSeconds': playbackOpenTimeoutSeconds,
       'playbackDefaultSpeed': playbackDefaultSpeed,
       'playbackSubtitlePreference': playbackSubtitlePreference.name,
-      'playbackSubtitleScale': playbackSubtitleScale.name,
+      'playbackSubtitleScale': playbackSubtitleScale,
       'onlineSubtitleSources':
           onlineSubtitleSources.map((item) => item.name).toList(),
+      'opensubtitlesEnabled': opensubtitlesEnabled,
+      'opensubtitlesUsername': opensubtitlesUsername,
+      'opensubtitlesPassword': opensubtitlesPassword,
+      'subdlEnabled': subdlEnabled,
+      'subdlApiKey': subdlApiKey,
+      'subtitlePreferredLanguages': subtitlePreferredLanguages,
+      'subtitleHearingImpairedPreferred': subtitleHearingImpairedPreferred,
+      'subtitleSearchMaxValidatedCandidates':
+          subtitleSearchMaxValidatedCandidates,
+      'subtitleAllowLegacyProvidersFallback':
+          subtitleAllowLegacyProvidersFallback,
       'playbackBackgroundPlaybackEnabled': playbackBackgroundPlaybackEnabled,
       'playbackEngine': playbackEngine.name,
       'playbackDecodeMode': playbackDecodeMode.name,
@@ -1124,11 +1208,28 @@ class AppSettings {
       playbackSubtitlePreference: PlaybackSubtitlePreferenceX.fromName(
         json['playbackSubtitlePreference'] as String? ?? '',
       ),
-      playbackSubtitleScale: PlaybackSubtitleScaleX.fromName(
-        json['playbackSubtitleScale'] as String? ?? '',
+      playbackSubtitleScale: parsePlaybackSubtitleScale(
+        json['playbackSubtitleScale'],
       ),
       onlineSubtitleSources:
           _parseOnlineSubtitleSources(json['onlineSubtitleSources']),
+      opensubtitlesEnabled: json['opensubtitlesEnabled'] as bool? ?? false,
+      opensubtitlesUsername: json['opensubtitlesUsername'] as String? ?? '',
+      opensubtitlesPassword: json['opensubtitlesPassword'] as String? ?? '',
+      subdlEnabled: json['subdlEnabled'] as bool? ?? false,
+      subdlApiKey: json['subdlApiKey'] as String? ?? '',
+      subtitlePreferredLanguages: parseSubtitlePreferredLanguages(
+        json['subtitlePreferredLanguages'],
+      ),
+      subtitleHearingImpairedPreferred:
+          json['subtitleHearingImpairedPreferred'] as bool? ?? false,
+      subtitleSearchMaxValidatedCandidates:
+          clampSubtitleSearchMaxValidatedCandidates(
+        (json['subtitleSearchMaxValidatedCandidates'] as num?)?.toInt() ??
+            kSubtitleSearchMaxValidatedCandidatesDefault,
+      ),
+      subtitleAllowLegacyProvidersFallback:
+          json['subtitleAllowLegacyProvidersFallback'] as bool? ?? true,
       playbackBackgroundPlaybackEnabled:
           json['playbackBackgroundPlaybackEnabled'] as bool? ?? true,
       playbackEngine: PlaybackEngineX.fromName(
@@ -1259,6 +1360,38 @@ extension AppSettingsPerformanceX on AppSettings {
 
   bool get effectiveFullscreenRouteAnimationEnabled {
     return !effectiveReduceMotionEnabled;
+  }
+}
+
+extension AppSettingsSubtitleSearchX on AppSettings {
+  List<OnlineSubtitleSource> get configuredStructuredSubtitleSources {
+    final sources = <OnlineSubtitleSource>[
+      if (opensubtitlesEnabled) OnlineSubtitleSource.opensubtitles,
+      if (subdlEnabled) OnlineSubtitleSource.subdl,
+    ];
+    return sources.toSet().toList(growable: false);
+  }
+
+  List<OnlineSubtitleSource> get configuredLegacySubtitleSources {
+    if (!subtitleAllowLegacyProvidersFallback) {
+      return const <OnlineSubtitleSource>[];
+    }
+    return onlineSubtitleSources
+        .where(
+          (item) =>
+              item == OnlineSubtitleSource.assrt ||
+              item == OnlineSubtitleSource.subhd ||
+              item == OnlineSubtitleSource.yify,
+        )
+        .toSet()
+        .toList(growable: false);
+  }
+
+  List<OnlineSubtitleSource> get effectiveOnlineSubtitleSources {
+    return {
+      ...configuredStructuredSubtitleSources,
+      ...configuredLegacySubtitleSources,
+    }.toList(growable: false);
   }
 }
 

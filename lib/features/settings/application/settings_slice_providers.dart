@@ -81,6 +81,18 @@ final settingsPlaybackSliceProvider = Provider<SettingsPlaybackSlice>(
           playbackSubtitlePreference: settings.playbackSubtitlePreference,
           playbackSubtitleScale: settings.playbackSubtitleScale,
           onlineSubtitleSources: settings.onlineSubtitleSources,
+          opensubtitlesEnabled: settings.opensubtitlesEnabled,
+          opensubtitlesUsername: settings.opensubtitlesUsername,
+          opensubtitlesPassword: settings.opensubtitlesPassword,
+          subdlEnabled: settings.subdlEnabled,
+          subdlApiKey: settings.subdlApiKey,
+          subtitlePreferredLanguages: settings.subtitlePreferredLanguages,
+          subtitleHearingImpairedPreferred:
+              settings.subtitleHearingImpairedPreferred,
+          subtitleSearchMaxValidatedCandidates:
+              settings.subtitleSearchMaxValidatedCandidates,
+          subtitleAllowLegacyProvidersFallback:
+              settings.subtitleAllowLegacyProvidersFallback,
           configuredBackgroundPlaybackEnabled:
               settings.playbackBackgroundPlaybackEnabled,
           effectiveBackgroundPlaybackEnabled:
@@ -194,6 +206,15 @@ class SettingsPlaybackSlice {
     required this.playbackSubtitlePreference,
     required this.playbackSubtitleScale,
     required this.onlineSubtitleSources,
+    required this.opensubtitlesEnabled,
+    required this.opensubtitlesUsername,
+    required this.opensubtitlesPassword,
+    required this.subdlEnabled,
+    required this.subdlApiKey,
+    required this.subtitlePreferredLanguages,
+    required this.subtitleHearingImpairedPreferred,
+    required this.subtitleSearchMaxValidatedCandidates,
+    required this.subtitleAllowLegacyProvidersFallback,
     required this.configuredBackgroundPlaybackEnabled,
     required this.effectiveBackgroundPlaybackEnabled,
   });
@@ -208,8 +229,17 @@ class SettingsPlaybackSlice {
   final int playbackOpenTimeoutSeconds;
   final double playbackDefaultSpeed;
   final PlaybackSubtitlePreference playbackSubtitlePreference;
-  final PlaybackSubtitleScale playbackSubtitleScale;
+  final double playbackSubtitleScale;
   final List<OnlineSubtitleSource> onlineSubtitleSources;
+  final bool opensubtitlesEnabled;
+  final String opensubtitlesUsername;
+  final String opensubtitlesPassword;
+  final bool subdlEnabled;
+  final String subdlApiKey;
+  final List<String> subtitlePreferredLanguages;
+  final bool subtitleHearingImpairedPreferred;
+  final int subtitleSearchMaxValidatedCandidates;
+  final bool subtitleAllowLegacyProvidersFallback;
   final bool configuredBackgroundPlaybackEnabled;
   final bool effectiveBackgroundPlaybackEnabled;
 
@@ -236,6 +266,21 @@ class SettingsPlaybackSlice {
               other.onlineSubtitleSources,
               onlineSubtitleSources,
             ) &&
+            other.opensubtitlesEnabled == opensubtitlesEnabled &&
+            other.opensubtitlesUsername == opensubtitlesUsername &&
+            other.opensubtitlesPassword == opensubtitlesPassword &&
+            other.subdlEnabled == subdlEnabled &&
+            other.subdlApiKey == subdlApiKey &&
+            listEquals(
+              other.subtitlePreferredLanguages,
+              subtitlePreferredLanguages,
+            ) &&
+            other.subtitleHearingImpairedPreferred ==
+                subtitleHearingImpairedPreferred &&
+            other.subtitleSearchMaxValidatedCandidates ==
+                subtitleSearchMaxValidatedCandidates &&
+            other.subtitleAllowLegacyProvidersFallback ==
+                subtitleAllowLegacyProvidersFallback &&
             other.configuredBackgroundPlaybackEnabled ==
                 configuredBackgroundPlaybackEnabled &&
             other.effectiveBackgroundPlaybackEnabled ==
@@ -244,20 +289,33 @@ class SettingsPlaybackSlice {
 
   @override
   int get hashCode => Object.hash(
-        playbackEngine,
-        playbackDecodeMode,
-        playbackMpvQualityPreset,
-        playbackMpvDoubleTapToSeekEnabled,
-        playbackMpvSwipeToSeekEnabled,
-        playbackMpvLongPressSpeedBoostEnabled,
-        playbackMpvStallAutoRecoveryEnabled,
-        playbackOpenTimeoutSeconds,
-        playbackDefaultSpeed,
-        playbackSubtitlePreference,
-        playbackSubtitleScale,
-        Object.hashAll(onlineSubtitleSources),
-        configuredBackgroundPlaybackEnabled,
-        effectiveBackgroundPlaybackEnabled,
+        Object.hash(
+          playbackEngine,
+          playbackDecodeMode,
+          playbackMpvQualityPreset,
+          playbackMpvDoubleTapToSeekEnabled,
+          playbackMpvSwipeToSeekEnabled,
+          playbackMpvLongPressSpeedBoostEnabled,
+          playbackMpvStallAutoRecoveryEnabled,
+          playbackOpenTimeoutSeconds,
+          playbackDefaultSpeed,
+          playbackSubtitlePreference,
+          playbackSubtitleScale,
+        ),
+        Object.hash(
+          Object.hashAll(onlineSubtitleSources),
+          opensubtitlesEnabled,
+          opensubtitlesUsername,
+          opensubtitlesPassword,
+          subdlEnabled,
+          subdlApiKey,
+          Object.hashAll(subtitlePreferredLanguages),
+          subtitleHearingImpairedPreferred,
+          subtitleSearchMaxValidatedCandidates,
+          subtitleAllowLegacyProvidersFallback,
+          configuredBackgroundPlaybackEnabled,
+          effectiveBackgroundPlaybackEnabled,
+        ),
       );
 }
 

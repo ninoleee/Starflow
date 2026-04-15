@@ -264,6 +264,138 @@ class SettingsSelectionTile extends StatelessWidget {
   }
 }
 
+class SettingsStepperTile extends ConsumerWidget {
+  const SettingsStepperTile({
+    super.key,
+    required this.title,
+    required this.value,
+    required this.onDecrease,
+    required this.onIncrease,
+    this.subtitle = '',
+  });
+
+  final String title;
+  final String value;
+  final VoidCallback? onDecrease;
+  final VoidCallback? onIncrease;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(18),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(title),
+                  if (subtitle.trim().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            _SettingsStepperButton(
+              isTelevision: isTelevision,
+              label: '-',
+              icon: Icons.remove_rounded,
+              onPressed: onDecrease,
+            ),
+            const SizedBox(width: 8),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: theme.colorScheme.outlineVariant),
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 76),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  child: Text(
+                    value,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            _SettingsStepperButton(
+              isTelevision: isTelevision,
+              label: '+',
+              icon: Icons.add_rounded,
+              onPressed: onIncrease,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsStepperButton extends StatelessWidget {
+  const _SettingsStepperButton({
+    required this.isTelevision,
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final bool isTelevision;
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isTelevision) {
+      return SizedBox(
+        width: 56,
+        child: StarflowChipButton(
+          label: label,
+          selected: false,
+          onPressed: onPressed,
+        ),
+      );
+    }
+    return SizedBox(
+      width: 42,
+      height: 42,
+      child: OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          padding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+        child: Icon(icon, size: 18),
+      ),
+    );
+  }
+}
+
 class SettingsToggleTile extends StatelessWidget {
   const SettingsToggleTile({
     super.key,

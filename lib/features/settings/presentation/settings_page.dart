@@ -513,6 +513,19 @@ class SettingsPage extends ConsumerStatefulWidget {
           initialSubtitlePreference: playbackSlice.playbackSubtitlePreference,
           initialSubtitleScale: playbackSlice.playbackSubtitleScale,
           initialOnlineSubtitleSources: playbackSlice.onlineSubtitleSources,
+          initialOpensubtitlesEnabled: playbackSlice.opensubtitlesEnabled,
+          initialOpensubtitlesUsername: playbackSlice.opensubtitlesUsername,
+          initialOpensubtitlesPassword: playbackSlice.opensubtitlesPassword,
+          initialSubdlEnabled: playbackSlice.subdlEnabled,
+          initialSubdlApiKey: playbackSlice.subdlApiKey,
+          initialSubtitlePreferredLanguages:
+              playbackSlice.subtitlePreferredLanguages,
+          initialSubtitleHearingImpairedPreferred:
+              playbackSlice.subtitleHearingImpairedPreferred,
+          initialSubtitleSearchMaxValidatedCandidates:
+              playbackSlice.subtitleSearchMaxValidatedCandidates,
+          initialSubtitleAllowLegacyProvidersFallback:
+              playbackSlice.subtitleAllowLegacyProvidersFallback,
           initialBackgroundPlaybackEnabled:
               playbackSlice.configuredBackgroundPlaybackEnabled,
           initialPlaybackEngine: playbackSlice.playbackEngine,
@@ -754,7 +767,12 @@ String _playbackSettingsSummary(
     '${playbackSlice.playbackOpenTimeoutSeconds}s 超时',
     '${_formatPlaybackSpeedLabel(playbackSlice.playbackDefaultSpeed)} 默认倍速',
     '字幕 ${playbackSlice.playbackSubtitlePreference.label}',
-    playbackSlice.playbackSubtitleScale.label,
+    formatPlaybackSubtitleScaleLabel(playbackSlice.playbackSubtitleScale),
+    if (playbackSlice.opensubtitlesEnabled || playbackSlice.subdlEnabled)
+      [
+        if (playbackSlice.opensubtitlesEnabled) 'OpenSubtitles',
+        if (playbackSlice.subdlEnabled) 'SubDL',
+      ].join('/'),
     isTelevision
         ? 'TV 端后台播放禁用'
         : playbackSlice.configuredBackgroundPlaybackEnabled

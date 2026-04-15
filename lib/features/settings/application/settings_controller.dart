@@ -226,7 +226,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> setPlaybackSubtitleScale(
-    PlaybackSubtitleScale subtitleScale,
+    double subtitleScale,
   ) async {
     final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(playbackSubtitleScale: subtitleScale));
@@ -236,8 +236,17 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     required int openTimeoutSeconds,
     required double defaultSpeed,
     required PlaybackSubtitlePreference subtitlePreference,
-    required PlaybackSubtitleScale subtitleScale,
+    required double subtitleScale,
     required List<OnlineSubtitleSource> onlineSubtitleSources,
+    required bool opensubtitlesEnabled,
+    required String opensubtitlesUsername,
+    required String opensubtitlesPassword,
+    required bool subdlEnabled,
+    required String subdlApiKey,
+    required List<String> subtitlePreferredLanguages,
+    required bool subtitleHearingImpairedPreferred,
+    required int subtitleSearchMaxValidatedCandidates,
+    required bool subtitleAllowLegacyProvidersFallback,
     required bool backgroundPlaybackEnabled,
     required PlaybackEngine playbackEngine,
     required PlaybackDecodeMode playbackDecodeMode,
@@ -261,6 +270,24 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         playbackSubtitleScale: subtitleScale,
         onlineSubtitleSources:
             onlineSubtitleSources.toSet().toList(growable: false),
+        opensubtitlesEnabled: opensubtitlesEnabled,
+        opensubtitlesUsername: opensubtitlesUsername.trim(),
+        opensubtitlesPassword: opensubtitlesPassword,
+        subdlEnabled: subdlEnabled,
+        subdlApiKey: subdlApiKey.trim(),
+        subtitlePreferredLanguages: subtitlePreferredLanguages
+            .map((item) => item.trim().toLowerCase())
+            .where((item) => item.isNotEmpty)
+            .toSet()
+            .toList(growable: false),
+        subtitleHearingImpairedPreferred:
+            subtitleHearingImpairedPreferred,
+        subtitleSearchMaxValidatedCandidates:
+            clampSubtitleSearchMaxValidatedCandidates(
+          subtitleSearchMaxValidatedCandidates,
+        ),
+        subtitleAllowLegacyProvidersFallback:
+            subtitleAllowLegacyProvidersFallback,
         playbackBackgroundPlaybackEnabled: backgroundPlaybackEnabled,
         playbackEngine: playbackEngine,
         playbackDecodeMode: playbackDecodeMode,

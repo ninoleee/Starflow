@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
+import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/playback/presentation/subtitle_search_page.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -146,6 +147,19 @@ class _FakeOnlineSubtitleRepository implements OnlineSubtitleRepository {
   }) async {
     searchQueries.add(query);
     searchSources.add(List<OnlineSubtitleSource>.from(sources));
+    return const [];
+  }
+
+  @override
+  Future<List<ValidatedSubtitleCandidate>> searchStructured(
+    OnlineSubtitleSearchRequest request, {
+    List<OnlineSubtitleSource> sources = const [
+      OnlineSubtitleSource.opensubtitles,
+      OnlineSubtitleSource.subdl,
+    ],
+    int maxResults = 0,
+    int maxValidated = 0,
+  }) async {
     return const [];
   }
 }

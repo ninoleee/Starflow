@@ -367,19 +367,29 @@ class _PlaybackOptionsDialogBodyState
     final body = ListView(
       shrinkWrap: true,
       children: [
-        Text(
-          widget.target.title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          buildPlaybackOptionMeta(widget.target),
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+        _PlaybackReadOnlyFocusRegion(
+          isTelevision: widget.isTelevision,
+          autofocus: widget.isTelevision,
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.target.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                buildPlaybackOptionMeta(widget.target),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 12),
@@ -434,6 +444,7 @@ class _PlaybackOptionsDialogBodyState
         ),
         const SizedBox(height: 16),
         _PlaybackInfoTile(
+          isTelevision: widget.isTelevision,
           progressLabel: progressLabel,
           videoSizeLabel: videoSizeLabel,
           speedLabel: formatPlaybackSpeed(_viewState.rate),
@@ -477,17 +488,13 @@ class _PlaybackSubtitleOptionsDialog extends ConsumerWidget {
         (settings) => settings.playbackSubtitleScale,
       ),
     );
-    final subtitleScaleValues = PlaybackSubtitleScale.values;
-    final subtitleScaleIndex = subtitleScaleValues.indexOf(subtitleScale);
 
     Future<void> shiftSubtitleScale(int delta) async {
-      final nextIndex = subtitleScaleIndex + delta;
-      if (nextIndex < 0 || nextIndex >= subtitleScaleValues.length) {
-        return;
-      }
       await ref
           .read(settingsControllerProvider.notifier)
-          .setPlaybackSubtitleScale(subtitleScaleValues[nextIndex]);
+          .setPlaybackSubtitleScale(
+            stepPlaybackSubtitleScale(subtitleScale, delta),
+          );
     }
 
     return wrapTelevisionDialogFieldTraversal(
@@ -531,11 +538,11 @@ class _PlaybackSubtitleOptionsDialog extends ConsumerWidget {
               _PlaybackStepperTile(
                 isTelevision: isTelevision,
                 title: '字幕大小',
-                value: subtitleScale.label,
-                onDecrease: subtitleScaleIndex > 0
+                value: formatPlaybackSubtitleScaleLabel(subtitleScale),
+                onDecrease: subtitleScale > kPlaybackSubtitleScaleMin
                     ? () => shiftSubtitleScale(-1)
                     : null,
-                onIncrease: subtitleScaleIndex < subtitleScaleValues.length - 1
+                onIncrease: subtitleScale < kPlaybackSubtitleScaleMax
                     ? () => shiftSubtitleScale(1)
                     : null,
               ),
@@ -601,8 +608,46 @@ class _PlaybackOptionTile extends StatelessWidget {
   }
 }
 
+class _PlaybackReadOnlyFocusRegion extends StatelessWidget {
+  const _PlaybackReadOnlyFocusRegion({
+    required this.isTelevision,
+    required this.child,
+    this.autofocus = false,
+    this.padding = EdgeInsets.zero,
+    this.borderRadius = const BorderRadius.all(Radius.circular(12)),
+  });
+
+  final bool isTelevision;
+  final Widget child;
+  final bool autofocus;
+  final EdgeInsetsGeometry padding;
+  final BorderRadius borderRadius;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = Padding(
+      padding: padding,
+      child: child,
+    );
+    if (!isTelevision) {
+      return content;
+    }
+    return SizedBox(
+      width: double.infinity,
+      child: TvFocusableAction(
+        autofocus: autofocus,
+        onPressed: () {},
+        borderRadius: borderRadius,
+        visualStyle: TvFocusVisualStyle.subtle,
+        child: content,
+      ),
+    );
+  }
+}
+
 class _PlaybackInfoTile extends StatelessWidget {
   const _PlaybackInfoTile({
+    required this.isTelevision,
     required this.progressLabel,
     required this.videoSizeLabel,
     required this.speedLabel,
@@ -615,6 +660,7 @@ class _PlaybackInfoTile extends StatelessWidget {
     required this.bitrateLabel,
   });
 
+  final bool isTelevision;
   final String progressLabel;
   final String videoSizeLabel;
   final String speedLabel;
@@ -628,7 +674,7 @@ class _PlaybackInfoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
+    final content = Material(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
@@ -661,6 +707,11 @@ class _PlaybackInfoTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+    return _PlaybackReadOnlyFocusRegion(
+      isTelevision: isTelevision,
+      borderRadius: const BorderRadius.all(Radius.circular(12)),
+      child: content,
     );
   }
 }

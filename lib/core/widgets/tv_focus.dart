@@ -239,6 +239,7 @@ class _TvOutlinedFocusableAction extends StatefulWidget {
     this.focusNode,
     this.focusId,
     this.borderWidth = 2,
+    this.focusScale = 1.0,
   });
 
   final Widget child;
@@ -249,6 +250,7 @@ class _TvOutlinedFocusableAction extends StatefulWidget {
   final String? focusId;
   final BorderRadius borderRadius;
   final double borderWidth;
+  final double focusScale;
 
   @override
   State<_TvOutlinedFocusableAction> createState() =>
@@ -317,6 +319,7 @@ class _TvOutlinedFocusableActionState
       focusId: widget.focusId,
       borderRadius: widget.borderRadius,
       visualStyle: TvFocusVisualStyle.none,
+      focusScale: widget.focusScale,
       child: _TvFocusOutlineFrame(
         isFocused: _isFocused,
         borderRadius: widget.borderRadius,
@@ -622,6 +625,7 @@ class StarflowButton extends StatelessWidget {
     this.compact = false,
     this.expand = false,
     this.loading = false,
+    this.focusScale = 1.0,
   });
 
   final String label;
@@ -634,6 +638,7 @@ class StarflowButton extends StatelessWidget {
   final bool compact;
   final bool expand;
   final bool loading;
+  final double focusScale;
 
   @override
   Widget build(BuildContext context) {
@@ -699,6 +704,7 @@ class StarflowButton extends StatelessWidget {
       focusId: focusId,
       borderRadius: radius,
       borderWidth: compact ? 1.6 : 2,
+      focusScale: focusScale,
       child: expand
           ? SizedBox(
               width: double.infinity,
@@ -1049,6 +1055,7 @@ class TvAdaptiveButton extends StatelessWidget {
     this.autofocus = false,
     this.focusNode,
     this.focusId,
+    this.focusScale = 1.0,
   });
 
   final String label;
@@ -1059,6 +1066,7 @@ class TvAdaptiveButton extends StatelessWidget {
   final bool autofocus;
   final FocusNode? focusNode;
   final String? focusId;
+  final double focusScale;
 
   @override
   Widget build(BuildContext context) {
@@ -1076,6 +1084,7 @@ class TvAdaptiveButton extends StatelessWidget {
       autofocus: autofocus,
       focusNode: focusNode,
       focusId: focusId,
+      focusScale: focusScale,
     );
   }
 }

@@ -141,6 +141,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _tvPlaybackChromeVisible = false;
   final ValueNotifier<_TvPlaybackState> _tvPlaybackStateNotifier =
       ValueNotifier(const _TvPlaybackState());
+  final FocusNode _tvBackControlFocusNode =
+      FocusNode(debugLabel: 'tv-player-control-back');
+  final FocusNode _tvPlayPauseControlFocusNode =
+      FocusNode(debugLabel: 'tv-player-control-play');
+  final FocusNode _tvSubtitleControlFocusNode =
+      FocusNode(debugLabel: 'tv-player-control-subtitle');
+  final FocusNode _tvAudioControlFocusNode =
+      FocusNode(debugLabel: 'tv-player-control-audio');
+  final FocusNode _tvMoreControlFocusNode =
+      FocusNode(debugLabel: 'tv-player-control-more');
   final PlayerAdaptiveTopChromeController _adaptiveTopChromeController =
       PlayerAdaptiveTopChromeController(
     visible: true,
@@ -152,6 +162,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   LogicalKeyboardKey? _tvSeekHoldKey;
   DateTime? _tvSeekHoldStartedAt;
   int _tvSeekHoldRepeatCount = 0;
+
+  List<FocusNode> get _tvChromeControlFocusNodes => <FocusNode>[
+        _tvBackControlFocusNode,
+        _tvPlayPauseControlFocusNode,
+        _tvSubtitleControlFocusNode,
+        _tvAudioControlFocusNode,
+        _tvMoreControlFocusNode,
+      ];
+
+  bool get _hasFocusedTvChromeControl =>
+      _tvChromeControlFocusNodes.any((node) => node.hasFocus);
 
   void _updateTvPlaybackState({
     Duration? position,
@@ -226,6 +247,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _activePlaybackCleanupToken = ActivePlaybackCleanupCoordinator.register(
       _handleExternalPlaybackCleanup,
     );
+    for (final node in _tvChromeControlFocusNodes) {
+      node.addListener(_handleTvChromeControlFocusChanged);
+    }
     unawaited(_bindAdaptiveGestureSystemLevels());
     unawaited(_bindPictureInPictureSupport());
     unawaited(_bindPlaybackSystemSession());
@@ -258,6 +282,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       ),
     );
     _tvPlaybackStateNotifier.dispose();
+    for (final node in _tvChromeControlFocusNodes) {
+      node
+        ..removeListener(_handleTvChromeControlFocusChanged)
+        ..dispose();
+    }
     _adaptiveTopChromeController.dispose();
     super.dispose();
   }
@@ -618,8 +647,28 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     return _kSeekStep;
   }
 
+  void _handleTvChromeControlFocusChanged() {
+    if (!_isTelevisionPlaybackDevice) {
+      return;
+    }
+    if (_hasFocusedTvChromeControl) {
+      _tvPlaybackChromeHideTimer?.cancel();
+      if (!_tvPlaybackChromeVisible && mounted) {
+        setState(() {
+          _tvPlaybackChromeVisible = true;
+        });
+      }
+      return;
+    }
+    if (_tvPlaybackChromeVisible && (_player?.state.playing ?? false)) {
+      _scheduleTvPlaybackChromeHide();
+    }
+  }
+
   KeyEventResult _handleTvSeekKeyEvent(KeyEvent event) {
-    if (!_isTelevisionPlaybackDevice || !_isTvSeekKey(event.logicalKey)) {
+    if (!_isTelevisionPlaybackDevice ||
+        !_isTvSeekKey(event.logicalKey) ||
+        _hasFocusedTvChromeControl) {
       return KeyEventResult.ignored;
     }
 
@@ -797,6 +846,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                       state.playing || player.state.playing,
                                   bufferingPercentage:
                                       state.bufferingPercentage,
+                                  backFocusNode: _tvBackControlFocusNode,
+                                  playPauseFocusNode:
+                                      _tvPlayPauseControlFocusNode,
+                                  subtitleFocusNode:
+                                      _tvSubtitleControlFocusNode,
+                                  audioFocusNode: _tvAudioControlFocusNode,
+                                  moreFocusNode: _tvMoreControlFocusNode,
                                   onBack: () {
                                     unawaited(_handleTvBack());
                                   },

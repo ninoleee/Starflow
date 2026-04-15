@@ -329,6 +329,13 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       query: query,
       title: initialInput,
       initialInput: initialInput,
+      originalTitle: target.title.trim(),
+      year: target.year > 0 ? target.year : null,
+      seasonNumber: target.seasonNumber,
+      episodeNumber: target.episodeNumber,
+      filePath: target.actualAddress.trim().isNotEmpty
+          ? target.actualAddress.trim()
+          : target.streamUrl.trim(),
       applyMode: SubtitleSearchApplyMode.downloadAndApply,
     );
     final location = request.toLocation();

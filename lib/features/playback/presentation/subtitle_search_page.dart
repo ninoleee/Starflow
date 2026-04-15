@@ -6,10 +6,12 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
+import 'package:starflow/features/playback/application/online_subtitle_search_request_builder.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/data/subtitle_search_host_bridge.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 
 class SubtitleSearchPage extends ConsumerStatefulWidget {
   const SubtitleSearchPage({
@@ -30,6 +32,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       TvFocusMemoryController();
   late List<OnlineSubtitleSource> _selectedSources;
   List<SubtitleSearchResult> _results = const [];
+  Map<String, SubtitleSearchSelection> _validatedSelectionsByResultId =
+      const <String, SubtitleSearchSelection>{};
   bool _isSearching = false;
   String? _errorMessage;
   String? _busyResultId;
@@ -40,7 +44,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     _controller = TextEditingController(
       text: _resolveInitialInput(widget.request),
     );
-    _availableSources = ref.read(appSettingsProvider).onlineSubtitleSources;
+    _availableSources = ref.read(appSettingsProvider).effectiveOnlineSubtitleSources;
     _selectedSources = _availableSources.toList(growable: false);
     subtitleSearchTrace(
       'page.init',
@@ -139,6 +143,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       subtitleSearchTrace('page.search.skip-empty-query');
       setState(() {
         _results = const [];
+        _validatedSelectionsByResultId = const <String, SubtitleSearchSelection>{};
         _isSearching = false;
         _errorMessage = '请先输入要搜索的字幕关键词';
       });
@@ -147,11 +152,18 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
 
     setState(() {
       _isSearching = true;
+      _results = const [];
+      _validatedSelectionsByResultId = const <String, SubtitleSearchSelection>{};
       _errorMessage = null;
     });
 
     try {
-      final sources = _selectedSources;
+      final settings = ref.read(appSettingsProvider);
+      final availableSources = settings.effectiveOnlineSubtitleSources;
+      final sources = _selectedSources
+          .where(availableSources.contains)
+          .toSet()
+          .toList(growable: false);
       if (sources.isEmpty) {
         if (!mounted) {
           return;
@@ -172,10 +184,73 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         });
         return;
       }
-      final results = await ref.read(onlineSubtitleRepositoryProvider).search(
-            query,
-            sources: sources,
+      final repository = ref.read(onlineSubtitleRepositoryProvider);
+      final structuredSources = sources
+          .where(
+            (item) =>
+                item == OnlineSubtitleSource.opensubtitles ||
+                item == OnlineSubtitleSource.subdl,
+          )
+          .toList(growable: false);
+      final legacySources = settings.subtitleAllowLegacyProvidersFallback
+          ? sources
+              .where(
+                (item) =>
+                    item == OnlineSubtitleSource.assrt ||
+                    item == OnlineSubtitleSource.subhd ||
+                    item == OnlineSubtitleSource.yify,
+              )
+              .toList(growable: false)
+          : const <OnlineSubtitleSource>[];
+
+      final nextResults = <SubtitleSearchResult>[];
+      final validatedSelections = <String, SubtitleSearchSelection>{};
+
+      if (structuredSources.isNotEmpty) {
+        final structuredRequest =
+            await buildOnlineSubtitleSearchRequestForRoute(
+          SubtitleSearchRequest(
+            query: query,
+            title: widget.request.title,
+            originalTitle: widget.request.originalTitle,
+            initialInput: widget.request.initialInput,
+            year: widget.request.year,
+            imdbId: widget.request.imdbId,
+            tmdbId: widget.request.tmdbId,
+            seasonNumber: widget.request.seasonNumber,
+            episodeNumber: widget.request.episodeNumber,
+            filePath: widget.request.filePath,
+            applyMode: widget.request.applyMode,
+            standalone: widget.request.standalone,
+          ),
+          languages: settings.subtitlePreferredLanguages,
+          preferHearingImpaired: settings.subtitleHearingImpairedPreferred,
+        );
+        final validated = await repository.searchStructured(
+          structuredRequest,
+          sources: structuredSources,
+          maxResults: settings.subtitleSearchMaxValidatedCandidates * 4,
+          maxValidated: settings.subtitleSearchMaxValidatedCandidates,
+        );
+        for (final candidate in validated) {
+          final result = candidate.toSearchResult();
+          nextResults.add(result);
+          validatedSelections[result.id] = SubtitleSearchSelection(
+            cachedPath: candidate.cachedPath,
+            displayName: candidate.displayName,
+            subtitleFilePath: candidate.subtitleFilePath,
           );
+        }
+      }
+
+      if (nextResults.isEmpty && legacySources.isNotEmpty) {
+        nextResults.addAll(
+          await repository.search(
+            query,
+            sources: legacySources,
+          ),
+        );
+      }
       if (!mounted) {
         return;
       }
@@ -183,16 +258,18 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         'page.search.finished',
         fields: {
           'query': query,
-          'count': results.length,
-          'downloadable': results.where((item) => item.canDownload).length,
-          'autoLoadable': results.where((item) => item.canAutoLoad).length,
-          'sample': _pageSubtitleResultSample(results),
+          'count': nextResults.length,
+          'validated': validatedSelections.length,
+          'downloadable': nextResults.where((item) => item.canDownload).length,
+          'autoLoadable': nextResults.where((item) => item.canAutoLoad).length,
+          'sample': _pageSubtitleResultSample(nextResults),
         },
       );
       setState(() {
-        _results = results;
+        _results = nextResults;
+        _validatedSelectionsByResultId = validatedSelections;
         _isSearching = false;
-        _errorMessage = results.isEmpty ? '没有找到可用字幕结果' : null;
+        _errorMessage = nextResults.isEmpty ? '没有找到可用字幕结果' : null;
       });
     } catch (error, stackTrace) {
       if (!mounted) {
@@ -210,6 +287,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       );
       setState(() {
         _results = const [];
+        _validatedSelectionsByResultId = const <String, SubtitleSearchSelection>{};
         _isSearching = false;
         _errorMessage = '$error';
       });
@@ -224,6 +302,14 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
           'currentBusyResultId': _busyResultId,
           'nextResultId': result.id,
         },
+      );
+      return;
+    }
+    final validatedSelection = _validatedSelectionsByResultId[result.id];
+    if (validatedSelection != null) {
+      await _finishSelection(
+        result: result,
+        selection: validatedSelection,
       );
       return;
     }
@@ -261,41 +347,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         displayName: downloadResult.displayName,
         subtitleFilePath: downloadResult.subtitleFilePath,
       );
-      if (widget.request.applyMode ==
-              SubtitleSearchApplyMode.downloadAndApply &&
-          !selection.canApply) {
-        _showMessage('字幕已缓存，但当前结果暂不能直接挂载播放');
-        return;
-      }
-
-      if (!mounted) {
-        return;
-      }
-      if (widget.request.standalone) {
-        final handled =
-            await SubtitleSearchHostBridge.finishSelection(selection);
-        subtitleSearchTrace(
-          'page.download.finished',
-          fields: {
-            'resultId': result.id,
-            'handledByHost': handled,
-            'subtitleFilePath': selection.subtitleFilePath ?? '',
-          },
-        );
-        if (!handled && mounted) {
-          Navigator.of(context).pop(selection);
-        }
-        return;
-      }
-      subtitleSearchTrace(
-        'page.download.finished',
-        fields: {
-          'resultId': result.id,
-          'handledByHost': false,
-          'subtitleFilePath': selection.subtitleFilePath ?? '',
-        },
-      );
-      Navigator.of(context).pop(selection);
+      await _finishSelection(result: result, selection: selection);
     } catch (error, stackTrace) {
       subtitleSearchTrace(
         'page.download.failed',
@@ -314,6 +366,44 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         });
       }
     }
+  }
+
+  Future<void> _finishSelection({
+    required SubtitleSearchResult result,
+    required SubtitleSearchSelection selection,
+  }) async {
+    if (widget.request.applyMode == SubtitleSearchApplyMode.downloadAndApply &&
+        !selection.canApply) {
+      _showMessage('字幕已缓存，但当前结果暂不能直接挂载播放');
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    if (widget.request.standalone) {
+      final handled = await SubtitleSearchHostBridge.finishSelection(selection);
+      subtitleSearchTrace(
+        'page.download.finished',
+        fields: {
+          'resultId': result.id,
+          'handledByHost': handled,
+          'subtitleFilePath': selection.subtitleFilePath ?? '',
+        },
+      );
+      if (!handled && mounted) {
+        Navigator.of(context).pop(selection);
+      }
+      return;
+    }
+    subtitleSearchTrace(
+      'page.download.finished',
+      fields: {
+        'resultId': result.id,
+        'handledByHost': false,
+        'subtitleFilePath': selection.subtitleFilePath ?? '',
+      },
+    );
+    Navigator.of(context).pop(selection);
   }
 
   void _showMessage(String message) {

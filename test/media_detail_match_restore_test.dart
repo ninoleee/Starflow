@@ -21,6 +21,7 @@ import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
+import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -1764,6 +1765,19 @@ class _FakeOnlineSubtitleRepository implements OnlineSubtitleRepository {
     lastSources = sources.toList(growable: false);
     lastMaxResults = maxResults;
     return results;
+  }
+
+  @override
+  Future<List<ValidatedSubtitleCandidate>> searchStructured(
+    OnlineSubtitleSearchRequest request, {
+    List<OnlineSubtitleSource> sources = const [
+      OnlineSubtitleSource.opensubtitles,
+      OnlineSubtitleSource.subdl,
+    ],
+    int maxResults = 0,
+    int maxValidated = 0,
+  }) async {
+    return const [];
   }
 }
 

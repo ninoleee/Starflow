@@ -44,6 +44,11 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
     required this.duration,
     required this.playing,
     required this.bufferingPercentage,
+    required this.backFocusNode,
+    required this.playPauseFocusNode,
+    required this.subtitleFocusNode,
+    required this.audioFocusNode,
+    required this.moreFocusNode,
     required this.onBack,
     required this.onTogglePlayback,
     required this.onOpenSubtitle,
@@ -56,6 +61,11 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
   final Duration duration;
   final bool playing;
   final double bufferingPercentage;
+  final FocusNode backFocusNode;
+  final FocusNode playPauseFocusNode;
+  final FocusNode subtitleFocusNode;
+  final FocusNode audioFocusNode;
+  final FocusNode moreFocusNode;
   final VoidCallback onBack;
   final VoidCallback onTogglePlayback;
   final VoidCallback onOpenSubtitle;
@@ -85,28 +95,34 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
           right: 16,
           child: SafeArea(
             bottom: false,
-            child: Row(
-              children: [
-                StarflowIconButton(
-                  icon: Icons.arrow_back_rounded,
-                  tooltip: '返回',
-                  variant: StarflowButtonVariant.ghost,
-                  onPressed: onBack,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    titleText,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
+            child: TvDirectionalActionPanel(
+              onMoveDown: () {
+                playPauseFocusNode.requestFocus();
+              },
+              child: Row(
+                children: [
+                  StarflowIconButton(
+                    icon: Icons.arrow_back_rounded,
+                    tooltip: '返回',
+                    variant: StarflowButtonVariant.ghost,
+                    focusNode: backFocusNode,
+                    onPressed: onBack,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      titleText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -129,50 +145,60 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
                     bufferedProgress: bufferedProgress,
                   ),
                   const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      StarflowIconButton(
-                        icon: playing
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded,
-                        tooltip: playing ? '暂停' : '播放',
-                        variant: StarflowButtonVariant.ghost,
-                        onPressed: onTogglePlayback,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          '${formatPlaybackClockDuration(position)} / $durationText',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
+                  TvDirectionalActionPanel(
+                    onMoveUp: () {
+                      backFocusNode.requestFocus();
+                    },
+                    child: Row(
+                      children: [
+                        StarflowIconButton(
+                          icon: playing
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                          tooltip: playing ? '暂停' : '播放',
+                          variant: StarflowButtonVariant.ghost,
+                          autofocus: true,
+                          focusNode: playPauseFocusNode,
+                          onPressed: onTogglePlayback,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            '${formatPlaybackClockDuration(position)} / $durationText',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      StarflowIconButton(
-                        icon: Icons.closed_caption_rounded,
-                        tooltip: '字幕',
-                        variant: StarflowButtonVariant.ghost,
-                        onPressed: onOpenSubtitle,
-                      ),
-                      const SizedBox(width: 10),
-                      StarflowIconButton(
-                        icon: Icons.audiotrack_rounded,
-                        tooltip: '音轨',
-                        variant: StarflowButtonVariant.ghost,
-                        onPressed: onOpenAudio,
-                      ),
-                      const SizedBox(width: 10),
-                      StarflowIconButton(
-                        icon: Icons.more_horiz_rounded,
-                        tooltip: '更多',
-                        variant: StarflowButtonVariant.ghost,
-                        onPressed: onOpenOptions,
-                      ),
-                    ],
+                        const SizedBox(width: 12),
+                        StarflowIconButton(
+                          icon: Icons.closed_caption_rounded,
+                          tooltip: '字幕',
+                          variant: StarflowButtonVariant.ghost,
+                          focusNode: subtitleFocusNode,
+                          onPressed: onOpenSubtitle,
+                        ),
+                        const SizedBox(width: 10),
+                        StarflowIconButton(
+                          icon: Icons.audiotrack_rounded,
+                          tooltip: '音轨',
+                          variant: StarflowButtonVariant.ghost,
+                          focusNode: audioFocusNode,
+                          onPressed: onOpenAudio,
+                        ),
+                        const SizedBox(width: 10),
+                        StarflowIconButton(
+                          icon: Icons.more_horiz_rounded,
+                          tooltip: '更多',
+                          variant: StarflowButtonVariant.ghost,
+                          focusNode: moreFocusNode,
+                          onPressed: onOpenOptions,
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
