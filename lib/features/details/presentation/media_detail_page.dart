@@ -13,7 +13,6 @@ import 'package:starflow/core/navigation/retained_async_controller.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/core/utils/detail_resource_switch_trace.dart';
-import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
@@ -22,7 +21,6 @@ import 'package:starflow/features/details/application/detail_library_match_servi
 import 'package:starflow/features/details/application/detail_online_resource_update_service.dart';
 import 'package:starflow/features/details/application/detail_page_actions.dart';
 import 'package:starflow/features/details/application/detail_page_controller.dart';
-import 'package:starflow/features/details/application/detail_subtitle_controller.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/detail_page_providers.dart';
 import 'package:starflow/features/details/presentation/person_credits_page.dart';
@@ -39,10 +37,7 @@ import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
-import 'package:starflow/features/playback/application/online_subtitle_search_request_builder.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
-import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
-import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
@@ -55,8 +50,6 @@ import 'package:starflow/features/settings/presentation/widgets/settings_page_sc
 
 const DetailLibraryMatchService _detailLibraryMatchService =
     DetailLibraryMatchService();
-const DetailSubtitleController _detailSubtitleController =
-    DetailSubtitleController();
 final DetailCachedStateRestorer _detailCachedStateRestorer =
     DetailCachedStateRestorer();
 
@@ -1252,12 +1245,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       _pageController.libraryMatchChoices;
   int get _selectedLibraryMatchIndex =>
       _pageController.selectedLibraryMatchIndex;
-  List<CachedSubtitleSearchOption> get _subtitleSearchChoices =>
-      _pageController.subtitleSearchChoices;
-  bool get _isSearchingSubtitles => _pageController.isSearchingSubtitles;
-  String? get _busySubtitleResultId => _pageController.busySubtitleResultId;
-  DetailSubtitleSearchViewState get _subtitleSearchView =>
-      _pageController.subtitleSearchView;
 
   @override
   void initState() {
@@ -1321,10 +1308,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       _isSavingOnlineResourceUpdate = false;
     });
     _updateLibraryMatchView(isMatching: false);
-    _updateSubtitleSearchView(
-      isSearching: false,
-      busyResultId: null,
-    );
   }
 
   Future<void> _loadFavoriteSearchResults() async {
@@ -1604,22 +1587,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     );
   }
 
-  void _updateSubtitleSearchView({
-    List<CachedSubtitleSearchOption>? choices,
-    int? selectedIndex,
-    bool? isSearching,
-    Object? busyResultId = detailSubtitleSearchViewUnchanged,
-    Object? statusMessage = detailSubtitleSearchViewUnchanged,
-  }) {
-    _pageController.updateSubtitleSearchView(
-      choices: choices,
-      selectedIndex: selectedIndex,
-      isSearching: isSearching,
-      busyResultId: busyResultId,
-      statusMessage: statusMessage,
-    );
-  }
-
   void _handleHeroArtworkFocusChanged() {
     if (!mounted ||
         (!_heroArtworkFocusNode.hasFocus &&
@@ -1665,9 +1632,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         return;
       }
 
-      final hasInMemoryDetailState = _manualOverrideTarget != null ||
-          _libraryMatchChoices.isNotEmpty ||
-          _subtitleSearchChoices.isNotEmpty;
+      final hasInMemoryDetailState =
+          _manualOverrideTarget != null || _libraryMatchChoices.isNotEmpty;
       var restoredMetadataRefreshStatus = DetailMetadataRefreshStatus.never;
       if (!hasInMemoryDetailState) {
         restoredMetadataRefreshStatus = await _restoreCachedDetailState(
@@ -1808,13 +1774,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       choices: restorePlan.libraryMatchChoices,
       selectedIndex: restorePlan.selectedLibraryMatchIndex,
       isMatching: false,
-    );
-    _updateSubtitleSearchView(
-      choices: restorePlan.subtitleSearchChoices,
-      selectedIndex: restorePlan.selectedSubtitleSearchIndex,
-      isSearching: false,
-      busyResultId: null,
-      statusMessage: null,
     );
     detailResourceSwitchTrace(
       'cache.restore.hit',
@@ -2533,467 +2492,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     _applySelectedLibraryMatchIndex(nextIndex);
   }
 
-  int _normalizeSubtitleSearchIndex(
-    int index, {
-    List<CachedSubtitleSearchOption>? choices,
-  }) {
-    return normalizeSubtitleSearchIndex(
-      index,
-      choices: choices ?? _subtitleSearchChoices,
-    );
-  }
-
-  int get _currentSubtitleSearchIndex {
-    return _pageController.currentSubtitleSearchIndex;
-  }
-
-  DetailSubtitleSearchViewState get _currentSubtitleSearchView {
-    return _subtitleSearchView;
-  }
-
-  void _applySubtitleSearchView(DetailSubtitleSearchViewState viewData) {
-    _updateSubtitleSearchView(
-      choices: viewData.choices,
-      selectedIndex: viewData.selectedIndex,
-      isSearching: viewData.isSearching,
-      busyResultId: viewData.busyResultId,
-      statusMessage: viewData.statusMessage,
-    );
-  }
-
-  MediaDetailTarget _decorateTargetWithSubtitleView(
-    MediaDetailTarget target,
-    DetailSubtitleSearchViewState subtitleView,
-  ) {
-    return _detailSubtitleController.decorateTargetWithSelectedSubtitle(
-      target,
-      viewData: subtitleView,
-    );
-  }
-
-  Future<void> _searchSubtitlesForDetail(
-    MediaDetailTarget target, {
-    bool showFeedback = true,
-  }) async {
-    final activeSessionId = _detailSessionId;
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    final playbackTarget = target.playbackTarget;
-    final query = playbackTarget == null
-        ? ''
-        : buildSubtitleSearchQuery(playbackTarget).trim();
-    subtitleSearchTrace(
-      'detail.search.start',
-      fields: {
-        'title': target.title.trim(),
-        'showFeedback': showFeedback,
-        'isPlayable': target.isPlayable,
-        'query': query,
-        'playbackTitle': playbackTarget?.title.trim() ?? '',
-        'seriesTitle': playbackTarget?.seriesTitle.trim() ?? '',
-        'season': playbackTarget?.seasonNumber,
-        'episode': playbackTarget?.episodeNumber,
-      },
-    );
-    if (playbackTarget == null || !target.isPlayable) {
-      subtitleSearchTrace(
-        'detail.search.skip-unplayable',
-        fields: {
-          'hasPlaybackTarget': playbackTarget != null,
-          'isPlayable': target.isPlayable,
-        },
-      );
-      if (showFeedback && mounted) {
-        messenger?.showSnackBar(
-          const SnackBar(content: Text('当前资源还不能直接播放，暂时无法搜索字幕')),
-        );
-      }
-      return;
-    }
-    if (!_isSessionActive(activeSessionId)) {
-      return;
-    }
-    if (_isSearchingSubtitles) {
-      subtitleSearchTrace('detail.search.skip-already-searching');
-      return;
-    }
-
-    final settings = ref.read(appSettingsProvider);
-    final sources = settings.effectiveOnlineSubtitleSources;
-    if (sources.isEmpty) {
-      subtitleSearchTrace('detail.search.skip-empty-sources');
-      if (_isSessionActive(activeSessionId)) {
-        _updateSubtitleSearchView(
-          statusMessage: '请先在设置里启用至少一个在线字幕来源',
-        );
-      }
-      if (showFeedback && _isSessionActive(activeSessionId)) {
-        messenger?.showSnackBar(
-          const SnackBar(content: Text('请先在设置里启用至少一个在线字幕来源')),
-        );
-      }
-      return;
-    }
-
-    if (query.isEmpty) {
-      subtitleSearchTrace(
-        'detail.search.skip-empty-query',
-        fields: {
-          'playbackTitle': playbackTarget.title.trim(),
-          'seriesTitle': playbackTarget.seriesTitle.trim(),
-        },
-      );
-      if (_isSessionActive(activeSessionId)) {
-        _updateSubtitleSearchView(
-          statusMessage: '缺少片名信息，暂时无法搜索字幕',
-        );
-      }
-      if (showFeedback && _isSessionActive(activeSessionId)) {
-        messenger?.showSnackBar(
-          const SnackBar(content: Text('缺少片名信息，暂时无法搜索字幕')),
-        );
-      }
-      return;
-    }
-
-    final currentViewData = _currentSubtitleSearchView;
-    final repository = ref.read(onlineSubtitleRepositoryProvider);
-
-    if (_isSessionActive(activeSessionId)) {
-      _applySubtitleSearchView(
-        currentViewData.copyWith(
-          isSearching: true,
-          statusMessage: null,
-        ),
-      );
-    }
-
-    try {
-      final structuredSources = sources
-          .where(settings.configuredStructuredSubtitleSources.contains)
-          .toList(growable: false);
-      final legacySources = sources
-          .where(settings.configuredLegacySubtitleSources.contains)
-          .toList(growable: false);
-
-      if (structuredSources.isNotEmpty) {
-        final structuredRequest =
-            await buildOnlineSubtitleSearchRequestForTarget(
-          target: playbackTarget,
-          query: query,
-          title: target.title.trim(),
-          originalTitle: target.title.trim(),
-          imdbId: target.imdbId.trim(),
-          tmdbId: target.tmdbId.trim(),
-          languages: settings.subtitlePreferredLanguages,
-        );
-        final validated = await repository.searchStructured(
-          structuredRequest,
-          sources: structuredSources,
-          maxResults: settings.subtitleSearchMaxValidatedCandidates * 4,
-          maxValidated: settings.subtitleSearchMaxValidatedCandidates,
-        );
-        subtitleSearchTrace(
-          'detail.search.structured-finished',
-          fields: {
-            'query': query,
-            'sources': structuredSources.map((item) => item.name).join('/'),
-            'validated': validated.length,
-          },
-        );
-        if (validated.isNotEmpty) {
-          final resolveResult =
-              _detailSubtitleController.resolveValidatedCandidates(
-            currentViewData: _currentSubtitleSearchView,
-            candidates: validated,
-            maxChoices: settings.subtitleSearchMaxValidatedCandidates,
-          );
-          final nextChoices = resolveResult.usableChoices;
-          if (!_isSessionActive(activeSessionId)) {
-            return;
-          }
-          _applySubtitleSearchView(resolveResult.nextViewData);
-          await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
-                seedTarget: widget.target,
-                resolvedTarget: target,
-                subtitleSearchChoices: nextChoices,
-                selectedSubtitleSearchIndex:
-                    resolveResult.nextViewData.selectedIndex,
-              );
-          if (showFeedback && _isSessionActive(activeSessionId)) {
-            messenger?.showSnackBar(
-              SnackBar(content: Text('已找到 ${nextChoices.length} 条可直接加载字幕')),
-            );
-          }
-          return;
-        }
-      }
-
-      final results = await repository.search(
-        query,
-        sources: legacySources,
-        maxResults: 10,
-      );
-      subtitleSearchTrace(
-        'detail.search.repository-finished',
-        fields: {
-          'query': query,
-          'sources': legacySources.map((item) => item.name).join('/'),
-          'count': results.length,
-          'downloadable': results.where((item) => item.canDownload).length,
-          'autoLoadable': results.where((item) => item.canAutoLoad).length,
-          'sample': _detailSubtitleResultSample(results),
-        },
-      );
-      final resolveResult = _detailSubtitleController.resolveSearchResults(
-        currentViewData: _currentSubtitleSearchView,
-        results: results,
-        maxChoices: 10,
-      );
-      final nextChoices = resolveResult.usableChoices;
-      final statusMessage = resolveResult.statusMessage;
-      subtitleSearchTrace(
-        'detail.search.filtered',
-        fields: {
-          'query': query,
-          'rawCount': results.length,
-          'usableCount': nextChoices.length,
-          'filteredOut': results.length - nextChoices.length,
-          'notDownloadable': results.where((item) => !item.canDownload).length,
-          'notAutoLoadable': results.where((item) => !item.canAutoLoad).length,
-          'sample': _detailSubtitleChoiceSample(nextChoices),
-        },
-      );
-      if (!_isSessionActive(activeSessionId)) {
-        return;
-      }
-      _applySubtitleSearchView(resolveResult.nextViewData);
-      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
-            seedTarget: widget.target,
-            resolvedTarget: target,
-            subtitleSearchChoices: nextChoices,
-            selectedSubtitleSearchIndex:
-                resolveResult.nextViewData.selectedIndex,
-          );
-      if (!showFeedback || !_isSessionActive(activeSessionId)) {
-        return;
-      }
-      messenger?.showSnackBar(
-        SnackBar(
-          content: Text(
-            nextChoices.isEmpty
-                ? statusMessage!
-                : '已找到 ${nextChoices.length} 条可用字幕',
-          ),
-        ),
-      );
-    } catch (error, stackTrace) {
-      subtitleSearchTrace(
-        'detail.search.failed',
-        fields: {
-          'query': query,
-          'sources': sources.map((item) => item.name).join('/'),
-        },
-        error: error,
-        stackTrace: stackTrace,
-      );
-      if (!_isSessionActive(activeSessionId)) {
-        return;
-      }
-      _applySubtitleSearchView(
-        _currentSubtitleSearchView.copyWith(
-          isSearching: false,
-          statusMessage: '$error',
-        ),
-      );
-      if (showFeedback) {
-        messenger?.showSnackBar(
-          SnackBar(content: Text('字幕搜索失败：$error')),
-        );
-      }
-    }
-  }
-
-  Future<void> _applySelectedSubtitleSearchIndex(
-    MediaDetailTarget target,
-    int index,
-  ) async {
-    final activeSessionId = _detailSessionId;
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    if (!_isSessionActive(activeSessionId)) {
-      return;
-    }
-    final currentViewData = _currentSubtitleSearchView;
-    final decision = _detailSubtitleController.decideSelectionAction(
-      currentViewData: currentViewData,
-      requestedIndex: index,
-    );
-    if (decision is DetailSubtitleSelectionIgnored) {
-      if (decision.reason == 'busy-downloading') {
-        subtitleSearchTrace(
-          'detail.download.skip-busy',
-          fields: {
-            'busyResultId': _busySubtitleResultId,
-          },
-        );
-      }
-      return;
-    }
-
-    if (_isSessionActive(activeSessionId)) {
-      _applySubtitleSearchView(decision.nextViewData);
-    }
-
-    if (decision is DetailSubtitleSelectionCleared) {
-      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
-            seedTarget: widget.target,
-            resolvedTarget: target,
-            subtitleSearchChoices: decision.nextViewData.choices,
-            selectedSubtitleSearchIndex: decision.persistedSelectedIndex,
-          );
-      return;
-    }
-
-    if (decision is DetailSubtitleSelectionUseCached) {
-      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
-            seedTarget: widget.target,
-            resolvedTarget: target,
-            subtitleSearchChoices: decision.nextViewData.choices,
-            selectedSubtitleSearchIndex: decision.persistedSelectedIndex,
-          );
-      if (_isSessionActive(activeSessionId)) {
-        messenger?.showSnackBar(
-          const SnackBar(content: Text('播放时会自动加载这条外挂字幕')),
-        );
-      }
-      return;
-    }
-
-    final downloadDecision = decision as DetailSubtitleSelectionNeedsDownload;
-    final choice = downloadDecision.selectedOption;
-
-    try {
-      subtitleSearchTrace(
-        'detail.download.start',
-        fields: {
-          'resultId': choice.result.id,
-          'source': choice.result.source.name,
-          'title': choice.result.title,
-          'packageKind': choice.result.packageKind.name,
-        },
-      );
-      final download = await ref
-          .read(onlineSubtitleRepositoryProvider)
-          .download(choice.result);
-      final selection =
-          _detailSubtitleController.selectionFromDownloadResult(download);
-      if (!selection.canApply) {
-        throw StateError('字幕已缓存，但当前结果暂不能直接挂载播放');
-      }
-      if (!_isSessionActive(activeSessionId)) {
-        return;
-      }
-      final nextViewData =
-          _detailSubtitleController.applyDownloadedSelectionSuccess(
-        currentViewData: downloadDecision.nextViewData,
-        selectionIndex: downloadDecision.selectionIndex,
-        selection: selection,
-      );
-      _applySubtitleSearchView(nextViewData);
-      await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
-            seedTarget: widget.target,
-            resolvedTarget: target,
-            subtitleSearchChoices: nextViewData.choices,
-            selectedSubtitleSearchIndex: nextViewData.selectedIndex,
-          );
-      if (_isSessionActive(activeSessionId)) {
-        messenger?.showSnackBar(
-          const SnackBar(content: Text('字幕已缓存，播放时会自动加载')),
-        );
-      }
-      subtitleSearchTrace(
-        'detail.download.finished',
-        fields: {
-          'resultId': choice.result.id,
-          'subtitleFilePath': selection.subtitleFilePath ?? '',
-        },
-      );
-    } catch (error, stackTrace) {
-      subtitleSearchTrace(
-        'detail.download.failed',
-        fields: {
-          'resultId': choice.result.id,
-          'source': choice.result.source.name,
-        },
-        error: error,
-        stackTrace: stackTrace,
-      );
-      if (!_isSessionActive(activeSessionId)) {
-        return;
-      }
-      _applySubtitleSearchView(
-        _detailSubtitleController.applyDownloadedSelectionFailure(
-          currentViewData: _currentSubtitleSearchView,
-          fallbackSelectedIndex: downloadDecision.previousSelectedIndex,
-          error: error,
-        ),
-      );
-      messenger?.showSnackBar(
-        SnackBar(content: Text('加载字幕失败：$error')),
-      );
-    }
-  }
-
-  String _subtitleSearchChoiceLabel(CachedSubtitleSearchOption choice) {
-    return _detailSubtitleController.subtitleSearchChoiceLabel(choice);
-  }
-
-  String _detailSubtitleResultSample(List<SubtitleSearchResult> results) {
-    return _detailSubtitleController.subtitleResultSample(results);
-  }
-
-  String _detailSubtitleChoiceSample(
-    List<CachedSubtitleSearchOption> choices,
-  ) {
-    return _detailSubtitleController.subtitleChoiceSample(choices);
-  }
-
-  Future<void> _openTelevisionSubtitlePicker(MediaDetailTarget target) async {
-    if (_subtitleSearchChoices.isEmpty || _isSearchingSubtitles) {
-      return;
-    }
-
-    final selectedIndex = _currentSubtitleSearchIndex;
-    final nextIndex = await showDetailTelevisionPickerDialog<int>(
-      context: context,
-      enabled: ref.read(isTelevisionProvider).value ?? false,
-      title: '选择外挂字幕',
-      selectedValue: selectedIndex,
-      optionDebugLabelPrefix: 'detail-subtitle-option',
-      closeFocusDebugLabel: 'detail-subtitle-close',
-      closeFocusId: 'detail:subtitle:close',
-      width: 500,
-      titleMaxLines: 3,
-      options: [
-        const DetailTelevisionPickerOption<int>(
-          value: -1,
-          title: '不加载外挂字幕',
-          focusId: 'detail:subtitle:option:0',
-        ),
-        for (var index = 0; index < _subtitleSearchChoices.length; index++)
-          DetailTelevisionPickerOption<int>(
-            value: index,
-            title: _subtitleSearchChoiceLabel(_subtitleSearchChoices[index]),
-            subtitle: _subtitleSearchChoices[index].result.detailLine,
-            focusId: 'detail:subtitle:option:${index + 1}',
-          ),
-      ],
-    );
-    if (!mounted || nextIndex == null || nextIndex == selectedIndex) {
-      return;
-    }
-    await _applySelectedSubtitleSearchIndex(target, nextIndex);
-  }
-
   Widget _buildSeriesSection(
     MediaDetailTarget target,
     AsyncValue<DetailSeriesBrowserState?> seriesAsync,
@@ -3058,88 +2556,63 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     return ValueListenableBuilder<DetailLibraryMatchViewState>(
       valueListenable: _pageController.libraryMatchViewListenable,
       builder: (context, libraryMatchView, _) {
-        return ValueListenableBuilder<DetailSubtitleSearchViewState>(
-          valueListenable: _pageController.subtitleSearchViewListenable,
-          builder: (context, subtitleSearchView, __) {
-            return DetailBlock(
-              title: '资源信息',
-              child: DetailResourceInfoSection(
-                target: target,
-                isTelevision: isTelevision,
-                playbackEngine: playbackEngine,
-                libraryView: libraryMatchView,
-                subtitleView: subtitleSearchView,
-                selectedSubtitleIndex: _normalizeSubtitleSearchIndex(
-                  subtitleSearchView.selectedIndex,
-                  choices: subtitleSearchView.choices,
-                ),
-                subtitleChoiceLabelBuilder: _subtitleSearchChoiceLabel,
-                onSearchOnline: () {
-                  context.pushNamed(
-                    'detail-search',
-                    queryParameters: {
-                      'q': target.searchQuery,
-                    },
-                  );
+        return DetailBlock(
+          title: '资源信息',
+          child: DetailResourceInfoSection(
+            target: target,
+            isTelevision: isTelevision,
+            playbackEngine: playbackEngine,
+            libraryView: libraryMatchView,
+            onSearchOnline: () {
+              context.pushNamed(
+                'detail-search',
+                queryParameters: {
+                  'q': target.searchQuery,
                 },
-                onOpenTelevisionPlayableVariantPicker:
-                    _openTelevisionPlayableVariantPicker,
-                onLibraryMatchSelected: _applySelectedLibraryMatchIndex,
-                onOpenTelevisionLibraryMatchPicker:
-                    _openTelevisionLibraryMatchPicker,
-                onMatchLocalResource: libraryMatchView.isMatching
-                    ? null
-                    : () {
-                        detailResourceSwitchTrace(
-                          'resource.ui.match.tap',
-                          fields: {
-                            'target': _detailResourceTraceTarget(target),
-                            'isMatching': libraryMatchView.isMatching,
-                            'currentChoices': libraryMatchView.choices.length,
-                          },
-                        );
-                        _matchLocalResource(target);
+              );
+            },
+            onOpenTelevisionPlayableVariantPicker:
+                _openTelevisionPlayableVariantPicker,
+            onLibraryMatchSelected: _applySelectedLibraryMatchIndex,
+            onOpenTelevisionLibraryMatchPicker:
+                _openTelevisionLibraryMatchPicker,
+            onMatchLocalResource: libraryMatchView.isMatching
+                ? null
+                : () {
+                    detailResourceSwitchTrace(
+                      'resource.ui.match.tap',
+                      fields: {
+                        'target': _detailResourceTraceTarget(target),
+                        'isMatching': libraryMatchView.isMatching,
+                        'currentChoices': libraryMatchView.choices.length,
                       },
-                onCheckOnlineResourceUpdate:
-                    canCheckFavoriteOnlineResourceUpdate
-                        ? () => _checkFavoriteOnlineResourceUpdate(target)
-                        : null,
-                isCheckingOnlineResourceUpdate: _isCheckingOnlineResourceUpdate,
-                onOpenPlaybackEnginePicker: () =>
-                    _openPlaybackEnginePicker(playbackEngine),
-                onPlaybackEngineSelected: (selection) {
-                  unawaited(
-                    _setPlaybackEngine(
-                      selection,
-                      currentEngine: playbackEngine,
-                    ),
-                  );
+                    );
+                    _matchLocalResource(target);
+                  },
+            onCheckOnlineResourceUpdate: canCheckFavoriteOnlineResourceUpdate
+                ? () => _checkFavoriteOnlineResourceUpdate(target)
+                : null,
+            isCheckingOnlineResourceUpdate: _isCheckingOnlineResourceUpdate,
+            onOpenPlaybackEnginePicker: () =>
+                _openPlaybackEnginePicker(playbackEngine),
+            onPlaybackEngineSelected: (selection) {
+              unawaited(
+                _setPlaybackEngine(
+                  selection,
+                  currentEngine: playbackEngine,
+                ),
+              );
+            },
+            onOpenMetadataIndexManager: () {
+              detailResourceSwitchTrace(
+                'resource.ui.metadata-manager.tap',
+                fields: {
+                  'target': _detailResourceTraceTarget(target),
                 },
-                onSearchSubtitles: subtitleSearchView.isSearching
-                    ? null
-                    : () => _searchSubtitlesForDetail(target),
-                onOpenTelevisionSubtitlePicker: () =>
-                    _openTelevisionSubtitlePicker(target),
-                onSubtitleSelected: (index) {
-                  unawaited(
-                    _applySelectedSubtitleSearchIndex(
-                      target,
-                      index,
-                    ),
-                  );
-                },
-                onOpenMetadataIndexManager: () {
-                  detailResourceSwitchTrace(
-                    'resource.ui.metadata-manager.tap',
-                    fields: {
-                      'target': _detailResourceTraceTarget(target),
-                    },
-                  );
-                  _openMetadataIndexManager(target);
-                },
-              ),
-            );
-          },
+              );
+              _openMetadataIndexManager(target);
+            },
+          ),
         );
       },
     );
@@ -3223,22 +2696,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                     controller: _scrollController,
                     padding: EdgeInsets.zero,
                     children: [
-                      ValueListenableBuilder<DetailSubtitleSearchViewState>(
-                        valueListenable:
-                            _pageController.subtitleSearchViewListenable,
-                        builder: (context, subtitleSearchView, __) {
-                          return DetailHeroSection(
-                            target: _decorateTargetWithSubtitleView(
-                              target,
-                              subtitleSearchView,
-                            ),
-                            simplifyVisualEffects:
-                                performanceSlimDetailHeroEnabled,
-                            isTelevision: isTelevision,
-                            artworkFocusNode: _heroArtworkFocusNode,
-                            playFocusNode: _heroPlayFocusNode,
-                          );
-                        },
+                      DetailHeroSection(
+                        target: target,
+                        simplifyVisualEffects: performanceSlimDetailHeroEnabled,
+                        isTelevision: isTelevision,
+                        artworkFocusNode: _heroArtworkFocusNode,
+                        playFocusNode: _heroPlayFocusNode,
                       ),
                       Padding(
                         padding: EdgeInsets.zero,

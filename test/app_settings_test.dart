@@ -27,7 +27,6 @@ void main() {
       'subdlApiKey': 'subdl-key',
       'subtitlePreferredLanguages': ['zh-cn', 'en', 'zh-cn'],
       'subtitleSearchMaxValidatedCandidates': 9,
-      'subtitleAllowLegacyProvidersFallback': false,
       'playbackBackgroundPlaybackEnabled': false,
       'playbackEngine': 'systemPlayer',
       'playbackDecodeMode': 'softwarePreferred',
@@ -64,7 +63,6 @@ void main() {
     expect(settings.subdlApiKey, 'subdl-key');
     expect(settings.subtitlePreferredLanguages, ['zh-cn', 'en']);
     expect(settings.subtitleSearchMaxValidatedCandidates, 9);
-    expect(settings.subtitleAllowLegacyProvidersFallback, isFalse);
     expect(
       settings.configuredStructuredSubtitleSources,
       [
@@ -73,7 +71,6 @@ void main() {
         OnlineSubtitleSource.subdl,
       ],
     );
-    expect(settings.configuredLegacySubtitleSources, isEmpty);
     expect(settings.playbackBackgroundPlaybackEnabled, isFalse);
     expect(settings.playbackEngine, PlaybackEngine.systemPlayer);
     expect(
@@ -111,10 +108,6 @@ void main() {
     expect(settings.toJson()['subdlApiKey'], 'subdl-key');
     expect(settings.toJson()['subtitlePreferredLanguages'], ['zh-cn', 'en']);
     expect(settings.toJson()['subtitleSearchMaxValidatedCandidates'], 9);
-    expect(
-      settings.toJson()['subtitleAllowLegacyProvidersFallback'],
-      isFalse,
-    );
     expect(settings.toJson()['playbackBackgroundPlaybackEnabled'], isFalse);
     expect(settings.toJson()['playbackEngine'], 'systemPlayer');
     expect(settings.toJson()['playbackDecodeMode'], 'softwarePreferred');
@@ -172,12 +165,7 @@ void main() {
       settings.subtitleSearchMaxValidatedCandidates,
       kSubtitleSearchMaxValidatedCandidatesDefault,
     );
-    expect(settings.subtitleAllowLegacyProvidersFallback, isTrue);
     expect(settings.configuredStructuredSubtitleSources, isEmpty);
-    expect(
-      settings.configuredLegacySubtitleSources,
-      [OnlineSubtitleSource.assrt],
-    );
     expect(settings.playbackBackgroundPlaybackEnabled, isTrue);
     expect(settings.playbackEngine, PlaybackEngine.embeddedMpv);
     expect(settings.playbackDecodeMode, PlaybackDecodeMode.auto);
@@ -503,19 +491,14 @@ void main() {
     );
   });
 
-  test('assrt falls back to legacy web search when token is empty', () {
+  test('assrt requires token before becoming an effective subtitle source', () {
     final settings = AppSettings.fromJson({
       'onlineSubtitleSources': ['assrt'],
-      'subtitleAllowLegacyProvidersFallback': false,
     });
 
     expect(settings.assrtApiSearchEnabled, isFalse);
-    expect(settings.assrtLegacySearchEnabled, isTrue);
     expect(settings.configuredStructuredSubtitleSources, isEmpty);
-    expect(
-      settings.configuredLegacySubtitleSources,
-      [OnlineSubtitleSource.assrt],
-    );
+    expect(settings.effectiveOnlineSubtitleSources, isEmpty);
   });
 
   test('high performance preset turns on playback tuning flags', () {

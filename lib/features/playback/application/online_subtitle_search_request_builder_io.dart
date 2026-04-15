@@ -59,7 +59,7 @@ Future<OnlineSubtitleSearchRequest> buildOnlineSubtitleSearchRequestForRoute(
     tmdbId: request.tmdbId,
     seasonNumber: request.seasonNumber,
     episodeNumber: request.episodeNumber,
-    filePath: resolvedFilePath,
+    filePath: resolvedFilePath.isNotEmpty ? resolvedFilePath : request.filePath,
     fileHash: fileHash,
     languages: effectiveLanguages,
   );

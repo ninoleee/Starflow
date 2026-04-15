@@ -324,6 +324,8 @@ class ProviderSubtitleHit {
       detailUrl: detailUrl,
       packageName: packageName,
       packageKind: packageKind,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
     );
   }
 }
@@ -350,6 +352,28 @@ class ValidatedSubtitleCandidate {
   bool get canApply =>
       status == SubtitleValidationStatus.validated &&
       (subtitleFilePath ?? '').trim().isNotEmpty;
+
+  bool get hasFailureReason => failureReason.trim().isNotEmpty;
+
+  String get statusLabel => switch (status) {
+        SubtitleValidationStatus.validated => '已验证',
+        SubtitleValidationStatus.failed => '验证失败',
+        SubtitleValidationStatus.skipped => '未预检',
+        SubtitleValidationStatus.pending => '待处理',
+      };
+
+  String get statusDescription {
+    final reason = failureReason.trim();
+    return switch (status) {
+      SubtitleValidationStatus.validated =>
+        canApply ? '已验证，可直接加载' : '已验证，但当前结果暂不能直接加载',
+      SubtitleValidationStatus.failed =>
+        reason.isEmpty ? '预检失败，请稍后重试' : '预检失败：$reason',
+      SubtitleValidationStatus.skipped =>
+        reason.isEmpty ? '当前结果未进入预检' : '未预检：$reason',
+      SubtitleValidationStatus.pending => '正在等待预检结果',
+    };
+  }
 
   SubtitleSearchResult toSearchResult() => hit.toSearchResult();
 

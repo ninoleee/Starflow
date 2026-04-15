@@ -179,5 +179,288 @@ void main() {
       expect(results.first.downloadUrl,
           'https://cdn.assrt.net/files/planet.earth.package.zip');
     });
+
+    test(
+        'throws explicit rate limit error when ASSRT detail request returns 509',
+        () async {
+      final client = MockClient((request) async {
+        if (request.url.path == '/v1/sub/search') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'status': 0,
+                'sub': {
+                  'subs': [
+                    {
+                      'id': 629281,
+                      'native_name': '怪奇物语',
+                      'videoname': 'Stranger.Things.S01E01',
+                      'down_count': 18,
+                    },
+                  ],
+                },
+              }),
+            ),
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        if (request.url.path == '/v1/sub/detail') {
+          return http.Response('', 509);
+        }
+        return http.Response('', 404);
+      });
+
+      final provider = AssrtStructuredProvider(
+        client,
+        config: const AssrtProviderConfig(
+          enabled: true,
+          token: 'test-token',
+        ),
+      );
+
+      await expectLater(
+        () => provider.search(
+          const OnlineSubtitleSearchRequest(
+            query: '怪奇物语 S01E01',
+            title: '怪奇物语',
+            seasonNumber: 1,
+            episodeNumber: 1,
+          ),
+        ),
+        throwsA(
+          predicate(
+            (error) =>
+                error is StateError &&
+                '$error'.contains('ASSRT API 请求过于频繁，请稍后再试'),
+          ),
+        ),
+      );
+    });
+
+    test('parses ASSRT detail payload nested under sub.subs', () async {
+      final client = MockClient((request) async {
+        if (request.url.path == '/v1/sub/search') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'status': 0,
+                'sub': {
+                  'subs': [
+                    {
+                      'id': 629281,
+                      'native_name': '怪奇物语 第一季',
+                      'videoname':
+                          'Stranger.Things.S01.720p.BluRay.x264.DD5.1-HDChina',
+                      'down_count': 1225,
+                    },
+                  ],
+                },
+              }),
+            ),
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        if (request.url.path == '/v1/sub/detail') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'sub': {
+                  'action': 'detail',
+                  'subs': [
+                    {
+                      'id': 629281,
+                      'title': '怪奇物语 第一季',
+                      'native_name': '怪奇物语 第一季',
+                      'videoname':
+                          'Stranger.Things.S01.720p.BluRay.x264.DD5.1-HDChina',
+                      'subtype': 'Subrip(srt)',
+                      'upload_time': '2020-05-20 21:56:12',
+                      'down_count': 1225,
+                      'lang': {'desc': '简'},
+                      'filelist': [
+                        {
+                          'url':
+                              'http://file1.assrt.net/onthefly/629281/-/1/Stranger.Things.S01E01.720p.BluRay.x264.DD5.1-HDChina.srt?api=1',
+                          's': '44KB',
+                          'f':
+                              'Stranger.Things.S01E01.720p.BluRay.x264.DD5.1-HDChina.srt',
+                        },
+                      ],
+                      'url':
+                          'http://file1.assrt.net/download/629281/Stranger.Things.S01.BluRay.rar?api=1',
+                    },
+                  ],
+                  'result': 'succeed',
+                },
+                'status': 0,
+              }),
+            ),
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        return http.Response('', 404);
+      });
+
+      final provider = AssrtStructuredProvider(
+        client,
+        config: const AssrtProviderConfig(
+          enabled: true,
+          token: 'test-token',
+        ),
+      );
+
+      final results = await provider.search(
+        const OnlineSubtitleSearchRequest(
+          query: '怪奇物语 S01E01',
+          title: '怪奇物语',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+      );
+
+      expect(results, hasLength(1));
+      expect(results.first.title, '怪奇物语 第一季');
+      expect(results.first.languageLabel, '简');
+      expect(
+        results.first.downloadUrl,
+        'http://file1.assrt.net/onthefly/629281/-/1/Stranger.Things.S01E01.720p.BluRay.x264.DD5.1-HDChina.srt?api=1',
+      );
+      expect(
+        results.first.packageName,
+        'Stranger.Things.S01E01.720p.BluRay.x264.DD5.1-HDChina.srt',
+      );
+      expect(results.first.packageKind, SubtitlePackageKind.subtitleFile);
+    });
+
+    test('uses cleaned remote file name for ASSRT file search query', () async {
+      final requests = <http.Request>[];
+      final client = MockClient((request) async {
+        requests.add(request);
+        return http.Response.bytes(
+          utf8.encode(
+            jsonEncode({
+              'status': 0,
+              'sub': {'subs': const []},
+            }),
+          ),
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        );
+      });
+
+      final provider = AssrtStructuredProvider(
+        client,
+        config: const AssrtProviderConfig(
+          enabled: true,
+          token: 'test-token',
+        ),
+      );
+
+      await provider.search(
+        const OnlineSubtitleSearchRequest(
+          query: '怪奇物语 S01E01',
+          title: '怪奇物语',
+          seasonNumber: 1,
+          episodeNumber: 1,
+          filePath:
+              'https://example.com/Stranger.Things.S01E01.2160p.WEB-DL.H265.10bit.DDP5.1&DTS5.1.(mkv).strm',
+        ),
+      );
+
+      expect(requests, isNotEmpty);
+      expect(requests.first.url.path, '/v1/sub/search');
+      expect(requests.first.url.queryParameters['q'], 'Stranger Things S01E01');
+    });
+
+    test(
+        'prefers the matching episode file when ASSRT detail contains a season bundle',
+        () async {
+      final client = MockClient((request) async {
+        if (request.url.path == '/v1/sub/search') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'status': 0,
+                'sub': {
+                  'subs': [
+                    {
+                      'id': 3003,
+                      'native_name': '怪奇物语 第一季',
+                      'videoname':
+                          'Stranger.Things.S01.720p.BluRay.x264.DD5.1-HDChina',
+                      'down_count': 1200,
+                    },
+                  ],
+                },
+              }),
+            ),
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        if (request.url.path == '/v1/sub/detail') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'status': 0,
+                'sub': {
+                  'id': 3003,
+                  'title': '怪奇物语 第一季',
+                  'videoname':
+                      'Stranger.Things.S01.720p.BluRay.x264.DD5.1-HDChina',
+                  'filelist': [
+                    {
+                      'f':
+                          'Stranger.Things.S01E01.720p.BluRay.x264.DD5.1-HDChina.srt',
+                      'url':
+                          'https://cdn.assrt.net/files/stranger-things-s01e01.srt',
+                    },
+                    {
+                      'f':
+                          'Stranger.Things.S01E02.720p.BluRay.x264.DD5.1-HDChina.srt',
+                      'url':
+                          'https://cdn.assrt.net/files/stranger-things-s01e02.srt',
+                    },
+                  ],
+                },
+              }),
+            ),
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        return http.Response('', 404);
+      });
+
+      final provider = AssrtStructuredProvider(
+        client,
+        config: const AssrtProviderConfig(
+          enabled: true,
+          token: 'test-token',
+        ),
+      );
+
+      final results = await provider.search(
+        const OnlineSubtitleSearchRequest(
+          query: '怪奇物语 S01E02',
+          title: '怪奇物语',
+          seasonNumber: 1,
+          episodeNumber: 2,
+        ),
+      );
+
+      expect(results, hasLength(1));
+      expect(
+        results.first.downloadUrl,
+        'https://cdn.assrt.net/files/stranger-things-s01e02.srt',
+      );
+      expect(
+        results.first.packageName,
+        'Stranger.Things.S01E02.720p.BluRay.x264.DD5.1-HDChina.srt',
+      );
+    });
   });
 }

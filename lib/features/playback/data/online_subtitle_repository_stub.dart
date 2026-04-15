@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
@@ -9,15 +10,6 @@ OnlineSubtitleRepository createOnlineSubtitleRepository(Ref ref) {
 
 class UnsupportedOnlineSubtitleRepository implements OnlineSubtitleRepository {
   const UnsupportedOnlineSubtitleRepository();
-
-  @override
-  Future<List<SubtitleSearchResult>> search(
-    String query, {
-    List<OnlineSubtitleSource> sources = const [OnlineSubtitleSource.assrt],
-    int maxResults = 0,
-  }) {
-    throw UnsupportedError('当前平台暂不支持应用内在线字幕搜索。');
-  }
 
   @override
   Future<List<ValidatedSubtitleCandidate>> searchStructured(
@@ -37,4 +29,16 @@ class UnsupportedOnlineSubtitleRepository implements OnlineSubtitleRepository {
   Future<SubtitleDownloadResult> download(SubtitleSearchResult result) {
     throw UnsupportedError('当前平台暂不支持应用内在线字幕下载。');
   }
+
+  @override
+  Future<LocalStorageCacheSummary> inspectCacheSummary() async {
+    return const LocalStorageCacheSummary(
+      type: LocalStorageCacheType.subtitleCache,
+      entryCount: 0,
+      totalBytes: 0,
+    );
+  }
+
+  @override
+  Future<void> clearCache() async {}
 }

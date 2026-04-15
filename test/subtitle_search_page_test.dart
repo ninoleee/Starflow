@@ -98,6 +98,7 @@ void main() {
               'doubanAccount': const {'enabled': false},
               'homeModules': const [],
               'onlineSubtitleSources': ['assrt'],
+              'assrtToken': 'assrt-token',
               'opensubtitlesEnabled': true,
               'opensubtitlesUsername': 'tester',
               'opensubtitlesPassword': 'secret',
@@ -143,17 +144,6 @@ class _FakeOnlineSubtitleRepository implements OnlineSubtitleRepository {
   }
 
   @override
-  Future<List<SubtitleSearchResult>> search(
-    String query, {
-    List<OnlineSubtitleSource> sources = const [OnlineSubtitleSource.assrt],
-    int maxResults = 0,
-  }) async {
-    searchQueries.add(query);
-    searchSources.add(List<OnlineSubtitleSource>.from(sources));
-    return const [];
-  }
-
-  @override
   Future<List<ValidatedSubtitleCandidate>> searchStructured(
     OnlineSubtitleSearchRequest request, {
     List<OnlineSubtitleSource> sources = const [
@@ -164,6 +154,8 @@ class _FakeOnlineSubtitleRepository implements OnlineSubtitleRepository {
     int maxResults = 0,
     int maxValidated = 0,
   }) async {
+    searchQueries.add(request.normalizedQuery);
+    searchSources.add(List<OnlineSubtitleSource>.from(sources));
     return const [];
   }
 }

@@ -524,8 +524,6 @@ class SettingsPage extends ConsumerStatefulWidget {
               playbackSlice.subtitlePreferredLanguages,
           initialSubtitleSearchMaxValidatedCandidates:
               playbackSlice.subtitleSearchMaxValidatedCandidates,
-          initialSubtitleAllowLegacyProvidersFallback:
-              playbackSlice.subtitleAllowLegacyProvidersFallback,
           initialBackgroundPlaybackEnabled:
               playbackSlice.configuredBackgroundPlaybackEnabled,
           initialPlaybackEngine: playbackSlice.playbackEngine,

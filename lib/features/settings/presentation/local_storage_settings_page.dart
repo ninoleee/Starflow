@@ -5,6 +5,7 @@ import 'package:starflow/core/storage/persistent_image_cache.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
+import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
@@ -20,12 +21,15 @@ final localStorageSummariesProvider =
   final indexSummary = await indexStore.inspectSummary();
   final detailSummary = await repository.inspectDetailCache();
   final playbackSummary = await playbackMemoryRepository.inspectSummary();
+  final subtitleSummary =
+      await ref.read(onlineSubtitleRepositoryProvider).inspectCacheSummary();
   final searchPreferencesSummary =
       await searchPreferencesRepository.inspectSummary();
   final imageSummary = await persistentImageCache.inspect();
   return [
     indexSummary,
     detailSummary,
+    subtitleSummary,
     playbackSummary,
     searchPreferencesSummary,
     imageSummary,
@@ -49,6 +53,7 @@ class _LocalStorageSettingsPageState
       types: [
         LocalStorageCacheType.nasMetadataIndex,
         LocalStorageCacheType.detailData,
+        LocalStorageCacheType.subtitleCache,
         LocalStorageCacheType.images,
       ],
     ),
@@ -207,6 +212,9 @@ class _LocalStorageSettingsPageState
         break;
       case LocalStorageCacheType.playbackMemory:
         await ref.read(playbackMemoryRepositoryProvider).clearAll();
+        break;
+      case LocalStorageCacheType.subtitleCache:
+        await ref.read(onlineSubtitleRepositoryProvider).clearCache();
         break;
       case LocalStorageCacheType.televisionSearchPreferences:
         await ref.read(searchPreferencesRepositoryProvider).clear();

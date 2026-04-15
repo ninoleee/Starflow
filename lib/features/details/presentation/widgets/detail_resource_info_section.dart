@@ -3,12 +3,9 @@ import 'package:starflow/core/utils/detail_resource_switch_trace.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_library_match_service.dart';
 import 'package:starflow/features/details/application/detail_page_controller.dart';
-import 'package:starflow/features/details/application/detail_subtitle_controller.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
-import 'package:starflow/features/details/presentation/widgets/detail_subtitle_section.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 const DetailLibraryMatchService _detailLibraryMatchService =
@@ -73,9 +70,6 @@ class DetailResourceInfoSection extends StatelessWidget {
     required this.isTelevision,
     required this.playbackEngine,
     required this.libraryView,
-    required this.subtitleView,
-    required this.selectedSubtitleIndex,
-    required this.subtitleChoiceLabelBuilder,
     required this.onSearchOnline,
     required this.onOpenTelevisionPlayableVariantPicker,
     required this.onLibraryMatchSelected,
@@ -85,9 +79,6 @@ class DetailResourceInfoSection extends StatelessWidget {
     required this.isCheckingOnlineResourceUpdate,
     required this.onOpenPlaybackEnginePicker,
     required this.onPlaybackEngineSelected,
-    required this.onSearchSubtitles,
-    required this.onOpenTelevisionSubtitlePicker,
-    required this.onSubtitleSelected,
     required this.onOpenMetadataIndexManager,
   });
 
@@ -95,10 +86,6 @@ class DetailResourceInfoSection extends StatelessWidget {
   final bool isTelevision;
   final PlaybackEngine playbackEngine;
   final DetailLibraryMatchViewState libraryView;
-  final DetailSubtitleSearchViewState subtitleView;
-  final int selectedSubtitleIndex;
-  final String Function(CachedSubtitleSearchOption choice)
-      subtitleChoiceLabelBuilder;
   final VoidCallback onSearchOnline;
   final VoidCallback onOpenTelevisionPlayableVariantPicker;
   final ValueChanged<int> onLibraryMatchSelected;
@@ -108,9 +95,6 @@ class DetailResourceInfoSection extends StatelessWidget {
   final bool isCheckingOnlineResourceUpdate;
   final VoidCallback onOpenPlaybackEnginePicker;
   final ValueChanged<PlaybackEngine> onPlaybackEngineSelected;
-  final VoidCallback? onSearchSubtitles;
-  final VoidCallback onOpenTelevisionSubtitlePicker;
-  final ValueChanged<int> onSubtitleSelected;
   final VoidCallback onOpenMetadataIndexManager;
 
   @override
@@ -360,16 +344,6 @@ class DetailResourceInfoSection extends StatelessWidget {
               ),
             ),
         ],
-        DetailSubtitleSection(
-          target: target,
-          isTelevision: isTelevision,
-          subtitleView: subtitleView,
-          selectedSubtitleIndex: selectedSubtitleIndex,
-          subtitleChoiceLabelBuilder: subtitleChoiceLabelBuilder,
-          onSearchSubtitles: onSearchSubtitles,
-          onOpenTelevisionSubtitlePicker: onOpenTelevisionSubtitlePicker,
-          onSubtitleSelected: onSubtitleSelected,
-        ),
         if (shouldShowDetailMetadataManagerEntry(target)) ...[
           const SizedBox(height: 12),
           Align(

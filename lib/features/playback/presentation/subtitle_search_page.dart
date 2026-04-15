@@ -9,6 +9,7 @@ import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/features/playback/application/online_subtitle_search_request_builder.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/data/subtitle_search_host_bridge.dart';
+import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -34,6 +35,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
   List<SubtitleSearchResult> _results = const [];
   Map<String, SubtitleSearchSelection> _validatedSelectionsByResultId =
       const <String, SubtitleSearchSelection>{};
+  Map<String, ValidatedSubtitleCandidate> _structuredCandidatesByResultId =
+      const <String, ValidatedSubtitleCandidate>{};
   bool _isSearching = false;
   String? _errorMessage;
   String? _busyResultId;
@@ -146,6 +149,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         _results = const [];
         _validatedSelectionsByResultId =
             const <String, SubtitleSearchSelection>{};
+        _structuredCandidatesByResultId =
+            const <String, ValidatedSubtitleCandidate>{};
         _isSearching = false;
         _errorMessage = '请先输入要搜索的字幕关键词';
       });
@@ -157,6 +162,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       _results = const [];
       _validatedSelectionsByResultId =
           const <String, SubtitleSearchSelection>{};
+      _structuredCandidatesByResultId =
+          const <String, ValidatedSubtitleCandidate>{};
       _errorMessage = null;
     });
 
@@ -191,12 +198,11 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       final structuredSources = sources
           .where(settings.configuredStructuredSubtitleSources.contains)
           .toList(growable: false);
-      final legacySources = sources
-          .where(settings.configuredLegacySubtitleSources.contains)
-          .toList(growable: false);
 
-      final nextResults = <SubtitleSearchResult>[];
+      final nextResultsById = <String, SubtitleSearchResult>{};
       final validatedSelections = <String, SubtitleSearchSelection>{};
+      final structuredCandidatesByResultId =
+          <String, ValidatedSubtitleCandidate>{};
 
       if (structuredSources.isNotEmpty) {
         final structuredRequest =
@@ -217,31 +223,49 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
           ),
           languages: settings.subtitlePreferredLanguages,
         );
-        final validated = await repository.searchStructured(
+        final candidates = await repository.searchStructured(
           structuredRequest,
           sources: structuredSources,
           maxResults: settings.subtitleSearchMaxValidatedCandidates * 4,
           maxValidated: settings.subtitleSearchMaxValidatedCandidates,
         );
-        for (final candidate in validated) {
+        subtitleSearchTrace(
+          'page.search.structured-finished',
+          fields: {
+            'query': query,
+            'sources': structuredSources.map((item) => item.name).join('/'),
+            'processed': candidates.length,
+            'validated': candidates
+                .where(
+                  (item) => item.status == SubtitleValidationStatus.validated,
+                )
+                .length,
+            'failed': candidates
+                .where(
+                  (item) => item.status == SubtitleValidationStatus.failed,
+                )
+                .length,
+            'skipped': candidates
+                .where(
+                  (item) => item.status == SubtitleValidationStatus.skipped,
+                )
+                .length,
+          },
+        );
+        for (final candidate in candidates) {
           final result = candidate.toSearchResult();
-          nextResults.add(result);
-          validatedSelections[result.id] = SubtitleSearchSelection(
-            cachedPath: candidate.cachedPath,
-            displayName: candidate.displayName,
-            subtitleFilePath: candidate.subtitleFilePath,
-          );
+          nextResultsById.putIfAbsent(result.id, () => result);
+          structuredCandidatesByResultId[result.id] = candidate;
+          if (candidate.canApply) {
+            validatedSelections[result.id] = SubtitleSearchSelection(
+              cachedPath: candidate.cachedPath,
+              displayName: candidate.displayName,
+              subtitleFilePath: candidate.subtitleFilePath,
+            );
+          }
         }
       }
-
-      if (nextResults.isEmpty && legacySources.isNotEmpty) {
-        nextResults.addAll(
-          await repository.search(
-            query,
-            sources: legacySources,
-          ),
-        );
-      }
+      final nextResults = nextResultsById.values.toList(growable: false);
       if (!mounted) {
         return;
       }
@@ -259,6 +283,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       setState(() {
         _results = nextResults;
         _validatedSelectionsByResultId = validatedSelections;
+        _structuredCandidatesByResultId = structuredCandidatesByResultId;
         _isSearching = false;
         _errorMessage = nextResults.isEmpty ? '没有找到可用字幕结果' : null;
       });
@@ -280,6 +305,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         _results = const [];
         _validatedSelectionsByResultId =
             const <String, SubtitleSearchSelection>{};
+        _structuredCandidatesByResultId =
+            const <String, ValidatedSubtitleCandidate>{};
         _isSearching = false;
         _errorMessage = '$error';
       });
@@ -299,11 +326,31 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     }
     final validatedSelection = _validatedSelectionsByResultId[result.id];
     if (validatedSelection != null) {
+      subtitleSearchTrace(
+        'page.download.use-validated-selection',
+        fields: {
+          'resultId': result.id,
+          'source': result.source.name,
+          'subtitleFilePath': validatedSelection.subtitleFilePath ?? '',
+        },
+      );
       await _finishSelection(
         result: result,
         selection: validatedSelection,
       );
       return;
+    }
+    final candidate = _structuredCandidatesByResultId[result.id];
+    if (candidate != null) {
+      subtitleSearchTrace(
+        'page.download.use-raw-result',
+        fields: {
+          'resultId': result.id,
+          'source': result.source.name,
+          'validationStatus': candidate.status.name,
+          'failureReason': candidate.failureReason,
+        },
+      );
     }
     if (widget.request.applyMode == SubtitleSearchApplyMode.downloadAndApply &&
         !result.canAutoLoad) {
@@ -502,6 +549,9 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         final result = _results[index];
         return _SubtitleResultTile(
           result: result,
+          validationCandidate: _structuredCandidatesByResultId[result.id],
+          hasValidatedSelection:
+              _validatedSelectionsByResultId.containsKey(result.id),
           applyMode: applyMode,
           isBusy: _busyResultId == result.id,
           onPressed: () => _handleDownload(result),
@@ -624,12 +674,16 @@ class _SearchHeader extends StatelessWidget {
 class _SubtitleResultTile extends StatelessWidget {
   const _SubtitleResultTile({
     required this.result,
+    required this.validationCandidate,
+    required this.hasValidatedSelection,
     required this.applyMode,
     required this.isBusy,
     required this.onPressed,
   });
 
   final SubtitleSearchResult result;
+  final ValidatedSubtitleCandidate? validationCandidate;
+  final bool hasValidatedSelection;
   final SubtitleSearchApplyMode applyMode;
   final bool isBusy;
   final VoidCallback onPressed;
@@ -637,14 +691,11 @@ class _SubtitleResultTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final enabled = result.canDownload &&
-        (applyMode == SubtitleSearchApplyMode.downloadOnly ||
-            result.canAutoLoad);
-    final buttonLabel = applyMode == SubtitleSearchApplyMode.downloadOnly
-        ? '下载到缓存'
-        : enabled
-            ? '下载并加载'
-            : '暂不支持';
+    final enabled = hasValidatedSelection ||
+        (result.canDownload &&
+            (applyMode == SubtitleSearchApplyMode.downloadOnly ||
+                result.canAutoLoad));
+    final buttonLabel = _resolveButtonLabel(enabled);
 
     return TvFocusableAction(
       onPressed: enabled && !isBusy ? onPressed : null,
@@ -714,6 +765,16 @@ class _SubtitleResultTile extends StatelessWidget {
                   ),
                 ),
               ],
+              if (validationCandidate != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  validationCandidate!.statusDescription,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: _validationTextColor(theme),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
               if (result.packageName.trim().isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -740,6 +801,28 @@ class _SubtitleResultTile extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _resolveButtonLabel(bool enabled) {
+    if (applyMode == SubtitleSearchApplyMode.downloadOnly) {
+      return hasValidatedSelection ? '使用已缓存' : '下载到缓存';
+    }
+    if (hasValidatedSelection) {
+      return '直接加载';
+    }
+    if (enabled) {
+      return '下载并加载';
+    }
+    return '暂不支持';
+  }
+
+  Color _validationTextColor(ThemeData theme) {
+    return switch (validationCandidate?.status) {
+      SubtitleValidationStatus.validated => theme.colorScheme.primary,
+      SubtitleValidationStatus.failed => theme.colorScheme.error,
+      SubtitleValidationStatus.skipped => theme.colorScheme.onSurfaceVariant,
+      _ => theme.colorScheme.onSurfaceVariant,
+    };
   }
 }
 

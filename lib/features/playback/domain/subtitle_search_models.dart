@@ -1,3 +1,4 @@
+import 'package:path/path.dart' as p;
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 enum SubtitleSearchApplyMode {
@@ -45,7 +46,8 @@ class SubtitleSearchRequest {
     return {
       'q': query,
       if (title.trim().isNotEmpty) 'title': title.trim(),
-      if (originalTitle.trim().isNotEmpty) 'originalTitle': originalTitle.trim(),
+      if (originalTitle.trim().isNotEmpty)
+        'originalTitle': originalTitle.trim(),
       if (initialInput.trim().isNotEmpty) 'input': initialInput.trim(),
       if ((year ?? 0) > 0) 'year': '${year!}',
       if (imdbId.trim().isNotEmpty) 'imdbId': imdbId.trim(),
@@ -104,10 +106,8 @@ extension OnlineSubtitleSourceX on OnlineSubtitleSource {
 
   String get description {
     return switch (this) {
-      OnlineSubtitleSource.assrt =>
-        'ASSRT。填写 Token 后优先走官方 API，否则继续走网页搜索。',
-      OnlineSubtitleSource.opensubtitles =>
-        'OpenSubtitles.com 官方 API 字幕源。',
+      OnlineSubtitleSource.assrt => 'ASSRT 官方 API 字幕源，需要在设置页填写 Token。',
+      OnlineSubtitleSource.opensubtitles => 'OpenSubtitles.com 官方 API 字幕源。',
       OnlineSubtitleSource.subdl => 'SubDL 官方 API 字幕源。',
     };
   }
@@ -153,6 +153,8 @@ class SubtitleSearchResult {
     required this.detailUrl,
     required this.packageName,
     required this.packageKind,
+    this.seasonNumber,
+    this.episodeNumber,
   });
 
   final String id;
@@ -170,6 +172,8 @@ class SubtitleSearchResult {
   final String detailUrl;
   final String packageName;
   final SubtitlePackageKind packageKind;
+  final int? seasonNumber;
+  final int? episodeNumber;
 
   bool get canDownload =>
       downloadUrl.trim().isNotEmpty &&
@@ -216,6 +220,8 @@ class SubtitleSearchResult {
       'detailUrl': detailUrl,
       'packageName': packageName,
       'packageKind': packageKind.name,
+      'seasonNumber': seasonNumber,
+      'episodeNumber': episodeNumber,
     };
   }
 
@@ -241,6 +247,8 @@ class SubtitleSearchResult {
         'rarArchive' => SubtitlePackageKind.rarArchive,
         _ => SubtitlePackageKind.unsupported,
       },
+      seasonNumber: (json['seasonNumber'] as num?)?.toInt(),
+      episodeNumber: (json['episodeNumber'] as num?)?.toInt(),
     );
   }
 }
@@ -332,6 +340,10 @@ class CachedSubtitleSearchOption {
 }
 
 String buildSubtitleSearchQuery(PlaybackTarget target) {
+  final fileNameQuery = buildSubtitleSearchFileName(target);
+  if (fileNameQuery.isNotEmpty) {
+    return _appendSubtitleSearchEpisodeTokenIfMissing(fileNameQuery, target);
+  }
   final baseTitle = target.seriesTitle.trim().isNotEmpty
       ? target.seriesTitle.trim()
       : target.title.trim();
@@ -345,6 +357,10 @@ String buildSubtitleSearchQuery(PlaybackTarget target) {
 }
 
 String buildSubtitleSearchInitialInput(PlaybackTarget target) {
+  final fileNameQuery = buildSubtitleSearchFileName(target);
+  if (fileNameQuery.isNotEmpty) {
+    return _appendSubtitleSearchEpisodeTokenIfMissing(fileNameQuery, target);
+  }
   final seriesTitle = target.resolvedSeriesTitle.trim();
   if (seriesTitle.isNotEmpty) {
     return seriesTitle;
@@ -354,4 +370,198 @@ String buildSubtitleSearchInitialInput(PlaybackTarget target) {
     return title;
   }
   return buildSubtitleSearchQuery(target);
+}
+
+String buildSubtitleSearchFileName(PlaybackTarget target) {
+  final candidates = [
+    cleanSubtitleSearchFileName(target.actualAddress),
+    cleanSubtitleSearchFileName(target.streamUrl),
+  ];
+  for (final candidate in candidates) {
+    if (candidate.isNotEmpty) {
+      return candidate;
+    }
+  }
+  return '';
+}
+
+String cleanSubtitleSearchFileName(String rawPath) {
+  final normalized = rawPath.trim();
+  if (normalized.isEmpty) {
+    return '';
+  }
+  final uri = Uri.tryParse(normalized);
+  final sourcePath =
+      uri != null && uri.path.trim().isNotEmpty ? uri.path.trim() : normalized;
+  var fileName = p.basename(sourcePath).trim();
+  try {
+    fileName = Uri.decodeComponent(fileName);
+  } catch (_) {
+    // Keep the original basename when the path is not valid URI encoding.
+  }
+  if (fileName.isEmpty) {
+    return '';
+  }
+  fileName = _stripSubtitleSearchKnownExtensions(fileName);
+  fileName = _stripSubtitleSearchFormatSuffix(fileName);
+  return fileName
+      .replaceAll(RegExp(r'[._]+'), ' ')
+      .replaceAll(RegExp(r'[\[\]\(\)]'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
+String _appendSubtitleSearchEpisodeTokenIfMissing(
+  String query,
+  PlaybackTarget target,
+) {
+  final normalizedQuery = query.trim();
+  final seasonNumber = target.seasonNumber;
+  final episodeNumber = target.episodeNumber;
+  if (normalizedQuery.isEmpty ||
+      seasonNumber == null ||
+      seasonNumber <= 0 ||
+      episodeNumber == null ||
+      episodeNumber <= 0 ||
+      _containsSubtitleSearchEpisodeMarker(normalizedQuery)) {
+    return normalizedQuery;
+  }
+  final episodeToken =
+      'S${seasonNumber.toString().padLeft(2, '0')}E${episodeNumber.toString().padLeft(2, '0')}';
+  return '$normalizedQuery $episodeToken'.trim();
+}
+
+bool _containsSubtitleSearchEpisodeMarker(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return false;
+  }
+  return RegExp(
+    r'\bS\d{1,2}E\d{1,3}\b|\bE\d{1,3}\b|第\s*\d+\s*(季|集|期)\b',
+    caseSensitive: false,
+  ).hasMatch(normalized);
+}
+
+String _stripSubtitleSearchKnownExtensions(String fileName) {
+  var current = fileName.trim();
+  final pattern = RegExp(
+    r'\.(?:\(|\[)?(?:strm|mkv|mp4|avi|mov|wmv|flv|webm|ts|m2ts|iso|rmvb|m4v|srt|ass|ssa|vtt|zip|rar)(?:\)|\])?$',
+    caseSensitive: false,
+  );
+  while (true) {
+    final next = current.replaceFirst(pattern, '').trim();
+    if (next == current) {
+      return current;
+    }
+    current = next;
+  }
+}
+
+String _stripSubtitleSearchFormatSuffix(String fileName) {
+  final stripped = fileName
+      .replaceFirst(
+        RegExp(
+          r'(?:[ ._\-&]+(?:\d{3,4}p|web(?:[ ._-]?dl)?|webrip|bluray|blu[ ._-]?ray|bdrip|brrip|remux|hdrip|hdtv|uhd|hq|hdr10plus|hdr10|hdr|dv|dovi|dolby[ ._-]?vision|hevc|h265|x265|h264|x264|av1|10bit|8bit|aac(?:\d(?:\.\d)?)?|ac3(?:\d(?:\.\d)?)?|eac3(?:\d(?:\.\d)?)?|ddp?(?:\d(?:\.\d)?)?|truehd(?:\d(?:\.\d)?)?|atmos|dts(?:\d(?:\.\d)?)?|dts[ ._-]?hd|flac|proper|repack|extended|multi|dubbed|subbed|chs|cht|eng|简繁|简中|繁中|中字|内封|外挂))+[ ._\-&]*$',
+          caseSensitive: false,
+        ),
+        '',
+      )
+      .trim();
+  return stripped.isNotEmpty ? stripped : fileName.trim();
+}
+
+int scoreSubtitleEpisodeMatch(
+  String fileName, {
+  int? seasonNumber,
+  int? episodeNumber,
+}) {
+  if (seasonNumber == null ||
+      seasonNumber <= 0 ||
+      episodeNumber == null ||
+      episodeNumber <= 0) {
+    return 0;
+  }
+
+  var score = 0;
+  if (_containsExactSeasonEpisodeMarker(
+    fileName,
+    seasonNumber: seasonNumber,
+    episodeNumber: episodeNumber,
+  )) {
+    score += 420;
+  } else if (_containsAnySeasonEpisodeMarker(fileName)) {
+    score -= 260;
+  }
+
+  if (_containsExactEpisodeOnlyMarker(fileName, episodeNumber)) {
+    score += 160;
+  } else if (_containsAnyEpisodeOnlyMarker(fileName)) {
+    score -= 120;
+  }
+
+  if (_containsExactSeasonOnlyMarker(fileName, seasonNumber)) {
+    score += 48;
+  }
+  return score;
+}
+
+bool _containsExactSeasonEpisodeMarker(
+  String fileName, {
+  required int seasonNumber,
+  required int episodeNumber,
+}) {
+  final patterns = [
+    RegExp(
+      's0?$seasonNumber'
+      'e0?$episodeNumber'
+      r'\b',
+      caseSensitive: false,
+    ),
+    RegExp(
+      '\\b0?$seasonNumber'
+      'x0?$episodeNumber'
+      r'\b',
+      caseSensitive: false,
+    ),
+    RegExp(
+      '第\\s*0?$seasonNumber\\s*季\\s*第\\s*0?$episodeNumber\\s*[集话期]',
+      caseSensitive: false,
+    ),
+  ];
+  return patterns.any((pattern) => pattern.hasMatch(fileName));
+}
+
+bool _containsAnySeasonEpisodeMarker(String fileName) {
+  return RegExp(r's\d{1,2}e\d{1,3}\b', caseSensitive: false)
+          .hasMatch(fileName) ||
+      RegExp(r'\b\d{1,2}x\d{1,3}\b', caseSensitive: false).hasMatch(fileName) ||
+      RegExp(r'第\s*\d+\s*季\s*第\s*\d+\s*[集话期]', caseSensitive: false)
+          .hasMatch(fileName);
+}
+
+bool _containsExactEpisodeOnlyMarker(String fileName, int episodeNumber) {
+  return RegExp(
+        r'\be0?' '$episodeNumber' r'\b',
+        caseSensitive: false,
+      ).hasMatch(fileName) ||
+      RegExp(
+        '第\\s*0?$episodeNumber\\s*[集话期]',
+        caseSensitive: false,
+      ).hasMatch(fileName);
+}
+
+bool _containsAnyEpisodeOnlyMarker(String fileName) {
+  return RegExp(r'\be\d{1,3}\b', caseSensitive: false).hasMatch(fileName) ||
+      RegExp(r'第\s*\d+\s*[集话期]', caseSensitive: false).hasMatch(fileName);
+}
+
+bool _containsExactSeasonOnlyMarker(String fileName, int seasonNumber) {
+  return RegExp(
+        r'\bs0?' '$seasonNumber' r'\b',
+        caseSensitive: false,
+      ).hasMatch(fileName) ||
+      RegExp(
+        '第\\s*0?$seasonNumber\\s*季',
+        caseSensitive: false,
+      ).hasMatch(fileName);
 }

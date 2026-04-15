@@ -9,9 +9,12 @@ class PlaybackTarget {
     required this.sourceKind,
     this.allowResume = true,
     this.actualAddress = '',
+    this.originalTitle = '',
     this.itemId = '',
     this.itemType = '',
     this.year = 0,
+    this.imdbId = '',
+    this.tmdbId = '',
     this.seriesId = '',
     this.seriesTitle = '',
     this.preferredMediaSourceId = '',
@@ -37,9 +40,12 @@ class PlaybackTarget {
   final MediaSourceKind sourceKind;
   final bool allowResume;
   final String actualAddress;
+  final String originalTitle;
   final String itemId;
   final String itemType;
   final int year;
+  final String imdbId;
+  final String tmdbId;
   final String seriesId;
   final String seriesTitle;
   final String preferredMediaSourceId;
@@ -65,9 +71,12 @@ class PlaybackTarget {
     MediaSourceKind? sourceKind,
     bool? allowResume,
     String? actualAddress,
+    String? originalTitle,
     String? itemId,
     String? itemType,
     int? year,
+    String? imdbId,
+    String? tmdbId,
     String? seriesId,
     String? seriesTitle,
     String? preferredMediaSourceId,
@@ -93,9 +102,12 @@ class PlaybackTarget {
       sourceKind: sourceKind ?? this.sourceKind,
       allowResume: allowResume ?? this.allowResume,
       actualAddress: actualAddress ?? this.actualAddress,
+      originalTitle: originalTitle ?? this.originalTitle,
       itemId: itemId ?? this.itemId,
       itemType: itemType ?? this.itemType,
       year: year ?? this.year,
+      imdbId: imdbId ?? this.imdbId,
+      tmdbId: tmdbId ?? this.tmdbId,
       seriesId: seriesId ?? this.seriesId,
       seriesTitle: seriesTitle ?? this.seriesTitle,
       preferredMediaSourceId:
@@ -134,8 +146,7 @@ class PlaybackTarget {
 
   bool get hasEffectiveHeaders {
     return headers.entries.any(
-      (entry) =>
-          entry.key.trim().isNotEmpty && entry.value.trim().isNotEmpty,
+      (entry) => entry.key.trim().isNotEmpty && entry.value.trim().isNotEmpty,
     );
   }
 
@@ -205,9 +216,12 @@ class PlaybackTarget {
       sourceName: item.sourceName,
       sourceKind: item.sourceKind,
       actualAddress: item.actualAddress,
+      originalTitle: item.originalTitle,
       itemId: item.playbackItemId,
       itemType: item.itemType,
       year: item.year,
+      imdbId: item.imdbId,
+      tmdbId: item.tmdbId,
       preferredMediaSourceId: item.preferredMediaSourceId,
       subtitle: item.overview,
       externalSubtitleFilePath: '',
@@ -236,9 +250,12 @@ class PlaybackTarget {
       'sourceKind': sourceKind.name,
       'allowResume': allowResume,
       'actualAddress': actualAddress,
+      'originalTitle': originalTitle,
       'itemId': itemId,
       'itemType': itemType,
       'year': year,
+      'imdbId': imdbId,
+      'tmdbId': tmdbId,
       'seriesId': seriesId,
       'seriesTitle': seriesTitle,
       'preferredMediaSourceId': preferredMediaSourceId,
@@ -268,9 +285,12 @@ class PlaybackTarget {
           MediaSourceKindX.fromName(json['sourceKind'] as String? ?? ''),
       allowResume: json['allowResume'] as bool? ?? true,
       actualAddress: json['actualAddress'] as String? ?? '',
+      originalTitle: json['originalTitle'] as String? ?? '',
       itemId: json['itemId'] as String? ?? '',
       itemType: json['itemType'] as String? ?? '',
       year: (json['year'] as num?)?.toInt() ?? 0,
+      imdbId: json['imdbId'] as String? ?? '',
+      tmdbId: json['tmdbId'] as String? ?? '',
       seriesId: json['seriesId'] as String? ?? '',
       seriesTitle: json['seriesTitle'] as String? ?? '',
       preferredMediaSourceId: json['preferredMediaSourceId'] as String? ?? '',

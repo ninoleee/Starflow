@@ -784,7 +784,6 @@ class AppSettings {
     this.subtitlePreferredLanguages = const [],
     this.subtitleSearchMaxValidatedCandidates =
         kSubtitleSearchMaxValidatedCandidatesDefault,
-    this.subtitleAllowLegacyProvidersFallback = true,
     this.playbackBackgroundPlaybackEnabled = true,
     this.playbackEngine = PlaybackEngine.embeddedMpv,
     this.playbackDecodeMode = PlaybackDecodeMode.auto,
@@ -842,7 +841,6 @@ class AppSettings {
   final String subdlApiKey;
   final List<String> subtitlePreferredLanguages;
   final int subtitleSearchMaxValidatedCandidates;
-  final bool subtitleAllowLegacyProvidersFallback;
   final bool playbackBackgroundPlaybackEnabled;
   final PlaybackEngine playbackEngine;
   final PlaybackDecodeMode playbackDecodeMode;
@@ -900,7 +898,6 @@ class AppSettings {
     String? subdlApiKey,
     List<String>? subtitlePreferredLanguages,
     int? subtitleSearchMaxValidatedCandidates,
-    bool? subtitleAllowLegacyProvidersFallback,
     bool? playbackBackgroundPlaybackEnabled,
     PlaybackEngine? playbackEngine,
     PlaybackDecodeMode? playbackDecodeMode,
@@ -1002,9 +999,6 @@ class AppSettings {
               : clampSubtitleSearchMaxValidatedCandidates(
                   subtitleSearchMaxValidatedCandidates,
                 ),
-      subtitleAllowLegacyProvidersFallback:
-          subtitleAllowLegacyProvidersFallback ??
-              this.subtitleAllowLegacyProvidersFallback,
       playbackBackgroundPlaybackEnabled: playbackBackgroundPlaybackEnabled ??
           this.playbackBackgroundPlaybackEnabled,
       playbackEngine: playbackEngine ?? this.playbackEngine,
@@ -1082,8 +1076,6 @@ class AppSettings {
       'subtitlePreferredLanguages': subtitlePreferredLanguages,
       'subtitleSearchMaxValidatedCandidates':
           subtitleSearchMaxValidatedCandidates,
-      'subtitleAllowLegacyProvidersFallback':
-          subtitleAllowLegacyProvidersFallback,
       'playbackBackgroundPlaybackEnabled': playbackBackgroundPlaybackEnabled,
       'playbackEngine': playbackEngine.name,
       'playbackDecodeMode': playbackDecodeMode.name,
@@ -1224,8 +1216,6 @@ class AppSettings {
         (json['subtitleSearchMaxValidatedCandidates'] as num?)?.toInt() ??
             kSubtitleSearchMaxValidatedCandidatesDefault,
       ),
-      subtitleAllowLegacyProvidersFallback:
-          json['subtitleAllowLegacyProvidersFallback'] as bool? ?? true,
       playbackBackgroundPlaybackEnabled:
           json['playbackBackgroundPlaybackEnabled'] as bool? ?? true,
       playbackEngine: PlaybackEngineX.fromName(
@@ -1371,16 +1361,6 @@ extension AppSettingsSubtitleSearchX on AppSettings {
 
   bool get subdlSearchEnabled => subdlEnabled && subdlApiKey.trim().isNotEmpty;
 
-  bool get assrtLegacySearchEnabled {
-    if (!onlineSubtitleSources.contains(OnlineSubtitleSource.assrt)) {
-      return false;
-    }
-    if (assrtToken.trim().isEmpty) {
-      return true;
-    }
-    return subtitleAllowLegacyProvidersFallback;
-  }
-
   List<OnlineSubtitleSource> get configuredStructuredSubtitleSources {
     final sources = <OnlineSubtitleSource>[
       if (assrtApiSearchEnabled) OnlineSubtitleSource.assrt,
@@ -1390,17 +1370,8 @@ extension AppSettingsSubtitleSearchX on AppSettings {
     return sources.toSet().toList(growable: false);
   }
 
-  List<OnlineSubtitleSource> get configuredLegacySubtitleSources {
-    return <OnlineSubtitleSource>[
-      if (assrtLegacySearchEnabled) OnlineSubtitleSource.assrt,
-    ];
-  }
-
   List<OnlineSubtitleSource> get effectiveOnlineSubtitleSources {
-    return {
-      ...configuredStructuredSubtitleSources,
-      ...configuredLegacySubtitleSources,
-    }.toList(growable: false);
+    return configuredStructuredSubtitleSources;
   }
 }
 

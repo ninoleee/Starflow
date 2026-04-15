@@ -9,6 +9,7 @@ import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 const String _defaultOpenSubtitlesApiKey = String.fromEnvironment(
   'STARFLOW_OPENSUBTITLES_API_KEY',
 );
+const String _assrtRateLimitErrorMessage = 'ASSRT API 请求过于频繁，请稍后再试';
 
 abstract class OnlineSubtitleStructuredProvider {
   OnlineSubtitleSource get source;
@@ -121,6 +122,18 @@ class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
         headers: _assrtHeaders(),
       );
       if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (response.statusCode == 509) {
+          subtitleSearchTrace(
+            'repository.structured.provider.rate-limited',
+            fields: {
+              'source': source.name,
+              'status': response.statusCode,
+              'queryKind': query.kind,
+              'query': query.query,
+            },
+          );
+          throw StateError(_assrtRateLimitErrorMessage);
+        }
         subtitleSearchTrace(
           'repository.structured.provider.request-failed',
           fields: {
@@ -142,7 +155,7 @@ class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
 
       final hits = <ProviderSubtitleHit>[];
       for (final candidate in candidates) {
-        final hit = await _loadAssrtDetail(candidate);
+        final hit = await _loadAssrtDetail(candidate, request: request);
         if (hit != null) {
           hits.add(hit);
         }
@@ -180,6 +193,8 @@ class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
   ) {
     final queries = <_AssrtStructuredQuery>[];
     final seen = <String>{};
+    final broadQueries = <_AssrtStructuredQuery>[];
+    final episodeQueries = <_AssrtStructuredQuery>[];
 
     void addQuery(
       String rawQuery, {
@@ -191,18 +206,21 @@ class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
       if (normalized.length < 3) {
         return;
       }
-      final key = '${normalized.toLowerCase()}|$kind|$isFileQuery|$noMuxer';
+      final key = '${normalized.toLowerCase()}|$isFileQuery|$noMuxer';
       if (!seen.add(key)) {
         return;
       }
-      queries.add(
-        _AssrtStructuredQuery(
-          query: normalized,
-          kind: kind,
-          isFileQuery: isFileQuery,
-          noMuxer: noMuxer,
-        ),
+      final next = _AssrtStructuredQuery(
+        query: normalized,
+        kind: kind,
+        isFileQuery: isFileQuery,
+        noMuxer: noMuxer,
       );
+      if (kind == 'episode') {
+        episodeQueries.add(next);
+      } else {
+        broadQueries.add(next);
+      }
     }
 
     final fileBaseName = _normalizedFileBaseName(request.normalizedFilePath);
@@ -233,11 +251,16 @@ class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
       }
     }
 
+    queries
+      ..addAll(broadQueries)
+      ..addAll(episodeQueries);
     return queries;
   }
 
   Future<ProviderSubtitleHit?> _loadAssrtDetail(
-      _AssrtSearchCandidate item) async {
+    _AssrtSearchCandidate item, {
+    required OnlineSubtitleSearchRequest request,
+  }) async {
     final response = await _client.get(
       Uri.parse('${config.baseUrl}/v1/sub/detail').replace(
         queryParameters: {'id': '${item.id}'},
@@ -245,6 +268,17 @@ class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
       headers: _assrtHeaders(),
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      if (response.statusCode == 509) {
+        subtitleSearchTrace(
+          'repository.structured.provider.rate-limited',
+          fields: {
+            'source': source.name,
+            'status': response.statusCode,
+            'detailId': item.id,
+          },
+        );
+        throw StateError(_assrtRateLimitErrorMessage);
+      }
       subtitleSearchTrace(
         'repository.structured.provider.request-failed',
         fields: {
@@ -278,7 +312,11 @@ class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
       item.videoName,
       version,
     );
-    final fileChoice = _selectAssrtDownloadChoice(detail, version: version);
+    final fileChoice = _selectAssrtDownloadChoice(
+      detail,
+      version: version,
+      request: request,
+    );
     if (fileChoice == null) {
       return null;
     }
@@ -315,6 +353,8 @@ class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
       ratingLabel: ratingLabel,
       downloadCount:
           _readNum(detail['down_count'])?.toInt() ?? item.downloadCount,
+      seasonNumber: request.seasonNumber,
+      episodeNumber: request.episodeNumber,
       raw: {
         'assrt_id': item.id,
         'detail': detail,
@@ -728,6 +768,7 @@ int _extractOpenSubtitlesFileId(ProviderSubtitleHit hit) {
 _AssrtDownloadChoice? _selectAssrtDownloadChoice(
   Map<String, Object?> detail, {
   required String version,
+  required OnlineSubtitleSearchRequest request,
 }) {
   final fileEntries = _readList(detail['filelist'])
       .map(_readMap)
@@ -747,10 +788,12 @@ _AssrtDownloadChoice? _selectAssrtDownloadChoice(
         (left, right) => _assrtFileScore(
           right.packageName,
           version: version,
+          request: request,
         ).compareTo(
           _assrtFileScore(
             left.packageName,
             version: version,
+            request: request,
           ),
         ),
       );
@@ -772,7 +815,11 @@ _AssrtDownloadChoice? _selectAssrtDownloadChoice(
   );
 }
 
-int _assrtFileScore(String fileName, {required String version}) {
+int _assrtFileScore(
+  String fileName, {
+  required String version,
+  required OnlineSubtitleSearchRequest request,
+}) {
   final normalized = _normalizeToken(fileName);
   final normalizedVersion = _normalizeToken(version);
   var score = 0;
@@ -785,6 +832,11 @@ int _assrtFileScore(String fileName, {required String version}) {
   if (normalizedVersion.isNotEmpty && normalized.contains(normalizedVersion)) {
     score += 140;
   }
+  score += scoreSubtitleEpisodeMatch(
+    fileName,
+    seasonNumber: request.seasonNumber,
+    episodeNumber: request.episodeNumber,
+  );
   for (final token in const ['中英', '双语', '简中', '繁中', 'chs', 'cht']) {
     if (normalized.contains(_normalizeToken(token))) {
       score += 32;
@@ -794,11 +846,7 @@ int _assrtFileScore(String fileName, {required String version}) {
 }
 
 String _normalizedFileBaseName(String filePath) {
-  final normalized = filePath.trim();
-  if (normalized.isEmpty) {
-    return '';
-  }
-  return p.basenameWithoutExtension(normalized).replaceAll('.', ' ').trim();
+  return cleanSubtitleSearchFileName(filePath);
 }
 
 String _extensionLabel(String fileName) {
@@ -833,6 +881,13 @@ bool _assrtSuccess(Map<String, Object?> root) {
 
 Map<String, Object?>? _resolveAssrtDetailPayload(Map<String, Object?> root) {
   final sub = _readMap(root['sub']);
+  final nestedSubs = _readList(sub['subs']);
+  if (nestedSubs.isNotEmpty) {
+    final detail = _readMap(nestedSubs.first);
+    if (detail.isNotEmpty) {
+      return detail;
+    }
+  }
   if (sub.isNotEmpty) {
     return sub;
   }

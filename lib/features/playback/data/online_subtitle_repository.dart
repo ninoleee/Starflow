@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository_stub.dart'
     if (dart.library.io) 'package:starflow/features/playback/data/online_subtitle_repository_io.dart'
     as impl;
@@ -12,12 +13,6 @@ final onlineSubtitleRepositoryProvider = Provider<OnlineSubtitleRepository>((
 });
 
 abstract class OnlineSubtitleRepository {
-  Future<List<SubtitleSearchResult>> search(
-    String query, {
-    List<OnlineSubtitleSource> sources = const [OnlineSubtitleSource.assrt],
-    int maxResults = 0,
-  });
-
   Future<List<ValidatedSubtitleCandidate>> searchStructured(
     OnlineSubtitleSearchRequest request, {
     List<OnlineSubtitleSource> sources = const [
@@ -30,4 +25,8 @@ abstract class OnlineSubtitleRepository {
   });
 
   Future<SubtitleDownloadResult> download(SubtitleSearchResult result);
+
+  Future<LocalStorageCacheSummary> inspectCacheSummary();
+
+  Future<void> clearCache();
 }

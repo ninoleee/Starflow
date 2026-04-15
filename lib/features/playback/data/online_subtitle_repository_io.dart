@@ -1,12 +1,11 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/features/playback/application/subtitle_language_preferences.dart';
@@ -32,8 +31,6 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
   })  : _settingsProvider = settingsProvider,
         _validationPipeline = SubtitleValidationPipeline(_client);
 
-  static const _assrtSearchMarker =
-      '<div onmouseover="addclass(this,\'subitem_hover\')" onmouseout="redclass(this,\'subitem_hover\')" class="subitem"';
   static const _openSubtitlesApiKey = String.fromEnvironment(
     'STARFLOW_OPENSUBTITLES_API_KEY',
   );
@@ -42,105 +39,6 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
   final AppSettings Function() _settingsProvider;
   final SubtitleValidationPipeline _validationPipeline;
   Future<Directory>? _cacheDirectoryFuture;
-
-  @override
-  Future<List<SubtitleSearchResult>> search(
-    String query, {
-    List<OnlineSubtitleSource> sources = const [OnlineSubtitleSource.assrt],
-    int maxResults = 0,
-  }) async {
-    final normalizedQuery = query.trim();
-    subtitleSearchTrace(
-      'repository.search.start',
-      fields: {
-        'query': normalizedQuery,
-        'sources': sources.map((item) => item.name).join('/'),
-        'maxResults': maxResults,
-      },
-    );
-    if (normalizedQuery.isEmpty) {
-      subtitleSearchTrace('repository.search.skip-empty-query');
-      return const [];
-    }
-
-    final enabledSources = sources.toSet();
-    if (enabledSources.isEmpty) {
-      subtitleSearchTrace('repository.search.skip-empty-sources');
-      return const [];
-    }
-
-    final results = <SubtitleSearchResult>[];
-    final errors = <String>[];
-    final preferredLanguages = _settingsProvider().subtitlePreferredLanguages;
-
-    if (enabledSources.contains(OnlineSubtitleSource.assrt)) {
-      try {
-        final assrtResults = await _searchSourceWithFallback(
-          normalizedQuery,
-          source: OnlineSubtitleSource.assrt,
-          searcher: _searchAssrt,
-        );
-        results.addAll(assrtResults);
-        subtitleSearchTrace(
-          'repository.search.source-finished',
-          fields: {
-            'source': OnlineSubtitleSource.assrt.name,
-            'count': assrtResults.length,
-            'downloadable':
-                assrtResults.where((item) => item.canDownload).length,
-            'autoLoadable':
-                assrtResults.where((item) => item.canAutoLoad).length,
-            'sample': _sampleResultTitles(assrtResults),
-          },
-        );
-      } catch (error, stackTrace) {
-        errors.add('ASSRT: $error');
-        subtitleSearchTrace(
-          'repository.search.source-failed',
-          fields: {
-            'source': OnlineSubtitleSource.assrt.name,
-            'query': normalizedQuery,
-          },
-          error: error,
-          stackTrace: stackTrace,
-        );
-      }
-    }
-
-    if (results.isEmpty && errors.isNotEmpty) {
-      subtitleSearchTrace(
-        'repository.search.failed',
-        fields: {
-          'query': normalizedQuery,
-          'errors': errors.join('；'),
-        },
-      );
-      throw StateError(errors.join('；'));
-    }
-
-    results.sort(
-      (left, right) => _compareSearchResults(
-        left,
-        right,
-        configuredLanguages: preferredLanguages,
-      ),
-    );
-    final limitedResults = maxResults > 0 && results.length > maxResults
-        ? results.take(maxResults).toList(growable: false)
-        : results;
-    subtitleSearchTrace(
-      'repository.search.finished',
-      fields: {
-        'query': normalizedQuery,
-        'total': results.length,
-        'returned': limitedResults.length,
-        'downloadable': limitedResults.where((item) => item.canDownload).length,
-        'autoLoadable': limitedResults.where((item) => item.canAutoLoad).length,
-        'sample': _sampleResultTitles(limitedResults),
-      },
-    );
-    return limitedResults;
-  }
 
   @override
   Future<List<ValidatedSubtitleCandidate>> searchStructured(
@@ -172,14 +70,43 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
       return const [];
     }
 
-    final hitLists = await Future.wait(
-      providers.map((provider) => provider.search(request)),
-    );
+    final hitLists = <List<ProviderSubtitleHit>>[];
+    final errors = <String>[];
+    for (final provider in providers) {
+      try {
+        hitLists.add(await provider.search(request));
+      } catch (error, stackTrace) {
+        errors.add('${provider.providerLabel}: $error');
+        subtitleSearchTrace(
+          'repository.structured.search.provider-failed',
+          fields: {
+            'source': provider.source.name,
+            'query': request.normalizedQuery,
+          },
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
     final hits = hitLists.expand((item) => item).toList(growable: false);
+    subtitleSearchTrace(
+      'repository.structured.search.hits-collected',
+      fields: {
+        'hits': hits.length,
+        'downloadable': hits.where((item) => item.canDownload).length,
+        'sample': hits
+            .take(3)
+            .map((item) => '${item.providerLabel}:${item.title}')
+            .join(' | '),
+      },
+    );
+    if (hits.isEmpty && errors.isNotEmpty) {
+      throw StateError(errors.join('；'));
+    }
     final limitedHits = maxResults > 0 && hits.length > maxResults
         ? hits.take(maxResults).toList(growable: false)
         : hits;
-    final validated = await _validationPipeline.validateHits(
+    final candidates = await _validationPipeline.validateHits(
       limitedHits,
       maxValidated: maxValidated,
     );
@@ -187,11 +114,20 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
       'repository.structured.search.finished',
       fields: {
         'hits': hits.length,
-        'validated': validated.length,
+        'processed': candidates.length,
+        'validated': candidates
+            .where((item) => item.status == SubtitleValidationStatus.validated)
+            .length,
+        'failed': candidates
+            .where((item) => item.status == SubtitleValidationStatus.failed)
+            .length,
+        'skipped': candidates
+            .where((item) => item.status == SubtitleValidationStatus.skipped)
+            .length,
         'sources': providers.map((item) => item.source.name).join('/'),
       },
     );
-    return validated;
+    return candidates;
   }
 
   List<OnlineSubtitleStructuredProvider> _buildStructuredProviders() {
@@ -223,131 +159,6 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
     ];
   }
 
-  Future<List<SubtitleSearchResult>> _searchSourceWithFallback(
-    String query, {
-    required OnlineSubtitleSource source,
-    required Future<List<SubtitleSearchResult>> Function(String query) searcher,
-  }) async {
-    final variants = buildSubtitleSearchQueryVariants(query);
-    if (variants.isEmpty) {
-      return const [];
-    }
-
-    Object? lastError;
-    StackTrace? lastStackTrace;
-    List<SubtitleSearchResult> lastResults = const [];
-
-    for (var index = 0; index < variants.length; index++) {
-      final variant = variants[index];
-      final isFallback = index > 0;
-      if (isFallback) {
-        subtitleSearchTrace(
-          'repository.search.fallback-query',
-          fields: {
-            'source': source.name,
-            'originalQuery': query,
-            'fallbackQuery': variant,
-            'attempt': index + 1,
-          },
-        );
-      }
-
-      try {
-        final variantResults = await searcher(variant);
-        lastResults = variantResults;
-        if (variantResults.isNotEmpty || index == variants.length - 1) {
-          if (isFallback) {
-            subtitleSearchTrace(
-              'repository.search.fallback-result',
-              fields: {
-                'source': source.name,
-                'fallbackQuery': variant,
-                'count': variantResults.length,
-                'sample': _sampleResultTitles(variantResults),
-              },
-            );
-          }
-          return variantResults;
-        }
-      } catch (error, stackTrace) {
-        lastError = error;
-        lastStackTrace = stackTrace;
-        if (index == variants.length - 1) {
-          Error.throwWithStackTrace(error, stackTrace);
-        }
-        subtitleSearchTrace(
-          isFallback
-              ? 'repository.search.fallback-query-failed'
-              : 'repository.search.primary-query-failed',
-          fields: {
-            'source': source.name,
-            'query': variant,
-            'originalQuery': query,
-          },
-          error: error,
-          stackTrace: stackTrace,
-        );
-      }
-    }
-
-    if (lastError != null && lastStackTrace != null) {
-      Error.throwWithStackTrace(lastError, lastStackTrace);
-    }
-    return lastResults;
-  }
-
-  Future<List<SubtitleSearchResult>> _searchAssrt(String query) async {
-    final uri = Uri.https('assrt.net', '/sub/', {
-      'searchword': query,
-      'sort': 'rank',
-    });
-    subtitleSearchTrace(
-      'repository.assrt.request',
-      fields: {
-        'query': query,
-        'uri': uri,
-      },
-    );
-    final response = await _client.get(uri, headers: const {
-      'Accept':
-          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    });
-    final body = _readResponseBody(response);
-    subtitleSearchTrace(
-      'repository.assrt.response',
-      fields: {
-        'status': response.statusCode,
-        'bytes': response.bodyBytes.length,
-        'marker': body.contains(_assrtSearchMarker),
-        'snippet': _responseSnippet(body),
-      },
-    );
-    if (isAssrtErrorResponse(response.statusCode, body)) {
-      subtitleSearchTrace(
-        'repository.assrt.error-page',
-        fields: {
-          'query': query,
-          'status': response.statusCode,
-          'snippet': _responseSnippet(body),
-        },
-      );
-      throw StateError('ASSRT 当前返回错误页，暂时无法搜索字幕，请改用其他字幕源重试');
-    }
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError('字幕搜索失败：HTTP ${response.statusCode}');
-    }
-    final results = parseAssrtSearchHtml(body);
-    subtitleSearchTrace(
-      'repository.assrt.parsed',
-      fields: {
-        'query': query,
-        'count': results.length,
-        'sample': _sampleResultTitles(results),
-      },
-    );
-    return results;
-  }
-
   @override
   Future<SubtitleDownloadResult> download(SubtitleSearchResult result) {
     switch (result.source) {
@@ -360,6 +171,32 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
       case OnlineSubtitleSource.subdl:
         throw StateError('新结构化字幕源请走预验证后本地应用链路。');
     }
+  }
+
+  @override
+  Future<LocalStorageCacheSummary> inspectCacheSummary() async {
+    final downloadSummary =
+        await _inspectDirectorySummary(await _cacheDirectory());
+    final validationSummary =
+        await _inspectDirectorySummary(await _validationCacheDirectory());
+    return LocalStorageCacheSummary(
+      type: LocalStorageCacheType.subtitleCache,
+      entryCount: downloadSummary.entryCount + validationSummary.entryCount,
+      totalBytes: downloadSummary.totalBytes + validationSummary.totalBytes,
+    );
+  }
+
+  @override
+  Future<void> clearCache() async {
+    final downloadDirectory = await _cacheDirectory();
+    if (await downloadDirectory.exists()) {
+      await downloadDirectory.delete(recursive: true);
+    }
+    final validationDirectory = await _validationCacheDirectory();
+    if (await validationDirectory.exists()) {
+      await validationDirectory.delete(recursive: true);
+    }
+    _cacheDirectoryFuture = null;
   }
 
   Future<SubtitleDownloadResult> _downloadAndCacheResult(
@@ -388,12 +225,50 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
       await bucketDirectory.create(recursive: true);
     }
 
-    final existingExtracted = await _findBestExistingSubtitleFile(
-      bucketDirectory,
-      packageName: result.packageName,
-      version: result.version,
-      preferredLanguages: _settingsProvider().subtitlePreferredLanguages,
-    );
+    if (result.packageKind == SubtitlePackageKind.zipArchive) {
+      final cachedArchive = await _findExistingPackageFile(
+        bucketDirectory,
+        packageName: result.packageName,
+      );
+      if (cachedArchive != null) {
+        final extracted = await _extractBestSubtitleFromZip(
+          archiveFile: cachedArchive,
+          bucketDirectory: bucketDirectory,
+          version: result.version,
+          packageName: result.packageName,
+          preferredLanguages: _settingsProvider().subtitlePreferredLanguages,
+          seasonNumber: result.seasonNumber,
+          episodeNumber: result.episodeNumber,
+        );
+        subtitleSearchTrace(
+          'repository.download.cache-hit',
+          fields: {
+            'id': result.id,
+            'path': extracted.path,
+          },
+        );
+        return SubtitleDownloadResult(
+          cachedPath: bucketDirectory.path,
+          displayName: p.basenameWithoutExtension(extracted.path),
+          subtitleFilePath: extracted.path,
+        );
+      }
+    }
+
+    final existingExtracted = result.packageKind ==
+            SubtitlePackageKind.subtitleFile
+        ? await _findExistingSubtitleFileByPackageName(
+            bucketDirectory,
+            packageName: result.packageName,
+          )
+        : await _findBestExistingSubtitleFile(
+            bucketDirectory,
+            packageName: result.packageName,
+            version: result.version,
+            preferredLanguages: _settingsProvider().subtitlePreferredLanguages,
+            seasonNumber: result.seasonNumber,
+            episodeNumber: result.episodeNumber,
+          );
     if (existingExtracted != null) {
       subtitleSearchTrace(
         'repository.download.cache-hit',
@@ -457,6 +332,8 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
           version: result.version,
           packageName: result.packageName,
           preferredLanguages: _settingsProvider().subtitlePreferredLanguages,
+          seasonNumber: result.seasonNumber,
+          episodeNumber: result.episodeNumber,
         );
         subtitleSearchTrace(
           'repository.download.finished',
@@ -487,105 +364,13 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
     }
   }
 
-  @visibleForTesting
-  static List<SubtitleSearchResult> parseAssrtSearchHtml(String html) {
-    final normalized = html.trim();
-    if (normalized.isEmpty || !normalized.contains(_assrtSearchMarker)) {
-      return const [];
-    }
-
-    final segments = normalized.split(_assrtSearchMarker);
-    final results = <SubtitleSearchResult>[];
-    for (final rawSegment in segments.skip(1)) {
-      final segment = rawSegment.trim();
-      final titleMatch = RegExp(
-        r'<a class="introtitle"[^>]*title="([^"]+)"[^>]*href="([^"]+)"',
-        dotAll: true,
-      ).firstMatch(segment);
-      final downloadMatch = RegExp(
-        r"location\.href='([^']+)'",
-        dotAll: true,
-      ).firstMatch(segment);
-      if (titleMatch == null || downloadMatch == null) {
-        continue;
-      }
-
-      final title = _decodeHtmlText(titleMatch.group(1) ?? '');
-      final detailUrl =
-          _absoluteUrl('https://assrt.net/', titleMatch.group(2) ?? '');
-      final downloadUrl = _absoluteUrl(
-        'https://assrt.net/',
-        downloadMatch.group(1) ?? '',
-      );
-      final version = _extractAssrtField(segment, label: '版本');
-      final formatLabel = _extractAssrtField(segment, label: '格式');
-      final languageLabel = _extractAssrtField(segment, label: '语言');
-      final sourceLabel = _extractAssrtField(segment, label: '来源');
-      final publishDateLabel = _extractAssrtField(segment, label: '日期');
-      final downloadCount = int.tryParse(
-            RegExp(r'下载次数：\s*(\d+)').firstMatch(segment)?.group(1) ?? '',
-          ) ??
-          0;
-      final ratingValue = RegExp(
-        r'用户评分(\d+)分',
-      ).firstMatch(segment)?.group(1);
-      final ratingCount = int.tryParse(
-            RegExp(r'\((\d+)人评分\)').firstMatch(segment)?.group(1) ?? '',
-          ) ??
-          0;
-      final ratingLabel = ratingValue == null
-          ? ''
-          : '评分 ${ratingValue.trim()}${ratingCount > 0 ? ' · $ratingCount 人' : ''}';
-      final packageName = _extractPackageName(downloadUrl);
-      final packageKind = _resolvePackageKind(packageName);
-      final id =
-          RegExp(r'/download/(\d+)/').firstMatch(downloadUrl)?.group(1) ??
-              _stableHash(downloadUrl);
-
-      results.add(
-        SubtitleSearchResult(
-          id: id,
-          source: OnlineSubtitleSource.assrt,
-          providerLabel: 'ASSRT',
-          title: title,
-          version: version,
-          formatLabel: formatLabel,
-          languageLabel: languageLabel,
-          sourceLabel: sourceLabel,
-          publishDateLabel: publishDateLabel,
-          downloadCount: downloadCount,
-          ratingLabel: ratingLabel,
-          downloadUrl: downloadUrl,
-          detailUrl: detailUrl,
-          packageName: packageName,
-          packageKind: packageKind,
-        ),
-      );
-    }
-
-    results.sort(_compareSearchResults);
-    return results;
-  }
-
-  static String _extractAssrtField(
-    String segment, {
-    required String label,
-  }) {
-    final match = RegExp(
-      '$label：\\s*(.*?)</span>',
-      dotAll: true,
-    ).firstMatch(segment);
-    if (match == null) {
-      return '';
-    }
-    return _normalizeWhitespace(_decodeHtmlText(match.group(1) ?? ''));
-  }
-
   Future<File?> _findBestExistingSubtitleFile(
     Directory bucketDirectory, {
     required String packageName,
     required String version,
     required List<String> preferredLanguages,
+    int? seasonNumber,
+    int? episodeNumber,
   }) async {
     if (!await bucketDirectory.exists()) {
       return null;
@@ -609,16 +394,63 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
         packageName: packageName,
         version: version,
         preferredLanguages: preferredLanguages,
+        seasonNumber: seasonNumber,
+        episodeNumber: episodeNumber,
       ).compareTo(
         _subtitleCandidateScore(
           fileName: p.basename(left.path),
           packageName: packageName,
           version: version,
           preferredLanguages: preferredLanguages,
+          seasonNumber: seasonNumber,
+          episodeNumber: episodeNumber,
         ),
       ),
     );
     return candidates.first;
+  }
+
+  Future<File?> _findExistingSubtitleFileByPackageName(
+    Directory bucketDirectory, {
+    required String packageName,
+  }) async {
+    if (!await bucketDirectory.exists()) {
+      return null;
+    }
+    final normalizedName = _sanitizeFileName(packageName);
+    if (normalizedName.trim().isEmpty) {
+      return null;
+    }
+    final directFile = File(p.join(bucketDirectory.path, normalizedName));
+    if (await directFile.exists()) {
+      return directFile;
+    }
+    return null;
+  }
+
+  Future<File?> _findExistingPackageFile(
+    Directory bucketDirectory, {
+    required String packageName,
+  }) async {
+    if (!await bucketDirectory.exists()) {
+      return null;
+    }
+    final directFile =
+        File(p.join(bucketDirectory.path, _sanitizeFileName(packageName)));
+    if (await directFile.exists()) {
+      return directFile;
+    }
+    final packageExtension = p.extension(packageName).toLowerCase();
+    await for (final entity in bucketDirectory.list()) {
+      if (entity is! File) {
+        continue;
+      }
+      if (packageExtension.isNotEmpty &&
+          p.extension(entity.path).toLowerCase() == packageExtension) {
+        return entity;
+      }
+    }
+    return null;
   }
 
   Future<File> _extractBestSubtitleFromZip({
@@ -627,6 +459,8 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
     required String version,
     required String packageName,
     required List<String> preferredLanguages,
+    int? seasonNumber,
+    int? episodeNumber,
   }) async {
     final archive = ZipDecoder().decodeBytes(
       await archiveFile.readAsBytes(),
@@ -646,12 +480,16 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
         packageName: packageName,
         version: version,
         preferredLanguages: preferredLanguages,
+        seasonNumber: seasonNumber,
+        episodeNumber: episodeNumber,
       ).compareTo(
         _subtitleCandidateScore(
           fileName: left.name,
           packageName: packageName,
           version: version,
           preferredLanguages: preferredLanguages,
+          seasonNumber: seasonNumber,
+          episodeNumber: episodeNumber,
         ),
       ),
     );
@@ -672,9 +510,9 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
 
   Future<Directory> _cacheDirectory() {
     return _cacheDirectoryFuture ??= () async {
-      final baseDirectory = await getApplicationSupportDirectory();
+      final baseDirectory = await getTemporaryDirectory();
       final directory = Directory(
-        p.join(baseDirectory.path, 'starflow-subtitle-cache'),
+        p.join(baseDirectory.path, 'starflow', 'downloaded_online_subtitles'),
       );
       if (!await directory.exists()) {
         await directory.create(recursive: true);
@@ -682,254 +520,42 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
       return directory;
     }();
   }
+
+  Future<Directory> _validationCacheDirectory() async {
+    final root = await getTemporaryDirectory();
+    return Directory(
+      p.join(root.path, 'starflow', 'validated_online_subtitles'),
+    );
+  }
 }
 
-String _sampleResultTitles(List<SubtitleSearchResult> results) {
-  if (results.isEmpty) {
-    return '';
-  }
-  return results
-      .take(3)
-      .map((item) => '${item.providerLabel}:${item.title}')
-      .join(' | ');
-}
-
-String _responseSnippet(String body) {
-  final normalized = body.replaceAll(RegExp(r'\s+'), ' ').trim();
-  if (normalized.length <= 180) {
-    return normalized;
-  }
-  return '${normalized.substring(0, 177)}...';
-}
-
-int _compareSearchResults(
-  SubtitleSearchResult left,
-  SubtitleSearchResult right, {
-  Iterable<String> configuredLanguages = const <String>[],
-}) {
-  final preferredLanguageOrder = scorePreferredSubtitleText(
-    _buildSubtitleLanguagePreferenceText(right),
-    configuredLanguages: configuredLanguages,
-  ).compareTo(
-    scorePreferredSubtitleText(
-      _buildSubtitleLanguagePreferenceText(left),
-      configuredLanguages: configuredLanguages,
-    ),
-  );
-  if (preferredLanguageOrder != 0) {
-    return preferredLanguageOrder;
+Future<LocalStorageCacheSummary> _inspectDirectorySummary(
+  Directory directory,
+) async {
+  if (!await directory.exists()) {
+    return const LocalStorageCacheSummary(
+      type: LocalStorageCacheType.subtitleCache,
+      entryCount: 0,
+      totalBytes: 0,
+    );
   }
 
-  final downloadOrder = _compareBoolTrueFirst(
-    left.canDownload,
-    right.canDownload,
-  );
-  if (downloadOrder != 0) {
-    return downloadOrder;
-  }
-
-  final autoLoadOrder = _compareBoolTrueFirst(
-    left.canAutoLoad,
-    right.canAutoLoad,
-  );
-  if (autoLoadOrder != 0) {
-    return autoLoadOrder;
-  }
-
-  final packageOrder = _packageKindSortValue(left.packageKind).compareTo(
-    _packageKindSortValue(right.packageKind),
-  );
-  if (packageOrder != 0) {
-    return packageOrder;
-  }
-
-  final languageOrder = _subtitleLanguageScore(right.languageLabel).compareTo(
-    _subtitleLanguageScore(left.languageLabel),
-  );
-  if (languageOrder != 0) {
-    return languageOrder;
-  }
-
-  final ratingOrder = _ratingScore(right.ratingLabel).compareTo(
-    _ratingScore(left.ratingLabel),
-  );
-  if (ratingOrder != 0) {
-    return ratingOrder;
-  }
-
-  final downloadCountOrder = right.downloadCount.compareTo(left.downloadCount);
-  if (downloadCountOrder != 0) {
-    return downloadCountOrder;
-  }
-
-  return left.providerLabel.compareTo(right.providerLabel);
-}
-
-String _buildSubtitleLanguagePreferenceText(SubtitleSearchResult result) {
-  return [
-    result.languageLabel,
-    result.title,
-    result.version,
-    result.formatLabel,
-    result.sourceLabel,
-  ].where((item) => item.trim().isNotEmpty).join(' ');
-}
-
-int _compareBoolTrueFirst(bool left, bool right) {
-  if (left == right) {
-    return 0;
-  }
-  return left ? -1 : 1;
-}
-
-int _packageKindSortValue(SubtitlePackageKind kind) {
-  return switch (kind) {
-    SubtitlePackageKind.subtitleFile => 0,
-    SubtitlePackageKind.zipArchive => 1,
-    SubtitlePackageKind.rarArchive => 2,
-    SubtitlePackageKind.unsupported => 3,
-  };
-}
-
-int _subtitleLanguageScore(String label) {
-  final normalized = label.trim().toLowerCase();
-  if (normalized.isEmpty) {
-    return 0;
-  }
-
-  var score = 0;
-  if (normalized.contains('双语') ||
-      normalized.contains('中英') ||
-      normalized.contains('bilingual')) {
-    score += 6;
-  }
-  if (normalized.contains('简体') ||
-      normalized.contains('繁体') ||
-      normalized.contains('中文') ||
-      normalized.contains('chinese') ||
-      normalized.contains('chs') ||
-      normalized.contains('cht')) {
-    score += 5;
-  }
-  if (normalized.contains('英语') || normalized.contains('english')) {
-    score += 2;
-  }
-  return score;
-}
-
-int _ratingScore(String label) {
-  final match = RegExp(r'评分\s*(\d+)').firstMatch(label);
-  if (match != null) {
-    return int.tryParse(match.group(1) ?? '') ?? 0;
-  }
-  if (label.contains('官方')) {
-    return 8;
-  }
-  if (label.contains('转载精修')) {
-    return 6;
-  }
-  return 0;
-}
-
-@visibleForTesting
-List<String> buildSubtitleSearchQueryVariants(String query) {
-  final normalized = _normalizeWhitespace(query);
-  if (normalized.isEmpty) {
-    return const [];
-  }
-
-  final variants = <String>[];
-  final pending = <String>[normalized];
-  final seen = <String>{};
-
-  while (pending.isNotEmpty) {
-    final current = pending.removeAt(0);
-    if (!seen.add(current)) {
+  var entryCount = 0;
+  var totalBytes = 0;
+  await for (final entity
+      in directory.list(recursive: true, followLinks: false)) {
+    if (entity is! File) {
       continue;
     }
-    variants.add(current);
+    entryCount += 1;
+    totalBytes += await entity.length();
+  }
 
-    final withoutEpisode = _stripTrailingEpisodeToken(current);
-    if (withoutEpisode.isNotEmpty && !seen.contains(withoutEpisode)) {
-      pending.add(withoutEpisode);
-    }
-
-    final withoutYear = _stripTrailingYearToken(current);
-    if (withoutYear.isNotEmpty && !seen.contains(withoutYear)) {
-      pending.add(withoutYear);
-    }
-  }
-  return variants;
-}
-
-@visibleForTesting
-bool isAssrtErrorResponse(int statusCode, String body) {
-  final normalized = body.trim();
-  if (statusCode >= 400) {
-    return true;
-  }
-  if (normalized.isEmpty) {
-    return false;
-  }
-  return normalized.contains('java.money.noMoneyException') ||
-      normalized.contains('请您通过Email报告指向此页面的网址') ||
-      normalized.contains('啊呀');
-}
-
-String _readResponseBody(http.Response response) {
-  try {
-    return utf8.decode(response.bodyBytes, allowMalformed: true);
-  } catch (_) {
-    return response.body;
-  }
-}
-
-String _absoluteUrl(String baseUrl, String value) {
-  final trimmed = value.trim();
-  if (trimmed.isEmpty) {
-    return '';
-  }
-  final uri = Uri.tryParse(trimmed);
-  if (uri != null && uri.hasScheme) {
-    return trimmed;
-  }
-  return Uri.parse(baseUrl).resolve(trimmed).toString();
-}
-
-String _extractPackageName(String downloadUrl) {
-  final uri = Uri.tryParse(downloadUrl);
-  final segments = uri?.pathSegments ?? const <String>[];
-  if (segments.isEmpty) {
-    return 'subtitle.bin';
-  }
-  final rawName = segments.last.trim();
-  if (rawName.isEmpty) {
-    return 'subtitle.bin';
-  }
-  try {
-    return Uri.decodeComponent(rawName);
-  } on ArgumentError catch (error, stackTrace) {
-    subtitleSearchTrace(
-      'repository.package-name.decode-fallback',
-      fields: {
-        'downloadUrl': downloadUrl,
-        'rawName': rawName,
-      },
-      error: error,
-      stackTrace: stackTrace,
-    );
-    return rawName;
-  }
-}
-
-SubtitlePackageKind _resolvePackageKind(String packageName) {
-  final extension = p.extension(packageName).toLowerCase();
-  return switch (extension) {
-    '.srt' || '.ass' || '.ssa' || '.vtt' => SubtitlePackageKind.subtitleFile,
-    '.zip' => SubtitlePackageKind.zipArchive,
-    '.rar' => SubtitlePackageKind.rarArchive,
-    _ => SubtitlePackageKind.unsupported,
-  };
+  return LocalStorageCacheSummary(
+    type: LocalStorageCacheType.subtitleCache,
+    entryCount: entryCount,
+    totalBytes: totalBytes,
+  );
 }
 
 bool _isSubtitleFileName(String fileName) {
@@ -945,6 +571,8 @@ int _subtitleCandidateScore({
   required String packageName,
   required String version,
   Iterable<String> preferredLanguages = const <String>[],
+  int? seasonNumber,
+  int? episodeNumber,
 }) {
   final normalized = _normalizeCandidateText(fileName);
   final normalizedPackageName = _normalizeCandidateText(packageName);
@@ -966,6 +594,11 @@ int _subtitleCandidateScore({
   if (normalizedVersion.isNotEmpty && normalized.contains(normalizedVersion)) {
     score += 140;
   }
+  score += scoreSubtitleEpisodeMatch(
+    fileName,
+    seasonNumber: seasonNumber,
+    episodeNumber: episodeNumber,
+  );
   score += scorePreferredSubtitleText(
     fileName,
     configuredLanguages: preferredLanguages,
@@ -999,32 +632,6 @@ int _subtitleCandidateScore({
   return score;
 }
 
-String _stripTrailingEpisodeToken(String query) {
-  final trimmed = query.trim();
-  if (trimmed.isEmpty) {
-    return '';
-  }
-  return _normalizeWhitespace(
-    trimmed.replaceFirst(
-      RegExp(
-        r'\s*(?:s\d{1,2}e\d{1,2}|season\s*\d+\s*episode\s*\d+|第\s*\d+\s*季\s*第\s*\d+\s*集|第\s*\d+\s*集)\s*$',
-        caseSensitive: false,
-      ),
-      '',
-    ),
-  );
-}
-
-String _stripTrailingYearToken(String query) {
-  final trimmed = query.trim();
-  if (trimmed.isEmpty) {
-    return '';
-  }
-  return _normalizeWhitespace(
-    trimmed.replaceFirst(RegExp(r'\s+(?:19|20)\d{2}\s*$'), ''),
-  );
-}
-
 String _normalizeCandidateText(String value) {
   return value.trim().toLowerCase().replaceAll(
         RegExp(r'[\s\-_.,:;!?/\\|()\[\]{}<>《》【】"“”·]+'),
@@ -1038,22 +645,6 @@ String _sanitizeFileName(String value) {
     return 'subtitle';
   }
   return trimmed.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]+'), '_');
-}
-
-String _decodeHtmlText(String value) {
-  return value
-      .replaceAll(RegExp(r'<[^>]+>'), ' ')
-      .replaceAll('&nbsp;', ' ')
-      .replaceAll('&amp;', '&')
-      .replaceAll('&quot;', '"')
-      .replaceAll('&#39;', "'")
-      .replaceAll('&#x27;', "'")
-      .replaceAll('&lt;', '<')
-      .replaceAll('&gt;', '>');
-}
-
-String _normalizeWhitespace(String value) {
-  return value.replaceAll(RegExp(r'\s+'), ' ').trim();
 }
 
 String _stableHash(String value) {

@@ -1,5 +1,129 @@
 import 'dart:ui';
 
+class SubtitlePreferredLanguageOption {
+  const SubtitlePreferredLanguageOption({
+    required this.value,
+    required this.label,
+    this.subtitle = '',
+  });
+
+  final String value;
+  final String label;
+  final String subtitle;
+}
+
+const List<SubtitlePreferredLanguageOption>
+    commonSubtitlePreferredLanguageOptions = <SubtitlePreferredLanguageOption>[
+  SubtitlePreferredLanguageOption(
+    value: 'zh-cn',
+    label: '简体中文',
+    subtitle: 'zh-cn',
+  ),
+  SubtitlePreferredLanguageOption(
+    value: 'zh-tw',
+    label: '繁体中文',
+    subtitle: 'zh-tw',
+  ),
+  SubtitlePreferredLanguageOption(
+    value: 'en',
+    label: '英语',
+    subtitle: 'en',
+  ),
+  SubtitlePreferredLanguageOption(
+    value: 'ja',
+    label: '日语',
+    subtitle: 'ja',
+  ),
+  SubtitlePreferredLanguageOption(
+    value: 'ko',
+    label: '韩语',
+    subtitle: 'ko',
+  ),
+];
+
+String canonicalizeSubtitlePreferredLanguage(
+  String raw, {
+  Locale? systemLocale,
+}) {
+  return _canonicalSubtitlePreferenceKey(raw, systemLocale: systemLocale);
+}
+
+String formatSubtitlePreferredLanguageLabel(
+  String raw, {
+  Locale? systemLocale,
+}) {
+  final canonical = canonicalizeSubtitlePreferredLanguage(
+    raw,
+    systemLocale: systemLocale,
+  );
+  return switch (canonical) {
+    'zh-cn' => '简体中文',
+    'zh-tw' => '繁体中文',
+    'zh' => '中文',
+    'en' => '英语',
+    'ja' => '日语',
+    'ko' => '韩语',
+    'fr' => '法语',
+    'de' => '德语',
+    'es' => '西班牙语',
+    'pt' => '葡萄牙语',
+    'ru' => '俄语',
+    _ => raw.trim().isNotEmpty ? raw.trim() : canonical,
+  };
+}
+
+List<String> orderCommonSubtitlePreferredLanguages(
+  Iterable<String> values, {
+  Locale? systemLocale,
+}) {
+  final selected = values
+      .map(
+        (item) => canonicalizeSubtitlePreferredLanguage(
+          item,
+          systemLocale: systemLocale,
+        ),
+      )
+      .where((item) => item.isNotEmpty)
+      .toSet();
+  final ordered = <String>[];
+  for (final option in commonSubtitlePreferredLanguageOptions) {
+    if (selected.remove(option.value)) {
+      ordered.add(option.value);
+    }
+  }
+  return ordered;
+}
+
+String formatSubtitlePreferredLanguageSummary(
+  Iterable<String> values, {
+  Locale? systemLocale,
+  String emptyLabel = '未限制',
+  String separator = ' / ',
+}) {
+  final labels = <String>[];
+  final seen = <String>{};
+  for (final value in values) {
+    final canonical = canonicalizeSubtitlePreferredLanguage(
+      value,
+      systemLocale: systemLocale,
+    );
+    final dedupeKey = canonical.isNotEmpty ? canonical : value.trim();
+    if (dedupeKey.isEmpty || !seen.add(dedupeKey)) {
+      continue;
+    }
+    labels.add(
+      formatSubtitlePreferredLanguageLabel(
+        value,
+        systemLocale: systemLocale,
+      ),
+    );
+  }
+  if (labels.isEmpty) {
+    return emptyLabel;
+  }
+  return labels.join(separator);
+}
+
 List<String> resolveEffectiveSubtitleSearchLanguages(
   Iterable<String> configuredLanguages, {
   Locale? systemLocale,

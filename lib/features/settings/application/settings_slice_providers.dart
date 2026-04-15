@@ -90,8 +90,6 @@ final settingsPlaybackSliceProvider = Provider<SettingsPlaybackSlice>(
           subtitlePreferredLanguages: settings.subtitlePreferredLanguages,
           subtitleSearchMaxValidatedCandidates:
               settings.subtitleSearchMaxValidatedCandidates,
-          subtitleAllowLegacyProvidersFallback:
-              settings.subtitleAllowLegacyProvidersFallback,
           configuredBackgroundPlaybackEnabled:
               settings.playbackBackgroundPlaybackEnabled,
           effectiveBackgroundPlaybackEnabled:
@@ -213,7 +211,6 @@ class SettingsPlaybackSlice {
     required this.subdlApiKey,
     required this.subtitlePreferredLanguages,
     required this.subtitleSearchMaxValidatedCandidates,
-    required this.subtitleAllowLegacyProvidersFallback,
     required this.configuredBackgroundPlaybackEnabled,
     required this.effectiveBackgroundPlaybackEnabled,
   });
@@ -238,7 +235,6 @@ class SettingsPlaybackSlice {
   final String subdlApiKey;
   final List<String> subtitlePreferredLanguages;
   final int subtitleSearchMaxValidatedCandidates;
-  final bool subtitleAllowLegacyProvidersFallback;
   final bool configuredBackgroundPlaybackEnabled;
   final bool effectiveBackgroundPlaybackEnabled;
 
@@ -277,8 +273,6 @@ class SettingsPlaybackSlice {
             ) &&
             other.subtitleSearchMaxValidatedCandidates ==
                 subtitleSearchMaxValidatedCandidates &&
-            other.subtitleAllowLegacyProvidersFallback ==
-                subtitleAllowLegacyProvidersFallback &&
             other.configuredBackgroundPlaybackEnabled ==
                 configuredBackgroundPlaybackEnabled &&
             other.effectiveBackgroundPlaybackEnabled ==
@@ -310,7 +304,6 @@ class SettingsPlaybackSlice {
           subdlApiKey,
           Object.hashAll(subtitlePreferredLanguages),
           subtitleSearchMaxValidatedCandidates,
-          subtitleAllowLegacyProvidersFallback,
           configuredBackgroundPlaybackEnabled,
           effectiveBackgroundPlaybackEnabled,
         ),

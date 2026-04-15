@@ -246,7 +246,6 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     required String subdlApiKey,
     required List<String> subtitlePreferredLanguages,
     required int subtitleSearchMaxValidatedCandidates,
-    required bool subtitleAllowLegacyProvidersFallback,
     required bool backgroundPlaybackEnabled,
     required PlaybackEngine playbackEngine,
     required PlaybackDecodeMode playbackDecodeMode,
@@ -285,8 +284,6 @@ class SettingsController extends AsyncNotifier<AppSettings> {
             clampSubtitleSearchMaxValidatedCandidates(
           subtitleSearchMaxValidatedCandidates,
         ),
-        subtitleAllowLegacyProvidersFallback:
-            subtitleAllowLegacyProvidersFallback,
         playbackBackgroundPlaybackEnabled: backgroundPlaybackEnabled,
         playbackEngine: playbackEngine,
         playbackDecodeMode: playbackDecodeMode,
@@ -484,7 +481,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   void _syncRuntimeTraceSettings(AppSettings settings) {
     setPlaybackTraceEnabled(false);
-    setSubtitleSearchTraceEnabled(false);
+    setSubtitleSearchTraceEnabled(true);
   }
 
   HomeModuleConfig _resolveHeroModule(AppSettings settings) {

@@ -1,6 +1,7 @@
 enum LocalStorageCacheType {
   nasMetadataIndex,
   detailData,
+  subtitleCache,
   playbackMemory,
   televisionSearchPreferences,
   images,
@@ -13,6 +14,8 @@ extension LocalStorageCacheTypeX on LocalStorageCacheType {
         return '媒体库索引';
       case LocalStorageCacheType.detailData:
         return '详情匹配与刮削缓存';
+      case LocalStorageCacheType.subtitleCache:
+        return '字幕缓存';
       case LocalStorageCacheType.playbackMemory:
         return '播放记录与续播';
       case LocalStorageCacheType.televisionSearchPreferences:
@@ -28,6 +31,8 @@ extension LocalStorageCacheTypeX on LocalStorageCacheType {
         return '本地 WebDAV 索引、分区结果和扫描状态';
       case LocalStorageCacheType.detailData:
         return '详情页资源命中、刮削结果、字幕选择和手动修正';
+      case LocalStorageCacheType.subtitleCache:
+        return '在线字幕下载、解压结果和预验证缓存';
       case LocalStorageCacheType.playbackMemory:
         return '播放历史、续播进度与按剧跳过规则';
       case LocalStorageCacheType.televisionSearchPreferences:

@@ -1,7 +1,5 @@
 import 'package:starflow/features/details/application/detail_library_match_service.dart';
-import 'package:starflow/features/details/application/detail_subtitle_controller.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
-import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 String detailProviderInvalidationKey(MediaDetailTarget target) {
@@ -38,16 +36,12 @@ class DetailCachedStateRestorePlan {
   const DetailCachedStateRestorePlan({
     required this.libraryMatchChoices,
     required this.selectedLibraryMatchIndex,
-    required this.subtitleSearchChoices,
-    required this.selectedSubtitleSearchIndex,
     required this.manualOverrideTarget,
     required this.structuralSeedTarget,
   });
 
   final List<MediaDetailTarget> libraryMatchChoices;
   final int selectedLibraryMatchIndex;
-  final List<CachedSubtitleSearchOption> subtitleSearchChoices;
-  final int selectedSubtitleSearchIndex;
   final MediaDetailTarget? manualOverrideTarget;
   final MediaDetailTarget structuralSeedTarget;
 }
@@ -115,18 +109,11 @@ class DetailCachedStateRestorer {
           restoredTarget: preservedResolvedTarget,
         );
 
-    final normalizedSubtitleIndex = normalizeSubtitleSearchIndex(
-      cachedState.selectedSubtitleSearchIndex,
-      choices: cachedState.subtitleSearchChoices,
-    );
-
     return DetailCachedStateRestorePlan(
       libraryMatchChoices: hasMultiChoices
           ? preferredChoices.choices
           : const <MediaDetailTarget>[],
       selectedLibraryMatchIndex: selectedLibraryMatchIndex,
-      subtitleSearchChoices: cachedState.subtitleSearchChoices,
-      selectedSubtitleSearchIndex: normalizedSubtitleIndex,
       manualOverrideTarget: hasMultiChoices
           ? preferredChoices.choices[selectedLibraryMatchIndex]
           : (shouldRestoreSingleResolvedTarget
