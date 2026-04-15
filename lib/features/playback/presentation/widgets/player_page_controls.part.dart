@@ -443,7 +443,10 @@ extension _PlayerPageStateControls on _PlayerPageState {
       child: MaterialDesktopVideoControlsTheme(
         normal: desktopThemeData,
         fullscreen: desktopFullscreenThemeData,
-        child: AdaptiveVideoControls(state),
+        child: KeyedSubtree(
+          key: ValueKey('adaptive-controls-$_adaptiveGestureLevelsRevision'),
+          child: AdaptiveVideoControls(state),
+        ),
       ),
     );
   }
@@ -479,10 +482,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
             ? 42.0
             : 0.0;
     final enableVerticalGestureControls = _supportsAdaptiveVerticalGestures;
-    final normalizedPlayerVolume = (((_player?.state.volume ?? 100.0) / 100.0)
-            .clamp(0.0, 1.0))
-        .toDouble();
-    _adaptiveGestureVolume = normalizedPlayerVolume;
     final seekBarMargin = isPortrait
         ? EdgeInsets.only(
             left: 16,
@@ -578,17 +577,27 @@ extension _PlayerPageStateControls on _PlayerPageState {
       return;
     }
     final brightness = await _readSystemBrightnessLevel();
-    if (brightness != null && mounted) {
-      setState(() {
-        _adaptiveGestureBrightness = brightness;
-      });
-    }
     final volume = await _readSystemVolumeLevel();
-    if (volume != null && mounted) {
-      setState(() {
-        _adaptiveGestureVolume = volume;
-      });
+    if (!mounted) {
+      return;
     }
+    final brightnessChanged =
+        brightness != null &&
+        (_adaptiveGestureBrightness - brightness).abs() >= 0.01;
+    final volumeChanged =
+        volume != null && (_adaptiveGestureVolume - volume).abs() >= 0.01;
+    if (!brightnessChanged && !volumeChanged) {
+      return;
+    }
+    setState(() {
+      if (brightnessChanged) {
+        _adaptiveGestureBrightness = brightness;
+      }
+      if (volumeChanged) {
+        _adaptiveGestureVolume = volume;
+      }
+      _adaptiveGestureLevelsRevision++;
+    });
   }
 
   Future<double?> _readSystemBrightnessLevel() async {

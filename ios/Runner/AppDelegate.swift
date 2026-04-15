@@ -145,6 +145,9 @@ import UIKit
   }
 
   private func currentSystemVolumeLevel() -> Float {
+    if let sliderLevel = currentSystemVolumeSliderLevel() {
+      return sliderLevel
+    }
     let session = AVAudioSession.sharedInstance()
     try? session.setActive(true)
     return session.outputVolume
@@ -163,6 +166,20 @@ import UIKit
       slider.sendActions(for: .valueChanged)
       slider.sendActions(for: .touchUpInside)
     }
+  }
+
+  private func currentSystemVolumeSliderLevel() -> Float? {
+    if Thread.isMainThread {
+      attachSystemVolumeViewIfNeeded()
+      return systemVolumeView.subviews.compactMap { $0 as? UISlider }.first?.value
+    }
+
+    var sliderLevel: Float?
+    DispatchQueue.main.sync { [weak self] in
+      self?.attachSystemVolumeViewIfNeeded()
+      sliderLevel = self?.systemVolumeView.subviews.compactMap { $0 as? UISlider }.first?.value
+    }
+    return sliderLevel
   }
 
   private func installPlaybackSessionChannelIfNeeded() {

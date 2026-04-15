@@ -176,6 +176,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _isEmbeddedMpvFullscreen = false;
   double _adaptiveGestureBrightness = 0.5;
   double _adaptiveGestureVolume = 1.0;
+  int _adaptiveGestureLevelsRevision = 0;
   bool _introSkipApplied = false;
   bool _outroSkipApplied = false;
   Duration _latestPosition = Duration.zero;
@@ -332,6 +333,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_bindAdaptiveGestureSystemLevels());
+    }
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       unawaited(_persistPlaybackProgress(force: true));
