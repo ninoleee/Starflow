@@ -1326,6 +1326,24 @@ extension AppSettingsPerformanceX on AppSettings {
         effectiveUiPerformanceTier == AppUiPerformanceTier.performance;
   }
 
+  bool effectiveLightweightHomeHeroEnabled({required bool isTelevision}) {
+    return isTelevision ||
+        performanceLightweightHomeHeroEnabled ||
+        effectiveUiPerformanceTier == AppUiPerformanceTier.performance;
+  }
+
+  bool effectiveSlimDetailHeroEnabled({required bool isTelevision}) {
+    return isTelevision ||
+        performanceSlimDetailHeroEnabled ||
+        effectiveUiPerformanceTier == AppUiPerformanceTier.performance;
+  }
+
+  bool effectiveLightweightTvFocusEnabled({required bool isTelevision}) {
+    return isTelevision &&
+        (performanceLightweightTvFocusEnabled ||
+            effectiveUiPerformanceTier == AppUiPerformanceTier.performance);
+  }
+
   bool get effectiveStartupProbeEnabled {
     return effectiveUiPerformanceTier != AppUiPerformanceTier.performance;
   }

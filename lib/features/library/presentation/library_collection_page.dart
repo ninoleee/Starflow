@@ -194,57 +194,12 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
           fit: StackFit.expand,
           children: [
             AppPageBackground(
-              child: ListView(
-                controller: _scrollController,
-                padding: overlayToolbarPagePadding(context),
-                children: [
-                  if (isTelevision)
-                    TvFocusableAction(
-                      onPressed: () => FocusScope.of(context).nextFocus(),
-                      focusNode: _headerFocusNode,
-                      focusId: 'library-collection:header',
-                      borderRadius: BorderRadius.circular(20),
-                      child: headerContent,
-                    )
-                  else
-                    headerContent,
-                  const SizedBox(height: 20),
-                  displayAsync.when(
-                    data: (pageItems) {
-                      final prefetchTargets = pageItems.items
-                          .map(MediaDetailTarget.fromMediaItem);
-                      if (isTelevision) {
-                        _ratingPrefetchCoordinator.scheduleInMemoryPrefetch(
-                          ref: ref,
-                          targets: prefetchTargets,
-                          isPageActive: () => mounted && isPageVisible,
-                        );
-                      } else {
-                        _ratingPrefetchCoordinator.schedulePrefetch(
-                          ref: ref,
-                          targets: prefetchTargets,
-                          isPageActive: () => mounted && isPageVisible,
-                        );
-                      }
-                      return LibraryPagedGrid(
-                        pageItems: pageItems.items,
-                        totalItems: pageItems.totalItems,
-                        currentPage: _currentPage,
-                        isTelevision: isTelevision,
-                        focusScopePrefix:
-                            _libraryCollectionGridFocusScopePrefix(target),
-                        onPageChanged: _handleCollectionPageChanged,
-                        onItemContextAction: (item) =>
-                            _handleItemContextAction(item),
-                        emptyMessage: '无',
-                      );
-                    },
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (error, stackTrace) => Text('加载失败：$error'),
-                  ),
-                  appPageBottomSpacer(),
-                ],
+              child: _buildScrollContent(
+                context: context,
+                target: target,
+                isTelevision: isTelevision,
+                headerContent: headerContent,
+                displayAsync: displayAsync,
               ),
             ),
             Positioned(
@@ -259,6 +214,176 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
         ),
       ),
     );
+  }
+
+  Widget _buildScrollContent({
+    required BuildContext context,
+    required LibraryCollectionTarget target,
+    required bool isTelevision,
+    required Widget headerContent,
+    required AsyncValue<LibraryVisiblePageItemsResult> displayAsync,
+  }) {
+    if (isTelevision) {
+      return _buildTelevisionScrollContent(
+        context: context,
+        target: target,
+        headerContent: headerContent,
+        displayAsync: displayAsync,
+      );
+    }
+
+    return ListView(
+      controller: _scrollController,
+      padding: overlayToolbarPagePadding(context),
+      children: [
+        _buildHeader(headerContent, isTelevision: false),
+        const SizedBox(height: 20),
+        _buildGrid(
+          target: target,
+          displayAsync: displayAsync,
+          isTelevision: false,
+        ),
+        appPageBottomSpacer(),
+      ],
+    );
+  }
+
+  Widget _buildTelevisionScrollContent({
+    required BuildContext context,
+    required LibraryCollectionTarget target,
+    required Widget headerContent,
+    required AsyncValue<LibraryVisiblePageItemsResult> displayAsync,
+  }) {
+    final scrollView = CustomScrollView(
+      controller: _scrollController,
+      clipBehavior: Clip.none,
+      slivers: [
+        SliverPadding(
+          padding: overlayToolbarPagePadding(context),
+          sliver: SliverMainAxisGroup(
+            slivers: [
+              SliverToBoxAdapter(
+                child: _buildHeader(headerContent, isTelevision: true),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 20)),
+              ..._buildGridSlivers(
+                target: target,
+                displayAsync: displayAsync,
+                isTelevision: true,
+              ),
+              appPageBottomSliverSpacer(),
+            ],
+          ),
+        ),
+      ],
+    );
+    final loadedPageItems = displayAsync.asData?.value;
+    if (loadedPageItems == null) {
+      return scrollView;
+    }
+    return LibraryPagedGridKeyboardActions(
+      enabled: true,
+      totalItems: loadedPageItems.totalItems,
+      currentPage: _currentPage,
+      pageSize: _gridPageSize,
+      onPageChanged: _handleCollectionPageChanged,
+      child: scrollView,
+    );
+  }
+
+  Widget _buildHeader(
+    Widget headerContent, {
+    required bool isTelevision,
+  }) {
+    if (!isTelevision) {
+      return headerContent;
+    }
+    return TvFocusableAction(
+      onPressed: () => FocusScope.of(context).nextFocus(),
+      focusNode: _headerFocusNode,
+      focusId: 'library-collection:header',
+      borderRadius: BorderRadius.circular(20),
+      child: headerContent,
+    );
+  }
+
+  Widget _buildGrid({
+    required LibraryCollectionTarget target,
+    required AsyncValue<LibraryVisiblePageItemsResult> displayAsync,
+    required bool isTelevision,
+  }) {
+    return displayAsync.when(
+      data: (pageItems) {
+        _scheduleRatingPrefetch(pageItems, isTelevision: isTelevision);
+        return LibraryPagedGrid(
+          pageItems: pageItems.items,
+          totalItems: pageItems.totalItems,
+          currentPage: _currentPage,
+          isTelevision: isTelevision,
+          focusScopePrefix: _libraryCollectionGridFocusScopePrefix(target),
+          onPageChanged: _handleCollectionPageChanged,
+          onItemContextAction: (item) => _handleItemContextAction(item),
+          emptyMessage: '无',
+          pageSize: _gridPageSize,
+        );
+      },
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, stackTrace) => Text('加载失败：$error'),
+    );
+  }
+
+  List<Widget> _buildGridSlivers({
+    required LibraryCollectionTarget target,
+    required AsyncValue<LibraryVisiblePageItemsResult> displayAsync,
+    required bool isTelevision,
+  }) {
+    return displayAsync.when<List<Widget>>(
+      data: (pageItems) {
+        _scheduleRatingPrefetch(pageItems, isTelevision: isTelevision);
+        return [
+          LibraryPagedGridSliver(
+            pageItems: pageItems.items,
+            totalItems: pageItems.totalItems,
+            currentPage: _currentPage,
+            isTelevision: isTelevision,
+            focusScopePrefix: _libraryCollectionGridFocusScopePrefix(target),
+            onPageChanged: _handleCollectionPageChanged,
+            onItemContextAction: (item) => _handleItemContextAction(item),
+            emptyMessage: '无',
+            pageSize: _gridPageSize,
+          ),
+        ];
+      },
+      loading: () => const [
+        SliverToBoxAdapter(
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      ],
+      error: (error, stackTrace) => [
+        SliverToBoxAdapter(child: Text('加载失败：$error')),
+      ],
+    );
+  }
+
+  void _scheduleRatingPrefetch(
+    LibraryVisiblePageItemsResult pageItems, {
+    required bool isTelevision,
+  }) {
+    final prefetchTargets =
+        pageItems.items.map(MediaDetailTarget.fromMediaItem);
+    if (isTelevision) {
+      _ratingPrefetchCoordinator.scheduleInMemoryPrefetch(
+        ref: ref,
+        targets: prefetchTargets,
+        isPageActive: () => mounted && isPageVisible,
+      );
+    } else {
+      _ratingPrefetchCoordinator.schedulePrefetch(
+        ref: ref,
+        targets: prefetchTargets,
+        isPageActive: () => mounted && isPageVisible,
+      );
+    }
   }
 
   void _handleCollectionPageChanged(int page) {

@@ -102,67 +102,12 @@ class LibraryPagedGrid extends ConsumerWidget {
                 mainAxisSpacing: spacing,
                 childAspectRatio: childAspectRatio,
               ),
-              itemBuilder: (context, index) {
-                final seedItem = pageItems[index];
-                final cachedTarget = ref.watch(
-                  libraryCachedDetailTargetProvider(
-                    LibraryItemOverlayRequest(seedItem),
-                  ),
-                );
-                final item = mergeLibraryItemWithCachedDetails(
-                  item: seedItem,
-                  cachedTarget: cachedTarget,
-                );
-                final posterAssets = _resolveLibraryPosterAssets(item)
-                    .map(
-                      (asset) => _resolveLibraryPosterAssetForDisplay(
-                        item,
-                        asset,
-                      ),
-                    )
-                    .toList(growable: false);
-                final posterAsset = posterAssets.isNotEmpty
-                    ? posterAssets.first
-                    : const _LibraryImageAsset(url: '');
-                return MediaPosterTile(
-                  focusId: _libraryItemFocusId(
-                    focusScopePrefix: focusScopePrefix,
-                    item: item,
-                  ),
-                  autofocus: index == 0,
-                  tvPosterFocusOutlineOnly: true,
-                  tvPosterFocusShowBorder: false,
-                  tvPosterFocusScale: 1.06,
-                  title: item.title,
-                  subtitle: item.year > 0 ? '${item.year}' : '',
-                  posterUrl: posterAsset.url,
-                  posterCachePolicy: item.sourceKind == MediaSourceKind.emby
-                      ? AppNetworkImageCachePolicy.networkOnly
-                      : AppNetworkImageCachePolicy.persistent,
-                  posterHeaders: posterAsset.headers,
-                  imageBadgeText:
-                      resolvePreferredPosterRatingLabel(item.ratingLabels),
-                  posterFallbackSources: posterAssets
-                      .skip(1)
-                      .map(
-                        (asset) => AppNetworkImageSource(
-                          url: asset.url,
-                          headers: asset.headers,
-                        ),
-                      )
-                      .toList(growable: false),
-                  onContextAction: onItemContextAction == null
-                      ? null
-                      : () => onItemContextAction!(item),
-                  width: null,
-                  onTap: () {
-                    context.pushNamed(
-                      'detail',
-                      extra: MediaDetailTarget.fromMediaItem(item),
-                    );
-                  },
-                );
-              },
+              itemBuilder: (context, index) => _LibraryPagedGridTile(
+                seedItem: pageItems[index],
+                index: index,
+                focusScopePrefix: focusScopePrefix,
+                onItemContextAction: onItemContextAction,
+              ),
             );
           },
         ),
@@ -181,9 +126,157 @@ class LibraryPagedGrid extends ConsumerWidget {
       ],
     );
 
-    if (!isTelevision) {
-      return content;
+    return LibraryPagedGridKeyboardActions(
+      enabled: isTelevision,
+      totalItems: totalItems,
+      currentPage: currentPage,
+      pageSize: pageSize,
+      onPageChanged: onPageChanged,
+      child: content,
+    );
+  }
+}
+
+class LibraryPagedGridSliver extends ConsumerWidget {
+  const LibraryPagedGridSliver({
+    super.key,
+    required this.pageItems,
+    required this.totalItems,
+    required this.currentPage,
+    required this.onPageChanged,
+    required this.isTelevision,
+    this.focusScopePrefix = 'library',
+    this.onItemContextAction,
+    this.emptyMessage = '无',
+    this.pageSize = 24,
+    this.header,
+  });
+
+  final List<MediaItem> pageItems;
+  final int totalItems;
+  final int currentPage;
+  final ValueChanged<int> onPageChanged;
+  final bool isTelevision;
+  final String focusScopePrefix;
+  final ValueChanged<MediaItem>? onItemContextAction;
+  final String emptyMessage;
+  final int pageSize;
+  final Widget? header;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final normalizedPageSize = math.max(1, pageSize);
+    if (totalItems <= 0) {
+      return SliverToBoxAdapter(
+        child: Text(
+          emptyMessage,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      );
     }
+
+    final totalPages = math.max(1, (totalItems / normalizedPageSize).ceil());
+    final safePage = currentPage.clamp(0, totalPages - 1);
+
+    return SliverMainAxisGroup(
+      slivers: [
+        if (header != null) ...[
+          SliverToBoxAdapter(child: header!),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+        ],
+        SliverToBoxAdapter(
+          child: _LibraryPagerSummary(
+            totalItems: totalItems,
+            currentPage: safePage,
+            totalPages: totalPages,
+            onPageChanged: onPageChanged,
+            isTelevision: isTelevision,
+            focusScopePrefix: '$focusScopePrefix:pager:top',
+          ),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 14)),
+        SliverLayoutBuilder(
+          builder: (context, constraints) {
+            const spacing = 10.0;
+            final maxWidth = constraints.crossAxisExtent;
+            final crossAxisCount =
+                math.max(2, ((maxWidth + spacing) / 150).floor());
+            final itemWidth =
+                (maxWidth - (crossAxisCount - 1) * spacing) / crossAxisCount;
+            final itemHeight = itemWidth / 0.7 + 54;
+            final childAspectRatio = itemWidth / itemHeight;
+
+            return SliverPadding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              sliver: SliverGrid(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  crossAxisSpacing: spacing,
+                  mainAxisSpacing: spacing,
+                  childAspectRatio: childAspectRatio,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) => _LibraryPagedGridTile(
+                    seedItem: pageItems[index],
+                    index: index,
+                    focusScopePrefix: focusScopePrefix,
+                    onItemContextAction: onItemContextAction,
+                  ),
+                  childCount: pageItems.length,
+                ),
+              ),
+            );
+          },
+        ),
+        if (totalPages > 1) ...[
+          const SliverToBoxAdapter(child: SizedBox(height: 18)),
+          SliverToBoxAdapter(
+            child: _LibraryPagerSummary(
+              totalItems: totalItems,
+              currentPage: safePage,
+              totalPages: totalPages,
+              onPageChanged: onPageChanged,
+              isTelevision: isTelevision,
+              focusScopePrefix: '$focusScopePrefix:pager:bottom',
+              compact: true,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class LibraryPagedGridKeyboardActions extends StatelessWidget {
+  const LibraryPagedGridKeyboardActions({
+    super.key,
+    required this.enabled,
+    required this.totalItems,
+    required this.currentPage,
+    required this.pageSize,
+    required this.onPageChanged,
+    required this.child,
+  });
+
+  final bool enabled;
+  final int totalItems;
+  final int currentPage;
+  final int pageSize;
+  final ValueChanged<int> onPageChanged;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!enabled || totalItems <= 0) {
+      return child;
+    }
+
+    final normalizedPageSize = math.max(1, pageSize);
+    final totalPages = math.max(1, (totalItems / normalizedPageSize).ceil());
+    final safePage = currentPage.clamp(0, totalPages - 1);
 
     return Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
@@ -211,8 +304,82 @@ class LibraryPagedGrid extends ConsumerWidget {
             },
           ),
         },
-        child: content,
+        child: child,
       ),
+    );
+  }
+}
+
+class _LibraryPagedGridTile extends ConsumerWidget {
+  const _LibraryPagedGridTile({
+    required this.seedItem,
+    required this.index,
+    required this.focusScopePrefix,
+    required this.onItemContextAction,
+  });
+
+  final MediaItem seedItem;
+  final int index;
+  final String focusScopePrefix;
+  final ValueChanged<MediaItem>? onItemContextAction;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cachedTarget = ref.watch(
+      libraryCachedDetailTargetProvider(
+        LibraryItemOverlayRequest(seedItem),
+      ),
+    );
+    final item = mergeLibraryItemWithCachedDetails(
+      item: seedItem,
+      cachedTarget: cachedTarget,
+    );
+    final posterAssets = _resolveLibraryPosterAssets(item)
+        .map(
+          (asset) => _resolveLibraryPosterAssetForDisplay(
+            item,
+            asset,
+          ),
+        )
+        .toList(growable: false);
+    final posterAsset = posterAssets.isNotEmpty
+        ? posterAssets.first
+        : const _LibraryImageAsset(url: '');
+    return MediaPosterTile(
+      focusId: _libraryItemFocusId(
+        focusScopePrefix: focusScopePrefix,
+        item: item,
+      ),
+      autofocus: index == 0,
+      tvPosterFocusOutlineOnly: true,
+      tvPosterFocusShowBorder: false,
+      tvPosterFocusScale: 1.06,
+      title: item.title,
+      subtitle: item.year > 0 ? '${item.year}' : '',
+      posterUrl: posterAsset.url,
+      posterCachePolicy: item.sourceKind == MediaSourceKind.emby
+          ? AppNetworkImageCachePolicy.networkOnly
+          : AppNetworkImageCachePolicy.persistent,
+      posterHeaders: posterAsset.headers,
+      imageBadgeText: resolvePreferredPosterRatingLabel(item.ratingLabels),
+      posterFallbackSources: posterAssets
+          .skip(1)
+          .map(
+            (asset) => AppNetworkImageSource(
+              url: asset.url,
+              headers: asset.headers,
+            ),
+          )
+          .toList(growable: false),
+      onContextAction:
+          onItemContextAction == null ? null : () => onItemContextAction!(item),
+      width: null,
+      onTap: () {
+        context.pushNamed(
+          'detail',
+          extra: MediaDetailTarget.fromMediaItem(item),
+        );
+      },
     );
   }
 }

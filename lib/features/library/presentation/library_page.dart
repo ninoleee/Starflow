@@ -359,236 +359,13 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
                 context,
                 includeBottomNavigationBar: true,
               ),
-              child: ListView(
-                controller: _scrollController,
-                padding: EdgeInsets.zero,
-                children: [
-                  const SizedBox(height: kToolbarHeight),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      for (var index = 0;
-                          index < LibraryFilter.values.length;
-                          index++)
-                        _LibraryFilterChip(
-                          filter: LibraryFilter.values[index],
-                          selected: LibraryFilter.values[index] == _filter,
-                          focusNode: index == 0 ? _topFilterFocusNode : null,
-                          focusId:
-                              'library:filter:${LibraryFilter.values[index].name}',
-                          autofocus: index == 0 && isTelevision,
-                          onPressed: () =>
-                              _selectFilter(LibraryFilter.values[index]),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  if (refreshScope != null &&
-                      refreshScope.sourceIds.isNotEmpty) ...[
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          if (isTelevision)
-                            TvAdaptiveButton(
-                              label: _isIncrementalRefreshing
-                                  ? '更新中...'
-                                  : refreshScope.incrementalButtonLabel,
-                              icon: Icons.refresh_rounded,
-                              onPressed:
-                                  _isIncrementalRefreshing || _isForceRescanning
-                                      ? null
-                                      : () => _runIncrementalRefresh(
-                                            refreshScope,
-                                          ),
-                              variant: TvButtonVariant.outlined,
-                              focusId: 'library:refresh:incremental',
-                            )
-                          else
-                            OutlinedButton.icon(
-                              onPressed:
-                                  _isIncrementalRefreshing || _isForceRescanning
-                                      ? null
-                                      : () => _runIncrementalRefresh(
-                                            refreshScope,
-                                          ),
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 10,
-                                ),
-                                minimumSize: const Size(0, 40),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                              icon: _isIncrementalRefreshing
-                                  ? const SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.refresh_rounded),
-                              label: Text(
-                                _isIncrementalRefreshing
-                                    ? '更新中...'
-                                    : refreshScope.incrementalButtonLabel,
-                              ),
-                            ),
-                          if (refreshScope.supportsRebuild && isTelevision)
-                            TvAdaptiveButton(
-                              label: _isForceRescanning
-                                  ? '重建中...'
-                                  : refreshScope.rebuildButtonLabel,
-                              icon: Icons.restart_alt_rounded,
-                              onPressed: _isForceRescanning
-                                  ? null
-                                  : () => _confirmForceRescan(
-                                        refreshScope,
-                                      ),
-                              variant: TvButtonVariant.outlined,
-                              focusId: 'library:refresh:rescan',
-                            )
-                          else if (refreshScope.supportsRebuild)
-                            OutlinedButton.icon(
-                              onPressed: _isForceRescanning
-                                  ? null
-                                  : () => _confirmForceRescan(
-                                        refreshScope,
-                                      ),
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 10,
-                                ),
-                                minimumSize: const Size(0, 40),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                              icon: _isForceRescanning
-                                  ? const SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.restart_alt_rounded),
-                              label: Text(
-                                _isForceRescanning
-                                    ? '重建中...'
-                                    : refreshScope.rebuildButtonLabel,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                  _buildScrapeProgressSection(mediaSources),
-                  collectionsAsync.when(
-                    data: (collections) {
-                      if (collections.isEmpty) {
-                        return const SizedBox.shrink();
-                      }
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 18),
-                        child: SizedBox(
-                          height: 56,
-                          child: DesktopHorizontalPager(
-                            showButtonsOnAllPlatforms: true,
-                            leftInset: -4,
-                            rightInset: -4,
-                            buttonSize: 40,
-                            iconSize: 22,
-                            builder: (context, controller) =>
-                                ListView.separated(
-                              controller: controller,
-                              scrollDirection: Axis.horizontal,
-                              clipBehavior: Clip.none,
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 2),
-                              itemCount: collections.length,
-                              separatorBuilder: (context, index) =>
-                                  const SizedBox(width: 10),
-                              itemBuilder: (context, index) {
-                                final collection = collections[index];
-                                return _LibraryCollectionChip(
-                                  label: collection.title,
-                                  focusId:
-                                      'library:collection:${collection.id}',
-                                  autofocus: index == 0 && isTelevision,
-                                  onPressed: () {
-                                    context.pushNamed(
-                                      'collection',
-                                      extra: LibraryCollectionTarget(
-                                        title: collection.title,
-                                        sourceId: collection.sourceId,
-                                        sourceName: collection.sourceName,
-                                        sourceKind: collection.sourceKind,
-                                        sectionId: collection.id,
-                                        subtitle: collection.subtitle,
-                                      ),
-                                    );
-                                  },
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                    loading: () => const SizedBox.shrink(),
-                    error: (error, stackTrace) => const SizedBox.shrink(),
-                  ),
-                  displayAsync.when(
-                    data: (pageItems) {
-                      final prefetchTargets = pageItems.items
-                          .map(MediaDetailTarget.fromMediaItem);
-                      if (isTelevision) {
-                        _ratingPrefetchCoordinator.scheduleInMemoryPrefetch(
-                          ref: ref,
-                          targets: prefetchTargets,
-                          isPageActive: () => mounted && isPageVisible,
-                        );
-                      } else {
-                        _ratingPrefetchCoordinator.schedulePrefetch(
-                          ref: ref,
-                          targets: prefetchTargets,
-                          isPageActive: () => mounted && isPageVisible,
-                        );
-                      }
-                      return LibraryPagedGrid(
-                        pageItems: pageItems.items,
-                        totalItems: pageItems.totalItems,
-                        currentPage: _currentPage,
-                        isTelevision: isTelevision,
-                        focusScopePrefix: 'library',
-                        onPageChanged: _handleLibraryPageChanged,
-                        onItemContextAction: (item) =>
-                            _handleItemContextAction(item),
-                        emptyMessage: '无',
-                        header: Text(
-                          _filter == LibraryFilter.all
-                              ? '全部内容'
-                              : '${_filter.label} 内容',
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                    color: Colors.white,
-                                  ),
-                        ),
-                      );
-                    },
-                    loading: () => const Center(
-                      child: CircularProgressIndicator(),
-                    ),
-                    error: (error, stackTrace) => Text('加载失败：$error'),
-                  ),
-                  appPageBottomSpacer(),
-                ],
+              child: _buildScrollContent(
+                context: context,
+                isTelevision: isTelevision,
+                mediaSources: mediaSources,
+                refreshScope: refreshScope,
+                collectionsAsync: collectionsAsync,
+                displayAsync: displayAsync,
               ),
             ),
             Positioned(
@@ -602,6 +379,353 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildScrollContent({
+    required BuildContext context,
+    required bool isTelevision,
+    required List<MediaSourceConfig> mediaSources,
+    required _LibraryRefreshScope? refreshScope,
+    required AsyncValue<List<MediaCollection>> collectionsAsync,
+    required AsyncValue<LibraryVisiblePageItemsResult> displayAsync,
+  }) {
+    if (isTelevision) {
+      return _buildTelevisionScrollContent(
+        context: context,
+        mediaSources: mediaSources,
+        refreshScope: refreshScope,
+        collectionsAsync: collectionsAsync,
+        displayAsync: displayAsync,
+      );
+    }
+
+    return ListView(
+      controller: _scrollController,
+      padding: EdgeInsets.zero,
+      children: [
+        const SizedBox(height: kToolbarHeight),
+        _buildFilterChips(isTelevision: false),
+        const SizedBox(height: 18),
+        if (refreshScope != null && refreshScope.sourceIds.isNotEmpty) ...[
+          _buildRefreshActions(refreshScope, isTelevision: false),
+          const SizedBox(height: 16),
+        ],
+        _buildScrapeProgressSection(mediaSources),
+        _buildCollectionsSection(
+          context: context,
+          collectionsAsync: collectionsAsync,
+          isTelevision: false,
+        ),
+        _buildGrid(displayAsync, isTelevision: false),
+        appPageBottomSpacer(),
+      ],
+    );
+  }
+
+  Widget _buildTelevisionScrollContent({
+    required BuildContext context,
+    required List<MediaSourceConfig> mediaSources,
+    required _LibraryRefreshScope? refreshScope,
+    required AsyncValue<List<MediaCollection>> collectionsAsync,
+    required AsyncValue<LibraryVisiblePageItemsResult> displayAsync,
+  }) {
+    final scrollView = CustomScrollView(
+      controller: _scrollController,
+      clipBehavior: Clip.none,
+      slivers: [
+        const SliverToBoxAdapter(child: SizedBox(height: kToolbarHeight)),
+        SliverToBoxAdapter(child: _buildFilterChips(isTelevision: true)),
+        const SliverToBoxAdapter(child: SizedBox(height: 18)),
+        if (refreshScope != null && refreshScope.sourceIds.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: _buildRefreshActions(refreshScope, isTelevision: true),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+        ],
+        SliverToBoxAdapter(child: _buildScrapeProgressSection(mediaSources)),
+        SliverToBoxAdapter(
+          child: _buildCollectionsSection(
+            context: context,
+            collectionsAsync: collectionsAsync,
+            isTelevision: true,
+          ),
+        ),
+        ..._buildGridSlivers(displayAsync, isTelevision: true),
+        appPageBottomSliverSpacer(),
+      ],
+    );
+    final loadedPageItems = displayAsync.asData?.value;
+    if (loadedPageItems == null) {
+      return scrollView;
+    }
+    return LibraryPagedGridKeyboardActions(
+      enabled: true,
+      totalItems: loadedPageItems.totalItems,
+      currentPage: _currentPage,
+      pageSize: _gridPageSize,
+      onPageChanged: _handleLibraryPageChanged,
+      child: scrollView,
+    );
+  }
+
+  Widget _buildFilterChips({
+    required bool isTelevision,
+  }) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        for (var index = 0; index < LibraryFilter.values.length; index++)
+          _LibraryFilterChip(
+            filter: LibraryFilter.values[index],
+            selected: LibraryFilter.values[index] == _filter,
+            focusNode: index == 0 ? _topFilterFocusNode : null,
+            focusId: 'library:filter:${LibraryFilter.values[index].name}',
+            autofocus: index == 0 && isTelevision,
+            onPressed: () => _selectFilter(LibraryFilter.values[index]),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildRefreshActions(
+    _LibraryRefreshScope refreshScope, {
+    required bool isTelevision,
+  }) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        children: [
+          if (isTelevision)
+            TvAdaptiveButton(
+              label: _isIncrementalRefreshing
+                  ? '更新中...'
+                  : refreshScope.incrementalButtonLabel,
+              icon: Icons.refresh_rounded,
+              onPressed: _isIncrementalRefreshing || _isForceRescanning
+                  ? null
+                  : () => _runIncrementalRefresh(refreshScope),
+              variant: TvButtonVariant.outlined,
+              focusId: 'library:refresh:incremental',
+            )
+          else
+            OutlinedButton.icon(
+              onPressed: _isIncrementalRefreshing || _isForceRescanning
+                  ? null
+                  : () => _runIncrementalRefresh(refreshScope),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                minimumSize: const Size(0, 40),
+                visualDensity: VisualDensity.compact,
+              ),
+              icon: _isIncrementalRefreshing
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh_rounded),
+              label: Text(
+                _isIncrementalRefreshing
+                    ? '更新中...'
+                    : refreshScope.incrementalButtonLabel,
+              ),
+            ),
+          if (refreshScope.supportsRebuild && isTelevision)
+            TvAdaptiveButton(
+              label: _isForceRescanning
+                  ? '重建中...'
+                  : refreshScope.rebuildButtonLabel,
+              icon: Icons.restart_alt_rounded,
+              onPressed: _isForceRescanning
+                  ? null
+                  : () => _confirmForceRescan(refreshScope),
+              variant: TvButtonVariant.outlined,
+              focusId: 'library:refresh:rescan',
+            )
+          else if (refreshScope.supportsRebuild)
+            OutlinedButton.icon(
+              onPressed: _isForceRescanning
+                  ? null
+                  : () => _confirmForceRescan(refreshScope),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                minimumSize: const Size(0, 40),
+                visualDensity: VisualDensity.compact,
+              ),
+              icon: _isForceRescanning
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.restart_alt_rounded),
+              label: Text(
+                _isForceRescanning ? '重建中...' : refreshScope.rebuildButtonLabel,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCollectionsSection({
+    required BuildContext context,
+    required AsyncValue<List<MediaCollection>> collectionsAsync,
+    required bool isTelevision,
+  }) {
+    return collectionsAsync.when(
+      data: (collections) {
+        if (collections.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 18),
+          child: SizedBox(
+            height: 56,
+            child: DesktopHorizontalPager(
+              showButtonsOnAllPlatforms: true,
+              leftInset: -4,
+              rightInset: -4,
+              buttonSize: 40,
+              iconSize: 22,
+              builder: (context, controller) => ListView.separated(
+                controller: controller,
+                scrollDirection: Axis.horizontal,
+                clipBehavior: Clip.none,
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                itemCount: collections.length,
+                separatorBuilder: (context, index) => const SizedBox(width: 10),
+                itemBuilder: (context, index) {
+                  final collection = collections[index];
+                  return _LibraryCollectionChip(
+                    label: collection.title,
+                    focusId: 'library:collection:${collection.id}',
+                    autofocus: index == 0 && isTelevision,
+                    onPressed: () {
+                      context.pushNamed(
+                        'collection',
+                        extra: LibraryCollectionTarget(
+                          title: collection.title,
+                          sourceId: collection.sourceId,
+                          sourceName: collection.sourceName,
+                          sourceKind: collection.sourceKind,
+                          sectionId: collection.id,
+                          subtitle: collection.subtitle,
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (error, stackTrace) => const SizedBox.shrink(),
+    );
+  }
+
+  Widget _buildGrid(
+    AsyncValue<LibraryVisiblePageItemsResult> displayAsync, {
+    required bool isTelevision,
+  }) {
+    return displayAsync.when(
+      data: (pageItems) {
+        _scheduleRatingPrefetch(pageItems, isTelevision: isTelevision);
+        return LibraryPagedGrid(
+          pageItems: pageItems.items,
+          totalItems: pageItems.totalItems,
+          currentPage: _currentPage,
+          isTelevision: isTelevision,
+          focusScopePrefix: 'library',
+          onPageChanged: _handleLibraryPageChanged,
+          onItemContextAction: (item) => _handleItemContextAction(item),
+          emptyMessage: '无',
+          pageSize: _gridPageSize,
+          header: _buildGridHeader(context),
+        );
+      },
+      loading: () => const Center(
+        child: CircularProgressIndicator(),
+      ),
+      error: (error, stackTrace) => Text('加载失败：$error'),
+    );
+  }
+
+  List<Widget> _buildGridSlivers(
+    AsyncValue<LibraryVisiblePageItemsResult> displayAsync, {
+    required bool isTelevision,
+  }) {
+    return displayAsync.when<List<Widget>>(
+      data: (pageItems) {
+        _scheduleRatingPrefetch(pageItems, isTelevision: isTelevision);
+        return [
+          LibraryPagedGridSliver(
+            pageItems: pageItems.items,
+            totalItems: pageItems.totalItems,
+            currentPage: _currentPage,
+            isTelevision: isTelevision,
+            focusScopePrefix: 'library',
+            onPageChanged: _handleLibraryPageChanged,
+            onItemContextAction: (item) => _handleItemContextAction(item),
+            emptyMessage: '无',
+            pageSize: _gridPageSize,
+            header: _buildGridHeader(context),
+          ),
+        ];
+      },
+      loading: () => const [
+        SliverToBoxAdapter(
+          child: Center(
+            child: CircularProgressIndicator(),
+          ),
+        ),
+      ],
+      error: (error, stackTrace) => [
+        SliverToBoxAdapter(child: Text('加载失败：$error')),
+      ],
+    );
+  }
+
+  void _scheduleRatingPrefetch(
+    LibraryVisiblePageItemsResult pageItems, {
+    required bool isTelevision,
+  }) {
+    final prefetchTargets =
+        pageItems.items.map(MediaDetailTarget.fromMediaItem);
+    if (isTelevision) {
+      _ratingPrefetchCoordinator.scheduleInMemoryPrefetch(
+        ref: ref,
+        targets: prefetchTargets,
+        isPageActive: () => mounted && isPageVisible,
+      );
+    } else {
+      _ratingPrefetchCoordinator.schedulePrefetch(
+        ref: ref,
+        targets: prefetchTargets,
+        isPageActive: () => mounted && isPageVisible,
+      );
+    }
+  }
+
+  Widget _buildGridHeader(BuildContext context) {
+    return Text(
+      _filter == LibraryFilter.all ? '全部内容' : '${_filter.label} 内容',
+      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
     );
   }
 

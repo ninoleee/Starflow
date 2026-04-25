@@ -206,9 +206,11 @@ class _HomePageState extends ConsumerState<HomePage>
       appSettingsProvider
           .select((settings) => settings.performanceStaticHomeHeroEnabled),
     );
-    final performanceLightweightHomeHeroEnabled = ref.watch(
+    final lightweightHomeHeroEnabled = ref.watch(
       appSettingsProvider.select(
-        (settings) => settings.performanceLightweightHomeHeroEnabled,
+        (settings) => settings.effectiveLightweightHomeHeroEnabled(
+          isTelevision: isTelevision,
+        ),
       ),
     );
     final homeMetadataAutoRefreshRevision = ref.watch(
@@ -218,9 +220,9 @@ class _HomePageState extends ConsumerState<HomePage>
       homeExplicitRefreshRevisionProvider,
     );
     final effectiveTranslucentEffectsEnabled =
-        translucentEffectsEnabled && !performanceLightweightHomeHeroEnabled;
+        translucentEffectsEnabled && !lightweightHomeHeroEnabled;
     final effectiveHeroBackgroundEnabled = heroBackgroundEnabled;
-    final simplifyHeroBackdrop = performanceLightweightHomeHeroEnabled;
+    final simplifyHeroBackdrop = lightweightHomeHeroEnabled;
     final resolvedSections = resolvedSectionsState.sections;
     final hasPendingSections = resolvedSectionsState.hasPendingSections;
 
@@ -248,8 +250,7 @@ class _HomePageState extends ConsumerState<HomePage>
                 heroBackgroundEnabled: effectiveHeroBackgroundEnabled,
                 translucentEffectsEnabled: effectiveTranslucentEffectsEnabled,
                 staticHomeHeroEnabled: performanceStaticHomeHeroEnabled,
-                lightweightHomeHeroEnabled:
-                    performanceLightweightHomeHeroEnabled,
+                lightweightHomeHeroEnabled: lightweightHomeHeroEnabled,
                 simplifyHeroBackdrop: simplifyHeroBackdrop,
                 homeMetadataAutoRefreshRevision:
                     homeMetadataAutoRefreshRevision,

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/desktop_horizontal_pager.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -416,6 +417,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final playbackEntry =
         ref.watch(playbackEntryForMediaItemProvider(item)).value;
     final badgeText = _episodeBadgeText(item, playbackEntry);
@@ -435,12 +437,27 @@ class _DetailEpisodeCard extends ConsumerWidget {
 
     final effectiveFocusId = focusId?.trim() ?? '';
     final borderRadius = BorderRadius.circular(24);
+    final titleStyle = TextStyle(
+      color: Colors.white,
+      fontSize: 16,
+      fontWeight: FontWeight.w800,
+      height: 1.25,
+      shadows: isTelevision
+          ? null
+          : const [
+              Shadow(
+                color: Color(0xAA000000),
+                blurRadius: 16,
+                offset: Offset(0, 3),
+              ),
+            ],
+    );
     final cardChild = DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
+        color: Colors.white.withValues(alpha: isTelevision ? 0.045 : 0.06),
         borderRadius: borderRadius,
         border: Border.all(
-          color: Colors.white.withValues(alpha: 0.06),
+          color: Colors.white.withValues(alpha: isTelevision ? 0.05 : 0.06),
         ),
       ),
       child: Column(
@@ -456,21 +473,22 @@ class _DetailEpisodeCard extends ConsumerWidget {
                 fit: StackFit.expand,
                 children: [
                   _DetailEpisodeArtwork(item: item),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          Colors.black.withValues(alpha: 0.18),
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.12),
-                          Colors.black.withValues(alpha: 0.58),
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomCenter,
-                        stops: const [0, 0.34, 0.62, 1],
+                  if (!isTelevision)
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.black.withValues(alpha: 0.18),
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.12),
+                            Colors.black.withValues(alpha: 0.58),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomCenter,
+                          stops: const [0, 0.34, 0.62, 1],
+                        ),
                       ),
                     ),
-                  ),
                   Positioned(
                     left: 14,
                     right: 14,
@@ -479,19 +497,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
                       titleText,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        height: 1.25,
-                        shadows: [
-                          Shadow(
-                            color: Color(0xAA000000),
-                            blurRadius: 16,
-                            offset: Offset(0, 3),
-                          ),
-                        ],
-                      ),
+                      style: titleStyle,
                     ),
                   ),
                   Positioned(
@@ -574,7 +580,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
       autofocus: autofocus,
       borderRadius: borderRadius,
       visualStyle: TvFocusVisualStyle.none,
-      child: cardChild,
+      child: RepaintBoundary(child: cardChild),
     );
   }
 

@@ -1181,6 +1181,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   bool _isRefreshingMetadata = false;
   bool _isCheckingOnlineResourceUpdate = false;
   bool _isSavingOnlineResourceUpdate = false;
+  bool _showDeferredDetailContent = false;
+  bool _deferredDetailContentScheduled = false;
   List<SearchResult> _favoriteSearchResults = const <SearchResult>[];
   _LibraryMatchTaskController? _activeLibraryMatchController;
   late final DetailPageController _pageController;
@@ -1226,6 +1228,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       );
       _selectedSeasonIdNotifier.value = '';
       _isRefreshingMetadata = false;
+      _showDeferredDetailContent = false;
+      _deferredDetailContentScheduled = false;
       _pageController.resetForTargetChange();
       _retainedTargetAsync.clear();
       _retainedSeriesAsync.clear();
@@ -1266,8 +1270,29 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       _isRefreshingMetadata = false;
       _isCheckingOnlineResourceUpdate = false;
       _isSavingOnlineResourceUpdate = false;
+      _showDeferredDetailContent = false;
+      _deferredDetailContentScheduled = false;
     });
     _updateLibraryMatchView(isMatching: false);
+  }
+
+  void _scheduleDeferredDetailContent() {
+    if (_showDeferredDetailContent || _deferredDetailContentScheduled) {
+      return;
+    }
+    _deferredDetailContentScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future<void>.delayed(const Duration(milliseconds: 180), () {
+        if (!mounted || !isPageVisible || _showDeferredDetailContent) {
+          _deferredDetailContentScheduled = false;
+          return;
+        }
+        setState(() {
+          _showDeferredDetailContent = true;
+          _deferredDetailContentScheduled = false;
+        });
+      });
+    });
   }
 
   Future<void> _loadFavoriteSearchResults() async {
@@ -1650,7 +1675,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     if (runtimePlan.shouldWarmEnrichedTarget) {
       unawaited(ref.read(enrichedDetailTargetProvider(currentTarget).future));
     }
-    if (runtimePlan.shouldWarmSeriesBrowser) {
+    if (runtimePlan.shouldWarmSeriesBrowser && !isTelevision) {
       unawaited(ref.read(detailSeriesBrowserProvider(currentTarget).future));
     }
 
@@ -2582,9 +2607,11 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
-    final performanceSlimDetailHeroEnabled = ref.watch(
+    final slimDetailHeroEnabled = ref.watch(
       appSettingsProvider.select(
-        (settings) => settings.performanceSlimDetailHeroEnabled,
+        (settings) => settings.effectiveSlimDetailHeroEnabled(
+          isTelevision: isTelevision,
+        ),
       ),
     );
     final networkStorage = ref.watch(
@@ -2630,7 +2657,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                   if (!target.isSeries) {
                     _retainedSeriesAsync.clear();
                   }
-                  final watchedSeriesAsync = target.isSeries && isPageVisible
+                  final showDeferredDetailContent =
+                      !isTelevision || _showDeferredDetailContent;
+                  if (isTelevision && !_showDeferredDetailContent) {
+                    _scheduleDeferredDetailContent();
+                  }
+                  final watchedSeriesAsync = target.isSeries &&
+                          isPageVisible &&
+                          showDeferredDetailContent
                       ? ref.watch(detailSeriesBrowserProvider(target))
                       : null;
                   final seriesAsync = target.isSeries
@@ -2651,7 +2685,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                   final canCheckFavoriteOnlineResourceUpdate =
                       favoriteOnlineResourceMatch != null &&
                           networkStorage.quarkCookie.trim().isNotEmpty;
-                  final galleryImages = buildDetailGalleryImages(target);
+                  final galleryImages = showDeferredDetailContent
+                      ? buildDetailGalleryImages(target)
+                      : const <DetailImageAsset>[];
 
                   return ListView(
                     controller: _scrollController,
@@ -2659,7 +2695,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                     children: [
                       DetailHeroSection(
                         target: target,
-                        simplifyVisualEffects: performanceSlimDetailHeroEnabled,
+                        simplifyVisualEffects: slimDetailHeroEnabled,
                         isTelevision: isTelevision,
                         artworkFocusNode: _heroArtworkFocusNode,
                         playFocusNode: _heroPlayFocusNode,
@@ -2669,9 +2705,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (target.isSeries)
+                            if (showDeferredDetailContent && target.isSeries)
                               _buildSeriesSection(target, seriesAsync),
-                            if (target.overview.trim().isNotEmpty)
+                            if (showDeferredDetailContent &&
+                                target.overview.trim().isNotEmpty)
                               DetailBlock(
                                 title: resolveDetailPrimaryTitle(
                                   currentTarget: target,
@@ -2708,7 +2745,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                   ],
                                 ),
                               ),
-                            if (target.overview.trim().isEmpty &&
+                            if (showDeferredDetailContent &&
+                                target.overview.trim().isEmpty &&
                                 resolveDetailEpisodeTitleLine(
                                       currentTarget: target,
                                       pageTarget: widget.target,
@@ -2740,15 +2778,17 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                   ],
                                 ),
                               ),
-                            if (galleryImages.isNotEmpty)
+                            if (showDeferredDetailContent &&
+                                galleryImages.isNotEmpty)
                               DetailBlock(
                                 title: '剧照',
                                 child: DetailImageGallery(
                                   images: galleryImages,
                                 ),
                               ),
-                            if (target.resolvedDirectorProfiles.isNotEmpty ||
-                                target.resolvedActorProfiles.isNotEmpty)
+                            if (showDeferredDetailContent &&
+                                (target.resolvedDirectorProfiles.isNotEmpty ||
+                                    target.resolvedActorProfiles.isNotEmpty))
                               DetailBlock(
                                 title: '演职员',
                                 child: Column(
@@ -2797,14 +2837,16 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                   ],
                                 ),
                               ),
-                            if (target.resolvedPlatformProfiles.isNotEmpty)
+                            if (showDeferredDetailContent &&
+                                target.resolvedPlatformProfiles.isNotEmpty)
                               DetailBlock(
                                 title: '公司',
                                 child: PlatformRail(
                                   platforms: target.resolvedPlatformProfiles,
                                 ),
                               ),
-                            if (shouldShowDetailResourceInfo(target))
+                            if (showDeferredDetailContent &&
+                                shouldShowDetailResourceInfo(target))
                               _buildResourceInfoBlock(
                                 target: target,
                                 isTelevision: isTelevision,

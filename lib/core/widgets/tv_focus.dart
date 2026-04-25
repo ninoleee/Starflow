@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 
 enum TvButtonVariant {
   filled,
@@ -21,6 +23,24 @@ enum StarflowButtonVariant {
   secondary,
   ghost,
   danger,
+}
+
+final _lightweightTvFocusSettingsProvider = Provider<bool>((ref) {
+  return ref.watch(appSettingsProvider.select(
+    (settings) => settings.effectiveLightweightTvFocusEnabled(
+      isTelevision: true,
+    ),
+  ));
+});
+
+bool _watchLightweightTvFocusEnabled(
+  WidgetRef ref, {
+  required bool isTelevision,
+}) {
+  if (!isTelevision) {
+    return false;
+  }
+  return ref.watch(_lightweightTvFocusSettingsProvider);
 }
 
 class TvFocusMemoryController extends ChangeNotifier {}
@@ -229,7 +249,65 @@ class _TvFocusOutlineFrame extends StatelessWidget {
   }
 }
 
-class _TvOutlinedFocusableAction extends StatefulWidget {
+class _TvLightweightFocusOutlineFrame extends StatelessWidget {
+  const _TvLightweightFocusOutlineFrame({
+    required this.child,
+    required this.isFocused,
+    required this.borderRadius,
+    this.borderWidth = 2,
+  });
+
+  final Widget child;
+  final bool isFocused;
+  final BorderRadius borderRadius;
+  final double borderWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      foregroundPainter: _TvFocusOutlinePainter(
+        isFocused: isFocused,
+        borderRadius: borderRadius,
+        borderWidth: borderWidth,
+      ),
+      child: RepaintBoundary(child: child),
+    );
+  }
+}
+
+class _TvFocusOutlinePainter extends CustomPainter {
+  const _TvFocusOutlinePainter({
+    required this.isFocused,
+    required this.borderRadius,
+    required this.borderWidth,
+  });
+
+  final bool isFocused;
+  final BorderRadius borderRadius;
+  final double borderWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (!isFocused || size.isEmpty) {
+      return;
+    }
+    final rect = (Offset.zero & size).deflate(borderWidth / 2);
+    final paint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = borderWidth;
+    canvas.drawRRect(borderRadius.toRRect(rect), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _TvFocusOutlinePainter oldDelegate) {
+    return isFocused != oldDelegate.isFocused ||
+        borderRadius != oldDelegate.borderRadius ||
+        borderWidth != oldDelegate.borderWidth;
+  }
+}
+
+class _TvOutlinedFocusableAction extends ConsumerStatefulWidget {
   const _TvOutlinedFocusableAction({
     required this.child,
     required this.onPressed,
@@ -253,12 +331,12 @@ class _TvOutlinedFocusableAction extends StatefulWidget {
   final double focusScale;
 
   @override
-  State<_TvOutlinedFocusableAction> createState() =>
+  ConsumerState<_TvOutlinedFocusableAction> createState() =>
       _TvOutlinedFocusableActionState();
 }
 
 class _TvOutlinedFocusableActionState
-    extends State<_TvOutlinedFocusableAction> {
+    extends ConsumerState<_TvOutlinedFocusableAction> {
   FocusNode? _ownedFocusNode;
   bool _isFocused = false;
 
@@ -311,6 +389,11 @@ class _TvOutlinedFocusableActionState
 
   @override
   Widget build(BuildContext context) {
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+    final lightweightTvFocusEnabled = _watchLightweightTvFocusEnabled(
+      ref,
+      isTelevision: isTelevision,
+    );
     return TvFocusableAction(
       onPressed: widget.onPressed,
       onFocused: widget.onFocused,
@@ -320,12 +403,19 @@ class _TvOutlinedFocusableActionState
       borderRadius: widget.borderRadius,
       visualStyle: TvFocusVisualStyle.none,
       focusScale: widget.focusScale,
-      child: _TvFocusOutlineFrame(
-        isFocused: _isFocused,
-        borderRadius: widget.borderRadius,
-        borderWidth: widget.borderWidth,
-        child: widget.child,
-      ),
+      child: lightweightTvFocusEnabled
+          ? _TvLightweightFocusOutlineFrame(
+              isFocused: _isFocused,
+              borderRadius: widget.borderRadius,
+              borderWidth: widget.borderWidth,
+              child: widget.child,
+            )
+          : _TvFocusOutlineFrame(
+              isFocused: _isFocused,
+              borderRadius: widget.borderRadius,
+              borderWidth: widget.borderWidth,
+              child: widget.child,
+            ),
     );
   }
 }
@@ -484,23 +574,46 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
 
   Widget _buildFocusVisualFrame({
     required Widget child,
+    required bool lightweightTvFocusEnabled,
   }) {
-    Widget currentChild = child;
-    if (widget.visualStyle != TvFocusVisualStyle.none && _isFocused) {
-      currentChild = _TvFocusOutlineFrame(
-        isFocused: true,
-        borderRadius: widget.borderRadius,
-        borderWidth: widget.visualStyle == TvFocusVisualStyle.subtle ? 1.6 : 2,
-        child: currentChild,
-      );
+    final shouldIsolateScaledChild = lightweightTvFocusEnabled &&
+        widget.visualStyle == TvFocusVisualStyle.none &&
+        widget.focusScale > 1.0;
+    Widget currentChild =
+        shouldIsolateScaledChild ? RepaintBoundary(child: child) : child;
+    if (widget.visualStyle != TvFocusVisualStyle.none) {
+      final borderWidth =
+          widget.visualStyle == TvFocusVisualStyle.subtle ? 1.6 : 2.0;
+      if (lightweightTvFocusEnabled) {
+        currentChild = _TvLightweightFocusOutlineFrame(
+          isFocused: _isFocused,
+          borderRadius: widget.borderRadius,
+          borderWidth: borderWidth,
+          child: currentChild,
+        );
+      } else if (_isFocused) {
+        currentChild = _TvFocusOutlineFrame(
+          isFocused: true,
+          borderRadius: widget.borderRadius,
+          borderWidth: borderWidth,
+          child: currentChild,
+        );
+      }
     }
     if (widget.focusScale > 1.0) {
-      currentChild = AnimatedScale(
-        scale: _isFocused ? widget.focusScale : 1.0,
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
-        child: currentChild,
-      );
+      if (lightweightTvFocusEnabled) {
+        currentChild = Transform.scale(
+          scale: _isFocused ? widget.focusScale : 1.0,
+          child: currentChild,
+        );
+      } else {
+        currentChild = AnimatedScale(
+          scale: _isFocused ? widget.focusScale : 1.0,
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          child: currentChild,
+        );
+      }
     }
     return currentChild;
   }
@@ -508,6 +621,10 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+    final lightweightTvFocusEnabled = _watchLightweightTvFocusEnabled(
+      ref,
+      isTelevision: isTelevision,
+    );
     final enabled = widget.onPressed != null;
 
     if (!isTelevision) {
@@ -544,7 +661,10 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
         SingleActivator(LogicalKeyboardKey.gameButtonY): TvContextMenuIntent(),
       },
       actions: _buildTelevisionActions(context),
-      child: _buildFocusVisualFrame(child: widget.child),
+      child: _buildFocusVisualFrame(
+        child: widget.child,
+        lightweightTvFocusEnabled: lightweightTvFocusEnabled,
+      ),
     );
   }
 }

@@ -348,7 +348,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
                         ),
                   _buildEmbeddedMpvSurfaceOverlay(
                     player,
-                    settings: settings,
                     isTelevision: isTelevision,
                     videoWidth: width,
                     videoHeight: height,
@@ -364,7 +363,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
 
   Widget _buildEmbeddedMpvSurfaceOverlay(
     Player player, {
-    required AppSettings settings,
     required bool isTelevision,
     required int videoWidth,
     required int videoHeight,
@@ -417,24 +415,13 @@ extension _PlayerPageStateControls on _PlayerPageState {
               return const SizedBox.shrink();
             }
             return Positioned.fill(
-              child: isTelevision
-                  ? PlayerStartupOverlay(
-                      target: _resolvedTarget ?? widget.target,
-                      speedLabel: _startupProbe.speedLabel,
-                    )
-                  : Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        PlayerStartupOverlay(
-                          target: _resolvedTarget ?? widget.target,
-                          speedLabel: _startupProbe.speedLabel,
-                        ),
-                        _buildNonTvTransientTopChrome(
-                          settings: settings,
-                          showMoreButton: false,
-                        ),
-                      ],
-                    ),
+              child: IgnorePointer(
+                ignoring: !isTelevision,
+                child: PlayerStartupOverlay(
+                  target: _resolvedTarget ?? widget.target,
+                  speedLabel: _startupProbe.speedLabel,
+                ),
+              ),
             );
           },
         );

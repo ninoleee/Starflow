@@ -309,8 +309,11 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   Future<void> setHomeHeroEnabled(bool enabled) async {
     final current = state.value ?? await _repository.load();
-    await saveHomeModule(
-      _resolveHeroModule(current).copyWith(enabled: enabled),
+    final heroModule = _resolveHeroModule(current).copyWith(enabled: enabled);
+    await _persist(
+      current.copyWith(
+        homeModules: _replaceHomeHeroModule(current.homeModules, heroModule),
+      ),
     );
   }
 
@@ -449,6 +452,10 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   Future<void> removeHomeModule(String id) async {
     final current = state.value ?? await _repository.load();
+    if (id == HomeModuleConfig.heroModuleId) {
+      await setHomeHeroEnabled(false);
+      return;
+    }
     final next = current.copyWith(
       homeModules: current.homeModules.where((item) => item.id != id).toList(),
     );
@@ -457,18 +464,33 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   Future<void> reorderHomeModules(int oldIndex, int newIndex) async {
     final current = state.value ?? await _repository.load();
-    final modules = [...current.homeModules];
+    final heroModule = _resolveHeroModule(current);
+    final modules = current.homeModules
+        .where((module) => !_isHomeHeroModule(module))
+        .toList();
+    if (oldIndex < 0 || oldIndex >= modules.length) {
+      return;
+    }
     if (newIndex > oldIndex) {
       newIndex -= 1;
     }
     final moved = modules.removeAt(oldIndex);
+    if (newIndex < 0) {
+      newIndex = 0;
+    }
+    if (newIndex > modules.length) {
+      newIndex = modules.length;
+    }
     modules.insert(newIndex, moved);
-    await _persist(current.copyWith(homeModules: modules));
+    await _persist(current.copyWith(homeModules: [heroModule, ...modules]));
   }
 
   Future<void> _persist(AppSettings next) async {
-    state = AsyncData(next);
-    await _repository.save(next);
+    final normalized = next.copyWith(
+      homeModules: _normalizeHomeModuleOrder(next.homeModules),
+    );
+    state = AsyncData(normalized);
+    await _repository.save(normalized);
     ref.read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
   }
 
@@ -484,4 +506,44 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     }
     return HomeModuleConfig.hero();
   }
+}
+
+bool _isHomeHeroModule(HomeModuleConfig module) {
+  return module.type == HomeModuleType.hero ||
+      module.id == HomeModuleConfig.heroModuleId;
+}
+
+List<HomeModuleConfig> _replaceHomeHeroModule(
+  List<HomeModuleConfig> modules,
+  HomeModuleConfig heroModule,
+) {
+  return [
+    heroModule.copyWith(
+      id: HomeModuleConfig.heroModuleId,
+      type: HomeModuleType.hero,
+    ),
+    for (final module in modules)
+      if (!_isHomeHeroModule(module)) module,
+  ];
+}
+
+List<HomeModuleConfig> _normalizeHomeModuleOrder(
+  List<HomeModuleConfig> modules,
+) {
+  HomeModuleConfig? heroModule;
+  final sortableModules = <HomeModuleConfig>[];
+  for (final module in modules) {
+    if (_isHomeHeroModule(module)) {
+      heroModule ??= module.copyWith(
+        id: HomeModuleConfig.heroModuleId,
+        type: HomeModuleType.hero,
+      );
+      continue;
+    }
+    sortableModules.add(module);
+  }
+  return [
+    heroModule ?? HomeModuleConfig.hero(),
+    ...sortableModules,
+  ];
 }

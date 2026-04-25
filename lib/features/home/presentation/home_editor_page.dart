@@ -25,6 +25,119 @@ final homeEditorCollectionsProvider = FutureProvider<List<MediaCollection>>((
 
 const _kCustomDoubanListPresetValue = '__custom__';
 
+bool _homeEditorIsHeroModule(HomeModuleConfig module) {
+  return module.type == HomeModuleType.hero ||
+      module.id == HomeModuleConfig.heroModuleId;
+}
+
+HomeModuleConfig? _homeEditorHeroModule(List<HomeModuleConfig> modules) {
+  for (final module in modules) {
+    if (_homeEditorIsHeroModule(module)) {
+      return module;
+    }
+  }
+  return null;
+}
+
+List<HomeModuleConfig> _homeEditorSortableModules(
+  List<HomeModuleConfig> modules,
+) {
+  return modules
+      .where((module) => !_homeEditorIsHeroModule(module))
+      .toList(growable: false);
+}
+
+class _HomeModuleCard extends StatelessWidget {
+  const _HomeModuleCard({
+    super.key,
+    required this.module,
+    required this.leading,
+    required this.onToggle,
+    this.onEdit,
+    this.onRemove,
+  });
+
+  final HomeModuleConfig module;
+  final Widget leading;
+  final VoidCallback onToggle;
+  final VoidCallback? onEdit;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isHero = _homeEditorIsHeroModule(module);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 10,
+        ),
+        child: Row(
+          children: [
+            leading,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(module.title),
+                  if (isHero) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '开启后固定显示在首页最上方',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (onEdit != null) ...[
+              StarflowIconButton(
+                icon: Icons.edit_outlined,
+                tooltip: '编辑',
+                variant: StarflowButtonVariant.secondary,
+                onPressed: onEdit,
+              ),
+              const SizedBox(width: 8),
+            ],
+            if (onRemove != null) ...[
+              StarflowIconButton(
+                icon: Icons.close_rounded,
+                tooltip: '删除',
+                variant: StarflowButtonVariant.danger,
+                onPressed: onRemove,
+              ),
+              const SizedBox(width: 8),
+            ],
+            StarflowButton(
+              label: module.enabled ? '开启' : '关闭',
+              icon: module.enabled
+                  ? Icons.toggle_on_rounded
+                  : Icons.toggle_off_rounded,
+              onPressed: onToggle,
+              variant: module.enabled
+                  ? StarflowButtonVariant.primary
+                  : StarflowButtonVariant.secondary,
+              compact: true,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// 二级选择底部弹层：四周留白 + 列表过长时可滚动。
 class _HomeEditorSecondarySheetBody extends StatelessWidget {
   const _HomeEditorSecondarySheetBody({
@@ -140,6 +253,8 @@ class HomeEditorPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final List<HomeModuleConfig> modules = ref.watch(homeModulesProvider);
+    final heroModule = _homeEditorHeroModule(modules);
+    final sortableModules = _homeEditorSortableModules(modules);
     final List<MediaSourceConfig> mediaSources =
         ref.watch(homeMediaSourcesProvider);
     final collectionsAsync = ref.watch(homeEditorCollectionsProvider);
@@ -166,96 +281,71 @@ class HomeEditorPage extends ConsumerWidget {
               children: [
                 SectionPanel(
                   title: '当前模块',
-                  child: modules.isEmpty
+                  child: heroModule == null && sortableModules.isEmpty
                       ? const Text('还没有首页模块。')
-                      : ReorderableListView.builder(
-                          shrinkWrap: true,
-                          buildDefaultDragHandles: false,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: modules.length,
-                          onReorder: (oldIndex, newIndex) {
-                            ref
-                                .read(settingsControllerProvider.notifier)
-                                .reorderHomeModules(oldIndex, newIndex);
-                          },
-                          itemBuilder: (context, index) {
-                            final module = modules[index];
-                            return Container(
-                              key: ValueKey(module.id),
-                              margin: const EdgeInsets.only(bottom: 10),
-                              decoration: BoxDecoration(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerHigh,
-                                borderRadius: BorderRadius.circular(22),
-                                border: Border.all(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .outlineVariant,
+                      : Column(
+                          children: [
+                            if (heroModule != null)
+                              _HomeModuleCard(
+                                module: heroModule,
+                                leading: const Icon(
+                                  Icons.vertical_align_top_rounded,
                                 ),
+                                onToggle: () {
+                                  ref
+                                      .read(settingsControllerProvider.notifier)
+                                      .toggleHomeModule(
+                                        heroModule.id,
+                                        !heroModule.enabled,
+                                      );
+                                },
                               ),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 10,
-                                ),
-                                child: Row(
-                                  children: [
-                                    ReorderableDragStartListener(
+                            if (sortableModules.isNotEmpty)
+                              ReorderableListView.builder(
+                                shrinkWrap: true,
+                                buildDefaultDragHandles: false,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount: sortableModules.length,
+                                onReorder: (oldIndex, newIndex) {
+                                  ref
+                                      .read(settingsControllerProvider.notifier)
+                                      .reorderHomeModules(oldIndex, newIndex);
+                                },
+                                itemBuilder: (context, index) {
+                                  final module = sortableModules[index];
+                                  return _HomeModuleCard(
+                                    key: ValueKey(module.id),
+                                    module: module,
+                                    leading: ReorderableDragStartListener(
                                       index: index,
                                       child: const Icon(
                                         Icons.drag_indicator_rounded,
                                       ),
                                     ),
-                                    const SizedBox(width: 12),
-                                    Expanded(child: Text(module.title)),
-                                    StarflowIconButton(
-                                      icon: Icons.edit_outlined,
-                                      tooltip: '编辑',
-                                      variant: StarflowButtonVariant.secondary,
-                                      onPressed: () => _showEditModuleDialog(
-                                        context,
-                                        ref,
-                                        module,
-                                      ),
+                                    onEdit: () => _showEditModuleDialog(
+                                      context,
+                                      ref,
+                                      module,
                                     ),
-                                    const SizedBox(width: 8),
-                                    StarflowIconButton(
-                                      icon: Icons.close_rounded,
-                                      tooltip: '删除',
-                                      variant: StarflowButtonVariant.danger,
-                                      onPressed: () {
-                                        ref
-                                            .read(settingsControllerProvider
-                                                .notifier)
-                                            .removeHomeModule(module.id);
-                                      },
-                                    ),
-                                    const SizedBox(width: 8),
-                                    StarflowButton(
-                                      label: module.enabled ? '开启' : '关闭',
-                                      icon: module.enabled
-                                          ? Icons.toggle_on_rounded
-                                          : Icons.toggle_off_rounded,
-                                      onPressed: () {
-                                        ref
-                                            .read(settingsControllerProvider
-                                                .notifier)
-                                            .toggleHomeModule(
-                                              module.id,
-                                              !module.enabled,
-                                            );
-                                      },
-                                      variant: module.enabled
-                                          ? StarflowButtonVariant.primary
-                                          : StarflowButtonVariant.secondary,
-                                      compact: true,
-                                    ),
-                                  ],
-                                ),
+                                    onRemove: () {
+                                      ref
+                                          .read(settingsControllerProvider
+                                              .notifier)
+                                          .removeHomeModule(module.id);
+                                    },
+                                    onToggle: () {
+                                      ref
+                                          .read(settingsControllerProvider
+                                              .notifier)
+                                          .toggleHomeModule(
+                                            module.id,
+                                            !module.enabled,
+                                          );
+                                    },
+                                  );
+                                },
                               ),
-                            );
-                          },
+                          ],
                         ),
                 ),
                 const SizedBox(height: 18),
@@ -382,15 +472,6 @@ class HomeEditorPage extends ConsumerWidget {
         return _HomeEditorSecondarySheetBody(
           title: '内置模块',
           tiles: [
-            _AddModuleTile(
-              title: 'Hero',
-              onTap: () {
-                ref
-                    .read(settingsControllerProvider.notifier)
-                    .saveHomeModule(HomeModuleConfig.hero());
-                Navigator.of(context).pop();
-              },
-            ),
             _AddModuleTile(
               title: '最近新增',
               onTap: () {
