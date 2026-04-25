@@ -569,37 +569,39 @@ _StarflowButtonPalette _starflowButtonPalette(
   final isDark = theme.brightness == Brightness.dark;
   final palette = switch (variant) {
     StarflowButtonVariant.primary => _StarflowButtonPalette(
-        backgroundColor: isDark ? Colors.white : theme.colorScheme.primary,
-        foregroundColor:
-            isDark ? const Color(0xFF081120) : theme.colorScheme.onPrimary,
-        borderColor: isDark ? Colors.white : theme.colorScheme.primary,
+        backgroundColor: isDark
+            ? Colors.white.withValues(alpha: 0.10)
+            : theme.colorScheme.primary.withValues(alpha: 0.10),
+        foregroundColor: isDark ? Colors.white : theme.colorScheme.primary,
+        borderColor: isDark
+            ? Colors.white.withValues(alpha: 0.26)
+            : theme.colorScheme.primary.withValues(alpha: 0.24),
       ),
     StarflowButtonVariant.secondary => _StarflowButtonPalette(
         backgroundColor: isDark
-            ? Colors.white.withValues(alpha: 0.08)
-            : theme.colorScheme.surfaceContainerHighest,
+            ? Colors.white.withValues(alpha: 0.06)
+            : theme.colorScheme.onSurface.withValues(alpha: 0.04),
         foregroundColor: isDark ? Colors.white : theme.colorScheme.onSurface,
         borderColor: isDark
-            ? Colors.white.withValues(alpha: 0.24)
+            ? Colors.white.withValues(alpha: 0.16)
             : theme.colorScheme.outlineVariant,
       ),
     StarflowButtonVariant.ghost => _StarflowButtonPalette(
-        backgroundColor:
-            isDark ? Colors.white.withValues(alpha: 0.04) : Colors.transparent,
+        backgroundColor: Colors.transparent,
         foregroundColor: isDark ? Colors.white : theme.colorScheme.primary,
-        borderColor:
-            isDark ? Colors.white.withValues(alpha: 0.14) : Colors.transparent,
+        borderColor: isDark
+            ? Colors.white.withValues(alpha: 0.12)
+            : theme.colorScheme.primary.withValues(alpha: 0.12),
       ),
     StarflowButtonVariant.danger => _StarflowButtonPalette(
         backgroundColor: isDark
-            ? theme.colorScheme.error.withValues(alpha: 0.16)
-            : theme.colorScheme.errorContainer,
-        foregroundColor: isDark
-            ? const Color(0xFFFFD3D3)
-            : theme.colorScheme.onErrorContainer,
+            ? theme.colorScheme.error.withValues(alpha: 0.10)
+            : theme.colorScheme.error.withValues(alpha: 0.10),
+        foregroundColor:
+            isDark ? const Color(0xFFFFE3E3) : theme.colorScheme.error,
         borderColor: isDark
-            ? theme.colorScheme.error.withValues(alpha: 0.35)
-            : theme.colorScheme.errorContainer,
+            ? theme.colorScheme.error.withValues(alpha: 0.30)
+            : theme.colorScheme.error.withValues(alpha: 0.24),
       ),
   };
   if (enabled) {
@@ -809,8 +811,8 @@ class StarflowChipButton extends StatelessWidget {
     final backgroundColor = selected
         ? (isDark ? Colors.white : theme.colorScheme.primaryContainer)
         : (isDark
-            ? Colors.white.withValues(alpha: 0.08)
-            : theme.colorScheme.surfaceContainerHighest);
+            ? Colors.white.withValues(alpha: 0.04)
+            : theme.colorScheme.onSurface.withValues(alpha: 0.04));
     final foregroundColor = selected
         ? (isDark
             ? const Color(0xFF081120)
@@ -819,7 +821,7 @@ class StarflowChipButton extends StatelessWidget {
     final borderColor = selected
         ? (isDark ? Colors.white : theme.colorScheme.primaryContainer)
         : (isDark
-            ? Colors.white.withValues(alpha: 0.18)
+            ? Colors.white.withValues(alpha: 0.14)
             : theme.colorScheme.outlineVariant);
     final labelStyle = theme.textTheme.labelLarge?.copyWith(
       color: foregroundColor,
@@ -906,6 +908,7 @@ class StarflowSelectionTile extends StatelessWidget {
     final theme = Theme.of(context);
     final effectiveSubtitle =
         value.trim().isNotEmpty ? value.trim() : subtitle.trim();
+    final isDark = theme.brightness == Brightness.dark;
     return _TvOutlinedFocusableAction(
       onPressed: onPressed,
       autofocus: autofocus,
@@ -917,8 +920,15 @@ class StarflowSelectionTile extends StatelessWidget {
         opacity: onPressed == null ? 0.5 : 1,
         child: Container(
           decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest,
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.04)
+                : theme.colorScheme.onSurface.withValues(alpha: 0.035),
             borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.12)
+                  : theme.colorScheme.outlineVariant,
+            ),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           child: Row(

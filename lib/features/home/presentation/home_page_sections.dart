@@ -214,6 +214,7 @@ class _HomePosterTile extends StatelessWidget {
       tvPosterFocusOutlineOnly: true,
       tvPosterFocusShowBorder: false,
       tvPosterFocusScale: 1.06,
+      tvPosterAnimateFocus: false,
       focusNode: focusNode,
       focusId: focusId,
       autofocus: autofocus,

@@ -271,47 +271,20 @@ class DetailHeroContent extends StatelessWidget {
       bool autofocus = false,
       TvButtonVariant televisionVariant = TvButtonVariant.filled,
     }) {
-      if (isTelevision) {
-        return TvAdaptiveButton(
-          label: label,
-          icon: icon,
-          variant: televisionVariant,
-          focusNode: focusNode,
-          focusId: focusId,
-          autofocus: autofocus,
-          focusScale: 1.06,
-          onPressed: () => openPlaybackTarget(playbackTarget),
-        );
-      }
-      if (televisionVariant == TvButtonVariant.outlined) {
-        return OutlinedButton.icon(
-          onPressed: () => openPlaybackTarget(playbackTarget),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: Colors.white,
-            side: BorderSide(
-              color: Colors.white.withValues(alpha: 0.36),
-            ),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 18,
-              vertical: 15,
-            ),
-          ),
-          icon: Icon(icon),
-          label: Text(label),
-        );
-      }
-      return FilledButton.icon(
+      final variant = switch (televisionVariant) {
+        TvButtonVariant.filled => StarflowButtonVariant.primary,
+        TvButtonVariant.outlined => StarflowButtonVariant.secondary,
+        TvButtonVariant.text => StarflowButtonVariant.ghost,
+      };
+      return StarflowButton(
+        label: label,
+        icon: icon,
+        variant: variant,
+        focusNode: focusNode,
+        focusId: focusId,
+        autofocus: autofocus,
+        focusScale: isTelevision ? 1.06 : 1.0,
         onPressed: () => openPlaybackTarget(playbackTarget),
-        style: FilledButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: const Color(0xFF081120),
-          padding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 15,
-          ),
-        ),
-        icon: Icon(icon),
-        label: Text(label),
       );
     }
 
