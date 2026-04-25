@@ -52,6 +52,10 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 
 part 'widgets/player_page_platform_session.part.dart';
 part 'widgets/player_page_startup_mpv.part.dart';
+part 'widgets/player_page_startup_mpv_open.part.dart';
+part 'widgets/player_page_startup_mpv_recovery.part.dart';
+part 'widgets/player_page_startup_mpv_launch.part.dart';
+part 'widgets/player_page_startup_mpv_tuning.part.dart';
 part 'widgets/player_page_runtime_actions.part.dart';
 part 'widgets/player_page_controls.part.dart';
 
