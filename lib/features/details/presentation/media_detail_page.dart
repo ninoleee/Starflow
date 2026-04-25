@@ -726,7 +726,7 @@ Future<void> _runLibraryMatchTaskFactories({
   required List<_LibraryMatchCandidate> Function() snapshot,
   void Function(List<_LibraryMatchCandidate> matches)? onProgress,
 }) async {
-  const maxConcurrentTasks = 4;
+  const maxConcurrentTasks = 2;
   var nextTaskIndex = 0;
 
   Future<void> runWorker() async {
@@ -1250,7 +1250,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   void initState() {
     super.initState();
     _pageController = DetailPageController();
-    _heroArtworkFocusNode.addListener(_handleHeroArtworkFocusChanged);
   }
 
   @override
@@ -1277,7 +1276,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   @override
   void dispose() {
     _cancelActiveLibraryMatch(reason: 'dispose');
-    _heroArtworkFocusNode.removeListener(_handleHeroArtworkFocusChanged);
     _pageController.dispose();
     _selectedSeasonIdNotifier.dispose();
     _heroArtworkFocusNode.dispose();
@@ -1587,34 +1585,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     );
   }
 
-  void _handleHeroArtworkFocusChanged() {
-    if (!mounted ||
-        (!_heroArtworkFocusNode.hasFocus &&
-            !_heroArtworkFocusNode.hasPrimaryFocus)) {
-      return;
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted ||
-          !_scrollController.hasClients ||
-          (!_heroArtworkFocusNode.hasFocus &&
-              !_heroArtworkFocusNode.hasPrimaryFocus)) {
-        return;
-      }
-      final position = _scrollController.position;
-      final targetOffset = position.minScrollExtent;
-      if ((position.pixels - targetOffset).abs() < 1) {
-        return;
-      }
-      unawaited(
-        _scrollController.animateTo(
-          targetOffset,
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-        ),
-      );
-    });
-  }
-
   void _startDetailTasks() {
     final initialPlan = buildDetailStartupPlan(
       isPageVisible: isPageVisible,
@@ -1627,103 +1597,132 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       return;
     }
     final sessionId = _pageController.startNewSession();
-    Future<void>.microtask(() async {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_isSessionActive(sessionId)) {
+        return;
+      }
+      unawaited(_runDeferredDetailStartup(sessionId));
+    });
+  }
+
+  Future<void> _runDeferredDetailStartup(int sessionId) async {
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
+    if (isTelevision) {
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      if (!_isSessionActive(sessionId)) {
+        return;
+      }
+    }
+    await Future<void>.delayed(Duration.zero);
+    if (!_isSessionActive(sessionId)) {
+      return;
+    }
+
+    final initialPlan = buildDetailStartupPlan(
+      isPageVisible: isPageVisible,
+      backgroundWorkSuspended: ref.read(backgroundEnrichmentSuspendedProvider),
+      pageSeedTarget: widget.target,
+      manualOverrideTarget: _manualOverrideTarget,
+      detailAutoLibraryMatchEnabled: false,
+    );
+    if (!initialPlan.shouldStart) {
+      return;
+    }
+
+    if (!_isSessionActive(sessionId)) {
+      return;
+    }
+
+    final hasInMemoryDetailState =
+        _manualOverrideTarget != null || _libraryMatchChoices.isNotEmpty;
+    var restoredMetadataRefreshStatus = DetailMetadataRefreshStatus.never;
+    if (!hasInMemoryDetailState) {
+      restoredMetadataRefreshStatus = await _restoreCachedDetailState(
+        sessionId,
+      );
       if (!_isSessionActive(sessionId)) {
         return;
       }
 
-      final hasInMemoryDetailState =
-          _manualOverrideTarget != null || _libraryMatchChoices.isNotEmpty;
-      var restoredMetadataRefreshStatus = DetailMetadataRefreshStatus.never;
-      if (!hasInMemoryDetailState) {
-        restoredMetadataRefreshStatus = await _restoreCachedDetailState(
-          sessionId,
-        );
-        if (!_isSessionActive(sessionId)) {
-          return;
-        }
-
-        final restoredTarget = _manualOverrideTarget ?? widget.target;
-        await _restoreIndexedEpisodeVariantChoices(
-          sessionId,
-          restoredTarget,
-        );
-        if (!_isSessionActive(sessionId)) {
-          return;
-        }
-      }
-
-      final detailAutoLibraryMatchEnabled = ref.read(
-        appSettingsProvider.select(
-          (settings) => settings.detailAutoLibraryMatchEnabled,
-        ),
+      final restoredTarget = _manualOverrideTarget ?? widget.target;
+      await _restoreIndexedEpisodeVariantChoices(
+        sessionId,
+        restoredTarget,
       );
-      final runtimePlan = buildDetailStartupPlan(
-        isPageVisible: isPageVisible,
-        backgroundWorkSuspended:
-            ref.read(backgroundEnrichmentSuspendedProvider),
-        pageSeedTarget: widget.target,
-        manualOverrideTarget: _manualOverrideTarget,
-        detailAutoLibraryMatchEnabled: detailAutoLibraryMatchEnabled,
-      );
-      var currentTarget = runtimePlan.effectiveTarget;
-      final enrichmentSettings = ref.read(detailEnrichmentSettingsProvider);
-      if (_shouldAutoRefreshOverviewMetadata(
-        pageTarget: widget.target,
-        currentTarget: currentTarget,
-        settings: enrichmentSettings,
-        refreshStatus: restoredMetadataRefreshStatus,
-      )) {
-        await _refreshMetadata(
-          currentTarget,
-          sessionId: sessionId,
-          showFeedback: false,
-        );
-        if (!_isSessionActive(sessionId)) {
-          return;
-        }
-        currentTarget = _manualOverrideTarget ?? currentTarget;
-      }
-
-      if (runtimePlan.shouldWarmEnrichedTarget) {
-        unawaited(ref.read(enrichedDetailTargetProvider(currentTarget).future));
-      }
-      if (runtimePlan.shouldWarmSeriesBrowser) {
-        unawaited(ref.read(detailSeriesBrowserProvider(currentTarget).future));
-      }
-
-      if (!runtimePlan.shouldAttemptAutoLibraryMatch) {
+      if (!_isSessionActive(sessionId)) {
         return;
       }
+    }
 
-      final resolved = await ref.read(
-        enrichedDetailTargetProvider(currentTarget).future,
-      );
-      final shouldAutoMatchSeriesSources = shouldAutoMatchSeriesOverviewSources(
-        pageSeedTarget: widget.target,
-        libraryMatchChoices: _libraryMatchChoices,
-      );
-      if (!_isSessionActive(sessionId) ||
-          (_manualOverrideTarget != null && !shouldAutoMatchSeriesSources) ||
-          ref.read(backgroundEnrichmentSuspendedProvider)) {
-        return;
-      }
-      final autoMatchTarget = shouldAutoMatchSeriesSources
-          ? buildSeriesOverviewSourceMatchSeed(
-              pageSeedTarget: widget.target,
-              resolvedTarget: resolved,
-            )
-          : resolved;
-      if (!shouldAutoMatchDetailLocalResource(autoMatchTarget) &&
-          !shouldAutoMatchSeriesSources) {
-        return;
-      }
-      await _matchLocalResource(
-        autoMatchTarget,
+    final detailAutoLibraryMatchEnabled = ref.read(
+      appSettingsProvider.select(
+        (settings) => settings.detailAutoLibraryMatchEnabled,
+      ),
+    );
+    final runtimePlan = buildDetailStartupPlan(
+      isPageVisible: isPageVisible,
+      backgroundWorkSuspended: ref.read(backgroundEnrichmentSuspendedProvider),
+      pageSeedTarget: widget.target,
+      manualOverrideTarget: _manualOverrideTarget,
+      detailAutoLibraryMatchEnabled: detailAutoLibraryMatchEnabled,
+    );
+    var currentTarget = runtimePlan.effectiveTarget;
+    final enrichmentSettings = ref.read(detailEnrichmentSettingsProvider);
+    if (_shouldAutoRefreshOverviewMetadata(
+      pageTarget: widget.target,
+      currentTarget: currentTarget,
+      settings: enrichmentSettings,
+      refreshStatus: restoredMetadataRefreshStatus,
+    )) {
+      await _refreshMetadata(
+        currentTarget,
         sessionId: sessionId,
         showFeedback: false,
       );
-    });
+      if (!_isSessionActive(sessionId)) {
+        return;
+      }
+      currentTarget = _manualOverrideTarget ?? currentTarget;
+    }
+
+    if (runtimePlan.shouldWarmEnrichedTarget) {
+      unawaited(ref.read(enrichedDetailTargetProvider(currentTarget).future));
+    }
+    if (runtimePlan.shouldWarmSeriesBrowser) {
+      unawaited(ref.read(detailSeriesBrowserProvider(currentTarget).future));
+    }
+
+    if (!runtimePlan.shouldAttemptAutoLibraryMatch) {
+      return;
+    }
+
+    final resolved = await ref.read(
+      enrichedDetailTargetProvider(currentTarget).future,
+    );
+    final shouldAutoMatchSeriesSources = shouldAutoMatchSeriesOverviewSources(
+      pageSeedTarget: widget.target,
+      libraryMatchChoices: _libraryMatchChoices,
+    );
+    if (!_isSessionActive(sessionId) ||
+        (_manualOverrideTarget != null && !shouldAutoMatchSeriesSources) ||
+        ref.read(backgroundEnrichmentSuspendedProvider)) {
+      return;
+    }
+    final autoMatchTarget = shouldAutoMatchSeriesSources
+        ? buildSeriesOverviewSourceMatchSeed(
+            pageSeedTarget: widget.target,
+            resolvedTarget: resolved,
+          )
+        : resolved;
+    if (!shouldAutoMatchDetailLocalResource(autoMatchTarget) &&
+        !shouldAutoMatchSeriesSources) {
+      return;
+    }
+    await _matchLocalResource(
+      autoMatchTarget,
+      sessionId: sessionId,
+      showFeedback: false,
+    );
   }
 
   bool _isSessionActive(int sessionId) {

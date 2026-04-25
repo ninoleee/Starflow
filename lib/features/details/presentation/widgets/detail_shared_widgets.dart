@@ -632,7 +632,6 @@ class DetailImageGallery extends StatelessWidget {
               focusId: '$focusIdPrefix:$index',
               borderRadius: BorderRadius.circular(22),
               visualStyle: TvFocusVisualStyle.none,
-              focusScale: 1.06,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(22),
                 child: AspectRatio(

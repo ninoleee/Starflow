@@ -148,9 +148,7 @@ import UIKit
     if let sliderLevel = currentSystemVolumeSliderLevel() {
       return sliderLevel
     }
-    let session = AVAudioSession.sharedInstance()
-    try? session.setActive(true)
-    return session.outputVolume
+    return AVAudioSession.sharedInstance().outputVolume
   }
 
   private func setSystemVolumeLevel(_ value: Double) {

@@ -564,7 +564,6 @@ class _DetailTelevisionSelectionTile extends StatelessWidget {
       focusId: focusId,
       borderRadius: BorderRadius.circular(18),
       visualStyle: TvFocusVisualStyle.subtle,
-      focusScale: 1.03,
       child: Opacity(
         opacity: onPressed == null ? 0.5 : 1,
         child: Container(

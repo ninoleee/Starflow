@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -247,47 +246,6 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
   static const double _episodeCardWidth = 292;
   static const double _episodeCardSpacing = 14;
 
-  @override
-  void initState() {
-    super.initState();
-    _prefetchSelectedSeasonGroup();
-  }
-
-  @override
-  void didUpdateWidget(covariant DetailEpisodeBrowser oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.selectedGroupId != widget.selectedGroupId ||
-        oldWidget.seriesTarget != widget.seriesTarget) {
-      _prefetchSelectedSeasonGroup();
-    }
-  }
-
-  void _prefetchSelectedSeasonGroup() {
-    if (widget.groups.isEmpty) {
-      return;
-    }
-    final selectedGroup = resolveSelectedEpisodeGroup(
-      groups: widget.groups,
-      selectedGroupId: widget.selectedGroupId,
-    );
-    _prefetchSeasonGroup(selectedGroup);
-  }
-
-  void _prefetchSeasonGroup(DetailEpisodeGroup group) {
-    if (group.episodesLoaded || group.id.trim().isEmpty) {
-      return;
-    }
-    final request = _DetailSeasonEpisodesRequest.fromTargetAndGroup(
-      target: widget.seriesTarget,
-      group: group,
-    );
-    unawaited(
-      ref
-          .read(detailSeasonEpisodesProvider(request).future)
-          .catchError((_) => const <MediaItem>[]),
-    );
-  }
-
   String _episodeFocusId(MediaItem episode, int index) {
     final episodeSeed = episode.id.isNotEmpty
         ? episode.id
@@ -344,7 +302,6 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
                     focusId: 'detail:season:${group.id}',
                     autofocus: index == 0,
                     onTap: () {
-                      _prefetchSeasonGroup(group);
                       if (widget.selectedGroupId != group.id) {
                         widget.onSeasonSelected(group.id);
                       }
@@ -380,7 +337,6 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
                   physics: const BouncingScrollPhysics(),
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   clipBehavior: Clip.none,
-                  cacheExtent: _episodeCardWidth * 2,
                   itemCount: episodes.length,
                   separatorBuilder: (context, index) =>
                       const SizedBox(width: _episodeCardSpacing),
@@ -618,7 +574,6 @@ class _DetailEpisodeCard extends ConsumerWidget {
       autofocus: autofocus,
       borderRadius: borderRadius,
       visualStyle: TvFocusVisualStyle.none,
-      focusScale: 1.06,
       child: cardChild,
     );
   }

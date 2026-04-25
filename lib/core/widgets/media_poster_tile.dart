@@ -25,7 +25,6 @@ class MediaPosterTile extends ConsumerStatefulWidget {
     this.tvPosterFocusOutlineOnly = true,
     this.tvPosterFocusShowBorder = true,
     this.tvPosterFocusScale = 1.0,
-    this.tvPosterAnimateFocus = true,
   });
 
   final String title;
@@ -46,7 +45,6 @@ class MediaPosterTile extends ConsumerStatefulWidget {
   final bool tvPosterFocusOutlineOnly;
   final bool tvPosterFocusShowBorder;
   final double tvPosterFocusScale;
-  final bool tvPosterAnimateFocus;
 
   @override
   ConsumerState<MediaPosterTile> createState() => _MediaPosterTileState();
@@ -142,7 +140,7 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
         // Only constrain decode height so landscape fallbacks keep
         // their original aspect ratio before BoxFit.cover crops them.
         cacheHeight: skipResizeForDecode ? null : cacheHeight,
-        filterQuality: isTelevision ? FilterQuality.none : FilterQuality.low,
+        filterQuality: FilterQuality.low,
         loadingBuilder: (context) {
           return _buildPosterPlaceholder(theme);
         },
@@ -219,18 +217,8 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
               ],
             );
           }
-          final scale = isPosterFocused ? widget.tvPosterFocusScale : 1.0;
-          if ((scale - 1.0).abs() < 0.0001) {
-            return currentChild;
-          }
-          if (!widget.tvPosterAnimateFocus) {
-            return Transform.scale(
-              scale: scale,
-              child: currentChild,
-            );
-          }
           return AnimatedScale(
-            scale: scale,
+            scale: isPosterFocused ? widget.tvPosterFocusScale : 1.0,
             duration: const Duration(milliseconds: 140),
             curve: Curves.easeOutCubic,
             child: currentChild,
@@ -363,8 +351,8 @@ class _TelevisionPosterAction extends StatelessWidget {
         child: Focus(
           focusNode: focusNode,
           autofocus: autofocus,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
             onTap: onPressed,
             onLongPress: onContextAction,
             onSecondaryTap: onContextAction,

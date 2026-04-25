@@ -199,7 +199,6 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       await _awaitStrictPlaybackReady(
         playback.player,
         target: resolvedTarget,
-        videoController: playback.videoController,
         timeout: Duration(seconds: timeoutSeconds),
         stageLabel: 'post-resume',
         progressBaseline: playback.player.state.position > _latestPosition
@@ -314,13 +313,11 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   }) async {
     final bufferSizeBytes = _resolveMpvBufferSizeBytes(resolvedTarget);
     final hardwareDecodeMode = _resolveMpvHardwareDecodeMode();
-    final gateStartupAudio = _shouldGateMpvStartupAudio(resolvedTarget);
     final player = Player(
       configuration: PlayerConfiguration(
         title: 'Starflow',
         logLevel: MPVLogLevel.error,
         bufferSize: bufferSizeBytes,
-        muted: gateStartupAudio,
       ),
     );
     final videoController = VideoController(
@@ -387,18 +384,22 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         beginStartupWait: beginStartupWait,
       );
       startupError = Completer<String>();
-      await _awaitStrictPlaybackReady(
+      await _awaitMpvPrePlayReady(
         player,
         target: resolvedTarget,
         videoController: videoController,
         timeout: _remainingMpvOpenTimeout(deadline),
         startupError: startupError!.future,
+      );
+      await player.play().timeout(_remainingMpvOpenTimeout(deadline));
+      await _awaitStrictPlaybackReady(
+        player,
+        target: resolvedTarget,
+        timeout: _remainingMpvOpenTimeout(deadline),
+        startupError: startupError!.future,
         stageLabel: 'open-attempt',
         progressBaseline: player.state.position,
       );
-      if (gateStartupAudio) {
-        await _releaseMpvStartupAudioGate(player);
-      }
       awaitingStartup = false;
       startupError = null;
       _traceWindowsMpv(
@@ -804,7 +805,6 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     required PlaybackTarget target,
     required Duration timeout,
     required String stageLabel,
-    VideoController? videoController,
     Duration? progressBaseline,
     Future<String>? startupError,
   }) async {
@@ -820,9 +820,6 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       config: _resolveStartupStallWatchdogConfig(target),
     );
     final readyConfirmWindow = _resolveStrictReadyConfirmWindow(target);
-    final requireFirstFrame =
-        _shouldRequireMpvFirstFrame(target) && videoController != null;
-    var firstFrameRendered = !requireFirstFrame;
 
     void evaluateReady() {
       if (readyCompleter.isCompleted) {
@@ -832,7 +829,6 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         player,
         target: target,
         progressBaseline: baseline,
-        firstFrameRendered: firstFrameRendered,
       )) {
         readyCandidateSince ??= DateTime.now();
         if (DateTime.now().difference(readyCandidateSince!) <
@@ -843,37 +839,6 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         return;
       }
       readyCandidateSince = null;
-    }
-
-    if (requireFirstFrame && videoController != null) {
-      unawaited(
-        _awaitMpvFirstFrameReady(
-          videoController,
-          timeout: timeout,
-          startupError: startupFailureFuture,
-        ).then((_) {
-          if (readyCompleter.isCompleted) {
-            return;
-          }
-          firstFrameRendered = true;
-          _traceWindowsMpv(
-            'windows-mpv.open.first-frame-ready',
-            fields: {
-              'stage': stageLabel,
-              'positionMs': player.state.position.inMilliseconds,
-              'durationMs': player.state.duration.inMilliseconds,
-              'width': player.state.width ?? 0,
-              'height': player.state.height ?? 0,
-            },
-          );
-          evaluateReady();
-        }).catchError((Object error, StackTrace stackTrace) {
-          if (readyCompleter.isCompleted) {
-            return;
-          }
-          readyCompleter.completeError(error, stackTrace);
-        }),
-      );
     }
 
     subscriptions.addAll([
@@ -953,11 +918,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     Player player, {
     required PlaybackTarget target,
     required Duration progressBaseline,
-    required bool firstFrameRendered,
   }) {
-    if (!firstFrameRendered) {
-      return false;
-    }
     final state = player.state;
     final isRemote = _isLikelyRemotePlaybackTarget(target);
     final positionDelta = state.position - progressBaseline;
@@ -1009,37 +970,71 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     }
   }
 
-  bool _shouldGateMpvStartupAudio(PlaybackTarget target) {
-    if (kIsWeb) {
-      return false;
-    }
-    return _shouldRequireMpvFirstFrame(target);
-  }
-
-  Future<void> _awaitMpvFirstFrameReady(
-    VideoController videoController, {
+  Future<void> _awaitMpvPrePlayReady(
+    Player player, {
+    required PlaybackTarget target,
     required Duration timeout,
-    Future<void>? startupError,
+    VideoController? videoController,
+    Future<String>? startupError,
   }) async {
+    if (!_shouldRequireMpvFirstFrame(target)) {
+      return;
+    }
     final waiters = <Future<void>>[
-      videoController.waitUntilFirstFrameRendered,
+      _awaitMpvVisualMetadataReady(player),
     ];
+    if (videoController != null) {
+      waiters.add(
+        _awaitMpvFirstFrameReady(
+          videoController,
+        ),
+      );
+    }
     if (startupError != null) {
-      waiters.add(startupError);
+      waiters.add(
+        startupError.then<void>((message) {
+          throw _PlayerOpenException(message);
+        }),
+      );
     }
     await Future.any(waiters).timeout(timeout);
   }
 
-  Future<void> _releaseMpvStartupAudioGate(Player player) async {
+  Future<void> _awaitMpvFirstFrameReady(
+    VideoController videoController, {
+  }) async {
+    await videoController.waitUntilFirstFrameRendered;
+  }
+
+  Future<void> _awaitMpvVisualMetadataReady(Player player) async {
+    if (_hasStrictPlaybackMetadata(player)) {
+      return;
+    }
+    final completer = Completer<void>();
+    final subscriptions = <StreamSubscription<dynamic>>[];
+
+    void evaluate() {
+      if (completer.isCompleted) {
+        return;
+      }
+      if (_hasStrictPlaybackMetadata(player)) {
+        completer.complete();
+      }
+    }
+
+    subscriptions.addAll([
+      player.stream.duration.listen((_) => evaluate()),
+      player.stream.width.listen((_) => evaluate()),
+      player.stream.height.listen((_) => evaluate()),
+    ]);
+    evaluate();
+
     try {
-      await player.setVolume(100);
-      _traceWindowsMpv('windows-mpv.open.startup-audio-unmuted');
-    } catch (error, stackTrace) {
-      _traceWindowsMpv(
-        'windows-mpv.open.startup-audio-unmute-failed',
-        error: error,
-        stackTrace: stackTrace,
-      );
+      await completer.future;
+    } finally {
+      for (final subscription in subscriptions) {
+        await subscription.cancel();
+      }
     }
   }
 
@@ -1532,7 +1527,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     required Completer<String> startupError,
   }) async {
     await Future.any<void>([
-      player.open(media, play: true),
+      player.open(media, play: false),
       startupError.future.then<void>((message) {
         throw _PlayerOpenException(message);
       }),
