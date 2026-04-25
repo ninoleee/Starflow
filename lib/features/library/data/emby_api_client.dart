@@ -13,6 +13,11 @@ final embyApiClientProvider = Provider<EmbyApiClient>((ref) {
   return EmbyApiClient(client);
 });
 
+enum EmbyImageRequestProfile {
+  poster,
+  libraryGrid,
+}
+
 class EmbyApiClient {
   EmbyApiClient(this._client);
 
@@ -615,6 +620,7 @@ class EmbyApiClient {
     final mediaSourcePath = (mediaSource?['Path'] as String? ?? '').trim();
     final actualAddress =
         mediaSourcePath.isNotEmpty ? mediaSourcePath : itemPath;
+    final ratingLabels = _resolveRatingLabels(item);
 
     return MediaItem(
       id: id,
@@ -662,6 +668,7 @@ class EmbyApiClient {
         const ['tmdbSet', 'TMDbSet', 'TmdbSet'],
       ),
       providerIds: providerIds,
+      ratingLabels: ratingLabels,
       addedAt: createdAt,
       lastWatchedAt: lastPlayedAt,
     );
@@ -674,7 +681,7 @@ class EmbyApiClient {
   }) {
     final query = <String, String>{
       'Fields':
-          'DateCreated,Genres,IndexNumber,OriginalTitle,Overview,ParentIndexNumber,Path,People,ProductionYear,ProviderIds,RunTimeTicks,SortName',
+          'CommunityRating,CriticRating,DateCreated,Genres,IndexNumber,OriginalTitle,Overview,ParentIndexNumber,Path,People,ProductionYear,ProviderIds,RunTimeTicks,SortName',
       'EnableImages': 'true',
       'EnableImageTypes': 'Primary',
       'ImageTypeLimit': '1',
@@ -802,16 +809,35 @@ class EmbyApiClient {
     required String itemId,
     required String imageTag,
     required String accessToken,
+    EmbyImageRequestProfile profile = EmbyImageRequestProfile.poster,
   }) {
     return baseUri.replace(
       path: _joinPath(baseUri.path, 'Items/$itemId/Images/Primary'),
       queryParameters: {
-        'maxHeight': '720',
-        'quality': '90',
+        ..._imageRequestParameters(profile),
         if (imageTag.isNotEmpty) 'tag': imageTag,
         if (accessToken.trim().isNotEmpty) 'api_key': accessToken.trim(),
       },
     );
+  }
+
+  static String buildImageUrlForProfile(
+    String rawUrl, {
+    EmbyImageRequestProfile profile = EmbyImageRequestProfile.poster,
+  }) {
+    final trimmedUrl = rawUrl.trim();
+    if (trimmedUrl.isEmpty) {
+      return '';
+    }
+
+    final uri = Uri.tryParse(trimmedUrl);
+    if (uri == null || !_isEmbyItemImagePath(uri.path)) {
+      return trimmedUrl;
+    }
+
+    final queryParameters = Map<String, String>.from(uri.queryParameters)
+      ..addAll(_imageRequestParameters(profile));
+    return uri.replace(queryParameters: queryParameters).toString();
   }
 
   static Uri buildDirectStreamUri({
@@ -872,6 +898,15 @@ class EmbyApiClient {
     }
 
     return null;
+  }
+
+  static List<String> _resolveRatingLabels(Map<String, dynamic> item) {
+    final labels = <String>[];
+    final communityRating = (item['CommunityRating'] as num?)?.toDouble();
+    if (communityRating != null && communityRating > 0) {
+      labels.add('Emby ${communityRating.toStringAsFixed(1)}');
+    }
+    return labels;
   }
 
   String _resolveErrorMessage(http.Response response) {
@@ -1196,6 +1231,37 @@ class EmbyApiClient {
       return '/$normalizedSegment';
     }
     return '$normalizedBase/$normalizedSegment';
+  }
+
+  static bool _isEmbyItemImagePath(String path) {
+    final segments = path
+        .split('/')
+        .where((segment) => segment.isNotEmpty)
+        .map((segment) => segment.toLowerCase())
+        .toList(growable: false);
+    if (segments.length < 4) {
+      return false;
+    }
+    final itemsIndex = segments.indexOf('items');
+    final imagesIndex = segments.indexOf('images');
+    return itemsIndex >= 0 &&
+        imagesIndex == itemsIndex + 2 &&
+        imagesIndex + 1 < segments.length;
+  }
+
+  static Map<String, String> _imageRequestParameters(
+    EmbyImageRequestProfile profile,
+  ) {
+    return switch (profile) {
+      EmbyImageRequestProfile.poster => const {
+          'maxHeight': '720',
+          'quality': '90',
+        },
+      EmbyImageRequestProfile.libraryGrid => const {
+          'maxHeight': '420',
+          'quality': '80',
+        },
+    };
   }
 }
 

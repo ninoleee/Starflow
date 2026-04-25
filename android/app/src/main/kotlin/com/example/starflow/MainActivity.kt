@@ -122,6 +122,7 @@ class MainActivity : FlutterActivity() {
                     val playbackTargetJson = call.argument<String>("playbackTargetJson")?.trim().orEmpty()
                     val playbackItemKey = call.argument<String>("playbackItemKey")?.trim().orEmpty()
                     val seriesKey = call.argument<String>("seriesKey")?.trim().orEmpty()
+                    val episodeQueueJson = call.argument<String>("episodeQueueJson")?.trim().orEmpty()
                     if (rawUrl.isEmpty()) {
                         result.success(false)
                         return@setMethodCallHandler
@@ -136,6 +137,7 @@ class MainActivity : FlutterActivity() {
                             putExtra(NativePlaybackActivity.EXTRA_PLAYBACK_TARGET_JSON, playbackTargetJson)
                             putExtra(NativePlaybackActivity.EXTRA_PLAYBACK_ITEM_KEY, playbackItemKey)
                             putExtra(NativePlaybackActivity.EXTRA_SERIES_KEY, seriesKey)
+                            putExtra(NativePlaybackActivity.EXTRA_EPISODE_QUEUE_JSON, episodeQueueJson)
                             addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                         }
                         startActivity(intent)

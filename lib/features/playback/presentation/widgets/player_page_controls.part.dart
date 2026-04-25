@@ -290,7 +290,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
 
     final player = _player;
     final videoController = _videoController;
-    if (!_isReady || player == null || videoController == null) {
+    if (player == null || videoController == null) {
       final startupOverlay = PlayerStartupOverlay(
         target: _resolvedTarget ?? widget.target,
         speedLabel: _startupProbe.speedLabel,
@@ -346,7 +346,28 @@ extension _PlayerPageStateControls on _PlayerPageState {
                             child: embeddedVideo,
                           ),
                         ),
-                  if (!_isLeanPlaybackMode)
+                  if (!_isReady)
+                    Positioned.fill(
+                      child: isTelevision
+                          ? PlayerStartupOverlay(
+                              target: _resolvedTarget ?? widget.target,
+                              speedLabel: _startupProbe.speedLabel,
+                            )
+                          : Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                PlayerStartupOverlay(
+                                  target: _resolvedTarget ?? widget.target,
+                                  speedLabel: _startupProbe.speedLabel,
+                                ),
+                                _buildNonTvTransientTopChrome(
+                                  settings: settings,
+                                  showMoreButton: false,
+                                ),
+                              ],
+                            ),
+                    )
+                  else if (!_isLeanPlaybackMode)
                     StreamBuilder<bool>(
                       stream: player.stream.buffering,
                       initialData: player.state.buffering,

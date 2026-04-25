@@ -211,12 +211,21 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
                   const SizedBox(height: 20),
                   displayAsync.when(
                     data: (pageItems) {
-                      _ratingPrefetchCoordinator.schedulePrefetch(
-                        ref: ref,
-                        targets: pageItems.items
-                            .map(MediaDetailTarget.fromMediaItem),
-                        isPageActive: () => mounted && isPageVisible,
-                      );
+                      final prefetchTargets = pageItems.items
+                          .map(MediaDetailTarget.fromMediaItem);
+                      if (isTelevision) {
+                        _ratingPrefetchCoordinator.scheduleInMemoryPrefetch(
+                          ref: ref,
+                          targets: prefetchTargets,
+                          isPageActive: () => mounted && isPageVisible,
+                        );
+                      } else {
+                        _ratingPrefetchCoordinator.schedulePrefetch(
+                          ref: ref,
+                          targets: prefetchTargets,
+                          isPageActive: () => mounted && isPageVisible,
+                        );
+                      }
                       return LibraryPagedGrid(
                         pageItems: pageItems.items,
                         totalItems: pageItems.totalItems,

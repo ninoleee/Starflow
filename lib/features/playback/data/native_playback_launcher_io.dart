@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
+import 'package:starflow/features/playback/domain/playback_episode_queue.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -21,6 +22,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
   Future<NativePlaybackLaunchResult> launch(
     PlaybackTarget target, {
     required PlaybackDecodeMode decodeMode,
+    PlaybackEpisodeQueue? episodeQueue,
   }) async {
     if (!Platform.isAndroid && !Platform.isIOS) {
       return const NativePlaybackLaunchResult(
@@ -57,6 +59,9 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
           'playbackTargetJson': jsonEncode(target.toJson()),
           'playbackItemKey': buildPlaybackItemKey(target),
           'seriesKey': buildSeriesKeyForTarget(target),
+          'episodeQueueJson': episodeQueue == null
+              ? ''
+              : jsonEncode(episodeQueue.toJson()),
         },
       );
       _traceQuarkNativeLaunch(

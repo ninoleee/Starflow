@@ -76,10 +76,15 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       final startupPreparation = outcome.startupPreparation;
       final resumeEntry = startupPreparation.resumeEntry;
       final skipPreference = startupPreparation.skipPreference;
+      final episodeQueue = await _preparePlaybackEpisodeQueue(
+        startupTarget,
+        currentTarget: resolvedTarget,
+      );
       if (mounted) {
         setState(() {
           _resolvedTarget = resolvedTarget;
           _seriesSkipPreference = skipPreference;
+          _episodeQueue = episodeQueue;
         });
       }
       final executor = PlaybackStartupExecutor(
@@ -155,6 +160,20 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         if (!playing) {
           unawaited(_persistPlaybackProgress(force: true));
         }
+      });
+      _playerCompletedSubscription = playback.player.stream.completed.listen((
+        completed,
+      ) {
+        if (!completed || !mounted || _player != playback.player) {
+          return;
+        }
+        unawaited(
+          _movePlaybackQueue(
+            forward: true,
+            reason: 'playback-completed',
+            showFeedback: false,
+          ),
+        );
       });
       _playerDurationSubscription = playback.player.stream.duration.listen((
         duration,
@@ -338,6 +357,10 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
             _playbackDecodeMode != PlaybackDecodeMode.softwarePreferred,
       },
     );
+    _attachOpeningEmbeddedPlayback(
+      player,
+      videoController,
+    );
     Completer<String>? startupError;
     var awaitingStartup = false;
     late final StreamSubscription<String> errorSubscription;
@@ -422,6 +445,10 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         'windows-mpv.open.failed',
         error: error,
         stackTrace: stackTrace,
+      );
+      _detachOpeningEmbeddedPlayback(
+        player,
+        videoController,
       );
       await errorSubscription.cancel();
       await player.dispose();
@@ -980,24 +1007,21 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     if (!_shouldRequireMpvFirstFrame(target)) {
       return;
     }
-    final waiters = <Future<void>>[
-      _awaitMpvVisualMetadataReady(player),
-    ];
+    final waiters = <Future<void>>[_awaitMpvVisualMetadataReady(player)];
     if (videoController != null) {
-      waiters.add(
-        _awaitMpvFirstFrameReady(
-          videoController,
-        ),
-      );
+      waiters.add(_awaitMpvFirstFrameReady(videoController));
     }
-    if (startupError != null) {
-      waiters.add(
-        startupError.then<void>((message) {
-          throw _PlayerOpenException(message);
-        }),
-      );
+    final readinessFuture = Future.wait<void>(waiters);
+    if (startupError == null) {
+      await readinessFuture.timeout(timeout);
+      return;
     }
-    await Future.any(waiters).timeout(timeout);
+    await Future.any<void>([
+      readinessFuture,
+      startupError.then<void>((message) {
+        throw _PlayerOpenException(message);
+      }),
+    ]).timeout(timeout);
   }
 
   Future<void> _awaitMpvFirstFrameReady(
@@ -1007,7 +1031,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   }
 
   Future<void> _awaitMpvVisualMetadataReady(Player player) async {
-    if (_hasStrictPlaybackMetadata(player)) {
+    if (_hasMpvVisualMetadataReady(player)) {
       return;
     }
     final completer = Completer<void>();
@@ -1017,7 +1041,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       if (completer.isCompleted) {
         return;
       }
-      if (_hasStrictPlaybackMetadata(player)) {
+      if (_hasMpvVisualMetadataReady(player)) {
         completer.complete();
       }
     }
@@ -1043,6 +1067,53 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     final width = state.width ?? 0;
     final height = state.height ?? 0;
     return state.duration > Duration.zero || (width > 0 && height > 0);
+  }
+
+  void _attachOpeningEmbeddedPlayback(
+    Player player,
+    VideoController videoController,
+  ) {
+    if (!mounted) {
+      return;
+    }
+    if (identical(_player, player) && identical(_videoController, videoController)) {
+      return;
+    }
+    setState(() {
+      _player = player;
+      _videoController = videoController;
+      _isReady = false;
+      _error = null;
+      _latestPosition = player.state.position;
+      _latestDuration = player.state.duration;
+    });
+  }
+
+  void _detachOpeningEmbeddedPlayback(
+    Player player,
+    VideoController videoController,
+  ) {
+    if (!mounted) {
+      return;
+    }
+    if (!identical(_player, player) || !identical(_videoController, videoController)) {
+      return;
+    }
+    setState(() {
+      _player = null;
+      _videoController = null;
+      _isReady = false;
+      _error = null;
+      _latestPosition = Duration.zero;
+      _latestDuration = Duration.zero;
+    });
+  }
+
+  bool _hasMpvVisualMetadataReady(Player player) {
+    final state = player.state;
+    final width = state.width ?? 0;
+    final height = state.height ?? 0;
+    return width > 0 && height > 0;
   }
 
   MpvStallWatchdogConfig _resolveStartupStallWatchdogConfig(
@@ -1291,6 +1362,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   }
 
   Future<void> _launchWithNativeContainer(PlaybackTarget target) async {
+    final nativeEpisodeQueue = await _resolveNativePlayableEpisodeQueue();
     _traceQuarkPlaybackStartup(
       'quark.launch.native.begin',
       target: target,
@@ -1303,6 +1375,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         await _providerContainer.read(nativePlaybackLauncherProvider).launch(
               target,
               decodeMode: _playbackDecodeMode,
+              episodeQueue: nativeEpisodeQueue,
             );
     _traceQuarkPlaybackStartup(
       'quark.launch.native.result',
@@ -1327,6 +1400,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   Future<bool> _tryLaunchWithPerformanceFallback(
     PlaybackTarget target,
   ) async {
+    final nativeEpisodeQueue = await _resolveNativePlayableEpisodeQueue();
     _traceQuarkPlaybackStartup(
       'quark.launch.fallback.begin',
       target: target,
@@ -1336,6 +1410,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         await _providerContainer.read(nativePlaybackLauncherProvider).launch(
               target,
               decodeMode: _playbackDecodeMode,
+              episodeQueue: nativeEpisodeQueue,
             );
     _traceQuarkPlaybackStartup(
       'quark.launch.fallback.native-result',
@@ -1372,6 +1447,118 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     }
     context.pop();
     return true;
+  }
+
+  Future<PlaybackEpisodeQueue?> _preparePlaybackEpisodeQueue(
+    PlaybackTarget queueSeedTarget, {
+    required PlaybackTarget currentTarget,
+  }) async {
+    try {
+      final queue = await PlaybackEpisodeQueueResolver(
+        read: _providerContainer.read,
+      ).resolve(queueSeedTarget);
+      return queue?.replaceCurrentTarget(currentTarget);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<PlaybackEpisodeQueue?> _resolveNativePlayableEpisodeQueue() async {
+    final queue = _episodeQueue;
+    final resolvedTarget = _resolvedTarget;
+    if (queue == null || resolvedTarget == null || !queue.hasCurrent) {
+      return null;
+    }
+
+    final targetResolver = PlaybackTargetResolver(read: _providerContainer.read);
+    final resolvedEntries = <PlaybackEpisodeQueueEntry>[];
+    for (var index = queue.currentIndex; index < queue.entries.length; index++) {
+      final entry = queue.entries[index];
+      PlaybackTarget resolvedEntryTarget;
+      if (index == queue.currentIndex) {
+        resolvedEntryTarget = resolvedTarget;
+      } else {
+        try {
+          resolvedEntryTarget = await targetResolver.resolve(entry.target);
+        } catch (_) {
+          break;
+        }
+      }
+      resolvedEntries.add(
+        entry.copyWith(
+          target: resolvedEntryTarget,
+        ),
+      );
+    }
+    if (resolvedEntries.length <= 1) {
+      return null;
+    }
+    return PlaybackEpisodeQueue(entries: resolvedEntries);
+  }
+
+  Future<bool> _movePlaybackQueue({
+    required bool forward,
+    required String reason,
+    required bool showFeedback,
+  }) async {
+    if (_episodeQueueAdvanceInProgress) {
+      return false;
+    }
+    final queue = _episodeQueue;
+    final player = _player;
+    if (queue == null || player == null || !queue.hasCurrent) {
+      return false;
+    }
+    final nextQueue = forward ? queue.moveToNext() : queue.moveToPrevious();
+    if (identical(nextQueue, queue) || !nextQueue.hasCurrent) {
+      return false;
+    }
+
+    _episodeQueueAdvanceInProgress = true;
+    try {
+      final resolvedDuration = player.state.duration;
+      final resolvedPosition = player.state.position;
+      if (forward && resolvedDuration > Duration.zero) {
+        _latestDuration = resolvedDuration;
+        _latestPosition = resolvedDuration;
+      } else {
+        _latestDuration =
+            resolvedDuration > Duration.zero ? resolvedDuration : _latestDuration;
+        _latestPosition = resolvedPosition;
+      }
+      await _persistPlaybackProgress(force: true);
+
+      final detachedPlayer = _detachActivePlayerState();
+      await _shutdownDetachedPlayer(
+        detachedPlayer,
+        reason: 'player-page-$reason',
+        persistProgress: false,
+        teardownPlatformState: false,
+      );
+
+      if (!mounted) {
+        return false;
+      }
+
+      setState(() {
+        _episodeQueue = nextQueue;
+        _error = null;
+      });
+      await _initialize(initialTarget: nextQueue.currentEntry!.target);
+      if (mounted && showFeedback) {
+        _showMessage(forward ? '已切到下一集' : '已切到上一集');
+      }
+      return true;
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = _buildPlaybackErrorMessage(error);
+        });
+      }
+      return false;
+    } finally {
+      _episodeQueueAdvanceInProgress = false;
+    }
   }
 
   String _resolveMpvHardwareDecodeMode() {

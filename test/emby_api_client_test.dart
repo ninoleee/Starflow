@@ -106,6 +106,7 @@ void main() {
                       },
                     ],
                     'RunTimeTicks': 99600000000,
+                    'CommunityRating': 8.4,
                   },
                 ],
               }),
@@ -185,6 +186,7 @@ void main() {
       expect(items.first.tvdbId, '123456');
       expect(items.first.wikidataId, 'Q987654');
       expect(items.first.tmdbSetId, '435259');
+      expect(items.first.ratingLabels, ['Emby 8.4']);
       expect(
         items.first.providerIds,
         containsPair('wikidata', 'Q987654'),

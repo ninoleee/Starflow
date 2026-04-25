@@ -10,6 +10,7 @@ import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/application/library_cached_items.dart';
+import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 
 class _PreviousLibraryPageIntent extends Intent {
@@ -112,7 +113,14 @@ class LibraryPagedGrid extends ConsumerWidget {
                   item: seedItem,
                   cachedTarget: cachedTarget,
                 );
-                final posterAssets = _resolveLibraryPosterAssets(item);
+                final posterAssets = _resolveLibraryPosterAssets(item)
+                    .map(
+                      (asset) => _resolveLibraryPosterAssetForDisplay(
+                        item,
+                        asset,
+                      ),
+                    )
+                    .toList(growable: false);
                 final posterAsset = posterAssets.isNotEmpty
                     ? posterAssets.first
                     : const _LibraryImageAsset(url: '');
@@ -242,6 +250,28 @@ List<_LibraryImageAsset> _resolveLibraryPosterAssets(MediaItem item) {
     add(item.backdropUrl, item.backdropHeaders);
   }
   return assets;
+}
+
+_LibraryImageAsset _resolveLibraryPosterAssetForDisplay(
+  MediaItem item,
+  _LibraryImageAsset asset,
+) {
+  if (item.sourceKind != MediaSourceKind.emby) {
+    return asset;
+  }
+
+  final optimizedUrl = EmbyApiClient.buildImageUrlForProfile(
+    asset.url,
+    profile: EmbyImageRequestProfile.libraryGrid,
+  );
+  if (optimizedUrl == asset.url) {
+    return asset;
+  }
+
+  return _LibraryImageAsset(
+    url: optimizedUrl,
+    headers: asset.headers,
+  );
 }
 
 bool _isLibraryDetailOnlyEpisodeBackdrop(MediaItem item) {

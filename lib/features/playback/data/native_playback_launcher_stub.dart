@@ -1,4 +1,5 @@
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
+import 'package:starflow/features/playback/domain/playback_episode_queue.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -13,6 +14,7 @@ class UnsupportedNativePlaybackLauncher implements NativePlaybackLauncher {
   Future<NativePlaybackLaunchResult> launch(
     PlaybackTarget target, {
     required PlaybackDecodeMode decodeMode,
+    PlaybackEpisodeQueue? episodeQueue,
   }) async {
     return const NativePlaybackLaunchResult(
       launched: false,

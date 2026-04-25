@@ -56,6 +56,7 @@ class NativePlaybackActivity : Activity() {
     private var playbackTargetJson = "{}"
     private var playbackItemKey = ""
     private var seriesKey = ""
+    private var episodeQueue: NativeEpisodeQueue? = null
     private var restoredResumePositionMs: Long = 0L
     private var subtitleDelayMs: Long = 0L
     private var externalSubtitleSource: ExternalSubtitleSource? = null
@@ -100,6 +101,11 @@ class NativePlaybackActivity : Activity() {
             syncPlaybackSystemSession()
             updatePictureInPictureParams()
             updateProgressMarkers()
+            if (playbackState == Player.STATE_ENDED &&
+                advanceToAdjacentEpisode(forward = true, reason = "ended", showFeedback = false)
+            ) {
+                return
+            }
             logPlayback(
                 "native.playback.state state=${playbackStateLabel(playbackState)} " +
                     "positionMs=${player?.currentPosition ?: -1L}",
@@ -139,6 +145,9 @@ class NativePlaybackActivity : Activity() {
             .ifEmpty { "{}" }
         playbackItemKey = intent.getStringExtra(EXTRA_PLAYBACK_ITEM_KEY)?.trim().orEmpty()
         seriesKey = intent.getStringExtra(EXTRA_SERIES_KEY)?.trim().orEmpty()
+        episodeQueue = NativeEpisodeQueue.fromJsonString(
+            intent.getStringExtra(EXTRA_EPISODE_QUEUE_JSON)?.trim().orEmpty(),
+        )
         restoreExternalSubtitleSourceFromTarget()
 
         setContentView(
@@ -735,6 +744,8 @@ class NativePlaybackActivity : Activity() {
             buffering = currentPlayer.playbackState == Player.STATE_BUFFERING,
             speed = currentPlayer.playbackParameters.speed,
             canSeek = true,
+            hasPrevious = episodeQueue?.hasPrevious() == true,
+            hasNext = episodeQueue?.hasNext() == true,
         )
         playbackSystemSessionManager.update(state)
     }
@@ -750,10 +761,18 @@ class NativePlaybackActivity : Activity() {
                 persistPlaybackProgress(force = true)
             }
             "toggle" -> togglePlayback()
-            "seekForward",
-            "next" -> seekBy(10_000L)
-            "seekBackward",
-            "previous" -> seekBy(-10_000L)
+            "seekForward" -> seekBy(10_000L)
+            "next" -> {
+                if (!advanceToAdjacentEpisode(forward = true, reason = "remote-next")) {
+                    seekBy(10_000L)
+                }
+            }
+            "seekBackward" -> seekBy(-10_000L)
+            "previous" -> {
+                if (!advanceToAdjacentEpisode(forward = false, reason = "remote-previous")) {
+                    seekBy(-10_000L)
+                }
+            }
             "seekTo" -> {
                 val currentPlayer = player ?: return
                 currentPlayer.seekTo((positionMs ?: 0L).coerceAtLeast(0L))
@@ -761,6 +780,62 @@ class NativePlaybackActivity : Activity() {
             }
             "interruptionResume" -> setPlayWhenReady(true)
         }
+    }
+
+    private fun advanceToAdjacentEpisode(
+        forward: Boolean,
+        reason: String,
+        showFeedback: Boolean = true,
+    ): Boolean {
+        val queue = episodeQueue ?: return false
+        val nextQueue = if (forward) {
+            queue.moveToNext()
+        } else {
+            queue.moveToPrevious()
+        } ?: return false
+        val nextEntry = nextQueue.currentEntry() ?: return false
+        if (nextEntry.url().isBlank()) {
+            return false
+        }
+
+        persistPlaybackProgress(force = true)
+        releasePlayer()
+
+        episodeQueue = nextQueue
+        playbackTargetJson = nextEntry.playbackTargetJson
+        playbackItemKey = nextEntry.playbackItemKey
+        seriesKey = nextEntry.seriesKey
+        externalSubtitleSource = null
+        subtitleDelayMs = 0L
+        restoredResumePositionMs = 0L
+        lastSavedPositionMs = -1L
+        nextInitializePlayWhenReady = true
+
+        intent.putExtra(EXTRA_URL, nextEntry.url())
+        intent.putExtra(EXTRA_TITLE, nextEntry.title())
+        intent.putExtra(EXTRA_HEADERS_JSON, nextEntry.headersJson())
+        intent.putExtra(EXTRA_PLAYBACK_TARGET_JSON, playbackTargetJson)
+        intent.putExtra(EXTRA_PLAYBACK_ITEM_KEY, playbackItemKey)
+        intent.putExtra(EXTRA_SERIES_KEY, seriesKey)
+        intent.putExtra(EXTRA_EPISODE_QUEUE_JSON, nextQueue.toJsonString())
+
+        bindControllerChrome()
+        initializePlayer()
+        syncPlaybackSystemSession()
+        if (showFeedback) {
+            showToast(
+                if (forward) {
+                    "已切到下一集"
+                } else {
+                    "已切到上一集"
+                },
+            )
+        }
+        logPlayback(
+            "native.queue.advance direction=${if (forward) "next" else "previous"} " +
+                "reason=$reason index=${nextQueue.currentIndex}",
+        )
+        return true
     }
 
     private fun buildSystemSessionTitle(): String {
@@ -2198,6 +2273,7 @@ class NativePlaybackActivity : Activity() {
         const val EXTRA_PLAYBACK_TARGET_JSON = "playbackTargetJson"
         const val EXTRA_PLAYBACK_ITEM_KEY = "playbackItemKey"
         const val EXTRA_SERIES_KEY = "seriesKey"
+        const val EXTRA_EPISODE_QUEUE_JSON = "episodeQueueJson"
     }
 }
 
@@ -2215,6 +2291,106 @@ private data class ExternalSubtitleSource(
     val mimeType: String,
     val displayName: String,
 )
+
+private data class NativeEpisodeQueueEntry(
+    val playbackTargetJson: String,
+    val playbackItemKey: String,
+    val seriesKey: String,
+) {
+    private fun targetObject(): JSONObject {
+        return try {
+            JSONObject(playbackTargetJson)
+        } catch (_: Throwable) {
+            JSONObject()
+        }
+    }
+
+    fun url(): String = targetObject().optString("streamUrl").trim()
+
+    fun title(): String = targetObject().optString("title").trim()
+
+    fun headersJson(): String {
+        return targetObject().optJSONObject("headers")?.toString() ?: "{}"
+    }
+}
+
+private data class NativeEpisodeQueue(
+    val entries: List<NativeEpisodeQueueEntry>,
+    val currentIndex: Int = 0,
+) {
+    fun hasPrevious(): Boolean {
+        return currentIndex > 0 && currentIndex < entries.size
+    }
+
+    fun hasNext(): Boolean {
+        return currentIndex >= 0 && currentIndex + 1 < entries.size
+    }
+
+    fun currentEntry(): NativeEpisodeQueueEntry? {
+        return entries.getOrNull(currentIndex)
+    }
+
+    fun moveToNext(): NativeEpisodeQueue? {
+        return if (hasNext()) copy(currentIndex = currentIndex + 1) else null
+    }
+
+    fun moveToPrevious(): NativeEpisodeQueue? {
+        return if (hasPrevious()) copy(currentIndex = currentIndex - 1) else null
+    }
+
+    fun toJsonString(): String {
+        val entriesJson = org.json.JSONArray()
+        entries.forEach { entry ->
+            entriesJson.put(
+                JSONObject().apply {
+                    put("target", try {
+                        JSONObject(entry.playbackTargetJson)
+                    } catch (_: Throwable) {
+                        JSONObject()
+                    })
+                    put("playbackItemKey", entry.playbackItemKey)
+                    put("seriesKey", entry.seriesKey)
+                },
+            )
+        }
+        return JSONObject().apply {
+            put("currentIndex", currentIndex)
+            put("entries", entriesJson)
+        }.toString()
+    }
+
+    companion object {
+        fun fromJsonString(raw: String): NativeEpisodeQueue? {
+            if (raw.isBlank()) {
+                return null
+            }
+            return try {
+                val json = JSONObject(raw)
+                val entriesArray = json.optJSONArray("entries") ?: return null
+                val entries = mutableListOf<NativeEpisodeQueueEntry>()
+                for (index in 0 until entriesArray.length()) {
+                    val entryObject = entriesArray.optJSONObject(index) ?: continue
+                    entries += NativeEpisodeQueueEntry(
+                        playbackTargetJson =
+                            entryObject.optJSONObject("target")?.toString() ?: "{}",
+                        playbackItemKey = entryObject.optString("playbackItemKey").trim(),
+                        seriesKey = entryObject.optString("seriesKey").trim(),
+                    )
+                }
+                if (entries.isEmpty()) {
+                    return null
+                }
+                NativeEpisodeQueue(
+                    entries = entries,
+                    currentIndex = json.optInt("currentIndex", 0)
+                        .coerceIn(0, entries.lastIndex),
+                )
+            } catch (_: Throwable) {
+                null
+            }
+        }
+    }
+}
 
 private enum class PlaybackDecodeMode {
     AUTO,

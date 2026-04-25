@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/application/empty_library_auto_rebuild_scheduler.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
@@ -64,7 +63,7 @@ class AppMediaQueryService {
       }),
     );
 
-    return collections.expand((item) => item).toList();
+    return collections.expand((item) => item).toList(growable: false);
   }
 
   Future<List<MediaItem>> fetchLibrary({
@@ -80,14 +79,12 @@ class AppMediaQueryService {
               (sourceId == null || sourceId == item.id),
         )
         .toList();
-    final seededLibrary = _enabledLibrary;
     final sourceResults = await Future.wait(
       sources.map(
         (source) => _fetchLibraryForSource(
           source,
           sectionId: sectionId,
           limit: limit,
-          seededLibrary: seededLibrary,
         ),
       ),
     );
@@ -228,13 +225,6 @@ class AppMediaQueryService {
         .toList();
   }
 
-  List<MediaItem> get _enabledLibrary {
-    final enabledSourceIds = _enabledSources.map((item) => item.id).toSet();
-    return SeedData.seedLibrary
-        .where((item) => enabledSourceIds.contains(item.sourceId))
-        .toList();
-  }
-
   Future<void> refreshEmbySourceCache(MediaSourceConfig source) async {
     final normalizedSourceId = source.id.trim();
     if (source.kind != MediaSourceKind.emby ||
@@ -326,6 +316,8 @@ class AppMediaQueryService {
           fallbackItems = await _loadEmbyRootLibraryFallback(source);
         }
       }
+    } catch (_) {
+      rethrow;
     } finally {
       _embyLibraryMatchIndexes.remove(source.id.trim());
       await cacheRepository.saveEmbyLibrarySnapshot(
@@ -553,7 +545,6 @@ class AppMediaQueryService {
     MediaSourceConfig source, {
     required String? sectionId,
     required int limit,
-    required List<MediaItem> seededLibrary,
   }) async {
     try {
       final hasScopedSections = _hasScopedSections(source);

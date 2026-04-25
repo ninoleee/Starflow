@@ -8,6 +8,7 @@ import 'package:starflow/core/navigation/page_activity_mixin.dart';
 import 'package:starflow/core/navigation/retained_async_value.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
+import 'package:starflow/core/widgets/desktop_horizontal_pager.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_rating_prefetch_coordinator.dart';
@@ -496,34 +497,45 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
                         padding: const EdgeInsets.only(bottom: 18),
                         child: SizedBox(
                           height: 56,
-                          child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            clipBehavior: Clip.none,
-                            padding: const EdgeInsets.symmetric(vertical: 2),
-                            itemCount: collections.length,
-                            separatorBuilder: (context, index) =>
-                                const SizedBox(width: 10),
-                            itemBuilder: (context, index) {
-                              final collection = collections[index];
-                              return _LibraryCollectionChip(
-                                label: collection.title,
-                                focusId: 'library:collection:${collection.id}',
-                                autofocus: index == 0 && isTelevision,
-                                onPressed: () {
-                                  context.pushNamed(
-                                    'collection',
-                                    extra: LibraryCollectionTarget(
-                                      title: collection.title,
-                                      sourceId: collection.sourceId,
-                                      sourceName: collection.sourceName,
-                                      sourceKind: collection.sourceKind,
-                                      sectionId: collection.id,
-                                      subtitle: collection.subtitle,
-                                    ),
-                                  );
-                                },
-                              );
-                            },
+                          child: DesktopHorizontalPager(
+                            showButtonsOnAllPlatforms: true,
+                            leftInset: -4,
+                            rightInset: -4,
+                            buttonSize: 40,
+                            iconSize: 22,
+                            builder: (context, controller) =>
+                                ListView.separated(
+                              controller: controller,
+                              scrollDirection: Axis.horizontal,
+                              clipBehavior: Clip.none,
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 2),
+                              itemCount: collections.length,
+                              separatorBuilder: (context, index) =>
+                                  const SizedBox(width: 10),
+                              itemBuilder: (context, index) {
+                                final collection = collections[index];
+                                return _LibraryCollectionChip(
+                                  label: collection.title,
+                                  focusId:
+                                      'library:collection:${collection.id}',
+                                  autofocus: index == 0 && isTelevision,
+                                  onPressed: () {
+                                    context.pushNamed(
+                                      'collection',
+                                      extra: LibraryCollectionTarget(
+                                        title: collection.title,
+                                        sourceId: collection.sourceId,
+                                        sourceName: collection.sourceName,
+                                        sourceKind: collection.sourceKind,
+                                        sectionId: collection.id,
+                                        subtitle: collection.subtitle,
+                                      ),
+                                    );
+                                  },
+                                );
+                              },
+                            ),
                           ),
                         ),
                       );
@@ -533,12 +545,21 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
                   ),
                   displayAsync.when(
                     data: (pageItems) {
-                      _ratingPrefetchCoordinator.schedulePrefetch(
-                        ref: ref,
-                        targets: pageItems.items
-                            .map(MediaDetailTarget.fromMediaItem),
-                        isPageActive: () => mounted && isPageVisible,
-                      );
+                      final prefetchTargets = pageItems.items
+                          .map(MediaDetailTarget.fromMediaItem);
+                      if (isTelevision) {
+                        _ratingPrefetchCoordinator.scheduleInMemoryPrefetch(
+                          ref: ref,
+                          targets: prefetchTargets,
+                          isPageActive: () => mounted && isPageVisible,
+                        );
+                      } else {
+                        _ratingPrefetchCoordinator.schedulePrefetch(
+                          ref: ref,
+                          targets: prefetchTargets,
+                          isPageActive: () => mounted && isPageVisible,
+                        );
+                      }
                       return LibraryPagedGrid(
                         pageItems: pageItems.items,
                         totalItems: pageItems.totalItems,

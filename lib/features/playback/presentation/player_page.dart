@@ -22,6 +22,7 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
+import 'package:starflow/features/playback/application/playback_episode_queue_resolver.dart';
 import 'package:starflow/features/playback/application/playback_remote_preflight.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/application/playback_engine_router.dart';
@@ -36,6 +37,7 @@ import 'package:starflow/features/playback/data/playback_memory_repository.dart'
 import 'package:starflow/features/playback/data/subtitle_file_picker.dart';
 import 'package:starflow/features/playback/data/system_playback_launcher.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
+import 'package:starflow/features/playback/domain/playback_episode_queue.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/playback/presentation/widgets/mpv_stall_watchdog.dart';
@@ -123,6 +125,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   VideoController? _videoController;
   StreamSubscription<String>? _playerErrorSubscription;
   StreamSubscription<bool>? _playerPlayingSubscription;
+  StreamSubscription<bool>? _playerCompletedSubscription;
   StreamSubscription<Duration>? _playerPositionSubscription;
   StreamSubscription<Duration>? _playerDurationSubscription;
   StreamSubscription<int?>? _playerWidthSubscription;
@@ -130,6 +133,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   StreamSubscription<bool>? _playerBufferingSubscription;
   StreamSubscription<double>? _playerBufferingPercentageSubscription;
   PlaybackTarget? _resolvedTarget;
+  PlaybackEpisodeQueue? _episodeQueue;
   _StartupProbeResult _startupProbe = const _StartupProbeResult();
   SeriesSkipPreference? _seriesSkipPreference;
   Object? _error;
@@ -212,6 +216,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Duration _lastPlaybackSystemSessionDuration = Duration.zero;
   bool _lastPlaybackSystemSessionPlaying = false;
   bool _lastPlaybackSystemSessionBuffering = false;
+  bool _lastPlaybackSystemSessionHasPrevious = false;
+  bool _lastPlaybackSystemSessionHasNext = false;
   String _lastPlaybackSystemSessionTitle = '';
   String _lastPlaybackSystemSessionSubtitle = '';
   int? _lastTracedVideoWidth;
@@ -230,6 +236,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   int _runtimeMpvErrorBurstCount = 0;
   int _runtimeMpvErrorRecoveryAttempts = 0;
   bool _runtimeMpvErrorRecoveryInProgress = false;
+  bool _episodeQueueAdvanceInProgress = false;
 
   @override
   void initState() {
@@ -333,6 +340,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Future<void> _cancelPlayerSubscriptions() async {
     final errorSubscription = _playerErrorSubscription;
     final playingSubscription = _playerPlayingSubscription;
+    final completedSubscription = _playerCompletedSubscription;
     final positionSubscription = _playerPositionSubscription;
     final durationSubscription = _playerDurationSubscription;
     final widthSubscription = _playerWidthSubscription;
@@ -343,6 +351,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     _playerErrorSubscription = null;
     _playerPlayingSubscription = null;
+    _playerCompletedSubscription = null;
     _playerPositionSubscription = null;
     _playerDurationSubscription = null;
     _playerWidthSubscription = null;
@@ -352,6 +361,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     await errorSubscription?.cancel();
     await playingSubscription?.cancel();
+    await completedSubscription?.cancel();
     await positionSubscription?.cancel();
     await durationSubscription?.cancel();
     await widthSubscription?.cancel();

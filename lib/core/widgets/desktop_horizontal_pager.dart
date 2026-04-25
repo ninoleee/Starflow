@@ -6,6 +6,7 @@ class DesktopHorizontalPager extends StatefulWidget {
     super.key,
     required this.builder,
     this.enabled = true,
+    this.showButtonsOnAllPlatforms = false,
     this.scrollStep,
     this.leftInset = 10,
     this.rightInset = 10,
@@ -16,6 +17,7 @@ class DesktopHorizontalPager extends StatefulWidget {
   final Widget Function(BuildContext context, ScrollController controller)
       builder;
   final bool enabled;
+  final bool showButtonsOnAllPlatforms;
   final double? scrollStep;
   final double leftInset;
   final double rightInset;
@@ -35,6 +37,9 @@ class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
   bool get _showsDesktopButtons {
     if (!widget.enabled) {
       return false;
+    }
+    if (widget.showButtonsOnAllPlatforms) {
+      return true;
     }
     if (kIsWeb) {
       return true;
@@ -89,6 +94,9 @@ class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
     }
     _visibilityUpdateScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
       _visibilityUpdateScheduled = false;
       _updateButtonVisibility();
     });
@@ -106,11 +114,12 @@ class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
       }
       return;
     }
-    final hasClients = _controller.hasClients;
-    final canScrollBackward = hasClients &&
+    final hasUsableMetrics =
+        _controller.hasClients && _controller.position.hasContentDimensions;
+    final canScrollBackward = hasUsableMetrics &&
         _controller.position.pixels >
             _controller.position.minScrollExtent + 0.5;
-    final canScrollForward = hasClients &&
+    final canScrollForward = hasUsableMetrics &&
         _controller.position.pixels <
             _controller.position.maxScrollExtent - 0.5;
     if (currentVisibility.canScrollBackward == canScrollBackward &&
@@ -128,6 +137,9 @@ class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
       return;
     }
     final position = _controller.position;
+    if (!position.hasContentDimensions) {
+      return;
+    }
     final scrollStep = widget.scrollStep ?? position.viewportDimension * 0.82;
     final targetOffset = (position.pixels + scrollStep * direction)
         .clamp(position.minScrollExtent, position.maxScrollExtent)

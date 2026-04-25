@@ -61,7 +61,9 @@ class DetailTargetResolver {
   Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
     required MediaDetailTarget target,
   }) async {
-    final nextTarget = await _resolveMetadataOnlyIfNeeded(target: target);
+    final nextTarget = await _resolveMetadataOnlyIfNeeded(
+      target: target,
+    );
     final traceKey = _detailTraceKey(target);
     final playback = nextTarget.playbackTarget;
     if (playback == null) {
@@ -70,6 +72,7 @@ class DetailTargetResolver {
         'playback-resolve',
         'skipped no playback target',
       );
+      await _persistResolvedTarget(target, nextTarget);
       return nextTarget;
     }
 
@@ -84,6 +87,7 @@ class DetailTargetResolver {
             'resolution=${playback.resolutionLabel.trim().isNotEmpty} '
             'fileSize=${playback.fileSizeLabel.trim().isNotEmpty}',
       );
+      await _persistResolvedTarget(target, nextTarget);
       return nextTarget;
     }
 
@@ -114,6 +118,7 @@ class DetailTargetResolver {
       return updatedTarget;
     } catch (_) {
       DebugTraceOnce.logMetadata(traceKey, 'playback-resolve', 'failed');
+      await _persistResolvedTarget(target, nextTarget);
       return nextTarget;
     }
   }
@@ -184,7 +189,6 @@ class DetailTargetResolver {
       DebugTraceOnce.logMetadata(traceKey, 'auto-enrich', 'skipped');
     }
 
-    await _persistResolvedTarget(target, nextTarget);
     DebugTraceOnce.logMetadata(
       traceKey,
       'metadata-done',

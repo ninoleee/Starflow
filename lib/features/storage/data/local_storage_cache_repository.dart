@@ -32,6 +32,26 @@ enum DetailMetadataRefreshStatus {
   failed,
 }
 
+class DetailTargetCacheSaveRequest {
+  const DetailTargetCacheSaveRequest({
+    required this.seedTarget,
+    required this.resolvedTarget,
+    this.metadataRefreshStatus,
+    this.libraryMatchChoices,
+    this.selectedLibraryMatchIndex,
+    this.subtitleSearchChoices,
+    this.selectedSubtitleSearchIndex,
+  });
+
+  final MediaDetailTarget seedTarget;
+  final MediaDetailTarget resolvedTarget;
+  final DetailMetadataRefreshStatus? metadataRefreshStatus;
+  final List<MediaDetailTarget>? libraryMatchChoices;
+  final int? selectedLibraryMatchIndex;
+  final List<CachedSubtitleSearchOption>? subtitleSearchChoices;
+  final int? selectedSubtitleSearchIndex;
+}
+
 extension DetailMetadataRefreshStatusX on DetailMetadataRefreshStatus {
   static DetailMetadataRefreshStatus fromJsonValue(Object? value) {
     final normalized = '$value'.trim().toLowerCase();
@@ -315,20 +335,119 @@ class LocalStorageCacheRepository {
     List<CachedSubtitleSearchOption>? subtitleSearchChoices,
     int? selectedSubtitleSearchIndex,
   }) async {
-    final lookupKeys = {
-      ...buildLookupKeys(seedTarget),
-      ...buildLookupKeys(resolvedTarget),
-    }.where((item) => item.trim().isNotEmpty).toSet();
-    if (lookupKeys.isEmpty) {
+    await _saveDetailTargetsBatch(
+      [
+        DetailTargetCacheSaveRequest(
+          seedTarget: seedTarget,
+          resolvedTarget: resolvedTarget,
+          metadataRefreshStatus: metadataRefreshStatus,
+          libraryMatchChoices: libraryMatchChoices,
+          selectedLibraryMatchIndex: selectedLibraryMatchIndex,
+          subtitleSearchChoices: subtitleSearchChoices,
+          selectedSubtitleSearchIndex: selectedSubtitleSearchIndex,
+        ),
+      ],
+      persistToStorage: true,
+    );
+  }
+
+  Future<void> saveDetailTargetsBatch(
+    Iterable<DetailTargetCacheSaveRequest> requests,
+  ) async {
+    await _saveDetailTargetsBatch(
+      requests,
+      persistToStorage: true,
+    );
+  }
+
+  Future<void> saveDetailTargetsBatchInMemory(
+    Iterable<DetailTargetCacheSaveRequest> requests,
+  ) async {
+    await _saveDetailTargetsBatch(
+      requests,
+      persistToStorage: false,
+    );
+  }
+
+  Future<void> _saveDetailTargetsBatch(
+    Iterable<DetailTargetCacheSaveRequest> requests, {
+    required bool persistToStorage,
+  }) async {
+    final requestList = requests.toList(growable: false);
+    if (requestList.isEmpty) {
       return;
     }
 
     final payload = await _loadDetailPayload();
+    final nextRecords = <String, _CachedDetailRecord>{...payload.records};
+    final nextLookupKeys = <String, String>{...payload.lookupKeys};
+    final changedSourceIds = <String>{};
+    final changedLookupKeys = <String>{};
+    final changedRecordIds = <String>{};
+    final changedFields = <LocalStorageDetailCacheChangedField>{};
+    var hasChanges = false;
+
+    for (final request in requestList) {
+      final applied = _applyDetailTargetSave(
+        records: nextRecords,
+        lookupKeys: nextLookupKeys,
+        request: request,
+      );
+      if (applied == null) {
+        continue;
+      }
+      hasChanges = true;
+      changedSourceIds.addAll(applied.sourceIds);
+      changedLookupKeys.addAll(applied.lookupKeys);
+      changedRecordIds.add(applied.recordId);
+      changedFields.addAll(applied.changedFields);
+    }
+
+    if (!hasChanges) {
+      return;
+    }
+
+    final nextPayload = _DetailCachePayload(
+      records: nextRecords,
+      lookupKeys: nextLookupKeys,
+    );
+    if (persistToStorage) {
+      await _saveDetailPayload(nextPayload);
+    } else {
+      _detailPayloadCache = nextPayload;
+      _detailPayloadLoadFuture = null;
+    }
+    _scheduleDetailCacheChangedNotification(
+      LocalStorageDetailCacheChangeEvent(
+        scope: LocalStorageDetailCacheScope(
+          sourceIds: changedSourceIds,
+          lookupKeys: changedLookupKeys,
+          recordIds: changedRecordIds,
+        ),
+        changedFields: changedFields,
+      ),
+    );
+  }
+
+  _AppliedDetailTargetSave? _applyDetailTargetSave({
+    required Map<String, _CachedDetailRecord> records,
+    required Map<String, String> lookupKeys,
+    required DetailTargetCacheSaveRequest request,
+  }) {
+    final seedTarget = request.seedTarget;
+    final resolvedTarget = request.resolvedTarget;
+    final requestLookupKeys = {
+      ...buildLookupKeys(seedTarget),
+      ...buildLookupKeys(resolvedTarget),
+    }.where((item) => item.trim().isNotEmpty).toSet();
+    if (requestLookupKeys.isEmpty) {
+      return null;
+    }
+
     String? recordId;
-    for (final lookupKey in lookupKeys) {
-      final candidate = payload.lookupKeys[lookupKey];
-      final candidateRecord =
-          candidate == null ? null : payload.records[candidate];
+    for (final lookupKey in requestLookupKeys) {
+      final candidate = lookupKeys[lookupKey];
+      final candidateRecord = candidate == null ? null : records[candidate];
       if (candidateRecord != null &&
           _canShareDetailCacheRecord(
             left: seedTarget,
@@ -342,31 +461,33 @@ class LocalStorageCacheRepository {
         break;
       }
     }
-    recordId ??= lookupKeys.first;
+    recordId ??= requestLookupKeys.first;
 
-    final existing = payload.records[recordId];
+    final existing = records[recordId];
     final mergedLookupKeys = {
       if (existing != null) ...existing.lookupKeys,
-      ...lookupKeys,
+      ...requestLookupKeys,
     }.toList(growable: false)
       ..sort();
-    final nextLibraryMatchChoices = libraryMatchChoices != null
-        ? List<MediaDetailTarget>.unmodifiable(libraryMatchChoices)
+    final nextLibraryMatchChoices = request.libraryMatchChoices != null
+        ? List<MediaDetailTarget>.unmodifiable(request.libraryMatchChoices!)
         : existing?.libraryMatchChoices ?? const <MediaDetailTarget>[];
     final normalizedSelectedLibraryMatchIndex = nextLibraryMatchChoices.isEmpty
         ? 0
-        : (selectedLibraryMatchIndex ??
+        : (request.selectedLibraryMatchIndex ??
                 existing?.selectedLibraryMatchIndex ??
                 0)
             .clamp(0, nextLibraryMatchChoices.length - 1);
-    final nextSubtitleSearchChoices = subtitleSearchChoices != null
-        ? List<CachedSubtitleSearchOption>.unmodifiable(subtitleSearchChoices)
+    final nextSubtitleSearchChoices = request.subtitleSearchChoices != null
+        ? List<CachedSubtitleSearchOption>.unmodifiable(
+            request.subtitleSearchChoices!,
+          )
         : existing?.subtitleSearchChoices ??
             const <CachedSubtitleSearchOption>[];
     final normalizedSelectedSubtitleSearchIndex =
         nextSubtitleSearchChoices.isEmpty
             ? -1
-            : (selectedSubtitleSearchIndex ??
+            : (request.selectedSubtitleSearchIndex ??
                     existing?.selectedSubtitleSearchIndex ??
                     -1)
                 .clamp(-1, nextSubtitleSearchChoices.length - 1);
@@ -380,7 +501,7 @@ class LocalStorageCacheRepository {
       selectedLibraryMatchIndex: normalizedSelectedLibraryMatchIndex,
       subtitleSearchChoices: nextSubtitleSearchChoices,
       selectedSubtitleSearchIndex: normalizedSelectedSubtitleSearchIndex,
-      metadataRefreshStatus: metadataRefreshStatus ??
+      metadataRefreshStatus: request.metadataRefreshStatus ??
           existing?.metadataRefreshStatus ??
           DetailMetadataRefreshStatus.never,
     );
@@ -391,39 +512,22 @@ class LocalStorageCacheRepository {
     if (existing != null &&
         changedFields.isEmpty &&
         _sameStringList(existing.lookupKeys, nextRecord.lookupKeys)) {
-      return;
+      return null;
     }
 
-    final nextRecords = <String, _CachedDetailRecord>{
-      ...payload.records,
-      recordId: nextRecord,
-    };
-    final nextLookupKeys = <String, String>{
-      ...payload.lookupKeys,
-    };
+    records[recordId] = nextRecord;
     for (final lookupKey in mergedLookupKeys) {
-      nextLookupKeys[lookupKey] = recordId;
+      lookupKeys[lookupKey] = recordId;
     }
-
-    await _saveDetailPayload(
-      _DetailCachePayload(
-        records: nextRecords,
-        lookupKeys: nextLookupKeys,
-      ),
-    );
-    _scheduleDetailCacheChangedNotification(
-      LocalStorageDetailCacheChangeEvent(
-        scope: LocalStorageDetailCacheScope(
-          sourceIds: {
-            seedTarget.sourceId.trim(),
-            resolvedTarget.sourceId.trim(),
-            nextRecord.target.sourceId.trim(),
-          }.where((item) => item.isNotEmpty).toSet(),
-          lookupKeys: mergedLookupKeys.toSet(),
-          recordIds: {recordId},
-        ),
-        changedFields: changedFields,
-      ),
+    return _AppliedDetailTargetSave(
+      recordId: recordId,
+      lookupKeys: mergedLookupKeys.toSet(),
+      sourceIds: {
+        seedTarget.sourceId.trim(),
+        resolvedTarget.sourceId.trim(),
+        nextRecord.target.sourceId.trim(),
+      }.where((item) => item.isNotEmpty).toSet(),
+      changedFields: changedFields,
     );
   }
 
@@ -647,9 +751,10 @@ class LocalStorageCacheRepository {
   Future<void> _saveEmbyLibraryPayload(_EmbyLibraryCachePayload payload) async {
     _embyLibraryPayloadCache = payload;
     _embyLibraryPayloadLoadFuture = null;
+    final raw = jsonEncode(payload.toJson());
     await _preferences.setString(
       _embyLibraryCacheKey,
-      jsonEncode(payload.toJson()),
+      raw,
     );
   }
 
@@ -787,7 +892,8 @@ class LocalStorageCacheRepository {
   Future<void> _saveDetailPayload(_DetailCachePayload payload) async {
     _detailPayloadCache = payload;
     _detailPayloadLoadFuture = null;
-    await _preferences.setString(_detailCacheKey, jsonEncode(payload.toJson()));
+    final raw = jsonEncode(payload.toJson());
+    await _preferences.setString(_detailCacheKey, raw);
   }
 
   void _scheduleDetailCacheChangedNotification(
@@ -1532,6 +1638,20 @@ class _EmbyLibraryCachePayload {
       ),
     );
   }
+}
+
+class _AppliedDetailTargetSave {
+  const _AppliedDetailTargetSave({
+    required this.recordId,
+    required this.lookupKeys,
+    required this.sourceIds,
+    required this.changedFields,
+  });
+
+  final String recordId;
+  final Set<String> lookupKeys;
+  final Set<String> sourceIds;
+  final Set<LocalStorageDetailCacheChangedField> changedFields;
 }
 
 class _CachedDetailRecord {
