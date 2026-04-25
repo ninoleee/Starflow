@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="native_player_overlay_scrim">#A6000000</color>
+    <color name="native_player_overlay_bar">#73000000</color>
+    <color name="native_player_secondary_text">#CCFFFFFF</color>
+    <color name="native_player_timebar_played">#FFFFFFFF</color>
+    <color name="native_player_timebar_buffered">#66FFFFFF</color>
+    <color name="native_player_timebar_unplayed">#33FFFFFF</color>
+    <color name="native_player_timebar_marker">#FFFFB54A</color>
+</resources>

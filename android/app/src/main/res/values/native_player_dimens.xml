@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="native_player_phone_horizontal_margin">16dp</dimen>
+    <dimen name="native_player_phone_top_margin">18dp</dimen>
+    <dimen name="native_player_phone_progress_bottom_margin">70dp</dimen>
+    <dimen name="native_player_phone_bottom_margin">12dp</dimen>
+    <dimen name="native_player_phone_top_button_size">40dp</dimen>
+
+    <dimen name="native_player_tv_horizontal_margin">28dp</dimen>
+    <dimen name="native_player_tv_top_margin">24dp</dimen>
+    <dimen name="native_player_tv_progress_bottom_margin">88dp</dimen>
+    <dimen name="native_player_tv_bottom_margin">22dp</dimen>
+    <dimen name="native_player_tv_top_button_size">48dp</dimen>
+</resources>

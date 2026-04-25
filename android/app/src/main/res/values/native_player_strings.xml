@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="native_back">返回</string>
     <string name="native_subtitle_delay">字幕偏移</string>
     <string name="native_external_subtitle">加载外部字幕</string>
     <string name="native_online_subtitle_search">在线查找字幕</string>
+    <string name="native_playback_settings">播放设置</string>
+    <string name="native_more_actions">更多</string>
+    <string name="native_audio_track">音轨</string>
+    <string name="native_subtitle_track">字幕轨道</string>
+    <string name="native_playback_speed">播放速度</string>
+    <string name="native_no_audio_tracks">暂无可选音轨</string>
+    <string name="native_no_subtitle_tracks">暂无可选字幕</string>
 </resources>

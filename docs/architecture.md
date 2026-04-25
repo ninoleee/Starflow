@@ -153,7 +153,7 @@ lib/
 - 页面级保留态异步模式：媒体库、详情页、人物作品页已经改成 `RetainedAsyncController / resolveRetainedAsyncValue`，避免页面 inactive、路由切换和播放让路时重复闪回 loading
 - 页面 inactive 任务治理：详情、媒体库、人物作品、搜索等页在失活时优先取消当前会话，而不是顺手 `invalidate` 掉已成功 provider，减少返回页时的重复拉取
 - 搜索页渲染收口：结果区切到 `CustomScrollView + SliverList`，让长结果集按需构建，不再一次性把整个列表塞进单个 `Column/ListView`
-- 详情页局部状态收口：本地资源匹配、外挂字幕和播放版本选择改成 `ValueNotifier + ValueListenableBuilder`，高频状态变化只刷新资源信息区，不再带动整页详情重建
+- 详情页局部状态收口：本地资源匹配和播放版本选择改成 `ValueNotifier + ValueListenableBuilder`，高频状态变化只刷新资源信息区，不再带动整页详情重建
 - 图片缓存收口：持久化图片缓存 identity 升级成 `URL + headers`，并增加磁盘 metadata、`30` 天 TTL、stale fallback 与更稳定的内存淘汰策略；同一候选图的解析/尺寸分析 future 也开始在组件间共享，减少同屏重复拉图与重复解码
 - 绘制范围收口：页面背景 glow、桌面横向翻页按钮和海报卡片布局已经分别加上独立重绘边界或局部 notifier，滚动和焦点切换时避免整段区域跟着重建
 - 统一性能派生：`AppSettingsPerformanceX` 新增 `effectiveUiPerformanceTier` 及一组 `effective*` 派生入口，路由、导航壳和播放器统一按同一档位判断动画、磨砂、自动隐藏和轻量播放 UI
@@ -204,7 +204,7 @@ lib/
   - 播放目标补全（`Emby / Quark`）
   - 解析结果回写详情缓存
 - `HomeHeroPrefetchCoordinator` 与详情链路复用同一套详情缓存与 enrichment provider，避免首页和详情各自维护一套补全逻辑。
-- 详情页 presentation 入口已经进一步拆成 `detail_page_providers.dart`、`detail_hero_section.dart`、`detail_resource_info_section.dart`、`detail_subtitle_section.dart`，`media_detail_page.dart` 主要保留页面级 session / callback / section wiring。
+- 详情页 presentation 入口已经进一步拆成 `detail_page_providers.dart`、`detail_hero_section.dart`、`detail_resource_info_section.dart`，`media_detail_page.dart` 主要保留页面级 session / callback / section wiring。
 
 ### Playback
 
@@ -361,7 +361,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 这一步会遍历作用域内目录来识别变更，但不会越过到其他分区
 - sidecar 和在线元数据补全只针对增量项继续执行
 - 只有当当前作用域索引为空时，才允许在后台调度一次自动全量重建；读链路本身不再同步等待这次重建
-- 当前仓库内置的 `WebDAV / metadata / subtitle / playback / detail resource switch` trace helper 都已静音；默认不再输出扫描、索引、匹配或播放链路日志
+- 当前仓库内置的 `WebDAV / metadata / subtitle / playback / detail resource switch` trace helper 都已静音；默认不再输出扫描、索引、匹配或播放链路日志，设置页也不再提供对应运行期开关
 
 `NasMediaIndexer` 负责的事情包括：
 
@@ -447,10 +447,10 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 如果恢复到的缓存命中项是某个单集或具体文件，详情页仍会保留原来的剧集结构目标，继续显示季/集浏览区，而不是把整页退化成单文件详情
 - 如果本地详情缓存或手动索引结果里已经有更新后的标题，详情页会优先显示这份标题；媒体库与首页也会沿着同一条缓存合并链路复用它
 - 详情页与人物作品页已经收口到 `RetainedAsyncController`；页面 inactive、切回前台或播放期间页面让路时，会优先保留最近一次已解析结果
-- 详情页在 inactive 时会取消当前匹配 / 刷新 / 字幕搜索会话，但不会再无条件失效成功缓存；重新回到页面时优先复用已有详情结果
+- 详情页在 inactive 时会取消当前匹配 / 刷新会话，但不会再无条件失效成功缓存；重新回到页面时优先复用已有详情结果
 - 网络图片在展示层支持候选图回退，主图 `404` 或解码失败时会自动尝试下一张候选 artwork
-- 详情页不再在进入时自动搜索字幕；只有已经拿到可播放目标并手动点击资源信息区里的“搜索字幕 / 刷新字幕”时，才会按 `设置 -> 播放 -> 字幕` 里的配置手动搜索。页面只走 `OnlineSubtitleRepository.searchStructured(...)` 结构化链路，只保留最多 `10` 条已经验证可直接挂载的结果；`ASSRT` 需要在设置里填写 Token 后才会启用
-- 这组字幕候选和当前选中项会一并写入详情缓存；再次进入详情页时会恢复，进入播放器后会把已选外挂字幕带给内置 `MPV` 与 Android 原生播放器链路
+- 详情页已经移除内联字幕搜索与外挂字幕选择；在线字幕搜索只保留在播放器页与独立字幕搜索页，仍按 `设置 -> 播放 -> 字幕` 里的配置使用 `ASSRT API / OpenSubtitles / SubDL`
+- 详情页不再把字幕候选或选中项写入详情缓存，也不会在进入播放器前向播放目标注入外挂字幕；字幕选择改由播放器页会话独立持有
 - 详情页资源信息区可直接切换播放器；这个入口最终会调用 `SettingsController.setPlaybackEngine(...)`，因此会和设置页里的全局默认播放器保持同一份持久化值
 
 当前详情页与元数据链路还额外承担这些能力：
@@ -466,7 +466,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
   - `Hero` 主操作按钮左右只在顶部操作区切换
   - 剧集浏览区拆成“季标签一排 / 卡片上半播放区一排 / 卡片下半简介区一排”
   - 剧集卡左右切换默认优先停留在上半播放区，只有主动按下才进入下半简介区
-- 单集详情仍然复用统一的 `MediaDetailTarget` 详情链路，但会继承剧集级搜索词与外部 ID 上下文，保证该集的本地资源匹配、字幕关联和在线补全不会只依赖单集标题
+- 单集详情仍然复用统一的 `MediaDetailTarget` 详情链路，但会继承剧集级搜索词与外部 ID 上下文，保证该集的本地资源匹配和在线补全不会只依赖单集标题
 - `TV` 模式下详情页主操作默认优先聚焦“继续播放 / 立即播放”或“搜索资源”，并记住人物、剧集等横向列表的上次焦点
 - 桌面端剧集横排与剧照横排会复用统一的左右翻页按钮，避免鼠标只能手动拖动或滚轮横移
 - 如果详情页命中多个可播放候选，底部会进入统一的“播放版本”切换路径；这条路径现在覆盖 `movie` 和单集等可播放叶子项，`series / season` 仍保留聚合态浏览
@@ -603,7 +603,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
   - `player_page_runtime_actions.part.dart`：续播、跳过、字幕、外挂字幕、在线字幕、启动 probe
   - `player_page_controls.part.dart`：返回、进度、选择器、播放设置、视频 surface
   - `player_mpv_controls_overlay.dart`、`player_playback_options_dialog.dart`、`player_playback_overlays.dart`、`player_playback_dialogs.dart`、`player_tv_playback_widgets.dart`：纯展示层组件
-- `lib/core/utils/playback_trace.dart`、`subtitle_search_trace.dart`、`metadata_search_trace.dart` 与 `detail_resource_switch_trace.dart` 仍保留调用点与设置字段，但当前实现都已静音，不再产生运行时输出
+- `lib/core/utils/playback_trace.dart`、`subtitle_search_trace.dart`、`metadata_search_trace.dart` 与 `detail_resource_switch_trace.dart` 仍保留调用点，但当前实现都已静音，不再产生运行时输出
 - 内置 `MPV` 现已把 `ISO` 打开路径统一纳入同一条执行链：本地路径 / `file://` / UNC 优先尝试 `dvd-device / bluray-device`，远程 `ISO` 则直接回退普通 `Media(...)` 打开，并在回退前清理残留的 `dvd-device / bluray-device / http-header-fields`
 - `TV` 分支当前仍保留自定义播放叠层：
   - 电视场景继续走“首层极简 + 二层高级”的 `NoVideoControls + 遥控器快捷键` 模式
@@ -615,11 +615,12 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
   - 本地续播记忆
   - 在线字幕搜索
   - Android 原生音轨/字幕轨选择、外挂字幕加载与外挂字幕偏移
-- 详情页与播放器页复用同一个 `OnlineSubtitleRepository`；仓库内部已经收口为 `searchStructured(...)` 一条结构化链路
+- 播放器页与独立字幕搜索页复用同一个 `OnlineSubtitleRepository`；仓库内部已经收口为 `searchStructured(...)` 一条结构化链路
 - `searchStructured(...)` 会基于当前播放目标、详情外部 ID 和本地文件信息组装 `OnlineSubtitleSearchRequest`，优先尝试文件哈希、`IMDb ID / TMDB ID`、季集号、年份和标题
 - 结构化源当前支持 `ASSRT API / OpenSubtitles / SubDL`；`ASSRT` Token 来自设置页，未填写时不会访问 API；`OpenSubtitles` API Key 通过 `--dart-define=STARFLOW_OPENSUBTITLES_API_KEY=...` 注入，账号密码来自设置页；`SubDL` API Key 直接来自设置页
-- `SubtitleValidationPipeline` 会在应用内预下载、解压并筛选结果，只向 UI 返回可直接挂载的 `SRT / ASS / SSA / VTT` 或可解压 `ZIP` 字幕
-- 结构化字幕结果会在应用内先验证并缓存到临时目录；如果同一结果之前已经验证过，再次选择时优先复用本地缓存
+- 多字幕源搜索会并行执行；`OpenSubtitles` 登录态会做短时会话缓存，避免同一轮搜索里重复登录
+- 结构化搜索阶段会先在应用内预下载、验证并筛掉不可直接挂载的结果；页面只展示可直接挂载的 `SRT / ASS / SSA / VTT` 或可解压 `ZIP` 字幕
+- 下载后的字幕会写入当前会话的临时目录 `starflow/online_subtitles/session-.../downloads`；当前不做 `cache-hit` 复用，重新搜索或重新选择时都会生成新的临时文件
 - 播放器页本身不再直接承载全部启动决策；目标解析、路由判定与执行分支已经拆到独立 application 文件，页面层主要负责装配、等待态和内置 `MPV` 运行期行为，便于 controller 级测试和后续替换策略
 - 播放器页 presentation 也已进一步拆开：`player_page.dart` 主要保留会话和流程编排，控制叠层、启动等待态、播放设置弹窗与平台会话子树分别沉到 `presentation/widgets` 与 `player_page_*.part.dart`
 
@@ -720,7 +721,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 字幕大小
 - 在线字幕来源
 - 各在线字幕来源的专属配置（`ASSRT Token / OpenSubtitles 账号密码 / SubDL API Key`）
-- 优先语言与单次最多验证条数
+- 优先语言（`简体中文 / 繁体中文 / 英语 / 日语 / 韩语`，可多选；不选时按字幕结果和系统语言自动处理）与单次最多验证条数
 - 播放器内核
 - 透明磨砂效果
 - 高性能模式
@@ -744,7 +745,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 媒体源、搜索服务、豆瓣账号、网络存储、播放、配置管理等主要设置页，当前尽量共用同一套页面骨架和按钮分类，减少页面间的操作分叉
 - 搜索来源、匹配来源等多选项当前统一复用同一套复选弹窗；`TV / 触屏` 共享一套选择流程与焦点逻辑
 - `WebDAV` 路径选择页会缓存目录 Future，避免同一目录在页面重建或来回切换时重复列目录
-- 高性能模式开启时，透明磨砂效果、自动隐藏菜单栏和 Hero 背景图等受统一性能策略接管的子项会显示实际生效值并禁用编辑，避免出现“可改但不生效”
+- 高性能模式开启时，会先为透明磨砂效果、自动隐藏菜单栏、Hero 背景图和运行时局部更新套用推荐轻量值；这些已单独列出的子项之后仍可按需单独改回
 - `TV` 端同样会把“运行时卡片 / Hero 局部更新”按实际生效值固定为关闭，避免焦点浏览和滚动过程中被后台缓存更新继续唤醒局部 provider 链路
 - 首页、搜索、设置页以及部分壳层组件已经开始改成 slice provider 订阅；高频页面会优先只读取需要的设置片段，而不是整份 `AppSettings`
 
@@ -758,7 +759,8 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 设置页还提供：
 
 - 本地缓存查看与清理
-- 当前清理项包括 `WebDAV` 索引、详情缓存、播放记忆、`TV` 搜索历史与来源记忆、图片缓存
+- 当前会按“媒体资料 / 使用记录”分组展示
+- 当前清理项包括 `WebDAV` 索引、详情缓存、字幕缓存、播放记忆、`TV` 搜索历史与来源记忆、图片缓存
 - 在支持文件访问的平台上导出配置到 JSON
 - 在支持文件访问的平台上从 JSON 导入并覆盖当前设置
 - Web 端会直接触发浏览器下载 JSON，并支持选择本地 JSON 立即导入覆盖
@@ -787,7 +789,7 @@ Android TV 下的设置页还额外做了遥控器适配：
 
 - 应用设置
 - 详情缓存
-- 详情缓存里的本地资源匹配候选列表、在线字幕候选列表与当前选中项
+- 详情缓存里的本地资源匹配候选列表与当前“播放版本”选择
 - 详情缓存里已经刮削、手动更新或手动关联后的标题；首页、媒体库和详情页会优先读取它作为展示名
 - 对存在多个可播放候选的详情页，还会额外保留当前选中的“播放版本”，包括影片和单集等叶子项
 - 对剧集详情页，恢复已缓存的本地资源状态时还会一起保留剧集结构上下文，避免再次进入后丢掉季/集浏览
@@ -806,12 +808,14 @@ Android TV 下的设置页还额外做了遥控器适配：
 
 用于保存：
 
-- 详情页与播放器页复用的外挂字幕本地副本
+- 当前不再为在线字幕保留长期副本
 
 ### 临时目录
 
 用于保存：
 
+- 当前会话下载的在线字幕 `starflow/online_subtitles/session-.../downloads`
+- 同一会话里再次选择同一字幕时，可优先复用已下载文件
 - 结构化在线字幕验证缓存 `starflow/validated_online_subtitles`
 - 新链路预下载后筛出的可直接挂载字幕文件
 

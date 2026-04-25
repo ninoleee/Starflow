@@ -75,17 +75,6 @@ void main() {
       limit: 5000,
     );
 
-    final matched = items.where((item) {
-      return item.title.contains('十三邀') ||
-          item.actualAddress.contains('十三邀');
-    }).toList(growable: false);
-
-    for (final item in matched) {
-      debugPrint(
-        '[DebugItem] title=${item.title} | id=${item.id} | type=${item.itemType} | address=${item.actualAddress}',
-      );
-    }
-
     expect(items, isNotEmpty);
   });
 }
