@@ -1001,8 +1001,8 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   }
 
   Future<void> _awaitMpvFirstFrameReady(
-    VideoController videoController, {
-  }) async {
+    VideoController videoController,
+  ) async {
     await videoController.waitUntilFirstFrameRendered;
   }
 

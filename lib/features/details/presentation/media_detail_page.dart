@@ -528,19 +528,19 @@ String _libraryMatchSourceKey(MediaSourceConfig source) {
   return '${source.kind.name}|${source.id}|${source.name.trim().toLowerCase()}';
 }
 
-int _preferredManualMatchCollectionBoost(
-  MediaCollection collection,
+int _preferredManualMatchItemBoost(
+  MediaItem item,
   MediaDetailTarget pageSeedTarget,
 ) {
   final preferredSourceId = pageSeedTarget.sourceId.trim();
   if (preferredSourceId.isNotEmpty &&
-      collection.sourceId.trim() != preferredSourceId) {
+      item.sourceId.trim() != preferredSourceId) {
     return 0;
   }
 
   final preferredSectionId = pageSeedTarget.sectionId.trim();
   if (preferredSectionId.isNotEmpty &&
-      collection.id.trim() == preferredSectionId) {
+      item.sectionId.trim() == preferredSectionId) {
     return 100000;
   }
 
@@ -548,10 +548,10 @@ int _preferredManualMatchCollectionBoost(
   if (preferredSectionName.isEmpty) {
     return 0;
   }
-  final label =
-      '${collection.title} ${collection.subtitle}'.trim().toLowerCase();
-  if (collection.title.trim().toLowerCase() == preferredSectionName ||
-      label.contains(preferredSectionName)) {
+  final sectionLabel =
+      '${item.sectionName} ${item.actualAddress}'.trim().toLowerCase();
+  if (item.sectionName.trim().toLowerCase() == preferredSectionName ||
+      sectionLabel.contains(preferredSectionName)) {
     return 50000;
   }
   return 0;
@@ -571,84 +571,54 @@ Future<List<Future<List<_LibraryMatchCandidate>> Function()>>
 }) async {
   const detailLibraryMatchLimit = 2000;
   final taskFactories = <Future<List<_LibraryMatchCandidate>> Function()>[];
+  final titles = _buildManualMatchTitles(
+    target: target,
+    query: _detailMetadataQuery(target),
+    metadataMatch: metadataMatch,
+  );
+  final year = _resolveManualMatchYear(target, metadataMatch);
+  final doubanId = _resolveManualMatchDoubanId(target, metadataMatch);
+  final imdbId = _resolveManualMatchImdbId(target, metadataMatch);
+  final tmdbId = _resolveManualMatchTmdbId(target, metadataMatch);
+  final tvdbId = _resolveManualMatchTvdbId(target);
+  final wikidataId = _resolveManualMatchWikidataId(target);
 
   final embySources = sources
       .where((source) => source.kind == MediaSourceKind.emby)
       .toList(growable: false);
   for (final source in embySources) {
     controller.throwIfCancelled();
-    List<MediaCollection> collections;
-    try {
-      collections = await mediaRepository.fetchCollections(
-        kind: MediaSourceKind.emby,
-        sourceId: source.id,
-      );
+    taskFactories.add(() async {
       controller.throwIfCancelled();
-    } catch (error, stackTrace) {
-      detailResourceSwitchTrace(
-        'resource.match.source.emby.collections.error',
-        fields: {
-          'sourceId': source.id,
-          'sourceName': source.name,
-        },
-        error: error,
-        stackTrace: stackTrace,
-      );
-      collections = const <MediaCollection>[];
-    }
-    if (collections.isEmpty) {
-      continue;
-    }
-
-    final rankedCollections = collections.toList()
-      ..sort((left, right) {
-        final rightScore = _scoreManualMatchCollection(
-              right,
-              target,
-              metadataMatch: metadataMatch,
-            ) +
-            _preferredManualMatchCollectionBoost(right, pageSeedTarget);
-        final leftScore = _scoreManualMatchCollection(
-              left,
-              target,
-              metadataMatch: metadataMatch,
-            ) +
-            _preferredManualMatchCollectionBoost(left, pageSeedTarget);
-        final scoreDelta = rightScore.compareTo(leftScore);
-        if (scoreDelta != 0) {
-          return scoreDelta;
-        }
-        return left.title.compareTo(right.title);
-      });
-    for (final collection in rankedCollections) {
-      taskFactories.add(() async {
+      try {
+        final items = await mediaRepository.loadLibraryMatchItems(
+          source: source,
+          titles: titles,
+          year: year,
+          doubanId: doubanId,
+          imdbId: imdbId,
+          tmdbId: tmdbId,
+          tvdbId: tvdbId,
+          wikidataId: wikidataId,
+          limit: detailLibraryMatchLimit,
+        );
         controller.throwIfCancelled();
-        try {
-          final items = await mediaRepository.fetchLibrary(
-            kind: MediaSourceKind.emby,
-            sourceId: collection.sourceId,
-            sectionId: collection.id,
-            limit: detailLibraryMatchLimit,
-          );
-          controller.throwIfCancelled();
-          return buildCandidates(items);
-        } on _LibraryMatchCancelledException {
-          rethrow;
-        } catch (error, stackTrace) {
-          detailResourceSwitchTrace(
-            'resource.match.source.emby.library.error',
-            fields: {
-              'sourceId': collection.sourceId,
-              'sectionId': collection.id,
-              'sectionName': collection.title,
-            },
-            error: error,
-            stackTrace: stackTrace,
-          );
-          return const <_LibraryMatchCandidate>[];
-        }
-      });
-    }
+        return buildCandidates(items);
+      } on _LibraryMatchCancelledException {
+        rethrow;
+      } catch (error, stackTrace) {
+        detailResourceSwitchTrace(
+          'resource.match.source.emby.library.error',
+          fields: {
+            'sourceId': source.id,
+            'sourceName': source.name,
+          },
+          error: error,
+          stackTrace: stackTrace,
+        );
+        return const <_LibraryMatchCandidate>[];
+      }
+    });
   }
 
   final nasSources = sources
@@ -805,7 +775,11 @@ Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
           (candidate) => _LibraryMatchCandidate(
             item: candidate.item,
             matchReason: candidate.matchReason,
-            score: candidate.score,
+            score: candidate.score +
+                _preferredManualMatchItemBoost(
+                  candidate.item,
+                  pageSeedTarget,
+                ),
           ),
         )
         .toList(growable: false);
@@ -1118,18 +1092,6 @@ String _resolveManualMatchTvdbId(MediaDetailTarget target) {
 
 String _resolveManualMatchWikidataId(MediaDetailTarget target) {
   return _detailLibraryMatchService.resolveManualMatchWikidataId(target);
-}
-
-int _scoreManualMatchCollection(
-  MediaCollection collection,
-  MediaDetailTarget target, {
-  MetadataMatchResult? metadataMatch,
-}) {
-  return _detailLibraryMatchService.scoreManualMatchCollection(
-    collection,
-    target,
-    metadataMatch: metadataMatch,
-  );
 }
 
 MediaDetailTarget _applyMetadataMatchToDetailTarget(

@@ -207,6 +207,9 @@ class _HomePosterTile extends StatelessWidget {
       title: item.title,
       subtitle: item.subtitle,
       posterUrl: item.posterUrl,
+      posterCachePolicy: item.detailTarget.sourceKind == MediaSourceKind.emby
+          ? AppNetworkImageCachePolicy.networkOnly
+          : AppNetworkImageCachePolicy.persistent,
       imageBadgeText: _resolveHomePosterBadgeText(
         module: module,
         item: item,

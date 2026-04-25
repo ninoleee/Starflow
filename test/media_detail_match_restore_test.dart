@@ -1713,6 +1713,47 @@ class _NoopMediaRepository implements MediaRepository {
   const _NoopMediaRepository();
 
   @override
+  Future<List<MediaItem>> loadLibraryMatchItems({
+    required MediaSourceConfig source,
+    String doubanId = '',
+    String imdbId = '',
+    String tmdbId = '',
+    String tvdbId = '',
+    String wikidataId = '',
+    Iterable<String> titles = const <String>[],
+    int year = 0,
+    int limit = 2000,
+  }) async {
+    if (source.kind == MediaSourceKind.emby) {
+      final collections = await fetchCollections(
+        kind: source.kind,
+        sourceId: source.id,
+      );
+      final scopedItems = <MediaItem>[];
+      for (final collection in collections) {
+        final items = await fetchLibrary(
+          kind: source.kind,
+          sourceId: source.id,
+          sectionId: collection.id,
+          limit: limit,
+        );
+        scopedItems.addAll(items);
+        if (scopedItems.length >= limit) {
+          return scopedItems.take(limit).toList(growable: false);
+        }
+      }
+      if (scopedItems.isNotEmpty) {
+        return scopedItems.take(limit).toList(growable: false);
+      }
+    }
+    return fetchLibrary(
+      kind: source.kind,
+      sourceId: source.id,
+      limit: limit,
+    );
+  }
+
+  @override
   Future<void> cancelActiveWebDavRefreshes({
     bool includeForceFull = false,
   }) async {}
@@ -1788,6 +1829,46 @@ class _RecordingEpisodeAutoMatchMediaRepository extends _NoopMediaRepository {
   int fetchLibraryCallCount = 0;
 
   @override
+  Future<List<MediaItem>> loadLibraryMatchItems({
+    required MediaSourceConfig source,
+    String doubanId = '',
+    String imdbId = '',
+    String tmdbId = '',
+    String tvdbId = '',
+    String wikidataId = '',
+    Iterable<String> titles = const <String>[],
+    int year = 0,
+    int limit = 2000,
+  }) async {
+    if (source.kind != MediaSourceKind.emby || source.id != 'emby-main') {
+      return const <MediaItem>[];
+    }
+    return [
+      MediaItem(
+        id: 'episode-1',
+        title: '乘风2026 第1集',
+        overview: '',
+        posterUrl: '',
+        year: 2026,
+        durationLabel: '45 分钟',
+        genres: const [],
+        itemType: 'episode',
+        sectionId: 'shows',
+        sectionName: '综艺',
+        sourceId: 'emby-main',
+        sourceName: '客厅 Emby',
+        sourceKind: MediaSourceKind.emby,
+        streamUrl: 'https://emby.example/Items/episode-1/stream.mkv',
+        playbackItemId: 'episode-1',
+        seasonNumber: 1,
+        episodeNumber: 1,
+        tmdbId: 'tmdb-2026',
+        addedAt: DateTime.utc(2026, 4, 7),
+      ),
+    ];
+  }
+
+  @override
   Future<List<MediaCollection>> fetchCollections({
     MediaSourceKind? kind,
     String? sourceId,
@@ -1848,6 +1929,45 @@ class _RecordingEpisodeAutoMatchMediaRepository extends _NoopMediaRepository {
 
 class _SingleMatchMediaRepository implements MediaRepository {
   const _SingleMatchMediaRepository();
+
+  @override
+  Future<List<MediaItem>> loadLibraryMatchItems({
+    required MediaSourceConfig source,
+    String doubanId = '',
+    String imdbId = '',
+    String tmdbId = '',
+    String tvdbId = '',
+    String wikidataId = '',
+    Iterable<String> titles = const <String>[],
+    int year = 0,
+    int limit = 2000,
+  }) async {
+    if (source.kind != MediaSourceKind.emby || source.id != 'emby-main') {
+      return const <MediaItem>[];
+    }
+    return [
+      MediaItem(
+        id: 'movie-1',
+        title: '测试影片',
+        overview: '',
+        posterUrl: '',
+        year: 2026,
+        durationLabel: '120 分钟',
+        genres: const [],
+        itemType: 'movie',
+        sectionId: 'movies',
+        sectionName: '电影',
+        sourceId: 'emby-main',
+        sourceName: 'Home Emby',
+        sourceKind: MediaSourceKind.emby,
+        streamUrl: 'https://media.example.com/Items/1/stream.mkv',
+        playbackItemId: 'movie-1',
+        imdbId: 'tt1234567',
+        tmdbId: '7654321',
+        addedAt: DateTime.utc(2026, 4, 7),
+      ),
+    ];
+  }
 
   @override
   Future<void> cancelActiveWebDavRefreshes({

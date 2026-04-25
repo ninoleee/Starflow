@@ -1,5 +1,3 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -68,13 +66,10 @@ class AppNetworkImage extends ConsumerStatefulWidget {
 }
 
 class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
-  Future<_ResolvedImageContent>? _resolvedImageFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _refreshResolvedImageFuture();
-  }
+  Future<Uint8List>? _resolvedSvgBytesFuture;
+  Future<ImageProvider<Object>>? _resolvedRasterProviderFuture;
+  int _activeCandidateIndex = 0;
+  bool _candidateAdvanceScheduled = false;
 
   @override
   void didUpdateWidget(covariant AppNetworkImage oldWidget) {
@@ -86,67 +81,51 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
           oldWidget.fallbackSources,
           widget.fallbackSources,
         )) {
-      _refreshResolvedImageFuture(force: true);
+      _resetCandidateResolution();
     }
   }
 
-  void _refreshResolvedImageFuture({bool force = false}) {
-    final backgroundImageLoadingSuspended =
-        ref.read(backgroundImageLoadingSuspendedProvider);
-    if (backgroundImageLoadingSuspended) {
-      if (force) {
-        _resolvedImageFuture = null;
-      }
+  void _resetCandidateResolution({bool resetCandidateIndex = true}) {
+    if (resetCandidateIndex) {
+      _activeCandidateIndex = 0;
+    }
+    _candidateAdvanceScheduled = false;
+    _resolvedSvgBytesFuture = null;
+    _resolvedRasterProviderFuture = null;
+  }
+
+  void _scheduleAdvanceCandidate({
+    required List<AppNetworkImageSource> candidates,
+    required int candidateIndex,
+  }) {
+    if (_candidateAdvanceScheduled || candidateIndex >= candidates.length - 1) {
       return;
     }
-    _resolvedImageFuture = _resolveImageFuture();
-  }
-
-  Future<_ResolvedImageContent>? _resolveImageFuture() {
-    final candidates = _buildCandidateSources();
-    if (candidates.isEmpty) {
-      return null;
-    }
-    return _loadAndAnalyze(candidates);
-  }
-
-  Future<_ResolvedImageContent> _loadAndAnalyze(
-    List<AppNetworkImageSource> candidates,
-  ) async {
-    Object? lastError;
-    StackTrace? lastStackTrace;
-    for (final candidate in candidates) {
-      try {
-        final bytes = await persistentImageCache.load(
-          candidate.url,
-          headers: candidate.headers,
-          persist:
-              candidate.cachePolicy == AppNetworkImageCachePolicy.persistent,
-        );
-        return _ResolvedImageContent(
-          bytes: bytes,
-          isSvg: _looksLikeSvg(candidate.url, bytes),
-          sourceUrl: candidate.url,
-          sourceHeaders: candidate.headers,
-          sourceCachePolicy: candidate.cachePolicy,
-        );
-      } catch (error, stackTrace) {
-        lastError = error;
-        lastStackTrace = stackTrace;
+    _candidateAdvanceScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _candidateAdvanceScheduled = false;
+      if (!mounted) {
+        return;
       }
-    }
-    if (lastError != null && lastStackTrace != null) {
-      Error.throwWithStackTrace(lastError, lastStackTrace);
-    }
-    throw StateError('Image URL is empty.');
+      final latestCandidates = _buildCandidateSources();
+      final safeIndex =
+          _activeCandidateIndex.clamp(0, latestCandidates.length - 1);
+      if (safeIndex >= latestCandidates.length - 1) {
+        return;
+      }
+      setState(() {
+        _activeCandidateIndex = safeIndex + 1;
+        _resetCandidateResolution(resetCandidateIndex: false);
+      });
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final backgroundImageLoadingSuspended =
         ref.watch(backgroundImageLoadingSuspendedProvider);
-    final hasCandidates = _buildCandidateSources().isNotEmpty;
-    if (!hasCandidates) {
+    final candidates = _buildCandidateSources();
+    if (candidates.isEmpty) {
       return _buildError(
         context,
         StateError('Image URL is empty.'),
@@ -157,65 +136,199 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
       return _buildLoading(context);
     }
 
-    _resolvedImageFuture ??= _resolveImageFuture();
-    final resolvedImageFuture = _resolvedImageFuture;
-    if (resolvedImageFuture == null) {
-      return _buildError(
+    final candidateIndex =
+        _activeCandidateIndex.clamp(0, candidates.length - 1);
+    final candidate = candidates[candidateIndex];
+    if (_urlLooksLikeSvg(candidate.url)) {
+      return _buildSvgCandidate(
         context,
-        StateError('Image URL is empty.'),
+        candidate: candidate,
+        candidates: candidates,
+        candidateIndex: candidateIndex,
       );
     }
 
-    return FutureBuilder<_ResolvedImageContent>(
-      future: resolvedImageFuture,
+    return _buildRasterCandidate(
+      context,
+      candidate: candidate,
+      candidates: candidates,
+      candidateIndex: candidateIndex,
+    );
+  }
+
+  Widget _buildSvgCandidate(
+    BuildContext context, {
+    required AppNetworkImageSource candidate,
+    required List<AppNetworkImageSource> candidates,
+    required int candidateIndex,
+  }) {
+    if (candidate.cachePolicy == AppNetworkImageCachePolicy.networkOnly) {
+      return SvgPicture.network(
+        candidate.url,
+        headers: candidate.headers.isEmpty ? null : candidate.headers,
+        width: widget.width,
+        height: widget.height,
+        fit: widget.fit ?? BoxFit.contain,
+        alignment: widget.alignment,
+        placeholderBuilder: (context) => _buildLoading(context),
+        errorBuilder: (context, error, stackTrace) {
+          return _buildCandidateFailure(
+            context,
+            error,
+            stackTrace,
+            candidates: candidates,
+            candidateIndex: candidateIndex,
+          );
+        },
+      );
+    }
+
+    _resolvedSvgBytesFuture ??= persistentImageCache.load(
+      candidate.url,
+      headers: candidate.headers,
+      persist: true,
+    );
+    final resolvedSvgBytesFuture = _resolvedSvgBytesFuture!;
+    return FutureBuilder<Uint8List>(
+      future: resolvedSvgBytesFuture,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return _buildError(context, snapshot.error!, snapshot.stackTrace);
+          return _buildCandidateFailure(
+            context,
+            snapshot.error!,
+            snapshot.stackTrace,
+            candidates: candidates,
+            candidateIndex: candidateIndex,
+          );
         }
 
-        final resolved = snapshot.data;
-        if (resolved == null) {
+        final bytes = snapshot.data;
+        if (bytes == null) {
           return _buildLoading(context);
         }
 
-        final bytes = resolved.bytes;
-        if (resolved.isSvg) {
-          return SvgPicture.memory(
-            bytes,
-            width: widget.width,
-            height: widget.height,
-            fit: widget.fit ?? BoxFit.contain,
-            alignment: widget.alignment,
-            placeholderBuilder: (context) => _buildLoading(context),
-          );
-        }
-        final rasterImageProvider = ResizeImage.resizeIfNeeded(
-          widget.cacheWidth,
-          widget.cacheHeight,
-          resolved.rasterProvider,
-        );
-        return Image(
-          image: rasterImageProvider,
+        return SvgPicture.memory(
+          bytes,
           width: widget.width,
           height: widget.height,
-          fit: widget.fit,
+          fit: widget.fit ?? BoxFit.contain,
           alignment: widget.alignment,
-          filterQuality: widget.filterQuality,
-          gaplessPlayback: true,
-          errorBuilder: (context, error, stackTrace) {
-            return _buildError(context, error, stackTrace);
-          },
+          placeholderBuilder: (context) => _buildLoading(context),
         );
       },
     );
   }
 
-  bool _looksLikeSvg(String url, Uint8List bytes) {
-    if (url.trim().toLowerCase().contains('.svg')) {
-      return true;
+  Widget _buildRasterCandidate(
+    BuildContext context, {
+    required AppNetworkImageSource candidate,
+    required List<AppNetworkImageSource> candidates,
+    required int candidateIndex,
+  }) {
+    if (candidate.cachePolicy == AppNetworkImageCachePolicy.networkOnly) {
+      return _buildRasterImage(
+        context,
+        _networkRasterProvider(candidate),
+        candidates: candidates,
+        candidateIndex: candidateIndex,
+      );
     }
-    final prefix = String.fromCharCodes(bytes.take(256));
-    return prefix.contains('<svg');
+
+    _resolvedRasterProviderFuture ??=
+        persistentImageCache.resolveRasterProvider(
+      candidate.url,
+      headers: candidate.headers,
+      persist: true,
+    );
+    final resolvedRasterProviderFuture = _resolvedRasterProviderFuture!;
+    return FutureBuilder<ImageProvider<Object>>(
+      future: resolvedRasterProviderFuture,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _buildCandidateFailure(
+            context,
+            snapshot.error!,
+            snapshot.stackTrace,
+            candidates: candidates,
+            candidateIndex: candidateIndex,
+          );
+        }
+
+        final provider = snapshot.data;
+        if (provider == null) {
+          return _buildLoading(context);
+        }
+
+        return _buildRasterImage(
+          context,
+          provider,
+          candidates: candidates,
+          candidateIndex: candidateIndex,
+        );
+      },
+    );
+  }
+
+  Widget _buildRasterImage(
+    BuildContext context,
+    ImageProvider<Object> provider, {
+    required List<AppNetworkImageSource> candidates,
+    required int candidateIndex,
+  }) {
+    final rasterImageProvider = ResizeImage.resizeIfNeeded(
+      widget.cacheWidth,
+      widget.cacheHeight,
+      provider,
+    );
+    return Image(
+      image: rasterImageProvider,
+      width: widget.width,
+      height: widget.height,
+      fit: widget.fit,
+      alignment: widget.alignment,
+      filterQuality: widget.filterQuality,
+      gaplessPlayback: true,
+      frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+        if (wasSynchronouslyLoaded || frame != null) {
+          return child;
+        }
+        return _buildLoading(context);
+      },
+      errorBuilder: (context, error, stackTrace) {
+        return _buildCandidateFailure(
+          context,
+          error,
+          stackTrace,
+          candidates: candidates,
+          candidateIndex: candidateIndex,
+        );
+      },
+    );
+  }
+
+  ImageProvider<Object> _networkRasterProvider(
+      AppNetworkImageSource candidate) {
+    return NetworkImage(
+      candidate.url,
+      headers: candidate.headers.isEmpty ? null : candidate.headers,
+    );
+  }
+
+  Widget _buildCandidateFailure(
+    BuildContext context,
+    Object error,
+    StackTrace? stackTrace, {
+    required List<AppNetworkImageSource> candidates,
+    required int candidateIndex,
+  }) {
+    if (candidateIndex < candidates.length - 1) {
+      _scheduleAdvanceCandidate(
+        candidates: candidates,
+        candidateIndex: candidateIndex,
+      );
+      return _buildLoading(context);
+    }
+    return _buildError(context, error, stackTrace);
   }
 
   Widget _buildLoading(BuildContext context) {
@@ -266,34 +379,6 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   ]) {
     return widget.errorBuilder?.call(context, error, stackTrace) ??
         const SizedBox.shrink();
-  }
-}
-
-class _ResolvedImageContent {
-  const _ResolvedImageContent({
-    required this.bytes,
-    required this.isSvg,
-    required this.sourceUrl,
-    required this.sourceHeaders,
-    required this.sourceCachePolicy,
-  });
-
-  final Uint8List bytes;
-  final bool isSvg;
-  final String sourceUrl;
-  final Map<String, String> sourceHeaders;
-  final AppNetworkImageCachePolicy sourceCachePolicy;
-
-  ImageProvider<Object> get rasterProvider {
-    return _PersistentMemoryImageProvider(
-      bytes: bytes,
-      sourceKey: _buildSourceIdentity(
-        sourceUrl,
-        sourceHeaders,
-        cachePolicy: sourceCachePolicy,
-      ),
-      bytesFingerprint: _fingerprintBytes(bytes),
-    );
   }
 }
 
@@ -357,68 +442,16 @@ String _buildSourceIdentity(
   return buffer.toString();
 }
 
-String _fingerprintBytes(Uint8List bytes) {
-  var hash = 2166136261;
-  for (final value in bytes) {
-    hash = 0x1fffffff & (hash ^ value);
-    hash = 0x1fffffff & (hash * 16777619);
+bool _urlLooksLikeSvg(String url) {
+  final trimmedUrl = url.trim();
+  if (trimmedUrl.isEmpty) {
+    return false;
   }
-  return hash.toRadixString(16);
-}
-
-@immutable
-class _PersistentMemoryImageProvider
-    extends ImageProvider<_PersistentMemoryImageProvider> {
-  const _PersistentMemoryImageProvider({
-    required this.bytes,
-    required this.sourceKey,
-    required this.bytesFingerprint,
-  });
-
-  final Uint8List bytes;
-  final String sourceKey;
-  final String bytesFingerprint;
-
-  @override
-  Future<_PersistentMemoryImageProvider> obtainKey(
-      ImageConfiguration configuration) {
-    return SynchronousFuture<_PersistentMemoryImageProvider>(this);
+  final normalized = trimmedUrl.toLowerCase();
+  if (normalized.startsWith('data:image/svg+xml')) {
+    return true;
   }
-
-  @override
-  ImageStreamCompleter loadImage(
-    _PersistentMemoryImageProvider key,
-    ImageDecoderCallback decode,
-  ) {
-    return MultiFrameImageStreamCompleter(
-      codec: _loadAsync(key, decode),
-      scale: 1.0,
-      debugLabel: key.sourceKey,
-      informationCollector: () => <DiagnosticsNode>[
-        DiagnosticsProperty<ImageProvider>('Image provider', this),
-        StringProperty('Source', sourceKey),
-      ],
-    );
-  }
-
-  Future<ui.Codec> _loadAsync(
-    _PersistentMemoryImageProvider key,
-    ImageDecoderCallback decode,
-  ) async {
-    final buffer = await ui.ImmutableBuffer.fromUint8List(key.bytes);
-    return decode(buffer);
-  }
-
-  @override
-  bool operator ==(Object other) {
-    return other is _PersistentMemoryImageProvider &&
-        other.sourceKey == sourceKey &&
-        other.bytesFingerprint == bytesFingerprint;
-  }
-
-  @override
-  int get hashCode => Object.hash(
-        sourceKey,
-        bytesFingerprint,
-      );
+  final uri = Uri.tryParse(trimmedUrl);
+  final path = (uri?.path ?? trimmedUrl).toLowerCase();
+  return path.endsWith('.svg') || path.endsWith('.svgz');
 }

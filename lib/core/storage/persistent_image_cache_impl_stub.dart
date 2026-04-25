@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/painting.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
@@ -34,5 +35,17 @@ class _StubPersistentImageCache implements PersistentImageCache {
   }) async {
     final response = await _client.get(Uri.parse(url), headers: headers);
     return validateNetworkImageHttpResponse(response, url: url);
+  }
+
+  @override
+  Future<ImageProvider<Object>> resolveRasterProvider(
+    String url, {
+    Map<String, String>? headers,
+    bool persist = true,
+  }) async {
+    return NetworkImage(
+      url,
+      headers: headers == null || headers.isEmpty ? null : headers,
+    );
   }
 }

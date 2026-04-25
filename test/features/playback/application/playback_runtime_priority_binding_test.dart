@@ -39,6 +39,20 @@ class _BindingFakeMediaRepository implements MediaRepository {
   final List<bool> cancelIncludeForceFullValues = <bool>[];
 
   @override
+  Future<List<MediaItem>> loadLibraryMatchItems({
+    required MediaSourceConfig source,
+    String doubanId = '',
+    String imdbId = '',
+    String tmdbId = '',
+    String tvdbId = '',
+    String wikidataId = '',
+    Iterable<String> titles = const <String>[],
+    int year = 0,
+    int limit = 2000,
+  }) async =>
+      const <MediaItem>[];
+
+  @override
   Future<void> cancelActiveWebDavRefreshes({
     bool includeForceFull = false,
   }) async {

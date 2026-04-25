@@ -768,4 +768,27 @@ class MediaCollection {
   final String sourceName;
   final MediaSourceKind sourceKind;
   final String subtitle;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'sourceId': sourceId,
+      'sourceName': sourceName,
+      'sourceKind': sourceKind.name,
+      'subtitle': subtitle,
+    };
+  }
+
+  factory MediaCollection.fromJson(Map<String, dynamic> json) {
+    return MediaCollection(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      sourceId: json['sourceId'] as String? ?? '',
+      sourceName: json['sourceName'] as String? ?? '',
+      sourceKind:
+          MediaSourceKindX.fromName(json['sourceKind'] as String? ?? ''),
+      subtitle: json['subtitle'] as String? ?? '',
+    );
+  }
 }

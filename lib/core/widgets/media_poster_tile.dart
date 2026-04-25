@@ -10,6 +10,7 @@ class MediaPosterTile extends ConsumerStatefulWidget {
     required this.title,
     required this.subtitle,
     required this.posterUrl,
+    this.posterCachePolicy = AppNetworkImageCachePolicy.persistent,
     this.posterHeaders = const {},
     this.posterFallbackSources = const [],
     required this.onTap,
@@ -30,6 +31,7 @@ class MediaPosterTile extends ConsumerStatefulWidget {
   final String title;
   final String subtitle;
   final String posterUrl;
+  final AppNetworkImageCachePolicy posterCachePolicy;
   final Map<String, String> posterHeaders;
   final List<AppNetworkImageSource> posterFallbackSources;
   final VoidCallback onTap;
@@ -134,8 +136,17 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
     } else {
       posterChild = AppNetworkImage(
         trimmedPoster,
+        cachePolicy: widget.posterCachePolicy,
         headers: widget.posterHeaders,
-        fallbackSources: widget.posterFallbackSources,
+        fallbackSources: widget.posterFallbackSources
+            .map(
+              (source) => AppNetworkImageSource(
+                url: source.url,
+                headers: source.headers,
+                cachePolicy: widget.posterCachePolicy,
+              ),
+            )
+            .toList(growable: false),
         fit: BoxFit.cover,
         // Only constrain decode height so landscape fallbacks keep
         // their original aspect ratio before BoxFit.cover crops them.

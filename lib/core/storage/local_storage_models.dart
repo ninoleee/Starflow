@@ -1,5 +1,6 @@
 enum LocalStorageCacheType {
   nasMetadataIndex,
+  embyLibraryCache,
   detailData,
   subtitleCache,
   playbackMemory,
@@ -12,6 +13,8 @@ extension LocalStorageCacheTypeX on LocalStorageCacheType {
     switch (this) {
       case LocalStorageCacheType.nasMetadataIndex:
         return '媒体库索引';
+      case LocalStorageCacheType.embyLibraryCache:
+        return 'Emby 媒体库缓存';
       case LocalStorageCacheType.detailData:
         return '详情匹配与刮削缓存';
       case LocalStorageCacheType.subtitleCache:
@@ -29,6 +32,8 @@ extension LocalStorageCacheTypeX on LocalStorageCacheType {
     switch (this) {
       case LocalStorageCacheType.nasMetadataIndex:
         return '本地 WebDAV 索引、分区结果和扫描状态';
+      case LocalStorageCacheType.embyLibraryCache:
+        return 'Emby 已加载分区、列表条目和首页回退数据快照';
       case LocalStorageCacheType.detailData:
         return '详情页资源命中、刮削结果、字幕选择和手动修正';
       case LocalStorageCacheType.subtitleCache:

@@ -31,6 +31,11 @@ import 'package:starflow/features/storage/data/local_storage_cache_repository.da
 
 import 'package:starflow/app/app.dart';
 
+Future<void> _pumpDetailPageStartup(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets('renders Starflow shell', (WidgetTester tester) async {
     await tester.pumpWidget(const ProviderScope(child: StarflowApp()));
@@ -77,7 +82,7 @@ void main() {
       ),
     );
 
-    await tester.pump();
+    await _pumpDetailPageStartup(tester);
 
     expect(find.text('The Last of Us'), findsAtLeastNWidgets(1));
     expect(
@@ -160,7 +165,7 @@ void main() {
       ),
     );
 
-    await tester.pump();
+    await _pumpDetailPageStartup(tester);
     await tester.pumpAndSettle();
 
     expect(cacheRepository.lastSavedState, isNotNull);
@@ -248,7 +253,7 @@ void main() {
       ),
     );
 
-    await tester.pump();
+    await _pumpDetailPageStartup(tester);
     await tester.pumpAndSettle();
 
     expect(
@@ -330,7 +335,7 @@ void main() {
       ),
     );
 
-    await tester.pump();
+    await _pumpDetailPageStartup(tester);
     await tester.pumpAndSettle();
 
     expect(
@@ -378,7 +383,7 @@ void main() {
       ),
     );
 
-    await tester.pump();
+    await _pumpDetailPageStartup(tester);
 
     expect(find.text('地址'), findsOneWidget);
     expect(
@@ -459,8 +464,8 @@ void main() {
       ),
     );
 
-    await tester.pump();
-    await tester.pump();
+    await _pumpDetailPageStartup(tester);
+    await _pumpDetailPageStartup(tester);
 
     final heroArtwork = tester.widget<AppNetworkImage>(
       find
@@ -578,7 +583,7 @@ void main() {
       ),
     );
 
-    await tester.pump();
+    await _pumpDetailPageStartup(tester);
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pump(const Duration(milliseconds: 600));
 
@@ -628,7 +633,7 @@ void main() {
       ),
     );
 
-    await tester.pump();
+    await _pumpDetailPageStartup(tester);
 
     expect(find.text('测试剧'), findsAtLeastNWidgets(1));
     expect(find.text('第1集 风暴前夜'), findsNothing);
@@ -675,7 +680,7 @@ void main() {
       ),
     );
 
-    await tester.pump();
+    await _pumpDetailPageStartup(tester);
 
     expect(find.text('第1集 风暴前夜'), findsNothing);
     expect(find.text('第1集 风暴前夜.mkv'), findsAtLeastNWidgets(1));
@@ -748,6 +753,25 @@ class _FakeMediaRepository implements MediaRepository {
   const _FakeMediaRepository({required this.library});
 
   final List<MediaItem> library;
+
+  @override
+  Future<List<MediaItem>> loadLibraryMatchItems({
+    required MediaSourceConfig source,
+    String doubanId = '',
+    String imdbId = '',
+    String tmdbId = '',
+    String tvdbId = '',
+    String wikidataId = '',
+    Iterable<String> titles = const <String>[],
+    int year = 0,
+    int limit = 2000,
+  }) async {
+    return library
+        .where((item) => item.sourceKind == source.kind)
+        .where((item) => item.sourceId == source.id)
+        .take(limit)
+        .toList(growable: false);
+  }
 
   @override
   Future<void> cancelActiveWebDavRefreshes({

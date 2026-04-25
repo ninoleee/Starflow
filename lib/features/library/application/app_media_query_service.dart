@@ -10,8 +10,11 @@ import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 class AppMediaQueryService {
+  static const Duration _embyAutoRefreshInterval = Duration(hours: 24);
+
   AppMediaQueryService({
     required this.ref,
     required EmbyApiClient embyApiClient,
@@ -30,6 +33,10 @@ class AppMediaQueryService {
   final NasMediaIndexer _nasMediaIndexer;
   final QuarkExternalStorageClient _quarkExternalStorageClient;
   final EmptyLibraryAutoRebuildScheduler _emptyLibraryAutoRebuildScheduler;
+  final Map<String, Future<void>> _embyRefreshFutures =
+      <String, Future<void>>{};
+  final Map<String, _CachedEmbyLibraryMatchIndex> _embyLibraryMatchIndexes =
+      <String, _CachedEmbyLibraryMatchIndex>{};
 
   Future<List<MediaSourceConfig>> fetchSources() async {
     await Future<void>.delayed(const Duration(milliseconds: 120));
@@ -167,6 +174,52 @@ class AppMediaQueryService {
     return matchMediaItemByTitles(library, titles: [title]);
   }
 
+  Future<List<MediaItem>> loadCachedEmbyLibraryMatchItems(
+    MediaSourceConfig source, {
+    Iterable<String> titles = const <String>[],
+    int year = 0,
+    String doubanId = '',
+    String imdbId = '',
+    String tmdbId = '',
+    String tvdbId = '',
+    String wikidataId = '',
+    int limit = 2000,
+  }) async {
+    if (source.kind != MediaSourceKind.emby || !source.hasActiveSession) {
+      return const <MediaItem>[];
+    }
+    final snapshot = await _loadCachedEmbySnapshot(source);
+    final items = _mergedVisibleCachedEmbyItems(source, snapshot);
+    if (items.isEmpty) {
+      return const <MediaItem>[];
+    }
+
+    final normalizedSourceId = source.id.trim();
+    final currentRevision = snapshot.refreshedAt?.microsecondsSinceEpoch ?? 0;
+    final cachedIndex = _embyLibraryMatchIndexes[normalizedSourceId];
+    final index = cachedIndex == null ||
+            cachedIndex.revision != currentRevision ||
+            cachedIndex.itemCount != items.length
+        ? (_embyLibraryMatchIndexes[normalizedSourceId] =
+            _CachedEmbyLibraryMatchIndex(
+            revision: currentRevision,
+            index: _EmbyLibraryMatchIndex(items),
+            itemCount: items.length,
+          ))
+        : cachedIndex;
+    final matched = index.index.lookup(
+      titles: titles,
+      year: year,
+      doubanId: doubanId,
+      imdbId: imdbId,
+      tmdbId: tmdbId,
+      tvdbId: tvdbId,
+      wikidataId: wikidataId,
+    );
+    final resolved = matched.isEmpty ? items : matched;
+    return resolved.take(limit).toList(growable: false);
+  }
+
   List<MediaSourceConfig> get _enabledSources {
     return ref
         .read(appSettingsProvider)
@@ -182,6 +235,294 @@ class AppMediaQueryService {
         .toList();
   }
 
+  Future<void> refreshEmbySourceCache(MediaSourceConfig source) async {
+    final normalizedSourceId = source.id.trim();
+    if (source.kind != MediaSourceKind.emby ||
+        normalizedSourceId.isEmpty ||
+        !source.hasActiveSession) {
+      return;
+    }
+
+    final existing = _embyRefreshFutures[normalizedSourceId];
+    if (existing != null) {
+      return existing;
+    }
+
+    final refreshFuture = _refreshEmbySourceCacheInternal(source);
+    _embyRefreshFutures[normalizedSourceId] = refreshFuture;
+    try {
+      await refreshFuture;
+    } finally {
+      _embyRefreshFutures.remove(normalizedSourceId);
+    }
+  }
+
+  Future<CachedEmbyLibrarySnapshot> _loadCachedEmbySnapshot(
+    MediaSourceConfig source,
+  ) async {
+    final cacheRepository = ref.read(localStorageCacheRepositoryProvider);
+    var snapshot = await cacheRepository.loadEmbyLibrarySnapshot(source.id);
+    if (_shouldAutoRefreshEmbySource(source, snapshot)) {
+      try {
+        await refreshEmbySourceCache(source);
+      } catch (_) {
+        // Keep the cached snapshot empty and rely on manual refresh next.
+      }
+      snapshot = await cacheRepository.loadEmbyLibrarySnapshot(source.id);
+    }
+    return snapshot;
+  }
+
+  bool _shouldAutoRefreshEmbySource(
+    MediaSourceConfig source,
+    CachedEmbyLibrarySnapshot snapshot,
+  ) {
+    if (source.kind != MediaSourceKind.emby || !source.hasActiveSession) {
+      return false;
+    }
+    if (snapshot.hasData) {
+      return false;
+    }
+    final refreshedAt = snapshot.refreshedAt;
+    if (refreshedAt == null) {
+      return true;
+    }
+    return DateTime.now().difference(refreshedAt) >= _embyAutoRefreshInterval;
+  }
+
+  Future<void> _refreshEmbySourceCacheInternal(MediaSourceConfig source) async {
+    final cacheRepository = ref.read(localStorageCacheRepositoryProvider);
+    final refreshedAt = DateTime.now();
+    var collections = const <MediaCollection>[];
+    var fallbackItems = const <MediaItem>[];
+    var itemsBySection = const <String, List<MediaItem>>{};
+
+    try {
+      collections = await _embyApiClient.fetchCollections(source);
+      final sectionItems = await Future.wait(
+        collections.map((collection) async {
+          final items = await _loadEmbySectionItems(
+            source,
+            collection: collection,
+          );
+          return MapEntry(collection.id.trim(), items);
+        }),
+      );
+      itemsBySection = Map<String, List<MediaItem>>.unmodifiable(
+        <String, List<MediaItem>>{
+          for (final entry in sectionItems)
+            if (entry.key.isNotEmpty) entry.key: entry.value,
+        },
+      );
+
+      if (!source.hasExplicitNoSectionsSelected) {
+        fallbackItems = _mergeAndSortEmbyItems(
+          _resolveVisibleEmbyItemsBySection(
+            source,
+            itemsBySection,
+          ).values,
+        );
+        if (fallbackItems.isEmpty) {
+          fallbackItems = await _loadEmbyRootLibraryFallback(source);
+        }
+      }
+    } finally {
+      _embyLibraryMatchIndexes.remove(source.id.trim());
+      await cacheRepository.saveEmbyLibrarySnapshot(
+        sourceId: source.id,
+        refreshedAt: refreshedAt,
+        collections: collections,
+        fallbackItems: fallbackItems
+            .map(_stripArtworkForEmbyCache)
+            .toList(growable: false),
+        itemsBySection: itemsBySection.map(
+          (key, value) => MapEntry(
+            key,
+            value.map(_stripArtworkForEmbyCache).toList(growable: false),
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<List<MediaItem>> _loadEmbySectionItems(
+    MediaSourceConfig source, {
+    required MediaCollection collection,
+  }) async {
+    try {
+      return await _embyApiClient.fetchLibrary(
+        source,
+        limit: 200,
+        sectionId: collection.id,
+        sectionName: collection.title,
+      );
+    } catch (_) {
+      return const <MediaItem>[];
+    }
+  }
+
+  Future<List<MediaItem>> _loadEmbyRootLibraryFallback(
+    MediaSourceConfig source,
+  ) async {
+    try {
+      return await _embyApiClient.fetchLibrary(
+        source,
+        limit: 200,
+      );
+    } catch (_) {
+      return const <MediaItem>[];
+    }
+  }
+
+  List<MediaCollection> _applyCollectionSelection(
+    MediaSourceConfig source,
+    List<MediaCollection> collections,
+  ) {
+    if (source.hasExplicitNoSectionsSelected) {
+      return const <MediaCollection>[];
+    }
+    final selectedIds = source.selectedSectionIds;
+    if (selectedIds.isEmpty) {
+      return collections;
+    }
+    return collections
+        .where((collection) => selectedIds.contains(collection.id))
+        .toList(growable: false);
+  }
+
+  List<MediaItem> _resolveCachedEmbyItems(
+    MediaSourceConfig source,
+    CachedEmbyLibrarySnapshot snapshot, {
+    String? sectionId,
+    required int limit,
+  }) {
+    final normalizedSectionId = sectionId?.trim() ?? '';
+    if (normalizedSectionId.isNotEmpty) {
+      final scopedItems = snapshot.itemsBySection[normalizedSectionId];
+      final resolved = scopedItems == null || scopedItems.isEmpty
+          ? snapshot.fallbackItems
+              .where((item) => item.sectionId == normalizedSectionId)
+              .toList(growable: false)
+          : scopedItems;
+      return _rehydrateCachedEmbyItems(
+        source,
+        resolved.take(limit),
+      );
+    }
+
+    final resolved = _mergedVisibleCachedEmbyItems(source, snapshot);
+    return resolved.take(limit).toList(growable: false);
+  }
+
+  List<MediaItem> _mergedVisibleCachedEmbyItems(
+    MediaSourceConfig source,
+    CachedEmbyLibrarySnapshot snapshot,
+  ) {
+    final visibleItemsBySection = _resolveVisibleEmbyItemsBySection(
+      source,
+      snapshot.itemsBySection,
+    );
+    final resolved = visibleItemsBySection.isEmpty
+        ? snapshot.fallbackItems
+        : _mergeAndSortEmbyItems(visibleItemsBySection.values);
+    return _rehydrateCachedEmbyItems(source, resolved);
+  }
+
+  Map<String, List<MediaItem>> _resolveVisibleEmbyItemsBySection(
+    MediaSourceConfig source,
+    Map<String, List<MediaItem>> itemsBySection,
+  ) {
+    if (itemsBySection.isEmpty) {
+      return const <String, List<MediaItem>>{};
+    }
+    if (source.hasExplicitNoSectionsSelected) {
+      return const <String, List<MediaItem>>{};
+    }
+    final selectedIds = source.selectedSectionIds;
+    if (selectedIds.isEmpty) {
+      return itemsBySection;
+    }
+    return <String, List<MediaItem>>{
+      for (final entry in itemsBySection.entries)
+        if (selectedIds.contains(entry.key)) entry.key: entry.value,
+    };
+  }
+
+  List<MediaItem> _mergeAndSortEmbyItems(
+    Iterable<List<MediaItem>> groups,
+  ) {
+    final mergedById = <String, MediaItem>{};
+    for (final group in groups) {
+      for (final item in group) {
+        final itemId = item.id.trim();
+        if (itemId.isEmpty) {
+          continue;
+        }
+        final existing = mergedById[itemId];
+        if (existing == null || item.addedAt.isAfter(existing.addedAt)) {
+          mergedById[itemId] = item;
+        }
+      }
+    }
+    final merged = mergedById.values.toList(growable: false)
+      ..sort((left, right) => right.addedAt.compareTo(left.addedAt));
+    return merged;
+  }
+
+  MediaItem _stripArtworkForEmbyCache(MediaItem item) {
+    return item.copyWith(
+      posterUrl: '',
+      posterHeaders: const <String, String>{},
+      backdropUrl: '',
+      backdropHeaders: const <String, String>{},
+      logoUrl: '',
+      logoHeaders: const <String, String>{},
+      bannerUrl: '',
+      bannerHeaders: const <String, String>{},
+      extraBackdropUrls: const <String>[],
+      extraBackdropHeaders: const <String, String>{},
+    );
+  }
+
+  List<MediaItem> _rehydrateCachedEmbyItems(
+    MediaSourceConfig source,
+    Iterable<MediaItem> items,
+  ) {
+    return items
+        .map((item) => _rehydrateCachedEmbyItem(source, item))
+        .toList(growable: false);
+  }
+
+  MediaItem _rehydrateCachedEmbyItem(
+    MediaSourceConfig source,
+    MediaItem item,
+  ) {
+    if (item.posterUrl.trim().isNotEmpty || item.id.trim().isEmpty) {
+      return item;
+    }
+    final baseUri = _resolvePreferredEmbyBaseUri(source);
+    if (baseUri == null) {
+      return item;
+    }
+    return item.copyWith(
+      posterUrl: EmbyApiClient.buildPosterUri(
+        baseUri: baseUri,
+        itemId: item.id,
+        imageTag: '',
+        accessToken: source.accessToken,
+      ).toString(),
+      posterHeaders: const <String, String>{},
+    );
+  }
+
+  Uri? _resolvePreferredEmbyBaseUri(MediaSourceConfig source) {
+    final candidates = EmbyApiClient.candidateBaseUris(source.endpoint);
+    if (candidates.isEmpty) {
+      return null;
+    }
+    return candidates.last;
+  }
+
   Future<List<MediaCollection>> _fetchCollectionsForSource(
     MediaSourceConfig source, {
     bool applySelection = true,
@@ -191,7 +532,8 @@ class AppMediaQueryService {
       if (!source.hasActiveSession) {
         return const [];
       }
-      collections = await _embyApiClient.fetchCollections(source);
+      final snapshot = await _loadCachedEmbySnapshot(source);
+      collections = snapshot.collections;
     } else if (source.kind == MediaSourceKind.quark) {
       collections = await _quarkExternalStorageClient.fetchCollections(source);
     } else {
@@ -204,16 +546,7 @@ class AppMediaQueryService {
     if (!applySelection) {
       return collections;
     }
-    if (source.hasExplicitNoSectionsSelected) {
-      return const [];
-    }
-    final selectedIds = source.selectedSectionIds;
-    if (selectedIds.isEmpty) {
-      return collections;
-    }
-    return collections
-        .where((collection) => selectedIds.contains(collection.id))
-        .toList();
+    return _applyCollectionSelection(source, collections);
   }
 
   Future<_SourceFetchResult> _fetchLibraryForSource(
@@ -228,34 +561,12 @@ class AppMediaQueryService {
         if (!source.hasActiveSession) {
           return const _SourceFetchResult(items: <MediaItem>[]);
         }
-        if (sectionId?.trim().isNotEmpty == true) {
-          return _SourceFetchResult(
-            items: await _embyApiClient.fetchLibrary(
-              source,
-              limit: limit,
-              sectionId: sectionId,
-              sectionName: await _resolveSectionName(source, sectionId),
-            ),
-          );
-        }
-
-        final selectedCollections = await _selectedCollectionsForSource(source);
-        if (hasScopedSections) {
-          if (selectedCollections.isEmpty) {
-            return const _SourceFetchResult(items: <MediaItem>[]);
-          }
-          return _SourceFetchResult(
-            items: await _fetchLibraryFromCollections(
-              source,
-              selectedCollections,
-              limit: limit,
-            ),
-          );
-        }
-
+        final snapshot = await _loadCachedEmbySnapshot(source);
         return _SourceFetchResult(
-          items: await _embyApiClient.fetchLibrary(
+          items: _resolveCachedEmbyItems(
             source,
+            snapshot,
+            sectionId: sectionId,
             limit: limit,
           ),
         );
@@ -370,41 +681,6 @@ class AppMediaQueryService {
         stackTrace: stackTrace,
       );
     }
-  }
-
-  Future<List<MediaItem>> _fetchLibraryFromCollections(
-    MediaSourceConfig source,
-    List<MediaCollection> collections, {
-    required int limit,
-  }) async {
-    final groups = await Future.wait(
-      collections.map((collection) async {
-        if (source.kind == MediaSourceKind.emby) {
-          return _embyApiClient.fetchLibrary(
-            source,
-            limit: limit,
-            sectionId: collection.id,
-            sectionName: collection.title,
-          );
-        }
-        if (source.kind == MediaSourceKind.quark) {
-          return _loadNasLibraryWithAutoRebuild(
-            source,
-            sectionId: collection.id,
-            scopedCollections: [collection],
-            limit: limit,
-            autoRebuildInBackground: false,
-          );
-        }
-        return _nasMediaIndexer.loadLibrary(
-          source,
-          sectionId: collection.id,
-          scopedCollections: [collection],
-          limit: limit,
-        );
-      }),
-    );
-    return groups.expand((group) => group).toList();
   }
 
   Future<List<MediaItem>> _loadNasLibraryWithAutoRebuild(
@@ -555,4 +831,140 @@ class _SourceFetchResult {
   final List<MediaItem> items;
   final Object? error;
   final StackTrace? stackTrace;
+}
+
+class _EmbyLibraryMatchIndex {
+  _EmbyLibraryMatchIndex(List<MediaItem> items) {
+    for (final item in items) {
+      _indexItem(item);
+    }
+  }
+
+  final Map<String, List<MediaItem>> _byLookupKey = <String, List<MediaItem>>{};
+
+  List<MediaItem> lookup({
+    Iterable<String> titles = const <String>[],
+    int year = 0,
+    String doubanId = '',
+    String imdbId = '',
+    String tmdbId = '',
+    String tvdbId = '',
+    String wikidataId = '',
+  }) {
+    final matchedById = <String, MediaItem>{};
+
+    void collect(String key) {
+      final lookupKey = key.trim();
+      if (lookupKey.isEmpty) {
+        return;
+      }
+      final items = _byLookupKey[lookupKey];
+      if (items == null) {
+        return;
+      }
+      for (final item in items) {
+        final itemId = item.id.trim();
+        if (itemId.isEmpty) {
+          continue;
+        }
+        matchedById[itemId] = item;
+      }
+    }
+
+    collect('douban|${doubanId.trim()}');
+    collect('imdb|${imdbId.trim().toLowerCase()}');
+    collect('tmdb|${tmdbId.trim()}');
+    collect('tvdb|${tvdbId.trim()}');
+    collect('wikidata|${wikidataId.trim().toUpperCase()}');
+    if (matchedById.isNotEmpty) {
+      return matchedById.values.toList(growable: false);
+    }
+
+    for (final title in titles) {
+      final normalizedTitle = _normalizeEmbyMatchText(title);
+      if (normalizedTitle.isEmpty) {
+        continue;
+      }
+      if (year > 0) {
+        collect('title|$normalizedTitle|$year');
+      }
+      collect('title|$normalizedTitle');
+      final originalNormalizedTitle = _normalizeEmbyMatchText(title);
+      if (originalNormalizedTitle.isNotEmpty) {
+        collect('title-original|$originalNormalizedTitle');
+      }
+    }
+    return matchedById.values.toList(growable: false);
+  }
+
+  void _indexItem(MediaItem item) {
+    void addKey(String key) {
+      final lookupKey = key.trim();
+      final itemId = item.id.trim();
+      if (lookupKey.isEmpty || itemId.isEmpty) {
+        return;
+      }
+      (_byLookupKey[lookupKey] ??= <MediaItem>[]).add(item);
+    }
+
+    final doubanId = item.doubanId.trim();
+    if (doubanId.isNotEmpty) {
+      addKey('douban|$doubanId');
+    }
+    final imdbId = item.imdbId.trim().toLowerCase();
+    if (imdbId.isNotEmpty) {
+      addKey('imdb|$imdbId');
+    }
+    final tmdbId = item.tmdbId.trim();
+    if (tmdbId.isNotEmpty) {
+      addKey('tmdb|$tmdbId');
+    }
+    final tvdbId = item.tvdbId.trim();
+    if (tvdbId.isNotEmpty) {
+      addKey('tvdb|$tvdbId');
+    }
+    final wikidataId = item.wikidataId.trim().toUpperCase();
+    if (wikidataId.isNotEmpty) {
+      addKey('wikidata|$wikidataId');
+    }
+
+    for (final title in <String>{
+      item.title.trim(),
+      item.originalTitle.trim(),
+      item.sortTitle.trim(),
+    }) {
+      final normalizedTitle = _normalizeEmbyMatchText(title);
+      if (normalizedTitle.isEmpty) {
+        continue;
+      }
+      addKey('title|$normalizedTitle');
+      if (item.year > 0) {
+        addKey('title|$normalizedTitle|${item.year}');
+      }
+      addKey('title-original|$normalizedTitle');
+    }
+  }
+}
+
+class _CachedEmbyLibraryMatchIndex {
+  const _CachedEmbyLibraryMatchIndex({
+    required this.revision,
+    required this.index,
+    required this.itemCount,
+  });
+
+  final int revision;
+  final _EmbyLibraryMatchIndex index;
+  final int itemCount;
+}
+
+String _normalizeEmbyMatchText(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized.isEmpty) {
+    return '';
+  }
+  return normalized.replaceAll(
+    RegExp(r'[\s\-_.,:;!?/\\|()\[\]{}<>《》【】"“”·]+'),
+    '',
+  );
 }

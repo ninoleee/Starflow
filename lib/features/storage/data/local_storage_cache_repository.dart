@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
@@ -63,6 +64,8 @@ class LocalStorageCacheRepository {
         _notifyDetailCacheChanged = notifyDetailCacheChanged;
 
   static const _detailCacheKey = 'starflow.local_storage.detail_cache.v1';
+  static const _embyLibraryCacheKey =
+      'starflow.local_storage.emby_library_cache.v1';
 
   final PreferencesStore _preferences;
   final void Function(LocalStorageDetailCacheChangeEvent event)?
@@ -72,11 +75,14 @@ class LocalStorageCacheRepository {
   final Set<String> _pendingDetailCacheChangedSourceIds = <String>{};
   final Set<String> _pendingDetailCacheChangedLookupKeys = <String>{};
   final Set<String> _pendingDetailCacheChangedRecordIds = <String>{};
-  final Set<LocalStorageDetailCacheChangedField> _pendingDetailCacheChangedFields =
+  final Set<LocalStorageDetailCacheChangedField>
+      _pendingDetailCacheChangedFields =
       <LocalStorageDetailCacheChangedField>{};
   bool _pendingDetailCacheInvalidateAll = false;
   _DetailCachePayload? _detailPayloadCache;
   Future<_DetailCachePayload>? _detailPayloadLoadFuture;
+  _EmbyLibraryCachePayload? _embyLibraryPayloadCache;
+  Future<_EmbyLibraryCachePayload>? _embyLibraryPayloadLoadFuture;
 
   void dispose() {
     _detailCacheChangeNotificationTimer?.cancel();
@@ -88,10 +94,100 @@ class LocalStorageCacheRepository {
     _pendingDetailCacheInvalidateAll = false;
     _detailPayloadCache = null;
     _detailPayloadLoadFuture = null;
+    _embyLibraryPayloadCache = null;
+    _embyLibraryPayloadLoadFuture = null;
   }
 
   Future<void> primeDetailPayload() async {
     await _loadDetailPayload();
+  }
+
+  Future<CachedEmbyLibrarySnapshot> loadEmbyLibrarySnapshot(
+    String sourceId,
+  ) async {
+    final normalizedSourceId = sourceId.trim();
+    if (normalizedSourceId.isEmpty) {
+      return const CachedEmbyLibrarySnapshot();
+    }
+    final payload = await _loadEmbyLibraryPayload();
+    return payload.sources[normalizedSourceId] ??
+        const CachedEmbyLibrarySnapshot();
+  }
+
+  Future<void> saveEmbyLibrarySnapshot({
+    required String sourceId,
+    required DateTime refreshedAt,
+    List<MediaCollection> collections = const <MediaCollection>[],
+    List<MediaItem> fallbackItems = const <MediaItem>[],
+    Map<String, List<MediaItem>> itemsBySection =
+        const <String, List<MediaItem>>{},
+  }) async {
+    final normalizedSourceId = sourceId.trim();
+    if (normalizedSourceId.isEmpty) {
+      return;
+    }
+
+    final payload = await _loadEmbyLibraryPayload();
+    final snapshot = CachedEmbyLibrarySnapshot(
+      refreshedAt: refreshedAt,
+      collections: List<MediaCollection>.unmodifiable(collections),
+      fallbackItems: List<MediaItem>.unmodifiable(fallbackItems),
+      itemsBySection: Map<String, List<MediaItem>>.unmodifiable(
+        itemsBySection.map(
+          (key, value) => MapEntry(
+            key.trim(),
+            List<MediaItem>.unmodifiable(value),
+          ),
+        )..removeWhere((key, _) => key.isEmpty),
+      ),
+    );
+    await _saveEmbyLibraryPayload(
+      _EmbyLibraryCachePayload(
+        sources: <String, CachedEmbyLibrarySnapshot>{
+          ...payload.sources,
+          normalizedSourceId: snapshot,
+        },
+      ),
+    );
+  }
+
+  Future<void> clearEmbyLibrarySnapshot(String sourceId) async {
+    final normalizedSourceId = sourceId.trim();
+    if (normalizedSourceId.isEmpty) {
+      return;
+    }
+
+    final payload = await _loadEmbyLibraryPayload();
+    if (!payload.sources.containsKey(normalizedSourceId)) {
+      return;
+    }
+
+    final nextSources =
+        Map<String, CachedEmbyLibrarySnapshot>.from(payload.sources)
+          ..remove(normalizedSourceId);
+    await _saveEmbyLibraryPayload(
+      _EmbyLibraryCachePayload(sources: nextSources),
+    );
+  }
+
+  Future<LocalStorageCacheSummary> inspectEmbyLibraryCache() async {
+    final raw = await _preferences.getString(_embyLibraryCacheKey) ?? '';
+    final payload = await _loadEmbyLibraryPayload();
+    final entryCount = payload.sources.values.fold<int>(
+      0,
+      (sum, snapshot) => sum + _countEmbySnapshotEntries(snapshot),
+    );
+    return LocalStorageCacheSummary(
+      type: LocalStorageCacheType.embyLibraryCache,
+      entryCount: entryCount,
+      totalBytes: utf8.encode(raw).length,
+    );
+  }
+
+  Future<void> clearAllEmbyLibrarySnapshots() async {
+    await _preferences.remove(_embyLibraryCacheKey);
+    _embyLibraryPayloadCache = const _EmbyLibraryCachePayload();
+    _embyLibraryPayloadLoadFuture = null;
   }
 
   CachedDetailState? peekDetailState(
@@ -496,12 +592,65 @@ class LocalStorageCacheRepository {
       case LocalStorageCacheType.playbackMemory:
       case LocalStorageCacheType.televisionSearchPreferences:
         return;
+      case LocalStorageCacheType.embyLibraryCache:
+        await clearAllEmbyLibrarySnapshots();
+        return;
       case LocalStorageCacheType.detailData:
         await clearDetailCache();
         return;
       case LocalStorageCacheType.images:
         return;
     }
+  }
+
+  Future<_EmbyLibraryCachePayload> _loadEmbyLibraryPayload() async {
+    final cached = _embyLibraryPayloadCache;
+    if (cached != null) {
+      return cached;
+    }
+    final existingLoad = _embyLibraryPayloadLoadFuture;
+    if (existingLoad != null) {
+      return existingLoad;
+    }
+    final loadFuture = _loadEmbyLibraryPayloadFromStorage();
+    _embyLibraryPayloadLoadFuture = loadFuture;
+    try {
+      final payload = await loadFuture;
+      _embyLibraryPayloadCache = payload;
+      return payload;
+    } finally {
+      _embyLibraryPayloadLoadFuture = null;
+    }
+  }
+
+  Future<_EmbyLibraryCachePayload> _loadEmbyLibraryPayloadFromStorage() async {
+    final raw = await _preferences.getString(_embyLibraryCacheKey);
+    if (raw == null || raw.isEmpty) {
+      return const _EmbyLibraryCachePayload();
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        return _EmbyLibraryCachePayload.fromJson(decoded);
+      }
+      if (decoded is Map) {
+        return _EmbyLibraryCachePayload.fromJson(
+          Map<String, dynamic>.from(decoded),
+        );
+      }
+    } catch (_) {
+      return const _EmbyLibraryCachePayload();
+    }
+    return const _EmbyLibraryCachePayload();
+  }
+
+  Future<void> _saveEmbyLibraryPayload(_EmbyLibraryCachePayload payload) async {
+    _embyLibraryPayloadCache = payload;
+    _embyLibraryPayloadLoadFuture = null;
+    await _preferences.setString(
+      _embyLibraryCacheKey,
+      jsonEncode(payload.toJson()),
+    );
   }
 
   static List<String> buildLookupKeys(MediaDetailTarget target) {
@@ -702,8 +851,7 @@ class LocalStorageCacheRepository {
               recordIds: Set<String>.from(_pendingDetailCacheChangedRecordIds),
             ),
             invalidateAll: _pendingDetailCacheInvalidateAll,
-            changedFields:
-                Set<LocalStorageDetailCacheChangedField>.from(
+            changedFields: Set<LocalStorageDetailCacheChangedField>.from(
               _pendingDetailCacheChangedFields,
             ),
           )
@@ -850,7 +998,8 @@ Set<LocalStorageDetailCacheChangedField> _resolveRecordChangedFields({
     changedFields.add(LocalStorageDetailCacheChangedField.summary);
   }
   if (previous.target.posterUrl != next.target.posterUrl ||
-      !_sameStringMap(previous.target.posterHeaders, next.target.posterHeaders) ||
+      !_sameStringMap(
+          previous.target.posterHeaders, next.target.posterHeaders) ||
       previous.target.backdropUrl != next.target.backdropUrl ||
       !_sameStringMap(
         previous.target.backdropHeaders,
@@ -910,7 +1059,8 @@ Set<LocalStorageDetailCacheChangedField> _resolveRecordChangedFields({
 
 bool _sameStringList(Iterable<String> left, Iterable<String> right) {
   final leftList = left is List<String> ? left : left.toList(growable: false);
-  final rightList = right is List<String> ? right : right.toList(growable: false);
+  final rightList =
+      right is List<String> ? right : right.toList(growable: false);
   return listEquals(leftList, rightList);
 }
 
@@ -1079,6 +1229,77 @@ class CachedDetailState {
   final DetailMetadataRefreshStatus metadataRefreshStatus;
 }
 
+class CachedEmbyLibrarySnapshot {
+  const CachedEmbyLibrarySnapshot({
+    this.refreshedAt,
+    this.collections = const <MediaCollection>[],
+    this.fallbackItems = const <MediaItem>[],
+    this.itemsBySection = const <String, List<MediaItem>>{},
+  });
+
+  final DateTime? refreshedAt;
+  final List<MediaCollection> collections;
+  final List<MediaItem> fallbackItems;
+  final Map<String, List<MediaItem>> itemsBySection;
+
+  bool get hasData {
+    if (fallbackItems.isNotEmpty) {
+      return true;
+    }
+    return itemsBySection.values.any((items) => items.isNotEmpty);
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'refreshedAt': refreshedAt?.toIso8601String(),
+      'collections': collections.map((item) => item.toJson()).toList(),
+      'fallbackItems': fallbackItems.map((item) => item.toJson()).toList(),
+      'itemsBySection': itemsBySection.map(
+        (key, value) => MapEntry(
+          key,
+          value.map((item) => item.toJson()).toList(),
+        ),
+      ),
+    };
+  }
+
+  factory CachedEmbyLibrarySnapshot.fromJson(Map<String, dynamic> json) {
+    return CachedEmbyLibrarySnapshot(
+      refreshedAt: DateTime.tryParse(json['refreshedAt'] as String? ?? ''),
+      collections: (json['collections'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) => MediaCollection.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .toList(growable: false),
+      fallbackItems: (json['fallbackItems'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) => MediaItem.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .toList(growable: false),
+      itemsBySection:
+          (json['itemsBySection'] as Map<dynamic, dynamic>? ?? const {}).map(
+        (key, value) => MapEntry(
+          '$key',
+          (value as List<dynamic>? ?? const [])
+              .whereType<Map>()
+              .map(
+                (item) => MediaItem.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .toList(growable: false),
+        ),
+      ),
+    );
+  }
+}
+
 String _normalizeLookupText(String value) {
   final lower = value.trim().toLowerCase();
   if (lower.isEmpty) {
@@ -1241,6 +1462,15 @@ MediaDetailTarget _stripResolvedLibraryResource(MediaDetailTarget target) {
   );
 }
 
+int _countEmbySnapshotEntries(CachedEmbyLibrarySnapshot snapshot) {
+  return snapshot.collections.length +
+      snapshot.fallbackItems.length +
+      snapshot.itemsBySection.values.fold<int>(
+        0,
+        (sum, items) => sum + items.length,
+      );
+}
+
 class _DetailCachePayload {
   const _DetailCachePayload({
     this.records = const {},
@@ -1271,6 +1501,35 @@ class _DetailCachePayload {
       ),
       lookupKeys: (json['lookupKeys'] as Map<dynamic, dynamic>? ?? const {})
           .map((key, value) => MapEntry('$key', '$value')),
+    );
+  }
+}
+
+class _EmbyLibraryCachePayload {
+  const _EmbyLibraryCachePayload({
+    this.sources = const <String, CachedEmbyLibrarySnapshot>{},
+  });
+
+  final Map<String, CachedEmbyLibrarySnapshot> sources;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'sources': sources.map(
+        (key, value) => MapEntry(key, value.toJson()),
+      ),
+    };
+  }
+
+  factory _EmbyLibraryCachePayload.fromJson(Map<String, dynamic> json) {
+    return _EmbyLibraryCachePayload(
+      sources: (json['sources'] as Map<dynamic, dynamic>? ?? const {}).map(
+        (key, value) => MapEntry(
+          '$key',
+          CachedEmbyLibrarySnapshot.fromJson(
+            Map<String, dynamic>.from(value as Map),
+          ),
+        ),
+      ),
     );
   }
 }

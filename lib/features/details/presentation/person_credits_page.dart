@@ -13,6 +13,7 @@ import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
@@ -749,6 +750,10 @@ class _PersonCreditsGrid extends StatelessWidget {
               imageBadgeText: item.ratingLabel,
               imageTopRightBadgeText: item.typeLabel,
               posterUrl: item.detailTarget.posterUrl,
+              posterCachePolicy:
+                  item.detailTarget.sourceKind == MediaSourceKind.emby
+                      ? AppNetworkImageCachePolicy.networkOnly
+                      : AppNetworkImageCachePolicy.persistent,
               posterHeaders: item.detailTarget.posterHeaders,
               posterFallbackSources: _buildPosterFallbackSources(
                 item.detailTarget,

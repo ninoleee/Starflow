@@ -21,6 +21,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/home/application/home_hero_prefetch_coordinator.dart';
 import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 

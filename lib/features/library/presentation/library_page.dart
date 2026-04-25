@@ -60,6 +60,7 @@ extension LibraryFilterX on LibraryFilter {
 }
 
 enum _LibraryRefreshSourceKind {
+  emby,
   indexed,
   webDav,
   quark,
@@ -68,6 +69,8 @@ enum _LibraryRefreshSourceKind {
 extension _LibraryRefreshSourceKindX on _LibraryRefreshSourceKind {
   String get label {
     switch (this) {
+      case _LibraryRefreshSourceKind.emby:
+        return 'Emby';
       case _LibraryRefreshSourceKind.indexed:
         return '非 Emby';
       case _LibraryRefreshSourceKind.webDav:
@@ -79,6 +82,7 @@ extension _LibraryRefreshSourceKindX on _LibraryRefreshSourceKind {
 
   String get rebuildTitle {
     switch (this) {
+      case _LibraryRefreshSourceKind.emby:
       case _LibraryRefreshSourceKind.indexed:
         return '重建索引';
       case _LibraryRefreshSourceKind.webDav:
@@ -90,6 +94,9 @@ extension _LibraryRefreshSourceKindX on _LibraryRefreshSourceKind {
   String rebuildDescription({
     required bool interruptIncrementalRefresh,
   }) {
+    if (this == _LibraryRefreshSourceKind.emby) {
+      return '';
+    }
     if (interruptIncrementalRefresh) {
       if (this == _LibraryRefreshSourceKind.indexed) {
         return '当前正在执行增量更新。继续后会先停止这次增量，再对当前启用的 WebDAV 和 Quark 媒体源执行全量重扫。';
@@ -97,6 +104,8 @@ extension _LibraryRefreshSourceKindX on _LibraryRefreshSourceKind {
       return '当前正在执行增量更新。继续后会先停止这次增量，再对当前启用的 $label 媒体源执行全量重扫。';
     }
     switch (this) {
+      case _LibraryRefreshSourceKind.emby:
+        return '';
       case _LibraryRefreshSourceKind.indexed:
         return '这会同时对当前启用的 WebDAV 和 Quark 媒体源执行全量重扫，忽略已有指纹并重新建立本地索引。';
       case _LibraryRefreshSourceKind.webDav:
@@ -107,6 +116,9 @@ extension _LibraryRefreshSourceKindX on _LibraryRefreshSourceKind {
   }
 
   String incrementalCompletedMessage(int sourceCount) {
+    if (this == _LibraryRefreshSourceKind.emby) {
+      return sourceCount == 1 ? '已完成 Emby 更新' : '已完成 $sourceCount 个 Emby 媒体源更新';
+    }
     if (this == _LibraryRefreshSourceKind.indexed) {
       if (sourceCount == 1) {
         return '已完成非 Emby 媒体源增量更新';
@@ -137,13 +149,24 @@ class _LibraryRefreshScope {
   const _LibraryRefreshScope({
     required this.kind,
     required this.sourceIds,
+    this.supportsRebuild = true,
   });
 
   final _LibraryRefreshSourceKind kind;
   final List<String> sourceIds;
+  final bool supportsRebuild;
 
-  String get incrementalButtonLabel =>
-      kind == _LibraryRefreshSourceKind.indexed ? '增量更新' : '增量更新 ${kind.label}';
+  String get incrementalButtonLabel {
+    switch (kind) {
+      case _LibraryRefreshSourceKind.emby:
+        return '更新';
+      case _LibraryRefreshSourceKind.indexed:
+        return '增量更新';
+      case _LibraryRefreshSourceKind.webDav:
+      case _LibraryRefreshSourceKind.quark:
+        return '增量更新 ${kind.label}';
+    }
+  }
 
   String get rebuildButtonLabel => kind == _LibraryRefreshSourceKind.indexed
       ? '重建索引'
@@ -414,7 +437,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
                                     : refreshScope.incrementalButtonLabel,
                               ),
                             ),
-                          if (isTelevision)
+                          if (refreshScope.supportsRebuild && isTelevision)
                             TvAdaptiveButton(
                               label: _isForceRescanning
                                   ? '重建中...'
@@ -428,7 +451,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
                               variant: TvButtonVariant.outlined,
                               focusId: 'library:refresh:rescan',
                             )
-                          else
+                          else if (refreshScope.supportsRebuild)
                             OutlinedButton.icon(
                               onPressed: _isForceRescanning
                                   ? null
@@ -610,7 +633,18 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
           sourceIds: sourceIds,
         );
       case LibraryFilter.emby:
-        return null;
+        final sourceIds = _refreshableSourceIds(
+          mediaSources,
+          kind: MediaSourceKind.emby,
+        );
+        if (sourceIds.isEmpty) {
+          return null;
+        }
+        return _LibraryRefreshScope(
+          kind: _LibraryRefreshSourceKind.emby,
+          sourceIds: sourceIds,
+          supportsRebuild: false,
+        );
     }
   }
 
@@ -638,6 +672,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
           (source) =>
               source.enabled &&
               source.kind == kind &&
+              (kind != MediaSourceKind.emby || source.hasActiveSession) &&
               (kind != MediaSourceKind.quark ||
                   source.hasConfiguredQuarkFolder),
         )

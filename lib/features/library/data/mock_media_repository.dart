@@ -39,6 +39,18 @@ abstract class MediaRepository {
     int limit = 10,
   });
 
+  Future<List<MediaItem>> loadLibraryMatchItems({
+    required MediaSourceConfig source,
+    String doubanId = '',
+    String imdbId = '',
+    String tmdbId = '',
+    String tvdbId = '',
+    String wikidataId = '',
+    Iterable<String> titles = const <String>[],
+    int year = 0,
+    int limit = 2000,
+  });
+
   Future<void> refreshSource({
     required String sourceId,
     bool forceFullRescan = false,
@@ -159,6 +171,49 @@ class AppMediaRepository implements MediaRepository {
   }
 
   @override
+  Future<List<MediaItem>> loadLibraryMatchItems({
+    required MediaSourceConfig source,
+    String doubanId = '',
+    String imdbId = '',
+    String tmdbId = '',
+    String tvdbId = '',
+    String wikidataId = '',
+    Iterable<String> titles = const <String>[],
+    int year = 0,
+    int limit = 2000,
+  }) async {
+    switch (source.kind) {
+      case MediaSourceKind.emby:
+        return _queryService.loadCachedEmbyLibraryMatchItems(
+          source,
+          titles: titles,
+          year: year,
+          doubanId: doubanId,
+          imdbId: imdbId,
+          tmdbId: tmdbId,
+          tvdbId: tvdbId,
+          wikidataId: wikidataId,
+          limit: limit,
+        );
+      case MediaSourceKind.nas:
+        return _nasMediaIndexer.loadCachedLibraryMatchItems(
+          source,
+          doubanId: doubanId,
+          imdbId: imdbId,
+          tmdbId: tmdbId,
+          tvdbId: tvdbId,
+          wikidataId: wikidataId,
+        );
+      case MediaSourceKind.quark:
+        return fetchLibrary(
+          kind: MediaSourceKind.quark,
+          sourceId: source.id,
+          limit: limit,
+        );
+    }
+  }
+
+  @override
   Future<void> refreshSource({
     required String sourceId,
     bool forceFullRescan = false,
@@ -182,20 +237,7 @@ class AppMediaRepository implements MediaRepository {
       if (!source.hasActiveSession) {
         return;
       }
-      final selectedCollections = await _selectedCollectionsForSource(source);
-      if (_hasScopedSections(source) && selectedCollections.isEmpty) {
-        return;
-      }
-      if (_hasScopedSections(source)) {
-        await _fetchLibraryFromCollections(
-          source,
-          selectedCollections,
-          limit: 200,
-        );
-        return;
-      }
-      await _embyApiClient.fetchCollections(source);
-      await _embyApiClient.fetchLibrary(source, limit: 200);
+      await _queryService.refreshEmbySourceCache(source);
       return;
     }
 

@@ -591,6 +591,25 @@ class _FakeMediaRepository implements MediaRepository {
   final List<MediaItem> items;
 
   @override
+  Future<List<MediaItem>> loadLibraryMatchItems({
+    required MediaSourceConfig source,
+    String doubanId = '',
+    String imdbId = '',
+    String tmdbId = '',
+    String tvdbId = '',
+    String wikidataId = '',
+    Iterable<String> titles = const <String>[],
+    int year = 0,
+    int limit = 2000,
+  }) async {
+    return items
+        .where((item) => item.sourceKind == source.kind)
+        .where((item) => item.sourceId == source.id)
+        .take(limit)
+        .toList(growable: false);
+  }
+
+  @override
   Future<List<MediaCollection>> fetchCollections({
     MediaSourceKind? kind,
     String? sourceId,

@@ -88,7 +88,7 @@ class PersonRail extends StatelessWidget {
           return TvFocusableAction(
             onPressed: () => onPersonTap(person),
             focusId: '$focusScopePrefix:${person.name}',
-            autofocus: index == 0,
+            autofocus: false,
             borderRadius: BorderRadius.circular(18),
             child: SizedBox(
               width: 86,
@@ -123,6 +123,7 @@ class _PersonAvatar extends StatelessWidget {
   const _PersonAvatar({required this.person});
 
   final MediaPersonProfile person;
+  static const int _avatarDecodeSize = 148;
 
   @override
   Widget build(BuildContext context) {
@@ -151,6 +152,8 @@ class _PersonAvatar extends StatelessWidget {
             )
           : AppNetworkImage(
               avatarUrl,
+              cacheWidth: _avatarDecodeSize,
+              cacheHeight: _avatarDecodeSize,
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) {
                 return Center(
@@ -202,6 +205,8 @@ class _PlatformLogo extends StatelessWidget {
   final MediaPersonProfile platform;
   static const double _logoDisplayWidth = 200;
   static const double _logoDisplayHeight = 100;
+  static const int _logoDecodeWidth = 400;
+  static const int _logoDecodeHeight = 200;
 
   @override
   Widget build(BuildContext context) {
@@ -217,6 +222,8 @@ class _PlatformLogo extends StatelessWidget {
           logoUrl,
           width: _logoDisplayWidth,
           height: _logoDisplayHeight,
+          cacheWidth: _logoDecodeWidth,
+          cacheHeight: _logoDecodeHeight,
           fit: BoxFit.contain,
           alignment: Alignment.center,
           errorBuilder: (context, error, stackTrace) {
@@ -642,6 +649,8 @@ class DetailImageGallery extends StatelessWidget {
                       image.url,
                       headers: image.headers,
                       cachePolicy: image.cachePolicy,
+                      cacheWidth: 804,
+                      cacheHeight: 452,
                       fit: BoxFit.cover,
                       errorBuilder: (context, error, stackTrace) {
                         return const ColoredBox(color: Color(0xFF0D192A));

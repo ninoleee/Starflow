@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
@@ -22,12 +23,16 @@ class _IoPersistentImageCache implements PersistentImageCache {
   final LinkedHashMap<String, _MemoryImageEntry> _memoryCache = LinkedHashMap();
   final Map<String, Future<Uint8List>> _inflight =
       <String, Future<Uint8List>>{};
+  final Map<String, Future<ImageProvider<Object>>> _rasterProviderInflight =
+      <String, Future<ImageProvider<Object>>>{};
   Future<Directory>? _directoryFuture;
   int _memoryBytes = 0;
 
   @override
   Future<void> clear() async {
     _memoryCache.clear();
+    _inflight.clear();
+    _rasterProviderInflight.clear();
     _memoryBytes = 0;
     final directory = await _cacheDirectory();
     if (await directory.exists()) {
@@ -107,6 +112,42 @@ class _IoPersistentImageCache implements PersistentImageCache {
     return future;
   }
 
+  @override
+  Future<ImageProvider<Object>> resolveRasterProvider(
+    String url, {
+    Map<String, String>? headers,
+    bool persist = true,
+  }) async {
+    final trimmedUrl = url.trim();
+    if (trimmedUrl.isEmpty) {
+      throw StateError('Image URL is empty.');
+    }
+    final normalizedHeaders = _normalizeHeaders(headers);
+    if (!persist) {
+      return NetworkImage(
+        trimmedUrl,
+        headers: normalizedHeaders.isEmpty ? null : normalizedHeaders,
+      );
+    }
+
+    final cacheKey = _cacheIdentity(trimmedUrl, normalizedHeaders);
+    final inflight = _rasterProviderInflight[cacheKey];
+    if (inflight != null) {
+      return inflight;
+    }
+
+    final future = _resolvePersistentRasterProvider(
+      cacheKey: cacheKey,
+      url: trimmedUrl,
+      headers: normalizedHeaders,
+    );
+    _rasterProviderInflight[cacheKey] = future;
+    future.whenComplete(() {
+      _rasterProviderInflight.remove(cacheKey);
+    });
+    return future;
+  }
+
   Future<Uint8List> _loadOrFetch({
     required String cacheKey,
     required String url,
@@ -142,6 +183,56 @@ class _IoPersistentImageCache implements PersistentImageCache {
       if (staleBytes != null && staleBytes.isNotEmpty) {
         _remember(cacheKey, staleBytes);
         return staleBytes;
+      }
+      rethrow;
+    }
+  }
+
+  Future<ImageProvider<Object>> _resolvePersistentRasterProvider({
+    required String cacheKey,
+    required String url,
+    required Map<String, String> headers,
+  }) async {
+    final file = await _ensurePersistentFile(
+      cacheKey: cacheKey,
+      url: url,
+      headers: headers,
+    );
+    return FileImage(file);
+  }
+
+  Future<File> _ensurePersistentFile({
+    required String cacheKey,
+    required String url,
+    required Map<String, String> headers,
+  }) async {
+    final file = await _cacheFile(cacheKey);
+    final metadataFile = await _cacheMetadataFile(cacheKey);
+    final metadata = await _loadMetadata(metadataFile);
+    final hasDiskEntry = await file.exists();
+    final isFresh = hasDiskEntry && _isDiskEntryFresh(metadata, file);
+
+    if (isFresh) {
+      return file;
+    }
+
+    final staleFile = hasDiskEntry ? file : null;
+    if (hasDiskEntry) {
+      await _deleteIfExists(file);
+      await _deleteIfExists(metadataFile);
+    }
+
+    try {
+      final bytes = await _fetchNetworkBytes(
+        url: url,
+        headers: headers,
+      );
+      await file.writeAsBytes(bytes, flush: false);
+      await _saveMetadata(metadataFile, _buildMetadata());
+      return file;
+    } catch (_) {
+      if (staleFile != null && await staleFile.exists()) {
+        return staleFile;
       }
       rethrow;
     }

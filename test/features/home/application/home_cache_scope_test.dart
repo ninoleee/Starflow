@@ -152,6 +152,21 @@ class _CountingDiscoveryRepository implements DiscoveryRepository {
 
 class _NoopMediaRepository implements MediaRepository {
   @override
+  Future<List<MediaItem>> loadLibraryMatchItems({
+    required MediaSourceConfig source,
+    String doubanId = '',
+    String imdbId = '',
+    String tmdbId = '',
+    String tvdbId = '',
+    String wikidataId = '',
+    Iterable<String> titles = const <String>[],
+    int year = 0,
+    int limit = 2000,
+  }) async {
+    return const [];
+  }
+
+  @override
   Future<void> cancelActiveWebDavRefreshes({
     bool includeForceFull = false,
   }) async {}

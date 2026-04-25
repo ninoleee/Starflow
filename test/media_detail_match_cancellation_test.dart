@@ -111,6 +111,29 @@ class _BlockingDetailMatchRepository implements MediaRepository {
   final Map<String, Completer<List<MediaItem>>> _completers;
   final List<String> startedSectionIds = [];
 
+  @override
+  Future<List<MediaItem>> loadLibraryMatchItems({
+    required MediaSourceConfig source,
+    String doubanId = '',
+    String imdbId = '',
+    String tmdbId = '',
+    String tvdbId = '',
+    String wikidataId = '',
+    Iterable<String> titles = const <String>[],
+    int year = 0,
+    int limit = 2000,
+  }) async {
+    if (source.kind != MediaSourceKind.emby || source.id != 'emby-main') {
+      return const <MediaItem>[];
+    }
+    final pendingSectionIds = sectionIds.take(4).toList(growable: false);
+    startedSectionIds.addAll(pendingSectionIds);
+    await Future.wait(
+      pendingSectionIds.map((sectionId) => _completers[sectionId]!.future),
+    );
+    return const <MediaItem>[];
+  }
+
   void completeStartedRequests() {
     for (final sectionId in startedSectionIds) {
       final completer = _completers[sectionId];

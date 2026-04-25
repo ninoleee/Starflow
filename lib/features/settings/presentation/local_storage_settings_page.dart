@@ -19,6 +19,7 @@ final localStorageSummariesProvider =
   final searchPreferencesRepository =
       ref.read(searchPreferencesRepositoryProvider);
   final indexSummary = await indexStore.inspectSummary();
+  final embyLibrarySummary = await repository.inspectEmbyLibraryCache();
   final detailSummary = await repository.inspectDetailCache();
   final playbackSummary = await playbackMemoryRepository.inspectSummary();
   final subtitleSummary =
@@ -28,6 +29,7 @@ final localStorageSummariesProvider =
   final imageSummary = await persistentImageCache.inspect();
   return [
     indexSummary,
+    embyLibrarySummary,
     detailSummary,
     subtitleSummary,
     playbackSummary,
@@ -49,9 +51,10 @@ class _LocalStorageSettingsPageState
   static const _groups = [
     _LocalStorageGroup(
       title: '媒体资料',
-      subtitle: '和媒体库、详情页相关的索引、匹配结果与图片缓存。',
+      subtitle: '和媒体库、Emby、详情页相关的索引、匹配结果与图片缓存。',
       types: [
         LocalStorageCacheType.nasMetadataIndex,
+        LocalStorageCacheType.embyLibraryCache,
         LocalStorageCacheType.detailData,
         LocalStorageCacheType.subtitleCache,
         LocalStorageCacheType.images,
@@ -206,6 +209,11 @@ class _LocalStorageSettingsPageState
     switch (type) {
       case LocalStorageCacheType.nasMetadataIndex:
         await ref.read(nasMediaIndexStoreProvider).clearAll();
+        break;
+      case LocalStorageCacheType.embyLibraryCache:
+        await ref
+            .read(localStorageCacheRepositoryProvider)
+            .clearAllEmbyLibrarySnapshots();
         break;
       case LocalStorageCacheType.detailData:
         await ref.read(localStorageCacheRepositoryProvider).clearDetailCache();

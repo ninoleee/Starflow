@@ -128,6 +128,9 @@ class LibraryPagedGrid extends ConsumerWidget {
                   title: item.title,
                   subtitle: item.year > 0 ? '${item.year}' : '',
                   posterUrl: posterAsset.url,
+                  posterCachePolicy: item.sourceKind == MediaSourceKind.emby
+                      ? AppNetworkImageCachePolicy.networkOnly
+                      : AppNetworkImageCachePolicy.persistent,
                   posterHeaders: posterAsset.headers,
                   imageBadgeText:
                       resolvePreferredPosterRatingLabel(item.ratingLabels),

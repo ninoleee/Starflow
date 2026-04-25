@@ -300,7 +300,7 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
                     label: group.label,
                     selected: selected,
                     focusId: 'detail:season:${group.id}',
-                    autofocus: index == 0,
+                    autofocus: false,
                     onTap: () {
                       if (widget.selectedGroupId != group.id) {
                         widget.onSeasonSelected(group.id);
@@ -348,7 +348,7 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
                         item: episode,
                         seriesTarget: widget.seriesTarget,
                         focusId: _episodeFocusId(episode, index),
-                        autofocus: index == 0,
+                        autofocus: false,
                       ),
                     );
                   },
