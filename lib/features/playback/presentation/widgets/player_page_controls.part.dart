@@ -346,53 +346,95 @@ extension _PlayerPageStateControls on _PlayerPageState {
                             child: embeddedVideo,
                           ),
                         ),
-                  if (!_isReady)
-                    Positioned.fill(
-                      child: isTelevision
-                          ? PlayerStartupOverlay(
-                              target: _resolvedTarget ?? widget.target,
-                              speedLabel: _startupProbe.speedLabel,
-                            )
-                          : Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                PlayerStartupOverlay(
-                                  target: _resolvedTarget ?? widget.target,
-                                  speedLabel: _startupProbe.speedLabel,
-                                ),
-                                _buildNonTvTransientTopChrome(
-                                  settings: settings,
-                                  showMoreButton: false,
-                                ),
-                              ],
-                            ),
-                    )
-                  else if (!_isLeanPlaybackMode)
-                    StreamBuilder<bool>(
-                      stream: player.stream.buffering,
-                      initialData: player.state.buffering,
-                      builder: (context, bufferingSnapshot) {
-                        final isBuffering = bufferingSnapshot.data ?? false;
-                        if (!isBuffering) {
-                          return const SizedBox.shrink();
-                        }
-                        return StreamBuilder<double>(
-                          stream: player.stream.bufferingPercentage,
-                          initialData: player.state.bufferingPercentage,
-                          builder: (context, progressSnapshot) {
-                            return IgnorePointer(
-                              child: PlayerStartupOverlay(
-                                target: _resolvedTarget ?? widget.target,
-                                speedLabel: _startupProbe.speedLabel,
-                                bufferingProgress: progressSnapshot.data,
-                              ),
-                            );
-                          },
-                        );
-                      },
-                    ),
+                  _buildEmbeddedMpvSurfaceOverlay(
+                    player,
+                    settings: settings,
+                    isTelevision: isTelevision,
+                    videoWidth: width,
+                    videoHeight: height,
+                  ),
                 ],
               ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildEmbeddedMpvSurfaceOverlay(
+    Player player, {
+    required AppSettings settings,
+    required bool isTelevision,
+    required int videoWidth,
+    required int videoHeight,
+  }) {
+    if (_isReady) {
+      if (_isLeanPlaybackMode) {
+        return const SizedBox.shrink();
+      }
+      return StreamBuilder<bool>(
+        stream: player.stream.buffering,
+        initialData: player.state.buffering,
+        builder: (context, bufferingSnapshot) {
+          final isBuffering = bufferingSnapshot.data ?? false;
+          if (!isBuffering) {
+            return const SizedBox.shrink();
+          }
+          return StreamBuilder<double>(
+            stream: player.stream.bufferingPercentage,
+            initialData: player.state.bufferingPercentage,
+            builder: (context, progressSnapshot) {
+              return IgnorePointer(
+                child: PlayerStartupOverlay(
+                  target: _resolvedTarget ?? widget.target,
+                  speedLabel: _startupProbe.speedLabel,
+                  bufferingProgress: progressSnapshot.data,
+                ),
+              );
+            },
+          );
+        },
+      );
+    }
+
+    return StreamBuilder<bool>(
+      stream: player.stream.playing,
+      initialData: player.state.playing,
+      builder: (context, playingSnapshot) {
+        return StreamBuilder<Duration>(
+          stream: player.stream.position,
+          initialData: player.state.position,
+          builder: (context, positionSnapshot) {
+            final hasVideoDimensions = videoWidth > 0 && videoHeight > 0;
+            final isPlaying = playingSnapshot.data ?? player.state.playing;
+            final position = positionSnapshot.data ?? player.state.position;
+            final hasPlaybackProgress =
+                position >= const Duration(milliseconds: 250);
+            final playbackIsVisible =
+                hasVideoDimensions && (isPlaying || hasPlaybackProgress);
+            if (playbackIsVisible) {
+              return const SizedBox.shrink();
+            }
+            return Positioned.fill(
+              child: isTelevision
+                  ? PlayerStartupOverlay(
+                      target: _resolvedTarget ?? widget.target,
+                      speedLabel: _startupProbe.speedLabel,
+                    )
+                  : Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        PlayerStartupOverlay(
+                          target: _resolvedTarget ?? widget.target,
+                          speedLabel: _startupProbe.speedLabel,
+                        ),
+                        _buildNonTvTransientTopChrome(
+                          settings: settings,
+                          showMoreButton: false,
+                        ),
+                      ],
+                    ),
             );
           },
         );
