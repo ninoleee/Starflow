@@ -138,11 +138,6 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
 
   @override
   Widget build(BuildContext context) {
-    final route = ModalRoute.of(context);
-    if (route != null && !route.isCurrent) {
-      _resetTvRasterLoadThrottle();
-      return _buildLoading(context);
-    }
     final throttleRasterLoads = widget.throttleOnTelevision &&
         _shouldThrottleTvRasterLoads(ref.watch(isTelevisionProvider));
     final candidates = _buildCandidateSources();

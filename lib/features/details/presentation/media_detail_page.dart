@@ -2646,9 +2646,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                 valueListenable: _pageController.manualOverrideTargetListenable,
                 builder: (context, manualOverrideTarget, _) {
                   final seedTarget = manualOverrideTarget ?? widget.target;
-                  final watchedTargetAsync = isPageVisible
-                      ? ref.watch(enrichedDetailTargetProvider(seedTarget))
-                      : null;
+                  final watchedTargetAsync =
+                      ref.watch(enrichedDetailTargetProvider(seedTarget));
                   final targetAsync = _retainedTargetAsync.resolve(
                     activeValue: watchedTargetAsync,
                     fallbackValue: AsyncValue.data(seedTarget),
