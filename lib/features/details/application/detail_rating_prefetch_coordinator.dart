@@ -7,7 +7,6 @@ import 'package:starflow/features/details/application/detail_target_resolver.dar
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 class DetailRatingPrefetchCoordinator {
@@ -58,8 +57,7 @@ class DetailRatingPrefetchCoordinator {
     required bool preferDoubanOnly,
     required bool persistToDisk,
   }) {
-    final backgroundSuspended = ref.read(backgroundEnrichmentSuspendedProvider);
-    if (!isPageActive() || backgroundSuspended) {
+    if (!isPageActive()) {
       return;
     }
 
@@ -100,6 +98,7 @@ class DetailRatingPrefetchCoordinator {
           sessionId: sessionId,
           isPageActive: isPageActive,
           persistToDisk: persistToDisk,
+          preferDoubanOnly: preferDoubanOnly,
         ),
       );
     });
@@ -110,9 +109,7 @@ class DetailRatingPrefetchCoordinator {
     required int sessionId,
     required bool Function() isPageActive,
   }) {
-    return isPageActive() &&
-        _refreshSessionId == sessionId &&
-        !ref.read(backgroundEnrichmentSuspendedProvider);
+    return isPageActive() && _refreshSessionId == sessionId;
   }
 
   Future<void> _prefetchRatingsInBackground({
@@ -121,6 +118,7 @@ class DetailRatingPrefetchCoordinator {
     required int sessionId,
     required bool Function() isPageActive,
     required bool persistToDisk,
+    required bool preferDoubanOnly,
   }) async {
     final cacheRepository = ref.read(localStorageCacheRepositoryProvider);
     try {
@@ -158,6 +156,7 @@ class DetailRatingPrefetchCoordinator {
             sessionId: sessionId,
             isPageActive: isPageActive,
             cacheRepository: cacheRepository,
+            preferDoubanOnly: preferDoubanOnly,
           );
           if (update != null) {
             updates.add(update);
@@ -201,6 +200,7 @@ class DetailRatingPrefetchCoordinator {
     required int sessionId,
     required bool Function() isPageActive,
     required LocalStorageCacheRepository cacheRepository,
+    required bool preferDoubanOnly,
   }) async {
     if (!_isRefreshSessionActive(
       ref: ref,
@@ -220,9 +220,17 @@ class DetailRatingPrefetchCoordinator {
       )) {
         return null;
       }
+      final prefetchNeedTarget = _mergePrefetchNeedTarget(
+        target,
+        cachedState?.target,
+      );
       if ((cachedState?.metadataRefreshStatus ??
-              DetailMetadataRefreshStatus.never) !=
-          DetailMetadataRefreshStatus.never) {
+                  DetailMetadataRefreshStatus.never) !=
+              DetailMetadataRefreshStatus.never &&
+          !_needsRatingPrefetch(
+            prefetchNeedTarget,
+            preferDoubanOnly: preferDoubanOnly,
+          )) {
         return null;
       }
 
@@ -268,6 +276,34 @@ class DetailRatingPrefetchCoordinator {
     }
   }
 
+  MediaDetailTarget _mergePrefetchNeedTarget(
+    MediaDetailTarget target,
+    MediaDetailTarget? cachedTarget,
+  ) {
+    if (cachedTarget == null) {
+      return target;
+    }
+    return target.copyWith(
+      posterUrl: target.posterUrl.trim().isNotEmpty
+          ? target.posterUrl
+          : cachedTarget.posterUrl,
+      searchQuery: target.searchQuery.trim().isNotEmpty
+          ? target.searchQuery
+          : cachedTarget.searchQuery,
+      ratingLabels: mergeDistinctRatingLabels(
+        cachedTarget.ratingLabels,
+        target.ratingLabels,
+      ),
+      doubanId: target.doubanId.trim().isNotEmpty
+          ? target.doubanId
+          : cachedTarget.doubanId,
+      imdbId:
+          target.imdbId.trim().isNotEmpty ? target.imdbId : cachedTarget.imdbId,
+      tmdbId:
+          target.tmdbId.trim().isNotEmpty ? target.tmdbId : cachedTarget.tmdbId,
+    );
+  }
+
   bool _needsRatingPrefetch(
     MediaDetailTarget target, {
     required bool preferDoubanOnly,
@@ -281,9 +317,10 @@ class DetailRatingPrefetchCoordinator {
       return false;
     }
     return resolvePreferredPosterRatingLabel(
-      target.ratingLabels,
-      preferDoubanOnly: preferDoubanOnly,
-    ).isEmpty;
+          target.ratingLabels,
+          preferDoubanOnly: preferDoubanOnly,
+        ).isEmpty ||
+        target.posterUrl.trim().isEmpty;
   }
 
   bool _ratingPrefetchProducedUpdate(

@@ -8,7 +8,6 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/storage/persistent_image_cache.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
-import 'package:starflow/features/playback/application/playback_session.dart';
 
 typedef AppNetworkImageErrorBuilder = Widget Function(
     BuildContext context, Object error, StackTrace? stackTrace);
@@ -79,6 +78,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   Future<ImageProvider<Object>>? _resolvedRasterProviderFuture;
   _TvRasterImageLoadRequest? _tvRasterLoadRequest;
   _TvRasterImageLoadPermit? _tvRasterLoadPermit;
+  Timer? _tvRasterLoadPermitTimeout;
   String? _tvRasterLoadIdentity;
   bool _tvRasterLoadSettled = false;
   int _activeCandidateIndex = 0;
@@ -136,8 +136,6 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
 
   @override
   Widget build(BuildContext context) {
-    final backgroundImageLoadingSuspended =
-        ref.watch(backgroundImageLoadingSuspendedProvider);
     final throttleRasterLoads =
         _shouldThrottleTvRasterLoads(ref.watch(isTelevisionProvider));
     final candidates = _buildCandidateSources();
@@ -146,11 +144,6 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
         context,
         StateError('Image URL is empty.'),
       );
-    }
-
-    if (backgroundImageLoadingSuspended) {
-      _resetTvRasterLoadThrottle();
-      return _buildLoading(context);
     }
 
     final candidateIndex =
@@ -302,7 +295,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
           return _buildLoading(context);
         }
 
-        _tvRasterLoadPermit = permit;
+        _trackTvRasterLoadPermit(permit);
         return _buildResolvedRasterCandidate(
           context,
           candidate: candidate,
@@ -408,6 +401,17 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     );
   }
 
+  void _trackTvRasterLoadPermit(_TvRasterImageLoadPermit permit) {
+    if (identical(_tvRasterLoadPermit, permit)) {
+      return;
+    }
+    _tvRasterLoadPermitTimeout?.cancel();
+    _tvRasterLoadPermit = permit;
+    _tvRasterLoadPermitTimeout = Timer(const Duration(seconds: 8), () {
+      _markTvRasterLoadSettled();
+    });
+  }
+
   ImageProvider<Object> _networkRasterProvider(
       AppNetworkImageSource candidate) {
     return NetworkImage(
@@ -429,6 +433,8 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
       return;
     }
     _tvRasterLoadSettled = true;
+    _tvRasterLoadPermitTimeout?.cancel();
+    _tvRasterLoadPermitTimeout = null;
     _tvRasterLoadPermit?.release();
     _tvRasterLoadPermit = null;
     _tvRasterLoadRequest = null;
@@ -437,6 +443,8 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   void _resetTvRasterLoadThrottle() {
     _tvRasterLoadRequest?.cancel();
     _tvRasterLoadRequest = null;
+    _tvRasterLoadPermitTimeout?.cancel();
+    _tvRasterLoadPermitTimeout = null;
     _tvRasterLoadPermit?.release();
     _tvRasterLoadPermit = null;
     _tvRasterLoadIdentity = null;

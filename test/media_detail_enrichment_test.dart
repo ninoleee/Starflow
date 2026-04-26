@@ -182,7 +182,77 @@ void main() {
       expect(resolved.ratingLabels, ['豆瓣 9.6', 'TMDB 8.3']);
     });
 
-    test('skips auto enrichment when cached metadata refresh already ran',
+    test('skips auto enrichment when cached metadata is already complete',
+        () async {
+      var wmdbRequestCount = 0;
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'wmdbMetadataMatchEnabled': true,
+              'tmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+            }),
+          ),
+          wmdbMetadataClientProvider.overrideWithValue(
+            WmdbMetadataClient(
+              MockClient((request) async {
+                wmdbRequestCount += 1;
+                return http.Response(
+                  jsonEncode({
+                    'data': [
+                      {
+                        'poster': 'https://img.wmdb.tv/poster.jpg',
+                        'name': '天书奇谭',
+                      },
+                    ],
+                    'doubanId': '1428581',
+                  }),
+                  200,
+                  headers: const {'content-type': 'application/json'},
+                );
+              }),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const target = MediaDetailTarget(
+        title: '天书奇谭',
+        posterUrl: 'https://cached.example.com/poster.jpg',
+        overview: '已有完整简介',
+        year: 1983,
+        ratingLabels: ['豆瓣 9.2', 'IMDb 8.0'],
+        availabilityLabel: '无',
+        searchQuery: '天书奇谭',
+        doubanId: '1428581',
+        imdbId: 'tt1234567',
+        sourceName: '豆瓣',
+      );
+
+      await container
+          .read(localStorageCacheRepositoryProvider)
+          .saveDetailTarget(
+            seedTarget: target,
+            resolvedTarget: target,
+            metadataRefreshStatus: DetailMetadataRefreshStatus.succeeded,
+          );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(target).future,
+      );
+
+      expect(wmdbRequestCount, 0);
+      expect(resolved.posterUrl, 'https://cached.example.com/poster.jpg');
+      expect(resolved.overview, '已有完整简介');
+    });
+
+    test('retries auto enrichment when cached refresh marker is incomplete',
         () async {
       var wmdbRequestCount = 0;
       final container = ProviderContainer(
@@ -245,9 +315,8 @@ void main() {
         enrichedDetailTargetProvider(target).future,
       );
 
-      expect(wmdbRequestCount, 0);
-      expect(resolved.posterUrl, isEmpty);
-      expect(resolved.overview, isEmpty);
+      expect(wmdbRequestCount, 1);
+      expect(resolved.posterUrl, 'https://img.wmdb.tv/poster.jpg');
     });
 
     test('resolves Emby playback details for existing matched target',

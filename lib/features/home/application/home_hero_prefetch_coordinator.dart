@@ -8,7 +8,6 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
@@ -32,7 +31,7 @@ class HomeHeroPrefetchCoordinator {
     required bool Function() isPageActive,
     bool forceMetadataRefresh = false,
   }) {
-    if (!isPageActive() || ref.read(backgroundEnrichmentSuspendedProvider)) {
+    if (!isPageActive()) {
       return;
     }
     final sessionId = _refreshSessionId;
@@ -76,9 +75,7 @@ class HomeHeroPrefetchCoordinator {
     required int sessionId,
     required bool Function() isPageActive,
   }) {
-    return isPageActive() &&
-        _refreshSessionId == sessionId &&
-        !ref.read(backgroundEnrichmentSuspendedProvider);
+    return isPageActive() && _refreshSessionId == sessionId;
   }
 
   Future<void> _refreshMetadataInBackground({
@@ -187,7 +184,8 @@ class HomeHeroPrefetchCoordinator {
         )) {
           return;
         }
-        if (refreshStatus != DetailMetadataRefreshStatus.never) {
+        if (refreshStatus != DetailMetadataRefreshStatus.never &&
+            !_needsHeroMetadataRefresh(workingTarget)) {
           return;
         }
       }
@@ -196,9 +194,7 @@ class HomeHeroPrefetchCoordinator {
         final updatedTarget = forceMetadataRefresh
             ? await ref.read(detailTargetResolverProvider).resolveMetadataOnly(
                   target: workingTarget,
-                  backgroundWorkSuspended: ref.read(
-                    backgroundEnrichmentSuspendedProvider,
-                  ),
+                  backgroundWorkSuspended: false,
                   forceMetadataRefresh: true,
                 )
             : await ref

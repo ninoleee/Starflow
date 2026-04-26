@@ -281,9 +281,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       ActivePlaybackCleanupCoordinator.unregister(activePlaybackCleanupToken);
       _activePlaybackCleanupToken = null;
     }
-    Future<void>(() {
-      _playbackPerformanceModeController.state = false;
-    });
+    _playbackPerformanceModeController.state = false;
     final player = _detachActivePlayerState();
     unawaited(
       _shutdownDetachedPlayer(

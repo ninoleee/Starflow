@@ -10,7 +10,6 @@ import 'package:starflow/features/library/application/nas_media_index_revision.d
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
@@ -91,9 +90,6 @@ class HomePageController {
   void primeModulesWithReader(
     T Function<T>(ProviderListenable<T> provider) read,
   ) {
-    if (read(playbackPerformanceModeProvider)) {
-      return;
-    }
     final modules = read(homeEnabledModulesProvider);
     read(homeRecentItemsProvider.future);
     read(homeRecentPlaybackEntriesProvider.future);
@@ -104,9 +100,6 @@ class HomePageController {
   }
 
   Future<void> refreshModules(WidgetRef ref) async {
-    if (ref.read(playbackPerformanceModeProvider)) {
-      return;
-    }
     ref.invalidate(homeRecentItemsProvider);
     ref.invalidate(homeRecentPlaybackEntriesProvider);
     ref.invalidate(homeCarouselItemsProvider);

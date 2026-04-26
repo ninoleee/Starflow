@@ -159,8 +159,11 @@ class DetailTargetResolver {
       target: nextTarget,
       settings: _settings,
     );
-    if (!forceMetadataRefresh &&
-        refreshStatus != DetailMetadataRefreshStatus.never) {
+    if (_shouldSkipAutomaticMetadataRefresh(
+      forceMetadataRefresh: forceMetadataRefresh,
+      refreshStatus: refreshStatus,
+      metadataNeeds: metadataNeeds,
+    )) {
       DebugTraceOnce.logMetadata(
         traceKey,
         'auto-enrich',
@@ -320,6 +323,18 @@ class DetailTargetResolver {
         target.needsResolution;
     return needsEmby || needsQuark || needsNas;
   }
+}
+
+bool _shouldSkipAutomaticMetadataRefresh({
+  required bool forceMetadataRefresh,
+  required DetailMetadataRefreshStatus refreshStatus,
+  required _DetailAutomaticMetadataNeeds metadataNeeds,
+}) {
+  if (forceMetadataRefresh ||
+      refreshStatus == DetailMetadataRefreshStatus.never) {
+    return false;
+  }
+  return !metadataNeeds.shouldEnrich;
 }
 
 String _detailMetadataQuery(MediaDetailTarget target) {

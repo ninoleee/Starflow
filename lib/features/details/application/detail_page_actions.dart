@@ -492,7 +492,7 @@ DetailStartupPlan buildDetailStartupPlan({
   required bool detailAutoLibraryMatchEnabled,
 }) {
   final effectiveTarget = manualOverrideTarget ?? pageSeedTarget;
-  final canStart = isPageVisible && !backgroundWorkSuspended;
+  final canStart = isPageVisible;
 
   return DetailStartupPlan(
     shouldStart: canStart,
@@ -500,7 +500,8 @@ DetailStartupPlan buildDetailStartupPlan({
     shouldRestoreIndexedEpisodeVariants: canStart,
     shouldWarmEnrichedTarget: canStart,
     shouldWarmSeriesBrowser: canStart && effectiveTarget.isSeries,
-    shouldAttemptAutoLibraryMatch: canStart && detailAutoLibraryMatchEnabled,
+    shouldAttemptAutoLibraryMatch:
+        canStart && !backgroundWorkSuspended && detailAutoLibraryMatchEnabled,
     effectiveTarget: effectiveTarget,
     resolveTargetForAutoMatch: pageSeedTarget,
   );
