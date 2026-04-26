@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -11,6 +12,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -435,6 +437,29 @@ class _DetailEpisodeCard extends ConsumerWidget {
       );
     }
 
+    Future<void> openPlaybackTarget() async {
+      final playbackTarget = itemToEpisodePlaybackTarget(
+        item,
+        seriesTarget: seriesTarget,
+      );
+      if (!playbackTarget.canPlay) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(content: Text('当前分集没有可直接播放的资源')),
+        );
+        return;
+      }
+      await ActivePlaybackCleanupCoordinator.cleanupAll(
+        reason: 'open-new-playback',
+      );
+      if (!context.mounted) {
+        return;
+      }
+      context.pushNamed(
+        'player',
+        extra: playbackTarget,
+      );
+    }
+
     final effectiveFocusId = focusId?.trim() ?? '';
     final borderRadius = BorderRadius.circular(24);
     final titleStyle = TextStyle(
@@ -574,13 +599,26 @@ class _DetailEpisodeCard extends ConsumerWidget {
         ],
       ),
     );
+    final actionChild = RepaintBoundary(
+      child: isTelevision
+          ? GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => unawaited(openPlaybackTarget()),
+              onLongPress: onOpenDetail,
+              onSecondaryTap: onOpenDetail,
+              child: cardChild,
+            )
+          : cardChild,
+    );
     return TvFocusableAction(
-      onPressed: onOpenDetail,
+      onPressed: () => unawaited(openPlaybackTarget()),
+      onContextAction: onOpenDetail,
       focusId: effectiveFocusId.isEmpty ? null : effectiveFocusId,
       autofocus: autofocus,
       borderRadius: borderRadius,
-      visualStyle: TvFocusVisualStyle.none,
-      child: RepaintBoundary(child: cardChild),
+      visualStyle: TvFocusVisualStyle.subtle,
+      focusScale: isTelevision ? 1.035 : 1.0,
+      child: actionChild,
     );
   }
 
