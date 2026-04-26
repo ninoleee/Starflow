@@ -681,6 +681,7 @@ class _PersonAvatar extends StatelessWidget {
           : AppNetworkImage(
               avatarUrl,
               fit: BoxFit.cover,
+              throttleOnTelevision: false,
               errorBuilder: (context, error, stackTrace) {
                 return Center(
                   child: Text(

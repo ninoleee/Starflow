@@ -215,7 +215,7 @@ class NativePlaybackActivity : Activity() {
             playerView.requestFocus()
         }
         if (!subtitleSearchActive && resumePlaybackAfterSubtitleSearch) {
-            player?.playWhenReady = true
+            setPlayWhenReady(true)
             resumePlaybackAfterSubtitleSearch = false
         }
     }
@@ -335,13 +335,13 @@ class NativePlaybackActivity : Activity() {
             }
 
             KeyEvent.KEYCODE_DPAD_LEFT -> {
-                if (handleTvHiddenSeek(event, direction = -1)) {
+                if (handleTvDirectionalSeek(event, direction = -1)) {
                     return true
                 }
             }
 
             KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                if (handleTvHiddenSeek(event, direction = 1)) {
+                if (handleTvDirectionalSeek(event, direction = 1)) {
                     return true
                 }
             }
@@ -507,8 +507,14 @@ class NativePlaybackActivity : Activity() {
         return 10_000L
     }
 
-    private fun handleTvHiddenSeek(event: KeyEvent, direction: Int): Boolean {
-        if (!isTelevisionDevice || playerView.isControllerFullyVisible) {
+    private fun handleTvDirectionalSeek(event: KeyEvent, direction: Int): Boolean {
+        if (!isTelevisionDevice || subtitleSearchActive || isOverlayDialogVisible()) {
+            return false
+        }
+        val currentPlayer = player ?: return false
+        if (currentPlayer.playbackState == Player.STATE_IDLE ||
+            currentPlayer.playbackState == Player.STATE_ENDED
+        ) {
             return false
         }
         val keyCode = event.keyCode
@@ -528,7 +534,8 @@ class NativePlaybackActivity : Activity() {
             heldForMs = heldForMs,
             repeatCount = tvSeekHoldRepeatCount,
         )
-        return seekBy(stepMs * direction.toLong())
+        seekBy(stepMs * direction.toLong())
+        return true
     }
 
     private fun buildPlaybackPagePrimaryTitle(): String {
@@ -678,9 +685,13 @@ class NativePlaybackActivity : Activity() {
         )
         baseMediaItem = initialMediaItem
 
+        val initialPlayWhenReady = nextInitializePlayWhenReady ?: true
+        nextInitializePlayWhenReady = null
+        if (initialPlayWhenReady) {
+            playbackSystemSessionManager.prepareForPlayback()
+        }
         exoPlayer.apply {
-            playWhenReady = nextInitializePlayWhenReady ?: true
-            nextInitializePlayWhenReady = null
+            playWhenReady = initialPlayWhenReady
             repeatMode = Player.REPEAT_MODE_OFF
             setMediaItem(initialMediaItem)
             if (restoredResumePositionMs > 5_000L) {
@@ -1139,7 +1150,7 @@ class NativePlaybackActivity : Activity() {
             subtitleSearchActive = false
             restoreVideoSurfaceIfNeeded()
             if (resumePlaybackAfterSubtitleSearch) {
-                currentPlayer?.playWhenReady = true
+                setPlayWhenReady(true)
                 resumePlaybackAfterSubtitleSearch = false
             }
             nextInitializePlayWhenReady = null
@@ -1205,7 +1216,7 @@ class NativePlaybackActivity : Activity() {
         resumePlaybackAfterSubtitleSearch = false
         if (resultCode != RESULT_OK || data == null) {
             if (shouldResumePlayback) {
-                player?.playWhenReady = true
+                setPlayWhenReady(true)
             }
             return
         }
@@ -1219,7 +1230,7 @@ class NativePlaybackActivity : Activity() {
         if (subtitleFilePath.isNotEmpty()) {
             loadCachedSubtitleFile(subtitleFilePath, displayName)
             if (shouldResumePlayback) {
-                player?.playWhenReady = true
+                setPlayWhenReady(true)
             }
             return
         }
@@ -1231,7 +1242,7 @@ class NativePlaybackActivity : Activity() {
             showToast("字幕已下载到缓存，但当前结果暂不能直接挂载")
         }
         if (shouldResumePlayback) {
-            player?.playWhenReady = true
+            setPlayWhenReady(true)
         }
     }
 
@@ -1337,7 +1348,11 @@ class NativePlaybackActivity : Activity() {
             .build()
         currentPlayer.setMediaItem(updatedMediaItem, currentPosition)
         currentPlayer.prepare()
-        currentPlayer.playWhenReady = shouldResumePlayback
+        if (shouldResumePlayback) {
+            setPlayWhenReady(true)
+        } else {
+            currentPlayer.playWhenReady = false
+        }
         if (showFeedback) {
             showToast(
                 if (subtitleDelayMs == 0L) {
@@ -1733,6 +1748,9 @@ class NativePlaybackActivity : Activity() {
 
     private fun setPlayWhenReady(playWhenReady: Boolean): Boolean {
         val currentPlayer = player ?: return false
+        if (playWhenReady) {
+            playbackSystemSessionManager.prepareForPlayback()
+        }
         currentPlayer.playWhenReady = playWhenReady
         return true
     }

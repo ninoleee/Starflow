@@ -52,6 +52,7 @@ class AppNetworkImage extends ConsumerStatefulWidget {
     this.debugLabel = '',
     this.fallbackSources = const [],
     this.cachePolicy = AppNetworkImageCachePolicy.persistent,
+    this.throttleOnTelevision = true,
   });
 
   final String url;
@@ -68,6 +69,7 @@ class AppNetworkImage extends ConsumerStatefulWidget {
   final String debugLabel;
   final List<AppNetworkImageSource> fallbackSources;
   final AppNetworkImageCachePolicy cachePolicy;
+  final bool throttleOnTelevision;
 
   @override
   ConsumerState<AppNetworkImage> createState() => _AppNetworkImageState();
@@ -136,7 +138,12 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
 
   @override
   Widget build(BuildContext context) {
-    final throttleRasterLoads =
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      _resetTvRasterLoadThrottle();
+      return _buildLoading(context);
+    }
+    final throttleRasterLoads = widget.throttleOnTelevision &&
         _shouldThrottleTvRasterLoads(ref.watch(isTelevisionProvider));
     final candidates = _buildCandidateSources();
     if (candidates.isEmpty) {

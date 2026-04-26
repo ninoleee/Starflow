@@ -722,6 +722,7 @@ class _DetailEpisodeArtwork extends StatelessWidget {
               cacheWidth: decodeSize?.width,
               cacheHeight: decodeSize?.height,
               fit: BoxFit.cover,
+              throttleOnTelevision: false,
               errorBuilder: (context, error, stackTrace) =>
                   _DetailEpisodeArtworkFallback(item: item),
             ),

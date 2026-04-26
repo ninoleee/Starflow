@@ -382,6 +382,7 @@ class DetailHeroContent extends StatelessWidget {
                 headers: target.logoHeaders,
                 fit: BoxFit.contain,
                 alignment: Alignment.centerLeft,
+                throttleOnTelevision: false,
                 errorBuilder: (context, error, stackTrace) {
                   return Text(
                     primaryTitle,
@@ -525,6 +526,7 @@ class DetailBackdropImage extends StatelessWidget {
           cacheHeight: decodeSize?.height,
           fit: BoxFit.cover,
           alignment: Alignment.topCenter,
+          throttleOnTelevision: false,
           errorBuilder: (context, error, stackTrace) {
             return const ColoredBox(color: Color(0xFF0A1423));
           },

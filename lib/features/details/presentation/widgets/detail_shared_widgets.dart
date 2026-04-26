@@ -155,6 +155,7 @@ class _PersonAvatar extends StatelessWidget {
               cacheWidth: _avatarDecodeSize,
               cacheHeight: _avatarDecodeSize,
               fit: BoxFit.cover,
+              throttleOnTelevision: false,
               errorBuilder: (context, error, stackTrace) {
                 return Center(
                   child: Text(
@@ -226,6 +227,7 @@ class _PlatformLogo extends StatelessWidget {
           cacheHeight: _logoDecodeHeight,
           fit: BoxFit.contain,
           alignment: Alignment.center,
+          throttleOnTelevision: false,
           errorBuilder: (context, error, stackTrace) {
             return const SizedBox.shrink();
           },
@@ -609,6 +611,7 @@ class DetailImageGallery extends StatelessWidget {
                     headers: image.headers,
                     cachePolicy: image.cachePolicy,
                     fit: BoxFit.contain,
+                    throttleOnTelevision: false,
                     errorBuilder: (context, error, stackTrace) {
                       return const ColoredBox(color: Color(0xFF0D192A));
                     },
@@ -652,6 +655,7 @@ class DetailImageGallery extends StatelessWidget {
                       cacheWidth: 804,
                       cacheHeight: 452,
                       fit: BoxFit.cover,
+                      throttleOnTelevision: false,
                       errorBuilder: (context, error, stackTrace) {
                         return const ColoredBox(color: Color(0xFF0D192A));
                       },

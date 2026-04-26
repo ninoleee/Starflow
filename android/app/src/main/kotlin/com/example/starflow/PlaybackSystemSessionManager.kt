@@ -96,6 +96,7 @@ class PlaybackSystemSessionManager(
         AudioManager.OnAudioFocusChangeListener { focusChange ->
             when (focusChange) {
                 AudioManager.AUDIOFOCUS_GAIN -> {
+                    hasAudioFocus = true
                     if (resumeOnFocusGain) {
                         resumeOnFocusGain = false
                         remoteCommandDispatcher("interruptionResume", null)
@@ -103,14 +104,25 @@ class PlaybackSystemSessionManager(
                 }
 
                 AudioManager.AUDIOFOCUS_LOSS -> {
+                    if (!hasAudioFocus) {
+                        return@OnAudioFocusChangeListener
+                    }
+                    hasAudioFocus = false
                     resumeOnFocusGain = false
                     remoteCommandDispatcher("interruptionPause", null)
                 }
 
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    if (!hasAudioFocus) {
+                        return@OnAudioFocusChangeListener
+                    }
+                    hasAudioFocus = false
                     resumeOnFocusGain = currentState.playing
                     remoteCommandDispatcher("interruptionPause", null)
+                }
+
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    // Keep video playback running for short duck events such as notifications.
                 }
             }
         }
@@ -210,6 +222,10 @@ class PlaybackSystemSessionManager(
         mediaSession.setPlaybackState(buildPlaybackState(state))
         mediaSession.setMetadata(buildMetadata(state))
         updateNotification(state)
+    }
+
+    fun prepareForPlayback(): Boolean {
+        return requestAudioFocus()
     }
 
     fun release() {
@@ -408,16 +424,16 @@ class PlaybackSystemSessionManager(
         noisyReceiverRegistered = false
     }
 
-    private fun requestAudioFocus() {
+    private fun requestAudioFocus(): Boolean {
         if (hasAudioFocus) {
-            return
+            return true
         }
         val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             if (audioFocusRequest == null) {
                 audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                     .setAudioAttributes(audioAttributes)
                     .setOnAudioFocusChangeListener(audioFocusChangeListener)
-                    .setWillPauseWhenDucked(true)
+                    .setWillPauseWhenDucked(false)
                     .build()
             }
             audioManager.requestAudioFocus(audioFocusRequest!!)
@@ -429,10 +445,11 @@ class PlaybackSystemSessionManager(
                 AudioManager.AUDIOFOCUS_GAIN,
             )
         }
-        hasAudioFocus = granted == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-        if (!hasAudioFocus) {
-            remoteCommandDispatcher("interruptionPause", null)
+        if (granted == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            hasAudioFocus = true
+            return true
         }
+        return false
     }
 
     private fun abandonAudioFocus() {
