@@ -143,7 +143,7 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
               (source) => AppNetworkImageSource(
                 url: source.url,
                 headers: source.headers,
-                cachePolicy: widget.posterCachePolicy,
+                cachePolicy: source.cachePolicy,
               ),
             )
             .toList(growable: false),

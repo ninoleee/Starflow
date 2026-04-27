@@ -13,7 +13,7 @@ typedef AppNetworkImageErrorBuilder = Widget Function(
     BuildContext context, Object error, StackTrace? stackTrace);
 typedef AppNetworkImageLoadingBuilder = Widget Function(BuildContext context);
 
-const int _kTvRasterImageLoadConcurrency = 4;
+const int _kTvRasterImageLoadConcurrency = 8;
 
 final _tvRasterImageLoadGate =
     _TvRasterImageLoadGate(_kTvRasterImageLoadConcurrency);
@@ -409,7 +409,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     }
     _tvRasterLoadPermitTimeout?.cancel();
     _tvRasterLoadPermit = permit;
-    _tvRasterLoadPermitTimeout = Timer(const Duration(seconds: 8), () {
+    _tvRasterLoadPermitTimeout = Timer(const Duration(seconds: 4), () {
       _markTvRasterLoadSettled();
     });
   }

@@ -156,21 +156,25 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
-    final heroModule =
-        isPageVisible ? ref.watch(homeHeroModuleProvider) : _cachedHeroModule;
-    if (isPageVisible) {
+    final shouldUseLiveHomeData = isPageVisible ||
+        _cachedEnabledModules.isEmpty ||
+        _cachedResolvedSectionsState.sections.isEmpty;
+    final heroModule = shouldUseLiveHomeData
+        ? ref.watch(homeHeroModuleProvider)
+        : _cachedHeroModule;
+    if (shouldUseLiveHomeData) {
       _cachedHeroModule = heroModule;
     }
-    final enabledModules = isPageVisible
+    final enabledModules = shouldUseLiveHomeData
         ? ref.watch(homeEnabledModulesProvider)
         : _cachedEnabledModules;
-    if (isPageVisible) {
+    if (shouldUseLiveHomeData) {
       _cachedEnabledModules = enabledModules;
     }
-    final resolvedSectionsState = isPageVisible
+    final resolvedSectionsState = shouldUseLiveHomeData
         ? ref.watch(homeResolvedSectionsProvider)
         : _cachedResolvedSectionsState;
-    if (isPageVisible) {
+    if (shouldUseLiveHomeData) {
       _cachedResolvedSectionsState = resolvedSectionsState;
     }
     final heroDisplayMode = ref.watch(
@@ -181,7 +185,7 @@ class _HomePageState extends ConsumerState<HomePage>
     );
     final preferredHeroModuleId = heroSourceModuleId.trim();
     final preferredHeroSectionLoading = preferredHeroModuleId.isNotEmpty &&
-        isPageVisible &&
+        shouldUseLiveHomeData &&
         ref.watch(
           homeSectionProvider(
             preferredHeroModuleId,
@@ -257,6 +261,7 @@ class _HomePageState extends ConsumerState<HomePage>
                 homeExplicitRefreshRevision: homeExplicitRefreshRevision,
                 isTelevision: isTelevision,
                 heroDisplayMode: heroDisplayMode,
+                shouldUseLiveHomeData: shouldUseLiveHomeData,
               ),
       ),
     );
@@ -280,6 +285,7 @@ class _HomePageState extends ConsumerState<HomePage>
     required bool isTelevision,
     required HomeHeroDisplayMode heroDisplayMode,
     required bool simplifyHeroBackdrop,
+    required bool shouldUseLiveHomeData,
   }) {
     if (homeMetadataAutoRefreshRevision !=
         _observedHomeMetadataAutoRefreshRevision) {
@@ -401,6 +407,7 @@ class _HomePageState extends ConsumerState<HomePage>
                   key: ValueKey<String>('home:section-slot:${module.id}'),
                   module: module,
                   isPageVisible: isPageVisible,
+                  shouldWatchSection: shouldUseLiveHomeData,
                   useHeroNextSectionFocusNode:
                       module.id == firstFocusableSectionId,
                   heroNextSectionFocusNode: _heroNextSectionFocusNode,

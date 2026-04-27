@@ -8,6 +8,7 @@ class _HomeSectionSlot extends ConsumerStatefulWidget {
     super.key,
     required this.module,
     required this.isPageVisible,
+    required this.shouldWatchSection,
     required this.useHeroNextSectionFocusNode,
     required this.heroNextSectionFocusNode,
     required this.homeMetadataAutoRefreshRevision,
@@ -15,6 +16,7 @@ class _HomeSectionSlot extends ConsumerStatefulWidget {
 
   final HomeModuleConfig module;
   final bool isPageVisible;
+  final bool shouldWatchSection;
   final bool useHeroNextSectionFocusNode;
   final FocusNode heroNextSectionFocusNode;
   final int homeMetadataAutoRefreshRevision;
@@ -45,7 +47,7 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final activeState = widget.isPageVisible
+    final activeState = widget.shouldWatchSection
         ? ref.watch(homeSectionProvider(widget.module.id))
         : null;
     final state = resolveRetainedAsyncValue(
@@ -1082,6 +1084,9 @@ List<AppNetworkImageSource> _buildPosterFallbackSources(
 ) {
   final sources = <AppNetworkImageSource>[];
   final seen = <String>{target.posterUrl.trim()};
+  final cachePolicy = target.sourceKind == MediaSourceKind.emby
+      ? AppNetworkImageCachePolicy.networkOnly
+      : AppNetworkImageCachePolicy.persistent;
 
   void add(String url, Map<String, String> headers) {
     final trimmedUrl = url.trim();
@@ -1092,6 +1097,7 @@ List<AppNetworkImageSource> _buildPosterFallbackSources(
       AppNetworkImageSource(
         url: trimmedUrl,
         headers: headers,
+        cachePolicy: cachePolicy,
       ),
     );
   }

@@ -345,6 +345,9 @@ class _LibraryPagedGridTile extends ConsumerWidget {
     final posterAsset = posterAssets.isNotEmpty
         ? posterAssets.first
         : const _LibraryImageAsset(url: '');
+    final posterCachePolicy = item.sourceKind == MediaSourceKind.emby
+        ? AppNetworkImageCachePolicy.networkOnly
+        : AppNetworkImageCachePolicy.persistent;
     return MediaPosterTile(
       focusId: _libraryItemFocusId(
         focusScopePrefix: focusScopePrefix,
@@ -357,9 +360,7 @@ class _LibraryPagedGridTile extends ConsumerWidget {
       title: item.title,
       subtitle: item.year > 0 ? '${item.year}' : '',
       posterUrl: posterAsset.url,
-      posterCachePolicy: item.sourceKind == MediaSourceKind.emby
-          ? AppNetworkImageCachePolicy.networkOnly
-          : AppNetworkImageCachePolicy.persistent,
+      posterCachePolicy: posterCachePolicy,
       posterHeaders: posterAsset.headers,
       imageBadgeText: resolvePreferredPosterRatingLabel(item.ratingLabels),
       posterFallbackSources: posterAssets
@@ -368,6 +369,7 @@ class _LibraryPagedGridTile extends ConsumerWidget {
             (asset) => AppNetworkImageSource(
               url: asset.url,
               headers: asset.headers,
+              cachePolicy: posterCachePolicy,
             ),
           )
           .toList(growable: false),
