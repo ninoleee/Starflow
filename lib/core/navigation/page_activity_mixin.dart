@@ -73,9 +73,6 @@ mixin PageActivityMixin<T extends StatefulWidget> on State<T> {
       } else {
         onPageBecameInactive();
       }
-      if (mounted) {
-        setState(() {});
-      }
     });
   }
 }

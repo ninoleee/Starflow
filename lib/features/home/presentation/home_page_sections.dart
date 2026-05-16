@@ -8,7 +8,6 @@ class _HomeSectionSlot extends ConsumerStatefulWidget {
     super.key,
     required this.module,
     required this.isPageVisible,
-    required this.shouldWatchSection,
     required this.useHeroNextSectionFocusNode,
     required this.heroNextSectionFocusNode,
     required this.homeMetadataAutoRefreshRevision,
@@ -16,7 +15,6 @@ class _HomeSectionSlot extends ConsumerStatefulWidget {
 
   final HomeModuleConfig module;
   final bool isPageVisible;
-  final bool shouldWatchSection;
   final bool useHeroNextSectionFocusNode;
   final FocusNode heroNextSectionFocusNode;
   final int homeMetadataAutoRefreshRevision;
@@ -47,9 +45,7 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final activeState = widget.shouldWatchSection
-        ? ref.watch(homeSectionProvider(widget.module.id))
-        : null;
+    final activeState = ref.watch(homeSectionProvider(widget.module.id));
     final state = resolveRetainedAsyncValue(
       activeValue: activeState,
       cachedValue: _cachedState,

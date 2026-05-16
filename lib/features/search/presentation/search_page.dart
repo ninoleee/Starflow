@@ -162,6 +162,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
   int _pendingSearchTotalCount = 0;
   int _pendingSearchCompletedCount = 0;
   int _pendingSearchFilteredCount = 0;
+  bool _initialTelevisionFocusScheduled = false;
+  bool _initialTelevisionFocusRequested = false;
 
   @override
   void initState() {
@@ -205,10 +207,13 @@ class _SearchPageState extends ConsumerState<SearchPage>
   @override
   void onPageBecameActive() {
     _runPendingAutoSearchIfNeeded();
+    _scheduleInitialTelevisionFocus();
   }
 
   @override
   void onPageBecameInactive() {
+    _initialTelevisionFocusScheduled = false;
+    _initialTelevisionFocusRequested = false;
     _cancelSearchTasks();
   }
 
@@ -586,6 +591,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+    if (isTelevision) {
+      _scheduleInitialTelevisionFocus();
+    }
     final networkStorage = ref.watch(_searchPageNetworkStorageProvider);
     final headerTopInset = kToolbarHeight;
     final enabledProviders =
@@ -878,6 +886,39 @@ class _SearchPageState extends ConsumerState<SearchPage>
         ),
       ),
     );
+  }
+
+  void _scheduleInitialTelevisionFocus({int remainingAttempts = 4}) {
+    if (_initialTelevisionFocusRequested ||
+        _initialTelevisionFocusScheduled ||
+        !mounted) {
+      return;
+    }
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
+    if (!isTelevision) {
+      return;
+    }
+    _initialTelevisionFocusScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initialTelevisionFocusScheduled = false;
+      if (!mounted || !isPageVisible) {
+        return;
+      }
+      final isTelevision = ref.read(isTelevisionProvider).value ?? false;
+      if (!isTelevision) {
+        return;
+      }
+      if (!_queryFocusNode.canRequestFocus) {
+        if (remainingAttempts > 0) {
+          _scheduleInitialTelevisionFocus(
+            remainingAttempts: remainingAttempts - 1,
+          );
+        }
+        return;
+      }
+      _initialTelevisionFocusRequested = true;
+      _queryFocusNode.requestFocus();
+    });
   }
 
   Future<void> _openTelevisionQueryDialog() async {

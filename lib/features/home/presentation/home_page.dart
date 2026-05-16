@@ -108,10 +108,6 @@ class _HomePageState extends ConsumerState<HomePage>
   final FocusNode _heroNextSectionFocusNode =
       FocusNode(debugLabel: 'home-hero-next-section');
   int _heroFocusBelowRequestVersion = 0;
-  HomeModuleConfig? _cachedHeroModule;
-  List<HomeModuleConfig> _cachedEnabledModules = const [];
-  HomeResolvedSectionsState _cachedResolvedSectionsState =
-      const HomeResolvedSectionsState();
   List<String> _lastFeaturedHeroIds = const [];
   int _observedHomeMetadataAutoRefreshRevision = 0;
   int _scheduledHeroMetadataAutoRefreshRevision = 0;
@@ -156,27 +152,9 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
-    final shouldUseLiveHomeData = isPageVisible ||
-        _cachedEnabledModules.isEmpty ||
-        _cachedResolvedSectionsState.sections.isEmpty;
-    final heroModule = shouldUseLiveHomeData
-        ? ref.watch(homeHeroModuleProvider)
-        : _cachedHeroModule;
-    if (shouldUseLiveHomeData) {
-      _cachedHeroModule = heroModule;
-    }
-    final enabledModules = shouldUseLiveHomeData
-        ? ref.watch(homeEnabledModulesProvider)
-        : _cachedEnabledModules;
-    if (shouldUseLiveHomeData) {
-      _cachedEnabledModules = enabledModules;
-    }
-    final resolvedSectionsState = shouldUseLiveHomeData
-        ? ref.watch(homeResolvedSectionsProvider)
-        : _cachedResolvedSectionsState;
-    if (shouldUseLiveHomeData) {
-      _cachedResolvedSectionsState = resolvedSectionsState;
-    }
+    final heroModule = ref.watch(homeHeroModuleProvider);
+    final enabledModules = ref.watch(homeEnabledModulesProvider);
+    final resolvedSectionsState = ref.watch(homeResolvedSectionsProvider);
     final heroDisplayMode = ref.watch(
       appSettingsProvider.select((settings) => settings.homeHeroDisplayMode),
     );
@@ -185,7 +163,6 @@ class _HomePageState extends ConsumerState<HomePage>
     );
     final preferredHeroModuleId = heroSourceModuleId.trim();
     final preferredHeroSectionLoading = preferredHeroModuleId.isNotEmpty &&
-        shouldUseLiveHomeData &&
         ref.watch(
           homeSectionProvider(
             preferredHeroModuleId,
@@ -261,7 +238,6 @@ class _HomePageState extends ConsumerState<HomePage>
                 homeExplicitRefreshRevision: homeExplicitRefreshRevision,
                 isTelevision: isTelevision,
                 heroDisplayMode: heroDisplayMode,
-                shouldUseLiveHomeData: shouldUseLiveHomeData,
               ),
       ),
     );
@@ -285,7 +261,6 @@ class _HomePageState extends ConsumerState<HomePage>
     required bool isTelevision,
     required HomeHeroDisplayMode heroDisplayMode,
     required bool simplifyHeroBackdrop,
-    required bool shouldUseLiveHomeData,
   }) {
     if (homeMetadataAutoRefreshRevision !=
         _observedHomeMetadataAutoRefreshRevision) {
@@ -407,7 +382,6 @@ class _HomePageState extends ConsumerState<HomePage>
                   key: ValueKey<String>('home:section-slot:${module.id}'),
                   module: module,
                   isPageVisible: isPageVisible,
-                  shouldWatchSection: shouldUseLiveHomeData,
                   useHeroNextSectionFocusNode:
                       module.id == firstFocusableSectionId,
                   heroNextSectionFocusNode: _heroNextSectionFocusNode,

@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod/misc.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
@@ -93,11 +91,6 @@ class HomePageController {
     T Function<T>(ProviderListenable<T> provider) read,
   ) {
     final modules = read(homeEnabledModulesProvider);
-    unawaited(
-      read(localStorageCacheRepositoryProvider)
-          .primeDetailPayload()
-          .catchError((_) {}),
-    );
     read(homeRecentItemsProvider.future);
     read(homeRecentPlaybackEntriesProvider.future);
     read(homeCarouselItemsProvider.future);

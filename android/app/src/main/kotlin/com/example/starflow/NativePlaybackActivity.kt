@@ -13,6 +13,8 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.OpenableColumns
 import android.view.KeyEvent
 import android.view.View
@@ -72,6 +74,24 @@ class NativePlaybackActivity : Activity() {
     private var tvSeekHoldKeyCode: Int? = null
     private var tvSeekHoldStartedAtMs: Long? = null
     private var tvSeekHoldRepeatCount = 0
+    private var pendingResumePositionOverrideMs: Long? = null
+    private val playbackWatchdogHandler = Handler(Looper.getMainLooper())
+    private var playbackWatchdogActive = false
+    private var playbackWatchdogLastPositionMs = 0L
+    private var playbackWatchdogLastProgressAtMs = 0L
+    private var playbackWatchdogRecoveries = 0
+    private var playbackWatchdogLastRecoveryAtMs = 0L
+    private val playbackWatchdogRunnable = object : Runnable {
+        override fun run() {
+            if (!playbackWatchdogActive) {
+                return
+            }
+            val shouldContinue = evaluatePlaybackWatchdog()
+            if (playbackWatchdogActive && shouldContinue) {
+                playbackWatchdogHandler.postDelayed(this, PLAYBACK_WATCHDOG_INTERVAL_MS)
+            }
+        }
+    }
     private val playbackSystemSessionManager by lazy {
         PlaybackSystemSessionManager(
             context = applicationContext,
@@ -83,6 +103,9 @@ class NativePlaybackActivity : Activity() {
     }
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (isPlaying) {
+                markPlaybackWatchdogActivity(player?.currentPosition ?: 0L)
+            }
             syncPlaybackSystemSession()
             updateTelevisionControllerAutoHidePolicy()
             if (isTelevisionDevice &&
@@ -98,6 +121,11 @@ class NativePlaybackActivity : Activity() {
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_READY ||
+                playbackState == Player.STATE_BUFFERING
+            ) {
+                markPlaybackWatchdogActivity(player?.currentPosition ?: 0L)
+            }
             syncPlaybackSystemSession()
             updatePictureInPictureParams()
             updateProgressMarkers()
@@ -117,6 +145,7 @@ class NativePlaybackActivity : Activity() {
             newPosition: Player.PositionInfo,
             reason: Int,
         ) {
+            resetPlaybackWatchdogProgress(newPosition.positionMs)
             syncPlaybackSystemSession()
         }
 
@@ -451,8 +480,16 @@ class NativePlaybackActivity : Activity() {
 
     private fun bindControllerChrome() {
         progressTimeBar = findViewById(Media3UiR.id.exo_progress)
-        findViewById<View>(R.id.native_back)?.setOnClickListener {
-            handleNavigationBack()
+        findViewById<View>(R.id.native_back)?.apply {
+            if (isTelevisionDevice) {
+                visibility = View.GONE
+                isFocusable = false
+                isFocusableInTouchMode = false
+            } else {
+                setOnClickListener {
+                    handleNavigationBack()
+                }
+            }
         }
         val primaryTitle = buildPlaybackPagePrimaryTitle()
         val secondaryTitle = buildPlaybackPageSecondaryTitle()
@@ -627,7 +664,8 @@ class NativePlaybackActivity : Activity() {
         )
         val guessedMimeType = guessVideoMimeType(targetObject, url).takeIf { it != "-" }
 
-        restoredResumePositionMs = loadResumePositionMs()
+        restoredResumePositionMs = pendingResumePositionOverrideMs ?: loadResumePositionMs()
+        pendingResumePositionOverrideMs = null
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
@@ -718,6 +756,7 @@ class NativePlaybackActivity : Activity() {
         if (restoredResumePositionMs > 5_000L) {
             showToast("已从 ${formatClockDuration(restoredResumePositionMs)} 继续播放")
         }
+        startPlaybackWatchdog()
     }
 
     private fun buildMediaCodecSelector(preferSoftware: Boolean): MediaCodecSelector {
@@ -737,11 +776,107 @@ class NativePlaybackActivity : Activity() {
     }
 
     private fun releasePlayer() {
+        stopPlaybackWatchdog()
         playerView.player = null
         player?.removeListener(playerListener)
         player?.release()
         player = null
         playbackSystemSessionManager.setActive(false)
+    }
+
+    private fun startPlaybackWatchdog() {
+        playbackWatchdogHandler.removeCallbacks(playbackWatchdogRunnable)
+        playbackWatchdogActive = true
+        resetPlaybackWatchdogProgress(player?.currentPosition ?: 0L)
+        playbackWatchdogHandler.postDelayed(
+            playbackWatchdogRunnable,
+            PLAYBACK_WATCHDOG_INTERVAL_MS,
+        )
+    }
+
+    private fun stopPlaybackWatchdog() {
+        playbackWatchdogActive = false
+        playbackWatchdogHandler.removeCallbacks(playbackWatchdogRunnable)
+        playbackWatchdogRecoveries = 0
+        playbackWatchdogLastRecoveryAtMs = 0L
+    }
+
+    private fun resetPlaybackWatchdogProgress(positionMs: Long) {
+        markPlaybackWatchdogActivity(positionMs)
+        playbackWatchdogRecoveries = 0
+        playbackWatchdogLastRecoveryAtMs = 0L
+    }
+
+    private fun markPlaybackWatchdogActivity(positionMs: Long) {
+        playbackWatchdogLastPositionMs = positionMs.coerceAtLeast(0L)
+        playbackWatchdogLastProgressAtMs = System.currentTimeMillis()
+    }
+
+    private fun evaluatePlaybackWatchdog(): Boolean {
+        val currentPlayer = player ?: return true
+        val inPictureInPicture =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode
+        if (subtitleSearchActive ||
+            (!hasWindowFocus() && !inPictureInPicture) ||
+            !currentPlayer.playWhenReady ||
+            currentPlayer.playbackState == Player.STATE_IDLE ||
+            currentPlayer.playbackState == Player.STATE_ENDED
+        ) {
+            resetPlaybackWatchdogProgress(currentPlayer.currentPosition)
+            return true
+        }
+
+        val nowMs = System.currentTimeMillis()
+        val positionMs = currentPlayer.currentPosition.coerceAtLeast(0L)
+        val hasProgressed = positionMs > playbackWatchdogLastPositionMs + 500L ||
+            positionMs < playbackWatchdogLastPositionMs - 1_000L
+        if (hasProgressed) {
+            resetPlaybackWatchdogProgress(positionMs)
+            return true
+        }
+
+        val stalledForMs = nowMs - playbackWatchdogLastProgressAtMs
+        val bufferingStalled =
+            currentPlayer.playbackState == Player.STATE_BUFFERING &&
+                stalledForMs >= PLAYBACK_WATCHDOG_BUFFERING_TIMEOUT_MS
+        val progressStalled =
+            currentPlayer.isPlaying &&
+                stalledForMs >= PLAYBACK_WATCHDOG_PROGRESS_TIMEOUT_MS
+        if (!bufferingStalled && !progressStalled) {
+            return true
+        }
+
+        return recoverPlaybackStall(positionMs)
+    }
+
+    private fun recoverPlaybackStall(positionMs: Long): Boolean {
+        val currentPlayer = player ?: return true
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - playbackWatchdogLastRecoveryAtMs < PLAYBACK_WATCHDOG_RECOVERY_COOLDOWN_MS) {
+            return true
+        }
+        playbackWatchdogLastRecoveryAtMs = nowMs
+        playbackWatchdogRecoveries += 1
+
+        if (playbackWatchdogRecoveries <= PLAYBACK_WATCHDOG_SOFT_RECOVERY_LIMIT) {
+            playbackSystemSessionManager.prepareForPlayback()
+            currentPlayer.seekTo(positionMs.coerceAtLeast(0L))
+            currentPlayer.prepare()
+            currentPlayer.playWhenReady = true
+            playbackWatchdogLastProgressAtMs = nowMs
+            return true
+        }
+
+        restartPlayerAfterPlaybackStall(positionMs)
+        return false
+    }
+
+    private fun restartPlayerAfterPlaybackStall(positionMs: Long) {
+        pendingResumePositionOverrideMs = positionMs.coerceAtLeast(0L)
+        nextInitializePlayWhenReady = true
+        releasePlayer()
+        initializePlayer()
+        syncPlaybackSystemSession()
     }
 
     private fun syncPlaybackSystemSession() {
@@ -1382,7 +1517,16 @@ class NativePlaybackActivity : Activity() {
                 }
             },
         )
-        configureFocusability(
+        val focusableControlIds = if (isTelevisionDevice) {
+            intArrayOf(
+                Media3UiR.id.exo_rew,
+                Media3UiR.id.exo_play_pause,
+                Media3UiR.id.exo_ffwd,
+                Media3UiR.id.exo_subtitle,
+                R.id.native_audio_track_button,
+                R.id.native_playback_settings,
+            )
+        } else {
             intArrayOf(
                 R.id.native_back,
                 Media3UiR.id.exo_rew,
@@ -1394,8 +1538,10 @@ class NativePlaybackActivity : Activity() {
                 R.id.native_external_subtitle,
                 R.id.native_online_subtitle_search,
                 R.id.native_playback_settings,
-            ),
-        )
+            )
+        }
+        configureFocusability(focusableControlIds)
+
         configureHorizontalFocusChain(
             intArrayOf(
                 Media3UiR.id.exo_rew,
@@ -1403,39 +1549,38 @@ class NativePlaybackActivity : Activity() {
                 Media3UiR.id.exo_ffwd,
             ),
         )
+        val settingsControlIds = if (isTelevisionDevice) {
+            intArrayOf(
+                Media3UiR.id.exo_subtitle,
+                R.id.native_audio_track_button,
+                R.id.native_playback_settings,
+            )
+        } else {
+            intArrayOf(
+                Media3UiR.id.exo_subtitle,
+                R.id.native_online_subtitle_search,
+                R.id.native_external_subtitle,
+                R.id.native_subtitle_delay,
+                R.id.native_playback_settings,
+            )
+        }
         configureHorizontalFocusChain(
-            if (isTelevisionDevice) {
-                intArrayOf(
-                    Media3UiR.id.exo_subtitle,
-                    R.id.native_audio_track_button,
-                    R.id.native_playback_settings,
-                )
-            } else {
-                intArrayOf(
-                    Media3UiR.id.exo_subtitle,
-                    R.id.native_online_subtitle_search,
-                    R.id.native_external_subtitle,
-                    R.id.native_subtitle_delay,
-                    R.id.native_playback_settings,
-                )
-            },
+            settingsControlIds,
         )
-        configureHorizontalFocusChain(intArrayOf(R.id.native_back))
+        if (!isTelevisionDevice) {
+            configureHorizontalFocusChain(intArrayOf(R.id.native_back))
+        }
         if (isTelevisionDevice) {
-            configureVerticalFocusLink(R.id.native_back, downId = Media3UiR.id.exo_play_pause)
             configureVerticalFocusLink(
                 Media3UiR.id.exo_rew,
-                upId = R.id.native_back,
                 downId = Media3UiR.id.exo_subtitle,
             )
             configureVerticalFocusLink(
                 Media3UiR.id.exo_play_pause,
-                upId = R.id.native_back,
                 downId = R.id.native_audio_track_button,
             )
             configureVerticalFocusLink(
                 Media3UiR.id.exo_ffwd,
-                upId = R.id.native_back,
                 downId = R.id.native_playback_settings,
             )
             configureVerticalFocusLink(
@@ -1637,7 +1782,6 @@ class NativePlaybackActivity : Activity() {
                         Media3UiR.id.exo_rew,
                         R.id.native_playback_settings,
                         Media3UiR.id.exo_subtitle,
-                        R.id.native_back,
                     )
                 } else {
                     intArrayOf(
@@ -1656,7 +1800,6 @@ class NativePlaybackActivity : Activity() {
                         R.id.native_audio_track_button,
                         Media3UiR.id.exo_subtitle,
                         Media3UiR.id.exo_play_pause,
-                        R.id.native_back,
                     )
                 } else {
                     intArrayOf(
@@ -1737,6 +1880,7 @@ class NativePlaybackActivity : Activity() {
             return false
         }
         currentPlayer.seekTo(nextPositionMs)
+        resetPlaybackWatchdogProgress(nextPositionMs)
         showControllerForRemoteFocus(ControllerFocusTarget.PLAYER)
         return true
     }
@@ -1750,6 +1894,8 @@ class NativePlaybackActivity : Activity() {
         val currentPlayer = player ?: return false
         if (playWhenReady) {
             playbackSystemSessionManager.prepareForPlayback()
+        } else {
+            resetPlaybackWatchdogProgress(currentPlayer.currentPosition)
         }
         currentPlayer.playWhenReady = playWhenReady
         return true
@@ -2279,6 +2425,11 @@ class NativePlaybackActivity : Activity() {
         private const val SHARED_PREFERENCES_NAME = "FlutterSharedPreferences"
         private const val PLAYBACK_MEMORY_STORAGE_KEY = "flutter.starflow.playback.memory.v1"
         private const val RECENT_ENTRY_LIMIT = 20
+        private const val PLAYBACK_WATCHDOG_INTERVAL_MS = 5_000L
+        private const val PLAYBACK_WATCHDOG_PROGRESS_TIMEOUT_MS = 15_000L
+        private const val PLAYBACK_WATCHDOG_BUFFERING_TIMEOUT_MS = 20_000L
+        private const val PLAYBACK_WATCHDOG_RECOVERY_COOLDOWN_MS = 10_000L
+        private const val PLAYBACK_WATCHDOG_SOFT_RECOVERY_LIMIT = 2
         private val SUBTITLE_DELAY_OPTIONS_MS =
             listOf(-5_000L, -2_000L, -1_000L, -500L, 0L, 500L, 1_000L, 2_000L, 5_000L)
         private val PLAYBACK_SPEED_OPTIONS =

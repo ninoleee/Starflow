@@ -1327,8 +1327,7 @@ extension AppSettingsPerformanceX on AppSettings {
   }
 
   bool effectiveLightweightHomeHeroEnabled({required bool isTelevision}) {
-    return isTelevision ||
-        performanceLightweightHomeHeroEnabled ||
+    return performanceLightweightHomeHeroEnabled ||
         effectiveUiPerformanceTier == AppUiPerformanceTier.performance;
   }
 
