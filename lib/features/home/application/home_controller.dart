@@ -110,6 +110,18 @@ class HomePageController {
     primeModulesWithReader(ref.read);
     await Future<void>.delayed(const Duration(milliseconds: 140));
   }
+
+  Future<void> refreshModulesFromRef(Ref ref) async {
+    ref.invalidate(homeRecentItemsProvider);
+    ref.invalidate(homeRecentPlaybackEntriesProvider);
+    ref.invalidate(homeCarouselItemsProvider);
+    ref.invalidate(_homeSectionSeedProvider);
+    ref.invalidate(homeSectionProvider);
+    ref.read(homeExplicitRefreshRevisionProvider.notifier).state += 1;
+    ref.read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
+    primeModulesWithReader(ref.read);
+    await Future<void>.delayed(const Duration(milliseconds: 140));
+  }
 }
 
 final homeFeedRepositoryProvider = Provider<HomeFeedRepository>((ref) {
@@ -253,4 +265,8 @@ void primeHomeModulesFromWidget(WidgetRef ref) {
 
 Future<void> refreshHomeModules(WidgetRef ref) async {
   return ref.read(homePageControllerProvider).refreshModules(ref);
+}
+
+Future<void> refreshHomeModulesFromRef(Ref ref) async {
+  return ref.read(homePageControllerProvider).refreshModulesFromRef(ref);
 }

@@ -30,11 +30,14 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultAllocator
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.R as Media3UiR
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.DefaultTimeBar
@@ -69,6 +72,7 @@ class NativePlaybackActivity : Activity() {
     private var pendingControllerFocusTarget = ControllerFocusTarget.NONE
     private var exitConfirmationDialog: AlertDialog? = null
     private var playbackSettingsDialog: AlertDialog? = null
+    private var episodeSelectionDialog: AlertDialog? = null
     private var trackSelectionDialog: Dialog? = null
     private var progressTimeBar: DefaultTimeBar? = null
     private var tvSeekHoldKeyCode: Int? = null
@@ -76,9 +80,16 @@ class NativePlaybackActivity : Activity() {
     private var tvSeekHoldRepeatCount = 0
     private var pendingResumePositionOverrideMs: Long? = null
     private val playbackWatchdogHandler = Handler(Looper.getMainLooper())
+    private val playbackRuntimeHandler = Handler(Looper.getMainLooper())
+    private var playbackRuntimeActive = false
+    private var introSkipApplied = false
+    private var outroSkipApplied = false
     private var playbackWatchdogActive = false
     private var playbackWatchdogLastPositionMs = 0L
     private var playbackWatchdogLastProgressAtMs = 0L
+    private var playbackWatchdogLastBufferedPositionMs = 0L
+    private var playbackWatchdogLastBufferedPercentage = 0
+    private var playbackWatchdogLastBufferActivityAtMs = 0L
     private var playbackWatchdogRecoveries = 0
     private var playbackWatchdogLastRecoveryAtMs = 0L
     private val playbackWatchdogRunnable = object : Runnable {
@@ -89,6 +100,17 @@ class NativePlaybackActivity : Activity() {
             val shouldContinue = evaluatePlaybackWatchdog()
             if (playbackWatchdogActive && shouldContinue) {
                 playbackWatchdogHandler.postDelayed(this, PLAYBACK_WATCHDOG_INTERVAL_MS)
+            }
+        }
+    }
+    private val playbackRuntimeRunnable = object : Runnable {
+        override fun run() {
+            if (!playbackRuntimeActive) {
+                return
+            }
+            maybeApplyAutoSkip()
+            if (playbackRuntimeActive) {
+                playbackRuntimeHandler.postDelayed(this, PLAYBACK_RUNTIME_INTERVAL_MS)
             }
         }
     }
@@ -129,6 +151,9 @@ class NativePlaybackActivity : Activity() {
             syncPlaybackSystemSession()
             updatePictureInPictureParams()
             updateProgressMarkers()
+            if (playbackState == Player.STATE_READY) {
+                maybeApplyAutoSkip()
+            }
             if (playbackState == Player.STATE_ENDED &&
                 advanceToAdjacentEpisode(forward = true, reason = "ended", showFeedback = false)
             ) {
@@ -146,6 +171,7 @@ class NativePlaybackActivity : Activity() {
             reason: Int,
         ) {
             resetPlaybackWatchdogProgress(newPosition.positionMs)
+            syncSkipFlagsWithCurrentPosition()
             syncPlaybackSystemSession()
         }
 
@@ -264,6 +290,9 @@ class NativePlaybackActivity : Activity() {
         playbackSettingsDialog?.setOnDismissListener(null)
         playbackSettingsDialog?.dismiss()
         playbackSettingsDialog = null
+        episodeSelectionDialog?.setOnDismissListener(null)
+        episodeSelectionDialog?.dismiss()
+        episodeSelectionDialog = null
         trackSelectionDialog?.setOnDismissListener(null)
         trackSelectionDialog?.dismiss()
         trackSelectionDialog = null
@@ -358,7 +387,9 @@ class NativePlaybackActivity : Activity() {
 
             KeyEvent.KEYCODE_DPAD_DOWN -> {
                 if (isTelevisionDevice && !playerView.isControllerFullyVisible) {
-                    openPlaybackSettingsDialog()
+                    if (!openEpisodeSelectionDialog()) {
+                        openPlaybackSettingsDialog()
+                    }
                     return true
                 }
             }
@@ -575,6 +606,39 @@ class NativePlaybackActivity : Activity() {
         return true
     }
 
+    private fun buildLoadControl(): DefaultLoadControl {
+        val minBufferMs: Int
+        val maxBufferMs: Int
+        val bufferForPlaybackMs: Int
+        val bufferForPlaybackAfterRebufferMs: Int
+        val targetBufferBytes: Int
+        if (isTelevisionDevice) {
+            minBufferMs = NATIVE_TV_MIN_BUFFER_MS
+            maxBufferMs = NATIVE_TV_MAX_BUFFER_MS
+            bufferForPlaybackMs = NATIVE_TV_BUFFER_FOR_PLAYBACK_MS
+            bufferForPlaybackAfterRebufferMs = NATIVE_TV_BUFFER_FOR_REBUFFER_MS
+            targetBufferBytes = NATIVE_TV_TARGET_BUFFER_BYTES
+        } else {
+            minBufferMs = NATIVE_PHONE_MIN_BUFFER_MS
+            maxBufferMs = NATIVE_PHONE_MAX_BUFFER_MS
+            bufferForPlaybackMs = NATIVE_PHONE_BUFFER_FOR_PLAYBACK_MS
+            bufferForPlaybackAfterRebufferMs = NATIVE_PHONE_BUFFER_FOR_REBUFFER_MS
+            targetBufferBytes = NATIVE_PHONE_TARGET_BUFFER_BYTES
+        }
+
+        return DefaultLoadControl.Builder()
+            .setAllocator(DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE))
+            .setBufferDurationsMs(
+                minBufferMs,
+                maxBufferMs,
+                bufferForPlaybackMs,
+                bufferForPlaybackAfterRebufferMs,
+            )
+            .setTargetBufferBytes(targetBufferBytes)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+    }
+
     private fun buildPlaybackPagePrimaryTitle(): String {
         val targetObject = decodePlaybackTargetObject()
         val title = intent.getStringExtra(EXTRA_TITLE)?.trim().orEmpty()
@@ -611,6 +675,7 @@ class NativePlaybackActivity : Activity() {
 
     private fun isOverlayDialogVisible(): Boolean {
         return playbackSettingsDialog?.isShowing == true ||
+            episodeSelectionDialog?.isShowing == true ||
             trackSelectionDialog?.isShowing == true
     }
 
@@ -669,6 +734,8 @@ class NativePlaybackActivity : Activity() {
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(NATIVE_HTTP_CONNECT_TIMEOUT_MS)
+            .setReadTimeoutMs(NATIVE_HTTP_READ_TIMEOUT_MS)
             .setUserAgent("Starflow")
 
         if (headersJson.isNotEmpty()) {
@@ -702,7 +769,13 @@ class NativePlaybackActivity : Activity() {
 
         val exoPlayer = ExoPlayer.Builder(this)
             .setRenderersFactory(renderersFactory)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .setLoadControl(buildLoadControl())
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(dataSourceFactory)
+                    .setLoadErrorHandlingPolicy(
+                        DefaultLoadErrorHandlingPolicy(NATIVE_LOAD_ERROR_RETRY_COUNT),
+                    ),
+            )
             .build()
         val initialMediaItemBuilder = MediaItem.Builder()
             .setUri(url)
@@ -757,6 +830,7 @@ class NativePlaybackActivity : Activity() {
             showToast("已从 ${formatClockDuration(restoredResumePositionMs)} 继续播放")
         }
         startPlaybackWatchdog()
+        startPlaybackRuntimeLoop()
     }
 
     private fun buildMediaCodecSelector(preferSoftware: Boolean): MediaCodecSelector {
@@ -777,6 +851,7 @@ class NativePlaybackActivity : Activity() {
 
     private fun releasePlayer() {
         stopPlaybackWatchdog()
+        stopPlaybackRuntimeLoop()
         playerView.player = null
         player?.removeListener(playerListener)
         player?.release()
@@ -801,6 +876,23 @@ class NativePlaybackActivity : Activity() {
         playbackWatchdogLastRecoveryAtMs = 0L
     }
 
+    private fun startPlaybackRuntimeLoop() {
+        playbackRuntimeHandler.removeCallbacks(playbackRuntimeRunnable)
+        playbackRuntimeActive = true
+        syncSkipFlagsWithCurrentPosition()
+        playbackRuntimeHandler.postDelayed(
+            playbackRuntimeRunnable,
+            PLAYBACK_RUNTIME_INITIAL_DELAY_MS,
+        )
+    }
+
+    private fun stopPlaybackRuntimeLoop() {
+        playbackRuntimeActive = false
+        playbackRuntimeHandler.removeCallbacks(playbackRuntimeRunnable)
+        introSkipApplied = false
+        outroSkipApplied = false
+    }
+
     private fun resetPlaybackWatchdogProgress(positionMs: Long) {
         markPlaybackWatchdogActivity(positionMs)
         playbackWatchdogRecoveries = 0
@@ -810,6 +902,86 @@ class NativePlaybackActivity : Activity() {
     private fun markPlaybackWatchdogActivity(positionMs: Long) {
         playbackWatchdogLastPositionMs = positionMs.coerceAtLeast(0L)
         playbackWatchdogLastProgressAtMs = System.currentTimeMillis()
+        markPlaybackWatchdogBufferActivity(player)
+    }
+
+    private fun markPlaybackWatchdogBufferActivity(currentPlayer: Player?) {
+        val resolvedPlayer = currentPlayer ?: return
+        playbackWatchdogLastBufferedPositionMs =
+            resolvedPlayer.bufferedPosition.coerceAtLeast(resolvedPlayer.currentPosition)
+        playbackWatchdogLastBufferedPercentage =
+            resolvedPlayer.bufferedPercentage.coerceIn(0, 100)
+        playbackWatchdogLastBufferActivityAtMs = System.currentTimeMillis()
+    }
+
+    private fun maybeApplyAutoSkip() {
+        val currentPlayer = player ?: return
+        if (!currentPlayer.playWhenReady ||
+            currentPlayer.playbackState != Player.STATE_READY ||
+            subtitleSearchActive
+        ) {
+            return
+        }
+        val skipPreference = loadSeriesSkipPreference()
+        if (skipPreference?.optBoolean("enabled", false) != true) {
+            introSkipApplied = true
+            outroSkipApplied = true
+            return
+        }
+
+        val positionMs = currentPlayer.currentPosition.coerceAtLeast(0L)
+        val durationMs = currentPlayer.duration.takeIf { it > 0L } ?: 0L
+        val introDurationMs = skipPreference.optLong("introDurationMs", 0L)
+            .coerceAtLeast(0L)
+        if (!introSkipApplied && introDurationMs > 0L) {
+            if (positionMs >= introDurationMs) {
+                introSkipApplied = true
+            } else {
+                introSkipApplied = true
+                currentPlayer.seekTo(introDurationMs)
+                resetPlaybackWatchdogProgress(introDurationMs)
+                showToast("已自动跳过片头")
+                return
+            }
+        }
+
+        val outroDurationMs = skipPreference.optLong("outroDurationMs", 0L)
+            .coerceAtLeast(0L)
+        if (outroSkipApplied || outroDurationMs <= 0L || durationMs <= 0L) {
+            return
+        }
+        val triggerPositionMs = durationMs - outroDurationMs
+        if (triggerPositionMs <= 0L || positionMs < triggerPositionMs) {
+            return
+        }
+
+        outroSkipApplied = true
+        val seekTargetMs = (durationMs - OUTRO_SKIP_END_MARGIN_MS).coerceAtLeast(0L)
+        currentPlayer.seekTo(seekTargetMs)
+        resetPlaybackWatchdogProgress(seekTargetMs)
+        showToast("已自动跳过片尾")
+    }
+
+    private fun syncSkipFlagsWithCurrentPosition() {
+        val currentPlayer = player ?: return
+        val skipPreference = loadSeriesSkipPreference()
+        if (skipPreference?.optBoolean("enabled", false) != true) {
+            introSkipApplied = true
+            outroSkipApplied = true
+            return
+        }
+
+        val positionMs = currentPlayer.currentPosition.coerceAtLeast(0L)
+        val durationMs = currentPlayer.duration.takeIf { it > 0L } ?: 0L
+        val introDurationMs = skipPreference.optLong("introDurationMs", 0L)
+        introSkipApplied = introDurationMs <= 0L || positionMs >= introDurationMs
+
+        val outroDurationMs = skipPreference.optLong("outroDurationMs", 0L)
+        outroSkipApplied = if (durationMs <= 0L || outroDurationMs <= 0L) {
+            false
+        } else {
+            durationMs - positionMs <= outroDurationMs
+        }
     }
 
     private fun evaluatePlaybackWatchdog(): Boolean {
@@ -828,6 +1000,18 @@ class NativePlaybackActivity : Activity() {
 
         val nowMs = System.currentTimeMillis()
         val positionMs = currentPlayer.currentPosition.coerceAtLeast(0L)
+        val bufferedPositionMs = currentPlayer.bufferedPosition.coerceAtLeast(positionMs)
+        val bufferedPercentage = currentPlayer.bufferedPercentage.coerceIn(0, 100)
+        val hasBufferedMore =
+            bufferedPositionMs > playbackWatchdogLastBufferedPositionMs +
+                PLAYBACK_WATCHDOG_BUFFER_ADVANCE_THRESHOLD_MS ||
+                bufferedPercentage > playbackWatchdogLastBufferedPercentage
+        if (hasBufferedMore) {
+            playbackWatchdogLastBufferedPositionMs = bufferedPositionMs
+            playbackWatchdogLastBufferedPercentage = bufferedPercentage
+            playbackWatchdogLastBufferActivityAtMs = nowMs
+        }
+
         val hasProgressed = positionMs > playbackWatchdogLastPositionMs + 500L ||
             positionMs < playbackWatchdogLastPositionMs - 1_000L
         if (hasProgressed) {
@@ -836,9 +1020,10 @@ class NativePlaybackActivity : Activity() {
         }
 
         val stalledForMs = nowMs - playbackWatchdogLastProgressAtMs
+        val bufferInactiveForMs = nowMs - playbackWatchdogLastBufferActivityAtMs
         val bufferingStalled =
             currentPlayer.playbackState == Player.STATE_BUFFERING &&
-                stalledForMs >= PLAYBACK_WATCHDOG_BUFFERING_TIMEOUT_MS
+                bufferInactiveForMs >= PLAYBACK_WATCHDOG_BUFFERING_TIMEOUT_MS
         val progressStalled =
             currentPlayer.isPlaying &&
                 stalledForMs >= PLAYBACK_WATCHDOG_PROGRESS_TIMEOUT_MS
@@ -922,6 +1107,7 @@ class NativePlaybackActivity : Activity() {
             "seekTo" -> {
                 val currentPlayer = player ?: return
                 currentPlayer.seekTo((positionMs ?: 0L).coerceAtLeast(0L))
+                syncSkipFlagsWithCurrentPosition()
                 syncPlaybackSystemSession()
             }
             "interruptionResume" -> setPlayWhenReady(true)
@@ -934,11 +1120,32 @@ class NativePlaybackActivity : Activity() {
         showFeedback: Boolean = true,
     ): Boolean {
         val queue = episodeQueue ?: return false
-        val nextQueue = if (forward) {
-            queue.moveToNext()
-        } else {
-            queue.moveToPrevious()
-        } ?: return false
+        val nextIndex = if (forward) queue.currentIndex + 1 else queue.currentIndex - 1
+        return switchToEpisodeQueueIndex(
+            index = nextIndex,
+            reason = reason,
+            feedbackMessage = if (showFeedback) {
+                if (forward) {
+                    "已切到下一集"
+                } else {
+                    "已切到上一集"
+                }
+            } else {
+                null
+            },
+        )
+    }
+
+    private fun switchToEpisodeQueueIndex(
+        index: Int,
+        reason: String,
+        feedbackMessage: String?,
+    ): Boolean {
+        val queue = episodeQueue ?: return false
+        if (index !in queue.entries.indices || index == queue.currentIndex) {
+            return false
+        }
+        val nextQueue = queue.copy(currentIndex = index)
         val nextEntry = nextQueue.currentEntry() ?: return false
         if (nextEntry.url().isBlank()) {
             return false
@@ -968,17 +1175,11 @@ class NativePlaybackActivity : Activity() {
         bindControllerChrome()
         initializePlayer()
         syncPlaybackSystemSession()
-        if (showFeedback) {
-            showToast(
-                if (forward) {
-                    "已切到下一集"
-                } else {
-                    "已切到上一集"
-                },
-            )
+        if (!feedbackMessage.isNullOrBlank()) {
+            showToast(feedbackMessage)
         }
         logPlayback(
-            "native.queue.advance direction=${if (forward) "next" else "previous"} " +
+            "native.queue.switch " +
                 "reason=$reason index=${nextQueue.currentIndex}",
         )
         return true
@@ -1139,6 +1340,9 @@ class NativePlaybackActivity : Activity() {
             "${getString(R.string.native_playback_speed)} · " +
                 formatPlaybackSpeedLabel(currentPlayer?.playbackParameters?.speed ?: 1f) to
                 { openPlaybackSpeedPicker() }
+        actions +=
+            "本剧跳过片头片尾 · ${formatSeriesSkipPreferenceSummary()}" to
+                { openSeriesSkipPreferenceDialog() }
         actions += getString(R.string.native_audio_track) to { openAudioTrackSelectionDialog() }
         actions += getString(R.string.native_subtitle_track) to { openSubtitleTrackSelectionDialog() }
         actions += getString(R.string.native_online_subtitle_search) to { openOnlineSubtitleSearch() }
@@ -1146,6 +1350,9 @@ class NativePlaybackActivity : Activity() {
         actions +=
             "${getString(R.string.native_subtitle_delay)} · ${formatSubtitleDelayLabel(subtitleDelayMs)}" to
                 { openSubtitleDelayPicker() }
+        if ((episodeQueue?.entries?.size ?: 0) > 1) {
+            actions += "选择剧集" to { openEpisodeSelectionDialog() }
+        }
 
         playbackSettingsDialog = AlertDialog.Builder(this)
             .setTitle(getString(R.string.native_playback_settings))
@@ -1162,6 +1369,228 @@ class NativePlaybackActivity : Activity() {
                 }
                 show()
             }
+    }
+
+    private fun openEpisodeSelectionDialog(): Boolean {
+        if (subtitleSearchActive) {
+            return false
+        }
+        val queue = episodeQueue ?: return false
+        if (queue.entries.size <= 1) {
+            return false
+        }
+        if (episodeSelectionDialog?.isShowing == true) {
+            return true
+        }
+
+        val labels = queue.entries
+            .mapIndexed { index, entry -> formatEpisodeSelectionLabel(index, entry) }
+            .toTypedArray()
+        var switchedEpisode = false
+        episodeSelectionDialog = AlertDialog.Builder(this)
+            .setTitle("选择剧集")
+            .setSingleChoiceItems(labels, queue.currentIndex) { dialog, which ->
+                if (which == queue.currentIndex) {
+                    dialog.dismiss()
+                    return@setSingleChoiceItems
+                }
+                switchedEpisode = true
+                dialog.dismiss()
+                playerView.post {
+                    switchToEpisodeQueueIndex(
+                        index = which,
+                        reason = "episode-picker",
+                        feedbackMessage = "已切到 ${labels[which]}",
+                    )
+                }
+            }
+            .setNegativeButton("关闭", null)
+            .create()
+            .apply {
+                setOnDismissListener {
+                    if (episodeSelectionDialog === this) {
+                        episodeSelectionDialog = null
+                    }
+                    if (!switchedEpisode) {
+                        restoreControllerFocusIfNeeded(ControllerFocusTarget.SETTINGS)
+                    }
+                }
+                show()
+            }
+        return true
+    }
+
+    private fun formatEpisodeSelectionLabel(
+        index: Int,
+        entry: NativeEpisodeQueueEntry,
+    ): String {
+        val targetObject = try {
+            JSONObject(entry.playbackTargetJson)
+        } catch (_: Throwable) {
+            JSONObject()
+        }
+        val title = entry.title().ifBlank { "第 ${index + 1} 集" }
+        val seasonNumber = targetObject.optInt("seasonNumber", 0)
+        val episodeNumber = targetObject.optInt("episodeNumber", 0)
+        if (seasonNumber > 0 && episodeNumber > 0) {
+            return "S${seasonNumber.toString().padStart(2, '0')}" +
+                "E${episodeNumber.toString().padStart(2, '0')} · $title"
+        }
+        if (episodeNumber > 0) {
+            return "第 $episodeNumber 集 · $title"
+        }
+        return title
+    }
+
+    private fun openSeriesSkipPreferenceDialog() {
+        if (seriesKey.isBlank()) {
+            showToast("当前内容没有可绑定的剧集信息")
+            restoreControllerFocusIfNeeded(ControllerFocusTarget.SETTINGS)
+            return
+        }
+        val currentPlayer = player
+        val durationMs = currentPlayer?.duration?.takeIf { it > 0L } ?: 0L
+        val positionMs = currentPlayer?.currentPosition?.coerceAtLeast(0L) ?: 0L
+        val preference = loadSeriesSkipPreference()
+        val enabled = preference?.optBoolean("enabled", false) == true
+        val introDurationMs = preference?.optLong("introDurationMs", 0L)?.coerceAtLeast(0L) ?: 0L
+        val outroDurationMs = preference?.optLong("outroDurationMs", 0L)?.coerceAtLeast(0L) ?: 0L
+        val canCaptureOutro = durationMs > 0L && positionMs > 0L && positionMs < durationMs
+        val actions = mutableListOf<Pair<String, () -> Unit>>()
+
+        actions +=
+            "自动跳过 · ${if (enabled) "已开启" else "已关闭"}" to {
+                saveSeriesSkipPreference(
+                    enabled = !enabled,
+                    introDurationMs = introDurationMs,
+                    outroDurationMs = outroDurationMs,
+                )
+                showToast(if (!enabled) "已开启自动跳过" else "已关闭自动跳过")
+            }
+        actions +=
+            "片头结束位置 · ${
+                if (introDurationMs > 0L) {
+                    formatClockDuration(introDurationMs)
+                } else {
+                    "未设置"
+                }
+            } · 用当前位置 ${formatClockDuration(positionMs)}" to {
+                saveSeriesSkipPreference(
+                    enabled = true,
+                    introDurationMs = positionMs,
+                    outroDurationMs = outroDurationMs,
+                )
+                showToast("已设置片头结束位置")
+            }
+        actions +=
+            "片尾提前跳过 · ${
+                if (outroDurationMs > 0L) {
+                    "距结尾 ${formatClockDuration(outroDurationMs)}"
+                } else {
+                    "未设置"
+                }
+            } · 用当前位置 ${formatClockDuration(positionMs)}" to {
+                if (!canCaptureOutro) {
+                    showToast("播放一小段后再设置片尾位置")
+                } else {
+                    saveSeriesSkipPreference(
+                        enabled = true,
+                        introDurationMs = introDurationMs,
+                        outroDurationMs = durationMs - positionMs,
+                    )
+                    showToast("已设置片尾跳过位置")
+                }
+            }
+        actions += "清空本剧跳过规则" to {
+            saveSeriesSkipPreference(
+                enabled = false,
+                introDurationMs = 0L,
+                outroDurationMs = 0L,
+            )
+            showToast("已清空本剧跳过规则")
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("本剧跳过片头片尾")
+            .setItems(actions.map { it.first }.toTypedArray()) { pickerDialog, which ->
+                pickerDialog.dismiss()
+                playerView.post {
+                    actions[which].second.invoke()
+                    restoreControllerFocusIfNeeded(ControllerFocusTarget.SETTINGS)
+                }
+            }
+            .setNegativeButton("关闭", null)
+            .create()
+        showTransientDialog(dialog, ControllerFocusTarget.SETTINGS)
+    }
+
+    private fun formatSeriesSkipPreferenceSummary(): String {
+        val preference = loadSeriesSkipPreference() ?: return "未设置"
+        val enabled = preference.optBoolean("enabled", false)
+        val introDurationMs = preference.optLong("introDurationMs", 0L)
+        val outroDurationMs = preference.optLong("outroDurationMs", 0L)
+        val parts = mutableListOf(if (enabled) "已开启" else "已关闭")
+        if (introDurationMs > 0L) {
+            parts += "片头 ${formatClockDuration(introDurationMs)}"
+        }
+        if (outroDurationMs > 0L) {
+            parts += "片尾 ${formatClockDuration(outroDurationMs)}"
+        }
+        if (parts.size == 1 && !enabled) {
+            return "未设置"
+        }
+        return parts.joinToString(" / ")
+    }
+
+    private fun saveSeriesSkipPreference(
+        enabled: Boolean,
+        introDurationMs: Long,
+        outroDurationMs: Long,
+    ) {
+        val normalizedSeriesKey = seriesKey.trim()
+        if (normalizedSeriesKey.isEmpty()) {
+            return
+        }
+        val snapshot = loadPlaybackSnapshot()
+        val items = snapshot.optJSONObject("items") ?: JSONObject()
+        val series = snapshot.optJSONObject("series") ?: JSONObject()
+        val skipPreferences = snapshot.optJSONObject("skipPreferences") ?: JSONObject()
+        skipPreferences.put(
+            normalizedSeriesKey,
+            JSONObject().apply {
+                put("seriesKey", normalizedSeriesKey)
+                put("updatedAt", isoNow())
+                put("seriesTitle", buildSeriesSkipPreferenceTitle())
+                put("enabled", enabled)
+                put("introDurationMs", introDurationMs.coerceAtLeast(0L))
+                put("outroDurationMs", outroDurationMs.coerceAtLeast(0L))
+            },
+        )
+
+        sharedPreferences.edit()
+            .putString(
+                PLAYBACK_MEMORY_STORAGE_KEY,
+                JSONObject().apply {
+                    put("items", items)
+                    put("series", series)
+                    put("skipPreferences", skipPreferences)
+                }.toString(),
+            )
+            .apply()
+        updateProgressMarkers()
+        syncSkipFlagsWithCurrentPosition()
+        maybeApplyAutoSkip()
+    }
+
+    private fun buildSeriesSkipPreferenceTitle(): String {
+        val targetObject = decodePlaybackTargetObject()
+        return targetObject.optString("seriesTitle").trim().ifBlank {
+            if (targetObject.optString("itemType").trim().lowercase() == "series") {
+                targetObject.optString("title").trim()
+            } else {
+                buildPlaybackPagePrimaryTitle()
+            }
+        }
     }
 
     private fun openPlaybackSpeedPicker() {
@@ -1871,6 +2300,7 @@ class NativePlaybackActivity : Activity() {
         }
         currentPlayer.seekTo(nextPositionMs)
         resetPlaybackWatchdogProgress(nextPositionMs)
+        syncSkipFlagsWithCurrentPosition()
         showControllerForRemoteFocus(ControllerFocusTarget.PLAYER)
         return true
     }
@@ -1888,6 +2318,9 @@ class NativePlaybackActivity : Activity() {
             resetPlaybackWatchdogProgress(currentPlayer.currentPosition)
         }
         currentPlayer.playWhenReady = playWhenReady
+        if (playWhenReady) {
+            playerView.post { maybeApplyAutoSkip() }
+        }
         return true
     }
 
@@ -2415,11 +2848,28 @@ class NativePlaybackActivity : Activity() {
         private const val SHARED_PREFERENCES_NAME = "FlutterSharedPreferences"
         private const val PLAYBACK_MEMORY_STORAGE_KEY = "flutter.starflow.playback.memory.v1"
         private const val RECENT_ENTRY_LIMIT = 20
+        private const val NATIVE_HTTP_CONNECT_TIMEOUT_MS = 15_000
+        private const val NATIVE_HTTP_READ_TIMEOUT_MS = 30_000
+        private const val NATIVE_LOAD_ERROR_RETRY_COUNT = 8
+        private const val NATIVE_TV_MIN_BUFFER_MS = 60_000
+        private const val NATIVE_TV_MAX_BUFFER_MS = 180_000
+        private const val NATIVE_TV_BUFFER_FOR_PLAYBACK_MS = 2_500
+        private const val NATIVE_TV_BUFFER_FOR_REBUFFER_MS = 10_000
+        private const val NATIVE_TV_TARGET_BUFFER_BYTES = 160 * 1024 * 1024
+        private const val NATIVE_PHONE_MIN_BUFFER_MS = 50_000
+        private const val NATIVE_PHONE_MAX_BUFFER_MS = 90_000
+        private const val NATIVE_PHONE_BUFFER_FOR_PLAYBACK_MS = 2_500
+        private const val NATIVE_PHONE_BUFFER_FOR_REBUFFER_MS = 5_000
+        private const val NATIVE_PHONE_TARGET_BUFFER_BYTES = C.LENGTH_UNSET
         private const val PLAYBACK_WATCHDOG_INTERVAL_MS = 5_000L
         private const val PLAYBACK_WATCHDOG_PROGRESS_TIMEOUT_MS = 15_000L
-        private const val PLAYBACK_WATCHDOG_BUFFERING_TIMEOUT_MS = 20_000L
+        private const val PLAYBACK_WATCHDOG_BUFFERING_TIMEOUT_MS = 45_000L
+        private const val PLAYBACK_WATCHDOG_BUFFER_ADVANCE_THRESHOLD_MS = 1_000L
         private const val PLAYBACK_WATCHDOG_RECOVERY_COOLDOWN_MS = 10_000L
         private const val PLAYBACK_WATCHDOG_SOFT_RECOVERY_LIMIT = 2
+        private const val PLAYBACK_RUNTIME_INITIAL_DELAY_MS = 500L
+        private const val PLAYBACK_RUNTIME_INTERVAL_MS = 1_000L
+        private const val OUTRO_SKIP_END_MARGIN_MS = 400L
         private val SUBTITLE_DELAY_OPTIONS_MS =
             listOf(-5_000L, -2_000L, -1_000L, -500L, 0L, 500L, 1_000L, 2_000L, 5_000L)
         private val PLAYBACK_SPEED_OPTIONS =

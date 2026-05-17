@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/bootstrap/application/bootstrap_controller.dart';
+import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -22,6 +23,8 @@ void main() {
     expect(state.isComplete, isTrue);
     expect(state.progress, 1);
     expect(state.currentStep, 3);
+    expect(container.read(homeMetadataAutoRefreshRevisionProvider), 2);
+    expect(container.read(homeExplicitRefreshRevisionProvider), 1);
   });
 }
 

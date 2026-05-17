@@ -44,4 +44,54 @@ void main() {
 
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'search-query');
   });
+
+  testWidgets('detail search route push requests TV focus on query input',
+      (tester) async {
+    SharedPreferences.setMockInitialValues(const {});
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(
+            const AppSettings(
+              mediaSources: <MediaSourceConfig>[],
+              searchProviders: <SearchProviderConfig>[],
+              doubanAccount: DoubanAccountConfig(enabled: false),
+              homeModules: <HomeModuleConfig>[],
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) {
+              return Scaffold(
+                body: Center(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.of(context).push<void>(
+                        MaterialPageRoute(
+                          builder: (_) => const SearchPage(
+                            initialQuery: '测试电影',
+                            showBackButton: true,
+                          ),
+                        ),
+                      );
+                    },
+                    child: const Text('Open'),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.pump();
+
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'search-query');
+  });
 }

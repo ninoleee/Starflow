@@ -706,7 +706,6 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                       index++)
                                     _SearchHistoryChip(
                                       label: _recentQueries[index],
-                                      autofocus: index == 0,
                                       focusId: 'search:recent:$index',
                                       onPressed: () => _runRecentQuery(
                                           _recentQueries[index]),
@@ -737,8 +736,6 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                               isTelevision: true,
                                               focusId:
                                                   'search:target:${targets[index].id}',
-                                              autofocus: index == 0 &&
-                                                  _recentQueries.isEmpty,
                                               onPressed: () {
                                                 _toggleTargetSelection(
                                                   targets[index],
@@ -848,7 +845,6 @@ class _SearchPageState extends ConsumerState<SearchPage>
                             return _SearchResultCard(
                               result: result,
                               focusId: 'search:result:${result.id}',
-                              autofocus: index == 0,
                               isSaving: _savingResultIds.contains(result.id),
                               isFavorite: _favoriteResultKeys.contains(
                                 searchResultFavoriteKey(result),
@@ -901,11 +897,19 @@ class _SearchPageState extends ConsumerState<SearchPage>
     _initialTelevisionFocusScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initialTelevisionFocusScheduled = false;
-      if (!mounted || !isPageVisible) {
+      if (!mounted) {
         return;
       }
       final isTelevision = ref.read(isTelevisionProvider).value ?? false;
       if (!isTelevision) {
+        return;
+      }
+      if (!_canRequestInitialTelevisionFocus()) {
+        if (remainingAttempts > 0) {
+          _scheduleInitialTelevisionFocus(
+            remainingAttempts: remainingAttempts - 1,
+          );
+        }
         return;
       }
       if (!_queryFocusNode.canRequestFocus) {
@@ -917,8 +921,14 @@ class _SearchPageState extends ConsumerState<SearchPage>
         return;
       }
       _initialTelevisionFocusRequested = true;
-      _queryFocusNode.requestFocus();
+      FocusScope.of(context).requestFocus(_queryFocusNode);
     });
+  }
+
+  bool _canRequestInitialTelevisionFocus() {
+    final route = ModalRoute.of(context);
+    final routeIsCurrent = route == null || route.isCurrent;
+    return routeIsCurrent && TickerMode.valuesOf(context).enabled;
   }
 
   Future<void> _openTelevisionQueryDialog() async {
@@ -1274,7 +1284,6 @@ class _SearchResultCard extends ConsumerWidget {
   const _SearchResultCard({
     required this.result,
     required this.focusId,
-    required this.autofocus,
     required this.isSaving,
     required this.isFavorite,
     required this.showSaveAction,
@@ -1284,7 +1293,6 @@ class _SearchResultCard extends ConsumerWidget {
 
   final SearchResult result;
   final String focusId;
-  final bool autofocus;
   final bool isSaving;
   final bool isFavorite;
   final bool showSaveAction;
@@ -1446,7 +1454,6 @@ class _SearchResultCard extends ConsumerWidget {
           isTelevision: true,
         ),
         focusId: focusId,
-        autofocus: autofocus,
         borderRadius: BorderRadius.circular(18),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
@@ -1801,13 +1808,11 @@ class _SearchHistoryChip extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.focusId,
-    this.autofocus = false,
   });
 
   final String label;
   final VoidCallback onPressed;
   final String? focusId;
-  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
@@ -1815,7 +1820,6 @@ class _SearchHistoryChip extends StatelessWidget {
       label: label,
       onPressed: onPressed,
       focusId: focusId,
-      autofocus: autofocus,
       selected: false,
     );
   }
@@ -1828,7 +1832,6 @@ class _SearchTargetChip extends StatelessWidget {
     required this.isTelevision,
     required this.onPressed,
     this.focusId,
-    this.autofocus = false,
   });
 
   final _SearchTarget target;
@@ -1836,7 +1839,6 @@ class _SearchTargetChip extends StatelessWidget {
   final bool isTelevision;
   final VoidCallback onPressed;
   final String? focusId;
-  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
@@ -1845,7 +1847,6 @@ class _SearchTargetChip extends StatelessWidget {
       selected: selected,
       onPressed: onPressed,
       focusId: focusId,
-      autofocus: autofocus,
     );
   }
 }
