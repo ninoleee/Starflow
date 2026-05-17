@@ -1519,9 +1519,7 @@ class NativePlaybackActivity : Activity() {
         )
         val focusableControlIds = if (isTelevisionDevice) {
             intArrayOf(
-                Media3UiR.id.exo_rew,
                 Media3UiR.id.exo_play_pause,
-                Media3UiR.id.exo_ffwd,
                 Media3UiR.id.exo_subtitle,
                 R.id.native_audio_track_button,
                 R.id.native_playback_settings,
@@ -1542,13 +1540,15 @@ class NativePlaybackActivity : Activity() {
         }
         configureFocusability(focusableControlIds)
 
-        configureHorizontalFocusChain(
-            intArrayOf(
-                Media3UiR.id.exo_rew,
-                Media3UiR.id.exo_play_pause,
-                Media3UiR.id.exo_ffwd,
-            ),
-        )
+        if (!isTelevisionDevice) {
+            configureHorizontalFocusChain(
+                intArrayOf(
+                    Media3UiR.id.exo_rew,
+                    Media3UiR.id.exo_play_pause,
+                    Media3UiR.id.exo_ffwd,
+                ),
+            )
+        }
         val settingsControlIds = if (isTelevisionDevice) {
             intArrayOf(
                 Media3UiR.id.exo_subtitle,
@@ -1572,16 +1572,8 @@ class NativePlaybackActivity : Activity() {
         }
         if (isTelevisionDevice) {
             configureVerticalFocusLink(
-                Media3UiR.id.exo_rew,
-                downId = Media3UiR.id.exo_subtitle,
-            )
-            configureVerticalFocusLink(
                 Media3UiR.id.exo_play_pause,
                 downId = R.id.native_audio_track_button,
-            )
-            configureVerticalFocusLink(
-                Media3UiR.id.exo_ffwd,
-                downId = R.id.native_playback_settings,
             )
             configureVerticalFocusLink(
                 Media3UiR.id.exo_subtitle,
@@ -1593,7 +1585,7 @@ class NativePlaybackActivity : Activity() {
             )
             configureVerticalFocusLink(
                 R.id.native_playback_settings,
-                upId = Media3UiR.id.exo_ffwd,
+                upId = Media3UiR.id.exo_play_pause,
             )
             playerView.requestFocus()
         }
@@ -1778,8 +1770,6 @@ class NativePlaybackActivity : Activity() {
                 if (isTelevisionDevice) {
                     intArrayOf(
                         Media3UiR.id.exo_play_pause,
-                        Media3UiR.id.exo_ffwd,
-                        Media3UiR.id.exo_rew,
                         R.id.native_playback_settings,
                         Media3UiR.id.exo_subtitle,
                     )

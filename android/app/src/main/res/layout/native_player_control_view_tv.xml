@@ -75,13 +75,9 @@
         android:layoutDirection="ltr"
         android:padding="20dp">
 
-        <include layout="@layout/exo_player_control_rewind_button" />
-
         <ImageButton
             android:id="@id/exo_play_pause"
             style="@style/ExoStyledControls.Button.Center.PlayPause" />
-
-        <include layout="@layout/exo_player_control_ffwd_button" />
     </LinearLayout>
 
     <androidx.media3.ui.DefaultTimeBar
