@@ -164,6 +164,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   int _pendingSearchFilteredCount = 0;
   bool _initialTelevisionFocusScheduled = false;
   bool _initialTelevisionFocusRequested = false;
+  bool _televisionFocusRecoveryScheduled = false;
 
   @override
   void initState() {
@@ -214,6 +215,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   void onPageBecameInactive() {
     _initialTelevisionFocusScheduled = false;
     _initialTelevisionFocusRequested = false;
+    _televisionFocusRecoveryScheduled = false;
     _cancelSearchTasks();
   }
 
@@ -430,6 +432,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
           ? errors.join('\n')
           : null;
     });
+    _scheduleTelevisionFocusRecoveryIfLost();
   }
 
   void _scheduleSearchUiCommit({
@@ -929,6 +932,46 @@ class _SearchPageState extends ConsumerState<SearchPage>
     final route = ModalRoute.of(context);
     final routeIsCurrent = route == null || route.isCurrent;
     return routeIsCurrent && TickerMode.valuesOf(context).enabled;
+  }
+
+  void _scheduleTelevisionFocusRecoveryIfLost() {
+    if (_televisionFocusRecoveryScheduled || !mounted) {
+      return;
+    }
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
+    if (!isTelevision) {
+      return;
+    }
+    _televisionFocusRecoveryScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _televisionFocusRecoveryScheduled = false;
+      if (!mounted ||
+          !_canRequestInitialTelevisionFocus() ||
+          _hasFocusWithinSearchPage() ||
+          !_queryFocusNode.canRequestFocus) {
+        return;
+      }
+      FocusScope.of(context).requestFocus(_queryFocusNode);
+    });
+  }
+
+  bool _hasFocusWithinSearchPage() {
+    final focusedContext = FocusManager.instance.primaryFocus?.context;
+    if (focusedContext == null) {
+      return false;
+    }
+    if (identical(focusedContext, context)) {
+      return true;
+    }
+    var found = false;
+    focusedContext.visitAncestorElements((ancestor) {
+      if (identical(ancestor, context)) {
+        found = true;
+        return false;
+      }
+      return true;
+    });
+    return found;
   }
 
   Future<void> _openTelevisionQueryDialog() async {
