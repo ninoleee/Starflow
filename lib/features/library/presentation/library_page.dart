@@ -13,6 +13,7 @@ import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_rating_prefetch_coordinator.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/library/application/emby_refresh_progress.dart';
 import 'package:starflow/features/library/application/library_cached_items.dart';
 import 'package:starflow/features/library/application/library_refresh_revision.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
@@ -58,6 +59,38 @@ extension LibraryFilterX on LibraryFilter {
         return MediaSourceKind.quark;
     }
   }
+}
+
+List<LibraryFilter> visibleLibraryFiltersForSources(
+  Iterable<MediaSourceConfig> mediaSources,
+) {
+  final sources = mediaSources.toList(growable: false);
+  final filters = <LibraryFilter>[LibraryFilter.all];
+  if (sources.any(_showsEmbyLibraryFilter)) {
+    filters.add(LibraryFilter.emby);
+  }
+  if (sources.any(_showsWebDavLibraryFilter)) {
+    filters.add(LibraryFilter.nas);
+  }
+  if (sources.any(_showsQuarkLibraryFilter)) {
+    filters.add(LibraryFilter.quark);
+  }
+  return List<LibraryFilter>.unmodifiable(filters);
+}
+
+bool _showsEmbyLibraryFilter(MediaSourceConfig source) {
+  return source.kind == MediaSourceKind.emby &&
+      source.canAppearInLibraryNavigation;
+}
+
+bool _showsWebDavLibraryFilter(MediaSourceConfig source) {
+  return source.kind == MediaSourceKind.nas &&
+      source.canAppearInLibraryNavigation;
+}
+
+bool _showsQuarkLibraryFilter(MediaSourceConfig source) {
+  return source.kind == MediaSourceKind.quark &&
+      source.canAppearInLibraryNavigation;
 }
 
 enum _LibraryRefreshSourceKind {
@@ -320,9 +353,24 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   @override
   Widget build(BuildContext context) {
     final mediaSources = ref.watch(libraryMediaSourcesSettingsSliceProvider);
+    final availableFilters = visibleLibraryFiltersForSources(mediaSources);
+    final activeFilter =
+        availableFilters.contains(_filter) ? _filter : LibraryFilter.all;
+    if (activeFilter != _filter) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _filter = activeFilter;
+          _currentPage = 0;
+          _cachedVisibleItemsByRequest.clear();
+        });
+      });
+    }
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final visiblePageRequest = LibraryVisiblePageRequest(
-      filter: _filter,
+      filter: activeFilter,
       page: _currentPage,
       pageSize: _gridPageSize,
     );
@@ -338,13 +386,17 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       fallbackValue: const AsyncLoading<LibraryVisiblePageItemsResult>(),
     );
     final collectionsAsync = resolveRetainedAsyncValue(
-      activeValue:
-          isPageVisible ? ref.watch(libraryCollectionsProvider(_filter)) : null,
-      cachedValue: _cachedCollectionsByFilter[_filter],
-      cacheValue: (value) => _cachedCollectionsByFilter[_filter] = value,
+      activeValue: isPageVisible
+          ? ref.watch(libraryCollectionsProvider(activeFilter))
+          : null,
+      cachedValue: _cachedCollectionsByFilter[activeFilter],
+      cacheValue: (value) => _cachedCollectionsByFilter[activeFilter] = value,
       fallbackValue: const AsyncLoading<List<MediaCollection>>(),
     );
-    final refreshScope = _currentRefreshScope(mediaSources);
+    final refreshScope = _currentRefreshScope(
+      mediaSources,
+      filter: activeFilter,
+    );
 
     return TvPageFocusScope(
       controller: _tvFocusMemoryController,
@@ -363,6 +415,8 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
                 context: context,
                 isTelevision: isTelevision,
                 mediaSources: mediaSources,
+                activeFilter: activeFilter,
+                availableFilters: availableFilters,
                 refreshScope: refreshScope,
                 collectionsAsync: collectionsAsync,
                 displayAsync: displayAsync,
@@ -386,6 +440,8 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     required BuildContext context,
     required bool isTelevision,
     required List<MediaSourceConfig> mediaSources,
+    required LibraryFilter activeFilter,
+    required List<LibraryFilter> availableFilters,
     required _LibraryRefreshScope? refreshScope,
     required AsyncValue<List<MediaCollection>> collectionsAsync,
     required AsyncValue<LibraryVisiblePageItemsResult> displayAsync,
@@ -394,6 +450,8 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       return _buildTelevisionScrollContent(
         context: context,
         mediaSources: mediaSources,
+        activeFilter: activeFilter,
+        availableFilters: availableFilters,
         refreshScope: refreshScope,
         collectionsAsync: collectionsAsync,
         displayAsync: displayAsync,
@@ -405,19 +463,31 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       padding: EdgeInsets.zero,
       children: [
         const SizedBox(height: kToolbarHeight),
-        _buildFilterChips(isTelevision: false),
+        _buildFilterChips(
+          isTelevision: false,
+          filters: availableFilters,
+          activeFilter: activeFilter,
+        ),
         const SizedBox(height: 18),
         if (refreshScope != null && refreshScope.sourceIds.isNotEmpty) ...[
           _buildRefreshActions(refreshScope, isTelevision: false),
           const SizedBox(height: 16),
         ],
-        _buildScrapeProgressSection(mediaSources),
+        _buildEmbyRefreshProgressSection(),
+        _buildScrapeProgressSection(
+          mediaSources,
+          filter: activeFilter,
+        ),
         _buildCollectionsSection(
           context: context,
           collectionsAsync: collectionsAsync,
           isTelevision: false,
         ),
-        _buildGrid(displayAsync, isTelevision: false),
+        _buildGrid(
+          displayAsync,
+          isTelevision: false,
+          filter: activeFilter,
+        ),
         appPageBottomSpacer(),
       ],
     );
@@ -426,6 +496,8 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   Widget _buildTelevisionScrollContent({
     required BuildContext context,
     required List<MediaSourceConfig> mediaSources,
+    required LibraryFilter activeFilter,
+    required List<LibraryFilter> availableFilters,
     required _LibraryRefreshScope? refreshScope,
     required AsyncValue<List<MediaCollection>> collectionsAsync,
     required AsyncValue<LibraryVisiblePageItemsResult> displayAsync,
@@ -435,7 +507,13 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       clipBehavior: Clip.none,
       slivers: [
         const SliverToBoxAdapter(child: SizedBox(height: kToolbarHeight)),
-        SliverToBoxAdapter(child: _buildFilterChips(isTelevision: true)),
+        SliverToBoxAdapter(
+          child: _buildFilterChips(
+            isTelevision: true,
+            filters: availableFilters,
+            activeFilter: activeFilter,
+          ),
+        ),
         const SliverToBoxAdapter(child: SizedBox(height: 18)),
         if (refreshScope != null && refreshScope.sourceIds.isNotEmpty) ...[
           SliverToBoxAdapter(
@@ -443,7 +521,13 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
           ),
           const SliverToBoxAdapter(child: SizedBox(height: 16)),
         ],
-        SliverToBoxAdapter(child: _buildScrapeProgressSection(mediaSources)),
+        SliverToBoxAdapter(child: _buildEmbyRefreshProgressSection()),
+        SliverToBoxAdapter(
+          child: _buildScrapeProgressSection(
+            mediaSources,
+            filter: activeFilter,
+          ),
+        ),
         SliverToBoxAdapter(
           child: _buildCollectionsSection(
             context: context,
@@ -451,7 +535,11 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
             isTelevision: true,
           ),
         ),
-        ..._buildGridSlivers(displayAsync, isTelevision: true),
+        ..._buildGridSlivers(
+          displayAsync,
+          isTelevision: true,
+          filter: activeFilter,
+        ),
         appPageBottomSliverSpacer(),
       ],
     );
@@ -471,19 +559,21 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
 
   Widget _buildFilterChips({
     required bool isTelevision,
+    required List<LibraryFilter> filters,
+    required LibraryFilter activeFilter,
   }) {
     return Wrap(
       spacing: 10,
       runSpacing: 10,
       children: [
-        for (var index = 0; index < LibraryFilter.values.length; index++)
+        for (var index = 0; index < filters.length; index++)
           _LibraryFilterChip(
-            filter: LibraryFilter.values[index],
-            selected: LibraryFilter.values[index] == _filter,
+            filter: filters[index],
+            selected: filters[index] == activeFilter,
             focusNode: index == 0 ? _topFilterFocusNode : null,
-            focusId: 'library:filter:${LibraryFilter.values[index].name}',
+            focusId: 'library:filter:${filters[index].name}',
             autofocus: index == 0 && isTelevision,
-            onPressed: () => _selectFilter(LibraryFilter.values[index]),
+            onPressed: () => _selectFilter(filters[index]),
           ),
       ],
     );
@@ -493,6 +583,12 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     _LibraryRefreshScope refreshScope, {
     required bool isTelevision,
   }) {
+    final embyRefreshProgress = ref.watch(embyRefreshProgressProvider);
+    final embyRefreshRunning =
+        refreshScope.kind == _LibraryRefreshSourceKind.emby &&
+            (embyRefreshProgress?.isRunning ?? false);
+    final incrementalRefreshRunning =
+        _isIncrementalRefreshing || embyRefreshRunning;
     return Align(
       alignment: Alignment.centerLeft,
       child: Wrap(
@@ -501,11 +597,11 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
         children: [
           if (isTelevision)
             TvAdaptiveButton(
-              label: _isIncrementalRefreshing
+              label: incrementalRefreshRunning
                   ? '更新中...'
                   : refreshScope.incrementalButtonLabel,
               icon: Icons.refresh_rounded,
-              onPressed: _isIncrementalRefreshing || _isForceRescanning
+              onPressed: incrementalRefreshRunning || _isForceRescanning
                   ? null
                   : () => _runIncrementalRefresh(refreshScope),
               variant: TvButtonVariant.outlined,
@@ -513,7 +609,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
             )
           else
             OutlinedButton.icon(
-              onPressed: _isIncrementalRefreshing || _isForceRescanning
+              onPressed: incrementalRefreshRunning || _isForceRescanning
                   ? null
                   : () => _runIncrementalRefresh(refreshScope),
               style: OutlinedButton.styleFrom(
@@ -524,7 +620,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
                 minimumSize: const Size(0, 40),
                 visualDensity: VisualDensity.compact,
               ),
-              icon: _isIncrementalRefreshing
+              icon: incrementalRefreshRunning
                   ? const SizedBox(
                       width: 16,
                       height: 16,
@@ -532,7 +628,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
                     )
                   : const Icon(Icons.refresh_rounded),
               label: Text(
-                _isIncrementalRefreshing
+                incrementalRefreshRunning
                     ? '更新中...'
                     : refreshScope.incrementalButtonLabel,
               ),
@@ -575,6 +671,26 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildEmbyRefreshProgressSection() {
+    if (!isPageVisible) {
+      return const SizedBox.shrink();
+    }
+    return Consumer(
+      builder: (context, ref, child) {
+        final progress = ref.watch(embyRefreshProgressProvider);
+        if (progress == null) {
+          return const SizedBox.shrink();
+        }
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: RepaintBoundary(
+            child: _EmbyRefreshProgressCard(progress: progress),
+          ),
+        );
+      },
     );
   }
 
@@ -639,6 +755,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   Widget _buildGrid(
     AsyncValue<LibraryVisiblePageItemsResult> displayAsync, {
     required bool isTelevision,
+    required LibraryFilter filter,
   }) {
     return displayAsync.when(
       data: (pageItems) {
@@ -653,7 +770,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
           onItemContextAction: (item) => _handleItemContextAction(item),
           emptyMessage: '无',
           pageSize: _gridPageSize,
-          header: _buildGridHeader(context),
+          header: _buildGridHeader(context, filter: filter),
         );
       },
       loading: () => const Center(
@@ -666,6 +783,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   List<Widget> _buildGridSlivers(
     AsyncValue<LibraryVisiblePageItemsResult> displayAsync, {
     required bool isTelevision,
+    required LibraryFilter filter,
   }) {
     return displayAsync.when<List<Widget>>(
       data: (pageItems) {
@@ -681,7 +799,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
             onItemContextAction: (item) => _handleItemContextAction(item),
             emptyMessage: '无',
             pageSize: _gridPageSize,
-            header: _buildGridHeader(context),
+            header: _buildGridHeader(context, filter: filter),
           ),
         ];
       },
@@ -719,9 +837,12 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     }
   }
 
-  Widget _buildGridHeader(BuildContext context) {
+  Widget _buildGridHeader(
+    BuildContext context, {
+    required LibraryFilter filter,
+  }) {
     return Text(
-      _filter == LibraryFilter.all ? '全部内容' : '${_filter.label} 内容',
+      filter == LibraryFilter.all ? '全部内容' : '${filter.label} 内容',
       style: Theme.of(context).textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w800,
             color: Colors.white,
@@ -741,9 +862,10 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   }
 
   _LibraryRefreshScope? _currentRefreshScope(
-    List<MediaSourceConfig> mediaSources,
-  ) {
-    switch (_filter) {
+    List<MediaSourceConfig> mediaSources, {
+    required LibraryFilter filter,
+  }) {
+    switch (filter) {
       case LibraryFilter.all:
         final sourceIds = _refreshableSourceIdsForIndexedSources(mediaSources);
         if (sourceIds.isEmpty) {
@@ -829,9 +951,10 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
 
   List<WebDavScrapeProgress> _visibleScrapeProgress(
     Iterable<WebDavScrapeProgress> progressEntries,
-    List<MediaSourceConfig> mediaSources,
-  ) {
-    final enabledVisibleSourceIds = switch (_filter) {
+    List<MediaSourceConfig> mediaSources, {
+    required LibraryFilter filter,
+  }) {
+    final enabledVisibleSourceIds = switch (filter) {
       LibraryFilter.all =>
         _refreshableSourceIdsForIndexedSources(mediaSources).toSet(),
       LibraryFilter.nas => _refreshableSourceIds(
@@ -855,8 +978,9 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   }
 
   Widget _buildScrapeProgressSection(
-    List<MediaSourceConfig> mediaSources,
-  ) {
+    List<MediaSourceConfig> mediaSources, {
+    required LibraryFilter filter,
+  }) {
     if (!isPageVisible) {
       return const SizedBox.shrink();
     }
@@ -866,6 +990,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
         final visibleProgress = _visibleScrapeProgress(
           scrapeProgress.values,
           mediaSources,
+          filter: filter,
         );
         if (visibleProgress.isEmpty) {
           return const SizedBox.shrink();
@@ -981,6 +1106,12 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   }
 
   Future<void> _runIncrementalRefresh(_LibraryRefreshScope scope) async {
+    if (scope.kind == _LibraryRefreshSourceKind.emby) {
+      await ref
+          .read(mediaRefreshCoordinatorProvider)
+          .startBackgroundEmbyRefresh(sourceIds: scope.sourceIds);
+      return;
+    }
     final refreshIntent = ++_refreshIntentSerial;
     setState(() {
       _isIncrementalRefreshing = true;
@@ -1236,6 +1367,82 @@ enum _LibraryItemAction {
   rebuildSourceIndex,
   manualIndex,
   deleteResource,
+}
+
+class _EmbyRefreshProgressCard extends StatelessWidget {
+  const _EmbyRefreshProgressCard({required this.progress});
+
+  final EmbyRefreshProgressState progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isFailed = progress.status == EmbyRefreshTaskStatus.failed;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.06),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isFailed ? Icons.error_outline_rounded : Icons.dns_rounded,
+                size: 18,
+                color: Colors.white.withValues(alpha: 0.84),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  progress.title,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Text(
+                progress.totalSourceCount <= 1
+                    ? progress.stage.label
+                    : '${progress.completedSourceCount.clamp(0, progress.totalSourceCount)} / ${progress.totalSourceCount}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.8),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            progress.summaryLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: Colors.white.withValues(alpha: 0.68),
+            ),
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              minHeight: 6,
+              value: progress.fraction,
+              backgroundColor: Colors.white.withValues(alpha: 0.08),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                isFailed ? const Color(0xFFFF8A8A) : Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _WebDavScrapeProgressCard extends StatelessWidget {

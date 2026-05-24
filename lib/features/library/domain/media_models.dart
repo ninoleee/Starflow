@@ -77,6 +77,16 @@ class MediaSourceConfig {
 
   bool get hasActiveSession => hasAccessToken && userId.trim().isNotEmpty;
 
+  bool get canAppearInLibraryNavigation {
+    if (!enabled) {
+      return false;
+    }
+    if (kind == MediaSourceKind.quark) {
+      return hasConfiguredQuarkFolder;
+    }
+    return true;
+  }
+
   String get connectionStatusLabel {
     if (kind == MediaSourceKind.quark) {
       return hasConfiguredQuarkFolder ? '已配置' : '待选择目录';

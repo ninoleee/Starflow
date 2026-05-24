@@ -21,3 +21,27 @@ final homeMediaSourcesProvider = Provider<List<MediaSourceConfig>>((ref) {
     appSettingsProvider.select((settings) => settings.mediaSources),
   );
 });
+
+final homeSelectableMediaSourcesProvider = Provider<List<MediaSourceConfig>>((
+  ref,
+) {
+  return ref
+      .watch(homeMediaSourcesProvider)
+      .where(_isSelectableHomeMediaSource)
+      .toList(growable: false);
+});
+
+final homeSelectableMediaSourceIdsProvider = Provider<Set<String>>((ref) {
+  return ref
+      .watch(homeSelectableMediaSourcesProvider)
+      .map((source) => source.id.trim())
+      .where((sourceId) => sourceId.isNotEmpty)
+      .toSet();
+});
+
+bool _isSelectableHomeMediaSource(MediaSourceConfig source) {
+  return source.canAppearInLibraryNavigation &&
+      (source.kind == MediaSourceKind.emby ||
+          source.kind == MediaSourceKind.nas ||
+          source.kind == MediaSourceKind.quark);
+}

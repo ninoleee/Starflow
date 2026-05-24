@@ -13,6 +13,8 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/starflow_action_dialog.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
+import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -135,7 +137,29 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
     widget.navigationShell.goBranch(index);
     if (shouldRefreshHome) {
       unawaited(refreshHomeModules(ref));
+      unawaited(_refreshHomeEmbySources());
     }
+  }
+
+  Future<void> _refreshHomeEmbySources() async {
+    final sourceIds = ref
+        .read(appSettingsProvider)
+        .mediaSources
+        .where(
+          (source) =>
+              source.enabled &&
+              source.kind == MediaSourceKind.emby &&
+              source.hasActiveSession,
+        )
+        .map((source) => source.id.trim())
+        .where((sourceId) => sourceId.isNotEmpty)
+        .toList(growable: false);
+    if (sourceIds.isEmpty) {
+      return;
+    }
+    await ref
+        .read(mediaRefreshCoordinatorProvider)
+        .startBackgroundEmbyRefresh(sourceIds: sourceIds);
   }
 
   @override

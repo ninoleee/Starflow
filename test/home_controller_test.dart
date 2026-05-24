@@ -144,6 +144,56 @@ void main() {
       expect(first.hasPendingSections, isFalse);
     });
 
+    test('homeEnabledModulesProvider skips disabled quark library modules', () {
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            const AppSettings(
+              mediaSources: [
+                MediaSourceConfig(
+                  id: 'quark-main',
+                  name: 'Quark',
+                  kind: MediaSourceKind.quark,
+                  endpoint: 'root-folder',
+                  libraryPath: '/影视',
+                  enabled: false,
+                ),
+              ],
+              searchProviders: [],
+              doubanAccount: DoubanAccountConfig(enabled: false),
+              homeModules: [
+                HomeModuleConfig(
+                  id: 'recently-added',
+                  type: HomeModuleType.recentlyAdded,
+                  title: '最近新增',
+                  enabled: true,
+                ),
+                HomeModuleConfig(
+                  id: 'quark-library',
+                  type: HomeModuleType.librarySection,
+                  title: '夸克剧集',
+                  enabled: true,
+                  sourceId: 'quark-main',
+                  sourceName: 'Quark',
+                  sectionId: 'section-1',
+                  sectionName: '剧集',
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      expect(
+        container
+            .read(homeEnabledModulesProvider)
+            .map((module) => module.id)
+            .toList(growable: false),
+        ['recently-added'],
+      );
+    });
+
     testWidgets('refreshHomeModules bumps home refresh revisions', (
       tester,
     ) async {

@@ -255,8 +255,9 @@ class HomeEditorPage extends ConsumerWidget {
     final List<HomeModuleConfig> modules = ref.watch(homeModulesProvider);
     final heroModule = _homeEditorHeroModule(modules);
     final sortableModules = _homeEditorSortableModules(modules);
-    final List<MediaSourceConfig> mediaSources =
-        ref.watch(homeMediaSourcesProvider);
+    final List<MediaSourceConfig> mediaSources = ref.watch(
+      homeSelectableMediaSourcesProvider,
+    );
     final collectionsAsync = ref.watch(homeEditorCollectionsProvider);
     final Set<String> visibleSourceIds =
         (collectionsAsync.value ?? const <MediaCollection>[])
@@ -386,7 +387,7 @@ class HomeEditorPage extends ConsumerWidget {
                         Padding(
                           padding: const EdgeInsets.only(top: 10),
                           child: Text(
-                            '还没有启用的 Emby 或 WebDAV 来源，先去设置里接入后，这里就会出现。',
+                            '还没有可用的 Emby、WebDAV 或 Quark 来源，先去设置里接入并启用后，这里就会出现。',
                             style: Theme.of(context).textTheme.bodyMedium,
                           ),
                         ),
@@ -411,10 +412,8 @@ class HomeEditorPage extends ConsumerWidget {
   }
 
   Future<void> _showAddModuleSheet(BuildContext context, WidgetRef ref) {
-    final enabledSources = ref
-        .read(homeMediaSourcesProvider)
-        .where((item) => item.enabled)
-        .toList();
+    final enabledSources =
+        ref.read(homeSelectableMediaSourcesProvider).toList();
     return ref.read(homeEditorCollectionsProvider.future).then((collections) {
       if (!context.mounted) {
         return Future<void>.value();

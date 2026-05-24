@@ -134,12 +134,14 @@ final homePageControllerProvider = Provider<HomePageController>((ref) {
 
 final homeEnabledModulesProvider = Provider<List<HomeModuleConfig>>((ref) {
   final modules = ref.watch(homeModulesProvider);
+  final selectableSourceIds = ref.watch(homeSelectableMediaSourceIdsProvider);
   return modules
       .where(
         (item) =>
             item.enabled &&
             item.type != HomeModuleType.doubanCarousel &&
-            item.type != HomeModuleType.hero,
+            item.type != HomeModuleType.hero &&
+            _isEnabledHomeModuleForVisibleSources(item, selectableSourceIds),
       )
       .toList();
 });
@@ -269,4 +271,14 @@ Future<void> refreshHomeModules(WidgetRef ref) async {
 
 Future<void> refreshHomeModulesFromRef(Ref ref) async {
   return ref.read(homePageControllerProvider).refreshModulesFromRef(ref);
+}
+
+bool _isEnabledHomeModuleForVisibleSources(
+  HomeModuleConfig module,
+  Set<String> selectableSourceIds,
+) {
+  if (!module.isLibrarySection) {
+    return true;
+  }
+  return selectableSourceIds.contains(module.sourceId.trim());
 }

@@ -27,6 +27,40 @@ void main() {
   group('LibraryPage visibility helpers', () {
     final items = _buildMediaItems(30);
 
+    test('visibleLibraryFiltersForSources hides disabled or unconfigured quark',
+        () {
+      const sources = [
+        MediaSourceConfig(
+          id: 'emby-main',
+          name: 'Emby',
+          kind: MediaSourceKind.emby,
+          endpoint: 'https://emby.example.com',
+          enabled: true,
+        ),
+        MediaSourceConfig(
+          id: 'quark-disabled',
+          name: 'Quark Disabled',
+          kind: MediaSourceKind.quark,
+          endpoint: 'root-folder',
+          libraryPath: '/影视',
+          enabled: false,
+        ),
+        MediaSourceConfig(
+          id: 'quark-unconfigured',
+          name: 'Quark Unconfigured',
+          kind: MediaSourceKind.quark,
+          endpoint: '',
+          libraryPath: '',
+          enabled: true,
+        ),
+      ];
+
+      expect(
+        visibleLibraryFiltersForSources(sources),
+        [LibraryFilter.all, LibraryFilter.emby],
+      );
+    });
+
     test('visibleLibraryGridPageItems slices the requested page', () {
       final pageItems = visibleLibraryGridPageItems(
         items: items,
@@ -38,7 +72,8 @@ void main() {
       expect(pageItems.last.id, 'movie-4');
     });
 
-    test('libraryPageVisibleSegmentChanged ignores updates outside the page', () {
+    test('libraryPageVisibleSegmentChanged ignores updates outside the page',
+        () {
       final previous = List<MediaItem>.from(items);
       final next = List<MediaItem>.from(items);
       next[10] = next[10].copyWith(title: 'Changed Title');
@@ -51,7 +86,8 @@ void main() {
       expect(changed, isFalse);
     });
 
-    test('libraryPageVisibleSegmentChanged detects updates on visible items', () {
+    test('libraryPageVisibleSegmentChanged detects updates on visible items',
+        () {
       final previous = List<MediaItem>.from(items);
       final next = List<MediaItem>.from(items);
       next[2] = next[2].copyWith(title: 'Changed Title');
@@ -79,8 +115,7 @@ void main() {
       expect(pageItems.last.id, 'movie-11');
     });
 
-    test(
-        'libraryCollectionVisibleSegmentChanged ignores non-visible updates',
+    test('libraryCollectionVisibleSegmentChanged ignores non-visible updates',
         () {
       final previous = List<MediaItem>.from(items);
       final next = List<MediaItem>.from(items);

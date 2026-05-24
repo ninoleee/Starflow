@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
+import 'package:starflow/features/library/application/emby_refresh_progress.dart';
 import 'package:starflow/features/library/application/library_refresh_revision.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -47,6 +48,7 @@ class MediaRefreshCoordinator {
   MediaRefreshCoordinator(this._ref);
 
   final Ref _ref;
+  Future<void>? _activeBackgroundEmbyRefresh;
 
   Future<void> refreshSelectedSources({
     required List<String> sourceIds,
@@ -67,6 +69,34 @@ class MediaRefreshCoordinator {
       delaySeconds: 0,
       forceFullRescan: true,
     );
+  }
+
+  Future<bool> startBackgroundEmbyRefresh({
+    required List<String> sourceIds,
+  }) async {
+    final sources = _enabledRefreshableEmbySources(sourceIds);
+    if (sources.isEmpty) {
+      return false;
+    }
+    if (_activeBackgroundEmbyRefresh != null) {
+      return false;
+    }
+
+    final progressController = _ref.read(embyRefreshProgressProvider.notifier);
+    progressController.startTask(sources);
+    final refreshFuture = _runBackgroundEmbyRefresh(
+      sources,
+      progressController: progressController,
+    );
+    _activeBackgroundEmbyRefresh = refreshFuture;
+    unawaited(
+      refreshFuture.whenComplete(() {
+        if (identical(_activeBackgroundEmbyRefresh, refreshFuture)) {
+          _activeBackgroundEmbyRefresh = null;
+        }
+      }),
+    );
+    return true;
   }
 
   Future<void> _runRefresh({
@@ -137,6 +167,86 @@ class MediaRefreshCoordinator {
       ),
     );
 
+    _afterRefreshCompleted();
+  }
+
+  Future<void> _runBackgroundEmbyRefresh(
+    List<MediaSourceConfig> sources, {
+    required EmbyRefreshProgressController progressController,
+  }) async {
+    final repository = _ref.read(mediaRepositoryProvider);
+    var refreshedSourceCount = 0;
+    final failedSourceNames = <String>[];
+    Object? lastError;
+
+    for (var index = 0; index < sources.length; index += 1) {
+      final source = sources[index];
+      progressController.activateSource(sourceIndex: index);
+      try {
+        await repository.refreshSource(sourceId: source.id);
+        refreshedSourceCount += 1;
+        progressController.completeSource(sourceIndex: index);
+      } catch (error) {
+        lastError = error;
+        failedSourceNames.add(
+          source.name.trim().isEmpty ? source.id : source.name,
+        );
+      }
+    }
+
+    if (refreshedSourceCount > 0) {
+      _afterRefreshCompleted();
+    }
+
+    if (failedSourceNames.isEmpty) {
+      progressController.completeTask(
+        _embyRefreshCompletedMessage(refreshedSourceCount),
+      );
+      return;
+    }
+
+    if (refreshedSourceCount > 0) {
+      progressController.completeTask(
+        '已完成 $refreshedSourceCount 个 Emby 媒体源更新，'
+        '${failedSourceNames.length} 个失败',
+      );
+      return;
+    }
+
+    progressController.failTask(
+      'Emby 后台更新失败：${lastError ?? failedSourceNames.join('、')}',
+    );
+  }
+
+  List<MediaSourceConfig> _enabledRefreshableEmbySources(
+    List<String> sourceIds,
+  ) {
+    final normalizedIds = sourceIds
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toSet();
+    if (normalizedIds.isEmpty) {
+      return const <MediaSourceConfig>[];
+    }
+
+    return _ref
+        .read(appSettingsProvider)
+        .mediaSources
+        .where(
+          (source) =>
+              source.enabled &&
+              source.kind == MediaSourceKind.emby &&
+              source.hasActiveSession &&
+              normalizedIds.contains(source.id.trim()),
+        )
+        .toList(growable: false);
+  }
+
+  String _embyRefreshCompletedMessage(int sourceCount) {
+    return sourceCount == 1 ? '已完成 Emby 更新' : '已完成 $sourceCount 个 Emby 媒体源更新';
+  }
+
+  void _afterRefreshCompleted() {
     _ref.read(libraryRefreshRevisionProvider.notifier).state++;
     _ref.invalidate(homeRecentItemsProvider);
     _ref.invalidate(homeCarouselItemsProvider);
