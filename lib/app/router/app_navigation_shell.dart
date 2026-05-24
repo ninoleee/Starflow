@@ -107,18 +107,30 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
     }
     _coldStartHomeRefreshScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      final settings = ref.read(appSettingsProvider);
-      if (!settings.homeStartupAutoRefreshEnabled) {
-        return;
-      }
-      unawaited(refreshHomeModules(ref));
-      if (settings.homeStartupAutoRefreshEmbyEnabled) {
-        unawaited(_refreshHomeEmbySources());
-      }
+      unawaited(_runColdStartHomeRefresh());
     });
+  }
+
+  Future<void> _runColdStartHomeRefresh() async {
+    if (!mounted) {
+      return;
+    }
+    final settings = ref.read(appSettingsProvider);
+    if (!settings.homeStartupAutoRefreshEnabled) {
+      return;
+    }
+    unawaited(refreshHomeModules(ref));
+    final isTelevision =
+        await ref.read(isTelevisionProvider.future).catchError((_) => false);
+    if (!mounted) {
+      return;
+    }
+    final embyEffective = settings.effectiveHomeStartupAutoRefreshEmbyEnabled(
+      isTelevision: isTelevision,
+    );
+    if (embyEffective) {
+      unawaited(_refreshHomeEmbySources());
+    }
   }
 
   @override

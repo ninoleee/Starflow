@@ -62,9 +62,12 @@ class SettingsPage extends ConsumerStatefulWidget {
       appSettingsProvider
           .select((settings) => settings.homeStartupAutoRefreshEnabled),
     );
-    final homeStartupAutoRefreshEmbyEnabled = ref.watch(
-      appSettingsProvider
-          .select((settings) => settings.homeStartupAutoRefreshEmbyEnabled),
+    final homeStartupAutoRefreshEmbyEffective = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.effectiveHomeStartupAutoRefreshEmbyEnabled(
+          isTelevision: isTelevision,
+        ),
+      ),
     );
 
     return TvPageFocusScope(
@@ -376,10 +379,11 @@ class SettingsPage extends ConsumerStatefulWidget {
                         StarflowToggleTile(
                           title: '同时刷新 Emby 媒体源',
                           subtitle: homeStartupAutoRefreshEnabled
-                              ? '关闭后启动时仅刷新首页模块缓存, 不会触发 Emby 全量同步.'
+                              ? (isTelevision
+                                  ? 'TV 端默认关闭以避免冷启动卡顿, 需要时可手动开启.'
+                                  : '关闭后启动时仅刷新首页模块缓存, 不会触发 Emby 全量同步.')
                               : '需先开启上方"启动时自动刷新首页".',
-                          value: homeStartupAutoRefreshEnabled &&
-                              homeStartupAutoRefreshEmbyEnabled,
+                          value: homeStartupAutoRefreshEmbyEffective,
                           onChanged: homeStartupAutoRefreshEnabled
                               ? (value) {
                                   ref

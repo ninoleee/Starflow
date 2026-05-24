@@ -749,7 +749,7 @@ class AppSettings {
     this.homeHeroLogoTitleEnabled = false,
     this.homeHeroBackgroundEnabled = true,
     this.homeStartupAutoRefreshEnabled = true,
-    this.homeStartupAutoRefreshEmbyEnabled = true,
+    this.homeStartupAutoRefreshEmbyEnabled,
     this.translucentEffectsEnabled = true,
     this.autoHideNavigationBarEnabled = true,
     this.highPerformanceModeEnabled = false,
@@ -807,7 +807,8 @@ class AppSettings {
   final bool homeHeroLogoTitleEnabled;
   final bool homeHeroBackgroundEnabled;
   final bool homeStartupAutoRefreshEnabled;
-  final bool homeStartupAutoRefreshEmbyEnabled;
+  // null = follow platform default (TV defaults to off, others default to on).
+  final bool? homeStartupAutoRefreshEmbyEnabled;
   final bool translucentEffectsEnabled;
   final bool autoHideNavigationBarEnabled;
   final bool highPerformanceModeEnabled;
@@ -925,6 +926,8 @@ class AppSettings {
           homeHeroBackgroundEnabled ?? this.homeHeroBackgroundEnabled,
       homeStartupAutoRefreshEnabled:
           homeStartupAutoRefreshEnabled ?? this.homeStartupAutoRefreshEnabled,
+      // Nullable: copyWith never resets back to platform default; toggle setter
+      // always supplies an explicit bool.
       homeStartupAutoRefreshEmbyEnabled: homeStartupAutoRefreshEmbyEnabled ??
           this.homeStartupAutoRefreshEmbyEnabled,
       translucentEffectsEnabled:
@@ -1149,7 +1152,7 @@ class AppSettings {
       homeStartupAutoRefreshEnabled:
           json['homeStartupAutoRefreshEnabled'] as bool? ?? true,
       homeStartupAutoRefreshEmbyEnabled:
-          json['homeStartupAutoRefreshEmbyEnabled'] as bool? ?? true,
+          json['homeStartupAutoRefreshEmbyEnabled'] as bool?,
       translucentEffectsEnabled:
           json['translucentEffectsEnabled'] as bool? ?? true,
       autoHideNavigationBarEnabled:
@@ -1334,6 +1337,20 @@ extension AppSettingsPerformanceX on AppSettings {
       return false;
     }
     return playbackBackgroundPlaybackEnabled;
+  }
+
+  bool effectiveHomeStartupAutoRefreshEmbyEnabled({
+    required bool isTelevision,
+  }) {
+    if (!homeStartupAutoRefreshEnabled) {
+      return false;
+    }
+    final stored = homeStartupAutoRefreshEmbyEnabled;
+    if (stored != null) {
+      return stored;
+    }
+    // Platform default: TV off, others on.
+    return !isTelevision;
   }
 
   bool effectiveLeanPlaybackUiEnabled({required bool isTelevision}) {
