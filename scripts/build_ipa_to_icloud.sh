@@ -64,7 +64,7 @@ fi
 VERSION="$(update_pubspec_version pubspec.yaml)"
 BUILD_NUMBER="$VERSION"
 BUILD_DATE="$(date +%Y-%m-%d)"
-OUTPUT_NAME="${APP_NAME}_v${VERSION}(${BUILD_NUMBER}).ipa"
+OUTPUT_NAME="${APP_NAME}_v${VERSION}.ipa"
 FAST_IPA_DIR="build/ios/ipa_fast"
 
 echo "Building IPA for $APP_NAME ($VERSION+$BUILD_NUMBER, $BUILD_DATE)..."

@@ -420,9 +420,9 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
         backgroundImage = Transform.scale(
           scale: backdropScale,
           child: ImageFiltered(
-            imageFilter: ImageFilter.blur(sigmaX: 42, sigmaY: 42),
+            imageFilter: ImageFilter.blur(sigmaX: 54, sigmaY: 54),
             child: Opacity(
-              opacity: 0.72,
+              opacity: 0.7,
               child: image,
             ),
           ),
