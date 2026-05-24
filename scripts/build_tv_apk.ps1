@@ -85,10 +85,15 @@ $embeddedPath = $null
 Push-Location $repoRoot
 try {
   $version = Update-PubspecVersion $pubspecPath
+  $buildDate = Get-Date -Format "yyyy-MM-dd"
   $embeddedPath = Set-EmbeddedSettings $repoRoot $SettingsJsonPath
 
   if (-not $SkipBuild) {
-    flutter build apk --release --android-skip-build-dependency-validation
+    flutter build apk `
+      --release `
+      --android-skip-build-dependency-validation `
+      --build-name $version `
+      --dart-define "STARFLOW_BUILD_DATE=$buildDate"
     if ($LASTEXITCODE -ne 0) {
       throw "flutter build apk failed with exit code $LASTEXITCODE"
     }
@@ -109,6 +114,7 @@ try {
 
   Copy-Item -LiteralPath $sourceApk -Destination $targetApk -Force
   Write-Output "Version=$version"
+  Write-Output "BuildDate=$buildDate"
   Write-Output "APK=$targetApk"
 }
 finally {
