@@ -441,8 +441,6 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           if (backgroundImage != null) backgroundImage,
-          if (translucentEffectsEnabled && !simplifyVisualEffects)
-            const _LiquidGlassBackdropOverlay(),
           if (!translucentEffectsEnabled && !simplifyVisualEffects)
             DecoratedBox(
               decoration: BoxDecoration(
@@ -469,71 +467,6 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 stops: const [0, 0.48, 0.84, 1],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LiquidGlassBackdropOverlay extends StatelessWidget {
-  const _LiquidGlassBackdropOverlay();
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Colors.white.withValues(alpha: 0.14),
-                  const Color(0xFF8FD9FF).withValues(alpha: 0.08),
-                  const Color(0xFF070D18).withValues(alpha: 0.24),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                stops: const [0, 0.42, 1],
-              ),
-            ),
-          ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                center: const Alignment(-0.78, -0.9),
-                radius: 1.08,
-                colors: [
-                  Colors.white.withValues(alpha: 0.2),
-                  Colors.white.withValues(alpha: 0.06),
-                  Colors.transparent,
-                ],
-                stops: const [0, 0.38, 1],
-              ),
-            ),
-          ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Colors.white.withValues(alpha: 0.18),
-                  Colors.white.withValues(alpha: 0.02),
-                  Colors.transparent,
-                ],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: const [0, 0.2, 0.62],
-              ),
-            ),
-          ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.08),
-                width: 1.2,
               ),
             ),
           ),
