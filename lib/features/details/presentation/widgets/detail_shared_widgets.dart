@@ -153,7 +153,6 @@ class _PersonAvatar extends StatelessWidget {
           : AppNetworkImage(
               avatarUrl,
               cacheWidth: _avatarDecodeSize,
-              cacheHeight: _avatarDecodeSize,
               fit: BoxFit.cover,
               throttleOnTelevision: false,
               errorBuilder: (context, error, stackTrace) {

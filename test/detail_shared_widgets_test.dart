@@ -1,4 +1,7 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -61,6 +64,35 @@ void main() {
         ),
         '第1集 风暴前夜.mkv',
       );
+    });
+
+    testWidgets('PersonRail avatar does not force square decode',
+        (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: Material(
+              child: PersonRail(
+                people: const [
+                  MediaPersonProfile(
+                    name: 'Keanu Reeves',
+                    avatarUrl: 'https://example.com/profile.jpg',
+                  ),
+                ],
+                focusScopePrefix: 'detail:actor',
+                onPersonTap: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final image = tester.widget<AppNetworkImage>(
+        find.byType(AppNetworkImage),
+      );
+      expect(image.cacheWidth, 148);
+      expect(image.cacheHeight, isNull);
+      expect(image.fit, BoxFit.cover);
     });
   });
 }
