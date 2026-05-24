@@ -44,7 +44,7 @@ class PerformanceSettingsPage extends ConsumerWidget {
       onBack: () => Navigator.of(context).pop(),
       children: [
         Text(
-          '这里集中放置你之前已经确认过的高性能与轻量模式选项。高性能模式本身只是一次性套用推荐值，下面这些项之后仍可单独改回；未单独列出的其他轻量化处理会继续跟随高性能模式预设。',
+          '这里集中放置你之前已经确认过的高性能与轻量模式选项。打开高性能模式会套用推荐轻量配置；关闭时会恢复富视觉默认值，下面这些项之后仍可单独调整。',
           style: theme.textTheme.bodyMedium?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
@@ -52,7 +52,7 @@ class PerformanceSettingsPage extends ConsumerWidget {
         const SettingsSectionTitle(label: '预设'),
         SettingsToggleTile(
           title: '高性能模式',
-          subtitle: '打开时会重新套用这一页的推荐轻量配置；关闭时只会清除“预设已开”标记，不会自动把下面这些项改回默认值。',
+          subtitle: '打开时会重新套用这一页的推荐轻量配置；关闭时会恢复透明磨砂、自动隐藏菜单栏、Hero 背景和其它轻量化子项。',
           value: settings.highPerformanceModeEnabled,
           onChanged: (value) {
             controller.setHighPerformanceModeEnabled(value);

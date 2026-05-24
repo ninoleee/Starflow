@@ -197,6 +197,50 @@ void main() {
     );
   });
 
+  test('clearing high performance preset restores rich visual defaults', () {
+    final settings =
+        AppSettings.fromJson(const {}).applyHighPerformancePreset();
+    final cleared = settings.clearHighPerformancePresetMarker();
+
+    expect(cleared.highPerformanceModeEnabled, isFalse);
+    expect(cleared.translucentEffectsEnabled, isTrue);
+    expect(cleared.autoHideNavigationBarEnabled, isTrue);
+    expect(cleared.homeHeroBackgroundEnabled, isTrue);
+    expect(cleared.performanceReduceDecorationsEnabled, isFalse);
+    expect(cleared.performanceReduceMotionEnabled, isFalse);
+    expect(cleared.performanceStaticNavigationEnabled, isFalse);
+    expect(cleared.performanceLightweightTvFocusEnabled, isFalse);
+    expect(cleared.performanceStaticHomeHeroEnabled, isFalse);
+    expect(cleared.performanceLightweightHomeHeroEnabled, isFalse);
+    expect(cleared.performanceLiveItemHeroOverlayEnabled, isTrue);
+    expect(cleared.performanceSlimDetailHeroEnabled, isFalse);
+    expect(cleared.performanceLeanPlaybackUiEnabled, isFalse);
+    expect(cleared.performanceAggressivePlaybackTuningEnabled, isFalse);
+    expect(cleared.performanceAutoDowngradeHeavyPlaybackEnabled, isFalse);
+    expect(cleared.effectiveUiPerformanceTier, AppUiPerformanceTier.rich);
+    expect(cleared.effectiveTranslucentEffectsEnabled, isTrue);
+    expect(cleared.effectiveNavigationAutoHideEnabled, isTrue);
+    expect(
+      cleared.effectiveLightweightHomeHeroEnabled(isTelevision: false),
+      isFalse,
+    );
+  });
+
+  test('manual visual switches remain effective inside high performance preset',
+      () {
+    final settings =
+        AppSettings.fromJson(const {}).applyHighPerformancePreset().copyWith(
+              translucentEffectsEnabled: true,
+              autoHideNavigationBarEnabled: true,
+            );
+
+    expect(settings.highPerformanceModeEnabled, isTrue);
+    expect(
+        settings.effectiveUiPerformanceTier, AppUiPerformanceTier.performance);
+    expect(settings.effectiveTranslucentEffectsEnabled, isTrue);
+    expect(settings.effectiveNavigationAutoHideEnabled, isTrue);
+  });
+
   test(
       'tv-safe effective overlay and background playback stay off until non-tv is confirmed',
       () {

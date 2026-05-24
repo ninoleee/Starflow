@@ -1292,7 +1292,23 @@ extension AppSettingsPerformanceX on AppSettings {
   }
 
   AppSettings clearHighPerformancePresetMarker() {
-    return copyWith(highPerformanceModeEnabled: false);
+    return copyWith(
+      highPerformanceModeEnabled: false,
+      translucentEffectsEnabled: true,
+      autoHideNavigationBarEnabled: true,
+      homeHeroBackgroundEnabled: true,
+      performanceReduceDecorationsEnabled: false,
+      performanceReduceMotionEnabled: false,
+      performanceStaticNavigationEnabled: false,
+      performanceLightweightTvFocusEnabled: false,
+      performanceStaticHomeHeroEnabled: false,
+      performanceLightweightHomeHeroEnabled: false,
+      performanceLiveItemHeroOverlayEnabled: true,
+      performanceSlimDetailHeroEnabled: false,
+      performanceLeanPlaybackUiEnabled: false,
+      performanceAggressivePlaybackTuningEnabled: false,
+      performanceAutoDowngradeHeavyPlaybackEnabled: false,
+    );
   }
 
   AppUiPerformanceTier get effectiveUiPerformanceTier {
@@ -1332,12 +1348,11 @@ extension AppSettingsPerformanceX on AppSettings {
   }
 
   bool get effectiveTranslucentEffectsEnabled {
-    return translucentEffectsEnabled &&
-        effectiveUiPerformanceTier != AppUiPerformanceTier.performance;
+    return translucentEffectsEnabled;
   }
 
   bool get effectiveNavigationAutoHideEnabled {
-    return autoHideNavigationBarEnabled && !effectiveStaticNavigationEnabled;
+    return autoHideNavigationBarEnabled;
   }
 
   bool effectivePerformanceLiveItemHeroOverlayEnabled({
