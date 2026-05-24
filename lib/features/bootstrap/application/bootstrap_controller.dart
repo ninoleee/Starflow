@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -87,7 +85,12 @@ class BootstrapController extends Notifier<BootstrapState> {
       title: '正在同步首页内容',
       subtitle: '预热首页模块，把可展示的资源先准备出来。',
       task: () async {
-        await refreshHomeModulesFromRef(ref);
+        final settings = ref.read(appSettingsProvider);
+        if (settings.homeStartupAutoRefreshEnabled) {
+          await refreshHomeModulesFromRef(ref);
+        } else {
+          primeHomeModules(ref);
+        }
       },
       nonBlockingErrorSubtitle: '媒体源响应偏慢，先进入应用，资源会继续在后台补齐。',
       stageDelay: const Duration(milliseconds: 30),

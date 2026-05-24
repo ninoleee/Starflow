@@ -1274,6 +1274,28 @@ extension AppSettingsPerformanceX on AppSettings {
     );
   }
 
+  AppSettings applyStartupCrashRecoveryPreset() {
+    final lightweightNetworkStorage = networkStorage.copyWith(
+      refreshMediaSourceIds: const [],
+      refreshDelaySeconds: 1,
+    );
+    return applyHighPerformancePreset().copyWith(
+      networkStorage: lightweightNetworkStorage,
+      homeStartupAutoRefreshEnabled: false,
+      homeStartupAutoRefreshEmbyEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      wmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+      detailAutoLibraryMatchEnabled: false,
+      playbackBackgroundPlaybackEnabled: false,
+      playbackMpvQualityPreset: PlaybackMpvQualityPreset.performanceFirst,
+      playbackMpvDoubleTapToSeekEnabled: false,
+      playbackMpvSwipeToSeekEnabled: false,
+      playbackMpvLongPressSpeedBoostEnabled: false,
+      playbackMpvStallAutoRecoveryEnabled: false,
+    );
+  }
+
   AppSettings clearHighPerformancePresetMarker() {
     return copyWith(highPerformanceModeEnabled: false);
   }

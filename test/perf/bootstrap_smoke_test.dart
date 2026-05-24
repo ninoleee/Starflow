@@ -26,6 +26,25 @@ void main() {
     expect(container.read(homeMetadataAutoRefreshRevisionProvider), 2);
     expect(container.read(homeExplicitRefreshRevisionProvider), 1);
   });
+
+  test('BootstrapController respects disabled startup home refresh', () async {
+    final container = ProviderContainer(
+      overrides: [
+        settingsControllerProvider.overrideWith(
+          _NoStartupRefreshSettingsController.new,
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(bootstrapControllerProvider.notifier);
+    await controller.start();
+
+    final state = container.read(bootstrapControllerProvider);
+    expect(state.isComplete, isTrue);
+    expect(container.read(homeMetadataAutoRefreshRevisionProvider), 1);
+    expect(container.read(homeExplicitRefreshRevisionProvider), 0);
+  });
 }
 
 class _PerfSettingsController extends SettingsController {
@@ -36,6 +55,19 @@ class _PerfSettingsController extends SettingsController {
       'searchProviders': <Object>[],
       'doubanAccount': <String, Object>{'enabled': false},
       'homeModules': <Object>[],
+    });
+  }
+}
+
+class _NoStartupRefreshSettingsController extends SettingsController {
+  @override
+  Future<AppSettings> build() async {
+    return AppSettings.fromJson(const <String, dynamic>{
+      'mediaSources': <Object>[],
+      'searchProviders': <Object>[],
+      'doubanAccount': <String, Object>{'enabled': false},
+      'homeModules': <Object>[],
+      'homeStartupAutoRefreshEnabled': false,
     });
   }
 }

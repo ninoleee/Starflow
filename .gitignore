@@ -1,6 +1,17 @@
 .DS_Store
 build/
 DerivedData/
+*.apk
+*.aab
+*.msi
+*.msix
+*.appx
+*.exe
+*.zip
+*.7z
+*.rar
+*.dmg
+*.pkg
 *.xcuserstate
 xcuserdata/
 *.hmap

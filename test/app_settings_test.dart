@@ -507,4 +507,41 @@ void main() {
         settings.effectiveUiPerformanceTier, AppUiPerformanceTier.performance);
     expect(settings.effectiveStartupProbeEnabled, isFalse);
   });
+
+  test('startup crash recovery preset disables automatic heavy work', () {
+    final settings = const AppSettings(
+      mediaSources: [],
+      searchProviders: [],
+      doubanAccount: DoubanAccountConfig(enabled: false),
+      homeModules: [],
+      homeStartupAutoRefreshEnabled: true,
+      homeStartupAutoRefreshEmbyEnabled: true,
+      tmdbMetadataMatchEnabled: true,
+      wmdbMetadataMatchEnabled: true,
+      imdbRatingMatchEnabled: true,
+      detailAutoLibraryMatchEnabled: true,
+      playbackBackgroundPlaybackEnabled: true,
+      playbackMpvDoubleTapToSeekEnabled: true,
+      playbackMpvSwipeToSeekEnabled: true,
+      playbackMpvLongPressSpeedBoostEnabled: true,
+      playbackMpvStallAutoRecoveryEnabled: true,
+    ).applyStartupCrashRecoveryPreset();
+
+    expect(settings.highPerformanceModeEnabled, isTrue);
+    expect(settings.homeStartupAutoRefreshEnabled, isFalse);
+    expect(settings.homeStartupAutoRefreshEmbyEnabled, isFalse);
+    expect(settings.tmdbMetadataMatchEnabled, isFalse);
+    expect(settings.wmdbMetadataMatchEnabled, isFalse);
+    expect(settings.imdbRatingMatchEnabled, isFalse);
+    expect(settings.detailAutoLibraryMatchEnabled, isFalse);
+    expect(settings.playbackBackgroundPlaybackEnabled, isFalse);
+    expect(settings.playbackMpvDoubleTapToSeekEnabled, isFalse);
+    expect(settings.playbackMpvSwipeToSeekEnabled, isFalse);
+    expect(settings.playbackMpvLongPressSpeedBoostEnabled, isFalse);
+    expect(settings.playbackMpvStallAutoRecoveryEnabled, isFalse);
+    expect(
+      settings.effectiveUiPerformanceTier,
+      AppUiPerformanceTier.performance,
+    );
+  });
 }

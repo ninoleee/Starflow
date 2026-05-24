@@ -12,6 +12,7 @@ import 'package:starflow/core/platform/playback_system_session.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/starflow_action_dialog.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
+import 'package:starflow/features/bootstrap/application/startup_crash_recovery.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -115,21 +116,27 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
     if (!mounted) {
       return;
     }
-    final settings = ref.read(appSettingsProvider);
-    if (!settings.homeStartupAutoRefreshEnabled) {
-      return;
-    }
-    unawaited(refreshHomeModules(ref));
-    final isTelevision =
-        await ref.read(isTelevisionProvider.future).catchError((_) => false);
-    if (!mounted) {
-      return;
-    }
-    final embyEffective = settings.effectiveHomeStartupAutoRefreshEmbyEnabled(
-      isTelevision: isTelevision,
-    );
-    if (embyEffective) {
-      unawaited(_refreshHomeEmbySources());
+    try {
+      final settings = ref.read(appSettingsProvider);
+      if (!settings.homeStartupAutoRefreshEnabled) {
+        return;
+      }
+      await refreshHomeModules(ref);
+      final isTelevision =
+          await ref.read(isTelevisionProvider.future).catchError((_) => false);
+      if (!mounted) {
+        return;
+      }
+      final embyEffective = settings.effectiveHomeStartupAutoRefreshEmbyEnabled(
+        isTelevision: isTelevision,
+      );
+      if (embyEffective) {
+        unawaited(_refreshHomeEmbySources());
+      }
+    } finally {
+      unawaited(
+        startupCrashRecovery.completeStartup().catchError((_) {}),
+      );
     }
   }
 
