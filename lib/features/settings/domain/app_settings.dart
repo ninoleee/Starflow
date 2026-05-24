@@ -1275,12 +1275,7 @@ extension AppSettingsPerformanceX on AppSettings {
   }
 
   AppSettings applyStartupCrashRecoveryPreset() {
-    final lightweightNetworkStorage = networkStorage.copyWith(
-      refreshMediaSourceIds: const [],
-      refreshDelaySeconds: 1,
-    );
     return applyHighPerformancePreset().copyWith(
-      networkStorage: lightweightNetworkStorage,
       homeStartupAutoRefreshEnabled: false,
       homeStartupAutoRefreshEmbyEnabled: false,
       tmdbMetadataMatchEnabled: false,
