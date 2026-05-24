@@ -58,6 +58,14 @@ class SettingsPage extends ConsumerStatefulWidget {
     final heroModule = ref.watch(homeHeroModuleProvider);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final heroEnabled = heroModule?.enabled ?? false;
+    final homeStartupAutoRefreshEnabled = ref.watch(
+      appSettingsProvider
+          .select((settings) => settings.homeStartupAutoRefreshEnabled),
+    );
+    final homeStartupAutoRefreshEmbyEnabled = ref.watch(
+      appSettingsProvider
+          .select((settings) => settings.homeStartupAutoRefreshEmbyEnabled),
+    );
 
     return TvPageFocusScope(
       controller: tvFocusMemoryController,
@@ -344,6 +352,42 @@ class SettingsPage extends ConsumerStatefulWidget {
                         _SettingsNavigationTile(
                           title: '打开首页编辑器',
                           onTap: () => context.pushNamed('home-editor'),
+                        ),
+                      ], spacing: 10),
+                      const SizedBox(height: 18),
+                      Text(
+                        '启动行为',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 10),
+                      ...buildSettingsTileGroup([
+                        StarflowToggleTile(
+                          title: '启动时自动刷新首页',
+                          subtitle: '冷启动应用后, 首页模块会在后台重新拉取一次最新数据.',
+                          value: homeStartupAutoRefreshEnabled,
+                          onChanged: (value) {
+                            ref
+                                .read(settingsControllerProvider.notifier)
+                                .setHomeStartupAutoRefreshEnabled(value);
+                          },
+                        ),
+                        StarflowToggleTile(
+                          title: '同时刷新 Emby 媒体源',
+                          subtitle: homeStartupAutoRefreshEnabled
+                              ? '关闭后启动时仅刷新首页模块缓存, 不会触发 Emby 全量同步.'
+                              : '需先开启上方"启动时自动刷新首页".',
+                          value: homeStartupAutoRefreshEnabled &&
+                              homeStartupAutoRefreshEmbyEnabled,
+                          onChanged: homeStartupAutoRefreshEnabled
+                              ? (value) {
+                                  ref
+                                      .read(settingsControllerProvider.notifier)
+                                      .setHomeStartupAutoRefreshEmbyEnabled(
+                                          value);
+                                }
+                              : null,
                         ),
                       ], spacing: 10),
                     ],

@@ -748,6 +748,8 @@ class AppSettings {
     this.homeHeroStyle = HomeHeroStyle.composite,
     this.homeHeroLogoTitleEnabled = false,
     this.homeHeroBackgroundEnabled = true,
+    this.homeStartupAutoRefreshEnabled = true,
+    this.homeStartupAutoRefreshEmbyEnabled = true,
     this.translucentEffectsEnabled = true,
     this.autoHideNavigationBarEnabled = true,
     this.highPerformanceModeEnabled = false,
@@ -804,6 +806,8 @@ class AppSettings {
   final HomeHeroStyle homeHeroStyle;
   final bool homeHeroLogoTitleEnabled;
   final bool homeHeroBackgroundEnabled;
+  final bool homeStartupAutoRefreshEnabled;
+  final bool homeStartupAutoRefreshEmbyEnabled;
   final bool translucentEffectsEnabled;
   final bool autoHideNavigationBarEnabled;
   final bool highPerformanceModeEnabled;
@@ -859,6 +863,8 @@ class AppSettings {
     HomeHeroStyle? homeHeroStyle,
     bool? homeHeroLogoTitleEnabled,
     bool? homeHeroBackgroundEnabled,
+    bool? homeStartupAutoRefreshEnabled,
+    bool? homeStartupAutoRefreshEmbyEnabled,
     bool? translucentEffectsEnabled,
     bool? autoHideNavigationBarEnabled,
     bool? highPerformanceModeEnabled,
@@ -917,6 +923,10 @@ class AppSettings {
           homeHeroLogoTitleEnabled ?? this.homeHeroLogoTitleEnabled,
       homeHeroBackgroundEnabled:
           homeHeroBackgroundEnabled ?? this.homeHeroBackgroundEnabled,
+      homeStartupAutoRefreshEnabled:
+          homeStartupAutoRefreshEnabled ?? this.homeStartupAutoRefreshEnabled,
+      homeStartupAutoRefreshEmbyEnabled: homeStartupAutoRefreshEmbyEnabled ??
+          this.homeStartupAutoRefreshEmbyEnabled,
       translucentEffectsEnabled:
           translucentEffectsEnabled ?? this.translucentEffectsEnabled,
       autoHideNavigationBarEnabled:
@@ -1024,6 +1034,8 @@ class AppSettings {
       'homeHeroStyle': homeHeroStyle.name,
       'homeHeroLogoTitleEnabled': homeHeroLogoTitleEnabled,
       'homeHeroBackgroundEnabled': homeHeroBackgroundEnabled,
+      'homeStartupAutoRefreshEnabled': homeStartupAutoRefreshEnabled,
+      'homeStartupAutoRefreshEmbyEnabled': homeStartupAutoRefreshEmbyEnabled,
       'translucentEffectsEnabled': translucentEffectsEnabled,
       'autoHideNavigationBarEnabled': autoHideNavigationBarEnabled,
       'highPerformanceModeEnabled': highPerformanceModeEnabled,
@@ -1134,6 +1146,10 @@ class AppSettings {
           json['homeHeroLogoTitleEnabled'] as bool? ?? false,
       homeHeroBackgroundEnabled:
           json['homeHeroBackgroundEnabled'] as bool? ?? true,
+      homeStartupAutoRefreshEnabled:
+          json['homeStartupAutoRefreshEnabled'] as bool? ?? true,
+      homeStartupAutoRefreshEmbyEnabled:
+          json['homeStartupAutoRefreshEmbyEnabled'] as bool? ?? true,
       translucentEffectsEnabled:
           json['translucentEffectsEnabled'] as bool? ?? true,
       autoHideNavigationBarEnabled:

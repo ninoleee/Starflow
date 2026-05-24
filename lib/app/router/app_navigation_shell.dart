@@ -84,6 +84,7 @@ class AppNavigationShell extends ConsumerStatefulWidget {
 class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
   static const int _homeBranchIndex = 0;
   bool _isBottomBarVisible = true;
+  bool _coldStartHomeRefreshScheduled = false;
   ProviderSubscription<bool>? _autoHideNavigationBarSubscription;
 
   @override
@@ -97,6 +98,27 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
         }
       },
     );
+    _scheduleColdStartHomeRefresh();
+  }
+
+  void _scheduleColdStartHomeRefresh() {
+    if (_coldStartHomeRefreshScheduled) {
+      return;
+    }
+    _coldStartHomeRefreshScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      final settings = ref.read(appSettingsProvider);
+      if (!settings.homeStartupAutoRefreshEnabled) {
+        return;
+      }
+      unawaited(refreshHomeModules(ref));
+      if (settings.homeStartupAutoRefreshEmbyEnabled) {
+        unawaited(_refreshHomeEmbySources());
+      }
+    });
   }
 
   @override
