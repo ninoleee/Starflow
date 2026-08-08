@@ -614,6 +614,15 @@ void main() {
       AppSettings.fromJson(const {}).navigationDestinationIds,
       kDefaultNavigationDestinationIds,
     );
+    expect(
+      normalizeNavigationDestinationIds(const [
+        kNavigationDestinationFavorites,
+      ]),
+      const [
+        kNavigationDestinationFavorites,
+        kNavigationDestinationSettings,
+      ],
+    );
   });
 
   test('high performance presets preserve detail auto matching', () {

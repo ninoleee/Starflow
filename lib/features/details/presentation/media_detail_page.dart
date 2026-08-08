@@ -2430,12 +2430,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   Future<void> _openPlaybackEnginePicker(PlaybackEngine currentEngine) async {
     final selection = await showDetailTelevisionPickerDialog<PlaybackEngine>(
       context: context,
-      enabled: ref.read(isTelevisionProvider).value ?? false,
       title: '选择播放器',
       selectedValue: currentEngine,
-      optionDebugLabelPrefix: 'detail-playback-engine-option',
-      closeFocusDebugLabel: 'detail-playback-engine-close',
-      closeFocusId: 'detail:resource:playback-engine-close',
       options: [
         for (final engine in PlaybackEngine.values)
           DetailTelevisionPickerOption<PlaybackEngine>(
@@ -2489,12 +2485,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     final selectedIndex = _currentLibraryMatchIndex;
     final nextIndex = await showDetailTelevisionPickerDialog<int>(
       context: context,
-      enabled: ref.read(isTelevisionProvider).value ?? false,
       title: title,
       selectedValue: selectedIndex,
-      optionDebugLabelPrefix: 'detail-library-match-option',
-      closeFocusDebugLabel: 'detail-library-match-close',
-      closeFocusId: 'detail:resource:library-close',
       options: [
         for (var index = 0; index < _libraryMatchChoices.length; index++)
           DetailTelevisionPickerOption<int>(

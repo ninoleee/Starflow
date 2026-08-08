@@ -487,9 +487,8 @@ class SettingsPage extends ConsumerStatefulWidget {
       context: context,
       title: '选择菜单栏按钮',
       initialSelection: selectedIds.toSet(),
-      allLabel: '仅保留首页和设置',
-      allSubtitle: '至少保留两个基础入口，避免菜单栏无法继续使用。',
-      clearLabel: '基础入口',
+      showAllOption: false,
+      showClearAction: false,
       sections: const [
         SettingsCheckboxDialogSection<String>(
           options: [
@@ -806,7 +805,7 @@ class _SettingsTile extends StatelessWidget {
         final compact = constraints.maxWidth < 720;
         final toggleLabel = value ? '已开启' : '已关闭';
         final toggleIcon =
-            value ? Icons.toggle_on_rounded : Icons.toggle_off_rounded;
+            value ? Icons.toggle_on_rounded : Icons.toggle_off_outlined;
         return Container(
           width: double.infinity,
           decoration: BoxDecoration(
@@ -863,6 +862,7 @@ class _SettingsTile extends StatelessWidget {
               compact
                   ? StarflowIconButton(
                       icon: toggleIcon,
+                      iconColor: value ? null : scheme.onSurfaceVariant,
                       onPressed: () => onChanged(!value),
                       variant: value
                           ? StarflowButtonVariant.primary
@@ -872,6 +872,7 @@ class _SettingsTile extends StatelessWidget {
                   : StarflowButton(
                       label: toggleLabel,
                       icon: toggleIcon,
+                      iconColor: value ? null : scheme.onSurfaceVariant,
                       onPressed: () => onChanged(!value),
                       variant: value
                           ? StarflowButtonVariant.primary

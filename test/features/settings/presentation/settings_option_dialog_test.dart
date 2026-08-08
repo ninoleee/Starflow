@@ -56,16 +56,48 @@ void main() {
     await tester.tap(find.text('打开'));
     await tester.pumpAndSettle();
 
-    final options = tester
-        .widgetList<TvFocusableAction>(find.byType(TvFocusableAction))
-        .where(
+    expect(find.byType(SimpleDialog), findsOneWidget);
+    expect(find.byType(StarflowSelectionTile), findsNothing);
+    expect(find.text('第二项  当前'), findsOneWidget);
+
+    final optionFinders = [
+      for (var index = 0; index < 2; index++)
+        find.byWidgetPredicate(
           (widget) =>
-              widget.focusId?.startsWith('settings-option-dialog:') ?? false,
+              widget is TvFocusableAction &&
+              widget.focusId ==
+                  buildTvFocusId(
+                    prefix: 'settings-option-dialog',
+                    segments: [
+                      '选择选项',
+                      index,
+                      index == 0 ? '第一项' : '第二项',
+                    ],
+                  ),
+        ),
+    ];
+    final options = optionFinders
+        .map(tester.widget<TvFocusableAction>)
+        .toList(growable: false);
+    final detectors = optionFinders
+        .map(
+          (finder) => tester.widget<FocusableActionDetector>(
+            find.descendant(
+              of: finder,
+              matching: find.byType(FocusableActionDetector),
+            ),
+          ),
         )
         .toList(growable: false);
 
     expect(options, hasLength(2));
-    expect(options.first.focusNode?.hasFocus, isTrue);
-    expect(options.last.focusNode?.hasFocus, isFalse);
+    expect(detectors.first.focusNode?.hasFocus, isTrue);
+    expect(detectors.last.focusNode?.hasFocus, isFalse);
+    expect(
+      options.every(
+        (option) => option.visualStyle == TvFocusVisualStyle.subtle,
+      ),
+      isTrue,
+    );
   });
 }

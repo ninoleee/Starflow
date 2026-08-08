@@ -353,6 +353,7 @@ class _HomePageState extends ConsumerState<HomePage>
                       displayMode: heroDisplayMode,
                       focusScopePrefix: 'home:hero',
                       onFocusBelowControl: _focusBelowHeroContent,
+                      onHeroFocusGained: _jumpToHeroTop,
                       onFocusedItemChanged: _handleFocusedHeroChanged,
                     ),
                   ),
@@ -428,6 +429,17 @@ class _HomePageState extends ConsumerState<HomePage>
 
   void _focusBelowHeroContent() {
     unawaited(_focusBelowHeroContentAsync());
+  }
+
+  void _jumpToHeroTop() {
+    if (!_scrollController.hasClients) {
+      return;
+    }
+    final targetOffset = _scrollController.position.minScrollExtent;
+    if ((_scrollController.offset - targetOffset).abs() < 1) {
+      return;
+    }
+    _scrollController.jumpTo(targetOffset);
   }
 
   Future<void> _focusBelowHeroContentAsync() async {

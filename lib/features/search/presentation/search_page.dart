@@ -217,6 +217,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
 
   @override
   void onPageBecameActive() {
+    if (widget.favoritesOnly) {
+      unawaited(_loadSearchPreferences());
+    }
     _runPendingAutoSearchIfNeeded();
     _scheduleInitialTelevisionFocus();
   }

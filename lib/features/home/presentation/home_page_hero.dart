@@ -388,6 +388,7 @@ class _FeaturedHero extends StatefulWidget {
     required this.translucentEffectsEnabled,
     required this.focusScopePrefix,
     this.onFocusBelowControl,
+    this.onHeroFocusGained,
     this.onFocusedItemChanged,
   });
 
@@ -401,6 +402,7 @@ class _FeaturedHero extends StatefulWidget {
   final bool translucentEffectsEnabled;
   final String focusScopePrefix;
   final VoidCallback? onFocusBelowControl;
+  final VoidCallback? onHeroFocusGained;
   final ValueChanged<_FeaturedHeroItem>? onFocusedItemChanged;
 
   @override
@@ -669,6 +671,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                         onFocusNextControl: () =>
                             _focusPagerButton(_nextPagerButtonFocusNode),
                         onFocusBelowControl: widget.onFocusBelowControl,
+                        onFocused: widget.onHeroFocusGained,
                       ),
                     );
                   },
@@ -696,6 +699,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                               enabled: currentIndex > 0,
                               onMoveRight: _focusCurrentCard,
                               onFocusBelowControl: widget.onFocusBelowControl,
+                              onFocused: widget.onHeroFocusGained,
                               onPressed: currentIndex > 0
                                   ? () => _moveToIndex(currentIndex - 1)
                                   : null,
@@ -716,6 +720,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                               enabled: currentIndex < widget.items.length - 1,
                               onMoveLeft: _focusCurrentCard,
                               onFocusBelowControl: widget.onFocusBelowControl,
+                              onFocused: widget.onHeroFocusGained,
                               onPressed: currentIndex < widget.items.length - 1
                                   ? () => _moveToIndex(currentIndex + 1)
                                   : null,
@@ -774,6 +779,7 @@ class _HeroPagerButton extends StatelessWidget {
     this.onMoveLeft,
     this.onMoveRight,
     this.onFocusBelowControl,
+    this.onFocused,
     this.onPressed,
   });
 
@@ -786,6 +792,7 @@ class _HeroPagerButton extends StatelessWidget {
   final VoidCallback? onMoveLeft;
   final VoidCallback? onMoveRight;
   final VoidCallback? onFocusBelowControl;
+  final VoidCallback? onFocused;
   final VoidCallback? onPressed;
 
   @override
@@ -830,6 +837,7 @@ class _HeroPagerButton extends StatelessWidget {
         focusId: focusId,
         borderRadius: BorderRadius.circular(999),
         visualStyle: TvFocusVisualStyle.subtle,
+        onFocused: onFocused,
         child: child,
       ),
     );
@@ -850,6 +858,7 @@ class _FeaturedHeroCard extends StatelessWidget {
     this.onFocusPreviousControl,
     this.onFocusNextControl,
     this.onFocusBelowControl,
+    this.onFocused,
   });
 
   final _FeaturedHeroItem item;
@@ -864,6 +873,7 @@ class _FeaturedHeroCard extends StatelessWidget {
   final VoidCallback? onFocusPreviousControl;
   final VoidCallback? onFocusNextControl;
   final VoidCallback? onFocusBelowControl;
+  final VoidCallback? onFocused;
 
   @override
   Widget build(BuildContext context) {
@@ -1077,6 +1087,7 @@ class _FeaturedHeroCard extends StatelessWidget {
         borderRadius: borderRadius,
         visualStyle: TvFocusVisualStyle.none,
         focusScale: 1.015,
+        onFocused: onFocused,
         child: card,
       ),
     );

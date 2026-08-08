@@ -124,7 +124,10 @@ class _HomeModuleCard extends StatelessWidget {
               label: module.enabled ? '开启' : '关闭',
               icon: module.enabled
                   ? Icons.toggle_on_rounded
-                  : Icons.toggle_off_rounded,
+                  : Icons.toggle_off_outlined,
+              iconColor: module.enabled
+                  ? null
+                  : Theme.of(context).colorScheme.onSurfaceVariant,
               onPressed: onToggle,
               variant: module.enabled
                   ? StarflowButtonVariant.primary

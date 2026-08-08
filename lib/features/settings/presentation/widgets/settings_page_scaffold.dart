@@ -6,6 +6,7 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/starflow_action_dialog.dart';
+import 'package:starflow/core/widgets/starflow_option_dialog.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/settings/presentation/settings_version_label.dart';
 
@@ -621,100 +622,22 @@ Future<T?> showSettingsOptionDialog<T>({
   required String Function(T option) labelBuilder,
   T? currentValue,
 }) {
-  final optionFocusNodes = List<FocusNode>.generate(
-    options.length,
-    (index) => FocusNode(debugLabel: 'settings-option-$index'),
-  );
-  var dialogClosed = false;
-  var initialFocusRequested = false;
-
-  void requestInitialOptionFocus() {
-    if (initialFocusRequested || optionFocusNodes.isEmpty) {
-      return;
-    }
-    initialFocusRequested = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (dialogClosed) {
-        return;
-      }
-      final focusNode = optionFocusNodes.first;
-      if (focusNode.canRequestFocus) {
-        focusNode.requestFocus();
-      }
-    });
-  }
-
-  return showDialog<T>(
+  return showStarflowOptionDialog<T>(
     context: context,
-    builder: (dialogContext) {
-      return Consumer(
-        builder: (context, ref, child) {
-          final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
-          if (isTelevision) {
-            requestInitialOptionFocus();
-          }
-
-          final dialog = FocusTraversalGroup(
-            policy: OrderedTraversalPolicy(),
-            child: SimpleDialog(
-              title: Text(title),
-              children: [
-                for (var index = 0; index < options.length; index++)
-                  FocusTraversalOrder(
-                    order: NumericFocusOrder(index.toDouble()),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: TvFocusableAction(
-                        onPressed: () =>
-                            Navigator.of(dialogContext).pop(options[index]),
-                        focusNode: optionFocusNodes[index],
-                        focusId: buildTvFocusId(
-                          prefix: 'settings-option-dialog',
-                          segments: [
-                            title,
-                            index,
-                            labelBuilder(options[index]),
-                          ],
-                        ),
-                        autofocus: index == 0,
-                        borderRadius: BorderRadius.circular(14),
-                        visualStyle: TvFocusVisualStyle.subtle,
-                        focusScale: kTvButtonFocusScale,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 12,
-                          ),
-                          child: Text(
-                            options[index] == currentValue
-                                ? '${labelBuilder(options[index])}  当前'
-                                : labelBuilder(options[index]),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          );
-
-          return wrapTelevisionDialogBackHandling(
-            enabled: isTelevision,
-            dialogContext: dialogContext,
-            inputFocusNodes: const <FocusNode>[],
-            contentFocusNodes: optionFocusNodes,
-            actionFocusNodes: const <FocusNode>[],
-            child: dialog,
-          );
-        },
-      );
-    },
-  ).whenComplete(() {
-    dialogClosed = true;
-    for (final focusNode in optionFocusNodes) {
-      focusNode.dispose();
-    }
-  });
+    title: title,
+    selectedValue: currentValue,
+    options: [
+      for (var index = 0; index < options.length; index++)
+        StarflowOptionDialogOption<T>(
+          value: options[index],
+          title: labelBuilder(options[index]),
+          focusId: buildTvFocusId(
+            prefix: 'settings-option-dialog',
+            segments: [title, index, labelBuilder(options[index])],
+          ),
+        ),
+    ],
+  );
 }
 
 Future<Set<T>?> showSettingsCheckboxSelectionDialog<T>({
@@ -722,12 +645,15 @@ Future<Set<T>?> showSettingsCheckboxSelectionDialog<T>({
   required String title,
   required Set<T> initialSelection,
   required List<SettingsCheckboxDialogSection<T>> sections,
-  required String allLabel,
-  required String allSubtitle,
+  String? allLabel,
+  String allSubtitle = '',
   String cancelLabel = '取消',
   String clearLabel = '全部来源',
   String confirmLabel = '保存',
+  bool showAllOption = true,
+  bool showClearAction = true,
 }) {
+  assert(!showAllOption || allLabel != null);
   return showDialog<Set<T>>(
     context: context,
     builder: (dialogContext) {
@@ -747,20 +673,21 @@ Future<Set<T>?> showSettingsCheckboxSelectionDialog<T>({
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    StarflowCheckboxTile(
-                      title: allLabel,
-                      subtitle: allSubtitle,
-                      value: draft.isEmpty,
-                      onChanged: (_) {
-                        setState(() {
-                          draft = <T>{};
-                        });
-                      },
-                    ),
+                    if (showAllOption)
+                      StarflowCheckboxTile(
+                        title: allLabel!,
+                        subtitle: allSubtitle,
+                        value: draft.isEmpty,
+                        onChanged: (_) {
+                          setState(() {
+                            draft = <T>{};
+                          });
+                        },
+                      ),
                     for (var index = 0;
                         index < visibleSections.length;
                         index++) ...[
-                      const Divider(height: 16),
+                      if (showAllOption || index > 0) const Divider(height: 16),
                       if (visibleSections[index].title.trim().isNotEmpty) ...[
                         Text(
                           visibleSections[index].title,
@@ -798,12 +725,13 @@ Future<Set<T>?> showSettingsCheckboxSelectionDialog<T>({
                 variant: StarflowButtonVariant.ghost,
                 compact: true,
               ),
-              StarflowButton(
-                label: clearLabel,
-                onPressed: () => Navigator.of(dialogContext).pop(<T>{}),
-                variant: StarflowButtonVariant.secondary,
-                compact: true,
-              ),
+              if (showClearAction)
+                StarflowButton(
+                  label: clearLabel,
+                  onPressed: () => Navigator.of(dialogContext).pop(<T>{}),
+                  variant: StarflowButtonVariant.secondary,
+                  compact: true,
+                ),
               StarflowButton(
                 label: confirmLabel,
                 onPressed: () => Navigator.of(dialogContext).pop(draft),

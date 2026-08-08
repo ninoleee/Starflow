@@ -742,6 +742,7 @@ class StarflowButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.icon,
+    this.iconColor,
     this.variant = StarflowButtonVariant.primary,
     this.autofocus = false,
     this.focusNode,
@@ -756,6 +757,7 @@ class StarflowButton extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
   final IconData? icon;
+  final Color? iconColor;
   final StarflowButtonVariant variant;
   final bool autofocus;
   final FocusNode? focusNode;
@@ -803,7 +805,7 @@ class StarflowButton extends StatelessWidget {
               Icon(
                 icon,
                 size: compact ? 18 : 20,
-                color: palette.foregroundColor,
+                color: iconColor ?? palette.foregroundColor,
               ),
             if ((loading || icon != null) && label.trim().isNotEmpty)
               const SizedBox(width: 10),
@@ -847,6 +849,7 @@ class StarflowIconButton extends StatelessWidget {
     super.key,
     required this.icon,
     required this.onPressed,
+    this.iconColor,
     this.variant = StarflowButtonVariant.ghost,
     this.autofocus = false,
     this.focusNode,
@@ -857,6 +860,7 @@ class StarflowIconButton extends StatelessWidget {
 
   final IconData icon;
   final VoidCallback? onPressed;
+  final Color? iconColor;
   final StarflowButtonVariant variant;
   final bool autofocus;
   final FocusNode? focusNode;
@@ -891,7 +895,7 @@ class StarflowIconButton extends StatelessWidget {
           child: Icon(
             icon,
             size: 20,
-            color: palette.foregroundColor,
+            color: iconColor ?? palette.foregroundColor,
           ),
         ),
       ),
@@ -1126,7 +1130,7 @@ class StarflowToggleTile extends StatelessWidget {
       focusId: focusId,
       autofocus: autofocus,
       trailing: Icon(
-        value ? Icons.toggle_on_rounded : Icons.toggle_off_rounded,
+        value ? Icons.toggle_on_rounded : Icons.toggle_off_outlined,
         size: 28,
         color: value
             ? Theme.of(context).colorScheme.primary

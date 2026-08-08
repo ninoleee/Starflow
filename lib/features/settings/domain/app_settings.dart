@@ -763,11 +763,9 @@ List<String> normalizeNavigationDestinationIds(Iterable<String> values) {
       .where(kAllNavigationDestinationIds.contains)
       .toSet();
   if (selected.isEmpty) {
-    return const [
-      kNavigationDestinationHome,
-      kNavigationDestinationSettings,
-    ];
+    selected.add(kNavigationDestinationHome);
   }
+  selected.add(kNavigationDestinationSettings);
   return [
     for (final id in kAllNavigationDestinationIds)
       if (selected.contains(id)) id,
