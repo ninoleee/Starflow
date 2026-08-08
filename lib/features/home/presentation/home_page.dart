@@ -110,6 +110,7 @@ class _HomePageState extends ConsumerState<HomePage>
   int _heroFocusBelowRequestVersion = 0;
   List<String> _lastFeaturedHeroIds = const [];
   int _observedHomeMetadataAutoRefreshRevision = 0;
+  int _observedHomeNavigationResetRevision = 0;
   int _scheduledHeroMetadataAutoRefreshRevision = 0;
   int _scheduledHeroExplicitRefreshRevision = 0;
 
@@ -200,6 +201,19 @@ class _HomePageState extends ConsumerState<HomePage>
     final homeExplicitRefreshRevision = ref.watch(
       homeExplicitRefreshRevisionProvider,
     );
+    final homeNavigationResetRevision = ref.watch(
+      homeNavigationResetRevisionProvider,
+    );
+    if (homeNavigationResetRevision != _observedHomeNavigationResetRevision) {
+      _observedHomeNavigationResetRevision = homeNavigationResetRevision;
+      _heroFocusBelowRequestVersion += 1;
+      _heroPrefetchCoordinator.reset();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _jumpToHeroTop();
+        }
+      });
+    }
     final effectiveTranslucentEffectsEnabled =
         translucentEffectsEnabled && !lightweightHomeHeroEnabled;
     final effectiveHeroBackgroundEnabled = heroBackgroundEnabled;
@@ -236,6 +250,7 @@ class _HomePageState extends ConsumerState<HomePage>
                 homeMetadataAutoRefreshRevision:
                     homeMetadataAutoRefreshRevision,
                 homeExplicitRefreshRevision: homeExplicitRefreshRevision,
+                homeNavigationResetRevision: homeNavigationResetRevision,
                 isTelevision: isTelevision,
                 heroDisplayMode: heroDisplayMode,
               ),
@@ -258,6 +273,7 @@ class _HomePageState extends ConsumerState<HomePage>
     required bool lightweightHomeHeroEnabled,
     required int homeMetadataAutoRefreshRevision,
     required int homeExplicitRefreshRevision,
+    required int homeNavigationResetRevision,
     required bool isTelevision,
     required HomeHeroDisplayMode heroDisplayMode,
     required bool simplifyHeroBackdrop,
@@ -388,6 +404,7 @@ class _HomePageState extends ConsumerState<HomePage>
                   heroNextSectionFocusNode: _heroNextSectionFocusNode,
                   homeMetadataAutoRefreshRevision:
                       homeMetadataAutoRefreshRevision,
+                  homeNavigationResetRevision: homeNavigationResetRevision,
                 ),
               ),
             );

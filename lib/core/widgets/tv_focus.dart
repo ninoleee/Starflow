@@ -1295,6 +1295,44 @@ Widget wrapTelevisionDialogFieldTraversal({
   );
 }
 
+void scheduleTelevisionDialogInitialFocus({
+  required bool enabled,
+  required FocusNode focusNode,
+  required Iterable<FocusNode> dialogFocusNodes,
+  required bool Function() isActive,
+}) {
+  if (!enabled) {
+    return;
+  }
+
+  void requestIfNeeded() {
+    if (!isActive()) {
+      return;
+    }
+    final dialogAlreadyHasFocus = dialogFocusNodes.any(
+      (node) => node.hasFocus || node.hasPrimaryFocus,
+    );
+    if (dialogAlreadyHasFocus ||
+        !focusNode.canRequestFocus ||
+        focusNode.context == null) {
+      return;
+    }
+    focusNode.requestFocus();
+  }
+
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    requestIfNeeded();
+    Future<void>.delayed(
+      const Duration(milliseconds: 120),
+      requestIfNeeded,
+    );
+    Future<void>.delayed(
+      const Duration(milliseconds: 320),
+      requestIfNeeded,
+    );
+  });
+}
+
 Widget wrapTelevisionDialogBackHandling({
   required bool enabled,
   required BuildContext dialogContext,

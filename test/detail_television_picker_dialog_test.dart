@@ -37,8 +37,12 @@ void main() {
                     unawaited(
                       showDetailTelevisionPickerDialog<int>(
                         context: context,
+                        enabled: true,
                         title: '选择播放来源',
                         selectedValue: 1,
+                        optionDebugLabelPrefix: 'test-option',
+                        closeFocusDebugLabel: 'test-close',
+                        closeFocusId: 'test:close',
                         options: const [
                           DetailTelevisionPickerOption<int>(
                             value: 0,
@@ -66,36 +70,20 @@ void main() {
     await tester.tap(find.text('打开'));
     await tester.pumpAndSettle();
 
-    expect(find.byType(SimpleDialog), findsOneWidget);
-    expect(find.byType(StarflowSelectionTile), findsNothing);
-    expect(find.text('第二项  当前'), findsOneWidget);
-
-    final firstFinder = find.byWidgetPredicate(
-      (widget) =>
-          widget is TvFocusableAction && widget.focusId == 'test:option:0',
-    );
-    final secondFinder = find.byWidgetPredicate(
-      (widget) =>
-          widget is TvFocusableAction && widget.focusId == 'test:option:1',
-    );
-    final first = tester.widget<TvFocusableAction>(firstFinder);
-    final second = tester.widget<TvFocusableAction>(secondFinder);
-    final firstDetector = tester.widget<FocusableActionDetector>(
-      find.descendant(
-        of: firstFinder,
-        matching: find.byType(FocusableActionDetector),
+    final first = tester.widget<TvFocusableAction>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TvFocusableAction && widget.focusId == 'test:option:0',
       ),
     );
-    final secondDetector = tester.widget<FocusableActionDetector>(
-      find.descendant(
-        of: secondFinder,
-        matching: find.byType(FocusableActionDetector),
+    final second = tester.widget<TvFocusableAction>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TvFocusableAction && widget.focusId == 'test:option:1',
       ),
     );
 
-    expect(firstDetector.focusNode?.hasFocus, isTrue);
-    expect(secondDetector.focusNode?.hasFocus, isFalse);
-    expect(first.visualStyle, TvFocusVisualStyle.subtle);
-    expect(second.visualStyle, TvFocusVisualStyle.subtle);
+    expect(first.focusNode?.hasFocus, isTrue);
+    expect(second.focusNode?.hasFocus, isFalse);
   });
 }

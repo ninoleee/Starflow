@@ -7,3 +7,7 @@ final homeMetadataAutoRefreshRevisionProvider = StateProvider<int>(
 final homeExplicitRefreshRevisionProvider = StateProvider<int>(
   (ref) => 0,
 );
+
+final homeNavigationResetRevisionProvider = StateProvider<int>(
+  (ref) => 0,
+);

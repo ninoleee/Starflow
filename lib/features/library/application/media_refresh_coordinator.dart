@@ -49,6 +49,15 @@ class MediaRefreshCoordinator {
 
   final Ref _ref;
   Future<void>? _activeBackgroundEmbyRefresh;
+  int _backgroundEmbyRefreshGeneration = 0;
+
+  Future<void> cancelBackgroundTasks() async {
+    _backgroundEmbyRefreshGeneration += 1;
+    _ref.read(embyRefreshProgressProvider.notifier).clear();
+    await _ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes(
+          includeForceFull: true,
+        );
+  }
 
   Future<void> refreshSelectedSources({
     required List<String> sourceIds,
@@ -84,9 +93,11 @@ class MediaRefreshCoordinator {
 
     final progressController = _ref.read(embyRefreshProgressProvider.notifier);
     progressController.startTask(sources);
+    final refreshGeneration = ++_backgroundEmbyRefreshGeneration;
     final refreshFuture = _runBackgroundEmbyRefresh(
       sources,
       progressController: progressController,
+      refreshGeneration: refreshGeneration,
     );
     _activeBackgroundEmbyRefresh = refreshFuture;
     unawaited(
@@ -173,6 +184,7 @@ class MediaRefreshCoordinator {
   Future<void> _runBackgroundEmbyRefresh(
     List<MediaSourceConfig> sources, {
     required EmbyRefreshProgressController progressController,
+    required int refreshGeneration,
   }) async {
     final repository = _ref.read(mediaRepositoryProvider);
     var refreshedSourceCount = 0;
@@ -180,18 +192,31 @@ class MediaRefreshCoordinator {
     Object? lastError;
 
     for (var index = 0; index < sources.length; index += 1) {
+      if (refreshGeneration != _backgroundEmbyRefreshGeneration) {
+        return;
+      }
       final source = sources[index];
       progressController.activateSource(sourceIndex: index);
       try {
         await repository.refreshSource(sourceId: source.id);
+        if (refreshGeneration != _backgroundEmbyRefreshGeneration) {
+          return;
+        }
         refreshedSourceCount += 1;
         progressController.completeSource(sourceIndex: index);
       } catch (error) {
+        if (refreshGeneration != _backgroundEmbyRefreshGeneration) {
+          return;
+        }
         lastError = error;
         failedSourceNames.add(
           source.name.trim().isEmpty ? source.id : source.name,
         );
       }
+    }
+
+    if (refreshGeneration != _backgroundEmbyRefreshGeneration) {
+      return;
     }
 
     if (refreshedSourceCount > 0) {

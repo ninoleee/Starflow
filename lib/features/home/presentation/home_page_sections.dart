@@ -11,6 +11,7 @@ class _HomeSectionSlot extends ConsumerStatefulWidget {
     required this.useHeroNextSectionFocusNode,
     required this.heroNextSectionFocusNode,
     required this.homeMetadataAutoRefreshRevision,
+    required this.homeNavigationResetRevision,
   });
 
   final HomeModuleConfig module;
@@ -18,6 +19,7 @@ class _HomeSectionSlot extends ConsumerStatefulWidget {
   final bool useHeroNextSectionFocusNode;
   final FocusNode heroNextSectionFocusNode;
   final int homeMetadataAutoRefreshRevision;
+  final int homeNavigationResetRevision;
 
   @override
   ConsumerState<_HomeSectionSlot> createState() => _HomeSectionSlotState();
@@ -30,6 +32,7 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
       DetailRatingPrefetchCoordinator();
   int _observedHomeMetadataAutoRefreshRevision = 0;
   int _scheduledHomeMetadataAutoRefreshRevision = 0;
+  int _observedHomeNavigationResetRevision = 0;
 
   @override
   bool get wantKeepAlive => true;
@@ -37,6 +40,11 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
   @override
   void didUpdateWidget(covariant _HomeSectionSlot oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.homeNavigationResetRevision !=
+        _observedHomeNavigationResetRevision) {
+      _observedHomeNavigationResetRevision = widget.homeNavigationResetRevision;
+      _ratingPrefetchCoordinator.reset();
+    }
     if (!oldWidget.isPageVisible && widget.isPageVisible) {
       _ratingPrefetchCoordinator.reset();
     }

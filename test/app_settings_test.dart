@@ -13,6 +13,7 @@ void main() {
       'homeHeroBackgroundEnabled': false,
       'translucentEffectsEnabled': false,
       'autoHideNavigationBarEnabled': false,
+      'homeNavigationSingleTapCleanupEnabled': false,
       'performanceLiveItemHeroOverlayEnabled': false,
       'playbackOpenTimeoutSeconds': 45,
       'playbackDefaultSpeed': 1.25,
@@ -44,6 +45,7 @@ void main() {
     expect(settings.homeHeroBackgroundEnabled, isFalse);
     expect(settings.translucentEffectsEnabled, isFalse);
     expect(settings.autoHideNavigationBarEnabled, isFalse);
+    expect(settings.homeNavigationSingleTapCleanupEnabled, isFalse);
     expect(settings.performanceLiveItemHeroOverlayEnabled, isFalse);
     expect(settings.playbackOpenTimeoutSeconds, 45);
     expect(settings.playbackDefaultSpeed, 1.25);
@@ -90,6 +92,10 @@ void main() {
     expect(settings.toJson()['homeHeroBackgroundEnabled'], isFalse);
     expect(settings.toJson()['translucentEffectsEnabled'], isFalse);
     expect(settings.toJson()['autoHideNavigationBarEnabled'], isFalse);
+    expect(
+      settings.toJson()['homeNavigationSingleTapCleanupEnabled'],
+      isFalse,
+    );
     expect(settings.toJson()['performanceLiveItemHeroOverlayEnabled'], isFalse);
     expect(settings.toJson()['playbackOpenTimeoutSeconds'], 45);
     expect(settings.toJson()['playbackDefaultSpeed'], 1.25);
@@ -133,6 +139,7 @@ void main() {
     expect(settings.homeHeroBackgroundEnabled, isTrue);
     expect(settings.translucentEffectsEnabled, isTrue);
     expect(settings.autoHideNavigationBarEnabled, isTrue);
+    expect(settings.homeNavigationSingleTapCleanupEnabled, isTrue);
     expect(settings.performanceLiveItemHeroOverlayEnabled, isTrue);
     expect(
       settings.homeModules
@@ -641,6 +648,29 @@ void main() {
     expect(
       settings.applyStartupCrashRecoveryPreset().detailAutoLibraryMatchEnabled,
       isTrue,
+    );
+  });
+
+  test('performance presets preserve the home single tap cleanup switch', () {
+    const settings = AppSettings(
+      mediaSources: [],
+      searchProviders: [],
+      doubanAccount: DoubanAccountConfig(enabled: false),
+      homeModules: [],
+      homeNavigationSingleTapCleanupEnabled: false,
+    );
+
+    expect(
+      settings
+          .applyHighPerformancePreset()
+          .homeNavigationSingleTapCleanupEnabled,
+      isFalse,
+    );
+    expect(
+      settings
+          .applyStartupCrashRecoveryPreset()
+          .homeNavigationSingleTapCleanupEnabled,
+      isFalse,
     );
   });
 }

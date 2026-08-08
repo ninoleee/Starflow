@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/app/router/home_navigation_tap_coordinator.dart';
 import 'package:starflow/core/platform/android_picture_in_picture.dart';
 import 'package:starflow/core/platform/background_playback.dart';
 import 'package:starflow/core/platform/playback_system_session.dart';
@@ -14,6 +15,7 @@ import 'package:starflow/core/widgets/starflow_action_dialog.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/bootstrap/application/startup_crash_recovery.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
+import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
@@ -101,6 +103,8 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
   static const int _homeBranchIndex = 0;
   bool _isBottomBarVisible = true;
   bool _coldStartHomeRefreshScheduled = false;
+  final HomeNavigationTapCoordinator _homeNavigationTapCoordinator =
+      HomeNavigationTapCoordinator();
   ProviderSubscription<bool>? _autoHideNavigationBarSubscription;
 
   @override
@@ -157,6 +161,7 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
 
   @override
   void dispose() {
+    _homeNavigationTapCoordinator.dispose();
     _autoHideNavigationBarSubscription?.close();
     super.dispose();
   }
@@ -187,14 +192,43 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
   }
 
   void _handleDestinationSelected(int index) {
-    final shouldRefreshHome = index == _homeBranchIndex &&
-        widget.navigationShell.currentIndex == _homeBranchIndex;
     _setBottomBarVisible(true);
-    widget.navigationShell.goBranch(index);
-    if (shouldRefreshHome) {
-      unawaited(refreshHomeModules(ref));
-      unawaited(_refreshHomeEmbySources());
+    if (index != _homeBranchIndex) {
+      _homeNavigationTapCoordinator.cancel();
+      widget.navigationShell.goBranch(index);
+      return;
     }
+
+    final wasAlreadyOnHome =
+        widget.navigationShell.currentIndex == _homeBranchIndex;
+    widget.navigationShell.goBranch(index);
+    final singleTapCleanupEnabled =
+        ref.read(appSettingsProvider).homeNavigationSingleTapCleanupEnabled;
+    if (!singleTapCleanupEnabled) {
+      _homeNavigationTapCoordinator.cancel();
+      if (wasAlreadyOnHome) {
+        _refreshHomeFromNavigation();
+      }
+      return;
+    }
+    _homeNavigationTapCoordinator.registerTap(
+      onSingleTap: () {
+        if (mounted) {
+          unawaited(_handleHomeSingleTap());
+        }
+      },
+      onDoubleTap: _refreshHomeFromNavigation,
+    );
+  }
+
+  Future<void> _handleHomeSingleTap() async {
+    ref.read(homeNavigationResetRevisionProvider.notifier).state += 1;
+    await ref.read(mediaRefreshCoordinatorProvider).cancelBackgroundTasks();
+  }
+
+  void _refreshHomeFromNavigation() {
+    unawaited(refreshHomeModules(ref));
+    unawaited(_refreshHomeEmbySources());
   }
 
   Future<void> _refreshHomeEmbySources() async {

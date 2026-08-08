@@ -8,7 +8,9 @@ import 'package:sembast/sembast_memory.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
+import 'package:starflow/features/library/application/emby_refresh_progress.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -203,6 +205,58 @@ void main() {
       expect(updatedItems, hasLength(1));
       expect(updatedItems.single.playbackItemId, 'new-file');
     });
+
+    test('cancelling background tasks stops remaining Emby refreshes',
+        () async {
+      final repository = _PendingRefreshMediaRepository();
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [
+                MediaSourceConfig(
+                  id: 'emby-one',
+                  name: 'Emby One',
+                  kind: MediaSourceKind.emby,
+                  endpoint: 'https://one.example.com',
+                  enabled: true,
+                  accessToken: 'token',
+                  userId: 'user',
+                ),
+                MediaSourceConfig(
+                  id: 'emby-two',
+                  name: 'Emby Two',
+                  kind: MediaSourceKind.emby,
+                  endpoint: 'https://two.example.com',
+                  enabled: true,
+                  accessToken: 'token',
+                  userId: 'user',
+                ),
+              ],
+            ),
+          ),
+          mediaRepositoryProvider.overrideWithValue(repository),
+        ],
+      );
+      addTearDown(container.dispose);
+      final coordinator = container.read(mediaRefreshCoordinatorProvider);
+
+      expect(
+        await coordinator.startBackgroundEmbyRefresh(
+          sourceIds: const ['emby-one', 'emby-two'],
+        ),
+        isTrue,
+      );
+      expect(repository.refreshSourceIds, ['emby-one']);
+
+      await coordinator.cancelBackgroundTasks();
+      repository.firstRefresh.complete();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(repository.refreshSourceIds, ['emby-one']);
+      expect(repository.cancelCallCount, 1);
+      expect(container.read(embyRefreshProgressProvider), isNull);
+    });
   });
 }
 
@@ -268,5 +322,27 @@ class _MutableQuarkSaveClient extends QuarkSaveClient {
         .map(QuarkDirectoryEntry.fromFileEntry)
         .whereType<QuarkDirectoryEntry>()
         .toList(growable: false);
+  }
+}
+
+class _PendingRefreshMediaRepository extends Fake implements MediaRepository {
+  final Completer<void> firstRefresh = Completer<void>();
+  final List<String> refreshSourceIds = <String>[];
+  int cancelCallCount = 0;
+
+  @override
+  Future<void> refreshSource({
+    required String sourceId,
+    bool forceFullRescan = false,
+  }) {
+    refreshSourceIds.add(sourceId);
+    return firstRefresh.future;
+  }
+
+  @override
+  Future<void> cancelActiveWebDavRefreshes({
+    bool includeForceFull = false,
+  }) async {
+    cancelCallCount += 1;
   }
 }

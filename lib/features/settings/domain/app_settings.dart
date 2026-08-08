@@ -786,6 +786,7 @@ class AppSettings {
     this.homeHeroBackgroundEnabled = true,
     this.homeStartupAutoRefreshEnabled = true,
     this.homeStartupAutoRefreshEmbyEnabled,
+    this.homeNavigationSingleTapCleanupEnabled = true,
     this.translucentEffectsEnabled = true,
     this.autoHideNavigationBarEnabled = true,
     this.navigationDestinationIds = kDefaultNavigationDestinationIds,
@@ -846,6 +847,7 @@ class AppSettings {
   final bool homeStartupAutoRefreshEnabled;
   // null = follow platform default (TV defaults to off, others default to on).
   final bool? homeStartupAutoRefreshEmbyEnabled;
+  final bool homeNavigationSingleTapCleanupEnabled;
   final bool translucentEffectsEnabled;
   final bool autoHideNavigationBarEnabled;
   final List<String> navigationDestinationIds;
@@ -904,6 +906,7 @@ class AppSettings {
     bool? homeHeroBackgroundEnabled,
     bool? homeStartupAutoRefreshEnabled,
     bool? homeStartupAutoRefreshEmbyEnabled,
+    bool? homeNavigationSingleTapCleanupEnabled,
     bool? translucentEffectsEnabled,
     bool? autoHideNavigationBarEnabled,
     List<String>? navigationDestinationIds,
@@ -969,6 +972,9 @@ class AppSettings {
       // always supplies an explicit bool.
       homeStartupAutoRefreshEmbyEnabled: homeStartupAutoRefreshEmbyEnabled ??
           this.homeStartupAutoRefreshEmbyEnabled,
+      homeNavigationSingleTapCleanupEnabled:
+          homeNavigationSingleTapCleanupEnabled ??
+              this.homeNavigationSingleTapCleanupEnabled,
       translucentEffectsEnabled:
           translucentEffectsEnabled ?? this.translucentEffectsEnabled,
       autoHideNavigationBarEnabled:
@@ -1080,6 +1086,8 @@ class AppSettings {
       'homeHeroBackgroundEnabled': homeHeroBackgroundEnabled,
       'homeStartupAutoRefreshEnabled': homeStartupAutoRefreshEnabled,
       'homeStartupAutoRefreshEmbyEnabled': homeStartupAutoRefreshEmbyEnabled,
+      'homeNavigationSingleTapCleanupEnabled':
+          homeNavigationSingleTapCleanupEnabled,
       'translucentEffectsEnabled': translucentEffectsEnabled,
       'autoHideNavigationBarEnabled': autoHideNavigationBarEnabled,
       'navigationDestinationIds': navigationDestinationIds,
@@ -1195,6 +1203,8 @@ class AppSettings {
           json['homeStartupAutoRefreshEnabled'] as bool? ?? true,
       homeStartupAutoRefreshEmbyEnabled:
           json['homeStartupAutoRefreshEmbyEnabled'] as bool?,
+      homeNavigationSingleTapCleanupEnabled:
+          json['homeNavigationSingleTapCleanupEnabled'] as bool? ?? true,
       translucentEffectsEnabled:
           json['translucentEffectsEnabled'] as bool? ?? true,
       autoHideNavigationBarEnabled:

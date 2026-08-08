@@ -344,6 +344,13 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     );
   }
 
+  Future<void> setHomeNavigationSingleTapCleanupEnabled(bool enabled) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(homeNavigationSingleTapCleanupEnabled: enabled),
+    );
+  }
+
   Future<void> setTranslucentEffectsEnabled(bool enabled) async {
     final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(translucentEffectsEnabled: enabled));

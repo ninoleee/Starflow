@@ -6,7 +6,6 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/starflow_action_dialog.dart';
-import 'package:starflow/core/widgets/starflow_option_dialog.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/settings/presentation/settings_version_label.dart';
 
@@ -622,22 +621,97 @@ Future<T?> showSettingsOptionDialog<T>({
   required String Function(T option) labelBuilder,
   T? currentValue,
 }) {
-  return showStarflowOptionDialog<T>(
-    context: context,
-    title: title,
-    selectedValue: currentValue,
-    options: [
-      for (var index = 0; index < options.length; index++)
-        StarflowOptionDialogOption<T>(
-          value: options[index],
-          title: labelBuilder(options[index]),
-          focusId: buildTvFocusId(
-            prefix: 'settings-option-dialog',
-            segments: [title, index, labelBuilder(options[index])],
-          ),
-        ),
-    ],
+  final optionFocusNodes = List<FocusNode>.generate(
+    options.length,
+    (index) => FocusNode(debugLabel: 'settings-option-$index'),
   );
+  var dialogClosed = false;
+  var initialFocusRequested = false;
+
+  void scheduleInitialOptionFocus() {
+    if (initialFocusRequested || optionFocusNodes.isEmpty) {
+      return;
+    }
+    initialFocusRequested = true;
+    scheduleTelevisionDialogInitialFocus(
+      enabled: true,
+      focusNode: optionFocusNodes.first,
+      dialogFocusNodes: optionFocusNodes,
+      isActive: () => !dialogClosed,
+    );
+  }
+
+  return showDialog<T>(
+    context: context,
+    builder: (dialogContext) {
+      return Consumer(
+        builder: (context, ref, child) {
+          final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+          if (isTelevision) {
+            scheduleInitialOptionFocus();
+          }
+
+          final dialog = FocusTraversalGroup(
+            policy: OrderedTraversalPolicy(),
+            child: SimpleDialog(
+              title: Text(title),
+              children: [
+                for (var index = 0; index < options.length; index++)
+                  FocusTraversalOrder(
+                    order: NumericFocusOrder(index.toDouble()),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: TvFocusableAction(
+                        onPressed: () =>
+                            Navigator.of(dialogContext).pop(options[index]),
+                        focusNode: optionFocusNodes[index],
+                        focusId: buildTvFocusId(
+                          prefix: 'settings-option-dialog',
+                          segments: [
+                            title,
+                            index,
+                            labelBuilder(options[index]),
+                          ],
+                        ),
+                        autofocus: index == 0,
+                        borderRadius: BorderRadius.circular(14),
+                        visualStyle: TvFocusVisualStyle.subtle,
+                        focusScale: kTvButtonFocusScale,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
+                          child: Text(
+                            options[index] == currentValue
+                                ? '${labelBuilder(options[index])}  当前'
+                                : labelBuilder(options[index]),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+
+          return wrapTelevisionDialogBackHandling(
+            enabled: isTelevision,
+            dialogContext: dialogContext,
+            inputFocusNodes: const <FocusNode>[],
+            contentFocusNodes: optionFocusNodes,
+            actionFocusNodes: const <FocusNode>[],
+            child: dialog,
+          );
+        },
+      );
+    },
+  ).whenComplete(() {
+    dialogClosed = true;
+    for (final focusNode in optionFocusNodes) {
+      focusNode.dispose();
+    }
+  });
 }
 
 Future<Set<T>?> showSettingsCheckboxSelectionDialog<T>({

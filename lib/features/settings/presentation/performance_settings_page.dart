@@ -38,6 +38,11 @@ class PerformanceSettingsPage extends ConsumerWidget {
     final settings = ref.watch(settingsPerformanceSliceProvider);
     final detailAutoLibraryMatchEnabled =
         ref.watch(settingsDetailAutoLibraryMatchEnabledProvider);
+    final homeNavigationSingleTapCleanupEnabled = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.homeNavigationSingleTapCleanupEnabled,
+      ),
+    );
     final controller = ref.read(settingsControllerProvider.notifier);
     final theme = Theme.of(context);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
@@ -76,6 +81,14 @@ class PerformanceSettingsPage extends ConsumerWidget {
             value: settings.autoHideNavigationBarEnabled,
             onChanged: (value) {
               controller.setAutoHideNavigationBarEnabled(value);
+            },
+          ),
+          SettingsToggleTile(
+            title: '单击首页时清理后台任务',
+            subtitle: '开启后，单击菜单栏首页会停止非播放后台任务并回到顶部；双击首页仍执行刷新。',
+            value: homeNavigationSingleTapCleanupEnabled,
+            onChanged: (value) {
+              controller.setHomeNavigationSingleTapCleanupEnabled(value);
             },
           ),
         ]),
