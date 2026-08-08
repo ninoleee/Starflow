@@ -577,7 +577,7 @@ void main() {
     expect(settings.tmdbMetadataMatchEnabled, isFalse);
     expect(settings.wmdbMetadataMatchEnabled, isFalse);
     expect(settings.imdbRatingMatchEnabled, isFalse);
-    expect(settings.detailAutoLibraryMatchEnabled, isFalse);
+    expect(settings.detailAutoLibraryMatchEnabled, isTrue);
     expect(settings.playbackBackgroundPlaybackEnabled, isFalse);
     expect(settings.playbackMpvDoubleTapToSeekEnabled, isFalse);
     expect(settings.playbackMpvSwipeToSeekEnabled, isFalse);
@@ -586,6 +586,52 @@ void main() {
     expect(
       settings.effectiveUiPerformanceTier,
       AppUiPerformanceTier.performance,
+    );
+  });
+
+  test('navigation destinations persist favorites without changing defaults',
+      () {
+    const settings = AppSettings(
+      mediaSources: [],
+      searchProviders: [],
+      doubanAccount: DoubanAccountConfig(enabled: false),
+      homeModules: [],
+      navigationDestinationIds: [
+        kNavigationDestinationHome,
+        kNavigationDestinationFavorites,
+        kNavigationDestinationSettings,
+      ],
+    );
+
+    final restored = AppSettings.fromJson(settings.toJson());
+
+    expect(restored.navigationDestinationIds, [
+      kNavigationDestinationHome,
+      kNavigationDestinationFavorites,
+      kNavigationDestinationSettings,
+    ]);
+    expect(
+      AppSettings.fromJson(const {}).navigationDestinationIds,
+      kDefaultNavigationDestinationIds,
+    );
+  });
+
+  test('high performance presets preserve detail auto matching', () {
+    const settings = AppSettings(
+      mediaSources: [],
+      searchProviders: [],
+      doubanAccount: DoubanAccountConfig(enabled: false),
+      homeModules: [],
+      detailAutoLibraryMatchEnabled: true,
+    );
+
+    expect(
+      settings.applyHighPerformancePreset().detailAutoLibraryMatchEnabled,
+      isTrue,
+    );
+    expect(
+      settings.applyStartupCrashRecoveryPreset().detailAutoLibraryMatchEnabled,
+      isTrue,
     );
   });
 }

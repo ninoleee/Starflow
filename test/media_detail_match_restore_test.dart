@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_external_episode_variant_service.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
@@ -1551,6 +1553,85 @@ void main() {
     expect(mediaRepository.fetchCollectionsCallCount, 0);
     expect(mediaRepository.fetchLibraryCallCount, 0);
     expect(find.text('匹配资源库'), findsOneWidget);
+  });
+
+  testWidgets('episode overview is focusable and hero focus scrolls to top',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const seedTarget = MediaDetailTarget(
+      title: '风暴前夜',
+      posterUrl: '',
+      overview: '单集简介内容。这里放入足够长的文本，让详情页形成可滚动区域，并验证 Hero 获得焦点后会回到顶部。'
+          '单集简介内容。这里放入足够长的文本，让详情页形成可滚动区域，并验证 Hero 获得焦点后会回到顶部。',
+      itemType: 'episode',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      searchQuery: '人生切割术',
+      sourceName: '豆瓣',
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'tmdbMetadataMatchEnabled': false,
+              'wmdbMetadataMatchEnabled': false,
+              'imdbRatingMatchEnabled': false,
+              'detailAutoLibraryMatchEnabled': false,
+            }),
+          ),
+          mediaRepositoryProvider.overrideWithValue(
+            const _NoopMediaRepository(),
+          ),
+          localStorageCacheRepositoryProvider.overrideWithValue(
+            _FakeRestoreCacheRepository(cachedState: null),
+          ),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(target: seedTarget),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 240));
+    await tester.pump();
+
+    final overviewFocusables = tester
+        .widgetList<TvFocusableAction>(find.byType(TvFocusableAction))
+        .where(
+          (widget) => widget.focusId?.startsWith('detail:overview') ?? false,
+        )
+        .toList(growable: false);
+    expect(overviewFocusables, hasLength(1));
+    expect(overviewFocusables.single.visualStyle, TvFocusVisualStyle.subtle);
+
+    final listView = tester.widget<ListView>(find.byType(ListView).first);
+    final controller = listView.controller!;
+    final heroArtwork = tester
+        .widgetList<TvFocusableAction>(find.byType(TvFocusableAction))
+        .firstWhere((widget) => widget.focusId == 'detail:hero:artwork');
+    heroArtwork.focusNode!.unfocus();
+    await tester.pump();
+
+    controller.jumpTo(controller.position.maxScrollExtent);
+    await tester.pump();
+    expect(controller.offset, greaterThan(0));
+
+    heroArtwork.focusNode!.requestFocus();
+    await tester.pump();
+
+    expect(controller.offset, controller.position.minScrollExtent);
   });
 }
 

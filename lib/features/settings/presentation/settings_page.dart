@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
@@ -11,10 +10,10 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
-import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/application/settings_slice_providers.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/presentation/home_settings_page.dart';
 import 'package:starflow/features/settings/presentation/media_source_editor_page.dart';
 import 'package:starflow/features/settings/presentation/metadata_match_settings_page.dart';
 import 'package:starflow/features/settings/presentation/local_storage_settings_page.dart';
@@ -47,27 +46,14 @@ class SettingsPage extends ConsumerStatefulWidget {
     final searchSourceIds = ref.watch(settingsSearchSourceIdsProvider);
     final libraryMatchSourceIds =
         ref.watch(settingsLibraryMatchSourceIdsProvider);
-    final detailAutoLibraryMatchEnabled =
-        ref.watch(settingsDetailAutoLibraryMatchEnabledProvider);
     final networkStorage = ref.watch(settingsNetworkStorageProvider);
-    final heroSlice = ref.watch(settingsHeroSliceProvider);
     final playbackSlice = ref.watch(settingsPlaybackSliceProvider);
     final performanceSlice = ref.watch(settingsPerformanceSliceProvider);
     final loading = ref.watch(settingsControllerProvider).isLoading;
-    final heroCandidates = ref.watch(homeHeroModuleCandidatesProvider);
-    final heroModule = ref.watch(homeHeroModuleProvider);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
-    final heroEnabled = heroModule?.enabled ?? false;
-    final homeStartupAutoRefreshEnabled = ref.watch(
+    final navigationDestinationIds = ref.watch(
       appSettingsProvider
-          .select((settings) => settings.homeStartupAutoRefreshEnabled),
-    );
-    final homeStartupAutoRefreshEmbyEffective = ref.watch(
-      appSettingsProvider.select(
-        (settings) => settings.effectiveHomeStartupAutoRefreshEmbyEnabled(
-          isTelevision: isTelevision,
-        ),
-      ),
+          .select((settings) => settings.navigationDestinationIds),
     );
 
     return TvPageFocusScope(
@@ -186,9 +172,7 @@ class SettingsPage extends ConsumerStatefulWidget {
                     children: [
                       _SettingsNavigationTile(
                         title: '打开匹配与评分设置',
-                        subtitle: detailAutoLibraryMatchEnabled
-                            ? '详情页自动匹配资源：已开启'
-                            : '详情页自动匹配资源：已关闭',
+                        subtitle: 'TMDB、评分与匹配优先级',
                         onTap: () => _openMetadataMatchSettings(context),
                       ),
                       const SizedBox(height: 10),
@@ -261,139 +245,28 @@ class SettingsPage extends ConsumerStatefulWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _SettingsNavigationTile(
+                        title: '首页设置',
+                        subtitle: 'Hero、首页模块与启动刷新',
+                        onTap: () => _openHomeSettings(context),
+                      ),
+                      const SizedBox(height: 10),
+                      _SettingsNavigationTile(
                         title: '高性能与轻量模式',
                         subtitle: performanceSettingsSummary(performanceSlice),
                         onTap: () => _openPerformanceSettings(context),
                       ),
-                      const SizedBox(height: 18),
-                      Text(
-                        '首页 Hero',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
                       const SizedBox(height: 10),
-                      Text(
-                        'Hero 展示方式',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          for (final mode in HomeHeroDisplayMode.values)
-                            StarflowChipButton(
-                              label: mode.label,
-                              selected: mode == heroSlice.displayMode,
-                              onPressed: heroEnabled
-                                  ? () {
-                                      ref
-                                          .read(settingsControllerProvider
-                                              .notifier)
-                                          .setHomeHeroDisplayMode(mode);
-                                    }
-                                  : null,
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      StarflowToggleTile(
-                        title: '标题优先展示 Logo',
-                        value: heroSlice.logoTitleEnabled,
-                        onChanged: heroEnabled
-                            ? (value) {
-                                ref
-                                    .read(settingsControllerProvider.notifier)
-                                    .setHomeHeroLogoTitleEnabled(value);
-                              }
-                            : null,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 18),
-                SectionPanel(
-                  title: '首页模块',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Hero 模块',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 10),
-                      ...buildSettingsTileGroup([
-                        StarflowToggleTile(
-                          title: '启用 Hero',
-                          value: heroEnabled,
-                          onChanged: (value) {
-                            ref
-                                .read(settingsControllerProvider.notifier)
-                                .setHomeHeroEnabled(value);
-                          },
+                      _SettingsNavigationTile(
+                        title: '菜单栏按钮',
+                        subtitle: _navigationDestinationSummary(
+                          navigationDestinationIds,
                         ),
-                        StarflowSelectionTile(
-                          title: 'Hero 数据来源',
-                          value: _heroSourceLabel(
-                            heroSlice: heroSlice,
-                            heroCandidates: heroCandidates,
-                          ),
-                          onPressed: heroEnabled
-                              ? () => _openHeroSourcePicker(
-                                    context,
-                                    ref,
-                                    heroSlice: heroSlice,
-                                    heroCandidates: heroCandidates,
-                                  )
-                              : null,
+                        onTap: () => _openNavigationDestinationPicker(
+                          context,
+                          ref,
+                          selectedIds: navigationDestinationIds,
                         ),
-                        _SettingsNavigationTile(
-                          title: '打开首页编辑器',
-                          onTap: () => context.pushNamed('home-editor'),
-                        ),
-                      ], spacing: 10),
-                      const SizedBox(height: 18),
-                      Text(
-                        '启动行为',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
                       ),
-                      const SizedBox(height: 10),
-                      ...buildSettingsTileGroup([
-                        StarflowToggleTile(
-                          title: '启动时自动刷新首页',
-                          subtitle: '冷启动应用后, 首页模块会在后台重新拉取一次最新数据.',
-                          value: homeStartupAutoRefreshEnabled,
-                          onChanged: (value) {
-                            ref
-                                .read(settingsControllerProvider.notifier)
-                                .setHomeStartupAutoRefreshEnabled(value);
-                          },
-                        ),
-                        StarflowToggleTile(
-                          title: '同时刷新 Emby 媒体源',
-                          subtitle: homeStartupAutoRefreshEnabled
-                              ? (isTelevision
-                                  ? 'TV 端默认关闭以避免冷启动卡顿, 需要时可手动开启.'
-                                  : '关闭后启动时仅刷新首页模块缓存, 不会触发 Emby 全量同步.')
-                              : '需先开启上方"启动时自动刷新首页".',
-                          value: homeStartupAutoRefreshEmbyEffective,
-                          onChanged: homeStartupAutoRefreshEnabled
-                              ? (value) {
-                                  ref
-                                      .read(settingsControllerProvider.notifier)
-                                      .setHomeStartupAutoRefreshEmbyEnabled(
-                                          value);
-                                }
-                              : null,
-                        ),
-                      ], spacing: 10),
                     ],
                   ),
                 ),
@@ -597,6 +470,51 @@ class SettingsPage extends ConsumerStatefulWidget {
     );
   }
 
+  Future<void> _openHomeSettings(BuildContext context) {
+    return Navigator.of(context, rootNavigator: true).push<void>(
+      NoAnimationMaterialPageRoute<void>(
+        builder: (context) => const HomeSettingsPage(),
+      ),
+    );
+  }
+
+  Future<void> _openNavigationDestinationPicker(
+    BuildContext context,
+    WidgetRef ref, {
+    required List<String> selectedIds,
+  }) async {
+    final selected = await showSettingsCheckboxSelectionDialog<String>(
+      context: context,
+      title: '选择菜单栏按钮',
+      initialSelection: selectedIds.toSet(),
+      allLabel: '仅保留首页和设置',
+      allSubtitle: '至少保留两个基础入口，避免菜单栏无法继续使用。',
+      clearLabel: '基础入口',
+      sections: const [
+        SettingsCheckboxDialogSection<String>(
+          options: [
+            SettingsCheckboxDialogOption(
+                value: kNavigationDestinationHome, title: '首页'),
+            SettingsCheckboxDialogOption(
+                value: kNavigationDestinationSearch, title: '搜索'),
+            SettingsCheckboxDialogOption(
+                value: kNavigationDestinationFavorites, title: '收藏'),
+            SettingsCheckboxDialogOption(
+                value: kNavigationDestinationLibrary, title: '媒体库'),
+            SettingsCheckboxDialogOption(
+                value: kNavigationDestinationSettings, title: '设置'),
+          ],
+        ),
+      ],
+    );
+    if (selected == null) {
+      return;
+    }
+    await ref
+        .read(settingsControllerProvider.notifier)
+        .setNavigationDestinationIds(selected);
+  }
+
   Future<void> _openLocalStorageSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
       NoAnimationMaterialPageRoute<void>(
@@ -611,45 +529,6 @@ class SettingsPage extends ConsumerStatefulWidget {
         builder: (context) => const SettingsManagementPage(),
       ),
     );
-  }
-
-  Future<void> _openHeroSourcePicker(
-    BuildContext context,
-    WidgetRef ref, {
-    required SettingsHeroSlice heroSlice,
-    required List<HomeModuleConfig> heroCandidates,
-  }) async {
-    final selection = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: const Text('选择 Hero 数据来源'),
-          children: [
-            SimpleDialogOption(
-              onPressed: () => Navigator.of(context).pop(''),
-              child: Text(
-                heroSlice.sourceModuleId.trim().isEmpty ? '自动选择  当前' : '自动选择',
-              ),
-            ),
-            for (final module in heroCandidates)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(context).pop(module.id),
-                child: Text(
-                  module.id == heroSlice.sourceModuleId
-                      ? '${module.title}  当前'
-                      : module.title,
-                ),
-              ),
-          ],
-        );
-      },
-    );
-    if (selection == null) {
-      return;
-    }
-    await ref
-        .read(settingsControllerProvider.notifier)
-        .setHomeHeroSourceModuleId(selection);
   }
 }
 
@@ -760,41 +639,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 }
 
-String _resolveHeroModuleSelectionValue({
-  required SettingsHeroSlice heroSlice,
-  required List<HomeModuleConfig> heroCandidates,
-}) {
-  final selectedId = heroSlice.sourceModuleId.trim();
-  if (selectedId.isEmpty) {
-    return '';
-  }
-  for (final module in heroCandidates) {
-    if (module.id == selectedId) {
-      return selectedId;
-    }
-  }
-  return '';
-}
-
-String _heroSourceLabel({
-  required SettingsHeroSlice heroSlice,
-  required List<HomeModuleConfig> heroCandidates,
-}) {
-  final selectedId = _resolveHeroModuleSelectionValue(
-    heroSlice: heroSlice,
-    heroCandidates: heroCandidates,
-  );
-  if (selectedId.isEmpty) {
-    return '自动选择';
-  }
-  for (final module in heroCandidates) {
-    if (module.id == selectedId) {
-      return module.title;
-    }
-  }
-  return '自动选择';
-}
-
 String _playbackSettingsSummary(
   SettingsPlaybackSlice playbackSlice, {
   bool isTelevision = false,
@@ -835,6 +679,18 @@ String _playbackSettingsSummary(
             ? '后台播放开'
             : '后台播放关',
   ].join(' · ');
+}
+
+String _navigationDestinationSummary(List<String> selectedIds) {
+  const labels = <String, String>{
+    kNavigationDestinationHome: '首页',
+    kNavigationDestinationSearch: '搜索',
+    kNavigationDestinationFavorites: '收藏',
+    kNavigationDestinationLibrary: '媒体库',
+    kNavigationDestinationSettings: '设置',
+  };
+  final selected = normalizeNavigationDestinationIds(selectedIds);
+  return selected.map((id) => labels[id]).whereType<String>().join('、');
 }
 
 String _searchSourceSummary({

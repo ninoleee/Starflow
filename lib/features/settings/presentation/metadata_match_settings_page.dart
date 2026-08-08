@@ -27,17 +27,6 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _MetadataToggleTile(
-                title: '详情页自动匹配本地资源',
-                subtitle: '开启后，进入详情页会自动尝试匹配本地资源；关闭后仅手动匹配',
-                value: settings.detailAutoLibraryMatchEnabled,
-                onChanged: (value) {
-                  ref
-                      .read(settingsControllerProvider.notifier)
-                      .setDetailAutoLibraryMatchEnabled(value);
-                },
-              ),
-              const SizedBox(height: 10),
               Text(
                 '优先顺序',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -707,19 +696,16 @@ class _MetadataToggleTile extends StatelessWidget {
     required this.title,
     required this.value,
     required this.onChanged,
-    this.subtitle = '',
   });
 
   final String title;
   final bool value;
   final ValueChanged<bool> onChanged;
-  final String subtitle;
 
   @override
   Widget build(BuildContext context) {
     return StarflowToggleTile(
       title: title,
-      subtitle: subtitle,
       value: value,
       onChanged: onChanged,
     );

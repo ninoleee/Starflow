@@ -49,21 +49,36 @@ final _navigationAnimationEnabledProvider = Provider<bool>((ref) {
 });
 const _navigationItems = <_NavigationItemData>[
   _NavigationItemData(
+    id: kNavigationDestinationHome,
+    branchIndex: 0,
     label: '首页',
     icon: Icons.space_dashboard_outlined,
     selectedIcon: Icons.space_dashboard_rounded,
   ),
   _NavigationItemData(
+    id: kNavigationDestinationSearch,
+    branchIndex: 1,
     label: '搜索',
     icon: Icons.search_rounded,
     selectedIcon: Icons.search_rounded,
   ),
   _NavigationItemData(
+    id: kNavigationDestinationFavorites,
+    branchIndex: 2,
+    label: '收藏',
+    icon: Icons.favorite_border_rounded,
+    selectedIcon: Icons.favorite_rounded,
+  ),
+  _NavigationItemData(
+    id: kNavigationDestinationLibrary,
+    branchIndex: 3,
     label: '媒体库',
     icon: Icons.video_library_outlined,
     selectedIcon: Icons.video_library_rounded,
   ),
   _NavigationItemData(
+    id: kNavigationDestinationSettings,
+    branchIndex: 4,
     label: '设置',
     icon: Icons.tune_outlined,
     selectedIcon: Icons.tune_rounded,
@@ -215,6 +230,13 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
         ref.watch(_navigationStaticNavigationProvider);
     final navigationAnimationEnabled =
         ref.watch(_navigationAnimationEnabledProvider);
+    final visibleNavigationIds = ref.watch(
+      appSettingsProvider
+          .select((settings) => settings.navigationDestinationIds),
+    );
+    final visibleNavigationItems = _navigationItems
+        .where((item) => visibleNavigationIds.contains(item.id))
+        .toList(growable: false);
     final navigationAnimationDuration = navigationAnimationEnabled
         ? const Duration(milliseconds: 220)
         : Duration.zero;
@@ -254,6 +276,7 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
                       color: const Color(0x1A0F1622),
                     ),
                     child: _FloatingNavigationBar(
+                      items: visibleNavigationItems,
                       currentIndex: widget.navigationShell.currentIndex,
                       staticNavigationEnabled:
                           performanceStaticNavigationEnabled,
@@ -270,6 +293,7 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
                     color: const Color(0xE1141F30),
                   ),
                   child: _FloatingNavigationBar(
+                    items: visibleNavigationItems,
                     currentIndex: widget.navigationShell.currentIndex,
                     staticNavigationEnabled: performanceStaticNavigationEnabled,
                     onDestinationSelected: _handleDestinationSelected,
@@ -284,6 +308,10 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
       backgroundColor: Colors.transparent,
       body: isTelevision
           ? _TelevisionNavigationShell(
+              key: ValueKey(
+                visibleNavigationItems.map((item) => item.id).join(','),
+              ),
+              items: visibleNavigationItems,
               currentIndex: widget.navigationShell.currentIndex,
               onDestinationSelected: _handleDestinationSelected,
               translucentEffectsEnabled: translucentEffectsEnabled,
@@ -326,6 +354,8 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
 
 class _TelevisionNavigationShell extends StatefulWidget {
   const _TelevisionNavigationShell({
+    super.key,
+    required this.items,
     required this.currentIndex,
     required this.onDestinationSelected,
     required this.child,
@@ -336,6 +366,7 @@ class _TelevisionNavigationShell extends StatefulWidget {
   });
 
   final int currentIndex;
+  final List<_NavigationItemData> items;
   final ValueChanged<int> onDestinationSelected;
   final Widget child;
   final bool translucentEffectsEnabled;
@@ -351,7 +382,7 @@ class _TelevisionNavigationShell extends StatefulWidget {
 class _TelevisionNavigationShellState
     extends State<_TelevisionNavigationShell> {
   late final List<FocusNode> _destinationFocusNodes = List.generate(
-    _navigationItems.length,
+    widget.items.length,
     (index) => FocusNode(debugLabel: 'tv-nav-$index'),
   );
   bool _isExitDialogVisible = false;
@@ -410,7 +441,10 @@ class _TelevisionNavigationShellState
       if (!mounted || _destinationFocusNodes.isEmpty) {
         return;
       }
-      final index = widget.currentIndex.clamp(
+      final currentDisplayIndex = widget.items.indexWhere(
+        (item) => item.branchIndex == widget.currentIndex,
+      );
+      final index = (currentDisplayIndex < 0 ? 0 : currentDisplayIndex).clamp(
         0,
         _destinationFocusNodes.length - 1,
       );
@@ -536,6 +570,7 @@ class _TelevisionNavigationShellState
                   color: const Color(0x160F1724),
                 ),
                 child: _TelevisionSidebarContent(
+                  items: widget.items,
                   currentIndex: widget.currentIndex,
                   focusNodes: _destinationFocusNodes,
                   onDestinationSelected: widget.onDestinationSelected,
@@ -548,6 +583,7 @@ class _TelevisionNavigationShellState
                 color: const Color(0xCC101926),
               ),
               child: _TelevisionSidebarContent(
+                items: widget.items,
                 currentIndex: widget.currentIndex,
                 focusNodes: _destinationFocusNodes,
                 onDestinationSelected: widget.onDestinationSelected,
@@ -656,11 +692,13 @@ class _TelevisionContentFocusBoundary extends StatelessWidget {
 
 class _TelevisionSidebarContent extends StatelessWidget {
   const _TelevisionSidebarContent({
+    required this.items,
     required this.currentIndex,
     required this.focusNodes,
     required this.onDestinationSelected,
   });
 
+  final List<_NavigationItemData> items;
   final int currentIndex;
   final List<FocusNode> focusNodes;
   final ValueChanged<int> onDestinationSelected;
@@ -673,16 +711,15 @@ class _TelevisionSidebarContent extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           const SizedBox(height: 10),
-          for (var index = 0; index < _navigationItems.length; index++) ...[
+          for (var index = 0; index < items.length; index++) ...[
             _TelevisionNavigationDestination(
-              item: _navigationItems[index],
-              selected: index == currentIndex,
+              item: items[index],
+              selected: items[index].branchIndex == currentIndex,
               focusNode: focusNodes[index],
-              autofocus: index == currentIndex,
-              onPressed: () => onDestinationSelected(index),
+              autofocus: items[index].branchIndex == currentIndex,
+              onPressed: () => onDestinationSelected(items[index].branchIndex),
             ),
-            if (index != _navigationItems.length - 1)
-              const SizedBox(height: 10),
+            if (index != items.length - 1) const SizedBox(height: 10),
           ],
           const SizedBox(height: 10),
         ],
@@ -740,11 +777,13 @@ class _TelevisionNavigationDestination extends StatelessWidget {
 
 class _FloatingNavigationBar extends StatelessWidget {
   const _FloatingNavigationBar({
+    required this.items,
     required this.currentIndex,
     required this.staticNavigationEnabled,
     required this.onDestinationSelected,
   });
 
+  final List<_NavigationItemData> items;
   final int currentIndex;
   final bool staticNavigationEnabled;
   final ValueChanged<int> onDestinationSelected;
@@ -754,15 +793,15 @@ class _FloatingNavigationBar extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       child: Row(
-        children: List.generate(_navigationItems.length, (index) {
-          final item = _navigationItems[index];
-          final selected = index == currentIndex;
+        children: List.generate(items.length, (index) {
+          final item = items[index];
+          final selected = item.branchIndex == currentIndex;
           return Expanded(
             child: _FloatingNavigationButton(
               item: item,
               selected: selected,
               staticNavigationEnabled: staticNavigationEnabled,
-              onTap: () => onDestinationSelected(index),
+              onTap: () => onDestinationSelected(item.branchIndex),
             ),
           );
         }),
@@ -875,11 +914,15 @@ class _FloatingNavigationButton extends StatelessWidget {
 
 class _NavigationItemData {
   const _NavigationItemData({
+    required this.id,
+    required this.branchIndex,
     required this.label,
     required this.icon,
     required this.selectedIcon,
   });
 
+  final String id;
+  final int branchIndex;
   final String label;
   final IconData icon;
   final IconData selectedIcon;

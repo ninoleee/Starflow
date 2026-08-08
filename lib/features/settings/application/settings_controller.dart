@@ -354,6 +354,15 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(autoHideNavigationBarEnabled: enabled));
   }
 
+  Future<void> setNavigationDestinationIds(Iterable<String> ids) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(
+        navigationDestinationIds: normalizeNavigationDestinationIds(ids),
+      ),
+    );
+  }
+
   Future<void> setHighPerformanceModeEnabled(bool enabled) async {
     final current = state.value ?? await _repository.load();
     final next = enabled

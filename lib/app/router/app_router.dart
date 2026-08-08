@@ -73,6 +73,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(
             routes: [
               GoRoute(
+                path: AppRoutes.favorites.path,
+                name: AppRoutes.favorites.name,
+                pageBuilder: (context, state) => _buildAppPage(
+                  state: state,
+                  child: const SearchPage(favoritesOnly: true),
+                ),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
                 path: AppRoutes.library.path,
                 name: AppRoutes.library.name,
                 pageBuilder: (context, state) => _buildAppPage(

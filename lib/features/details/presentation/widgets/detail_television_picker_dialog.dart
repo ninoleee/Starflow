@@ -33,16 +33,31 @@ Future<T?> showDetailTelevisionPickerDialog<T>({
     (index) => FocusNode(debugLabel: '$optionDebugLabelPrefix-$index'),
   );
   final closeFocusNode = FocusNode(debugLabel: closeFocusDebugLabel);
+  var dialogClosed = false;
+  var initialFocusRequested = false;
   try {
-    final selectedIndex = options.indexWhere(
-      (option) => option.value == selectedValue,
-    );
-    final autofocusIndex = optionFocusNodes.isEmpty
-        ? -1
-        : selectedIndex.clamp(0, optionFocusNodes.length - 1);
-    return showDialog<T>(
+    final autofocusIndex = optionFocusNodes.isEmpty ? -1 : 0;
+
+    void requestInitialOptionFocus() {
+      if (!enabled || initialFocusRequested || autofocusIndex < 0) {
+        return;
+      }
+      initialFocusRequested = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (dialogClosed) {
+          return;
+        }
+        final focusNode = optionFocusNodes[autofocusIndex];
+        if (focusNode.canRequestFocus) {
+          focusNode.requestFocus();
+        }
+      });
+    }
+
+    return await showDialog<T>(
       context: context,
       builder: (dialogContext) {
+        requestInitialOptionFocus();
         final dialog = AlertDialog(
           title: Text(title),
           content: SizedBox(
@@ -69,6 +84,7 @@ Future<T?> showDetailTelevisionPickerDialog<T>({
                       onPressed: () =>
                           Navigator.of(dialogContext).pop(option.value),
                       borderRadius: BorderRadius.circular(18),
+                      focusScale: kTvButtonFocusScale,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
                           color: isSelected
@@ -157,6 +173,7 @@ Future<T?> showDetailTelevisionPickerDialog<T>({
       },
     );
   } finally {
+    dialogClosed = true;
     for (final focusNode in optionFocusNodes) {
       focusNode.dispose();
     }

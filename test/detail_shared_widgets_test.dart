@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -93,6 +94,42 @@ void main() {
       expect(image.cacheWidth, 148);
       expect(image.cacheHeight, isNull);
       expect(image.fit, BoxFit.cover);
+    });
+
+    testWidgets('DetailImageGallery exposes a visible TV focus style',
+        (tester) async {
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MaterialApp(
+            home: Material(
+              child: DetailImageGallery(
+                images: [
+                  DetailImageAsset(url: 'https://example.com/still-1.jpg'),
+                  DetailImageAsset(url: 'https://example.com/still-2.jpg'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final focusableActions = tester
+          .widgetList<TvFocusableAction>(find.byType(TvFocusableAction))
+          .toList(growable: false);
+
+      expect(focusableActions, isNotEmpty);
+      expect(
+        focusableActions.every(
+          (widget) => widget.visualStyle == TvFocusVisualStyle.subtle,
+        ),
+        isTrue,
+      );
+      expect(
+        focusableActions.every(
+          (widget) => widget.focusScale == kTvButtonFocusScale,
+        ),
+        isTrue,
+      );
     });
   });
 }

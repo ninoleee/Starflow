@@ -17,12 +17,12 @@ fun computeStarflowVersionCode(versionName: String): Int {
     val month = match.groupValues[2].toInt()
     val sequence = match.groupValues[3].toInt()
     val yearOffset = Calendar.getInstance().get(Calendar.YEAR) - 2000
-    return (yearOffset * 1_000_000) + (major * 10_000) + (month * 100) + sequence
+    return (yearOffset * 1_000_000) + (major * 100_000) + (month * 100) + sequence
 }
 
 android {
     namespace = "com.example.starflow"
-    compileSdk = maxOf(flutter.compileSdkVersion, 31)
+    compileSdk = 35
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -47,7 +47,7 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = starflowMinSdk
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 35
         versionCode = computeStarflowVersionCode(flutter.versionName)
         versionName = flutter.versionName.substringBefore("+")
     }

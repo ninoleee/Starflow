@@ -640,7 +640,8 @@ class DetailImageGallery extends StatelessWidget {
               onPressed: () => openPreview(image),
               focusId: '$focusIdPrefix:$index',
               borderRadius: BorderRadius.circular(22),
-              visualStyle: TvFocusVisualStyle.none,
+              visualStyle: TvFocusVisualStyle.subtle,
+              focusScale: kTvButtonFocusScale,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(22),
                 child: AspectRatio(

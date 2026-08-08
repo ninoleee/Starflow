@@ -621,25 +621,100 @@ Future<T?> showSettingsOptionDialog<T>({
   required String Function(T option) labelBuilder,
   T? currentValue,
 }) {
+  final optionFocusNodes = List<FocusNode>.generate(
+    options.length,
+    (index) => FocusNode(debugLabel: 'settings-option-$index'),
+  );
+  var dialogClosed = false;
+  var initialFocusRequested = false;
+
+  void requestInitialOptionFocus() {
+    if (initialFocusRequested || optionFocusNodes.isEmpty) {
+      return;
+    }
+    initialFocusRequested = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (dialogClosed) {
+        return;
+      }
+      final focusNode = optionFocusNodes.first;
+      if (focusNode.canRequestFocus) {
+        focusNode.requestFocus();
+      }
+    });
+  }
+
   return showDialog<T>(
     context: context,
     builder: (dialogContext) {
-      return SimpleDialog(
-        title: Text(title),
-        children: [
-          for (final option in options)
-            SimpleDialogOption(
-              onPressed: () => Navigator.of(dialogContext).pop(option),
-              child: Text(
-                option == currentValue
-                    ? '${labelBuilder(option)}  当前'
-                    : labelBuilder(option),
-              ),
+      return Consumer(
+        builder: (context, ref, child) {
+          final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+          if (isTelevision) {
+            requestInitialOptionFocus();
+          }
+
+          final dialog = FocusTraversalGroup(
+            policy: OrderedTraversalPolicy(),
+            child: SimpleDialog(
+              title: Text(title),
+              children: [
+                for (var index = 0; index < options.length; index++)
+                  FocusTraversalOrder(
+                    order: NumericFocusOrder(index.toDouble()),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: TvFocusableAction(
+                        onPressed: () =>
+                            Navigator.of(dialogContext).pop(options[index]),
+                        focusNode: optionFocusNodes[index],
+                        focusId: buildTvFocusId(
+                          prefix: 'settings-option-dialog',
+                          segments: [
+                            title,
+                            index,
+                            labelBuilder(options[index]),
+                          ],
+                        ),
+                        autofocus: index == 0,
+                        borderRadius: BorderRadius.circular(14),
+                        visualStyle: TvFocusVisualStyle.subtle,
+                        focusScale: kTvButtonFocusScale,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
+                          child: Text(
+                            options[index] == currentValue
+                                ? '${labelBuilder(options[index])}  当前'
+                                : labelBuilder(options[index]),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
-        ],
+          );
+
+          return wrapTelevisionDialogBackHandling(
+            enabled: isTelevision,
+            dialogContext: dialogContext,
+            inputFocusNodes: const <FocusNode>[],
+            contentFocusNodes: optionFocusNodes,
+            actionFocusNodes: const <FocusNode>[],
+            child: dialog,
+          );
+        },
       );
     },
-  );
+  ).whenComplete(() {
+    dialogClosed = true;
+    for (final focusNode in optionFocusNodes) {
+      focusNode.dispose();
+    }
+  });
 }
 
 Future<Set<T>?> showSettingsCheckboxSelectionDialog<T>({

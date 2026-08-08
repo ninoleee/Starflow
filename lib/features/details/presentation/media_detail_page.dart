@@ -46,7 +46,6 @@ import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
-import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 const DetailLibraryMatchService _detailLibraryMatchService =
     DetailLibraryMatchService();
@@ -1295,6 +1294,29 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     });
   }
 
+  void _scrollDetailHeroToTop() {
+    void scrollToTop() {
+      if (!_scrollController.hasClients) {
+        return;
+      }
+      final targetOffset = _scrollController.position.minScrollExtent;
+      if ((_scrollController.offset - targetOffset).abs() < 1) {
+        return;
+      }
+      _scrollController.jumpTo(targetOffset);
+    }
+
+    if (!_scrollController.hasClients) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          scrollToTop();
+        }
+      });
+      return;
+    }
+    scrollToTop();
+  }
+
   Future<void> _loadFavoriteSearchResults() async {
     final favorites = await ref
         .read(searchPreferencesRepositoryProvider)
@@ -2406,12 +2428,23 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   }
 
   Future<void> _openPlaybackEnginePicker(PlaybackEngine currentEngine) async {
-    final selection = await showSettingsOptionDialog<PlaybackEngine>(
+    final selection = await showDetailTelevisionPickerDialog<PlaybackEngine>(
       context: context,
+      enabled: ref.read(isTelevisionProvider).value ?? false,
       title: '选择播放器',
-      options: PlaybackEngine.values,
-      currentValue: currentEngine,
-      labelBuilder: (engine) => engine.label,
+      selectedValue: currentEngine,
+      optionDebugLabelPrefix: 'detail-playback-engine-option',
+      closeFocusDebugLabel: 'detail-playback-engine-close',
+      closeFocusId: 'detail:resource:playback-engine-close',
+      options: [
+        for (final engine in PlaybackEngine.values)
+          DetailTelevisionPickerOption<PlaybackEngine>(
+            value: engine,
+            title: engine.label,
+            subtitle: engine.description,
+            focusId: 'detail:resource:playback-engine:${engine.name}',
+          ),
+      ],
     );
     if (selection == null) {
       return;
@@ -2604,6 +2637,67 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     );
   }
 
+  Widget _buildOverviewContent({
+    required MediaDetailTarget target,
+    required bool isTelevision,
+    required bool includeOverview,
+  }) {
+    final episodeTitle = resolveDetailEpisodeTitleLine(
+      currentTarget: target,
+      pageTarget: widget.target,
+    );
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (episodeTitle != null) ...[
+          Text(
+            episodeTitle,
+            style: const TextStyle(
+              color: Color(0xFFF1F5FF),
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              height: 1.4,
+            ),
+          ),
+          if (includeOverview) const SizedBox(height: 10),
+        ],
+        if (includeOverview)
+          Text(
+            target.overview,
+            style: const TextStyle(
+              color: Color(0xFFDCE6F8),
+              fontSize: 15,
+              height: 1.7,
+            ),
+          ),
+      ],
+    );
+
+    final isEpisodeDetail = isEpisodeDetailItemType(widget.target.itemType) ||
+        isEpisodeDetailItemType(target.itemType);
+    if (!isTelevision || !isEpisodeDetail) {
+      return content;
+    }
+    return TvFocusableAction(
+      onPressed: () {},
+      focusId: buildTvFocusId(
+        prefix: 'detail:overview',
+        segments: [
+          target.sourceKind?.name,
+          target.sourceId,
+          target.itemId,
+          target.seasonNumber,
+          target.episodeNumber,
+          target.title,
+        ],
+      ),
+      borderRadius: BorderRadius.circular(14),
+      visualStyle: TvFocusVisualStyle.subtle,
+      focusScale: 1,
+      child: content,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
@@ -2698,9 +2792,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                         isTelevision: isTelevision,
                         artworkFocusNode: _heroArtworkFocusNode,
                         playFocusNode: _heroPlayFocusNode,
+                        onHeroFocused: _scrollDetailHeroToTop,
                       ),
                       Padding(
-                        padding: EdgeInsets.zero,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: kAppPageHorizontalPadding,
+                        ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -2714,34 +2811,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                   pageTarget: widget.target,
                                   emptyFallback: '剧情简介',
                                 ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (resolveDetailEpisodeTitleLine(
-                                      currentTarget: target,
-                                      pageTarget: widget.target,
-                                    )
-                                        case final episodeTitle?) ...[
-                                      Text(
-                                        episodeTitle,
-                                        style: const TextStyle(
-                                          color: Color(0xFFF1F5FF),
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                          height: 1.4,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 10),
-                                    ],
-                                    Text(
-                                      target.overview,
-                                      style: const TextStyle(
-                                        color: Color(0xFFDCE6F8),
-                                        fontSize: 15,
-                                        height: 1.7,
-                                      ),
-                                    ),
-                                  ],
+                                child: _buildOverviewContent(
+                                  target: target,
+                                  isTelevision: isTelevision,
+                                  includeOverview: true,
                                 ),
                               ),
                             if (showDeferredDetailContent &&
@@ -2757,24 +2830,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                   pageTarget: widget.target,
                                   emptyFallback: '剧情简介',
                                 ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (resolveDetailEpisodeTitleLine(
-                                      currentTarget: target,
-                                      pageTarget: widget.target,
-                                    )
-                                        case final episodeTitle?)
-                                      Text(
-                                        episodeTitle,
-                                        style: const TextStyle(
-                                          color: Color(0xFFF1F5FF),
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                          height: 1.4,
-                                        ),
-                                      ),
-                                  ],
+                                child: _buildOverviewContent(
+                                  target: target,
+                                  isTelevision: isTelevision,
+                                  includeOverview: false,
                                 ),
                               ),
                             if (showDeferredDetailContent &&

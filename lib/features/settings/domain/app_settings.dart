@@ -736,6 +736,44 @@ class NetworkStorageWebDavDirectory {
   }
 }
 
+const kNavigationDestinationHome = 'home';
+const kNavigationDestinationSearch = 'search';
+const kNavigationDestinationFavorites = 'favorites';
+const kNavigationDestinationLibrary = 'library';
+const kNavigationDestinationSettings = 'settings';
+
+const kAllNavigationDestinationIds = <String>[
+  kNavigationDestinationHome,
+  kNavigationDestinationSearch,
+  kNavigationDestinationFavorites,
+  kNavigationDestinationLibrary,
+  kNavigationDestinationSettings,
+];
+
+const kDefaultNavigationDestinationIds = <String>[
+  kNavigationDestinationHome,
+  kNavigationDestinationSearch,
+  kNavigationDestinationLibrary,
+  kNavigationDestinationSettings,
+];
+
+List<String> normalizeNavigationDestinationIds(Iterable<String> values) {
+  final selected = values
+      .map((value) => value.trim())
+      .where(kAllNavigationDestinationIds.contains)
+      .toSet();
+  if (selected.isEmpty) {
+    return const [
+      kNavigationDestinationHome,
+      kNavigationDestinationSettings,
+    ];
+  }
+  return [
+    for (final id in kAllNavigationDestinationIds)
+      if (selected.contains(id)) id,
+  ];
+}
+
 class AppSettings {
   const AppSettings({
     required this.mediaSources,
@@ -752,6 +790,7 @@ class AppSettings {
     this.homeStartupAutoRefreshEmbyEnabled,
     this.translucentEffectsEnabled = true,
     this.autoHideNavigationBarEnabled = true,
+    this.navigationDestinationIds = kDefaultNavigationDestinationIds,
     this.highPerformanceModeEnabled = false,
     this.performanceReduceDecorationsEnabled = false,
     this.performanceReduceMotionEnabled = false,
@@ -811,6 +850,7 @@ class AppSettings {
   final bool? homeStartupAutoRefreshEmbyEnabled;
   final bool translucentEffectsEnabled;
   final bool autoHideNavigationBarEnabled;
+  final List<String> navigationDestinationIds;
   final bool highPerformanceModeEnabled;
   final bool performanceReduceDecorationsEnabled;
   final bool performanceReduceMotionEnabled;
@@ -868,6 +908,7 @@ class AppSettings {
     bool? homeStartupAutoRefreshEmbyEnabled,
     bool? translucentEffectsEnabled,
     bool? autoHideNavigationBarEnabled,
+    List<String>? navigationDestinationIds,
     bool? highPerformanceModeEnabled,
     bool? performanceReduceDecorationsEnabled,
     bool? performanceReduceMotionEnabled,
@@ -934,6 +975,8 @@ class AppSettings {
           translucentEffectsEnabled ?? this.translucentEffectsEnabled,
       autoHideNavigationBarEnabled:
           autoHideNavigationBarEnabled ?? this.autoHideNavigationBarEnabled,
+      navigationDestinationIds:
+          navigationDestinationIds ?? this.navigationDestinationIds,
       highPerformanceModeEnabled:
           highPerformanceModeEnabled ?? this.highPerformanceModeEnabled,
       performanceReduceDecorationsEnabled:
@@ -1041,6 +1084,7 @@ class AppSettings {
       'homeStartupAutoRefreshEmbyEnabled': homeStartupAutoRefreshEmbyEnabled,
       'translucentEffectsEnabled': translucentEffectsEnabled,
       'autoHideNavigationBarEnabled': autoHideNavigationBarEnabled,
+      'navigationDestinationIds': navigationDestinationIds,
       'highPerformanceModeEnabled': highPerformanceModeEnabled,
       'performanceReduceDecorationsEnabled':
           performanceReduceDecorationsEnabled,
@@ -1157,6 +1201,11 @@ class AppSettings {
           json['translucentEffectsEnabled'] as bool? ?? true,
       autoHideNavigationBarEnabled:
           json['autoHideNavigationBarEnabled'] as bool? ?? true,
+      navigationDestinationIds: json.containsKey('navigationDestinationIds')
+          ? normalizeNavigationDestinationIds(
+              _parseNormalizedStringList(json['navigationDestinationIds']),
+            )
+          : kDefaultNavigationDestinationIds,
       highPerformanceModeEnabled:
           json['highPerformanceModeEnabled'] as bool? ?? false,
       performanceReduceDecorationsEnabled:
@@ -1281,7 +1330,6 @@ extension AppSettingsPerformanceX on AppSettings {
       tmdbMetadataMatchEnabled: false,
       wmdbMetadataMatchEnabled: false,
       imdbRatingMatchEnabled: false,
-      detailAutoLibraryMatchEnabled: false,
       playbackBackgroundPlaybackEnabled: false,
       playbackMpvQualityPreset: PlaybackMpvQualityPreset.performanceFirst,
       playbackMpvDoubleTapToSeekEnabled: false,

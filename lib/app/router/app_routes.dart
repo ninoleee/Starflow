@@ -12,6 +12,7 @@ abstract final class AppRoutes {
   static const boot = AppRouteSpec(name: 'boot', path: '/boot');
   static const home = AppRouteSpec(name: 'home', path: '/home');
   static const search = AppRouteSpec(name: 'search', path: '/search');
+  static const favorites = AppRouteSpec(name: 'favorites', path: '/favorites');
   static const library = AppRouteSpec(name: 'library', path: '/library');
   static const settings = AppRouteSpec(name: 'settings', path: '/settings');
   static const homeEditor =
@@ -34,6 +35,7 @@ abstract final class AppRoutes {
   static const shellBranches = <AppRouteSpec>[
     home,
     search,
+    favorites,
     library,
     settings,
   ];

@@ -20,6 +20,7 @@ class DetailHeroSection extends ConsumerWidget {
     required this.isTelevision,
     this.artworkFocusNode,
     this.playFocusNode,
+    this.onHeroFocused,
   });
 
   final MediaDetailTarget target;
@@ -27,6 +28,7 @@ class DetailHeroSection extends ConsumerWidget {
   final bool isTelevision;
   final FocusNode? artworkFocusNode;
   final FocusNode? playFocusNode;
+  final VoidCallback? onHeroFocused;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -153,6 +155,7 @@ class DetailHeroSection extends ConsumerWidget {
                 borderRadius: BorderRadius.zero,
                 visualStyle: TvFocusVisualStyle.none,
                 focusScale: 1.015,
+                onFocused: onHeroFocused,
                 child: heroArtwork,
               ),
             ),
@@ -174,6 +177,7 @@ class DetailHeroSection extends ConsumerWidget {
                     resumePlaybackTarget: resumePlaybackTarget,
                     artworkFocusNode: artworkFocusNode,
                     playFocusNode: playFocusNode,
+                    onHeroFocused: onHeroFocused,
                   );
 
                   if (isCompact) {
@@ -210,6 +214,7 @@ class DetailHeroContent extends StatelessWidget {
     required this.resumePlaybackTarget,
     this.artworkFocusNode,
     this.playFocusNode,
+    this.onHeroFocused,
   });
 
   final MediaDetailTarget target;
@@ -221,6 +226,7 @@ class DetailHeroContent extends StatelessWidget {
   final PlaybackTarget? resumePlaybackTarget;
   final FocusNode? artworkFocusNode;
   final FocusNode? playFocusNode;
+  final VoidCallback? onHeroFocused;
 
   @override
   Widget build(BuildContext context) {
@@ -282,6 +288,7 @@ class DetailHeroContent extends StatelessWidget {
         variant: variant,
         focusNode: focusNode,
         focusId: focusId,
+        onFocused: onHeroFocused,
         autofocus: autofocus,
         focusScale: isTelevision ? 1.06 : 1.0,
         onPressed: () => openPlaybackTarget(playbackTarget),

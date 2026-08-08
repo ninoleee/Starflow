@@ -122,10 +122,12 @@ class SearchPage extends ConsumerStatefulWidget {
     super.key,
     this.initialQuery,
     this.showBackButton = false,
+    this.favoritesOnly = false,
   });
 
   final String? initialQuery;
   final bool showBackButton;
+  final bool favoritesOnly;
 
   @override
   ConsumerState<SearchPage> createState() => _SearchPageState();
@@ -145,7 +147,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   List<SearchResult> _favoriteResults = const [];
   List<String> _recentQueries = const [];
   bool _isSearching = false;
-  bool _showFavoriteResults = false;
+  late bool _showFavoriteResults;
   Set<String> _selectedTargetIds = const {_SearchTarget.allId};
   Set<String> _favoriteResultKeys = const <String>{};
   String? _errorMessage;
@@ -169,6 +171,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   @override
   void initState() {
     super.initState();
+    _showFavoriteResults = widget.favoritesOnly;
     _controller = TextEditingController(text: widget.initialQuery ?? '');
     unawaited(_loadSearchPreferences());
     _scheduleAutoSearch(widget.initialQuery);
@@ -198,6 +201,13 @@ class _SearchPageState extends ConsumerState<SearchPage>
   }
 
   void _handleBack() {
+    if (_showFavoriteResults && !widget.favoritesOnly) {
+      setState(() {
+        _showFavoriteResults = false;
+      });
+      _scrollToTop();
+      return;
+    }
     if (context.canPop()) {
       context.pop();
       return;
@@ -307,6 +317,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
   }
 
   void _toggleFavoriteResultsView() {
+    if (widget.favoritesOnly) {
+      return;
+    }
     if (!_showFavoriteResults) {
       _cancelSearchTasks();
     }
@@ -610,7 +623,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
 
     return TvPageFocusScope(
       controller: _tvFocusMemoryController,
-      scopeId: 'search',
+      scopeId: widget.favoritesOnly ? 'favorites' : 'search',
       isTelevision: isTelevision,
       child: Scaffold(
         body: Stack(
@@ -639,56 +652,71 @@ class _SearchPageState extends ConsumerState<SearchPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            FocusTraversalOrder(
-                              order: const NumericFocusOrder(1),
-                              child: isTelevision
-                                  ? _TelevisionSearchInput(
-                                      query: _controller.text.trim(),
-                                      focusNode: _queryFocusNode,
-                                      onEditQuery: _openTelevisionQueryDialog,
-                                      onSearch: _performSearch,
-                                      onToggleFavorites:
-                                          _toggleFavoriteResultsView,
-                                      showFavoriteResults: _showFavoriteResults,
-                                    )
-                                  : Row(
-                                      children: [
-                                        Expanded(
-                                          child: TextField(
-                                            controller: _controller,
-                                            textInputAction:
-                                                TextInputAction.search,
-                                            onSubmitted: (_) =>
-                                                _performSearch(),
-                                            decoration: const InputDecoration(
-                                              hintText: '搜索电影、剧集或番剧资源',
+                            if (_showFavoriteResults)
+                              Text(
+                                '收藏',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall
+                                    ?.copyWith(fontWeight: FontWeight.w800),
+                              )
+                            else
+                              FocusTraversalOrder(
+                                order: const NumericFocusOrder(1),
+                                child: isTelevision
+                                    ? _TelevisionSearchInput(
+                                        query: _controller.text.trim(),
+                                        focusNode: _queryFocusNode,
+                                        onEditQuery: _openTelevisionQueryDialog,
+                                        onSearch: _performSearch,
+                                        onToggleFavorites:
+                                            _toggleFavoriteResultsView,
+                                        showFavoriteResults:
+                                            _showFavoriteResults,
+                                      )
+                                    : Row(
+                                        children: [
+                                          Expanded(
+                                            child: TextField(
+                                              controller: _controller,
+                                              textInputAction:
+                                                  TextInputAction.search,
+                                              onSubmitted: (_) =>
+                                                  _performSearch(),
+                                              decoration: const InputDecoration(
+                                                hintText: '搜索电影、剧集或番剧资源',
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        StarflowIconButton(
-                                          icon: Icons.search_rounded,
-                                          tooltip: '搜索',
-                                          onPressed: _performSearch,
-                                          variant: StarflowButtonVariant.ghost,
-                                          size: 40,
-                                        ),
-                                        const SizedBox(width: 4),
-                                        StarflowIconButton(
-                                          icon: _showFavoriteResults
-                                              ? Icons.manage_search_rounded
-                                              : Icons.favorite_rounded,
-                                          tooltip: _showFavoriteResults
-                                              ? '返回搜索结果'
-                                              : '查看收藏',
-                                          onPressed: _toggleFavoriteResultsView,
-                                          variant: StarflowButtonVariant.ghost,
-                                          size: 40,
-                                        ),
-                                      ],
-                                    ),
-                            ),
-                            if (isTelevision && _recentQueries.isNotEmpty) ...[
+                                          const SizedBox(width: 8),
+                                          StarflowIconButton(
+                                            icon: Icons.search_rounded,
+                                            tooltip: '搜索',
+                                            onPressed: _performSearch,
+                                            variant:
+                                                StarflowButtonVariant.ghost,
+                                            size: 40,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          StarflowIconButton(
+                                            icon: _showFavoriteResults
+                                                ? Icons.manage_search_rounded
+                                                : Icons.favorite_rounded,
+                                            tooltip: _showFavoriteResults
+                                                ? '返回搜索结果'
+                                                : '查看收藏',
+                                            onPressed:
+                                                _toggleFavoriteResultsView,
+                                            variant:
+                                                StarflowButtonVariant.ghost,
+                                            size: 40,
+                                          ),
+                                        ],
+                                      ),
+                              ),
+                            if (!_showFavoriteResults &&
+                                isTelevision &&
+                                _recentQueries.isNotEmpty) ...[
                               const SizedBox(height: 14),
                               Text(
                                 '最近搜索',
@@ -717,11 +745,11 @@ class _SearchPageState extends ConsumerState<SearchPage>
                               ),
                             ],
                             const SizedBox(height: 10),
-                            if (targets.length == 1)
+                            if (!_showFavoriteResults && targets.length == 1)
                               const Text(
                                 '还没有启用可搜索的来源，请先去设置页添加媒体源或搜索服务。',
                               )
-                            else
+                            else if (!_showFavoriteResults)
                               FocusTraversalOrder(
                                 order: const NumericFocusOrder(2),
                                 child: isTelevision
@@ -890,7 +918,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
   void _scheduleInitialTelevisionFocus({int remainingAttempts = 4}) {
     if (_initialTelevisionFocusRequested ||
         _initialTelevisionFocusScheduled ||
-        !mounted) {
+        !mounted ||
+        _showFavoriteResults) {
       return;
     }
     final isTelevision = ref.read(isTelevisionProvider).value ?? false;

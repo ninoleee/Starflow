@@ -25,6 +25,8 @@ enum StarflowButtonVariant {
   danger,
 }
 
+const double kTvButtonFocusScale = 1.035;
+
 final _lightweightTvFocusSettingsProvider = Provider<bool>((ref) {
   return ref.watch(appSettingsProvider.select(
     (settings) => settings.effectiveLightweightTvFocusEnabled(
@@ -744,6 +746,7 @@ class StarflowButton extends StatelessWidget {
     this.autofocus = false,
     this.focusNode,
     this.focusId,
+    this.onFocused,
     this.compact = false,
     this.expand = false,
     this.loading = false,
@@ -757,6 +760,7 @@ class StarflowButton extends StatelessWidget {
   final bool autofocus;
   final FocusNode? focusNode;
   final String? focusId;
+  final VoidCallback? onFocused;
   final bool compact;
   final bool expand;
   final bool loading;
@@ -821,6 +825,7 @@ class StarflowButton extends StatelessWidget {
     );
     return _TvOutlinedFocusableAction(
       onPressed: loading ? null : onPressed,
+      onFocused: onFocused,
       autofocus: autofocus,
       focusNode: focusNode,
       focusId: focusId,

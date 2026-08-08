@@ -36,6 +36,8 @@ class PerformanceSettingsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsPerformanceSliceProvider);
+    final detailAutoLibraryMatchEnabled =
+        ref.watch(settingsDetailAutoLibraryMatchEnabledProvider);
     final controller = ref.read(settingsControllerProvider.notifier);
     final theme = Theme.of(context);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
@@ -74,6 +76,17 @@ class PerformanceSettingsPage extends ConsumerWidget {
             value: settings.autoHideNavigationBarEnabled,
             onChanged: (value) {
               controller.setAutoHideNavigationBarEnabled(value);
+            },
+          ),
+        ]),
+        const SettingsSectionTitle(label: '详情页'),
+        ...buildSettingsTileGroup([
+          SettingsToggleTile(
+            title: '自动匹配本地资源',
+            subtitle: '进入详情页时自动尝试匹配本地媒体源。此开关独立保存，不会被高性能模式开关改变。',
+            value: detailAutoLibraryMatchEnabled,
+            onChanged: (value) {
+              controller.setDetailAutoLibraryMatchEnabled(value);
             },
           ),
         ]),

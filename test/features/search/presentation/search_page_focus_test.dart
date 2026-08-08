@@ -172,6 +172,37 @@ void main() {
     expect(find.text('测试电影 4K'), findsOneWidget);
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'search-query');
   });
+
+  testWidgets('standalone favorites page hides search controls and tabs',
+      (tester) async {
+    SharedPreferences.setMockInitialValues(const {});
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => false),
+          appSettingsProvider.overrideWithValue(
+            const AppSettings(
+              mediaSources: <MediaSourceConfig>[],
+              searchProviders: <SearchProviderConfig>[],
+              doubanAccount: DoubanAccountConfig(enabled: false),
+              homeModules: <HomeModuleConfig>[],
+            ),
+          ),
+        ],
+        child: const MaterialApp(
+          home: SearchPage(favoritesOnly: true),
+        ),
+      ),
+    );
+
+    await tester.pump();
+
+    expect(find.text('收藏'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('搜索'), findsNothing);
+    expect(find.text('全部'), findsNothing);
+  });
 }
 
 class _PendingSearchRepository implements SearchRepository {

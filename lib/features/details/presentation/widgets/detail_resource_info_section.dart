@@ -7,6 +7,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const DetailLibraryMatchService _detailLibraryMatchService =
     DetailLibraryMatchService();
@@ -38,6 +39,7 @@ bool shouldShowDetailMetadataManagerEntry(MediaDetailTarget target) {
 bool shouldShowDetailResourceInfo(MediaDetailTarget target) {
   return target.sourceName.trim().isNotEmpty ||
       target.availabilityLabel.trim().isNotEmpty ||
+      _resolveDoubanSourceUri(target) != null ||
       _buildDetailResourceFacts(target).isNotEmpty;
 }
 
@@ -100,6 +102,7 @@ class DetailResourceInfoSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final resourceFacts = _buildDetailResourceFacts(target);
+    final doubanSourceUri = _resolveDoubanSourceUri(target);
     final showPlayableVariantSwitcher = _shouldShowPlayableVariantSwitcher(
       target,
       libraryView,
@@ -384,6 +387,19 @@ class DetailResourceInfoSection extends StatelessWidget {
                 : '${target.sourceKind!.label} · ${target.sourceName}',
           ),
         ],
+        if (doubanSourceUri != null) ...[
+          const SizedBox(height: 12),
+          _DetailLinkedFactRow(
+            label: '链接',
+            value: '跳转豆瓣详情页',
+            isTelevision: isTelevision,
+            focusId: 'detail:resource:douban-source',
+            onPressed: () => _openDetailExternalUri(
+              context,
+              doubanSourceUri,
+            ),
+          ),
+        ],
         for (final fact in resourceFacts) ...[
           const SizedBox(height: 12),
           FactRow(
@@ -397,6 +413,96 @@ class DetailResourceInfoSection extends StatelessWidget {
   }
 }
 
+class _DetailLinkedFactRow extends StatelessWidget {
+  const _DetailLinkedFactRow({
+    required this.label,
+    required this.value,
+    required this.isTelevision,
+    required this.onPressed,
+    this.focusId,
+  });
+
+  final String label;
+  final String value;
+  final bool isTelevision;
+  final VoidCallback onPressed;
+  final String? focusId;
+
+  @override
+  Widget build(BuildContext context) {
+    final action = _DetailLinkedFactAction(
+      value: value,
+      onPressed: onPressed,
+    );
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 52,
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF8FA0BD),
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: isTelevision
+                ? TvFocusableAction(
+                    onPressed: onPressed,
+                    focusId: focusId,
+                    borderRadius: BorderRadius.circular(12),
+                    visualStyle: TvFocusVisualStyle.subtle,
+                    focusScale: kTvButtonFocusScale,
+                    child: action,
+                  )
+                : action,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DetailLinkedFactAction extends StatelessWidget {
+  const _DetailLinkedFactAction({
+    required this.value,
+    required this.onPressed,
+  });
+
+  final String value;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton.icon(
+      onPressed: onPressed,
+      icon: const Icon(Icons.open_in_new_rounded, size: 15),
+      label: Text(
+        value,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      style: TextButton.styleFrom(
+        foregroundColor: const Color(0xFFE6EDFD),
+        padding: EdgeInsets.zero,
+        minimumSize: const Size(0, 30),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        textStyle: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+          height: 1.5,
+        ),
+      ),
+    );
+  }
+}
+
 String _detailResourceTraceKey(MediaDetailTarget target) {
   final parts = [
     target.sourceKind?.name ?? '',
@@ -406,6 +512,43 @@ String _detailResourceTraceKey(MediaDetailTarget target) {
     target.searchQuery.trim().toLowerCase(),
   ].where((item) => item.isNotEmpty).toList(growable: false);
   return parts.isEmpty ? 'detail-resource-ui' : parts.join('|');
+}
+
+Uri? _resolveDoubanSourceUri(MediaDetailTarget target) {
+  final doubanId = _resolveDoubanId(target);
+  if (doubanId.isEmpty) {
+    return null;
+  }
+  return Uri.https('movie.douban.com', '/subject/$doubanId/');
+}
+
+String _resolveDoubanId(MediaDetailTarget target) {
+  final directId = target.doubanId.trim();
+  if (directId.isNotEmpty) {
+    return directId;
+  }
+  for (final entry in target.providerIds.entries) {
+    final key = entry.key.trim().toLowerCase();
+    if (key == 'douban' || key == 'doubanid' || key == 'douban_id') {
+      return entry.value.trim();
+    }
+  }
+  return '';
+}
+
+Future<void> _openDetailExternalUri(BuildContext context, Uri uri) async {
+  bool launched = false;
+  try {
+    launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (_) {
+    launched = false;
+  }
+  if (!context.mounted || launched) {
+    return;
+  }
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('无法打开链接')),
+  );
 }
 
 String _detailResourceSelectedChoiceLabel(
