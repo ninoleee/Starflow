@@ -43,19 +43,6 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
         seriesTitleFilterKeywords: seriesTitleFilterKeywords,
       );
       grouped.putIfAbsent(key, () => <NasMediaIndexRecord>[]).add(record);
-      webDavTrace(
-        'indexer.groupSeries.record',
-        fields: {
-          'resourceId': record.resourceId,
-          'path': record.resourcePath,
-          'title': record.item.title,
-          'seriesTitle': title,
-          'groupKey': key,
-          'season': record.item.seasonNumber ?? record.recognizedSeasonNumber,
-          'episode':
-              record.item.episodeNumber ?? record.recognizedEpisodeNumber,
-        },
-      );
     }
     final groups = grouped.entries
         .map(
@@ -69,100 +56,7 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
           ),
         )
         .toList(growable: false);
-    _logSeriesGroupingDiagnostics(
-      groups,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    );
-    webDavTrace(
-      'indexer.groupSeries.done',
-      fields: {
-        'groupCount': groups.length,
-        'groups': groups
-            .map((group) => '${group.title}:${group.records.length}')
-            .toList(),
-      },
-    );
     return groups;
-  }
-
-  void _logSeriesGroupingDiagnostics(
-    List<_SeriesRecordGroup> groups, {
-    required List<String> seriesTitleFilterKeywords,
-  }) {
-    if (groups.isEmpty) {
-      return;
-    }
-
-    final groupsByNormalizedTitle = <String, List<_SeriesRecordGroup>>{};
-    for (final group in groups) {
-      final normalizedTitle = _normalizeMetadataQueryToken(group.title);
-      if (normalizedTitle.isEmpty) {
-        continue;
-      }
-      groupsByNormalizedTitle
-          .putIfAbsent(normalizedTitle, () => <_SeriesRecordGroup>[])
-          .add(group);
-    }
-
-    for (final entry in groupsByNormalizedTitle.entries) {
-      final splitGroups = entry.value;
-      if (splitGroups.length < 2) {
-        continue;
-      }
-      webDavTrace(
-        'indexer.groupSeries.split',
-        fields: {
-          'normalizedTitle': entry.key,
-          'titles': splitGroups.map((group) => group.title).toList(),
-          'groupKeys': splitGroups.map((group) => group.seriesKey).toList(),
-          'groups': splitGroups
-              .map(
-                (group) => _describeSeriesRecordGroupForDebug(
-                  group,
-                  seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-                ),
-              )
-              .toList(),
-        },
-      );
-    }
-  }
-
-  String _describeSeriesRecordGroupForDebug(
-    _SeriesRecordGroup group, {
-    required List<String> seriesTitleFilterKeywords,
-  }) {
-    final firstRecord = group.records.first;
-    final structureTitle = _seriesTitleFromStructurePath(
-      firstRecord,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    );
-    final structureRoot = _seriesStructureRootSegments(
-      firstRecord,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    ).join('/');
-    final recordSummaries = group.records
-        .take(8)
-        .map(
-          (record) => [
-            'path=${record.resourcePath}',
-            'item=${_cleanIndexedTitleLabel(record.item.title)}',
-            'parent=${_cleanIndexedTitleLabel(record.parentTitle)}',
-            'recognized=${_cleanIndexedTitleLabel(record.recognizedTitle)}',
-            'series=${_seriesTitleForRecord(record, seriesTitleFilterKeywords: seriesTitleFilterKeywords)}',
-            'season=${record.item.seasonNumber ?? record.recognizedSeasonNumber ?? 0}',
-            'episode=${record.item.episodeNumber ?? record.recognizedEpisodeNumber ?? 0}',
-          ].join(' | '),
-        )
-        .join(' || ');
-    return [
-      'title=${group.title}',
-      'key=${group.seriesKey}',
-      'count=${group.records.length}',
-      'structureTitle=$structureTitle',
-      'structureRoot=$structureRoot',
-      'sample=$recordSummaries',
-    ].join(' || ');
   }
 
   MediaItem buildSeriesItem(_SeriesRecordGroup group) {
@@ -276,15 +170,7 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       ratingLabels: ratingLabels,
       addedAt: lastAddedAt,
     );
-    webDavTrace(
-      'indexer.buildSeriesItem',
-      fields: {
-        'title': seriesItem.title,
-        'id': seriesItem.id,
-        'recordCount': records.length,
-        'actualAddress': seriesItem.actualAddress,
-      },
-    );
+
     return seriesItem;
   }
 
@@ -349,16 +235,7 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       ),
       addedAt: sorted.first.item.addedAt,
     );
-    webDavTrace(
-      'indexer.buildSeasonItem',
-      fields: {
-        'seriesTitle': group.title,
-        'seasonTitle': seasonItem.title,
-        'seasonNumber': seasonNumber,
-        'recordCount': records.length,
-        'actualAddress': seasonItem.actualAddress,
-      },
-    );
+
     return seasonItem;
   }
 
@@ -1257,6 +1134,7 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       if (_shouldSkipStructureSeriesDirectory(
         rawDirectory,
         parentMatchesFilter: parentMatchesFilter,
+        seriesParent: index > 0 ? directories[index - 1] : '',
       )) {
         continue;
       }
@@ -1271,7 +1149,14 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
   bool _shouldSkipStructureSeriesDirectory(
     String rawDirectory, {
     required bool parentMatchesFilter,
+    required String seriesParent,
   }) {
+    if (NasMediaRecognizer.matchesHashNumberedEpisodeFolder(
+      rawDirectory,
+      seriesParent: seriesParent,
+    )) {
+      return true;
+    }
     if (_looksLikeSeasonFolderLabel(rawDirectory) &&
         !_canUseSeasonDirectoryAsSeriesRoot(
           rawDirectory,
@@ -1446,6 +1331,7 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       if (_shouldSkipStructureSeriesDirectory(
         rawDirectory,
         parentMatchesFilter: parentMatchesFilter,
+        seriesParent: index > 0 ? relativeDirectories[index - 1] : '',
       )) {
         continue;
       }
@@ -1497,6 +1383,7 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       if (_shouldSkipStructureSeriesDirectory(
         rawDirectory,
         parentMatchesFilter: parentMatchesFilter,
+        seriesParent: index > 0 ? relativeDirectories[index - 1] : '',
       )) {
         continue;
       }

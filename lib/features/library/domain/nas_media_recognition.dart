@@ -1,4 +1,3 @@
-import 'package:starflow/core/utils/webdav_trace.dart';
 import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
 
@@ -90,6 +89,7 @@ class NasMediaRecognizer {
       MediaNaming.sharedTechnicalTokenPatterns;
   static const List<String> _releaseOnlyTokenPatterns = [
     r's\d{1,2}',
+    r'se\d{1,2}',
     r'season ?\d{1,2}',
   ];
   static const List<String> _wrapperOnlyTokenPatterns = [r'web'];
@@ -236,6 +236,16 @@ class NasMediaRecognizer {
       fileBaseName,
       specialEpisodeKeywords: normalizedSpecialEpisodeKeywords,
     );
+    final parentEpisodeMatch = _matchEpisode(
+          parentRaw,
+          specialEpisodeKeywords: normalizedSpecialEpisodeKeywords,
+        ) ??
+        (matchesHashNumberedEpisodeFolder(
+          parentRaw,
+          seriesParent: grandParentRaw,
+        )
+            ? _matchHashEpisode(parentRaw)
+            : null);
     final parentSeason = _matchSeason(parentRaw);
     final grandParentSeason = _matchSeason(grandParentRaw);
     final year = _findYear([fileBaseName, parentRaw, grandParentRaw]);
@@ -276,6 +286,20 @@ class NasMediaRecognizer {
       episodePart = episodeMatch.episodePart;
       if (resolvedParentTitle.isNotEmpty) {
         title = resolvedParentTitle;
+      }
+    } else if (parentEpisodeMatch != null) {
+      itemType = 'episode';
+      preferSeries = true;
+      seasonNumber = parentEpisodeMatch.seasonNumber ??
+          parentSeason ??
+          grandParentSeason ??
+          1;
+      episodeNumber = parentEpisodeMatch.episodeNumber;
+      episodePart = parentEpisodeMatch.episodePart;
+      final ancestorTitle = cleanedGrandParentTitle.trim();
+      if (ancestorTitle.isNotEmpty) {
+        title = ancestorTitle;
+        resolvedParentTitle = ancestorTitle;
       }
     } else if (_looksLikeSeriesFolder(parentRaw)) {
       final leadingEpisodeNumber = _matchLeadingEpisodeCue(fileBaseName);
@@ -338,20 +362,7 @@ class NasMediaRecognizer {
       episodeNumber: episodeNumber,
       episodePart: episodePart,
     );
-    webDavTrace(
-      'recognize',
-      fields: {
-        'path': actualAddress,
-        'title': result.title,
-        'parentTitle': result.parentTitle,
-        'itemType': result.itemType,
-        'preferSeries': result.preferSeries,
-        'season': result.seasonNumber,
-        'episode': result.episodeNumber,
-        'episodePart': result.episodePart,
-        'imdbId': result.imdbId,
-      },
-    );
+
     return result;
   }
 
@@ -408,6 +419,7 @@ class NasMediaRecognizer {
     final normalized = input.trim();
     for (final pattern in const [
       r'(?:^|[ ._\-])s(\d{1,2})[ ._\-]*e(\d{1,3})(?:$|[ ._\-])',
+      r'(?:^|[ ._\-])se(\d{1,2})[ ._\-]+(?:e|ep)?(\d{1,3})(?:$|[ ._\-])',
       r'(?:^|[ ._\-])season[ ._\-]?(\d{1,2})[ ._\-]*(?:episode|ep)[ ._\-]?(\d{1,3})(?:$|[ ._\-])',
       r'(?<!\d)e(\d{1,3})(?!\d)',
       r'(?:^|[ ._\-])ep(?:isode)?[ ._\-]?(\d{1,3})(?:$|[ ._\-])',
@@ -417,7 +429,7 @@ class NasMediaRecognizer {
       if (match == null) {
         continue;
       }
-      if (pattern.contains('s(') || pattern.contains('season')) {
+      if (match.groupCount >= 2) {
         return _EpisodeMatch(
           seasonNumber: int.tryParse(match.group(1) ?? ''),
           episodeNumber: int.tryParse(match.group(2) ?? ''),
@@ -442,6 +454,37 @@ class NasMediaRecognizer {
           ? ''
           : _normalizeEpisodePartToken(chineseMatch.group(2) ?? ''),
     );
+  }
+
+  static _EpisodeMatch? _matchHashEpisode(String input) {
+    final match = RegExp(
+      r'(?:^|[\s._\-])#\s*0*(\d{1,4})(?:$|[\s._\-])',
+      caseSensitive: false,
+    ).firstMatch(input.trim());
+    final episodeNumber = int.tryParse(match?.group(1) ?? '');
+    if (episodeNumber == null || episodeNumber <= 0) {
+      return null;
+    }
+    return _EpisodeMatch(
+      seasonNumber: null,
+      episodeNumber: episodeNumber,
+    );
+  }
+
+  static bool matchesHashNumberedEpisodeFolder(
+    String input, {
+    required String seriesParent,
+  }) {
+    if (_matchHashEpisode(input) == null) {
+      return false;
+    }
+    final cleanedParent = _cleanTitle(seriesParent).trim().toLowerCase();
+    if (cleanedParent.isEmpty ||
+        _genericLibraryFolders.contains(cleanedParent)) {
+      return false;
+    }
+    final cleanedInput = _cleanTitle(input).trim().toLowerCase();
+    return cleanedInput.contains(cleanedParent);
   }
 
   static String _extractEpisodePartToken(
@@ -510,6 +553,8 @@ class NasMediaRecognizer {
     final normalized = input.trim();
     for (final pattern in const [
       r'(?:^|[ ._\-])s(\d{1,2})(?:$|[ ._\-])',
+      r'[\u3400-\u9fff]s(\d{1,2})(?:$|[ ._\-])',
+      r'(?:^|[ ._\-])se(\d{1,2})(?:$|[ ._\-])',
       r'season[ ._\-]?(\d{1,2})',
       r'第(\d{1,2})季',
     ]) {
@@ -528,9 +573,14 @@ class NasMediaRecognizer {
     if (normalized.isEmpty) {
       return false;
     }
-    return RegExp(r'(^|[ ._\-])(s\d{1,2}|season[ ._\-]?\d{1,2})([ ._\-]|$)',
+    return RegExp(
+                r'(^|[ ._\-])(s\d{1,2}|se\d{1,2}|season[ ._\-]?\d{1,2})([ ._\-]|$)',
                 caseSensitive: false)
             .hasMatch(input) ||
+        RegExp(
+          r'[\u3400-\u9fff]s\d{1,2}(?:$|[ ._\-])',
+          caseSensitive: false,
+        ).hasMatch(input) ||
         RegExp(r'第\d{1,2}季').hasMatch(input);
   }
 
@@ -564,6 +614,13 @@ class NasMediaRecognizer {
           .replaceAll(
               RegExp(r'\bs\d{1,2}[ ._\-]*e\d{1,3}\b', caseSensitive: false),
               ' ')
+          .replaceAll(
+            RegExp(
+              r'\bse\d{1,2}[ ._\-]+(?:e|ep)?\d{1,3}\b',
+              caseSensitive: false,
+            ),
+            ' ',
+          )
           .replaceAll(
             RegExp(
               r'\bseason[ ._\-]?\d{1,2}[ ._\-]*(episode|ep)[ ._\-]?\d{1,3}\b',
@@ -626,7 +683,12 @@ class NasMediaRecognizer {
         hitFilteredDirectory = true;
         break;
       }
-      if ((_looksLikeSeasonFolder(rawSegment) &&
+      if ((_matchEpisode(rawSegment) != null) ||
+          matchesHashNumberedEpisodeFolder(
+            rawSegment,
+            seriesParent: index > 0 ? pathSegments[index - 1] : '',
+          ) ||
+          (_looksLikeSeasonFolder(rawSegment) &&
               !_canUseSeasonDirectoryAsSeriesTitle(
                 rawSegment,
                 parentMatchesFilter: parentMatchesFilter,
@@ -722,6 +784,8 @@ class NasMediaRecognizer {
       'mov',
       'ts',
       'm2ts',
+      '国',
+      '粤',
     };
 
     for (final token in tokens) {

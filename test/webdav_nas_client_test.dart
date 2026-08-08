@@ -283,6 +283,48 @@ void main() {
       expect(items.single.streamUrl, isNotEmpty);
     });
 
+    test('preserves encoded hash characters in WebDAV href paths', () async {
+      final requestedUrls = <String>[];
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          requestedUrls.add(request.url.toString());
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() == 'https://nas.example.com/dav/') {
+            return http.Response(_hashDirectoryRootPropfind, 207);
+          }
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Show%20%2319/') {
+            return http.Response(_hashDirectoryChildPropfind, 207);
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.fetchLibrary(
+        const MediaSourceConfig(
+          id: 'nas-hash-path',
+          name: 'Hash Path NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/',
+          enabled: true,
+          webDavSidecarScrapingEnabled: false,
+        ),
+        limit: 20,
+      );
+
+      expect(
+        requestedUrls,
+        contains('https://nas.example.com/dav/Show%20%2319/'),
+      );
+      expect(items, hasLength(1));
+      expect(items.single.title, 'Episode 01');
+      expect(
+        items.single.actualAddress,
+        '/dav/Show #19/Episode 01.mkv',
+      );
+    });
+
     test('treats generic child folders as seasons and root files as specials',
         () async {
       final client = WebDavNasClient(
@@ -1673,6 +1715,51 @@ const _malformedHrefPropfind = '''<?xml version="1.0" encoding="utf-8"?>
         <d:resourcetype />
         <d:getcontenttype>video/x-matroska</d:getcontenttype>
         <d:getlastmodified>Fri, 04 Apr 2026 10:00:00 GMT</d:getlastmodified>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _hashDirectoryRootPropfind = '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>dav</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Show%20%2319/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Show #19</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>''';
+
+const _hashDirectoryChildPropfind = '''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Show%20%2319/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Show #19</d:displayname>
+        <d:resourcetype><d:collection /></d:resourcetype>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/Show%20%2319/Episode%2001.mkv</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Episode 01.mkv</d:displayname>
+        <d:resourcetype />
+        <d:getcontenttype>video/x-matroska</d:getcontenttype>
       </d:prop>
     </d:propstat>
   </d:response>

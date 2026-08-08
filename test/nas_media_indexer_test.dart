@@ -119,6 +119,172 @@ void main() {
     expect(episodes.single.episodeNumber, 1);
   });
 
+  test('NasMediaIndexer materializes Friends and Lu Yu real-world naming',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-real-world-series',
+      name: 'WebDAV Real World Series',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/movies/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+      webDavSeriesTitleFilterKeywords: ['movies', 'strm', 'quark'],
+    );
+    final collection = MediaCollection(
+      id: 'https://nas.example.com/movies/',
+      title: 'movies',
+      sourceId: source.id,
+      sourceName: source.name,
+      sourceKind: source.kind,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: [
+        _episodeItem(
+          id: 'friends-s08e06',
+          path: '/movies/strm/quark/老友记/SE08/老友记.H265.1080P.SE08.06.(mkv).strm',
+          title: '第 6 集',
+          seasonNumber: 8,
+          episodeNumber: 6,
+        ),
+        _episodeItem(
+          id: 'friends-s02e03',
+          path: '/movies/strm/quark/老友记/SE02/老友记.H265.1080P.SE02.03.(mkv).strm',
+          title: '第 3 集',
+          seasonNumber: 2,
+          episodeNumber: 3,
+        ),
+        _episodeItem(
+          id: 'luyu-19',
+          path: '/movies/strm/quark/陈鲁豫/陈鲁豫 · 慢谈 #19 对话张泉灵/video.strm',
+          title: '第 19 集',
+          seasonNumber: 1,
+          episodeNumber: 19,
+        ),
+        _episodeItem(
+          id: 'luyu-02',
+          path: '/movies/strm/quark/陈鲁豫/陈鲁豫 · 慢谈 #02 对话陈奕迅/video.strm',
+          title: '第 2 集',
+          seasonNumber: 1,
+          episodeNumber: 2,
+        ),
+        _episodeItem(
+          id: 'brilliant-friend-s01e01',
+          path:
+              '/movies/strm/quark/我的天才女友/我的天才女友S1/我.的.天.才.女.友.S01E01.消失的娃娃.strm',
+          title: '第 1 集',
+          seasonNumber: 1,
+          episodeNumber: 1,
+        ),
+        _episodeItem(
+          id: 'brilliant-friend-s02e02',
+          path: '/movies/strm/quark/我的天才女友/我的天才女友S2/我.的.天.才.女.友.S02E02.strm',
+          title: '第 2 集',
+          seasonNumber: 2,
+          episodeNumber: 2,
+        ),
+        _episodeItem(
+          id: 'brilliant-friend-s03e08',
+          path:
+              '/movies/strm/quark/我的天才女友/我的天才女友S3 蓝光版/我的天才女友.Lamica.geniale.S03E08.1080p.strm',
+          title: '第 8 集',
+          seasonNumber: 3,
+          episodeNumber: 8,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source, scopedCollections: [collection]);
+    final library = await indexer.loadLibrary(
+      source,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(
+      library.map((item) => item.title).toSet(),
+      {'老友记', '陈鲁豫', '我的天才女友'},
+    );
+
+    final friends = library.singleWhere((item) => item.title == '老友记');
+    final friendsSeasons = await indexer.loadChildren(
+      source,
+      parentId: friends.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(
+      friendsSeasons.map((item) => item.seasonNumber).toSet(),
+      {2, 8},
+    );
+    final friendsSeasonEight =
+        friendsSeasons.singleWhere((item) => item.seasonNumber == 8);
+    final friendsEpisodes = await indexer.loadChildren(
+      source,
+      parentId: friendsSeasonEight.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(friendsEpisodes.single.episodeNumber, 6);
+
+    final luYu = library.singleWhere((item) => item.title == '陈鲁豫');
+    final luYuSeasons = await indexer.loadChildren(
+      source,
+      parentId: luYu.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(luYuSeasons, hasLength(1));
+    expect(luYuSeasons.single.seasonNumber, 1);
+    final luYuEpisodes = await indexer.loadChildren(
+      source,
+      parentId: luYuSeasons.single.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(
+      luYuEpisodes.map((item) => item.episodeNumber).toSet(),
+      {2, 19},
+    );
+
+    final brilliantFriend =
+        library.singleWhere((item) => item.title == '我的天才女友');
+    final brilliantFriendSeasons = await indexer.loadChildren(
+      source,
+      parentId: brilliantFriend.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(
+      brilliantFriendSeasons.map((item) => item.seasonNumber).toSet(),
+      {1, 2, 3},
+    );
+  });
+
   test(
       'NasMediaIndexer merges duplicate same-episode files and exposes playable variants',
       () async {

@@ -56,12 +56,6 @@ class _ExternalScanStructureModule {
     if (items.isEmpty) {
       return items;
     }
-    webDavTrace(
-      'structure.start',
-      fields: {
-        'itemCount': items.length,
-      },
-    );
 
     final context = _buildStructureContext(
       items,
@@ -92,18 +86,7 @@ class _ExternalScanStructureModule {
           ),
         )
         .toList(growable: false);
-    webDavTrace(
-      'structure.done',
-      fields: {
-        'resultCount': resolvedItems.length,
-        'episodes': resolvedItems
-            .where((item) => item.metadataSeed.itemType == 'episode')
-            .length,
-        'movies': resolvedItems
-            .where((item) => item.metadataSeed.itemType == 'movie')
-            .length,
-      },
-    );
+
     return resolvedItems;
   }
 
@@ -116,7 +99,6 @@ class _ExternalScanStructureModule {
     final childItemsByDirectory =
         <String, Map<String, List<_PendingWebDavScannedItem>>>{};
     final recognitionByResource = <String, NasMediaRecognition>{};
-    final explicitEpisodeCountByDirectory = <String, int>{};
 
     final seriesTitleFilterKeywords =
         source.normalizedWebDavSeriesTitleFilterKeywords;
@@ -131,10 +113,6 @@ class _ExternalScanStructureModule {
         specialEpisodeKeywords: specialEpisodeKeywords,
       );
       recognitionByResource[item.resourceId] = recognition;
-      if (_hasExplicitEpisodeCue(item, recognition)) {
-        explicitEpisodeCountByDirectory[directoryKey] =
-            (explicitEpisodeCountByDirectory[directoryKey] ?? 0) + 1;
-      }
       for (var depth = 0; depth < item.relativeDirectories.length; depth++) {
         final parentKey = _segmentsKey(item.relativeDirectories.take(depth));
         final childName = item.relativeDirectories[depth];
@@ -153,26 +131,11 @@ class _ExternalScanStructureModule {
       }
     }
 
-    for (final entry in filesByDirectory.entries) {
-      final childDirectoryNames =
-          childItemsByDirectory[entry.key]?.keys.toList(growable: false) ??
-              const <String>[];
-      webDavTrace(
-        'structure.context.directory',
-        fields: {
-          'directory': entry.key,
-          'directItems': entry.value.length,
-          'childDirs': childDirectoryNames,
-        },
-      );
-    }
-
     return _StructureInferenceContext(
       filesByDirectory: filesByDirectory,
       childVideoCountsByDirectory: childVideoCountsByDirectory,
       childItemsByDirectory: childItemsByDirectory,
       recognitionByResource: recognitionByResource,
-      explicitEpisodeCountByDirectory: explicitEpisodeCountByDirectory,
       specialEpisodeKeywords: specialEpisodeKeywords,
     );
   }
@@ -191,23 +154,12 @@ class _ExternalScanStructureModule {
         filesByDirectory: context.filesByDirectory,
         childItemsByDirectory: context.childItemsByDirectory,
         recognitionByResource: context.recognitionByResource,
-        explicitEpisodeCountByDirectory:
-            context.explicitEpisodeCountByDirectory,
         specialEpisodeKeywords: context.specialEpisodeKeywords,
       );
       if (plan == null) {
         continue;
       }
       seriesRootPlans[directoryKey] = plan;
-      webDavTrace(
-        'structure.seriesRoot',
-        fields: {
-          'directory': directoryKey,
-          'rootItemsAsSpecials': plan.rootItemsAsSpecials,
-          'seasonDirs': plan.seasonNumberByChildDirectory,
-          'collapsedChildDirs': plan.collapseChildDirectoriesToRoot.toList(),
-        },
-      );
     }
     return seriesRootPlans;
   }
@@ -236,17 +188,6 @@ class _ExternalScanStructureModule {
         seriesRootForResource[item.resourceId] = matchedRootKey;
         break;
       }
-      webDavTrace(
-        matchedRootKey == null
-            ? 'structure.rootMapping.unassigned'
-            : 'structure.rootMapping.assigned',
-        fields: {
-          'path': item.actualAddress,
-          'relativeDirs': item.relativeDirectories,
-          'resourceId': item.resourceId,
-          'seriesRoot': matchedRootKey,
-        },
-      );
     }
     return seriesRootForResource;
   }
@@ -332,8 +273,6 @@ class _ExternalScanStructureModule {
   }) {
     final seed = item.metadataSeed;
     final explicitSeasonNumber = seed.seasonNumber ?? recognition?.seasonNumber;
-    final explicitEpisodeNumber =
-        seed.episodeNumber ?? recognition?.episodeNumber;
     final rootDepth = _segmentsFromKey(seriesRootKey).length;
     final isRootDirectFile = item.relativeDirectories.length == rootDepth;
     final childDirectoryName =
@@ -394,19 +333,7 @@ class _ExternalScanStructureModule {
       seasonNumber: resolvedExplicitSeasonNumber ?? derivedSeasonNumber,
     );
     final nextItem = item.copyWith(metadataSeed: nextSeed);
-    webDavTrace(
-      'structure.assignSeriesEpisode',
-      fields: {
-        'path': item.actualAddress,
-        'seriesRoot': seriesRootKey,
-        'seasonGroup': seasonGroupKey,
-        'season': nextSeed.seasonNumber,
-        'episode': explicitEpisodeNumber,
-        'title': nextSeed.title,
-        'specialKeyword': matchesSpecialEpisodeKeyword,
-        'collapsedWrapperChild': collapseChildDirectoryToRoot,
-      },
-    );
+
     return _AssignedSeriesEpisode(
       item: nextItem,
       groupKey: '$seriesRootKey::$seasonGroupKey',
@@ -444,16 +371,7 @@ class _ExternalScanStructureModule {
             explicitSeasonNumber != null
         ? 'episode'
         : 'movie';
-    webDavTrace(
-      'structure.singleFileFallback',
-      fields: {
-        'path': item.actualAddress,
-        'resolvedItemType': resolvedItemType,
-        'season': matchesSpecialEpisodeKeyword ? 0 : explicitSeasonNumber,
-        'episode': explicitEpisodeNumber,
-        'specialKeyword': matchesSpecialEpisodeKeyword,
-      },
-    );
+
     return item.copyWith(
       metadataSeed: seed.copyWith(
         itemType: resolvedItemType,
@@ -557,17 +475,7 @@ class _ExternalScanStructureModule {
                 right.item.actualAddress.toLowerCase(),
               );
         });
-        webDavTrace(
-          'structure.episodeOrder.date',
-          fields: {
-            'items': datedItems
-                .map(
-                  (entry) =>
-                      '${entry.item.fileName}@${entry.date.toIso8601String()}',
-                )
-                .toList(growable: false),
-          },
-        );
+
         return datedItems.map((entry) => entry.item).toList(growable: false);
       }
     }
@@ -631,28 +539,20 @@ class _ExternalScanStructureModule {
     required Map<String, Map<String, List<_PendingWebDavScannedItem>>>
         childItemsByDirectory,
     required Map<String, NasMediaRecognition> recognitionByResource,
-    required Map<String, int> explicitEpisodeCountByDirectory,
     required List<String> specialEpisodeKeywords,
   }) {
     final directItems = filesByDirectory[directoryKey] ?? const [];
     final childGroups = childItemsByDirectory[directoryKey] ??
         const <String, List<_PendingWebDavScannedItem>>{};
     if (directItems.isEmpty && childGroups.isEmpty) {
-      webDavTrace(
-        'structure.plan.skipEmpty',
-        fields: {
-          'directory': directoryKey,
-        },
-      );
       return null;
     }
 
-    final directExplicitEpisodeCount =
-        explicitEpisodeCountByDirectory[directoryKey] ?? 0;
     final seasonHintsByChildDirectory = <String, _SeasonDirectoryHint>{};
     final collapseChildDirectoriesToRoot = <String>{};
     for (final entry in childGroups.entries) {
       final hint = _resolveSeasonDirectoryHint(
+        parentDirectoryKey: directoryKey,
         childDirectoryName: entry.key,
         items: entry.value,
         siblingDirectoryNames: childGroups.keys.toList(growable: false),
@@ -676,27 +576,11 @@ class _ExternalScanStructureModule {
         hasOnlyFlatWrapperChildDirectories && directItems.length <= 3;
     if (shouldCollapseWrapperChildDirectories) {
       collapseChildDirectoriesToRoot.addAll(childGroups.keys);
-      webDavTrace(
-        'structure.plan.collapseWrapperChildren',
-        fields: {
-          'directory': directoryKey,
-          'directItems': directItems.length,
-          'childDirs': childGroups.keys.toList(growable: false),
-        },
-      );
     }
 
     final hasImplicitRootEpisodes =
         childGroups.isEmpty && directItems.length >= 2;
     if (hasImplicitRootEpisodes) {
-      webDavTrace(
-        'structure.plan.implicitSeason',
-        fields: {
-          'directory': directoryKey,
-          'directItems': directItems.length,
-          'explicitEpisodes': directExplicitEpisodeCount,
-        },
-      );
       return const _SeriesRootInferencePlan(
         rootItemsAsSpecials: false,
         seasonNumberByChildDirectory: <String, int?>{},
@@ -704,29 +588,9 @@ class _ExternalScanStructureModule {
     }
 
     if (childGroups.isEmpty) {
-      webDavTrace(
-        'structure.plan.noSeriesRoot',
-        fields: {
-          'directory': directoryKey,
-          'directItems': directItems.length,
-          'childDirs': childGroups.keys.toList(),
-          'seasonHints': seasonHintsByChildDirectory,
-          'collapsedChildDirs': collapseChildDirectoriesToRoot.toList(),
-        },
-      );
       return null;
     }
 
-    webDavTrace(
-      'structure.plan.seriesRoot',
-      fields: {
-        'directory': directoryKey,
-        'directItems': directItems.length,
-        'rootItemsAsSpecials': directItems.isNotEmpty,
-        'seasonHints': seasonHintsByChildDirectory,
-        'collapsedChildDirs': collapseChildDirectoriesToRoot.toList(),
-      },
-    );
     return _SeriesRootInferencePlan(
       rootItemsAsSpecials: directItems.isNotEmpty,
       seasonNumberByChildDirectory: {
@@ -739,6 +603,7 @@ class _ExternalScanStructureModule {
   }
 
   _SeasonDirectoryHint? _resolveSeasonDirectoryHint({
+    required String parentDirectoryKey,
     required String childDirectoryName,
     required List<_PendingWebDavScannedItem> items,
     required List<String> siblingDirectoryNames,
@@ -746,12 +611,6 @@ class _ExternalScanStructureModule {
     required List<String> specialEpisodeKeywords,
   }) {
     if (items.isEmpty) {
-      webDavTrace(
-        'structure.seasonHint.empty',
-        fields: {
-          'directory': childDirectoryName,
-        },
-      );
       return null;
     }
 
@@ -759,12 +618,6 @@ class _ExternalScanStructureModule {
       [childDirectoryName],
       specialEpisodeKeywords: specialEpisodeKeywords,
     )) {
-      webDavTrace(
-        'structure.seasonHint.specialKeyword',
-        fields: {
-          'directory': childDirectoryName,
-        },
-      );
       return const _SeasonDirectoryHint(seasonNumber: 0);
     }
 
@@ -772,13 +625,6 @@ class _ExternalScanStructureModule {
       childDirectoryName,
     );
     if (explicitSeasonNumber != null) {
-      webDavTrace(
-        'structure.seasonHint.explicit',
-        fields: {
-          'directory': childDirectoryName,
-          'season': explicitSeasonNumber,
-        },
-      );
       return _SeasonDirectoryHint(seasonNumber: explicitSeasonNumber);
     }
 
@@ -787,20 +633,17 @@ class _ExternalScanStructureModule {
       siblingDirectoryNames: siblingDirectoryNames,
     )) {
       final seasonNumber = _parseLeadingNumericSeasonNumber(childDirectoryName);
-      webDavTrace(
-        'structure.seasonHint.numeric',
-        fields: {
-          'directory': childDirectoryName,
-          'season': seasonNumber,
-          'siblings': siblingDirectoryNames,
-        },
-      );
+
       return _SeasonDirectoryHint(
         seasonNumber: seasonNumber,
       );
     }
 
+    final childDirectoryDepth = _segmentsFromKey(parentDirectoryKey).length + 1;
     final explicitSeasonNumbers = items
+        .where(
+          (item) => item.relativeDirectories.length == childDirectoryDepth,
+        )
         .map(
           (item) =>
               item.metadataSeed.seasonNumber ??
@@ -809,23 +652,9 @@ class _ExternalScanStructureModule {
         .whereType<int>()
         .toSet();
     if (explicitSeasonNumbers.length == 1) {
-      webDavTrace(
-        'structure.seasonHint.fromItems',
-        fields: {
-          'directory': childDirectoryName,
-          'season': explicitSeasonNumbers.first,
-        },
-      );
       return _SeasonDirectoryHint(seasonNumber: explicitSeasonNumbers.first);
     }
 
-    webDavTrace(
-      'structure.seasonHint.none',
-      fields: {
-        'directory': childDirectoryName,
-        'itemCount': items.length,
-      },
-    );
     return null;
   }
 
@@ -907,17 +736,6 @@ class _ExternalScanStructureModule {
         .where((name) => _parseLeadingNumericSeasonNumber(name) != null)
         .length;
     return numericSiblingCount >= 2;
-  }
-
-  bool _hasExplicitEpisodeCue(
-    _PendingWebDavScannedItem item,
-    NasMediaRecognition recognition,
-  ) {
-    return item.metadataSeed.seasonNumber != null ||
-        item.metadataSeed.episodeNumber != null ||
-        recognition.seasonNumber != null ||
-        recognition.episodeNumber != null ||
-        recognition.itemType.trim().toLowerCase() == 'episode';
   }
 
   bool _matchesSpecialEpisodeKeyword(
@@ -1007,7 +825,6 @@ class _StructureInferenceContext {
     required this.childVideoCountsByDirectory,
     required this.childItemsByDirectory,
     required this.recognitionByResource,
-    required this.explicitEpisodeCountByDirectory,
     required this.specialEpisodeKeywords,
   });
 
@@ -1016,7 +833,6 @@ class _StructureInferenceContext {
   final Map<String, Map<String, List<_PendingWebDavScannedItem>>>
       childItemsByDirectory;
   final Map<String, NasMediaRecognition> recognitionByResource;
-  final Map<String, int> explicitEpisodeCountByDirectory;
   final List<String> specialEpisodeKeywords;
 }
 

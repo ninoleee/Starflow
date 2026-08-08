@@ -2,7 +2,6 @@ import 'dart:collection';
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/core/utils/webdav_trace.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/application/nas_media_index_revision.dart';
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
@@ -126,16 +125,6 @@ class NasMediaIndexer {
     if (handles.isEmpty) {
       return;
     }
-
-    webDavTrace(
-      'indexer.refresh.cancelAll',
-      fields: {
-        'activeCount': _activeRefreshTasks.length,
-        'backgroundCount': _backgroundEnrichmentTasks.length,
-        'includeForceFull': includeForceFull,
-        'cancelledCount': handles.length,
-      },
-    );
 
     for (final handle in handles) {
       handle.cancel();
@@ -318,24 +307,9 @@ class NasMediaIndexer {
     final scopeKey = _buildScopeKey(source, scopedCollections);
     final state = await _store.loadSourceState(source.id);
     if (state == null) {
-      webDavTrace(
-        'indexer.loadScopedRecords.miss',
-        fields: {
-          'sourceId': source.id,
-          'scopeKey': scopeKey,
-        },
-      );
       return const <NasMediaIndexRecord>[];
     }
     if (state.scopeKey != scopeKey) {
-      webDavTrace(
-        'indexer.loadScopedRecords.scopeMismatch',
-        fields: {
-          'sourceId': source.id,
-          'storedScopeKey': state.scopeKey,
-          'requestedScopeKey': scopeKey,
-        },
-      );
       return const <NasMediaIndexRecord>[];
     }
 

@@ -124,15 +124,6 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       ),
     );
 
-    webDavTrace(
-      'indexer.refresh.autoRebuildOnEmpty',
-      fields: {
-        'sourceId': source.id,
-        'sourceName': source.name,
-        'scopeKey': scopeKey,
-      },
-    );
-
     await refreshSource(
       source,
       scopedCollections: scopedCollections,
@@ -612,14 +603,6 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
 
     final existingBackgroundTask = _backgroundEnrichmentTasks[taskKey];
     if (existingBackgroundTask != null) {
-      webDavTrace(
-        'indexer.refresh.cancelBackground',
-        fields: {
-          'sourceId': source.id,
-          'sourceName': source.name,
-          'forceFullRescan': forceFullRescan,
-        },
-      );
       existingBackgroundTask.cancel();
       await existingBackgroundTask.future.catchError((_) {
         // Background enrichment is best-effort and safe to interrupt.
@@ -629,19 +612,6 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     final controller = _RefreshTaskController();
     final future = _sourceBudget.withPermit(() async {
       try {
-        webDavTrace(
-          'indexer.refresh.start',
-          fields: {
-            'sourceId': source.id,
-            'sourceName': source.name,
-            'endpoint': source.endpoint,
-            'scopedCollections':
-                scopedCollections?.map((item) => item.title).toList() ??
-                    const [],
-            'limitPerCollection': limitPerCollection,
-            'forceFullRescan': forceFullRescan,
-          },
-        );
         if (forceFullRescan) {
           _wmdbMetadataClient.clearCache();
           _tmdbMetadataClient.clearCache();
@@ -689,6 +659,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         if (_isProviderContainerDisposedError(error)) {
           return;
         }
+
         Error.throwWithStackTrace(error, stackTrace);
       } finally {
         _activeRefreshTasks.remove(taskKey);
@@ -876,13 +847,6 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
   }) async {
     controller.throwIfCancelled();
     if (scopedCollections != null && scopedCollections.isNotEmpty) {
-      webDavTrace(
-        'indexer.scanSource.scoped.start',
-        fields: {
-          'sourceId': source.id,
-          'collections': scopedCollections.map((item) => item.title).toList(),
-        },
-      );
       _progressController.startScanning(
         sourceId: source.id,
         sourceName: source.name,
@@ -920,14 +884,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
               total: scopedCollections.length,
               detail: collection.title,
             );
-            webDavTrace(
-              'indexer.scanSource.collection.done',
-              fields: {
-                'sourceId': source.id,
-                'collection': collection.title,
-                'count': result.length,
-              },
-            );
+
             return result;
           });
         }),
@@ -938,22 +895,10 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       }
       final items = deduped.values.toList(growable: false);
       items.sort((left, right) => right.addedAt.compareTo(left.addedAt));
-      webDavTrace(
-        'indexer.scanSource.scoped.done',
-        fields: {
-          'sourceId': source.id,
-          'dedupedCount': items.length,
-        },
-      );
+
       return items;
     }
-    webDavTrace(
-      'indexer.scanSource.root.start',
-      fields: {
-        'sourceId': source.id,
-        'sourceName': source.name,
-      },
-    );
+
     _progressController.startScanning(
       sourceId: source.id,
       sourceName: source.name,
@@ -981,13 +926,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       total: 1,
       detail: source.name,
     );
-    webDavTrace(
-      'indexer.scanSource.root.done',
-      fields: {
-        'sourceId': source.id,
-        'count': rootItems.length,
-      },
-    );
+
     return rootItems;
   }
 
@@ -1057,15 +996,6 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         enrichmentCandidates.add(scannedItem);
       }
       if (canReuse) {
-        webDavTrace(
-          'indexer.refresh.reuse',
-          fields: {
-            'resourceId': scannedItem.resourceId,
-            'path': scannedItem.actualAddress,
-            'title': scannedItem.metadataSeed.title,
-            'phase': phaseLabel,
-          },
-        );
         nextRecords.add(
           _reuseRecord(
             existing,
@@ -1075,18 +1005,6 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
           ),
         );
       } else {
-        webDavTrace(
-          'indexer.refresh.index',
-          fields: {
-            'resourceId': scannedItem.resourceId,
-            'path': scannedItem.actualAddress,
-            'title': scannedItem.metadataSeed.title,
-            'itemType': scannedItem.metadataSeed.itemType,
-            'season': scannedItem.metadataSeed.seasonNumber,
-            'episode': scannedItem.metadataSeed.episodeNumber,
-            'phase': phaseLabel,
-          },
-        );
         nextRecords.add(
           await _indexScannedItem(
             source,
@@ -1129,14 +1047,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       ),
     );
     _notifyIndexChangedSafely();
-    webDavTrace(
-      'indexer.refresh.done',
-      fields: {
-        'sourceId': source.id,
-        'recordCount': nextRecords.length,
-        'phase': phaseLabel,
-      },
-    );
+
     if (clearProgressWhenDone) {
       _clearProgressSafely(normalizedSourceId);
     }
@@ -1179,13 +1090,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
           _clearProgressSafely(source.id);
           return;
         }
-        webDavTrace(
-          'indexer.refresh.background.error',
-          fields: {
-            'sourceId': source.id,
-            'error': '$error',
-          },
-        );
+
         _clearProgressSafely(source.id);
       } finally {
         _backgroundEnrichmentTasks.remove(taskKey);

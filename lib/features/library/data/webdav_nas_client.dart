@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
-import 'package:starflow/core/utils/webdav_trace.dart';
 import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -53,24 +52,9 @@ class WebDavNasClient {
           : _browseRoot(source),
     );
     if (_isExcludedByKeyword(rootUri, source: source)) {
-      webDavTrace(
-        'fetchCollections.skipExcludedRoot',
-        fields: {
-          'sourceId': source.id,
-          'rootUri': rootUri,
-          'keywords': source.normalizedWebDavExcludedPathKeywords,
-        },
-      );
       return const [];
     }
-    webDavTrace(
-      'fetchCollections.start',
-      fields: {
-        'sourceId': source.id,
-        'sourceName': source.name,
-        'rootUri': rootUri,
-      },
-    );
+
     final entries = _filterExcludedEntries(
       await _propfind(rootUri, source: source),
       source: source,
@@ -88,14 +72,7 @@ class WebDavNasClient {
           ),
         )
         .toList();
-    webDavTrace(
-      'fetchCollections.done',
-      fields: {
-        'sourceId': source.id,
-        'count': collections.length,
-        'titles': collections.map((item) => item.title).toList(),
-      },
-    );
+
     return collections;
   }
 
@@ -142,35 +119,13 @@ class WebDavNasClient {
           : _browseRoot(source),
     );
     if (_isExcludedByKeyword(rootUri, source: source)) {
-      webDavTrace(
-        'scanLibrary.skipExcludedRoot',
-        fields: {
-          'sourceId': source.id,
-          'rootUri': rootUri,
-          'keywords': source.normalizedWebDavExcludedPathKeywords,
-        },
-      );
       return const [];
     }
     final collectionId = rootUri.toString();
     final collectionName = sectionName.trim().isEmpty
         ? _displayNameFromUri(rootUri, fallback: source.name)
         : sectionName.trim();
-    webDavTrace(
-      'scanLibrary.start',
-      fields: {
-        'sourceId': source.id,
-        'sourceName': source.name,
-        'rootUri': rootUri,
-        'sectionName': collectionName,
-        'limit': limit,
-        'structureInference': source.webDavStructureInferenceEnabled,
-        'sidecar': shouldLoadSidecarMetadata,
-        'maxConcurrentDirectoryWalks': _maxConcurrentDirectoryWalks,
-        'maxConcurrentFilePreparations': _maxConcurrentFilePreparations,
-        'resolvePlayableStreams': resolvePlayableStreams,
-      },
-    );
+
     final visited = <String>{};
 
     Future<_PendingWebDavScannedItem?> resolvePendingItem(
@@ -178,24 +133,9 @@ class WebDavNasClient {
       List<_WebDavEntry> siblings,
     ) async {
       if (_isExcludedByKeyword(entry.uri, source: source)) {
-        webDavTrace(
-          'scan.walk.skipExcludedFile',
-          fields: {
-            'uri': entry.uri,
-            'name': entry.name,
-          },
-        );
         return null;
       }
       if (!_isPlayableVideo(entry)) {
-        webDavTrace(
-          'scan.walk.skipNonPlayable',
-          fields: {
-            'uri': entry.uri,
-            'name': entry.name,
-            'contentType': entry.contentType,
-          },
-        );
         return null;
       }
       final metadata = shouldLoadSidecarMetadata
@@ -213,13 +153,6 @@ class WebDavNasClient {
       );
       _throwIfCancelled(shouldCancel);
       if (resolvedPlayable.streamUrl.trim().isEmpty) {
-        webDavTrace(
-          'scan.walk.skipEmptyStream',
-          fields: {
-            'uri': entry.uri,
-            'name': entry.name,
-          },
-        );
         return null;
       }
       final pendingItem = _PendingWebDavScannedItem(
@@ -239,17 +172,7 @@ class WebDavNasClient {
           rootUri: rootUri,
         ),
       );
-      webDavTrace(
-        'scan.walk.accept',
-        fields: {
-          'path': pendingItem.actualAddress,
-          'title': pendingItem.metadataSeed.title,
-          'itemType': pendingItem.metadataSeed.itemType,
-          'season': pendingItem.metadataSeed.seasonNumber,
-          'episode': pendingItem.metadataSeed.episodeNumber,
-          'directories': pendingItem.relativeDirectories,
-        },
-      );
+
       return pendingItem;
     }
 
@@ -267,13 +190,6 @@ class WebDavNasClient {
         return const _DirectoryWalkResult();
       }
       if (_isExcludedByKeyword(uri, source: source)) {
-        webDavTrace(
-          'scan.walk.skipExcludedDirectory',
-          fields: {
-            'uri': uri,
-            'depth': depth,
-          },
-        );
         return const _DirectoryWalkResult();
       }
 
@@ -294,30 +210,13 @@ class WebDavNasClient {
         final items = truncated
             ? rebasedItems.take(remaining).toList(growable: false)
             : rebasedItems;
-        webDavTrace(
-          'scan.walk.cacheHit',
-          fields: {
-            'uri': uri,
-            'depth': depth,
-            'cachedCount': cachedSubtree.items.length,
-            'returnedCount': items.length,
-            'truncated': truncated,
-          },
-        );
+
         return _DirectoryWalkResult(
           items: items,
           truncated: truncated,
         );
       }
 
-      webDavTrace(
-        'scan.walk.enter',
-        fields: {
-          'uri': uri,
-          'depth': depth,
-          'remaining': remaining,
-        },
-      );
       final entries = _filterExcludedEntries(
         await _propfind(uri, source: source),
         source: source,
@@ -331,41 +230,14 @@ class WebDavNasClient {
       final childDirectoryResults = <int, Future<_DirectoryWalkResult>>{};
       final activeDirectoryTasks = <Future<void>>[];
       final activeFileTasks = <Future<void>>[];
-      final childDirectoryCount =
-          directoryEntries.where((entry) => entry.isCollection).length;
-      final fileEntryCount =
-          directoryEntries.where((entry) => !entry.isCollection).length;
       var truncated = false;
-      webDavTrace(
-        'scan.walk.entries',
-        fields: {
-          'uri': uri,
-          'depth': depth,
-          'entryCount': directoryEntries.length,
-          'childDirectoryCount': childDirectoryCount,
-          'fileEntryCount': fileEntryCount,
-          'maxConcurrentDirectoryWalks': _maxConcurrentDirectoryWalks,
-          'maxConcurrentFilePreparations': _maxConcurrentFilePreparations,
-          'directories': directoryEntries
-              .where((entry) => entry.isCollection)
-              .map((entry) => entry.name)
-              .toList(),
-        },
-      );
+
       for (var entryIndex = 0;
           entryIndex < directoryEntries.length;
           entryIndex++) {
         final entry = directoryEntries[entryIndex];
         _throwIfCancelled(shouldCancel);
         if (entry.isCollection) {
-          webDavTrace(
-            'scan.walk.descend',
-            fields: {
-              'parent': uri,
-              'child': entry.uri,
-              'name': entry.name,
-            },
-          );
           final childResult = walk(
             entry.uri,
             depth + 1,
@@ -465,17 +337,7 @@ class WebDavNasClient {
         .map((item) => item.toScannedItem())
         .toList(growable: false);
     items.sort((left, right) => right.addedAt.compareTo(left.addedAt));
-    webDavTrace(
-      'scanLibrary.done',
-      fields: {
-        'sourceId': source.id,
-        'rootUri': rootUri,
-        'pendingCount': pendingItems.length,
-        'resultCount': items.length,
-        'truncated': walkResult.truncated,
-        'maxConcurrentDirectoryWalks': _maxConcurrentDirectoryWalks,
-      },
-    );
+
     return items;
   }
 

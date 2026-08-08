@@ -6,6 +6,8 @@ void main() {
     test('parses English and Chinese season keywords', () {
       expect(parseSeasonNumberFromFolderLabel('Season 01'), 1);
       expect(parseSeasonNumberFromFolderLabel('Series 2'), 2);
+      expect(parseSeasonNumberFromFolderLabel('SE08'), 8);
+      expect(parseSeasonNumberFromFolderLabel('我的天才女友S3 蓝光版'), 3);
       expect(parseSeasonNumberFromFolderLabel('第一季'), 1);
       expect(parseSeasonNumberFromFolderLabel('第十二季'), 12);
       expect(parseSeasonNumberFromFolderLabel('第０季'), 0);
@@ -27,6 +29,8 @@ void main() {
       expect(parseLeadingNumericSeasonNumber('9.韩国'), 9);
       expect(looksLikeNumericTopicSeason('5.美国'), isTrue);
       expect(looksLikeSeasonFolderLabel('呼啸山庄'), isFalse);
+      expect(looksLikeStrictSeasonFolderLabel('SE10'), isTrue);
+      expect(looksLikeStrictSeasonFolderLabel('我的天才女友S3 蓝光版'), isFalse);
     });
   });
 }

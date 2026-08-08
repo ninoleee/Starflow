@@ -251,6 +251,7 @@ class AppMediaRepository implements MediaRepository {
       return;
     }
     final selectedCollections = await _selectedCollectionsForSource(source);
+
     if (_hasScopedSections(source) && selectedCollections.isEmpty) {
       await _nasMediaIndexer.clearSource(source.id);
       await _clearIndexedSourceLocalState(source.id, previousIndexedRecords);
@@ -268,10 +269,11 @@ class AppMediaRepository implements MediaRepository {
           _hasScopedSections(source) ? selectedCollections : null,
       forceFullRescan: forceFullRescan,
     );
+    final nextIndexedRecords = await _nasMediaIndexer.loadSourceRecords(
+      source.id,
+    );
+
     if (!forceFullRescan) {
-      final nextIndexedRecords = await _nasMediaIndexer.loadSourceRecords(
-        source.id,
-      );
       await _clearRemovedIndexedResources(
         sourceId: source.id,
         previousRecords: previousIndexedRecords,

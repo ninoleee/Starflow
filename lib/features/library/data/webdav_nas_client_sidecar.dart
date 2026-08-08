@@ -6,13 +6,6 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     required List<_WebDavEntry> siblings,
     required MediaSourceConfig source,
   }) async {
-    webDavTrace(
-      'sidecar.start',
-      fields: {
-        'video': videoEntry.uri,
-        'fileName': videoEntry.name,
-      },
-    );
     final currentDirectoryUri = _parentDirectoryUri(videoEntry.uri);
     final parentDirectoryUri = currentDirectoryUri == null
         ? null
@@ -178,25 +171,7 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
       bitrate: nfoMetadata?.bitrate ?? inferredMediaInfo.bitrate,
       hasSidecarMatch: hasSidecarMatch,
     );
-    webDavTrace(
-      'sidecar.done',
-      fields: {
-        'video': videoEntry.uri,
-        'primaryNfo': primaryNfoEntry?.name ?? '',
-        'seasonNfo': seasonNfoEntry?.name ?? '',
-        'seriesNfo': seriesNfoEntry?.name ?? '',
-        'title': seed.title,
-        'itemType': seed.itemType,
-        'season': seed.seasonNumber,
-        'episode': seed.episodeNumber,
-        'imdbId': seed.imdbId,
-        'tmdbId': seed.tmdbId,
-        'hasPoster': seed.posterUrl.isNotEmpty,
-        'hasBackdrop': seed.backdropUrl.isNotEmpty,
-        'hasLogo': seed.logoUrl.isNotEmpty,
-        'hasSidecarMatch': seed.hasSidecarMatch,
-      },
-    );
+
     return seed;
   }
 
@@ -239,13 +214,6 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     Uri uri, {
     required MediaSourceConfig source,
   }) async {
-    webDavTrace(
-      'propfind.request',
-      fields: {
-        'uri': uri,
-        'sourceId': source.id,
-      },
-    );
     final request = http.Request('PROPFIND', uri)
       ..headers.addAll({
         ..._headers(source),
@@ -263,26 +231,17 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
   </d:prop>
 </d:propfind>''';
 
-    final streamed = await _client.send(request);
-    final response = await http.Response.fromStream(streamed);
+    late final http.Response response;
+    try {
+      final streamed = await _client.send(request);
+      response = await http.Response.fromStream(streamed);
+    } catch (_) {
+      rethrow;
+    }
     if (response.statusCode != 207 && response.statusCode != 200) {
-      webDavTrace(
-        'propfind.error',
-        fields: {
-          'uri': uri,
-          'status': response.statusCode,
-        },
-      );
       throw WebDavNasException('WebDAV 请求失败：HTTP ${response.statusCode}');
     }
     if (response.body.trim().isEmpty) {
-      webDavTrace(
-        'propfind.empty',
-        fields: {
-          'uri': uri,
-          'status': response.statusCode,
-        },
-      );
       return const [];
     }
 
@@ -320,18 +279,7 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
         isSelf: _normalizeUri(resolvedUri) == normalizedSelf,
       );
     }).toList();
-    webDavTrace(
-      'propfind.response',
-      fields: {
-        'uri': uri,
-        'status': response.statusCode,
-        'count': parsed.length,
-        'entries': parsed
-            .map((entry) =>
-                '${entry.isCollection ? 'dir' : 'file'}:${entry.name}')
-            .toList(),
-      },
-    );
+
     return parsed;
   }
 
@@ -373,14 +321,6 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     final filtered = <_WebDavEntry>[];
     for (final entry in entries) {
       if (!entry.isSelf && _isExcludedByKeyword(entry.uri, source: source)) {
-        webDavTrace(
-          'filter.exclude',
-          fields: {
-            'uri': entry.uri,
-            'name': entry.name,
-            'keywords': source.normalizedWebDavExcludedPathKeywords,
-          },
-        );
         continue;
       }
       filtered.add(entry);
@@ -454,13 +394,6 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
       );
     }
     if (!resolveStrmTarget) {
-      webDavTrace(
-        'resolvePlayable.strm.deferred',
-        fields: {
-          'uri': entry.uri,
-          'streamUrl': entry.uri,
-        },
-      );
       return _ResolvedPlayableSource(
         streamUrl: entry.uri.toString(),
         headers: _headers(source),
@@ -479,21 +412,8 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     Uri uri, {
     required MediaSourceConfig source,
   }) async {
-    webDavTrace(
-      'resolvePlayable.strm.start',
-      fields: {
-        'uri': uri,
-      },
-    );
     final response = await _client.get(uri, headers: _headers(source));
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      webDavTrace(
-        'resolvePlayable.strm.error',
-        fields: {
-          'uri': uri,
-          'status': response.statusCode,
-        },
-      );
       throw WebDavNasException(
         'STRM 读取失败：HTTP ${response.statusCode} ($uri)',
       );
@@ -507,31 +427,13 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
       }
       final parsed = Uri.tryParse(normalized);
       if (parsed != null && parsed.hasScheme) {
-        webDavTrace(
-          'resolvePlayable.strm.done',
-          fields: {
-            'uri': uri,
-            'streamUrl': normalized,
-          },
-        );
         return normalized;
       }
       final resolved = uri.resolve(normalized).toString();
-      webDavTrace(
-        'resolvePlayable.strm.relative',
-        fields: {
-          'uri': uri,
-          'streamUrl': resolved,
-        },
-      );
+
       return resolved;
     }
-    webDavTrace(
-      'resolvePlayable.strm.empty',
-      fields: {
-        'uri': uri,
-      },
-    );
+
     return '';
   }
 
@@ -1129,17 +1031,36 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     if (trimmed.isEmpty) {
       return requestUri;
     }
-    String decoded;
-    try {
-      decoded = Uri.decodeFull(trimmed);
-    } catch (_) {
-      decoded = trimmed;
-    }
-    final parsed = Uri.tryParse(decoded);
+    final normalized = _escapeInvalidHrefEncoding(
+      trimmed.replaceAll('#', '%23'),
+    );
+    final parsed = Uri.tryParse(normalized);
     if (parsed != null && parsed.hasScheme) {
       return parsed;
     }
-    return requestUri.resolve(decoded);
+    return requestUri.resolve(normalized);
+  }
+
+  String _escapeInvalidHrefEncoding(String value) {
+    final buffer = StringBuffer();
+    for (var index = 0; index < value.length; index++) {
+      final character = value[index];
+      if (character != '%') {
+        buffer.write(character);
+        continue;
+      }
+      final hasValidEscape = index + 2 < value.length &&
+          _isHexDigit(value.codeUnitAt(index + 1)) &&
+          _isHexDigit(value.codeUnitAt(index + 2));
+      buffer.write(hasValidEscape ? '%' : '%25');
+    }
+    return buffer.toString();
+  }
+
+  bool _isHexDigit(int codeUnit) {
+    return (codeUnit >= 0x30 && codeUnit <= 0x39) ||
+        (codeUnit >= 0x41 && codeUnit <= 0x46) ||
+        (codeUnit >= 0x61 && codeUnit <= 0x66);
   }
 
   String _childText(XmlElement node, String localName) {

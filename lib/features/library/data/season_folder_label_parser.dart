@@ -9,6 +9,8 @@ int? parseSeasonNumberFromFolderLabel(String value) {
 
   for (final pattern in const [
     r'(?:^|[ ._\-])s(\d{1,2})(?:$|[ ._\-])',
+    r'[\u3400-\u9fff]s(\d{1,2})(?:$|[ ._\-])',
+    r'(?:^|[ ._\-])se(\d{1,2})(?:$|[ ._\-])',
     r'season[ ._\-]?(\d{1,2})',
     r'series[ ._\-]?(\d{1,2})',
     r'第(\d{1,2})季',
@@ -71,7 +73,7 @@ bool looksLikeStrictSeasonFolderLabel(String value) {
   }
 
   if (RegExp(
-    r'^\s*(?:s\d{1,2}|season[ ._\-]?\d{1,2}|series[ ._\-]?\d{1,2})\s*$',
+    r'^\s*(?:s\d{1,2}|se\d{1,2}|season[ ._\-]?\d{1,2}|series[ ._\-]?\d{1,2})\s*$',
     caseSensitive: false,
   ).hasMatch(normalized)) {
     return true;

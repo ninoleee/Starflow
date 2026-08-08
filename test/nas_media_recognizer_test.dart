@@ -78,6 +78,66 @@ void main() {
       expect(result.episodeNumber, 1);
     });
 
+    test('recognizes SE season folders and dotted episode numbers', () {
+      final result = NasMediaRecognizer.recognize(
+        'Shows/老友记/SE08/老友记.H265.1080P.SE08.06.(mkv).strm',
+      );
+
+      expect(result.title, '老友记');
+      expect(result.parentTitle, '老友记');
+      expect(result.itemType, 'episode');
+      expect(result.preferSeries, isTrue);
+      expect(result.seasonNumber, 8);
+      expect(result.episodeNumber, 6);
+    });
+
+    test('recognizes a season suffix attached to a Chinese series title', () {
+      final result = NasMediaRecognizer.recognize(
+        'Shows/我的天才女友/我的天才女友S3 蓝光版/我的天才女友.Lamica.geniale.S03E08.1080p.strm',
+      );
+
+      expect(result.title, '我的天才女友');
+      expect(result.parentTitle, '我的天才女友');
+      expect(result.itemType, 'episode');
+      expect(result.seasonNumber, 3);
+      expect(result.episodeNumber, 8);
+    });
+
+    test('uses hash-numbered parent folders as season one episodes', () {
+      final result = NasMediaRecognizer.recognize(
+        'Shows/陈鲁豫/陈鲁豫 · 慢谈 #19 对话张泉灵/video.strm',
+        seriesTitleFilterKeywords: const ['shows'],
+      );
+
+      expect(result.title, '陈鲁豫');
+      expect(result.parentTitle, '陈鲁豫');
+      expect(result.itemType, 'episode');
+      expect(result.preferSeries, isTrue);
+      expect(result.seasonNumber, 1);
+      expect(result.episodeNumber, 19);
+    });
+
+    test('does not treat unrelated hashtag folders as episodes', () {
+      final result = NasMediaRecognizer.recognize(
+        'Shows/纪录片/Research #19/video.mkv',
+        seriesTitleFilterKeywords: const ['shows'],
+      );
+
+      expect(result.itemType, isEmpty);
+      expect(result.seasonNumber, isNull);
+      expect(result.episodeNumber, isNull);
+    });
+
+    test('does not treat hashtag numbers in file names as episode cues', () {
+      final result = NasMediaRecognizer.recognize(
+        'Movies/纪录片/Research #19.mkv',
+      );
+
+      expect(result.itemType, isEmpty);
+      expect(result.seasonNumber, isNull);
+      expect(result.episodeNumber, isNull);
+    });
+
     test(
         'treats leading numeric release names as episode cues in series folder',
         () {

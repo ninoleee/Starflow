@@ -120,6 +120,7 @@ class MediaRefreshCoordinator {
         .where((item) => item.isNotEmpty)
         .toSet()
         .toList(growable: false);
+
     if (normalizedIds.isEmpty) {
       return;
     }

@@ -529,6 +529,7 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
   }) async {
     final normalizedSourceId = sourceId.trim();
     final normalizedRecords = List<NasMediaIndexRecord>.unmodifiable(records);
+
     await _store.replaceSourceRecords(
       sourceId: normalizedSourceId,
       records: normalizedRecords,
