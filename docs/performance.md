@@ -1,5 +1,10 @@
 ## Performance Baseline Runbook
 
+> This document describes the lightweight host-side smoke timer. For real
+> profile-mode FrameTiming, slow-frame, and RSS baselines on hardware, use
+> [`run_device_perf.dart`](../tool/perf/run_device_perf.dart) and follow
+> [the device baseline guide](performance-baseline.md).
+
 `tool/perf/run_perf_baselines.dart` is the centralized script for capturing the five core performance baselines we are tracking: startup, home feed, detail screen, playback warm launch, and index refresh latency. Run it any time you change shared data layers, split hot UI files, or adjust the rendering/animation budget, so regressions are caught before a release.
 
 ### 2026-04-11 sync

@@ -412,7 +412,10 @@ extension _PlayerPageStateControls on _PlayerPageState {
             final playbackIsVisible =
                 hasVideoDimensions && (isPlaying || hasPlaybackProgress);
             if (playbackIsVisible) {
-              return const SizedBox.shrink();
+              return const KeyedSubtree(
+                key: ValueKey<String>('player:first-frame'),
+                child: SizedBox.shrink(),
+              );
             }
             return Positioned.fill(
               child: IgnorePointer(

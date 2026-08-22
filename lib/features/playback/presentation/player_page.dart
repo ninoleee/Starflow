@@ -804,6 +804,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             canRequestFocus: isTelevision,
             onKeyEvent: (_, event) => _handleTvSeekKeyEvent(event),
             child: Scaffold(
+              key: _isReady ? const ValueKey<String>('player:ready') : null,
               backgroundColor: Colors.black,
               body: !isTelevision
                   ? KeyedSubtree(

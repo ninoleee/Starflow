@@ -79,7 +79,7 @@ void main() {
       expect(preset, PlaybackMpvQualityPreset.performanceFirst);
     });
 
-    test('keeps fullscreen windows quality-first for non-heavy remote playback',
+    test('downgrades high-risk fullscreen remote playback to performance-first',
         () {
       const target = PlaybackTarget(
         title: '1080p AVC',
@@ -103,10 +103,10 @@ void main() {
         decodeMode: PlaybackDecodeMode.auto,
       );
 
-      expect(preset, PlaybackMpvQualityPreset.qualityFirst);
+      expect(preset, PlaybackMpvQualityPreset.performanceFirst);
     });
 
-    test('uses buffered remote tuning profile for http playback', () {
+    test('uses high-risk buffered tuning profile for heavy http playback', () {
       const target = PlaybackTarget(
         title: 'HTTP Movie',
         sourceId: 'emby-main',
@@ -124,12 +124,15 @@ void main() {
       expect(profile, isNotNull);
       expect(profile!.lowLatency, isFalse);
       expect(profile.cacheOnDisk, 'no');
-      expect(profile.cacheSecs, '30');
-      expect(profile.networkTimeoutSeconds, '15');
+      expect(profile.cacheSecs, '150');
+      expect(profile.demuxerReadaheadSecs, '42');
+      expect(profile.demuxerHysteresisSecs, '20');
+      expect(profile.cachePauseWait, '5.2');
+      expect(profile.networkTimeoutSeconds, '32');
       expect(profile.cachePauseInitial, 'yes');
     });
 
-    test('uses more aggressive buffered tuning profile for quark playback', () {
+    test('uses high-risk buffered tuning profile for quark playback', () {
       const target = PlaybackTarget(
         title: 'Quark Movie',
         sourceId: 'quark-main',
@@ -148,14 +151,15 @@ void main() {
       expect(isLikelyQuarkPlaybackTarget(target), isTrue);
       expect(profile!.lowLatency, isFalse);
       expect(profile.cacheOnDisk, 'no');
-      expect(profile.cacheSecs, '75');
-      expect(profile.demuxerReadaheadSecs, '24');
-      expect(profile.cachePauseWait, '2.5');
+      expect(profile.cacheSecs, '150');
+      expect(profile.demuxerReadaheadSecs, '42');
+      expect(profile.cachePauseWait, '5.2');
       expect(profile.cachePauseInitial, 'yes');
-      expect(profile.networkTimeoutSeconds, '20');
+      expect(profile.networkTimeoutSeconds, '32');
     });
 
-    test('uses strongest quark tuning profile for heavy aggressive playback', () {
+    test('keeps unified high-risk tuning for heavy aggressive quark playback',
+        () {
       const target = PlaybackTarget(
         title: 'Quark 4K',
         sourceId: 'quark-main',
@@ -171,11 +175,11 @@ void main() {
       );
 
       expect(profile, isNotNull);
-      expect(profile!.cacheSecs, '120');
-      expect(profile.demuxerReadaheadSecs, '36');
-      expect(profile.demuxerHysteresisSecs, '18');
-      expect(profile.cachePauseWait, '4.0');
-      expect(profile.networkTimeoutSeconds, '25');
+      expect(profile!.cacheSecs, '150');
+      expect(profile.demuxerReadaheadSecs, '42');
+      expect(profile.demuxerHysteresisSecs, '20');
+      expect(profile.cachePauseWait, '5.2');
+      expect(profile.networkTimeoutSeconds, '32');
     });
 
     test('keeps remote quark tuning after stream url is wrapped by relay', () {
@@ -198,7 +202,7 @@ void main() {
       expect(isLikelyRemotePlaybackTargetTransport(target), isTrue);
       expect(isLikelyQuarkPlaybackTarget(target), isTrue);
       expect(profile, isNotNull);
-      expect(profile!.cacheSecs, '75');
+      expect(profile!.cacheSecs, '150');
       expect(profile.cachePauseInitial, 'yes');
     });
 

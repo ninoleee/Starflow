@@ -715,7 +715,9 @@ flutter test
 
 ## Performance Baselines
 
-`tool/perf/run_perf_baselines.dart` 现在可以按场景精确定义跑 `flutter test` 的组合命令、收集运行次数、算出 p50/p95，并输出到 `tool/perf/perf_baselines.json`，方便把启动、首页、详情、播放器等关键路径的性能变化记录在同一套基线里。
+真机基线使用 `tool/perf/run_device_perf.dart`：它会以 profile 模式在独立应用进程中运行启动、首页首屏、详情页、播放器首帧和 600 条媒体索引五个场景，采集 FrameTiming、慢帧率与 RSS，并输出 p50/p95。完整命令、测量边界与口径见 [docs/performance-baseline.md](docs/performance-baseline.md)。
+
+原有 `tool/perf/run_perf_baselines.dart` 只统计主机侧 `flutter test` 子进程耗时，适合快速 smoke，不应作为设备运行时性能结论。
 
 最近这轮对 `home_page.dart`、`home_controller.dart`、`player_page.dart` + `widgets/player_page_*.part.dart`、`nas_media_indexer.dart` 和 `playback_memory_repository.dart` 的收口，都建议至少补跑一次对应 smoke 或 perf baseline。更细的运行建议见 [docs/performance.md](docs/performance.md)。
 
@@ -746,4 +748,5 @@ flutter test
 
 - [docs/architecture.md](docs/architecture.md)
 - [docs/performance.md](docs/performance.md)
+- [docs/performance-baseline.md](docs/performance-baseline.md)
 - [docs/development-network.md](docs/development-network.md)

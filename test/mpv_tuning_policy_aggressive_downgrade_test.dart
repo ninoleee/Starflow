@@ -6,7 +6,9 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
   group('MPV tuning policy aggressive downgrade', () {
-    test('downgrades non-windows remote heavy HEVC quality-first to performance-first', () {
+    test(
+        'downgrades non-windows remote heavy HEVC quality-first to performance-first',
+        () {
       const target = PlaybackTarget(
         title: 'Remote HEVC 4K',
         sourceId: 'emby-main',
@@ -58,10 +60,12 @@ void main() {
         startupProbeMegabitsPerSecond: 8.5,
       );
 
-      expect(preset, PlaybackMpvQualityPreset.balanced);
+      expect(preset, PlaybackMpvQualityPreset.performanceFirst);
     });
 
-    test('quark remote playback with low startup speed prefers performance-first and stronger buffering', () {
+    test(
+        'quark remote playback with low startup speed prefers performance-first and stronger buffering',
+        () {
       const target = PlaybackTarget(
         title: 'Quark Remote',
         sourceId: 'quark-main',
@@ -96,9 +100,9 @@ void main() {
       expect(preset, PlaybackMpvQualityPreset.performanceFirst);
       expect(profile, isNotNull);
       expect(profile!.cachePauseInitial, 'yes');
-      expect(profile.cacheSecs, '180');
-      expect(profile.demuxerReadaheadSecs, '48');
-      expect(profile.networkTimeoutSeconds, '35');
+      expect(profile.cacheSecs, '150');
+      expect(profile.demuxerReadaheadSecs, '42');
+      expect(profile.networkTimeoutSeconds, '32');
     });
   });
 }

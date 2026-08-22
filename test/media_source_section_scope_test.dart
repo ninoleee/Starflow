@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:sembast/sembast_memory.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
@@ -12,6 +13,12 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   group('AppMediaRepository section scope', () {
     test('only exposes selected collections for home editor and library',
         () async {

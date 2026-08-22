@@ -18,7 +18,7 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('debug current Windows NAS grouping logs', () async {
+  test('inspect current Windows NAS grouping logs', () async {
     debugPrint = debugPrintSynchronously;
 
     const sharedPrefsPath =

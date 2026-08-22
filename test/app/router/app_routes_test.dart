@@ -19,6 +19,7 @@ void main() {
         equals([
           AppRoutes.home,
           AppRoutes.search,
+          AppRoutes.favorites,
           AppRoutes.library,
           AppRoutes.settings,
         ]),
