@@ -1,11 +1,15 @@
 package com.example.starflow
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.AlertDialog
 import android.app.Dialog
 import android.app.PendingIntent
 import android.app.PictureInPictureParams
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.content.SharedPreferences
@@ -15,6 +19,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.ResultReceiver
 import android.provider.OpenableColumns
 import android.view.KeyEvent
 import android.view.View
@@ -62,6 +67,25 @@ class NativePlaybackActivity : Activity() {
     private var playbackItemKey = ""
     private var seriesKey = ""
     private var episodeQueue: NativeEpisodeQueue? = null
+    private var launchResultReceiver: ResultReceiver? = null
+    private var launchRequestId = ""
+    private var launchResultDelivered = false
+    private var launchCancellationReceiverRegistered = false
+    private val launchCancellationReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, cancellationIntent: Intent?) {
+            val cancelRequestId = cancellationIntent
+                ?.getStringExtra(EXTRA_CANCEL_LAUNCH_REQUEST_ID)
+                ?.trim()
+                .orEmpty()
+            if (cancelRequestId == launchRequestId && !launchResultDelivered) {
+                reportPlaybackLaunchResult(
+                    ready = false,
+                    message = "等待首帧超时",
+                )
+                finish()
+            }
+        }
+    }
     private var restoredResumePositionMs: Long = 0L
     private var subtitleDelayMs: Long = 0L
     private var externalSubtitleSource: ExternalSubtitleSource? = null
@@ -74,6 +98,7 @@ class NativePlaybackActivity : Activity() {
     private var playbackSettingsDialog: AlertDialog? = null
     private var episodeSelectionDialog: AlertDialog? = null
     private var trackSelectionDialog: Dialog? = null
+    private var playbackErrorDialog: AlertDialog? = null
     private var progressTimeBar: DefaultTimeBar? = null
     private var tvSeekHoldKeyCode: Int? = null
     private var tvSeekHoldStartedAtMs: Long? = null
@@ -165,6 +190,10 @@ class NativePlaybackActivity : Activity() {
             )
         }
 
+        override fun onRenderedFirstFrame() {
+            reportPlaybackLaunchResult(ready = true)
+        }
+
         override fun onPositionDiscontinuity(
             oldPosition: Player.PositionInfo,
             newPosition: Player.PositionInfo,
@@ -183,6 +212,7 @@ class NativePlaybackActivity : Activity() {
                     "container=${decodePlaybackTargetObject().optString("container").trim()}",
                 error,
             )
+            handlePlayerError(error)
         }
     }
     private val isTelevisionDevice: Boolean by lazy {
@@ -196,14 +226,8 @@ class NativePlaybackActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         sharedPreferences = getSharedPreferences(SHARED_PREFERENCES_NAME, MODE_PRIVATE)
-        playbackTargetJson = intent.getStringExtra(EXTRA_PLAYBACK_TARGET_JSON)?.trim().orEmpty()
-            .ifEmpty { "{}" }
-        playbackItemKey = intent.getStringExtra(EXTRA_PLAYBACK_ITEM_KEY)?.trim().orEmpty()
-        seriesKey = intent.getStringExtra(EXTRA_SERIES_KEY)?.trim().orEmpty()
-        episodeQueue = NativeEpisodeQueue.fromJsonString(
-            intent.getStringExtra(EXTRA_EPISODE_QUEUE_JSON)?.trim().orEmpty(),
-        )
-        restoreExternalSubtitleSourceFromTarget()
+        applyPlaybackIntent(intent)
+        registerLaunchCancellationReceiver()
 
         setContentView(
             if (isTelevisionDevice) {
@@ -254,6 +278,24 @@ class NativePlaybackActivity : Activity() {
         enterImmersiveMode()
     }
 
+    override fun onNewIntent(newIntent: Intent) {
+        super.onNewIntent(newIntent)
+        reportPlaybackLaunchResult(
+            ready = false,
+            message = "播放请求已被新的影片替换",
+        )
+        persistPlaybackProgress(force = true)
+        releasePlayer()
+        playbackErrorDialog?.dismiss()
+        playbackErrorDialog = null
+        setIntent(newIntent)
+        resetPlaybackStateForNewIntent()
+        applyPlaybackIntent(newIntent)
+        bindControllerChrome()
+        updateProgressMarkers()
+        initializePlayer()
+    }
+
     override fun onStart() {
         super.onStart()
         initializePlayer()
@@ -296,6 +338,8 @@ class NativePlaybackActivity : Activity() {
         trackSelectionDialog?.setOnDismissListener(null)
         trackSelectionDialog?.dismiss()
         trackSelectionDialog = null
+        playbackErrorDialog?.dismiss()
+        playbackErrorDialog = null
         persistPlaybackProgress(force = true)
         if (isFinishing) {
             releasePlayer()
@@ -304,9 +348,147 @@ class NativePlaybackActivity : Activity() {
     }
 
     override fun onDestroy() {
+        reportPlaybackLaunchResult(
+            ready = false,
+            message = "原生播放器在画面就绪前已关闭",
+        )
         releasePlayer()
+        if (launchCancellationReceiverRegistered) {
+            try {
+                unregisterReceiver(launchCancellationReceiver)
+            } catch (_: Throwable) {
+            }
+            launchCancellationReceiverRegistered = false
+        }
         playbackSystemSessionManager.release()
         super.onDestroy()
+    }
+
+    private fun applyPlaybackIntent(playbackIntent: Intent) {
+        launchRequestId = playbackIntent.getStringExtra(EXTRA_LAUNCH_REQUEST_ID)
+            ?.trim()
+            .orEmpty()
+        launchResultReceiver = readLaunchResultReceiver(playbackIntent)
+        launchResultDelivered = false
+        playbackTargetJson = playbackIntent.getStringExtra(EXTRA_PLAYBACK_TARGET_JSON)
+            ?.trim()
+            .orEmpty()
+            .ifEmpty { "{}" }
+        playbackItemKey = playbackIntent.getStringExtra(EXTRA_PLAYBACK_ITEM_KEY)
+            ?.trim()
+            .orEmpty()
+        seriesKey = playbackIntent.getStringExtra(EXTRA_SERIES_KEY)?.trim().orEmpty()
+        episodeQueue = NativeEpisodeQueue.fromJsonString(
+            playbackIntent.getStringExtra(EXTRA_EPISODE_QUEUE_JSON)?.trim().orEmpty(),
+        )
+        restoreExternalSubtitleSourceFromTarget()
+    }
+
+    private fun registerLaunchCancellationReceiver() {
+        if (launchCancellationReceiverRegistered) {
+            return
+        }
+        val filter = IntentFilter(ACTION_CANCEL_LAUNCH)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(
+                launchCancellationReceiver,
+                filter,
+                Context.RECEIVER_NOT_EXPORTED,
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(launchCancellationReceiver, filter)
+        }
+        launchCancellationReceiverRegistered = true
+    }
+
+    private fun resetPlaybackStateForNewIntent() {
+        baseMediaItem = null
+        externalSubtitleSource = null
+        subtitleDelayMs = 0L
+        restoredResumePositionMs = 0L
+        lastSavedPositionMs = -1L
+        pendingResumePositionOverrideMs = null
+        nextInitializePlayWhenReady = null
+        introSkipApplied = false
+        outroSkipApplied = false
+        subtitleSearchActive = false
+        resumePlaybackAfterSubtitleSearch = false
+    }
+
+    @Suppress("DEPRECATION")
+    private fun readLaunchResultReceiver(playbackIntent: Intent): ResultReceiver? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            playbackIntent.getParcelableExtra(
+                EXTRA_LAUNCH_RESULT_RECEIVER,
+                ResultReceiver::class.java,
+            )
+        } else {
+            playbackIntent.getParcelableExtra(EXTRA_LAUNCH_RESULT_RECEIVER)
+        }
+    }
+
+    private fun reportPlaybackLaunchResult(ready: Boolean, message: String = "") {
+        if (launchResultDelivered) {
+            return
+        }
+        launchResultDelivered = true
+        val receiver = launchResultReceiver
+        launchResultReceiver = null
+        receiver?.send(
+            if (ready) RESULT_PLAYBACK_READY else RESULT_PLAYBACK_FAILED,
+            Bundle().apply {
+                putString(RESULT_DATA_REQUEST_ID, launchRequestId)
+                putString(RESULT_DATA_MESSAGE, message)
+            },
+        )
+    }
+
+    private fun handlePlayerError(error: PlaybackException) {
+        val message = buildPlaybackErrorMessage(error)
+        if (!launchResultDelivered) {
+            reportPlaybackLaunchResult(ready = false, message = message)
+            showToast("原生播放器无法播放，正在切换兼容播放器")
+            finish()
+            return
+        }
+        if (isFinishing || isDestroyed || playbackErrorDialog?.isShowing == true) {
+            return
+        }
+        playbackErrorDialog = AlertDialog.Builder(this)
+            .setTitle("播放失败")
+            .setMessage(message)
+            .setCancelable(false)
+            .setPositiveButton("重试") { _, _ ->
+                playbackErrorDialog = null
+                val retryPositionMs = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+                pendingResumePositionOverrideMs = retryPositionMs
+                nextInitializePlayWhenReady = true
+                releasePlayer()
+                initializePlayer()
+            }
+            .setNegativeButton("退出") { _, _ ->
+                playbackErrorDialog = null
+                finish()
+            }
+            .create()
+            .also { dialog ->
+                dialog.setOnDismissListener {
+                    if (playbackErrorDialog === dialog) {
+                        playbackErrorDialog = null
+                    }
+                }
+                dialog.show()
+            }
+    }
+
+    private fun buildPlaybackErrorMessage(error: PlaybackException): String {
+        val detail = error.message?.trim().orEmpty()
+        return if (detail.isEmpty()) {
+            "设备无法解码该视频或音频格式（${error.errorCodeName}）。"
+        } else {
+            "设备无法继续播放（${error.errorCodeName}）：$detail"
+        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -607,35 +789,40 @@ class NativePlaybackActivity : Activity() {
     }
 
     private fun buildLoadControl(): DefaultLoadControl {
-        val minBufferMs: Int
-        val maxBufferMs: Int
-        val bufferForPlaybackMs: Int
-        val bufferForPlaybackAfterRebufferMs: Int
-        val targetBufferBytes: Int
-        if (isTelevisionDevice) {
-            minBufferMs = NATIVE_TV_MIN_BUFFER_MS
-            maxBufferMs = NATIVE_TV_MAX_BUFFER_MS
-            bufferForPlaybackMs = NATIVE_TV_BUFFER_FOR_PLAYBACK_MS
-            bufferForPlaybackAfterRebufferMs = NATIVE_TV_BUFFER_FOR_REBUFFER_MS
-            targetBufferBytes = NATIVE_TV_TARGET_BUFFER_BYTES
-        } else {
-            minBufferMs = NATIVE_PHONE_MIN_BUFFER_MS
-            maxBufferMs = NATIVE_PHONE_MAX_BUFFER_MS
-            bufferForPlaybackMs = NATIVE_PHONE_BUFFER_FOR_PLAYBACK_MS
-            bufferForPlaybackAfterRebufferMs = NATIVE_PHONE_BUFFER_FOR_REBUFFER_MS
-            targetBufferBytes = NATIVE_PHONE_TARGET_BUFFER_BYTES
-        }
+        val memoryClassMb = (getSystemService(ACTIVITY_SERVICE) as ActivityManager).memoryClass
+        val targetObject = decodePlaybackTargetObject()
+        val width = targetObject.optInt("width", 0)
+        val height = targetObject.optInt("height", 0)
+        val bitrate = targetObject.optInt("bitrate", 0)
+        val codec = targetObject.optString("videoCodec").trim().lowercase()
+        val is4k = width >= 3840 || height >= 2160
+        val isHevc = codec == "hevc" || codec == "h265" || codec == "x265"
+        val isHeavyPlayback = is4k || bitrate >= 25_000_000 ||
+            (isHevc && bitrate >= 18_000_000)
+        val bufferConfig = NativePlaybackBufferPolicy.resolve(
+            isTelevision = isTelevisionDevice,
+            memoryClassMb = memoryClassMb,
+            isHeavyPlayback = isHeavyPlayback,
+        )
+        logPlayback(
+            "native.buffer-policy television=$isTelevisionDevice " +
+                "memoryClassMb=$memoryClassMb heavy=$isHeavyPlayback " +
+                "minMs=${bufferConfig.minBufferMs} maxMs=${bufferConfig.maxBufferMs} " +
+                "targetBytes=${bufferConfig.targetBufferBytes}",
+        )
 
         return DefaultLoadControl.Builder()
             .setAllocator(DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE))
             .setBufferDurationsMs(
-                minBufferMs,
-                maxBufferMs,
-                bufferForPlaybackMs,
-                bufferForPlaybackAfterRebufferMs,
+                bufferConfig.minBufferMs,
+                bufferConfig.maxBufferMs,
+                bufferConfig.bufferForPlaybackMs,
+                bufferConfig.bufferForPlaybackAfterRebufferMs,
             )
-            .setTargetBufferBytes(targetBufferBytes)
-            .setPrioritizeTimeOverSizeThresholds(true)
+            .setTargetBufferBytes(bufferConfig.targetBufferBytes)
+            .setPrioritizeTimeOverSizeThresholds(
+                bufferConfig.prioritizeTimeOverSizeThresholds,
+            )
             .build()
     }
 
@@ -2851,16 +3038,6 @@ class NativePlaybackActivity : Activity() {
         private const val NATIVE_HTTP_CONNECT_TIMEOUT_MS = 15_000
         private const val NATIVE_HTTP_READ_TIMEOUT_MS = 30_000
         private const val NATIVE_LOAD_ERROR_RETRY_COUNT = 8
-        private const val NATIVE_TV_MIN_BUFFER_MS = 60_000
-        private const val NATIVE_TV_MAX_BUFFER_MS = 180_000
-        private const val NATIVE_TV_BUFFER_FOR_PLAYBACK_MS = 2_500
-        private const val NATIVE_TV_BUFFER_FOR_REBUFFER_MS = 10_000
-        private const val NATIVE_TV_TARGET_BUFFER_BYTES = 160 * 1024 * 1024
-        private const val NATIVE_PHONE_MIN_BUFFER_MS = 50_000
-        private const val NATIVE_PHONE_MAX_BUFFER_MS = 90_000
-        private const val NATIVE_PHONE_BUFFER_FOR_PLAYBACK_MS = 2_500
-        private const val NATIVE_PHONE_BUFFER_FOR_REBUFFER_MS = 5_000
-        private const val NATIVE_PHONE_TARGET_BUFFER_BYTES = C.LENGTH_UNSET
         private const val PLAYBACK_WATCHDOG_INTERVAL_MS = 5_000L
         private const val PLAYBACK_WATCHDOG_PROGRESS_TIMEOUT_MS = 15_000L
         private const val PLAYBACK_WATCHDOG_BUFFERING_TIMEOUT_MS = 45_000L
@@ -2883,6 +3060,14 @@ class NativePlaybackActivity : Activity() {
         const val EXTRA_PLAYBACK_ITEM_KEY = "playbackItemKey"
         const val EXTRA_SERIES_KEY = "seriesKey"
         const val EXTRA_EPISODE_QUEUE_JSON = "episodeQueueJson"
+        const val EXTRA_LAUNCH_REQUEST_ID = "launchRequestId"
+        const val EXTRA_LAUNCH_RESULT_RECEIVER = "launchResultReceiver"
+        const val EXTRA_CANCEL_LAUNCH_REQUEST_ID = "cancelLaunchRequestId"
+        const val ACTION_CANCEL_LAUNCH = "com.example.starflow.CANCEL_NATIVE_PLAYBACK_LAUNCH"
+        const val RESULT_DATA_REQUEST_ID = "requestId"
+        const val RESULT_DATA_MESSAGE = "message"
+        const val RESULT_PLAYBACK_READY = 1
+        const val RESULT_PLAYBACK_FAILED = 0
     }
 }
 

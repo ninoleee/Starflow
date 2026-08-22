@@ -1,5 +1,6 @@
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/playback/application/native_playback_capability.dart';
 
 enum PlaybackStartupRouteAction {
   openEmbeddedMpv,
@@ -29,7 +30,9 @@ PlaybackStartupRouteAction decidePlaybackStartupRoute(
 ) {
   if (_requiresHeaderAwareEmbeddedPlayback(input.target)) {
     if (input.playbackEngine == PlaybackEngine.nativeContainer) {
-      return PlaybackStartupRouteAction.launchNativeContainer;
+      return supportsNativePlayback(input.target)
+          ? PlaybackStartupRouteAction.launchNativeContainer
+          : PlaybackStartupRouteAction.openEmbeddedMpv;
     }
     return PlaybackStartupRouteAction.openEmbeddedMpv;
   }
@@ -37,7 +40,9 @@ PlaybackStartupRouteAction decidePlaybackStartupRoute(
     return PlaybackStartupRouteAction.launchSystemPlayer;
   }
   if (input.playbackEngine == PlaybackEngine.nativeContainer) {
-    return PlaybackStartupRouteAction.launchNativeContainer;
+    return supportsNativePlayback(input.target)
+        ? PlaybackStartupRouteAction.launchNativeContainer
+        : PlaybackStartupRouteAction.openEmbeddedMpv;
   }
   if (_shouldAutoDowngradeToPerformanceFallback(input)) {
     return PlaybackStartupRouteAction.launchPerformanceFallback;
@@ -57,6 +62,9 @@ bool _shouldAutoDowngradeToPerformanceFallback(
     return false;
   }
   if (input.isWeb) {
+    return false;
+  }
+  if (!supportsNativePlayback(input.target)) {
     return false;
   }
 

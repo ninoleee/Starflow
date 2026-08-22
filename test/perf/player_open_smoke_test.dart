@@ -105,7 +105,10 @@ void main() {
     final actions = <String>[];
     final executor = PlaybackStartupExecutor(
       launchSystemPlayer: (_) async => actions.add('launch-system'),
-      launchNativeContainer: (_) async => actions.add('launch-native'),
+      launchNativeContainer: (_) async {
+        actions.add('launch-native');
+        return true;
+      },
       launchPerformanceFallback: (_) async {
         actions.add('launch-performance');
         return false;

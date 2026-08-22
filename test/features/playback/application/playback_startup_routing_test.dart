@@ -28,7 +28,9 @@ void main() {
       expect(route, PlaybackStartupRouteAction.launchSystemPlayer);
     });
 
-    test('stays on embedded mpv for header-protected target even if system player is selected', () {
+    test(
+        'stays on embedded mpv for header-protected target even if system player is selected',
+        () {
       final route = decidePlaybackStartupRoute(
         PlaybackStartupRouteInput(
           playbackEngine: PlaybackEngine.systemPlayer,
@@ -50,7 +52,8 @@ void main() {
       expect(route, PlaybackStartupRouteAction.openEmbeddedMpv);
     });
 
-    test('allows system player for emby target even when headers are present', () {
+    test('allows system player for emby target even when headers are present',
+        () {
       final route = decidePlaybackStartupRoute(
         PlaybackStartupRouteInput(
           playbackEngine: PlaybackEngine.systemPlayer,
@@ -69,7 +72,8 @@ void main() {
       expect(route, PlaybackStartupRouteAction.launchSystemPlayer);
     });
 
-    test('allows system player for webdav target even when headers are present', () {
+    test('allows system player for webdav target even when headers are present',
+        () {
       final route = decidePlaybackStartupRoute(
         PlaybackStartupRouteInput(
           playbackEngine: PlaybackEngine.systemPlayer,
@@ -90,7 +94,8 @@ void main() {
       expect(route, PlaybackStartupRouteAction.launchSystemPlayer);
     });
 
-    test('allows system player for relay-backed quark target without headers', () {
+    test('allows system player for relay-backed quark target without headers',
+        () {
       final route = decidePlaybackStartupRoute(
         PlaybackStartupRouteInput(
           playbackEngine: PlaybackEngine.systemPlayer,
@@ -101,8 +106,7 @@ void main() {
             sourceId: 'quark-main',
             sourceName: 'Quark',
             sourceKind: MediaSourceKind.quark,
-            streamUrl:
-                'http://127.0.0.1:8787/playback-relay/session/video.mkv',
+            streamUrl: 'http://127.0.0.1:8787/playback-relay/session/video.mkv',
             actualAddress: 'https://download.example.com/video.mkv',
             headers: const <String, String>{},
           ),
@@ -124,6 +128,38 @@ void main() {
       );
 
       expect(route, PlaybackStartupRouteAction.launchNativeContainer);
+    });
+
+    test('uses embedded mpv for ISO even when native container is selected',
+        () {
+      final route = decidePlaybackStartupRoute(
+        PlaybackStartupRouteInput(
+          playbackEngine: PlaybackEngine.nativeContainer,
+          performanceAutoDowngradeHeavyPlaybackEnabled: true,
+          isTelevision: true,
+          isWeb: false,
+          target: baseTarget.copyWith(
+            streamUrl: 'https://example.com/movie.iso',
+            container: 'iso',
+          ),
+        ),
+      );
+
+      expect(route, PlaybackStartupRouteAction.openEmbeddedMpv);
+    });
+
+    test('uses embedded mpv for unsupported AVI container', () {
+      final route = decidePlaybackStartupRoute(
+        PlaybackStartupRouteInput(
+          playbackEngine: PlaybackEngine.nativeContainer,
+          performanceAutoDowngradeHeavyPlaybackEnabled: true,
+          isTelevision: true,
+          isWeb: false,
+          target: baseTarget.copyWith(container: 'avi'),
+        ),
+      );
+
+      expect(route, PlaybackStartupRouteAction.openEmbeddedMpv);
     });
 
     test('routes to performance fallback for heavy 4k tv target', () {

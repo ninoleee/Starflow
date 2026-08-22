@@ -8,6 +8,10 @@ import android.content.Context
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.ResultReceiver
 import android.provider.Settings
 import android.util.Rational
 import android.content.pm.PackageManager
@@ -16,12 +20,17 @@ import kotlin.math.roundToInt
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
+import java.util.UUID
 
 class MainActivity : FlutterActivity() {
     private var platformChannel: MethodChannel? = null
     private var playbackSessionChannel: MethodChannel? = null
     private var playbackPictureInPictureEnabled = false
     private var playbackPictureInPictureAspectRatio = Rational(16, 9)
+    private val nativePlaybackLaunchHandler = Handler(Looper.getMainLooper())
+    private var pendingNativePlaybackLaunchResult: MethodChannel.Result? = null
+    private var pendingNativePlaybackLaunchRequestId = ""
+    private var nativePlaybackLaunchTimeout: Runnable? = null
     private val audioManager by lazy {
         getSystemService(Context.AUDIO_SERVICE) as AudioManager
     }
@@ -128,6 +137,37 @@ class MainActivity : FlutterActivity() {
                         return@setMethodCallHandler
                     }
 
+                    completeNativePlaybackLaunch(false)
+                    val requestId = UUID.randomUUID().toString()
+                    pendingNativePlaybackLaunchResult = result
+                    pendingNativePlaybackLaunchRequestId = requestId
+                    val launchResultReceiver = object : ResultReceiver(
+                        nativePlaybackLaunchHandler,
+                    ) {
+                        override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                            if (resultData?.getString(
+                                    NativePlaybackActivity.RESULT_DATA_REQUEST_ID,
+                                ) != requestId
+                            ) {
+                                return
+                            }
+                            completeNativePlaybackLaunch(
+                                resultCode == NativePlaybackActivity.RESULT_PLAYBACK_READY,
+                            )
+                        }
+                    }
+                    val timeout = Runnable {
+                        if (pendingNativePlaybackLaunchRequestId == requestId) {
+                            cancelNativePlaybackLaunch(requestId)
+                            completeNativePlaybackLaunch(false)
+                        }
+                    }
+                    nativePlaybackLaunchTimeout = timeout
+                    nativePlaybackLaunchHandler.postDelayed(
+                        timeout,
+                        NATIVE_PLAYBACK_LAUNCH_TIMEOUT_MS,
+                    )
+
                     try {
                         val intent = Intent(this, NativePlaybackActivity::class.java).apply {
                             putExtra(NativePlaybackActivity.EXTRA_URL, rawUrl)
@@ -138,14 +178,17 @@ class MainActivity : FlutterActivity() {
                             putExtra(NativePlaybackActivity.EXTRA_PLAYBACK_ITEM_KEY, playbackItemKey)
                             putExtra(NativePlaybackActivity.EXTRA_SERIES_KEY, seriesKey)
                             putExtra(NativePlaybackActivity.EXTRA_EPISODE_QUEUE_JSON, episodeQueueJson)
-                            addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                            putExtra(NativePlaybackActivity.EXTRA_LAUNCH_REQUEST_ID, requestId)
+                            putExtra(
+                                NativePlaybackActivity.EXTRA_LAUNCH_RESULT_RECEIVER,
+                                launchResultReceiver,
+                            )
                         }
                         startActivity(intent)
-                        result.success(true)
                     } catch (_: ActivityNotFoundException) {
-                        result.success(false)
+                        completeNativePlaybackLaunch(false)
                     } catch (_: Throwable) {
-                        result.success(false)
+                        completeNativePlaybackLaunch(false)
                     }
                 }
 
@@ -180,9 +223,35 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        completeNativePlaybackLaunch(false)
         playbackSessionChannel?.setMethodCallHandler(null)
         playbackSystemSessionManager.release()
         super.onDestroy()
+    }
+
+    private fun completeNativePlaybackLaunch(launched: Boolean) {
+        nativePlaybackLaunchTimeout?.let(nativePlaybackLaunchHandler::removeCallbacks)
+        nativePlaybackLaunchTimeout = null
+        val result = pendingNativePlaybackLaunchResult
+        pendingNativePlaybackLaunchResult = null
+        pendingNativePlaybackLaunchRequestId = ""
+        result?.success(launched)
+    }
+
+    private fun cancelNativePlaybackLaunch(requestId: String) {
+        try {
+            sendBroadcast(
+                Intent(NativePlaybackActivity.ACTION_CANCEL_LAUNCH).apply {
+                    setPackage(packageName)
+                    putExtra(NativePlaybackActivity.EXTRA_CANCEL_LAUNCH_REQUEST_ID, requestId)
+                },
+            )
+        } catch (_: Throwable) {
+        }
+    }
+
+    companion object {
+        private const val NATIVE_PLAYBACK_LAUNCH_TIMEOUT_MS = 30_000L
     }
 
     override fun onUserLeaveHint() {

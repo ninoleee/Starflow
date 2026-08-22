@@ -26,7 +26,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     _closePlayerPageAfterExternalLaunch();
   }
 
-  Future<void> _launchWithNativeContainer(PlaybackTarget target) async {
+  Future<bool> _launchWithNativeContainer(PlaybackTarget target) async {
     _traceQuarkPlaybackStartup(
       'quark.launch.native.begin',
       target: target,
@@ -44,12 +44,11 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
         'message': result.message,
       },
     );
-    _ensureExternalLaunchSucceeded(
-      launched: result.launched,
-      message: result.message,
-      fallbackMessage: '原生播放器启动失败',
-    );
+    if (!result.launched) {
+      return false;
+    }
     _closePlayerPageAfterExternalLaunch();
+    return true;
   }
 
   Future<bool> _tryLaunchWithPerformanceFallback(
@@ -150,9 +149,12 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
       return null;
     }
 
-    final targetResolver = PlaybackTargetResolver(read: _providerContainer.read);
+    final targetResolver =
+        PlaybackTargetResolver(read: _providerContainer.read);
     final resolvedEntries = <PlaybackEpisodeQueueEntry>[];
-    for (var index = queue.currentIndex; index < queue.entries.length; index++) {
+    for (var index = queue.currentIndex;
+        index < queue.entries.length;
+        index++) {
       final entry = queue.entries[index];
       PlaybackTarget resolvedEntryTarget;
       if (index == queue.currentIndex) {
@@ -163,6 +165,9 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
         } catch (_) {
           break;
         }
+      }
+      if (!supportsNativePlayback(resolvedEntryTarget)) {
+        break;
       }
       resolvedEntries.add(entry.copyWith(target: resolvedEntryTarget));
     }
@@ -198,8 +203,9 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
         _latestDuration = resolvedDuration;
         _latestPosition = resolvedDuration;
       } else {
-        _latestDuration =
-            resolvedDuration > Duration.zero ? resolvedDuration : _latestDuration;
+        _latestDuration = resolvedDuration > Duration.zero
+            ? resolvedDuration
+            : _latestDuration;
         _latestPosition = resolvedPosition;
       }
       await _persistPlaybackProgress(force: true);
