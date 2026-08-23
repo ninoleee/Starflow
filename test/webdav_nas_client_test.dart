@@ -1543,6 +1543,40 @@ void main() {
       );
     });
 
+    test(
+        'parses large WebDAV responses and infers structure off the UI isolate',
+        () async {
+      final responseBody = _buildLargePropfindResponse(itemCount: 48);
+      expect(responseBody.length, greaterThan(32 * 1024));
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'PROPFIND' &&
+              request.url.toString() == 'https://nas.example.com/dav/Series/') {
+            return http.Response(responseBody, 207);
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final items = await client.scanLibrary(
+        const MediaSourceConfig(
+          id: 'nas-background-parse',
+          name: 'Background Parse NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/Series/',
+          enabled: true,
+          webDavStructureInferenceEnabled: true,
+        ),
+        limit: 100,
+        loadSidecarMetadata: false,
+        resolvePlayableStreams: false,
+      );
+
+      expect(items, hasLength(48));
+      expect(items.map((item) => item.resourceId).toSet(), hasLength(48));
+      expect(items.any((item) => item.metadataSeed.episodeNumber == 1), isTrue);
+    });
+
     test('deletes files using their direct WebDAV resource uri', () async {
       final requests = <String>[];
       final client = WebDavNasClient(
@@ -1659,6 +1693,37 @@ void main() {
       );
     });
   });
+}
+
+String _buildLargePropfindResponse({required int itemCount}) {
+  final buffer = StringBuffer('''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/Series/</d:href>
+    <d:propstat><d:prop>
+      <d:displayname>Series</d:displayname>
+      <d:resourcetype><d:collection /></d:resourcetype>
+    </d:prop></d:propstat>
+  </d:response>
+''');
+  final padding = 'x' * 900;
+  for (var index = 1; index <= itemCount; index++) {
+    final episode = index.toString().padLeft(2, '0');
+    buffer.write('''
+  <d:response>
+    <d:href>/dav/Series/Episode%20$episode.mkv</d:href>
+    <d:propstat><d:prop>
+      <d:displayname>Episode $episode $padding.mkv</d:displayname>
+      <d:resourcetype />
+      <d:getcontenttype>video/x-matroska</d:getcontenttype>
+      <d:getcontentlength>${index * 1024}</d:getcontentlength>
+      <d:getlastmodified>Sun, 23 Aug 2026 11:59:13 GMT</d:getlastmodified>
+    </d:prop></d:propstat>
+  </d:response>
+''');
+  }
+  buffer.write('</d:multistatus>');
+  return buffer.toString();
 }
 
 const _rootPropfindResponse = '''<?xml version="1.0" encoding="utf-8"?>

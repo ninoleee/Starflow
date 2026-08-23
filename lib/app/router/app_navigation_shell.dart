@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/router/home_navigation_tap_coordinator.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/platform/android_picture_in_picture.dart';
 import 'package:starflow/core/platform/background_playback.dart';
 import 'package:starflow/core/platform/playback_system_session.dart';
@@ -140,7 +141,19 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
       if (!settings.homeStartupAutoRefreshEnabled) {
         return;
       }
-      await refreshHomeModules(ref);
+      final startupRefreshCompleted =
+          ref.read(homeExplicitRefreshRevisionProvider) > 0;
+      if (startupRefreshCompleted) {
+        appLogInfo(
+          'home.refresh',
+          'Cold start home refresh skipped',
+          fields: const <String, Object?>{
+            'reason': 'already-refreshed-during-bootstrap',
+          },
+        );
+      } else {
+        await refreshHomeModules(ref);
+      }
       final isTelevision =
           await ref.read(isTelevisionProvider.future).catchError((_) => false);
       if (!mounted) {

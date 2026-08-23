@@ -21,8 +21,11 @@ object NativeAppLogger {
     private const val DEFAULT_MAX_BYTES = 20 * 1024 * 1024
     private const val MIN_NATIVE_BYTES = 16 * 1024
     private const val MAX_NATIVE_BYTES = 4 * 1024 * 1024
-    private const val MAX_EXIT_TRACE_READ_CHARS = 256 * 1024
-    private const val MAX_EXIT_TRACE_LOG_CHARS = 12_000
+    private const val MAX_EXIT_TRACE_READ_CHARS = 768 * 1024
+    private const val MAX_EXIT_TRACE_LOG_CHARS = 32_000
+    private const val MAX_EXIT_TRACE_THREADS = 8
+    private const val MAX_MAIN_THREAD_LOG_CHARS = 6_000
+    private const val MAX_SECONDARY_THREAD_LOG_CHARS = 3_200
     private const val CONFIG_FILE_NAME = "starflow-native-logging.json"
     private const val PLAYBACK_SESSION_FILE_NAME = "starflow-native-playback-session.json"
     private const val EXIT_STATE_PREFERENCES = "starflow_native_exit_state"
@@ -41,6 +44,9 @@ object NativeAppLogger {
     private val inlineSecretPattern = Regex(
         "((?:access[_-]?token|token|api[_-]?key|auth[_-]?key|password|cookie|authorization|secret|sign(?:ature)?|session)=)[^&\\s,;]+",
         RegexOption.IGNORE_CASE,
+    )
+    private val traceThreadHeaderPattern = Regex(
+        pattern = "(?m)^\"([^\"]+)\"\\s+(?:daemon\\s+)?prio=",
     )
 
     @Volatile
@@ -367,24 +373,68 @@ object NativeAppLogger {
         if (rawTrace.isBlank()) {
             return ""
         }
-        val mainThreadStart = rawTrace.indexOf("\"main\"")
-        if (mainThreadStart < 0) {
+        val matches = traceThreadHeaderPattern.findAll(rawTrace).toList()
+        if (matches.isEmpty()) {
             return rawTrace.take(MAX_EXIT_TRACE_LOG_CHARS)
         }
-        val nextThread = Regex(
-            pattern = "(?m)^\"[^\"]+\"\\s+(?:daemon\\s+)?prio=",
-        ).find(rawTrace, startIndex = mainThreadStart + 6)
-        val mainThreadEnd = nextThread?.range?.first ?: rawTrace.length
-        val mainThread = rawTrace.substring(mainThreadStart, mainThreadEnd).trim()
-        val header = rawTrace.take(mainThreadStart).take(1_200).trim()
+        val threads = matches.mapIndexed { index, match ->
+            val start = match.range.first
+            val end = matches.getOrNull(index + 1)?.range?.first ?: rawTrace.length
+            ExitTraceThread(
+                name = match.groupValues[1],
+                body = rawTrace.substring(start, end).trim(),
+                sourceIndex = index,
+            )
+        }
+        val prioritized = threads
+            .map { thread -> thread to exitTraceThreadScore(thread) }
+            .filter { (_, score) -> score > 0 }
+            .sortedWith(
+                compareByDescending<Pair<ExitTraceThread, Int>> { (_, score) -> score }
+                    .thenBy { (thread, _) -> thread.sourceIndex },
+            )
+            .take(MAX_EXIT_TRACE_THREADS)
+            .map { (thread, _) -> thread }
+            .ifEmpty { threads.take(MAX_EXIT_TRACE_THREADS) }
+        val header = rawTrace.take(matches.first().range.first).take(2_000).trim()
         return buildString {
-            append("--- main thread ---\n")
-            append(mainThread)
             if (header.isNotEmpty()) {
-                append("\n\n--- trace header ---\n")
+                append("--- trace header ---\n")
                 append(header)
             }
+            for (thread in prioritized) {
+                if (isNotEmpty()) {
+                    append("\n\n")
+                }
+                append("--- thread: ")
+                append(thread.name)
+                append(" ---\n")
+                val limit = if (thread.name == "main") {
+                    MAX_MAIN_THREAD_LOG_CHARS
+                } else {
+                    MAX_SECONDARY_THREAD_LOG_CHARS
+                }
+                append(thread.body.take(limit))
+            }
         }.take(MAX_EXIT_TRACE_LOG_CHARS)
+    }
+
+    private fun exitTraceThreadScore(thread: ExitTraceThread): Int {
+        val name = thread.name.lowercase(Locale.US)
+        return when {
+            name == "main" -> 1_000
+            name.endsWith(".ui") || name == "ui" -> 980
+            name.contains("flutter") -> 960
+            name.contains("dart") -> 940
+            name.contains("raster") -> 920
+            name.endsWith(".io") || name.startsWith("io.") -> 900
+            name.contains("platform") -> 880
+            name.contains("render") || name.contains("hwui") -> 820
+            name.contains("binder") -> 760
+            name.contains("pool") || name.contains("worker") -> 720
+            thread.body.contains("Runnable") -> 600
+            else -> 0
+        }
     }
 
     private fun stackTrace(error: Throwable): String {
@@ -409,5 +459,11 @@ object NativeAppLogger {
         val enabled: Boolean = true,
         val maxBytes: Int = DEFAULT_MAX_BYTES,
         val recordedLevels: Set<String> = setOf("trace", "info", "warning", "error"),
+    )
+
+    private data class ExitTraceThread(
+        val name: String,
+        val body: String,
+        val sourceIndex: Int,
     )
 }

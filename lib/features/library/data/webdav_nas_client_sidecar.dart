@@ -241,45 +241,46 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     if (response.statusCode != 207 && response.statusCode != 200) {
       throw WebDavNasException('WebDAV 请求失败：HTTP ${response.statusCode}');
     }
-    if (response.body.trim().isEmpty) {
+    final responseSizeBytes = response.bodyBytes.length;
+    if (responseSizeBytes == 0) {
       return const [];
     }
-
-    final document = XmlDocument.parse(response.body);
-    final responses = document.descendants
-        .whereType<XmlElement>()
-        .where((element) => element.name.local == 'response');
-    final normalizedSelf = _normalizeUri(uri);
-
-    final parsed = responses.map((node) {
-      final href = _childText(node, 'href');
-      final resolvedUri = _resolveHref(uri, href);
-      final prop = node.descendants.whereType<XmlElement>().firstWhere(
-            (element) => element.name.local == 'prop',
-            orElse: () => XmlElement(XmlName('prop')),
-          );
-      final isCollection = prop.descendants
-          .whereType<XmlElement>()
-          .any((element) => element.name.local == 'collection');
-      final displayName = _childText(prop, 'displayname');
-      final contentType = _childText(prop, 'getcontenttype');
-      final contentLength =
-          _tryParseInt(_childText(prop, 'getcontentlength')) ?? 0;
-      final modifiedAt = _parseModifiedAt(_childText(prop, 'getlastmodified'));
-
-      return _WebDavEntry(
-        uri: resolvedUri,
-        name: displayName.trim().isEmpty
-            ? _displayNameFromUri(resolvedUri, fallback: source.name)
-            : displayName.trim(),
-        isCollection: isCollection,
-        contentType: contentType.trim(),
-        sizeBytes: contentLength,
-        modifiedAt: modifiedAt,
-        isSelf: _normalizeUri(resolvedUri) == normalizedSelf,
+    final parseStopwatch = Stopwatch()..start();
+    final usesBackgroundIsolate =
+        !kIsWeb && responseSizeBytes >= _webDavXmlBackgroundThreshold;
+    if (usesBackgroundIsolate) {
+      appLogInfo(
+        'library.scan',
+        'Large WebDAV XML parse started',
+        fields: <String, Object?>{
+          'sourceId': source.id,
+          'responseBytes': responseSizeBytes,
+        },
       );
-    }).toList();
-
+    }
+    final responseBody = response.body;
+    if (responseBody.trim().isEmpty) {
+      return const [];
+    }
+    final parsed = await _parseWebDavXmlInBackground(
+      body: responseBody,
+      requestUri: uri,
+      fallbackName: source.name,
+      useBackgroundIsolate: usesBackgroundIsolate,
+    );
+    if (usesBackgroundIsolate || parseStopwatch.elapsedMilliseconds >= 250) {
+      appLogInfo(
+        'library.scan',
+        'WebDAV XML parse completed',
+        fields: <String, Object?>{
+          'sourceId': source.id,
+          'responseBytes': responseSizeBytes,
+          'entryCount': parsed.length,
+          'durationMs': parseStopwatch.elapsedMilliseconds,
+          'backgroundIsolate': usesBackgroundIsolate,
+        },
+      );
+    }
     return parsed;
   }
 
@@ -1026,51 +1027,6 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     );
   }
 
-  Uri _resolveHref(Uri requestUri, String href) {
-    final trimmed = href.trim();
-    if (trimmed.isEmpty) {
-      return requestUri;
-    }
-    final normalized = _escapeInvalidHrefEncoding(
-      trimmed.replaceAll('#', '%23'),
-    );
-    final parsed = Uri.tryParse(normalized);
-    if (parsed != null && parsed.hasScheme) {
-      return parsed;
-    }
-    return requestUri.resolve(normalized);
-  }
-
-  String _escapeInvalidHrefEncoding(String value) {
-    final buffer = StringBuffer();
-    for (var index = 0; index < value.length; index++) {
-      final character = value[index];
-      if (character != '%') {
-        buffer.write(character);
-        continue;
-      }
-      final hasValidEscape = index + 2 < value.length &&
-          _isHexDigit(value.codeUnitAt(index + 1)) &&
-          _isHexDigit(value.codeUnitAt(index + 2));
-      buffer.write(hasValidEscape ? '%' : '%25');
-    }
-    return buffer.toString();
-  }
-
-  bool _isHexDigit(int codeUnit) {
-    return (codeUnit >= 0x30 && codeUnit <= 0x39) ||
-        (codeUnit >= 0x41 && codeUnit <= 0x46) ||
-        (codeUnit >= 0x61 && codeUnit <= 0x66);
-  }
-
-  String _childText(XmlElement node, String localName) {
-    final match = node.children.whereType<XmlElement>().firstWhere(
-          (element) => element.name.local == localName,
-          orElse: () => XmlElement(XmlName(localName)),
-        );
-    return match.innerText.trim();
-  }
-
   String _displayNameFromUri(Uri uri, {required String fallback}) {
     final segments = uri.pathSegments.where((segment) => segment.isNotEmpty);
     if (segments.isEmpty) {
@@ -1082,77 +1038,6 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     } catch (_) {
       return raw;
     }
-  }
-
-  String _normalizeUri(Uri uri) {
-    final path = uri.path.endsWith('/') && uri.path.length > 1
-        ? uri.path.substring(0, uri.path.length - 1)
-        : uri.path;
-    return uri.replace(path: path, query: null, fragment: null).toString();
-  }
-
-  DateTime? _parseModifiedAt(String raw) {
-    final text = raw.trim();
-    if (text.isEmpty) {
-      return null;
-    }
-
-    final iso = DateTime.tryParse(text);
-    if (iso != null) {
-      return iso;
-    }
-
-    final match = RegExp(
-      r'^[A-Za-z]{3},\s+(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s+'
-      r'(\d{2}):(\d{2}):(\d{2})\s+GMT$',
-    ).firstMatch(text);
-    if (match == null) {
-      return null;
-    }
-
-    final month = _httpMonthIndex(match.group(2)!);
-    if (month == null) {
-      return null;
-    }
-
-    return DateTime.utc(
-      int.parse(match.group(3)!),
-      month,
-      int.parse(match.group(1)!),
-      int.parse(match.group(4)!),
-      int.parse(match.group(5)!),
-      int.parse(match.group(6)!),
-    );
-  }
-
-  int? _httpMonthIndex(String value) {
-    switch (value.toLowerCase()) {
-      case 'jan':
-        return 1;
-      case 'feb':
-        return 2;
-      case 'mar':
-        return 3;
-      case 'apr':
-        return 4;
-      case 'may':
-        return 5;
-      case 'jun':
-        return 6;
-      case 'jul':
-        return 7;
-      case 'aug':
-        return 8;
-      case 'sep':
-        return 9;
-      case 'oct':
-        return 10;
-      case 'nov':
-        return 11;
-      case 'dec':
-        return 12;
-    }
-    return null;
   }
 
   String _stripExtension(String fileName) {

@@ -1,7 +1,10 @@
 import 'dart:convert';
+import 'dart:isolate';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
@@ -13,6 +16,7 @@ import 'package:xml/xml.dart';
 part 'webdav_nas_client_sidecar.dart';
 part 'webdav_nas_client_structure.dart';
 part 'webdav_nas_client_models.dart';
+part 'webdav_nas_client_background.dart';
 
 final webDavNasClientProvider = Provider<WebDavNasClient>((ref) {
   final client = ref.watch(starflowHttpClientProvider);
@@ -103,6 +107,7 @@ class WebDavNasClient {
     bool resetCaches = true,
     bool Function()? shouldCancel,
   }) async {
+    final scanStopwatch = Stopwatch()..start();
     if (resetCaches) {
       _resetScanCaches();
     }
@@ -125,6 +130,17 @@ class WebDavNasClient {
     final collectionName = sectionName.trim().isEmpty
         ? _displayNameFromUri(rootUri, fallback: source.name)
         : sectionName.trim();
+
+    appLogInfo(
+      'library.scan',
+      'WebDAV directory scan started',
+      fields: <String, Object?>{
+        'sourceId': source.id,
+        'sectionScoped': sectionId?.trim().isNotEmpty == true,
+        'itemLimit': limit,
+        'structureInference': source.webDavStructureInferenceEnabled,
+      },
+    );
 
     final visited = <String>{};
 
@@ -328,15 +344,66 @@ class WebDavNasClient {
     final walkResult = await walk(rootUri, 0, limit);
     _throwIfCancelled(shouldCancel);
     final pendingItems = walkResult.items;
-    final items = (source.webDavStructureInferenceEnabled
-            ? applyExternalDirectoryStructureInference(
-                pendingItems,
-                source: source,
-              )
-            : pendingItems)
-        .map((item) => item.toScannedItem())
-        .toList(growable: false);
+    appLogInfo(
+      'library.scan',
+      'WebDAV directory walk completed',
+      fields: <String, Object?>{
+        'sourceId': source.id,
+        'directoryCount': visited.length,
+        'pendingItemCount': pendingItems.length,
+        'truncated': walkResult.truncated,
+        'durationMs': scanStopwatch.elapsedMilliseconds,
+      },
+    );
+
+    var resolvedPendingItems = pendingItems;
+    if (source.webDavStructureInferenceEnabled && pendingItems.isNotEmpty) {
+      final structureStopwatch = Stopwatch()..start();
+      appLogInfo(
+        'library.scan',
+        'WebDAV structure inference started',
+        fields: <String, Object?>{
+          'sourceId': source.id,
+          'itemCount': pendingItems.length,
+        },
+      );
+      resolvedPendingItems = await _applyStructureInferenceInBackground(
+        pendingItems,
+        source: source,
+      );
+      _throwIfCancelled(shouldCancel);
+      appLogInfo(
+        'library.scan',
+        'WebDAV structure inference completed',
+        fields: <String, Object?>{
+          'sourceId': source.id,
+          'itemCount': resolvedPendingItems.length,
+          'durationMs': structureStopwatch.elapsedMilliseconds,
+          'backgroundIsolate': !kIsWeb && pendingItems.length >= 32,
+        },
+      );
+    }
+
+    final items = <WebDavScannedItem>[];
+    for (var index = 0; index < resolvedPendingItems.length; index++) {
+      items.add(resolvedPendingItems[index].toScannedItem());
+      if ((index + 1) % 64 == 0) {
+        await Future<void>.delayed(Duration.zero);
+        _throwIfCancelled(shouldCancel);
+      }
+    }
     items.sort((left, right) => right.addedAt.compareTo(left.addedAt));
+
+    appLogInfo(
+      'library.scan',
+      'WebDAV media scan completed',
+      fields: <String, Object?>{
+        'sourceId': source.id,
+        'itemCount': items.length,
+        'directoryCount': visited.length,
+        'durationMs': scanStopwatch.elapsedMilliseconds,
+      },
+    );
 
     return items;
   }

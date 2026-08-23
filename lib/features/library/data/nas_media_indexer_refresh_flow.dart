@@ -933,8 +933,14 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         }),
       );
       final deduped = <String, WebDavScannedItem>{};
+      var dedupeCount = 0;
       for (final item in groups.expand((group) => group)) {
         deduped[item.resourceId] = item;
+        dedupeCount += 1;
+        if (dedupeCount % 64 == 0) {
+          await Future<void>.delayed(Duration.zero);
+          controller.throwIfCancelled();
+        }
       }
       final items = deduped.values.toList(growable: false);
       items.sort((left, right) => right.addedAt.compareTo(left.addedAt));
@@ -989,6 +995,18 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     final now = DateTime.now();
     final normalizedSourceId = source.id.trim();
     final settings = _readSettingsForRefresh();
+    final phaseStopwatch = Stopwatch()..start();
+    final scanStopwatch = Stopwatch()..start();
+    appLogInfo(
+      'library.index',
+      'Media source scan phase started',
+      fields: <String, Object?>{
+        'sourceId': normalizedSourceId,
+        'scopeCount': scopedCollections?.length ?? 0,
+        'itemLimitPerCollection': limitPerCollection,
+        'forceFullRescan': forceFullRescan,
+      },
+    );
     final scannedItems = await _scanSource(
       source,
       scopedCollections: scopedCollections,
@@ -998,20 +1016,49 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       controller: controller,
     );
     controller.throwIfCancelled();
+    appLogInfo(
+      'library.index',
+      'Media source scan phase completed',
+      fields: <String, Object?>{
+        'sourceId': normalizedSourceId,
+        'itemCount': scannedItems.length,
+        'durationMs': scanStopwatch.elapsedMilliseconds,
+      },
+    );
+    final indexingStopwatch = Stopwatch()..start();
     _progressController.startIndexing(
       sourceId: normalizedSourceId,
       totalItems: scannedItems.length,
       activityLabel: phaseLabel,
       detail: scannedItems.isEmpty ? '没有发现媒体文件' : phaseLabel,
     );
-    final existingRecords = {
-      for (final record in await _loadSourceRecordsCached(source.id))
-        record.resourceId: record,
-    };
+    final existingRecordList = await _loadSourceRecordsCached(source.id);
+    final existingRecords = <String, NasMediaIndexRecord>{};
+    for (var index = 0; index < existingRecordList.length; index++) {
+      final record = existingRecordList[index];
+      existingRecords[record.resourceId] = record;
+      if ((index + 1) % 64 == 0) {
+        await Future<void>.delayed(Duration.zero);
+        controller.throwIfCancelled();
+      }
+    }
     final nextRecords = <NasMediaIndexRecord>[];
     final enrichmentCandidates = <WebDavScannedItem>[];
 
+    appLogInfo(
+      'library.index',
+      'Media item indexing phase started',
+      fields: <String, Object?>{
+        'sourceId': normalizedSourceId,
+        'itemCount': scannedItems.length,
+        'existingRecordCount': existingRecords.length,
+      },
+    );
+
     for (var index = 0; index < scannedItems.length; index++) {
+      if (index > 0 && index % 24 == 0) {
+        await Future<void>.delayed(Duration.zero);
+      }
       controller.throwIfCancelled();
       final scannedItem = scannedItems[index];
       final fingerprint = _buildFingerprint(
@@ -1075,6 +1122,25 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     }
 
     controller.throwIfCancelled();
+    appLogInfo(
+      'library.index',
+      'Media item indexing phase completed',
+      fields: <String, Object?>{
+        'sourceId': normalizedSourceId,
+        'itemCount': nextRecords.length,
+        'enrichmentCandidateCount': enrichmentCandidates.length,
+        'durationMs': indexingStopwatch.elapsedMilliseconds,
+      },
+    );
+    final persistenceStopwatch = Stopwatch()..start();
+    appLogInfo(
+      'library.index',
+      'Media index persistence started',
+      fields: <String, Object?>{
+        'sourceId': normalizedSourceId,
+        'recordCount': nextRecords.length,
+      },
+    );
     final existingState = await _store.loadSourceState(source.id);
     await _persistSourceRecords(
       sourceId: source.id,
@@ -1088,6 +1154,16 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
             ? false
             : (existingState?.emptyAutoRebuildAttempted ?? false),
       ),
+    );
+    appLogInfo(
+      'library.index',
+      'Media index persistence completed',
+      fields: <String, Object?>{
+        'sourceId': normalizedSourceId,
+        'recordCount': nextRecords.length,
+        'durationMs': persistenceStopwatch.elapsedMilliseconds,
+        'phaseDurationMs': phaseStopwatch.elapsedMilliseconds,
+      },
     );
     _notifyIndexChangedSafely();
 
