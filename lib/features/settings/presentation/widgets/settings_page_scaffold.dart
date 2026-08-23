@@ -194,6 +194,7 @@ class SettingsActionButton extends ConsumerWidget {
     this.variant = StarflowButtonVariant.secondary,
     this.loading = false,
     this.expand = false,
+    this.compact,
     this.autofocus = false,
     this.focusNode,
     this.focusId,
@@ -205,6 +206,7 @@ class SettingsActionButton extends ConsumerWidget {
   final StarflowButtonVariant variant;
   final bool loading;
   final bool expand;
+  final bool? compact;
   final bool autofocus;
   final FocusNode? focusNode;
   final String? focusId;
@@ -217,7 +219,7 @@ class SettingsActionButton extends ConsumerWidget {
       icon: icon,
       onPressed: onPressed,
       variant: variant,
-      compact: !isTelevision,
+      compact: compact ?? !isTelevision,
       expand: expand,
       loading: loading,
       autofocus: autofocus,

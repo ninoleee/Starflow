@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/navigation/page_activity_mixin.dart';
@@ -1273,6 +1274,17 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     if (!confirmed || !mounted) {
       return;
     }
+    final stopwatch = Stopwatch()..start();
+    appLogInfo(
+      'library.resource',
+      'Media resource deletion started',
+      fields: <String, Object?>{
+        'sourceId': item.sourceId,
+        'sourceKind': item.sourceKind.name,
+        'itemType': item.itemType,
+        'isDirectory': isDirectory,
+      },
+    );
     try {
       await ref.read(mediaRepositoryProvider).deleteResource(
             sourceId: item.sourceId,
@@ -1285,7 +1297,31 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(isDirectory ? '已删除目录' : '已删除文件')),
       );
-    } catch (error) {
+      appLogInfo(
+        'library.resource',
+        'Media resource deletion completed',
+        fields: <String, Object?>{
+          'sourceId': item.sourceId,
+          'sourceKind': item.sourceKind.name,
+          'itemType': item.itemType,
+          'isDirectory': isDirectory,
+          'durationMs': stopwatch.elapsedMilliseconds,
+        },
+      );
+    } catch (error, stackTrace) {
+      appLogError(
+        'library.resource',
+        'Media resource deletion failed',
+        fields: <String, Object?>{
+          'sourceId': item.sourceId,
+          'sourceKind': item.sourceKind.name,
+          'itemType': item.itemType,
+          'isDirectory': isDirectory,
+          'durationMs': stopwatch.elapsedMilliseconds,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (!mounted) {
         return;
       }

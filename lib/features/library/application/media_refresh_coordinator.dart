@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/library/application/emby_refresh_progress.dart';
 import 'package:starflow/features/library/application/library_refresh_revision.dart';
@@ -52,6 +53,7 @@ class MediaRefreshCoordinator {
   int _backgroundEmbyRefreshGeneration = 0;
 
   Future<void> cancelBackgroundTasks() async {
+    appLogInfo('library.refresh', 'Cancelling background library refreshes');
     _backgroundEmbyRefreshGeneration += 1;
     _ref.read(embyRefreshProgressProvider.notifier).clear();
     await _ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes(
@@ -88,8 +90,21 @@ class MediaRefreshCoordinator {
       return false;
     }
     if (_activeBackgroundEmbyRefresh != null) {
+      appLogTrace(
+        'library.refresh',
+        'Emby background refresh already running',
+      );
       return false;
     }
+
+    appLogInfo(
+      'library.refresh',
+      'Emby background refresh started',
+      fields: <String, Object?>{
+        'sourceCount': sources.length,
+        'sourceIds': sources.map((source) => source.id).toList(growable: false),
+      },
+    );
 
     final progressController = _ref.read(embyRefreshProgressProvider.notifier);
     progressController.startTask(sources);
@@ -145,7 +160,25 @@ class MediaRefreshCoordinator {
       return;
     }
 
+    final stopwatch = Stopwatch()..start();
+    appLogInfo(
+      'library.refresh',
+      forceFullRescan
+          ? 'Library rebuild started'
+          : 'Library incremental refresh started',
+      fields: <String, Object?>{
+        'sourceCount': scopedIds.length,
+        'sourceIds': scopedIds,
+        'delaySeconds': delaySeconds,
+      },
+    );
+
     if (_ref.read(playbackPerformanceModeProvider)) {
+      appLogInfo(
+        'library.refresh',
+        'Library refresh skipped while playback performance mode is active',
+        fields: <String, Object?>{'sourceIds': scopedIds},
+      );
       await _ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes(
             includeForceFull: false,
           );
@@ -155,6 +188,11 @@ class MediaRefreshCoordinator {
     if (delaySeconds > 0) {
       await Future<void>.delayed(Duration(seconds: delaySeconds));
       if (_ref.read(playbackPerformanceModeProvider)) {
+        appLogInfo(
+          'library.refresh',
+          'Delayed library refresh skipped while playback is active',
+          fields: <String, Object?>{'sourceIds': scopedIds},
+        );
         await _ref.read(mediaRepositoryProvider).cancelActiveWebDavRefreshes(
               includeForceFull: false,
             );
@@ -164,6 +202,8 @@ class MediaRefreshCoordinator {
 
     final repository = _ref.read(mediaRepositoryProvider);
     await repository.cancelActiveWebDavRefreshes(includeForceFull: true);
+    var completedCount = 0;
+    var failedCount = 0;
     await Future.wait(
       scopedIds.map(
         (sourceId) async {
@@ -172,7 +212,19 @@ class MediaRefreshCoordinator {
               sourceId: sourceId,
               forceFullRescan: forceFullRescan,
             );
-          } catch (_) {
+            completedCount += 1;
+          } catch (error, stackTrace) {
+            failedCount += 1;
+            appLogError(
+              'library.refresh',
+              'Media source refresh failed',
+              fields: <String, Object?>{
+                'sourceId': sourceId,
+                'forceFullRescan': forceFullRescan,
+              },
+              error: error,
+              stackTrace: stackTrace,
+            );
             // Best-effort refresh to avoid interrupting save flow.
           }
         },
@@ -180,6 +232,26 @@ class MediaRefreshCoordinator {
     );
 
     _afterRefreshCompleted();
+    final summaryFields = <String, Object?>{
+      'sourceCount': scopedIds.length,
+      'completedCount': completedCount,
+      'failedCount': failedCount,
+      'forceFullRescan': forceFullRescan,
+      'durationMs': stopwatch.elapsedMilliseconds,
+    };
+    if (failedCount > 0) {
+      appLogWarning(
+        'library.refresh',
+        'Library refresh completed with failures',
+        fields: summaryFields,
+      );
+    } else {
+      appLogInfo(
+        'library.refresh',
+        'Library refresh completed',
+        fields: summaryFields,
+      );
+    }
   }
 
   Future<void> _runBackgroundEmbyRefresh(
@@ -205,13 +277,23 @@ class MediaRefreshCoordinator {
         }
         refreshedSourceCount += 1;
         progressController.completeSource(sourceIndex: index);
-      } catch (error) {
+      } catch (error, stackTrace) {
         if (refreshGeneration != _backgroundEmbyRefreshGeneration) {
           return;
         }
         lastError = error;
         failedSourceNames.add(
           source.name.trim().isEmpty ? source.id : source.name,
+        );
+        appLogError(
+          'library.refresh',
+          'Emby background source refresh failed',
+          fields: <String, Object?>{
+            'sourceId': source.id,
+            'sourceName': source.name,
+          },
+          error: error,
+          stackTrace: stackTrace,
         );
       }
     }
@@ -225,6 +307,13 @@ class MediaRefreshCoordinator {
     }
 
     if (failedSourceNames.isEmpty) {
+      appLogInfo(
+        'library.refresh',
+        'Emby background refresh completed',
+        fields: <String, Object?>{
+          'completedCount': refreshedSourceCount,
+        },
+      );
       progressController.completeTask(
         _embyRefreshCompletedMessage(refreshedSourceCount),
       );
@@ -232,6 +321,15 @@ class MediaRefreshCoordinator {
     }
 
     if (refreshedSourceCount > 0) {
+      appLogWarning(
+        'library.refresh',
+        'Emby background refresh completed with failures',
+        fields: <String, Object?>{
+          'completedCount': refreshedSourceCount,
+          'failedCount': failedSourceNames.length,
+          'failedSources': failedSourceNames,
+        },
+      );
       progressController.completeTask(
         '已完成 $refreshedSourceCount 个 Emby 媒体源更新，'
         '${failedSourceNames.length} 个失败',
@@ -239,6 +337,15 @@ class MediaRefreshCoordinator {
       return;
     }
 
+    appLogError(
+      'library.refresh',
+      'Emby background refresh failed',
+      fields: <String, Object?>{
+        'failedCount': failedSourceNames.length,
+        'failedSources': failedSourceNames,
+      },
+      error: lastError,
+    );
     progressController.failTask(
       'Emby 后台更新失败：${lastError ?? failedSourceNames.join('、')}',
     );

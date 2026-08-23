@@ -116,9 +116,19 @@ class MainActivity : FlutterActivity() {
                         }
                         startActivity(chooser)
                         result.success(true)
-                    } catch (_: ActivityNotFoundException) {
+                    } catch (error: ActivityNotFoundException) {
+                        NativeAppLogger.warning(
+                            "native.external-player",
+                            "No external video player is available",
+                            error,
+                        )
                         result.success(false)
-                    } catch (_: Throwable) {
+                    } catch (error: Throwable) {
+                        NativeAppLogger.error(
+                            "native.external-player",
+                            "Could not launch external video player",
+                            error,
+                        )
                         result.success(false)
                     }
                 }
@@ -173,9 +183,19 @@ class MainActivity : FlutterActivity() {
                             )
                         }
                         startActivity(intent)
-                    } catch (_: ActivityNotFoundException) {
+                    } catch (error: ActivityNotFoundException) {
+                        NativeAppLogger.warning(
+                            "native.playback-launch",
+                            "Native playback Activity is unavailable",
+                            error,
+                        )
                         completeNativePlaybackLaunch(false)
-                    } catch (_: Throwable) {
+                    } catch (error: Throwable) {
+                        NativeAppLogger.error(
+                            "native.playback-launch",
+                            "Could not launch native playback Activity",
+                            error,
+                        )
                         completeNativePlaybackLaunch(false)
                     }
                 }

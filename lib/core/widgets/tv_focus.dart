@@ -910,7 +910,7 @@ class StarflowIconButton extends StatelessWidget {
   }
 }
 
-class StarflowChipButton extends StatelessWidget {
+class StarflowChipButton extends StatefulWidget {
   const StarflowChipButton({
     super.key,
     required this.label,
@@ -921,6 +921,12 @@ class StarflowChipButton extends StatelessWidget {
     this.autofocus = false,
     this.focusNode,
     this.focusId,
+    this.accentColor,
+    this.showSelectedCheckmark = true,
+    this.onMoveLeft,
+    this.onMoveRight,
+    this.onMoveUp,
+    this.onMoveDown,
   });
 
   final String label;
@@ -931,79 +937,169 @@ class StarflowChipButton extends StatelessWidget {
   final bool autofocus;
   final FocusNode? focusNode;
   final String? focusId;
+  final Color? accentColor;
+  final bool showSelectedCheckmark;
+  final VoidCallback? onMoveLeft;
+  final VoidCallback? onMoveRight;
+  final VoidCallback? onMoveUp;
+  final VoidCallback? onMoveDown;
+
+  @override
+  State<StarflowChipButton> createState() => _StarflowChipButtonState();
+}
+
+class _StarflowChipButtonState extends State<StarflowChipButton> {
+  FocusNode? _ownedFocusNode;
+  late FocusNode _effectiveFocusNode;
+  bool _focused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _attachFocusNode();
+  }
+
+  @override
+  void didUpdateWidget(covariant StarflowChipButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.focusNode, widget.focusNode)) {
+      _detachFocusNode();
+      _attachFocusNode();
+    }
+  }
+
+  void _attachFocusNode() {
+    _effectiveFocusNode = widget.focusNode ??
+        (_ownedFocusNode = FocusNode(
+          debugLabel: 'starflow-chip:${widget.focusId ?? widget.label}',
+        ));
+    _effectiveFocusNode.addListener(_handleFocusChanged);
+    _focused = _effectiveFocusNode.hasFocus;
+  }
+
+  void _detachFocusNode() {
+    _effectiveFocusNode.removeListener(_handleFocusChanged);
+    _ownedFocusNode?.dispose();
+    _ownedFocusNode = null;
+  }
+
+  void _handleFocusChanged() {
+    final focused = _effectiveFocusNode.hasFocus;
+    if (_focused == focused || !mounted) {
+      return;
+    }
+    setState(() => _focused = focused);
+  }
+
+  @override
+  void dispose() {
+    _detachFocusNode();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final enabled = onPressed != null;
-    final backgroundColor = selected
-        ? (isDark ? Colors.white : theme.colorScheme.primaryContainer)
-        : (isDark
-            ? Colors.white.withValues(alpha: 0.04)
-            : theme.colorScheme.onSurface.withValues(alpha: 0.04));
-    final foregroundColor = selected
-        ? (isDark
-            ? const Color(0xFF081120)
-            : theme.colorScheme.onPrimaryContainer)
-        : (isDark ? Colors.white : theme.colorScheme.onSurface);
-    final borderColor = selected
-        ? (isDark ? Colors.white : theme.colorScheme.primaryContainer)
-        : (isDark
-            ? Colors.white.withValues(alpha: 0.14)
-            : theme.colorScheme.outlineVariant);
+    final colorScheme = theme.colorScheme;
+    final enabled = widget.onPressed != null;
+    final accentColor = widget.accentColor ?? colorScheme.primary;
+    final backgroundColor = _focused
+        ? colorScheme.primaryContainer
+        : widget.selected
+            ? accentColor.withValues(alpha: 0.18)
+            : colorScheme.surfaceContainerHighest.withValues(alpha: 0.58);
+    final foregroundColor = _focused
+        ? colorScheme.onPrimaryContainer
+        : widget.selected
+            ? accentColor
+            : colorScheme.onSurfaceVariant.withValues(alpha: 0.82);
+    final borderColor = _focused
+        ? (theme.brightness == Brightness.dark
+            ? Colors.white
+            : colorScheme.primary)
+        : widget.selected
+            ? accentColor.withValues(alpha: 0.78)
+            : colorScheme.outlineVariant.withValues(alpha: 0.68);
     final labelStyle = theme.textTheme.labelLarge?.copyWith(
       color: foregroundColor,
-      fontWeight: FontWeight.w700,
+      fontWeight: _focused ? FontWeight.w900 : FontWeight.w700,
       fontFamilyFallback: theme.textTheme.titleSmall?.fontFamilyFallback,
       height: 1.2,
       leadingDistribution: TextLeadingDistribution.even,
     );
-    return _TvOutlinedFocusableAction(
-      onPressed: onPressed,
-      onFocused: onFocused,
-      autofocus: autofocus,
-      focusNode: focusNode,
-      focusId: focusId,
-      borderRadius: BorderRadius.circular(999),
-      borderWidth: 1.6,
-      child: Opacity(
-        opacity: enabled ? 1 : 0.5,
-        child: DecoratedBox(
+    final effectiveIcon = widget.selected && widget.showSelectedCheckmark
+        ? Icons.check_circle_rounded
+        : widget.icon;
+    final radius = BorderRadius.circular(999);
+    final chip = TvFocusableAction(
+      onPressed: widget.onPressed,
+      onFocused: widget.onFocused,
+      autofocus: widget.autofocus,
+      focusNode: _effectiveFocusNode,
+      focusId: widget.focusId,
+      borderRadius: radius,
+      visualStyle: TvFocusVisualStyle.none,
+      focusScale: 1.045,
+      child: AnimatedOpacity(
+        opacity: enabled ? 1 : 0.48,
+        duration: const Duration(milliseconds: 120),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          constraints: const BoxConstraints(minHeight: 50),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
           decoration: BoxDecoration(
             color: backgroundColor,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: borderColor),
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 46),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 13, 16, 14),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  if (icon != null) ...[
-                    Icon(icon, size: 18, color: foregroundColor),
-                    const SizedBox(width: 8),
-                  ],
-                  Flexible(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      strutStyle: labelStyle == null
-                          ? null
-                          : StrutStyle.fromTextStyle(labelStyle),
-                      style: labelStyle,
-                    ),
-                  ),
-                ],
-              ),
+            borderRadius: radius,
+            border: Border.all(
+              color: borderColor,
+              width: _focused ? 3 : 1.5,
             ),
+            boxShadow: _focused
+                ? [
+                    BoxShadow(
+                      color: colorScheme.primary.withValues(alpha: 0.38),
+                      blurRadius: 20,
+                      spreadRadius: 2,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (effectiveIcon != null) ...[
+                Icon(effectiveIcon, size: 20, color: foregroundColor),
+                const SizedBox(width: 9),
+              ],
+              Flexible(
+                child: Text(
+                  widget.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  strutStyle: labelStyle == null
+                      ? null
+                      : StrutStyle.fromTextStyle(labelStyle),
+                  style: labelStyle,
+                ),
+              ),
+            ],
           ),
         ),
       ),
+    );
+    final hasDirectionalOverride = widget.onMoveLeft != null ||
+        widget.onMoveRight != null ||
+        widget.onMoveUp != null ||
+        widget.onMoveDown != null;
+    return TvDirectionalActionPanel(
+      enabled: hasDirectionalOverride,
+      onMoveLeft: widget.onMoveLeft,
+      onMoveRight: widget.onMoveRight,
+      onMoveUp: widget.onMoveUp,
+      onMoveDown: widget.onMoveDown,
+      child: chip,
     );
   }
 }

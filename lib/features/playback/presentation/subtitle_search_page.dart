@@ -647,11 +647,14 @@ class _SearchHeader extends StatelessWidget {
               runSpacing: 8,
               children: [
                 for (final source in availableSources)
-                  FilterChip(
-                    label: Text(source.label),
+                  StarflowChipButton(
+                    label: source.label,
                     selected: selectedSources.contains(source),
-                    onSelected: (selected) => onSourceChanged(source, selected),
-                    showCheckmark: false,
+                    onPressed: () => onSourceChanged(
+                      source,
+                      !selectedSources.contains(source),
+                    ),
+                    focusId: 'subtitle-search:source:${source.name}',
                   ),
               ],
             ),

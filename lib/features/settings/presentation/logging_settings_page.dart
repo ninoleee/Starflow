@@ -20,8 +20,7 @@ final appLogEntriesProvider = FutureProvider.autoDispose<List<AppLogEntry>>(
   (ref) => appLogger.read(limit: 300),
 );
 
-const double _mobileLogPreviewHeight = 440;
-const double _televisionLogPreviewHeight = 560;
+const double _logPreviewHeight = 560;
 
 class LoggingSettingsPage extends ConsumerStatefulWidget {
   const LoggingSettingsPage({super.key});
@@ -32,7 +31,23 @@ class LoggingSettingsPage extends ConsumerStatefulWidget {
 }
 
 class _LoggingSettingsPageState extends ConsumerState<LoggingSettingsPage> {
+  late final FocusNode _exportFocusNode;
+  late final FocusNode _clearFocusNode;
   bool _updating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _exportFocusNode = FocusNode(debugLabel: 'settings:logging:export');
+    _clearFocusNode = FocusNode(debugLabel: 'settings:logging:clear');
+  }
+
+  @override
+  void dispose() {
+    _exportFocusNode.dispose();
+    _clearFocusNode.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -102,6 +117,8 @@ class _LoggingSettingsPageState extends ConsumerState<LoggingSettingsPage> {
                 selectedLevels: settings.localLogVisibleLevels,
                 enabled: !_updating && appLogger.isSupported,
                 focusPrefix: 'settings:logging:visible',
+                onMoveDown:
+                    isTelevision ? () => _exportFocusNode.requestFocus() : null,
                 onToggle: (level) => _toggleVisibleLevel(
                   level,
                   settings.localLogVisibleLevels,
@@ -117,20 +134,33 @@ class _LoggingSettingsPageState extends ConsumerState<LoggingSettingsPage> {
                 error: (error, _) => Text('读取日志占用失败：$error'),
               ),
               const SizedBox(height: 16),
-              SettingsActionButton(
-                label: '导出日志',
-                icon: Icons.ios_share_rounded,
-                onPressed: !appLogger.isSupported ? null : _openLogExport,
-                focusId: 'settings:logging:export',
+              TvDirectionalActionPanel(
+                enabled: isTelevision,
+                onMoveDown: () => _clearFocusNode.requestFocus(),
+                child: SettingsActionButton(
+                  label: '导出日志',
+                  icon: Icons.ios_share_rounded,
+                  onPressed: !appLogger.isSupported ? null : _openLogExport,
+                  focusNode: _exportFocusNode,
+                  focusId: 'settings:logging:export',
+                  compact: false,
+                ),
               ),
               const SizedBox(height: 12),
-              SettingsActionButton(
-                label: _updating ? '正在处理…' : '清理全部日志',
-                icon: Icons.delete_sweep_rounded,
-                onPressed:
-                    _updating || !appLogger.isSupported ? null : _confirmClear,
-                variant: StarflowButtonVariant.danger,
-                focusId: 'settings:logging:clear',
+              TvDirectionalActionPanel(
+                enabled: isTelevision,
+                onMoveUp: () => _exportFocusNode.requestFocus(),
+                child: SettingsActionButton(
+                  label: _updating ? '正在处理…' : '清理全部日志',
+                  icon: Icons.delete_sweep_rounded,
+                  onPressed: _updating || !appLogger.isSupported
+                      ? null
+                      : _confirmClear,
+                  variant: StarflowButtonVariant.danger,
+                  focusNode: _clearFocusNode,
+                  focusId: 'settings:logging:clear',
+                  compact: false,
+                ),
               ),
             ],
           ),
@@ -294,168 +324,38 @@ class _LoggingSettingsPageState extends ConsumerState<LoggingSettingsPage> {
   }
 }
 
-class _LogLevelSelector extends ConsumerWidget {
+class _LogLevelSelector extends StatelessWidget {
   const _LogLevelSelector({
     required this.selectedLevels,
     required this.enabled,
     required this.focusPrefix,
     required this.onToggle,
+    this.onMoveDown,
   });
 
   final Set<AppLogLevel> selectedLevels;
   final bool enabled;
   final String focusPrefix;
   final ValueChanged<AppLogLevel> onToggle;
+  final VoidCallback? onMoveDown;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+  Widget build(BuildContext context) {
     return Wrap(
       spacing: 10,
       runSpacing: 10,
       children: [
         for (final level in AppLogLevel.values)
-          if (isTelevision)
-            _TelevisionLogLevelChip(
-              level: level,
-              selected: selectedLevels.contains(level),
-              onPressed: enabled ? () => onToggle(level) : null,
-              focusId: '$focusPrefix:${level.name}',
-            )
-          else
-            StarflowChipButton(
-              label: _levelLabel(level),
-              selected: selectedLevels.contains(level),
-              onPressed: enabled ? () => onToggle(level) : null,
-              icon: _levelIcon(level),
-              focusId: '$focusPrefix:${level.name}',
-            ),
-      ],
-    );
-  }
-}
-
-class _TelevisionLogLevelChip extends StatefulWidget {
-  const _TelevisionLogLevelChip({
-    required this.level,
-    required this.selected,
-    required this.onPressed,
-    required this.focusId,
-  });
-
-  final AppLogLevel level;
-  final bool selected;
-  final VoidCallback? onPressed;
-  final String focusId;
-
-  @override
-  State<_TelevisionLogLevelChip> createState() =>
-      _TelevisionLogLevelChipState();
-}
-
-class _TelevisionLogLevelChipState extends State<_TelevisionLogLevelChip> {
-  late final FocusNode _focusNode;
-
-  @override
-  void initState() {
-    super.initState();
-    _focusNode = FocusNode(debugLabel: widget.focusId);
-  }
-
-  @override
-  void dispose() {
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final levelColor = _levelColor(theme.colorScheme, widget.level);
-    final radius = BorderRadius.circular(999);
-    return AnimatedBuilder(
-      animation: _focusNode,
-      builder: (context, child) {
-        final focused = _focusNode.hasFocus;
-        final enabled = widget.onPressed != null;
-        final backgroundColor = focused
-            ? theme.colorScheme.primaryContainer
-            : widget.selected
-                ? levelColor.withValues(alpha: 0.18)
-                : theme.colorScheme.surfaceContainerHighest.withValues(
-                    alpha: 0.58,
-                  );
-        final foregroundColor = focused
-            ? theme.colorScheme.onPrimaryContainer
-            : widget.selected
-                ? levelColor
-                : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.78);
-        final borderColor = focused
-            ? (theme.brightness == Brightness.dark
-                ? Colors.white
-                : theme.colorScheme.primary)
-            : widget.selected
-                ? levelColor.withValues(alpha: 0.78)
-                : theme.colorScheme.outlineVariant.withValues(alpha: 0.58);
-        return TvFocusableAction(
-          onPressed: widget.onPressed,
-          onFocused: () => _ensureWidgetVisible(context),
-          focusNode: _focusNode,
-          focusId: widget.focusId,
-          borderRadius: radius,
-          visualStyle: TvFocusVisualStyle.none,
-          focusScale: 1.045,
-          child: AnimatedOpacity(
-            opacity: enabled ? 1 : 0.48,
-            duration: const Duration(milliseconds: 120),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 140),
-              curve: Curves.easeOutCubic,
-              constraints: const BoxConstraints(minHeight: 50),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
-              decoration: BoxDecoration(
-                color: backgroundColor,
-                borderRadius: radius,
-                border: Border.all(
-                  color: borderColor,
-                  width: focused ? 3 : 1.5,
-                ),
-                boxShadow: focused
-                    ? [
-                        BoxShadow(
-                          color: theme.colorScheme.primary.withValues(
-                            alpha: 0.38,
-                          ),
-                          blurRadius: 20,
-                          spreadRadius: 2,
-                        ),
-                      ]
-                    : null,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    widget.selected
-                        ? Icons.check_circle_rounded
-                        : _levelIcon(widget.level),
-                    size: 20,
-                    color: foregroundColor,
-                  ),
-                  const SizedBox(width: 9),
-                  Text(
-                    _levelLabel(widget.level),
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: foregroundColor,
-                      fontWeight: focused ? FontWeight.w900 : FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          StarflowChipButton(
+            label: _levelLabel(level),
+            icon: _levelIcon(level),
+            selected: selectedLevels.contains(level),
+            onPressed: enabled ? () => onToggle(level) : null,
+            focusId: '$focusPrefix:${level.name}',
+            accentColor: _levelColor(Theme.of(context).colorScheme, level),
+            onMoveDown: onMoveDown,
           ),
-        );
-      },
+      ],
     );
   }
 }
@@ -594,8 +494,8 @@ class _LogPreviewState extends State<_LogPreview> {
           )
         : Scrollbar(
             controller: _scrollController,
-            thumbVisibility: widget.isTelevision,
-            trackVisibility: widget.isTelevision,
+            thumbVisibility: true,
+            trackVisibility: true,
             child: SingleChildScrollView(
               key: const ValueKey<String>('logging-preview-scroll'),
               controller: _scrollController,
@@ -633,17 +533,16 @@ class _LogPreviewState extends State<_LogPreview> {
       key: const ValueKey<String>('logging-preview-viewport'),
       child: SizedBox(
         key: _viewportKey,
-        height: widget.isTelevision
-            ? _televisionLogPreviewHeight
-            : _mobileLogPreviewHeight,
+        height: _logPreviewHeight,
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: theme.colorScheme.surfaceContainerLowest.withValues(
-              alpha: 0.48,
+              alpha: 0.72,
             ),
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.72),
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.92),
+              width: 1.5,
             ),
           ),
           child: ClipRRect(
@@ -698,15 +597,15 @@ class _LogEntryCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: focused
               ? theme.colorScheme.primaryContainer.withValues(alpha: 0.34)
-              : theme.colorScheme.surfaceContainerLow,
+              : theme.colorScheme.surfaceContainer,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: focused
                 ? (theme.brightness == Brightness.dark
                     ? Colors.white
                     : theme.colorScheme.primary)
-                : color.withValues(alpha: 0.45),
-            width: focused ? 3 : 1,
+                : color.withValues(alpha: 0.72),
+            width: focused ? 3 : 1.5,
           ),
           boxShadow: focused
               ? [
@@ -716,7 +615,13 @@ class _LogEntryCard extends StatelessWidget {
                     spreadRadius: 1,
                   ),
                 ]
-              : null,
+              : [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.08),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -726,11 +631,24 @@ class _LogEntryCard extends StatelessWidget {
               runSpacing: 4,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Text(
-                  _levelLabel(entry.level),
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: color,
-                    fontWeight: FontWeight.w800,
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: color.withValues(alpha: 0.52),
+                    ),
+                  ),
+                  child: Text(
+                    _levelLabel(entry.level),
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: color,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ),
                 Text(
@@ -749,14 +667,31 @@ class _LogEntryCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 7),
-            previewText(entry.message),
+            previewText(
+              entry.message,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                height: 1.45,
+              ),
+            ),
             if (details.isNotEmpty) ...[
               const SizedBox(height: 8),
-              previewText(
-                details.join('\n'),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontFamily: 'monospace',
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.64,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: previewText(
+                  details.join('\n'),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontFamily: 'monospace',
+                    height: 1.4,
+                  ),
                 ),
               ),
             ],

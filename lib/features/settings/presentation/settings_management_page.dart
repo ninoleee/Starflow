@@ -10,6 +10,7 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/data/settings_lan_transfer_service.dart';
 import 'package:starflow/features/settings/data/settings_transfer_service.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/presentation/widgets/lan_transfer_qr_address_card.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class SettingsManagementPage extends ConsumerStatefulWidget {
@@ -415,6 +416,7 @@ class _SettingsLanTransferDialog extends StatefulWidget {
 class _SettingsLanTransferDialogState
     extends State<_SettingsLanTransferDialog> {
   late final StreamSubscription<SettingsLanTransferEvent> _subscription;
+  late final List<FocusNode> _urlFocusNodes;
   late final FocusNode _closeFocusNode;
   String _statusMessage = '服务已启动，手机访问下方地址后即可上传或下载配置。';
   bool _statusIsError = false;
@@ -422,6 +424,10 @@ class _SettingsLanTransferDialogState
   @override
   void initState() {
     super.initState();
+    _urlFocusNodes = List<FocusNode>.generate(
+      widget.session.urls.length,
+      (index) => FocusNode(debugLabel: 'settings-lan-transfer-url-$index'),
+    );
     _closeFocusNode = FocusNode(debugLabel: 'settings-lan-transfer-close');
     _subscription = widget.session.events.listen((event) {
       if (!mounted) {
@@ -437,6 +443,9 @@ class _SettingsLanTransferDialogState
   @override
   void dispose() {
     _subscription.cancel();
+    for (final focusNode in _urlFocusNodes) {
+      focusNode.dispose();
+    }
     _closeFocusNode.dispose();
     super.dispose();
   }
@@ -447,14 +456,15 @@ class _SettingsLanTransferDialogState
     final dialog = AlertDialog(
       title: const Text('手机传输配置'),
       content: SizedBox(
-        width: 560,
+        width: 660,
         child: SingleChildScrollView(
+          primary: false,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '请让手机和电视连接同一个局域网，然后在手机浏览器中打开下面任意地址。',
+                '请让手机和电视连接同一个局域网，然后扫描下面任意二维码；也可以在手机浏览器中输入对应地址。',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 14),
@@ -472,14 +482,15 @@ class _SettingsLanTransferDialogState
                     ),
               ),
               const SizedBox(height: 14),
-              for (final url in widget.session.urls) ...[
-                SelectableText(
-                  url,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+              for (var index = 0;
+                  index < widget.session.urls.length;
+                  index++) ...[
+                LanTransferQrAddressCard(
+                  url: widget.session.urls[index],
+                  focusNode: _urlFocusNodes[index],
+                  focusId: 'settings:management:lan-url:$index',
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
               ],
               const SizedBox(height: 8),
               Text(
@@ -525,7 +536,7 @@ class _SettingsLanTransferDialogState
       enabled: true,
       dialogContext: context,
       inputFocusNodes: const [],
-      contentFocusNodes: const [],
+      contentFocusNodes: _urlFocusNodes,
       actionFocusNodes: [_closeFocusNode],
       child: dialog,
     );

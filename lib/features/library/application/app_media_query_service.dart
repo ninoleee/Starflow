@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/library/application/empty_library_auto_rebuild_scheduler.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
@@ -57,7 +58,17 @@ class AppMediaQueryService {
       sources.map((source) async {
         try {
           return await _fetchCollectionsForSource(source);
-        } catch (_) {
+        } catch (error, stackTrace) {
+          appLogWarning(
+            'library.query',
+            'Media source collections could not be loaded',
+            fields: <String, Object?>{
+              'sourceId': source.id,
+              'sourceKind': source.kind.name,
+            },
+            error: error,
+            stackTrace: stackTrace,
+          );
           return const <MediaCollection>[];
         }
       }),
@@ -72,6 +83,7 @@ class AppMediaQueryService {
     String? sectionId,
     int limit = 200,
   }) async {
+    final stopwatch = Stopwatch()..start();
     final sources = _enabledSources
         .where(
           (item) =>
@@ -93,6 +105,19 @@ class AppMediaQueryService {
     if (items.isEmpty) {
       for (final result in sourceResults) {
         if (result.error != null) {
+          appLogError(
+            'library.query',
+            'Library query failed for every selected source',
+            fields: <String, Object?>{
+              'sourceCount': sources.length,
+              'kind': kind?.name ?? '',
+              'sourceId': sourceId ?? '',
+              'sectionId': sectionId ?? '',
+              'durationMs': stopwatch.elapsedMilliseconds,
+            },
+            error: result.error,
+            stackTrace: result.stackTrace,
+          );
           Error.throwWithStackTrace(
             result.error!,
             result.stackTrace ?? StackTrace.current,
@@ -102,6 +127,21 @@ class AppMediaQueryService {
     }
 
     items.sort((left, right) => right.addedAt.compareTo(left.addedAt));
+    appLogTrace(
+      'library.query',
+      'Library query completed',
+      fields: <String, Object?>{
+        'sourceCount': sources.length,
+        'failedSourceCount':
+            sourceResults.where((result) => result.error != null).length,
+        'itemCount': items.length,
+        'kind': kind?.name ?? '',
+        'sourceId': sourceId ?? '',
+        'sectionId': sectionId ?? '',
+        'limit': limit,
+        'durationMs': stopwatch.elapsedMilliseconds,
+      },
+    );
     return items;
   }
 
@@ -137,28 +177,59 @@ class AppMediaQueryService {
       return const [];
     }
 
-    if (source.kind == MediaSourceKind.emby) {
-      if (!source.hasActiveSession) {
-        return const [];
+    final stopwatch = Stopwatch()..start();
+    try {
+      late final List<MediaItem> items;
+      if (source.kind == MediaSourceKind.emby) {
+        if (!source.hasActiveSession) {
+          return const [];
+        }
+        items = await _embyApiClient.fetchChildren(
+          source,
+          parentId: normalizedParentId,
+          sectionId: sectionId,
+          sectionName: sectionName,
+          limit: limit,
+        );
+      } else {
+        final scopedCollections = _hasScopedSections(source)
+            ? await _selectedCollectionsForSource(source)
+            : null;
+        items = await _nasMediaIndexer.loadChildren(
+          source,
+          parentId: normalizedParentId,
+          sectionId: sectionId,
+          scopedCollections: scopedCollections,
+          limit: limit,
+        );
       }
-      return _embyApiClient.fetchChildren(
-        source,
-        parentId: normalizedParentId,
-        sectionId: sectionId,
-        sectionName: sectionName,
-        limit: limit,
+      appLogTrace(
+        'library.query',
+        'Library child items loaded',
+        fields: <String, Object?>{
+          'sourceId': source.id,
+          'sourceKind': source.kind.name,
+          'sectionId': sectionId,
+          'itemCount': items.length,
+          'durationMs': stopwatch.elapsedMilliseconds,
+        },
       );
+      return items;
+    } catch (error, stackTrace) {
+      appLogError(
+        'library.query',
+        'Library child items could not be loaded',
+        fields: <String, Object?>{
+          'sourceId': source.id,
+          'sourceKind': source.kind.name,
+          'sectionId': sectionId,
+          'durationMs': stopwatch.elapsedMilliseconds,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
+      rethrow;
     }
-    final scopedCollections = _hasScopedSections(source)
-        ? await _selectedCollectionsForSource(source)
-        : null;
-    return _nasMediaIndexer.loadChildren(
-      source,
-      parentId: normalizedParentId,
-      sectionId: sectionId,
-      scopedCollections: scopedCollections,
-      limit: limit,
-    );
   }
 
   Future<MediaItem?> findById(String id) async {
@@ -348,7 +419,17 @@ class AppMediaQueryService {
         sectionId: collection.id,
         sectionName: collection.title,
       );
-    } catch (_) {
+    } catch (error, stackTrace) {
+      appLogWarning(
+        'library.query',
+        'Emby section could not be loaded',
+        fields: <String, Object?>{
+          'sourceId': source.id,
+          'sectionId': collection.id,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       return const <MediaItem>[];
     }
   }
@@ -361,7 +442,14 @@ class AppMediaQueryService {
         source,
         limit: 200,
       );
-    } catch (_) {
+    } catch (error, stackTrace) {
+      appLogWarning(
+        'library.query',
+        'Emby root-library fallback could not be loaded',
+        fields: <String, Object?>{'sourceId': source.id},
+        error: error,
+        stackTrace: stackTrace,
+      );
       return const <MediaItem>[];
     }
   }
@@ -666,6 +754,18 @@ class AppMediaQueryService {
 
       return const _SourceFetchResult(items: <MediaItem>[]);
     } catch (error, stackTrace) {
+      appLogWarning(
+        'library.query',
+        'Media source library could not be loaded',
+        fields: <String, Object?>{
+          'sourceId': source.id,
+          'sourceKind': source.kind.name,
+          'sectionId': sectionId ?? '',
+          'limit': limit,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       return _SourceFetchResult(
         items: const <MediaItem>[],
         error: error,

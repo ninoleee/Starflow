@@ -6,6 +6,7 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/settings/data/log_export_service.dart';
+import 'package:starflow/features/settings/presentation/widgets/lan_transfer_qr_address_card.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class LogExportPage extends ConsumerStatefulWidget {
@@ -117,6 +118,7 @@ class _LogExportPageState extends ConsumerState<LogExportPage> {
           onPressed: _isExporting ? null : _exportLogs,
           loading: _isExporting,
           focusId: 'settings:logging:export-file',
+          compact: false,
         ),
       ],
     );
@@ -137,6 +139,7 @@ class _LogExportPageState extends ConsumerState<LogExportPage> {
           onPressed: _isStartingTelevisionExport ? null : _openTelevisionExport,
           loading: _isStartingTelevisionExport,
           focusId: 'settings:logging:export-tv',
+          compact: false,
         ),
       ],
     );
@@ -293,7 +296,7 @@ class _LogLanExportDialogState extends State<_LogLanExportDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '请让手机和电视连接同一个局域网，然后在手机浏览器中打开下面任意地址。',
+                '请让手机和电视连接同一个局域网，然后扫描下面任意二维码；也可以在手机浏览器中输入对应地址。',
                 style: theme.textTheme.bodyMedium,
               ),
               const SizedBox(height: 14),
@@ -314,28 +317,12 @@ class _LogLanExportDialogState extends State<_LogLanExportDialog> {
               for (var index = 0;
                   index < widget.session.urls.length;
                   index++) ...[
-                TvFocusableAction(
+                LanTransferQrAddressCard(
+                  url: widget.session.urls[index],
                   focusNode: _urlFocusNodes[index],
                   focusId: 'settings:logging:lan-url:$index',
-                  onPressed: () {},
-                  visualStyle: TvFocusVisualStyle.prominent,
-                  borderRadius: BorderRadius.circular(14),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Text(
-                      widget.session.urls[index],
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
               ],
               Text(
                 '打开手机页面后点击“下载日志”。关闭此窗口会同时停止局域网服务。',

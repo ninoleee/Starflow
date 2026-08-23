@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod/misc.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
@@ -100,6 +101,8 @@ class HomePageController {
   }
 
   Future<void> refreshModules(WidgetRef ref) async {
+    final stopwatch = Stopwatch()..start();
+    appLogInfo('home.refresh', 'Home refresh started');
     ref.invalidate(homeRecentItemsProvider);
     ref.invalidate(homeRecentPlaybackEntriesProvider);
     ref.invalidate(homeCarouselItemsProvider);
@@ -109,9 +112,16 @@ class HomePageController {
     ref.read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
     primeModulesWithReader(ref.read);
     await Future<void>.delayed(const Duration(milliseconds: 140));
+    appLogInfo(
+      'home.refresh',
+      'Home refresh scheduled',
+      fields: <String, Object?>{'durationMs': stopwatch.elapsedMilliseconds},
+    );
   }
 
   Future<void> refreshModulesFromRef(Ref ref) async {
+    final stopwatch = Stopwatch()..start();
+    appLogInfo('home.refresh', 'Home refresh started');
     ref.invalidate(homeRecentItemsProvider);
     ref.invalidate(homeRecentPlaybackEntriesProvider);
     ref.invalidate(homeCarouselItemsProvider);
@@ -121,6 +131,11 @@ class HomePageController {
     ref.read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
     primeModulesWithReader(ref.read);
     await Future<void>.delayed(const Duration(milliseconds: 140));
+    appLogInfo(
+      'home.refresh',
+      'Home refresh scheduled',
+      fields: <String, Object?>{'durationMs': stopwatch.elapsedMilliseconds},
+    );
   }
 }
 

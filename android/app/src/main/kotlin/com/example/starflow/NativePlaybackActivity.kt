@@ -220,6 +220,14 @@ class NativePlaybackActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         sharedPreferences = getSharedPreferences(SHARED_PREFERENCES_NAME, MODE_PRIVATE)
         applyPlaybackIntent(intent)
+        NativeAppLogger.markPlaybackStarted(
+            mapOf(
+                "television" to isTelevisionDevice,
+                "decodeMode" to intent.getStringExtra(EXTRA_DECODE_MODE).orEmpty(),
+                "container" to decodePlaybackTargetObject().optString("container").trim(),
+            ),
+        )
+        logPlayback("native.activity.created television=$isTelevisionDevice")
 
         setContentView(
             if (isTelevisionDevice) {
@@ -346,6 +354,8 @@ class NativePlaybackActivity : Activity() {
         playbackErrorDialog?.dismiss()
         playbackErrorDialog = null
         playbackSystemSessionManager.release()
+        logPlayback("native.activity.destroyed finishing=$isFinishing")
+        NativeAppLogger.markPlaybackEnded()
         super.onDestroy()
     }
 
@@ -2928,7 +2938,11 @@ class NativePlaybackActivity : Activity() {
     }
 
     private fun logPlayback(message: String, error: Throwable? = null) {
-        // Logging intentionally disabled for production playback runs.
+        if (error == null) {
+            NativeAppLogger.info("native.playback", message)
+        } else {
+            NativeAppLogger.error("native.playback", message, error)
+        }
     }
 
     private fun decodePlaybackTargetObject(): JSONObject {

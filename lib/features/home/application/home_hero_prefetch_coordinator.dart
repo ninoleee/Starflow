@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/details/application/detail_target_resolver.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
@@ -105,7 +106,14 @@ class HomeHeroPrefetchCoordinator {
         ),
         eagerError: false,
       );
-    } catch (_) {
+    } catch (error, stackTrace) {
+      appLogWarning(
+        'home.hero-prefetch',
+        'Hero metadata prefetch batch failed',
+        fields: <String, Object?>{'targetCount': targets.length},
+        error: error,
+        stackTrace: stackTrace,
+      );
       // Hero metadata refresh is best-effort and should never block home UI.
     }
   }
@@ -215,7 +223,18 @@ class HomeHeroPrefetchCoordinator {
               ? DetailMetadataRefreshStatus.succeeded
               : DetailMetadataRefreshStatus.failed,
         );
-      } catch (_) {
+      } catch (error, stackTrace) {
+        appLogWarning(
+          'home.hero-prefetch',
+          'Hero metadata refresh failed',
+          fields: <String, Object?>{
+            'sourceKind': target.sourceKind?.name ?? '',
+            'sourceId': target.sourceId,
+            'itemId': target.itemId,
+          },
+          error: error,
+          stackTrace: stackTrace,
+        );
         if (!_isRefreshSessionActive(
           ref: ref,
           sessionId: sessionId,
@@ -229,7 +248,18 @@ class HomeHeroPrefetchCoordinator {
           metadataRefreshStatus: DetailMetadataRefreshStatus.failed,
         );
       }
-    } catch (_) {
+    } catch (error, stackTrace) {
+      appLogWarning(
+        'home.hero-prefetch',
+        'Hero metadata prefetch could not complete',
+        fields: <String, Object?>{
+          'sourceKind': target.sourceKind?.name ?? '',
+          'sourceId': target.sourceId,
+          'itemId': target.itemId,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       // Background hero refresh is best-effort.
     }
   }

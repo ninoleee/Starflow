@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/settings/data/log_export_service.dart';
 import 'package:starflow/features/settings/presentation/log_export_page.dart';
+import 'package:starflow/features/settings/presentation/widgets/lan_transfer_qr_address_card.dart';
 
 void main() {
   testWidgets('TV log export uses LAN download instead of a path editor',
@@ -38,6 +40,12 @@ void main() {
 
     expect(service.televisionExportStarts, 1);
     expect(find.text('访问码：ABC123'), findsOneWidget);
+    expect(find.byType(QrImageView), findsOneWidget);
+    final qrCard = tester.widget<LanTransferQrAddressCard>(
+      find.byType(LanTransferQrAddressCard),
+    );
+    expect(qrCard.url, 'http://192.168.1.8:8123/?token=ABC123');
+    expect(find.text('手机扫码打开'), findsOneWidget);
     final urlActions = tester
         .widgetList<TvFocusableAction>(find.byType(TvFocusableAction))
         .where(

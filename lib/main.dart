@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -64,11 +63,13 @@ Future<void> main() async {
       );
     },
     (error, stackTrace) {
-      appLogError(
-        'app.uncaught-zone',
-        'Uncaught asynchronous error',
-        error: error,
-        stackTrace: stackTrace,
+      unawaited(
+        appLogCritical(
+          'app.uncaught-zone',
+          'Uncaught asynchronous error',
+          error: error,
+          stackTrace: stackTrace,
+        ),
       );
     },
   );
@@ -80,19 +81,23 @@ Future<void> main() async {
 void _installGlobalErrorLogging() {
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
-    appLogError(
-      'app.flutter-error',
-      details.context?.toDescription() ?? 'Flutter framework error',
-      error: details.exception,
-      stackTrace: details.stack,
+    unawaited(
+      appLogCritical(
+        'app.flutter-error',
+        details.context?.toDescription() ?? 'Flutter framework error',
+        error: details.exception,
+        stackTrace: details.stack,
+      ),
     );
   };
   PlatformDispatcher.instance.onError = (error, stackTrace) {
-    appLogError(
-      'app.platform-error',
-      'Uncaught platform dispatcher error',
-      error: error,
-      stackTrace: stackTrace,
+    unawaited(
+      appLogCritical(
+        'app.platform-error',
+        'Uncaught platform dispatcher error',
+        error: error,
+        stackTrace: stackTrace,
+      ),
     );
     return true;
   };

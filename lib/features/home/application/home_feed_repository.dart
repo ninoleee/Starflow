@@ -10,8 +10,15 @@ class HomeFeedRepository {
     if (!_needsRecentlyAdded(enabledModules)) {
       return const [];
     }
-    return mediaRepository.fetchRecentlyAdded(
-      limit: _defaultHomeSectionItemLimit,
+    return _runHomeFeedOperation<List<MediaItem>>(
+      stage: 'recent-items.load',
+      fields: const <String, Object?>{
+        'limit': _defaultHomeSectionItemLimit,
+      },
+      action: () => mediaRepository.fetchRecentlyAdded(
+        limit: _defaultHomeSectionItemLimit,
+      ),
+      resultFields: (items) => <String, Object?>{'itemCount': items.length},
     );
   }
 
@@ -22,8 +29,17 @@ class HomeFeedRepository {
     if (!_needsRecentPlayback(enabledModules)) {
       return const [];
     }
-    return playbackMemoryRepository.loadRecentDisplayEntries(
-      limit: _defaultHomeSectionItemLimit,
+    return _runHomeFeedOperation<List<PlaybackProgressEntry>>(
+      stage: 'recent-playback.load',
+      fields: const <String, Object?>{
+        'limit': _defaultHomeSectionItemLimit,
+      },
+      action: () => playbackMemoryRepository.loadRecentDisplayEntries(
+        limit: _defaultHomeSectionItemLimit,
+      ),
+      resultFields: (entries) => <String, Object?>{
+        'itemCount': entries.length,
+      },
     );
   }
 
@@ -34,7 +50,11 @@ class HomeFeedRepository {
     if (!_needsCarousel(enabledModules)) {
       return const [];
     }
-    return discoveryRepository.fetchCarouselItems();
+    return _runHomeFeedOperation<List<DoubanCarouselEntry>>(
+      stage: 'carousel.load',
+      action: discoveryRepository.fetchCarouselItems,
+      resultFields: (items) => <String, Object?>{'itemCount': items.length},
+    );
   }
 
   Future<HomeSectionViewModel?> buildSectionSeed({
@@ -47,70 +67,132 @@ class HomeFeedRepository {
     required Future<List<PlaybackProgressEntry>> recentPlaybackEntries,
     required Future<List<DoubanCarouselEntry>> carouselItems,
   }) async {
-    switch (module.type) {
-      case HomeModuleType.hero:
-        return null;
-      case HomeModuleType.recentlyAdded:
-        return _buildLibrarySectionSeed(
-          module: module,
-          items: await recentItems,
-          subtitle: module.description,
-        );
-      case HomeModuleType.recentPlayback:
-        return _buildRecentPlaybackSectionSeed(
-          module: module,
-          entries: await recentPlaybackEntries,
-        );
-      case HomeModuleType.librarySection:
-        final sourceKind = _resolveSourceKind(mediaSources, module.sourceId);
-        final sectionItems = module.isLibrarySection
-            ? await mediaRepository.fetchLibrary(
-                sourceId: module.sourceId,
-                sectionId: module.sectionId,
-                limit: _homeModuleFetchLimit(module, sourceKind: sourceKind),
-              )
-            : const <MediaItem>[];
-        return _buildLibrarySectionSeed(
-          module: module,
-          items: sectionItems,
-          subtitle: module.description,
-          viewAllTarget: module.isLibrarySection
-              ? LibraryCollectionTarget(
-                  title: module.title,
-                  sourceId: module.sourceId,
-                  sourceName: module.sourceName,
-                  sourceKind: sourceKind,
-                  sectionId: module.sectionId,
-                  subtitle: module.sectionName,
-                )
-              : null,
-        );
-      case HomeModuleType.doubanInterest:
-      case HomeModuleType.doubanSuggestion:
-      case HomeModuleType.doubanList:
-        final entries = await discoveryRepository.fetchEntries(module);
-        return _buildDoubanSectionSeed(
-          module: module,
-          entries: entries,
-          emptyMessage: _resolveDoubanEmptyMessage(module, doubanAccount),
-        );
-      case HomeModuleType.doubanCarousel:
-        return _buildCarouselSectionSeed(
-          module: module,
-          items: await carouselItems,
-          emptyMessage: _resolveDoubanEmptyMessage(module, doubanAccount),
-        );
-    }
+    return _runHomeFeedOperation<HomeSectionViewModel?>(
+      stage: 'section.build',
+      fields: <String, Object?>{
+        'moduleId': module.id,
+        'moduleType': module.type.name,
+        'sourceId': module.sourceId,
+        'sectionId': module.sectionId,
+      },
+      action: () async {
+        switch (module.type) {
+          case HomeModuleType.hero:
+            return null;
+          case HomeModuleType.recentlyAdded:
+            return _buildLibrarySectionSeed(
+              module: module,
+              items: await recentItems,
+              subtitle: module.description,
+            );
+          case HomeModuleType.recentPlayback:
+            return _buildRecentPlaybackSectionSeed(
+              module: module,
+              entries: await recentPlaybackEntries,
+            );
+          case HomeModuleType.librarySection:
+            final sourceKind =
+                _resolveSourceKind(mediaSources, module.sourceId);
+            final sectionItems = module.isLibrarySection
+                ? await mediaRepository.fetchLibrary(
+                    sourceId: module.sourceId,
+                    sectionId: module.sectionId,
+                    limit: _homeModuleFetchLimit(
+                      module,
+                      sourceKind: sourceKind,
+                    ),
+                  )
+                : const <MediaItem>[];
+            return _buildLibrarySectionSeed(
+              module: module,
+              items: sectionItems,
+              subtitle: module.description,
+              viewAllTarget: module.isLibrarySection
+                  ? LibraryCollectionTarget(
+                      title: module.title,
+                      sourceId: module.sourceId,
+                      sourceName: module.sourceName,
+                      sourceKind: sourceKind,
+                      sectionId: module.sectionId,
+                      subtitle: module.sectionName,
+                    )
+                  : null,
+            );
+          case HomeModuleType.doubanInterest:
+          case HomeModuleType.doubanSuggestion:
+          case HomeModuleType.doubanList:
+            final entries = await discoveryRepository.fetchEntries(module);
+            return _buildDoubanSectionSeed(
+              module: module,
+              entries: entries,
+              emptyMessage: _resolveDoubanEmptyMessage(module, doubanAccount),
+            );
+          case HomeModuleType.doubanCarousel:
+            return _buildCarouselSectionSeed(
+              module: module,
+              items: await carouselItems,
+              emptyMessage: _resolveDoubanEmptyMessage(module, doubanAccount),
+            );
+        }
+      },
+      resultFields: (section) => <String, Object?>{
+        'itemCount': section?.items.length ?? 0,
+        'carouselItemCount': section?.carouselItems.length ?? 0,
+      },
+    );
   }
 
   Future<HomeSectionViewModel> applyCachedSection({
     required HomeSectionViewModel section,
     required LocalStorageCacheRepository localStorageCacheRepository,
   }) {
-    return _applyCachedHomeSection(
-      section: section,
-      localStorageCacheRepository: localStorageCacheRepository,
+    return _runHomeFeedOperation<HomeSectionViewModel>(
+      stage: 'section.cache-apply',
+      fields: <String, Object?>{
+        'sectionId': section.id,
+        'itemCount': section.items.length,
+        'carouselItemCount': section.carouselItems.length,
+      },
+      action: () => _applyCachedHomeSection(
+        section: section,
+        localStorageCacheRepository: localStorageCacheRepository,
+      ),
     );
+  }
+}
+
+Future<T> _runHomeFeedOperation<T>({
+  required String stage,
+  Map<String, Object?> fields = const <String, Object?>{},
+  required Future<T> Function() action,
+  Map<String, Object?> Function(T result)? resultFields,
+}) async {
+  final stopwatch = Stopwatch()..start();
+  appLogTrace('home.feed', '$stage started', fields: fields);
+  try {
+    final result = await action();
+    appLogTrace(
+      'home.feed',
+      '$stage completed',
+      fields: <String, Object?>{
+        ...fields,
+        'durationMs': stopwatch.elapsedMilliseconds,
+        ...?resultFields?.call(result),
+      },
+    );
+    return result;
+  } catch (error, stackTrace) {
+    appLogError(
+      'home.feed',
+      '$stage failed',
+      fields: <String, Object?>{
+        ...fields,
+        'durationMs': stopwatch.elapsedMilliseconds,
+      },
+      error: error,
+      stackTrace: stackTrace,
+    );
+    rethrow;
   }
 }
 

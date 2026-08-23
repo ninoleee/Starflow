@@ -1338,7 +1338,24 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       return;
     }
 
-    await _loadFavoriteSearchResults();
+    try {
+      await _loadFavoriteSearchResults();
+    } catch (error, stackTrace) {
+      detailResourceSwitchTrace(
+        'online-update.favorites-load.error',
+        fields: <String, Object?>{
+          'target': _detailResourceTraceTarget(target),
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('读取收藏资源失败：$error')),
+        );
+      }
+      return;
+    }
     if (!mounted) {
       return;
     }
@@ -1360,6 +1377,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     });
 
     try {
+      detailResourceSwitchTrace(
+        'online-update.check.begin',
+        fields: <String, Object?>{
+          'target': _detailResourceTraceTarget(target),
+          'favoriteId': favoriteMatch.result.id,
+        },
+      );
       final networkStorage = ref.read(
         appSettingsProvider.select((settings) => settings.networkStorage),
       );
@@ -1368,6 +1392,16 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         favoriteMatch: favoriteMatch,
         networkStorage: networkStorage,
         quarkSaveClient: ref.read(quarkSaveClientProvider),
+      );
+      detailResourceSwitchTrace(
+        'online-update.check.done',
+        fields: <String, Object?>{
+          'target': _detailResourceTraceTarget(target),
+          'hasUpdates': result.hasUpdates,
+          'localVideoCount': result.localVideoCount,
+          'onlineVideoCount': result.onlineVideoCount,
+          'updatedEpisodeCount': result.updatedEpisodeLabels.length,
+        },
       );
       if (!mounted) {
         return;
@@ -1384,7 +1418,16 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         favoriteMatch: result.favoriteMatch,
         networkStorage: networkStorage,
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      detailResourceSwitchTrace(
+        'online-update.check.error',
+        fields: <String, Object?>{
+          'target': _detailResourceTraceTarget(target),
+          'favoriteId': favoriteMatch.result.id,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (!mounted) {
         return;
       }
@@ -1497,12 +1540,26 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     });
 
     try {
+      detailResourceSwitchTrace(
+        'online-update.save.begin',
+        fields: <String, Object?>{
+          'favoriteId': favoriteMatch.result.id,
+          'folderName': favoriteMatch.folderName,
+        },
+      );
       final response =
           await ref.read(quarkSaveWorkflowServiceProvider).saveToQuark(
                 shareUrl: favoriteMatch.result.resourceUrl,
                 saveFolderName: favoriteMatch.folderName,
                 networkStorage: networkStorage,
               );
+      detailResourceSwitchTrace(
+        'online-update.save.done',
+        fields: <String, Object?>{
+          'favoriteId': favoriteMatch.result.id,
+          'folderName': favoriteMatch.folderName,
+        },
+      );
       if (!mounted) {
         return;
       }
@@ -1512,6 +1569,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         ),
       );
     } on QuarkSaveException catch (error) {
+      detailResourceSwitchTrace(
+        'online-update.save.error',
+        fields: <String, Object?>{
+          'favoriteId': favoriteMatch.result.id,
+          'errorType': 'quark-save',
+        },
+        error: error,
+      );
       if (!mounted) {
         return;
       }
@@ -1519,13 +1584,30 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         SnackBar(content: Text(error.message)),
       );
     } on SmartStrmWebhookException catch (error) {
+      detailResourceSwitchTrace(
+        'online-update.save.error',
+        fields: <String, Object?>{
+          'favoriteId': favoriteMatch.result.id,
+          'errorType': 'strm-webhook',
+        },
+        error: error,
+      );
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('夸克保存成功，但 STRM 触发失败：${error.message}')),
       );
-    } catch (error) {
+    } catch (error, stackTrace) {
+      detailResourceSwitchTrace(
+        'online-update.save.error',
+        fields: <String, Object?>{
+          'favoriteId': favoriteMatch.result.id,
+          'errorType': 'unexpected',
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (!mounted) {
         return;
       }
@@ -1612,7 +1694,21 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       if (!_isSessionActive(sessionId)) {
         return;
       }
-      unawaited(_runDeferredDetailStartup(sessionId));
+      unawaited(
+        _runDeferredDetailStartup(sessionId).catchError(
+          (Object error, StackTrace stackTrace) {
+            detailResourceSwitchTrace(
+              'startup.error',
+              fields: <String, Object?>{
+                'sessionId': sessionId,
+                'target': _detailResourceTraceTarget(widget.target),
+              },
+              error: error,
+              stackTrace: stackTrace,
+            );
+          },
+        ),
+      );
     });
   }
 
@@ -2311,6 +2407,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
 
     var changed = false;
     try {
+      detailResourceSwitchTrace(
+        'metadata.refresh.begin',
+        fields: <String, Object?>{
+          'sessionId': activeSessionId,
+          'target': _detailResourceTraceTarget(currentTarget),
+          'showFeedback': showFeedback,
+        },
+      );
       final settings = ref.read(detailEnrichmentSettingsProvider);
       final nextTarget = await _resolveAutomaticMetadataIfNeeded(
         settings: settings,
@@ -2335,7 +2439,24 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
             resolvedTarget: nextTarget,
             metadataRefreshStatus: DetailMetadataRefreshStatus.succeeded,
           );
-    } catch (error) {
+      detailResourceSwitchTrace(
+        'metadata.refresh.done',
+        fields: <String, Object?>{
+          'sessionId': activeSessionId,
+          'target': _detailResourceTraceTarget(currentTarget),
+          'changed': changed,
+        },
+      );
+    } catch (error, stackTrace) {
+      detailResourceSwitchTrace(
+        'metadata.refresh.error',
+        fields: <String, Object?>{
+          'sessionId': activeSessionId,
+          'target': _detailResourceTraceTarget(currentTarget),
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (_isSessionActive(activeSessionId)) {
         await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
               seedTarget: widget.target,

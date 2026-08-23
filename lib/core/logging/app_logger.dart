@@ -5,6 +5,14 @@ import 'package:starflow/core/logging/app_logger_impl_stub.dart'
 
 final AppLogService appLogger = impl.createAppLogService();
 
+void appLogTrace(
+  String category,
+  String message, {
+  Map<String, Object?> fields = const <String, Object?>{},
+}) {
+  appLogger.log(AppLogLevel.trace, category, message, fields: fields);
+}
+
 void appLogInfo(
   String category,
   String message, {
@@ -39,6 +47,22 @@ void appLogError(
 }) {
   appLogger.log(
     AppLogLevel.error,
+    category,
+    message,
+    fields: fields,
+    error: error,
+    stackTrace: stackTrace,
+  );
+}
+
+Future<void> appLogCritical(
+  String category,
+  String message, {
+  Map<String, Object?> fields = const <String, Object?>{},
+  Object? error,
+  StackTrace? stackTrace,
+}) {
+  return appLogger.logCritical(
     category,
     message,
     fields: fields,

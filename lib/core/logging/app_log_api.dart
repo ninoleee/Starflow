@@ -111,6 +111,14 @@ abstract class AppLogService {
     StackTrace? stackTrace,
   });
 
+  Future<void> logCritical(
+    String category,
+    String message, {
+    Map<String, Object?> fields = const <String, Object?>{},
+    Object? error,
+    StackTrace? stackTrace,
+  });
+
   Future<void> flush();
 
   Future<AppLogSummary> inspect();

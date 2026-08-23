@@ -39,7 +39,14 @@ class _IoAppLogService implements AppLogService {
     _enabled = enabled;
     _maxBytes = maxBytes < _minimumMaxBytes ? _minimumMaxBytes : maxBytes;
     _recordedLevels = Set<AppLogLevel>.from(recordedLevels);
-    return _enqueue((storage) => storage.enforceLimit(_maxBytes));
+    return _enqueue((storage) async {
+      await storage.writeNativeConfig(
+        enabled: _enabled,
+        maxBytes: _maxBytes,
+        recordedLevels: _recordedLevels,
+      );
+      await storage.enforceLimit(_maxBytes);
+    });
   }
 
   @override
@@ -67,6 +74,32 @@ class _IoAppLogService implements AppLogService {
       (storage) => storage.append(line, maxBytes: limit),
       swallowErrors: true,
     );
+  }
+
+  @override
+  Future<void> logCritical(
+    String category,
+    String message, {
+    Map<String, Object?> fields = const <String, Object?>{},
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    if (!_enabled || !_recordedLevels.contains(AppLogLevel.error)) {
+      return Future<void>.value();
+    }
+    final line = AppLogFormatter.format(
+      level: AppLogLevel.error,
+      category: category,
+      message: message,
+      fields: fields,
+      error: error,
+      stackTrace: stackTrace,
+    );
+    final limit = _maxBytes;
+    return _enqueue(
+      (storage) => storage.append(line, maxBytes: limit, flush: true),
+      swallowErrors: true,
+    ).catchError((Object _) {});
   }
 
   @override
@@ -126,10 +159,21 @@ class FileAppLogStorage {
   File get previousFile =>
       File(p.join(directory.path, 'starflow.previous.log'));
 
-  Future<void> append(String line, {required int maxBytes}) async {
+  File get nativeFile => File(p.join(directory.path, 'starflow-native.log'));
+
+  File get nativeConfigFile => File(
+        p.join(directory.parent.path, 'starflow-native-logging.json'),
+      );
+
+  Future<void> append(
+    String line, {
+    required int maxBytes,
+    bool flush = false,
+  }) async {
     await directory.create(recursive: true);
     final normalizedLimit = maxBytes < 2 ? 2 : maxBytes;
-    final activeLimit = normalizedLimit ~/ 2;
+    final nativeReservedBytes = normalizedLimit ~/ 5;
+    final activeLimit = (normalizedLimit - nativeReservedBytes) ~/ 2;
     var bytes = utf8.encode(line);
     if (bytes.length > activeLimit) {
       bytes = bytes.sublist(bytes.length - activeLimit);
@@ -141,8 +185,27 @@ class FileAppLogStorage {
       await activeFile.rename(previousFile.path);
       await _trimFileToLastBytes(previousFile, activeLimit);
     }
-    await activeFile.writeAsBytes(bytes, mode: FileMode.append, flush: false);
+    await activeFile.writeAsBytes(bytes, mode: FileMode.append, flush: flush);
     await _trimFileToLastBytes(activeFile, activeLimit);
+  }
+
+  Future<void> writeNativeConfig({
+    required bool enabled,
+    required int maxBytes,
+    required Set<AppLogLevel> recordedLevels,
+  }) async {
+    await nativeConfigFile.parent.create(recursive: true);
+    await nativeConfigFile.writeAsString(
+      jsonEncode(<String, Object?>{
+        'enabled': enabled,
+        'maxBytes': maxBytes,
+        'recordedLevels': AppLogLevel.values
+            .where(recordedLevels.contains)
+            .map((level) => level.name)
+            .toList(growable: false),
+      }),
+      flush: true,
+    );
   }
 
   Future<void> enforceLimit(int maxBytes) async {
@@ -150,7 +213,9 @@ class FileAppLogStorage {
       return;
     }
     final normalizedLimit = maxBytes < 2 ? 2 : maxBytes;
-    final perFileLimit = normalizedLimit ~/ 2;
+    final nativeLimit = normalizedLimit ~/ 5;
+    final perFileLimit = (normalizedLimit - nativeLimit) ~/ 2;
+    await _trimFileToLastBytes(nativeFile, nativeLimit);
     await _trimFileToLastBytes(previousFile, perFileLimit);
     await _trimFileToLastBytes(activeFile, perFileLimit);
   }
@@ -166,7 +231,7 @@ class FileAppLogStorage {
     }
     var fileCount = 0;
     var totalBytes = 0;
-    for (final file in <File>[previousFile, activeFile]) {
+    for (final file in <File>[nativeFile, previousFile, activeFile]) {
       if (await file.exists()) {
         fileCount += 1;
         totalBytes += await file.length();
@@ -185,7 +250,7 @@ class FileAppLogStorage {
       return const <AppLogEntry>[];
     }
     final entries = <AppLogEntry>[];
-    for (final file in <File>[previousFile, activeFile]) {
+    for (final file in <File>[nativeFile, previousFile, activeFile]) {
       if (!await file.exists()) {
         continue;
       }
@@ -200,6 +265,7 @@ class FileAppLogStorage {
         }
       }
     }
+    entries.sort((left, right) => left.timestamp.compareTo(right.timestamp));
     if (entries.length <= limit) {
       return entries;
     }
@@ -212,7 +278,7 @@ class FileAppLogStorage {
     }
     final bytes = <int>[];
     var fileCount = 0;
-    for (final file in <File>[previousFile, activeFile]) {
+    for (final file in <File>[nativeFile, previousFile, activeFile]) {
       if (!await file.exists()) {
         continue;
       }

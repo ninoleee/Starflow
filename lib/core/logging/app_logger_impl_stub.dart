@@ -43,6 +43,15 @@ class _StubAppLogService implements AppLogService {
   }) {}
 
   @override
+  Future<void> logCritical(
+    String category,
+    String message, {
+    Map<String, Object?> fields = const <String, Object?>{},
+    Object? error,
+    StackTrace? stackTrace,
+  }) async {}
+
+  @override
   Future<void> flush() async {}
 
   @override

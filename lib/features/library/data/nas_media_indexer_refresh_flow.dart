@@ -590,6 +590,17 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       return;
     }
     final taskKey = _buildRefreshTaskKey(source, scopedCollections);
+    final stopwatch = Stopwatch()..start();
+    appLogInfo(
+      'library.index',
+      'Media index refresh started',
+      fields: <String, Object?>{
+        'sourceId': normalizedSourceId,
+        'sourceKind': source.kind.name,
+        'forceFullRescan': forceFullRescan,
+        'scopeCount': scopedCollections?.length ?? 0,
+      },
+    );
     final existingActiveTask = _activeRefreshTasks[taskKey];
     if (existingActiveTask != null) {
       if (!forceFullRescan ||
@@ -637,6 +648,16 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
           controller: controller,
         );
         controller.throwIfCancelled();
+        appLogInfo(
+          'library.index',
+          'Primary media indexing completed',
+          fields: <String, Object?>{
+            'sourceId': normalizedSourceId,
+            'forceFullRescan': forceFullRescan,
+            'enrichmentCandidateCount': phaseResult.enrichmentCandidates.length,
+            'durationMs': stopwatch.elapsedMilliseconds,
+          },
+        );
         if (shouldStageMetadata) {
           if (phaseResult.enrichmentCandidates.isEmpty) {
             _clearProgressSafely(normalizedSourceId);
@@ -653,12 +674,34 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
           }
         }
       } on _RefreshCancelledException {
+        appLogInfo(
+          'library.index',
+          'Media index refresh cancelled',
+          fields: <String, Object?>{
+            'sourceId': normalizedSourceId,
+            'forceFullRescan': forceFullRescan,
+            'durationMs': stopwatch.elapsedMilliseconds,
+          },
+        );
         _clearProgressSafely(normalizedSourceId);
       } catch (error, stackTrace) {
         _clearProgressSafely(normalizedSourceId);
         if (_isProviderContainerDisposedError(error)) {
           return;
         }
+
+        appLogError(
+          'library.index',
+          'Media index refresh failed',
+          fields: <String, Object?>{
+            'sourceId': normalizedSourceId,
+            'sourceKind': source.kind.name,
+            'forceFullRescan': forceFullRescan,
+            'durationMs': stopwatch.elapsedMilliseconds,
+          },
+          error: error,
+          stackTrace: stackTrace,
+        );
 
         Error.throwWithStackTrace(error, stackTrace);
       } finally {
@@ -1083,15 +1126,37 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
                   : '后台补全'),
           controller: controller,
         );
+        appLogInfo(
+          'library.index',
+          'Background metadata enrichment completed',
+          fields: <String, Object?>{
+            'sourceId': source.id,
+            'itemCount': enrichmentCandidates.length,
+            'sidecarMetadata': includeSidecarMetadata,
+            'onlineMetadata': includeOnlineMetadata,
+          },
+        );
       } on _RefreshCancelledException {
         _clearProgressSafely(source.id);
-      } catch (error) {
+      } catch (error, stackTrace) {
         if (_isProviderContainerDisposedError(error)) {
           _clearProgressSafely(source.id);
           return;
         }
 
         _clearProgressSafely(source.id);
+        appLogWarning(
+          'library.index',
+          'Background metadata enrichment failed',
+          fields: <String, Object?>{
+            'sourceId': source.id,
+            'itemCount': enrichmentCandidates.length,
+            'sidecarMetadata': includeSidecarMetadata,
+            'onlineMetadata': includeOnlineMetadata,
+          },
+          error: error,
+          stackTrace: stackTrace,
+        );
       } finally {
         _backgroundEnrichmentTasks.remove(taskKey);
       }

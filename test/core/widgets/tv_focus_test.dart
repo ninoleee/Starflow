@@ -10,6 +10,36 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  testWidgets('StarflowChipButton keeps unified mobile geometry and selection',
+      (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => false),
+        ],
+        child: MaterialApp(
+          theme: ThemeData(platform: TargetPlatform.iOS),
+          home: Scaffold(
+            body: Center(
+              child: StarflowChipButton(
+                key: const ValueKey<String>('unified-chip'),
+                label: '媒体库',
+                selected: true,
+                onPressed: () {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      tester.getSize(find.byKey(const ValueKey<String>('unified-chip'))).height,
+      50,
+    );
+    expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
+  });
+
   testWidgets('StarflowButton reports TV focus', (tester) async {
     final focusNode = FocusNode(debugLabel: 'test-starflow-button');
     var focusedCount = 0;

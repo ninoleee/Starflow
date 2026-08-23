@@ -110,4 +110,71 @@ void main() {
     expect(
         String.fromCharCodes(exported.bytes), 'previous-entry\nactive-entry\n');
   });
+
+  test('file log storage merges native entries in timestamp order', () async {
+    final temporaryDirectory = await Directory.systemTemp.createTemp(
+      'starflow-native-log-read-test-',
+    );
+    addTearDown(() async {
+      if (await temporaryDirectory.exists()) {
+        await temporaryDirectory.delete(recursive: true);
+      }
+    });
+    final storage = FileAppLogStorage(temporaryDirectory);
+
+    await storage.nativeFile.writeAsString(
+      AppLogFormatter.format(
+        level: AppLogLevel.error,
+        category: 'native.uncaught',
+        message: 'native-crash',
+        timestamp: DateTime.utc(2026, 8, 23, 9),
+      ),
+    );
+    await storage.activeFile.writeAsString(
+      AppLogFormatter.format(
+        level: AppLogLevel.info,
+        category: 'app.lifecycle',
+        message: 'next-start',
+        timestamp: DateTime.utc(2026, 8, 23, 10),
+      ),
+    );
+
+    final summary = await storage.inspect();
+    final entries = await storage.read();
+    expect(summary.fileCount, 2);
+    expect(entries.map((entry) => entry.message), [
+      'native-crash',
+      'next-start',
+    ]);
+  });
+
+  test('native logging configuration survives clearing log files', () async {
+    final temporaryDirectory = await Directory.systemTemp.createTemp(
+      'starflow-native-log-config-test-',
+    );
+    addTearDown(() async {
+      if (await temporaryDirectory.exists()) {
+        await temporaryDirectory.delete(recursive: true);
+      }
+    });
+    final logsDirectory = Directory('${temporaryDirectory.path}/logs');
+    final storage = FileAppLogStorage(logsDirectory);
+
+    await storage.writeNativeConfig(
+      enabled: true,
+      maxBytes: 12 * 1024 * 1024,
+      recordedLevels: const <AppLogLevel>{
+        AppLogLevel.warning,
+        AppLogLevel.error,
+      },
+    );
+    await logsDirectory.create(recursive: true);
+    await storage.nativeFile.writeAsString('native-entry\n');
+    await storage.clear();
+
+    expect(await storage.nativeConfigFile.exists(), isTrue);
+    expect(await storage.nativeConfigFile.readAsString(), contains('warning'));
+    expect(await storage.nativeConfigFile.readAsString(), contains('error'));
+    expect(await logsDirectory.exists(), isFalse);
+  });
 }

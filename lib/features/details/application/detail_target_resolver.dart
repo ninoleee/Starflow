@@ -116,8 +116,14 @@ class DetailTargetResolver {
             'ratings=${updatedTarget.ratingLabels.join(' | ')}',
       );
       return updatedTarget;
-    } catch (_) {
-      DebugTraceOnce.logMetadata(traceKey, 'playback-resolve', 'failed');
+    } catch (error, stackTrace) {
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'playback-resolve',
+        'failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
       await _persistResolvedTarget(target, nextTarget);
       return nextTarget;
     }
@@ -212,8 +218,14 @@ class DetailTargetResolver {
         seedTarget: seed,
         resolvedTarget: resolved,
       );
-    } catch (_) {
-      // ignore
+    } catch (error, stackTrace) {
+      DebugTraceOnce.logMetadata(
+        _detailTraceKey(seed),
+        'cache-save',
+        'failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
   }
 
@@ -437,8 +449,14 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
       } else {
         DebugTraceOnce.logMetadata(traceKey, 'wmdb', 'no match');
       }
-    } catch (_) {
-      DebugTraceOnce.logMetadata(traceKey, 'wmdb', 'failed');
+    } catch (error, stackTrace) {
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'wmdb',
+        'failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
     metadataNeeds = _resolveAutomaticMetadataNeeds(
       target: nextTarget,
@@ -531,8 +549,14 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
       } else {
         DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'no match');
       }
-    } catch (_) {
-      DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'failed');
+    } catch (error, stackTrace) {
+      DebugTraceOnce.logMetadata(
+        traceKey,
+        'tmdb',
+        'failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
   }
   return normalizeRatingLabelsInTarget(nextTarget);
