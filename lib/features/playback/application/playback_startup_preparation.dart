@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+import 'package:starflow/features/playback/application/playback_engine_support.dart';
 import 'package:starflow/features/playback/application/playback_startup_routing.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
@@ -10,12 +12,14 @@ class PlaybackStartupPreparationInput {
     required this.settings,
     required this.isTelevision,
     required this.isWeb,
+    this.platform = TargetPlatform.android,
   });
 
   final PlaybackTarget resolvedTarget;
   final AppSettings settings;
   final bool isTelevision;
   final bool isWeb;
+  final TargetPlatform platform;
 }
 
 class PlaybackStartupPreparationResult {
@@ -47,7 +51,11 @@ Future<PlaybackStartupPreparationResult> preparePlaybackStartup(
     input.resolvedTarget,
   );
   final startupRouteInput = PlaybackStartupRouteInput(
-    playbackEngine: input.settings.playbackEngine,
+    playbackEngine: effectivePlaybackEngine(
+      selected: input.settings.playbackEngine,
+      isWeb: input.isWeb,
+      platform: input.platform,
+    ),
     performanceAutoDowngradeHeavyPlaybackEnabled:
         input.settings.performanceAutoDowngradeHeavyPlaybackEnabled,
     isTelevision: input.isTelevision,

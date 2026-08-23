@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/no_animation_page_route.dart';
+import 'package:starflow/features/playback/application/playback_engine_support.dart';
 import 'package:starflow/features/playback/application/subtitle_language_preferences.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -124,7 +125,11 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     _draftOpensubtitlesEnabled = widget.initialOpensubtitlesEnabled;
     _draftSubdlEnabled = widget.initialSubdlEnabled;
     _draftBackgroundPlaybackEnabled = widget.initialBackgroundPlaybackEnabled;
-    _draftPlaybackEngine = widget.initialPlaybackEngine;
+    _draftPlaybackEngine = effectivePlaybackEngine(
+      selected: widget.initialPlaybackEngine,
+      isWeb: kIsWeb,
+      platform: defaultTargetPlatform,
+    );
     _draftPlaybackDecodeMode = widget.initialPlaybackDecodeMode;
     _initialMpvDoubleTapToSeekEnabled =
         widget.initialPlaybackMpvDoubleTapToSeekEnabled;
@@ -506,7 +511,10 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     final selection = await showSettingsOptionDialog<PlaybackEngine>(
       context: context,
       title: '选择播放器内核',
-      options: PlaybackEngine.values,
+      options: supportedPlaybackEngines(
+        isWeb: kIsWeb,
+        platform: defaultTargetPlatform,
+      ),
       currentValue: _draftPlaybackEngine,
       labelBuilder: (engine) => engine.label,
     );
@@ -572,9 +580,9 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
       buffer.write(' 当前选择的是外部系统播放器，此设置不会生效。');
     } else if (_draftPlaybackEngine == PlaybackEngine.nativeContainer) {
       if (defaultTargetPlatform == TargetPlatform.iOS) {
-        buffer.write(' iOS 原生容器页走系统 AVPlayer 解码链路，此设置当前不会生效。');
+        buffer.write(' iOS 原生播放器走系统 AVPlayer 解码链路，此设置当前不会生效。');
       } else {
-        buffer.write(' 作用于 App 内原生播放器容器页。');
+        buffer.write(' 作用于 Android 原生播放器。');
       }
     } else {
       buffer.write(' 作用于内置 MPV。');

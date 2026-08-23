@@ -2,9 +2,6 @@ import 'package:starflow/features/playback/application/playback_startup_routing.
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 typedef PlaybackStartupLaunch = Future<void> Function(PlaybackTarget target);
-typedef NativePlaybackStartupLaunch = Future<bool> Function(
-  PlaybackTarget target,
-);
 typedef PlaybackStartupPerformanceFallback = Future<bool> Function(
   PlaybackTarget target,
 );
@@ -17,7 +14,7 @@ class PlaybackStartupExecutor {
   });
 
   final PlaybackStartupLaunch launchSystemPlayer;
-  final NativePlaybackStartupLaunch launchNativeContainer;
+  final PlaybackStartupLaunch launchNativeContainer;
   final PlaybackStartupPerformanceFallback launchPerformanceFallback;
 
   /// Returns `true` if caller should continue (`openEmbeddedMpv` path).
@@ -30,7 +27,8 @@ class PlaybackStartupExecutor {
         await launchSystemPlayer(target);
         return false;
       case PlaybackStartupRouteAction.launchNativeContainer:
-        return !(await launchNativeContainer(target));
+        await launchNativeContainer(target);
+        return false;
       case PlaybackStartupRouteAction.launchPerformanceFallback:
         return !(await launchPerformanceFallback(target));
       case PlaybackStartupRouteAction.openEmbeddedMpv:

@@ -130,8 +130,7 @@ void main() {
       expect(route, PlaybackStartupRouteAction.launchNativeContainer);
     });
 
-    test('uses embedded mpv for ISO even when native container is selected',
-        () {
+    test('honors native container selection for ISO', () {
       final route = decidePlaybackStartupRoute(
         PlaybackStartupRouteInput(
           playbackEngine: PlaybackEngine.nativeContainer,
@@ -145,10 +144,10 @@ void main() {
         ),
       );
 
-      expect(route, PlaybackStartupRouteAction.openEmbeddedMpv);
+      expect(route, PlaybackStartupRouteAction.launchNativeContainer);
     });
 
-    test('uses embedded mpv for unsupported AVI container', () {
+    test('honors native container selection for AVI', () {
       final route = decidePlaybackStartupRoute(
         PlaybackStartupRouteInput(
           playbackEngine: PlaybackEngine.nativeContainer,
@@ -159,7 +158,7 @@ void main() {
         ),
       );
 
-      expect(route, PlaybackStartupRouteAction.openEmbeddedMpv);
+      expect(route, PlaybackStartupRouteAction.launchNativeContainer);
     });
 
     test('routes to performance fallback for heavy 4k tv target', () {

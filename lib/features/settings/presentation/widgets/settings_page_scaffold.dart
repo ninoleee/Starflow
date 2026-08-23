@@ -22,6 +22,7 @@ class SettingsPageScaffold extends StatelessWidget {
     this.onBack,
     this.trailing,
     this.listPadding,
+    this.primary = true,
     this.bottomSpacing = kBottomReservedSpacing,
     this.keyboardDismissBehavior = ScrollViewKeyboardDismissBehavior.onDrag,
   });
@@ -30,6 +31,7 @@ class SettingsPageScaffold extends StatelessWidget {
   final VoidCallback? onBack;
   final Widget? trailing;
   final EdgeInsets? listPadding;
+  final bool primary;
   final double bottomSpacing;
   final ScrollViewKeyboardDismissBehavior keyboardDismissBehavior;
 
@@ -42,6 +44,7 @@ class SettingsPageScaffold extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             ListView(
+              primary: primary,
               padding: listPadding ?? overlayToolbarPagePadding(context),
               keyboardDismissBehavior: keyboardDismissBehavior,
               children: [

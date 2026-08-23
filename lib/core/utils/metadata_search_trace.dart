@@ -1,10 +1,30 @@
-bool get metadataSearchTraceEnabled => false;
+import 'package:starflow/core/logging/app_log_api.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 
-void setMetadataSearchTraceEnabled(bool enabled) {}
+bool _metadataSearchTraceCategoryEnabled = true;
+
+bool get metadataSearchTraceEnabled =>
+    _metadataSearchTraceCategoryEnabled && appLogger.isEnabled;
+
+void setMetadataSearchTraceEnabled(bool enabled) {
+  _metadataSearchTraceCategoryEnabled = enabled;
+}
 
 void metadataSearchTrace(
   String stage, {
   Map<String, Object?> fields = const <String, Object?>{},
   Object? error,
   StackTrace? stackTrace,
-}) {}
+}) {
+  if (!metadataSearchTraceEnabled) {
+    return;
+  }
+  appLogger.log(
+    error == null ? AppLogLevel.trace : AppLogLevel.error,
+    'metadata',
+    stage,
+    fields: fields,
+    error: error,
+    stackTrace: stackTrace,
+  );
+}

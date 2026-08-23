@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starflow/core/logging/app_log_api.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
@@ -6,6 +7,51 @@ import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  test('app settings persist local logging preferences', () {
+    final settings = AppSettings.fromJson(const <String, dynamic>{
+      'localLoggingEnabled': false,
+      'localLogMaxSizeMb': 50,
+      'localLogRecordedLevels': ['info', 'error'],
+      'localLogVisibleLevels': ['warning', 'error'],
+    });
+
+    expect(settings.localLoggingEnabled, isFalse);
+    expect(settings.localLogMaxSizeMb, 50);
+    expect(
+      settings.localLogRecordedLevels,
+      <AppLogLevel>{AppLogLevel.info, AppLogLevel.error},
+    );
+    expect(
+      settings.localLogVisibleLevels,
+      <AppLogLevel>{AppLogLevel.warning, AppLogLevel.error},
+    );
+    expect(settings.toJson()['localLoggingEnabled'], isFalse);
+    expect(settings.toJson()['localLogMaxSizeMb'], 50);
+    expect(settings.toJson()['localLogRecordedLevels'], ['info', 'error']);
+    expect(
+      settings.toJson()['localLogVisibleLevels'],
+      ['warning', 'error'],
+    );
+
+    final defaults = AppSettings.fromJson(const <String, dynamic>{});
+    expect(defaults.localLoggingEnabled, isTrue);
+    expect(defaults.localLogMaxSizeMb, kLocalLogMaxSizeMbDefault);
+    expect(defaults.localLogRecordedLevels, kDefaultLocalLogRecordedLevels);
+    expect(defaults.localLogVisibleLevels, kDefaultLocalLogVisibleLevels);
+
+    final invalid = AppSettings.fromJson(const <String, dynamic>{
+      'localLogMaxSizeMb': 999,
+    });
+    expect(invalid.localLogMaxSizeMb, kLocalLogMaxSizeMbDefault);
+
+    final noLevels = AppSettings.fromJson(const <String, dynamic>{
+      'localLogRecordedLevels': <String>[],
+      'localLogVisibleLevels': <String>[],
+    });
+    expect(noLevels.localLogRecordedLevels, isEmpty);
+    expect(noLevels.localLogVisibleLevels, isEmpty);
+  });
+
   test('app settings persist home hero display mode, style and switches', () {
     final settings = AppSettings.fromJson({
       'homeHeroDisplayMode': 'borderless',

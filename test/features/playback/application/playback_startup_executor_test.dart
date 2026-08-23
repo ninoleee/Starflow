@@ -13,10 +13,10 @@ void main() {
     sourceKind: MediaSourceKind.emby,
   );
 
-  test('native launch failure continues with embedded MPV', () async {
+  test('native flow exit does not continue with embedded MPV', () async {
     final executor = PlaybackStartupExecutor(
       launchSystemPlayer: (_) async {},
-      launchNativeContainer: (_) async => false,
+      launchNativeContainer: (_) async {},
       launchPerformanceFallback: (_) async => false,
     );
 
@@ -25,14 +25,14 @@ void main() {
         PlaybackStartupRouteAction.launchNativeContainer,
         target,
       ),
-      isTrue,
+      isFalse,
     );
   });
 
   test('native first-frame success closes embedded startup path', () async {
     final executor = PlaybackStartupExecutor(
       launchSystemPlayer: (_) async {},
-      launchNativeContainer: (_) async => true,
+      launchNativeContainer: (_) async {},
       launchPerformanceFallback: (_) async => false,
     );
 

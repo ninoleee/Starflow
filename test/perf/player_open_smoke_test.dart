@@ -107,7 +107,6 @@ void main() {
       launchSystemPlayer: (_) async => actions.add('launch-system'),
       launchNativeContainer: (_) async {
         actions.add('launch-native');
-        return true;
       },
       launchPerformanceFallback: (_) async {
         actions.add('launch-performance');

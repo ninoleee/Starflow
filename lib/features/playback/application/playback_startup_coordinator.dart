@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:riverpod/misc.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/playback/application/playback_engine_router.dart';
@@ -39,6 +40,7 @@ class PlaybackStartupCoordinator {
         settings: settings,
         isTelevision: isTelevision,
         isWeb: isWeb,
+        platform: defaultTargetPlatform,
       ),
       playbackMemoryRepository: read(playbackMemoryRepositoryProvider),
     );

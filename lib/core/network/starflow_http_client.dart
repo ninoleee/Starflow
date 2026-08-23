@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:starflow/core/logging/app_logger.dart';
 
 final starflowHttpClientProvider = Provider<http.Client>((ref) {
   final client = StarflowHttpClient(http.Client());
@@ -30,12 +31,40 @@ class StarflowHttpClient extends http.BaseClient {
   static bool get _proxyEnabled => kIsWeb && _effectiveProxyBase.isNotEmpty;
 
   @override
-  Future<http.StreamedResponse> send(http.BaseRequest request) {
-    if (!_proxyEnabled) {
-      return _inner.send(request);
-    }
-
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
     final originalUrl = request.url;
+    try {
+      final response = _proxyEnabled
+          ? await _sendProxied(request, originalUrl)
+          : await _inner.send(request);
+      if (response.statusCode >= 400) {
+        appLogWarning(
+          'network.http',
+          'HTTP request returned an error response',
+          fields: _requestLogFields(
+            request,
+            originalUrl,
+            statusCode: response.statusCode,
+          ),
+        );
+      }
+      return response;
+    } catch (error, stackTrace) {
+      appLogError(
+        'network.http',
+        'HTTP request failed',
+        fields: _requestLogFields(request, originalUrl),
+        error: error,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    }
+  }
+
+  Future<http.StreamedResponse> _sendProxied(
+    http.BaseRequest request,
+    Uri originalUrl,
+  ) {
     final proxiedUrl = buildStarflowWebProxyUri(
       originalUrl.toString(),
       headers: request.headers,
@@ -66,6 +95,21 @@ class StarflowHttpClient extends http.BaseClient {
 
     unawaited(request.finalize().pipe(proxied.sink));
     return _inner.send(proxied);
+  }
+
+  Map<String, Object?> _requestLogFields(
+    http.BaseRequest request,
+    Uri originalUrl, {
+    int? statusCode,
+  }) {
+    return <String, Object?>{
+      'method': request.method,
+      'scheme': originalUrl.scheme,
+      'host': originalUrl.host,
+      'port': originalUrl.hasPort ? originalUrl.port : null,
+      'path': originalUrl.path,
+      if (statusCode != null) 'statusCode': statusCode,
+    };
   }
 
   @override

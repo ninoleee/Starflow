@@ -398,39 +398,42 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       filter: activeFilter,
     );
 
-    return TvPageFocusScope(
-      controller: _tvFocusMemoryController,
-      scopeId: 'library',
-      isTelevision: isTelevision,
-      child: Scaffold(
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            AppPageBackground(
-              contentPadding: appPageContentPadding(
-                context,
-                includeBottomNavigationBar: true,
+    return AppPrimaryScrollController(
+      controller: _scrollController,
+      child: TvPageFocusScope(
+        controller: _tvFocusMemoryController,
+        scopeId: 'library',
+        isTelevision: isTelevision,
+        child: Scaffold(
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              AppPageBackground(
+                contentPadding: appPageContentPadding(
+                  context,
+                  includeBottomNavigationBar: true,
+                ),
+                child: _buildScrollContent(
+                  context: context,
+                  isTelevision: isTelevision,
+                  mediaSources: mediaSources,
+                  activeFilter: activeFilter,
+                  availableFilters: availableFilters,
+                  refreshScope: refreshScope,
+                  collectionsAsync: collectionsAsync,
+                  displayAsync: displayAsync,
+                ),
               ),
-              child: _buildScrollContent(
-                context: context,
-                isTelevision: isTelevision,
-                mediaSources: mediaSources,
-                activeFilter: activeFilter,
-                availableFilters: availableFilters,
-                refreshScope: refreshScope,
-                collectionsAsync: collectionsAsync,
-                displayAsync: displayAsync,
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: OverlayToolbar(
+                  onBack: _handleBack,
+                ),
               ),
-            ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: OverlayToolbar(
-                onBack: _handleBack,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

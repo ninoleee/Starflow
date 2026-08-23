@@ -1,3 +1,4 @@
+import 'package:starflow/core/logging/app_log_api.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
@@ -150,9 +151,9 @@ extension PlaybackEngineX on PlaybackEngine {
       case PlaybackEngine.embeddedMpv:
         return '内置 MPV';
       case PlaybackEngine.nativeContainer:
-        return 'App 内原生播放器';
+        return '原生播放器（实验性）';
       case PlaybackEngine.systemPlayer:
-        return '外部系统播放器';
+        return '外部播放器';
     }
   }
 
@@ -161,7 +162,7 @@ extension PlaybackEngineX on PlaybackEngine {
       case PlaybackEngine.embeddedMpv:
         return '使用应用内置播放器，支持字幕、音轨和倍速控制。';
       case PlaybackEngine.nativeContainer:
-        return 'Android / iOS 上使用 App 内原生播放器容器页，优先追求播放性能，部分高级播放设置不可用。';
+        return 'Android / iOS 上使用系统原生播放内核，兼容性取决于终端；失败时可重试或退出，不会自动切换 MPV。';
       case PlaybackEngine.systemPlayer:
         return '交给系统默认的视频播放器处理。';
     }
@@ -259,6 +260,33 @@ const double kPlaybackSubtitleScaleDefault = 32.0;
 const int kSubtitleSearchMaxValidatedCandidatesMin = 1;
 const int kSubtitleSearchMaxValidatedCandidatesMax = 20;
 const int kSubtitleSearchMaxValidatedCandidatesDefault = 5;
+const int kLocalLogMaxSizeMbDefault = 20;
+const List<int> kLocalLogMaxSizeOptionsMb = <int>[5, 10, 20, 50, 100];
+const Set<AppLogLevel> kDefaultLocalLogRecordedLevels =
+    kDefaultRecordedAppLogLevels;
+const Set<AppLogLevel> kDefaultLocalLogVisibleLevels =
+    kDefaultRecordedAppLogLevels;
+
+int normalizeLocalLogMaxSizeMb(int value) {
+  if (kLocalLogMaxSizeOptionsMb.contains(value)) {
+    return value;
+  }
+  return kLocalLogMaxSizeMbDefault;
+}
+
+Set<AppLogLevel> parseLocalLogLevels(
+  Object? value, {
+  required Set<AppLogLevel> fallback,
+}) {
+  if (value is! List) {
+    return Set<AppLogLevel>.from(fallback);
+  }
+  final names = value.whereType<String>().toSet();
+  return <AppLogLevel>{
+    for (final level in AppLogLevel.values)
+      if (names.contains(level.name)) level,
+  };
+}
 
 double clampPlaybackSubtitleScale(double value) {
   final clamped = value.clamp(
@@ -832,6 +860,10 @@ class AppSettings {
     this.playbackMpvSwipeToSeekEnabled = true,
     this.playbackMpvLongPressSpeedBoostEnabled = true,
     this.playbackMpvStallAutoRecoveryEnabled = true,
+    this.localLoggingEnabled = true,
+    this.localLogMaxSizeMb = kLocalLogMaxSizeMbDefault,
+    this.localLogRecordedLevels = kDefaultLocalLogRecordedLevels,
+    this.localLogVisibleLevels = kDefaultLocalLogVisibleLevels,
   });
 
   final List<MediaSourceConfig> mediaSources;
@@ -892,6 +924,10 @@ class AppSettings {
   final bool playbackMpvSwipeToSeekEnabled;
   final bool playbackMpvLongPressSpeedBoostEnabled;
   final bool playbackMpvStallAutoRecoveryEnabled;
+  final bool localLoggingEnabled;
+  final int localLogMaxSizeMb;
+  final Set<AppLogLevel> localLogRecordedLevels;
+  final Set<AppLogLevel> localLogVisibleLevels;
 
   AppSettings copyWith({
     List<MediaSourceConfig>? mediaSources,
@@ -951,6 +987,10 @@ class AppSettings {
     bool? playbackMpvSwipeToSeekEnabled,
     bool? playbackMpvLongPressSpeedBoostEnabled,
     bool? playbackMpvStallAutoRecoveryEnabled,
+    bool? localLoggingEnabled,
+    int? localLogMaxSizeMb,
+    Set<AppLogLevel>? localLogRecordedLevels,
+    Set<AppLogLevel>? localLogVisibleLevels,
   }) {
     return AppSettings(
       mediaSources: mediaSources ?? this.mediaSources,
@@ -1069,6 +1109,15 @@ class AppSettings {
       playbackMpvStallAutoRecoveryEnabled:
           playbackMpvStallAutoRecoveryEnabled ??
               this.playbackMpvStallAutoRecoveryEnabled,
+      localLoggingEnabled:
+          localLoggingEnabled ?? this.localLoggingEnabled,
+      localLogMaxSizeMb: localLogMaxSizeMb == null
+          ? this.localLogMaxSizeMb
+          : normalizeLocalLogMaxSizeMb(localLogMaxSizeMb),
+      localLogRecordedLevels:
+          localLogRecordedLevels ?? this.localLogRecordedLevels,
+      localLogVisibleLevels:
+          localLogVisibleLevels ?? this.localLogVisibleLevels,
     );
   }
 
@@ -1142,6 +1191,16 @@ class AppSettings {
           playbackMpvLongPressSpeedBoostEnabled,
       'playbackMpvStallAutoRecoveryEnabled':
           playbackMpvStallAutoRecoveryEnabled,
+      'localLoggingEnabled': localLoggingEnabled,
+      'localLogMaxSizeMb': localLogMaxSizeMb,
+      'localLogRecordedLevels': AppLogLevel.values
+          .where(localLogRecordedLevels.contains)
+          .map((level) => level.name)
+          .toList(growable: false),
+      'localLogVisibleLevels': AppLogLevel.values
+          .where(localLogVisibleLevels.contains)
+          .map((level) => level.name)
+          .toList(growable: false),
     };
   }
 
@@ -1300,6 +1359,19 @@ class AppSettings {
           json['playbackMpvLongPressSpeedBoostEnabled'] as bool? ?? true,
       playbackMpvStallAutoRecoveryEnabled:
           json['playbackMpvStallAutoRecoveryEnabled'] as bool? ?? true,
+      localLoggingEnabled: json['localLoggingEnabled'] as bool? ?? true,
+      localLogMaxSizeMb: normalizeLocalLogMaxSizeMb(
+        (json['localLogMaxSizeMb'] as num?)?.toInt() ??
+            kLocalLogMaxSizeMbDefault,
+      ),
+      localLogRecordedLevels: parseLocalLogLevels(
+        json['localLogRecordedLevels'],
+        fallback: kDefaultLocalLogRecordedLevels,
+      ),
+      localLogVisibleLevels: parseLocalLogLevels(
+        json['localLogVisibleLevels'],
+        fallback: kDefaultLocalLogVisibleLevels,
+      ),
     );
   }
 }

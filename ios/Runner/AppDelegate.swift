@@ -124,6 +124,21 @@ import UIKit
           episodeQueueJson: episodeQueueJson,
           result: result
         )
+      case "launchSystemVideoPlayer":
+        let arguments = call.arguments as? [String: Any]
+        let rawUrl =
+          (arguments?["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title =
+          (arguments?["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let headersJson =
+          (arguments?["headersJson"] as? String)?
+          .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self?.launchExternalVideoPlayer(
+          rawUrl: rawUrl,
+          title: title,
+          headersJson: headersJson,
+          result: result
+        )
       case "exportDocument":
         let arguments = call.arguments as? [String: Any]
         let sourcePath =
@@ -340,6 +355,92 @@ import UIKit
         result(true)
       }
     }
+  }
+
+  private func launchExternalVideoPlayer(
+    rawUrl: String,
+    title: String,
+    headersJson: String,
+    result: @escaping FlutterResult
+  ) {
+    guard !rawUrl.isEmpty,
+      let streamUrl = URL(string: rawUrl),
+      streamUrl.scheme != nil
+    else {
+      result(false)
+      return
+    }
+
+    let headers = decodeHeadersJson(headersJson)
+    let safeTitle = sanitizedPlaylistValue(title.isEmpty ? "Starflow" : title)
+    var lines = ["#EXTM3U", "#EXTINF:-1,\(safeTitle)"]
+    if !headers.isEmpty,
+      let headersData = try? JSONSerialization.data(withJSONObject: headers),
+      let headersValue = String(data: headersData, encoding: .utf8)
+    {
+      lines.append("#EXTHTTP:\(headersValue)")
+    }
+    for (key, value) in headers {
+      let normalizedKey = key.lowercased()
+      let safeValue = sanitizedPlaylistValue(value)
+      switch normalizedKey {
+      case "user-agent":
+        lines.append("#EXTVLCOPT:http-user-agent=\(safeValue)")
+      case "referer", "referrer":
+        lines.append("#EXTVLCOPT:http-referrer=\(safeValue)")
+      case "cookie":
+        lines.append("#EXTVLCOPT:http-cookie=\(safeValue)")
+      default:
+        break
+      }
+    }
+    lines.append(sanitizedPlaylistValue(streamUrl.absoluteString))
+    lines.append("")
+
+    let playlistUrl = FileManager.default.temporaryDirectory
+      .appendingPathComponent("starflow-\(UUID().uuidString)")
+      .appendingPathExtension("m3u")
+    do {
+      try lines.joined(separator: "\n").write(
+        to: playlistUrl,
+        atomically: true,
+        encoding: .utf8
+      )
+    } catch {
+      result(false)
+      return
+    }
+
+    DispatchQueue.main.async { [weak self] in
+      guard let self,
+        let presenter = self.resolveTopViewController()
+      else {
+        try? FileManager.default.removeItem(at: playlistUrl)
+        result(false)
+        return
+      }
+      let controller = UIActivityViewController(
+        activityItems: [playlistUrl],
+        applicationActivities: nil
+      )
+      controller.popoverPresentationController?.sourceView = presenter.view
+      controller.popoverPresentationController?.sourceRect = CGRect(
+        x: presenter.view.bounds.midX,
+        y: presenter.view.bounds.midY,
+        width: 1,
+        height: 1
+      )
+      controller.completionWithItemsHandler = { _, completed, _, _ in
+        try? FileManager.default.removeItem(at: playlistUrl)
+        result(completed)
+      }
+      presenter.present(controller, animated: true)
+    }
+  }
+
+  private func sanitizedPlaylistValue(_ raw: String) -> String {
+    raw.replacingOccurrences(of: "\r", with: " ")
+      .replacingOccurrences(of: "\n", with: " ")
   }
 
   private func decodeHeadersJson(_ raw: String) -> [String: String] {
@@ -570,17 +671,21 @@ private struct NativeEpisodeQueue {
 
 private final class NativePlaybackViewController: AVPlayerViewController {
   private static let persistThresholdMs: Int64 = 4_000
+  private static let playbackStartupTimeoutSeconds: TimeInterval = 30
 
   private let playbackStore: NativePlaybackMemoryStore
   private let isoFormatter = ISO8601DateFormatter()
   private var request: NativePlaybackRequest
   private var episodeQueue: NativeEpisodeQueue?
   private var startupGate: NativePlaybackStartupGate?
+  private var playbackStartupTimeoutWorkItem: DispatchWorkItem?
+  private var playbackFailureAlert: UIAlertController?
   private let stallRecovery = NativePlaybackStallRecovery()
   private let metricsTracker = NativePlaybackMetricsTracker()
   private var timeObserverToken: Any?
   private var endObserver: NSObjectProtocol?
   private var playbackStateObservation: NSKeyValueObservation?
+  private var playbackItemStatusObservation: NSKeyValueObservation?
   private var appObservers: [NSObjectProtocol] = []
   private var lastSavedPositionMs: Int64 = -1
   private var remoteCommandsInstalled = false
@@ -617,6 +722,13 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   override func viewWillDisappear(_ animated: Bool) {
     super.viewWillDisappear(animated)
     persistPlaybackProgress(force: true)
+  }
+
+  override func viewDidDisappear(_ animated: Bool) {
+    super.viewDidDisappear(animated)
+    if isBeingDismissed || presentingViewController == nil {
+      teardownPlayback()
+    }
   }
 
   private func configurePlayer() {
@@ -657,7 +769,9 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     installEndObserver(for: item)
     installTimeObserver(for: player)
     installPlaybackStateObserver(for: player)
+    installPlaybackItemStatusObserver(for: item)
     stallRecovery.start(player: player, item: item)
+    schedulePlaybackStartupTimeout()
 
     let startupGate = NativePlaybackStartupGate(
       player: player,
@@ -687,8 +801,8 @@ private final class NativePlaybackViewController: AVPlayerViewController {
       switch result {
       case .started:
         self.updateNowPlayingInfo()
-      case .failed:
-        self.updateNowPlayingInfo()
+      case .failed(let error):
+        self.showPlaybackFailure(error: error)
       case .cancelled:
         break
       }
@@ -1067,10 +1181,83 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     timeObserverToken = player.addPeriodicTimeObserver(
       forInterval: interval,
       queue: .main
-    ) { [weak self] _ in
+    ) { [weak self] time in
+      if time.seconds.isFinite && time.seconds > 0 {
+        self?.markPlaybackFirstFrameReady()
+      }
       self?.persistPlaybackProgress()
       self?.updateNowPlayingInfo()
     }
+  }
+
+  private func installPlaybackItemStatusObserver(for item: AVPlayerItem) {
+    playbackItemStatusObservation = item.observe(\.status, options: [.new]) {
+      [weak self] item, _ in
+      guard item.status == .failed else {
+        return
+      }
+      DispatchQueue.main.async {
+        self?.showPlaybackFailure(error: item.error)
+      }
+    }
+  }
+
+  private func schedulePlaybackStartupTimeout() {
+    playbackStartupTimeoutWorkItem?.cancel()
+    let work = DispatchWorkItem { [weak self] in
+      self?.showPlaybackFailure(
+        message: "30 秒内未显示视频画面，请检查网络或重试播放。"
+      )
+    }
+    playbackStartupTimeoutWorkItem = work
+    DispatchQueue.main.asyncAfter(
+      deadline: .now() + Self.playbackStartupTimeoutSeconds,
+      execute: work
+    )
+  }
+
+  private func markPlaybackFirstFrameReady() {
+    playbackStartupTimeoutWorkItem?.cancel()
+    playbackStartupTimeoutWorkItem = nil
+  }
+
+  private func showPlaybackFailure(error: Error? = nil, message: String? = nil) {
+    guard playbackFailureAlert == nil, viewIfLoaded?.window != nil else {
+      return
+    }
+    playbackStartupTimeoutWorkItem?.cancel()
+    playbackStartupTimeoutWorkItem = nil
+    let detail = message ?? (error?.localizedDescription.nonEmptyTrimmed)
+      ?? "当前终端无法解码此视频，请重试或退出。"
+
+    teardownPlayback()
+    player = nil
+
+    let alert = UIAlertController(
+      title: "播放失败",
+      message: detail,
+      preferredStyle: .alert
+    )
+    alert.addAction(
+      UIAlertAction(title: "重试", style: .default) { [weak self] _ in
+        guard let self else {
+          return
+        }
+        self.playbackFailureAlert = nil
+        self.configurePlayer()
+      }
+    )
+    alert.addAction(
+      UIAlertAction(title: "退出", style: .cancel) { [weak self] _ in
+        guard let self else {
+          return
+        }
+        self.playbackFailureAlert = nil
+        self.dismiss(animated: true)
+      }
+    )
+    playbackFailureAlert = alert
+    present(alert, animated: true)
   }
 
   private func installEndObserver(for item: AVPlayerItem) {
@@ -1099,9 +1286,12 @@ private final class NativePlaybackViewController: AVPlayerViewController {
 
     startupGate?.cancel()
     startupGate = nil
+    playbackStartupTimeoutWorkItem?.cancel()
+    playbackStartupTimeoutWorkItem = nil
     stallRecovery.stop()
     metricsTracker.detach()
     playbackStateObservation = nil
+    playbackItemStatusObservation = nil
 
     if let token = timeObserverToken,
       let currentPlayer = player

@@ -221,39 +221,42 @@ class _HomePageState extends ConsumerState<HomePage>
     final resolvedSections = resolvedSectionsState.sections;
     final hasPendingSections = resolvedSectionsState.hasPendingSections;
 
-    return TvPageFocusScope(
-      controller: _tvFocusMemoryController,
-      scopeId: 'home',
-      isTelevision: isTelevision,
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: enabledModules.isEmpty
-            ? const _HomeShell(
-                backgroundImageUrl: '',
-                backgroundImageHeaders: {},
-                child: _EmptyHomeState(),
-              )
-            : _buildLoadedHome(
-                context: context,
-                enabledModules: enabledModules,
-                resolvedSections: resolvedSections,
-                hasPendingSections: hasPendingSections,
-                preferredHeroSectionLoading: preferredHeroSectionLoading,
-                heroEnabled: heroModule?.enabled ?? false,
-                heroSourceModuleId: heroSourceModuleId,
-                heroLogoTitleEnabled: heroLogoTitleEnabled,
-                heroBackgroundEnabled: effectiveHeroBackgroundEnabled,
-                translucentEffectsEnabled: effectiveTranslucentEffectsEnabled,
-                staticHomeHeroEnabled: performanceStaticHomeHeroEnabled,
-                lightweightHomeHeroEnabled: lightweightHomeHeroEnabled,
-                simplifyHeroBackdrop: simplifyHeroBackdrop,
-                homeMetadataAutoRefreshRevision:
-                    homeMetadataAutoRefreshRevision,
-                homeExplicitRefreshRevision: homeExplicitRefreshRevision,
-                homeNavigationResetRevision: homeNavigationResetRevision,
-                isTelevision: isTelevision,
-                heroDisplayMode: heroDisplayMode,
-              ),
+    return AppPrimaryScrollController(
+      controller: _scrollController,
+      child: TvPageFocusScope(
+        controller: _tvFocusMemoryController,
+        scopeId: 'home',
+        isTelevision: isTelevision,
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: enabledModules.isEmpty
+              ? const _HomeShell(
+                  backgroundImageUrl: '',
+                  backgroundImageHeaders: {},
+                  child: _EmptyHomeState(),
+                )
+              : _buildLoadedHome(
+                  context: context,
+                  enabledModules: enabledModules,
+                  resolvedSections: resolvedSections,
+                  hasPendingSections: hasPendingSections,
+                  preferredHeroSectionLoading: preferredHeroSectionLoading,
+                  heroEnabled: heroModule?.enabled ?? false,
+                  heroSourceModuleId: heroSourceModuleId,
+                  heroLogoTitleEnabled: heroLogoTitleEnabled,
+                  heroBackgroundEnabled: effectiveHeroBackgroundEnabled,
+                  translucentEffectsEnabled: effectiveTranslucentEffectsEnabled,
+                  staticHomeHeroEnabled: performanceStaticHomeHeroEnabled,
+                  lightweightHomeHeroEnabled: lightweightHomeHeroEnabled,
+                  simplifyHeroBackdrop: simplifyHeroBackdrop,
+                  homeMetadataAutoRefreshRevision:
+                      homeMetadataAutoRefreshRevision,
+                  homeExplicitRefreshRevision: homeExplicitRefreshRevision,
+                  homeNavigationResetRevision: homeNavigationResetRevision,
+                  isTelevision: isTelevision,
+                  heroDisplayMode: heroDisplayMode,
+                ),
+        ),
       ),
     );
   }

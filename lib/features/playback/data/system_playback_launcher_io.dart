@@ -1,8 +1,11 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:starflow/core/utils/playback_trace.dart';
+import 'package:starflow/features/playback/data/external_playback_playlist.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:starflow/features/playback/data/system_playback_launcher.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -25,22 +28,22 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
         message: '播放地址无效，无法调用外部系统播放器。',
       );
     }
-    if (_requiresExternalPlaybackHeaders(target)) {
-      return const SystemPlaybackLaunchResult(
-        launched: false,
-        message: '当前资源依赖请求头鉴权，外部系统播放器暂不支持。请改用内置 MPV 或原生播放器。',
-      );
-    }
-
     if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
       return _launchDesktopPlaylist(target);
     }
 
-    if (Platform.isAndroid) {
-      final launched = await _launchAndroidVideoIntent(target);
+    if (_requiresExternalPlaybackHeaders(target) && !Platform.isIOS) {
+      return const SystemPlaybackLaunchResult(
+        launched: false,
+        message: '当前资源依赖请求头鉴权，外部播放器暂不支持。请改用内置 MPV 或原生播放器。',
+      );
+    }
+
+    if (Platform.isAndroid || Platform.isIOS) {
+      final launched = await _launchPlatformVideoIntent(target);
       return SystemPlaybackLaunchResult(
         launched: launched,
-        message: launched ? '' : '外部系统播放器启动失败。',
+        message: launched ? '' : '外部播放器启动失败。',
       );
     }
 
@@ -63,7 +66,20 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
     PlaybackTarget target,
   ) async {
     final file = await _createPlaylistFile(target);
-    final launched = await _openFile(file.path);
+    final launched = await _openDesktopPlaylist(file.path);
+    if (launched) {
+      unawaited(
+        Future<void>.delayed(const Duration(minutes: 10), () async {
+          try {
+            await file.delete();
+          } catch (_) {}
+        }),
+      );
+    } else {
+      try {
+        await file.delete();
+      } catch (_) {}
+    }
     return SystemPlaybackLaunchResult(
       launched: launched,
       message: launched ? '' : '外部系统播放器启动失败。',
@@ -71,50 +87,133 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
   }
 
   Future<File> _createPlaylistFile(PlaybackTarget target) async {
+    await _cleanupStalePlaylistFiles();
     final safeTitle = _sanitizeFileName(target.title);
     final filename =
         'starflow-$safeTitle-${DateTime.now().millisecondsSinceEpoch}.m3u';
     final file = File(p.join(Directory.systemTemp.path, filename));
-    final content = <String>[
-      '#EXTM3U',
-      '#EXTINF:-1,${target.title}',
-      target.streamUrl.trim(),
-      '',
-    ].join('\n');
-    await file.writeAsString(content, flush: true);
+    await file.writeAsString(
+      buildExternalPlaybackPlaylist(target),
+      flush: true,
+    );
     return file;
   }
 
-  Future<bool> _openFile(String path) async {
+  Future<void> _cleanupStalePlaylistFiles() async {
+    final cutoff = DateTime.now().subtract(const Duration(hours: 1));
     try {
-      late final Process process;
+      await for (final entity
+          in Directory.systemTemp.list(followLinks: false)) {
+        if (entity is! File ||
+            !p.basename(entity.path).startsWith('starflow-') ||
+            p.extension(entity.path).toLowerCase() != '.m3u') {
+          continue;
+        }
+        final stat = await entity.stat();
+        if (stat.modified.isBefore(cutoff)) {
+          await entity.delete();
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<bool> _openDesktopPlaylist(String path) async {
+    try {
       if (Platform.isWindows) {
-        process = await Process.start(
+        final preferred = await _findWindowsExternalPlayer();
+        if (preferred != null) {
+          return _startExternalPlayer(preferred, [path]);
+        }
+        final process = await Process.start(
           'cmd',
           ['/c', 'start', '', path],
           runInShell: false,
         );
-      } else if (Platform.isMacOS) {
-        process = await Process.start('open', [path], runInShell: false);
-      } else if (Platform.isLinux) {
-        process = await Process.start('xdg-open', [path], runInShell: false);
-      } else {
-        return false;
+        return _processStarted(process);
       }
-
-      final exitCode = await process.exitCode.timeout(
-        const Duration(seconds: 8),
-        onTimeout: () => 0,
-      );
-      return exitCode == 0;
+      if (Platform.isMacOS) {
+        for (final candidate in const [
+          ('VLC', '/Applications/VLC.app'),
+          ('IINA', '/Applications/IINA.app'),
+          ('mpv', '/Applications/mpv.app'),
+        ]) {
+          if (await Directory(candidate.$2).exists()) {
+            return _startExternalPlayer('open', ['-a', candidate.$1, path]);
+          }
+        }
+        return _startExternalPlayer('open', [path]);
+      }
+      if (Platform.isLinux) {
+        return _startExternalPlayer('xdg-open', [path]);
+      }
+      return false;
     } catch (_) {
       return false;
     }
   }
 
-  Future<bool> _launchAndroidVideoIntent(PlaybackTarget target) async {
+  Future<String?> _findWindowsExternalPlayer() async {
+    final programFiles = <String>{
+      Platform.environment['ProgramFiles']?.trim() ?? '',
+      Platform.environment['ProgramFiles(x86)']?.trim() ?? '',
+    }.where((value) => value.isNotEmpty);
+    for (final root in programFiles) {
+      final vlcPath = p.join(root, 'VideoLAN', 'VLC', 'vlc.exe');
+      if (await File(vlcPath).exists()) {
+        return vlcPath;
+      }
+    }
+    for (final executable in const ['vlc.exe', 'mpv.exe']) {
+      try {
+        final result = await Process.run(
+          'where.exe',
+          [executable],
+          runInShell: false,
+        ).timeout(const Duration(seconds: 2));
+        if (result.exitCode != 0) {
+          continue;
+        }
+        for (final line in '${result.stdout}'.split(RegExp(r'[\r\n]+'))) {
+          final path = line.trim();
+          if (path.isNotEmpty && await File(path).exists()) {
+            return path;
+          }
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  Future<bool> _startExternalPlayer(
+    String executable,
+    List<String> arguments,
+  ) async {
+    try {
+      final process = await Process.start(
+        executable,
+        arguments,
+        runInShell: false,
+      );
+      return _processStarted(process);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _processStarted(Process process) async {
+    process.stdout.listen((_) {});
+    process.stderr.listen((_) {});
+    final exitCode = await process.exitCode.timeout(
+      const Duration(seconds: 3),
+      onTimeout: () => 0,
+    );
+    return exitCode == 0;
+  }
+
+  Future<bool> _launchPlatformVideoIntent(PlaybackTarget target) async {
+    final platformName = Platform.isIOS ? 'ios' : 'android';
     _traceQuarkSystemLaunch(
-      'quark.system-launch.android.channel.begin',
+      'quark.system-launch.$platformName.channel.begin',
       target: target,
       fields: {'streamUrl': target.streamUrl},
     );
@@ -123,9 +222,10 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
           await _platformChannel.invokeMethod<bool>('launchSystemVideoPlayer', {
         'url': target.streamUrl.trim(),
         'title': target.title,
+        'headersJson': jsonEncode(target.headers),
       });
       _traceQuarkSystemLaunch(
-        'quark.system-launch.android.channel.result',
+        'quark.system-launch.$platformName.channel.result',
         target: target,
         fields: {'launched': launched == true},
       );
@@ -134,7 +234,7 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
       }
     } catch (error, stackTrace) {
       _traceQuarkSystemLaunch(
-        'quark.system-launch.android.channel.failed',
+        'quark.system-launch.$platformName.channel.failed',
         target: target,
         error: error,
         stackTrace: stackTrace,
@@ -147,7 +247,7 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
       return false;
     }
     _traceQuarkSystemLaunch(
-      'quark.system-launch.android.url.begin',
+      'quark.system-launch.$platformName.url.begin',
       target: target,
       fields: {'streamUrl': target.streamUrl},
     );
@@ -157,14 +257,14 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
         mode: LaunchMode.externalNonBrowserApplication,
       );
       _traceQuarkSystemLaunch(
-        'quark.system-launch.android.url.result',
+        'quark.system-launch.$platformName.url.result',
         target: target,
         fields: {'launched': launched},
       );
       return launched;
     } catch (error, stackTrace) {
       _traceQuarkSystemLaunch(
-        'quark.system-launch.android.url.failed',
+        'quark.system-launch.$platformName.url.failed',
         target: target,
         error: error,
         stackTrace: stackTrace,

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:starflow/core/utils/detail_resource_switch_trace.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -6,6 +7,7 @@ import 'package:starflow/features/details/application/detail_page_controller.dar
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/application/playback_engine_support.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -101,6 +103,13 @@ class DetailResourceInfoSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final supportedEngines = supportedPlaybackEngines(
+      isWeb: kIsWeb,
+      platform: defaultTargetPlatform,
+    );
+    final effectiveEngine = supportedEngines.contains(playbackEngine)
+        ? playbackEngine
+        : PlaybackEngine.embeddedMpv;
     final resourceFacts = _buildDetailResourceFacts(target);
     final doubanSourceUri = _resolveDoubanSourceUri(target);
     final showPlayableVariantSwitcher = _shouldShowPlayableVariantSwitcher(
@@ -310,14 +319,14 @@ class DetailResourceInfoSection extends StatelessWidget {
           if (isTelevision)
             TvSelectionTile(
               title: '播放器',
-              value: playbackEngine.label,
+              value: effectiveEngine.label,
               onPressed: onOpenPlaybackEnginePicker,
               focusId: 'detail:resource:playback-engine',
             )
           else
             DropdownButtonHideUnderline(
               child: DropdownButton<PlaybackEngine>(
-                value: playbackEngine,
+                value: effectiveEngine,
                 isExpanded: true,
                 dropdownColor: const Color(0xFF142235),
                 iconEnabledColor: Colors.white70,
@@ -326,7 +335,7 @@ class DetailResourceInfoSection extends StatelessWidget {
                   fontSize: 14,
                   height: 1.35,
                 ),
-                items: PlaybackEngine.values
+                items: supportedEngines
                     .map(
                       (engine) => DropdownMenuItem<PlaybackEngine>(
                         value: engine,

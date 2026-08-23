@@ -1,5 +1,29 @@
 import 'package:flutter/material.dart';
 
+/// Registers a page-owned scroll controller as the route's primary controller.
+///
+/// This keeps explicit controllers compatible with iOS's status-bar tap gesture,
+/// which asks the surrounding [Scaffold] to scroll the primary controller to
+/// the top.
+class AppPrimaryScrollController extends StatelessWidget {
+  const AppPrimaryScrollController({
+    super.key,
+    required this.controller,
+    required this.child,
+  });
+
+  final ScrollController controller;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return PrimaryScrollController(
+      controller: controller,
+      child: child,
+    );
+  }
+}
+
 /// 主 Tab 内列表底部尾距（当前为 0，与全屏无边距布局一致）。
 const kShellScrollContentBottomPadding = 0.0;
 const kAppPageHorizontalPadding = 14.0;

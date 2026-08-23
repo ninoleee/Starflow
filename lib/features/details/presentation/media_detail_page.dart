@@ -4,6 +4,7 @@ import 'dart:math' as math;
 export 'package:starflow/features/details/presentation/detail_page_providers.dart'
     show enrichedDetailTargetProvider;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -38,6 +39,7 @@ import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
+import 'package:starflow/features/playback/application/playback_engine_support.dart';
 import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
@@ -2428,16 +2430,23 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   }
 
   Future<void> _openPlaybackEnginePicker(PlaybackEngine currentEngine) async {
+    final supportedEngines = supportedPlaybackEngines(
+      isWeb: kIsWeb,
+      platform: defaultTargetPlatform,
+    );
+    final effectiveEngine = supportedEngines.contains(currentEngine)
+        ? currentEngine
+        : PlaybackEngine.embeddedMpv;
     final selection = await showDetailTelevisionPickerDialog<PlaybackEngine>(
       context: context,
       enabled: ref.read(isTelevisionProvider).value ?? false,
       title: '选择播放器',
-      selectedValue: currentEngine,
+      selectedValue: effectiveEngine,
       optionDebugLabelPrefix: 'detail-playback-engine-option',
       closeFocusDebugLabel: 'detail-playback-engine-close',
       closeFocusId: 'detail:resource:playback-engine-close',
       options: [
-        for (final engine in PlaybackEngine.values)
+        for (final engine in supportedEngines)
           DetailTelevisionPickerOption<PlaybackEngine>(
             value: engine,
             title: engine.label,
@@ -2715,222 +2724,230 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       appSettingsProvider.select((settings) => settings.playbackEngine),
     );
 
-    return TvPageFocusScope(
-      controller: _tvFocusMemoryController,
-      scopeId: _detailFocusScopeId(widget.target),
-      isTelevision: isTelevision,
-      child: Scaffold(
-        backgroundColor: const Color(0xFF030914),
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            DecoratedBox(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Color(0xFF07121F),
-                    Color(0xFF08101A),
-                    Color(0xFF030914),
-                  ],
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
+    return AppPrimaryScrollController(
+      controller: _scrollController,
+      child: TvPageFocusScope(
+        controller: _tvFocusMemoryController,
+        scopeId: _detailFocusScopeId(widget.target),
+        isTelevision: isTelevision,
+        child: Scaffold(
+          backgroundColor: const Color(0xFF030914),
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              DecoratedBox(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Color(0xFF07121F),
+                      Color(0xFF08101A),
+                      Color(0xFF030914),
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+                child: ValueListenableBuilder<MediaDetailTarget?>(
+                  valueListenable:
+                      _pageController.manualOverrideTargetListenable,
+                  builder: (context, manualOverrideTarget, _) {
+                    final seedTarget = manualOverrideTarget ?? widget.target;
+                    final watchedTargetAsync =
+                        ref.watch(enrichedDetailTargetProvider(seedTarget));
+                    final targetAsync = _retainedTargetAsync.resolve(
+                      activeValue: watchedTargetAsync,
+                      fallbackValue: AsyncValue.data(seedTarget),
+                    );
+                    final target = targetAsync.value ?? seedTarget;
+                    if (!target.isSeries) {
+                      _retainedSeriesAsync.clear();
+                    }
+                    final showDeferredDetailContent =
+                        !isTelevision || _showDeferredDetailContent;
+                    if (isTelevision && !_showDeferredDetailContent) {
+                      _scheduleDeferredDetailContent();
+                    }
+                    final watchedSeriesAsync = target.isSeries &&
+                            isPageVisible &&
+                            showDeferredDetailContent
+                        ? ref.watch(detailSeriesBrowserProvider(target))
+                        : null;
+                    final seriesAsync = target.isSeries
+                        ? _retainedSeriesAsync.resolve(
+                            activeValue: watchedSeriesAsync,
+                            fallbackValue:
+                                const AsyncLoading<DetailSeriesBrowserState?>(),
+                          )
+                        : const AsyncData<DetailSeriesBrowserState?>(
+                            null,
+                          );
+                    final favoriteOnlineResourceMatch = ref
+                        .read(detailOnlineResourceUpdateServiceProvider)
+                        .resolveFavoriteMatch(
+                          target: target,
+                          favorites: _favoriteSearchResults,
+                        );
+                    final canCheckFavoriteOnlineResourceUpdate =
+                        favoriteOnlineResourceMatch != null &&
+                            networkStorage.quarkCookie.trim().isNotEmpty;
+                    final galleryImages = showDeferredDetailContent
+                        ? buildDetailGalleryImages(target)
+                        : const <DetailImageAsset>[];
+
+                    return ListView(
+                      controller: _scrollController,
+                      padding: EdgeInsets.zero,
+                      children: [
+                        DetailHeroSection(
+                          target: target,
+                          simplifyVisualEffects: slimDetailHeroEnabled,
+                          isTelevision: isTelevision,
+                          artworkFocusNode: _heroArtworkFocusNode,
+                          playFocusNode: _heroPlayFocusNode,
+                          onHeroFocused: _scrollDetailHeroToTop,
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: kAppPageHorizontalPadding,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (showDeferredDetailContent && target.isSeries)
+                                _buildSeriesSection(target, seriesAsync),
+                              if (showDeferredDetailContent &&
+                                  target.overview.trim().isNotEmpty)
+                                DetailBlock(
+                                  title: resolveDetailPrimaryTitle(
+                                    currentTarget: target,
+                                    pageTarget: widget.target,
+                                    emptyFallback: '剧情简介',
+                                  ),
+                                  child: _buildOverviewContent(
+                                    target: target,
+                                    isTelevision: isTelevision,
+                                    includeOverview: true,
+                                  ),
+                                ),
+                              if (showDeferredDetailContent &&
+                                  target.overview.trim().isEmpty &&
+                                  resolveDetailEpisodeTitleLine(
+                                        currentTarget: target,
+                                        pageTarget: widget.target,
+                                      ) !=
+                                      null)
+                                DetailBlock(
+                                  title: resolveDetailPrimaryTitle(
+                                    currentTarget: target,
+                                    pageTarget: widget.target,
+                                    emptyFallback: '剧情简介',
+                                  ),
+                                  child: _buildOverviewContent(
+                                    target: target,
+                                    isTelevision: isTelevision,
+                                    includeOverview: false,
+                                  ),
+                                ),
+                              if (showDeferredDetailContent &&
+                                  galleryImages.isNotEmpty)
+                                DetailBlock(
+                                  title: '剧照',
+                                  child: DetailImageGallery(
+                                    images: galleryImages,
+                                  ),
+                                ),
+                              if (showDeferredDetailContent &&
+                                  (target.resolvedDirectorProfiles.isNotEmpty ||
+                                      target.resolvedActorProfiles.isNotEmpty))
+                                DetailBlock(
+                                  title: '演职员',
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (target.resolvedDirectorProfiles
+                                          .isNotEmpty) ...[
+                                        const InfoLabel('导演'),
+                                        const SizedBox(height: 10),
+                                        PersonRail(
+                                          people:
+                                              target.resolvedDirectorProfiles,
+                                          focusScopePrefix: 'detail:director',
+                                          onPersonTap: (person) {
+                                            context.pushNamed(
+                                              'person-credits',
+                                              extra: PersonCreditsPageTarget(
+                                                person: person,
+                                                role:
+                                                    PersonCreditsRole.director,
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ],
+                                      if (target.resolvedDirectorProfiles
+                                              .isNotEmpty &&
+                                          target
+                                              .resolvedActorProfiles.isNotEmpty)
+                                        const SizedBox(height: 18),
+                                      if (target.resolvedActorProfiles
+                                          .isNotEmpty) ...[
+                                        const InfoLabel('演员'),
+                                        const SizedBox(height: 10),
+                                        PersonRail(
+                                          people: target.resolvedActorProfiles,
+                                          focusScopePrefix: 'detail:actor',
+                                          onPersonTap: (person) {
+                                            context.pushNamed(
+                                              'person-credits',
+                                              extra: PersonCreditsPageTarget(
+                                                person: person,
+                                                role: PersonCreditsRole.actor,
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              if (showDeferredDetailContent &&
+                                  target.resolvedPlatformProfiles.isNotEmpty)
+                                DetailBlock(
+                                  title: '公司',
+                                  child: PlatformRail(
+                                    platforms: target.resolvedPlatformProfiles,
+                                  ),
+                                ),
+                              if (showDeferredDetailContent &&
+                                  shouldShowDetailResourceInfo(target))
+                                _buildResourceInfoBlock(
+                                  target: target,
+                                  isTelevision: isTelevision,
+                                  playbackEngine: playbackEngine,
+                                  canCheckFavoriteOnlineResourceUpdate:
+                                      canCheckFavoriteOnlineResourceUpdate,
+                                ),
+                              appPageBottomSpacer(),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
-              child: ValueListenableBuilder<MediaDetailTarget?>(
-                valueListenable: _pageController.manualOverrideTargetListenable,
-                builder: (context, manualOverrideTarget, _) {
-                  final seedTarget = manualOverrideTarget ?? widget.target;
-                  final watchedTargetAsync =
-                      ref.watch(enrichedDetailTargetProvider(seedTarget));
-                  final targetAsync = _retainedTargetAsync.resolve(
-                    activeValue: watchedTargetAsync,
-                    fallbackValue: AsyncValue.data(seedTarget),
-                  );
-                  final target = targetAsync.value ?? seedTarget;
-                  if (!target.isSeries) {
-                    _retainedSeriesAsync.clear();
-                  }
-                  final showDeferredDetailContent =
-                      !isTelevision || _showDeferredDetailContent;
-                  if (isTelevision && !_showDeferredDetailContent) {
-                    _scheduleDeferredDetailContent();
-                  }
-                  final watchedSeriesAsync = target.isSeries &&
-                          isPageVisible &&
-                          showDeferredDetailContent
-                      ? ref.watch(detailSeriesBrowserProvider(target))
-                      : null;
-                  final seriesAsync = target.isSeries
-                      ? _retainedSeriesAsync.resolve(
-                          activeValue: watchedSeriesAsync,
-                          fallbackValue:
-                              const AsyncLoading<DetailSeriesBrowserState?>(),
-                        )
-                      : const AsyncData<DetailSeriesBrowserState?>(
-                          null,
-                        );
-                  final favoriteOnlineResourceMatch = ref
-                      .read(detailOnlineResourceUpdateServiceProvider)
-                      .resolveFavoriteMatch(
-                        target: target,
-                        favorites: _favoriteSearchResults,
-                      );
-                  final canCheckFavoriteOnlineResourceUpdate =
-                      favoriteOnlineResourceMatch != null &&
-                          networkStorage.quarkCookie.trim().isNotEmpty;
-                  final galleryImages = showDeferredDetailContent
-                      ? buildDetailGalleryImages(target)
-                      : const <DetailImageAsset>[];
-
-                  return ListView(
-                    controller: _scrollController,
-                    padding: EdgeInsets.zero,
-                    children: [
-                      DetailHeroSection(
-                        target: target,
-                        simplifyVisualEffects: slimDetailHeroEnabled,
-                        isTelevision: isTelevision,
-                        artworkFocusNode: _heroArtworkFocusNode,
-                        playFocusNode: _heroPlayFocusNode,
-                        onHeroFocused: _scrollDetailHeroToTop,
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: kAppPageHorizontalPadding,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (showDeferredDetailContent && target.isSeries)
-                              _buildSeriesSection(target, seriesAsync),
-                            if (showDeferredDetailContent &&
-                                target.overview.trim().isNotEmpty)
-                              DetailBlock(
-                                title: resolveDetailPrimaryTitle(
-                                  currentTarget: target,
-                                  pageTarget: widget.target,
-                                  emptyFallback: '剧情简介',
-                                ),
-                                child: _buildOverviewContent(
-                                  target: target,
-                                  isTelevision: isTelevision,
-                                  includeOverview: true,
-                                ),
-                              ),
-                            if (showDeferredDetailContent &&
-                                target.overview.trim().isEmpty &&
-                                resolveDetailEpisodeTitleLine(
-                                      currentTarget: target,
-                                      pageTarget: widget.target,
-                                    ) !=
-                                    null)
-                              DetailBlock(
-                                title: resolveDetailPrimaryTitle(
-                                  currentTarget: target,
-                                  pageTarget: widget.target,
-                                  emptyFallback: '剧情简介',
-                                ),
-                                child: _buildOverviewContent(
-                                  target: target,
-                                  isTelevision: isTelevision,
-                                  includeOverview: false,
-                                ),
-                              ),
-                            if (showDeferredDetailContent &&
-                                galleryImages.isNotEmpty)
-                              DetailBlock(
-                                title: '剧照',
-                                child: DetailImageGallery(
-                                  images: galleryImages,
-                                ),
-                              ),
-                            if (showDeferredDetailContent &&
-                                (target.resolvedDirectorProfiles.isNotEmpty ||
-                                    target.resolvedActorProfiles.isNotEmpty))
-                              DetailBlock(
-                                title: '演职员',
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (target.resolvedDirectorProfiles
-                                        .isNotEmpty) ...[
-                                      const InfoLabel('导演'),
-                                      const SizedBox(height: 10),
-                                      PersonRail(
-                                        people: target.resolvedDirectorProfiles,
-                                        focusScopePrefix: 'detail:director',
-                                        onPersonTap: (person) {
-                                          context.pushNamed(
-                                            'person-credits',
-                                            extra: PersonCreditsPageTarget(
-                                              person: person,
-                                              role: PersonCreditsRole.director,
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ],
-                                    if (target.resolvedDirectorProfiles
-                                            .isNotEmpty &&
-                                        target.resolvedActorProfiles.isNotEmpty)
-                                      const SizedBox(height: 18),
-                                    if (target
-                                        .resolvedActorProfiles.isNotEmpty) ...[
-                                      const InfoLabel('演员'),
-                                      const SizedBox(height: 10),
-                                      PersonRail(
-                                        people: target.resolvedActorProfiles,
-                                        focusScopePrefix: 'detail:actor',
-                                        onPersonTap: (person) {
-                                          context.pushNamed(
-                                            'person-credits',
-                                            extra: PersonCreditsPageTarget(
-                                              person: person,
-                                              role: PersonCreditsRole.actor,
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            if (showDeferredDetailContent &&
-                                target.resolvedPlatformProfiles.isNotEmpty)
-                              DetailBlock(
-                                title: '公司',
-                                child: PlatformRail(
-                                  platforms: target.resolvedPlatformProfiles,
-                                ),
-                              ),
-                            if (showDeferredDetailContent &&
-                                shouldShowDetailResourceInfo(target))
-                              _buildResourceInfoBlock(
-                                target: target,
-                                isTelevision: isTelevision,
-                                playbackEngine: playbackEngine,
-                                canCheckFavoriteOnlineResourceUpdate:
-                                    canCheckFavoriteOnlineResourceUpdate,
-                              ),
-                            appPageBottomSpacer(),
-                          ],
-                        ),
-                      ),
-                    ],
-                  );
-                },
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: OverlayToolbar(
+                  leadingColor: Colors.white,
+                  onBack: () => context.pop(),
+                ),
               ),
-            ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: OverlayToolbar(
-                leadingColor: Colors.white,
-                onBack: () => context.pop(),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -185,32 +185,35 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
       ],
     );
 
-    return TvPageFocusScope(
-      controller: _tvFocusMemoryController,
-      scopeId: _libraryCollectionFocusScopeId(target),
-      isTelevision: isTelevision,
-      child: Scaffold(
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            AppPageBackground(
-              child: _buildScrollContent(
-                context: context,
-                target: target,
-                isTelevision: isTelevision,
-                headerContent: headerContent,
-                displayAsync: displayAsync,
+    return AppPrimaryScrollController(
+      controller: _scrollController,
+      child: TvPageFocusScope(
+        controller: _tvFocusMemoryController,
+        scopeId: _libraryCollectionFocusScopeId(target),
+        isTelevision: isTelevision,
+        child: Scaffold(
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              AppPageBackground(
+                child: _buildScrollContent(
+                  context: context,
+                  target: target,
+                  isTelevision: isTelevision,
+                  headerContent: headerContent,
+                  displayAsync: displayAsync,
+                ),
               ),
-            ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: OverlayToolbar(
-                onBack: () => context.pop(),
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: OverlayToolbar(
+                  onBack: () => context.pop(),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -117,115 +117,120 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
       fallbackValue: const AsyncLoading<_PersonCreditsPageResult>(),
     );
 
-    return TvPageFocusScope(
-      controller: _tvFocusMemoryController,
-      scopeId: _personCreditsFocusScopeId(target),
-      isTelevision: isTelevision,
-      child: Scaffold(
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            AppPageBackground(
-              child: ListView(
-                controller: _scrollController,
-                padding: overlayToolbarPagePadding(context),
-                children: [
-                  _PersonCreditsHeader(
-                    target: target,
-                    isTelevision: isTelevision,
-                    focusNode: _headerFocusNode,
-                  ),
-                  const SizedBox(height: 22),
-                  resultAsync.when(
-                    data: (result) {
-                      if (result.items.isEmpty) {
-                        return _EmptyState(message: result.message);
-                      }
-                      final availablePrimaryCategories =
-                          _collectAvailablePrimaryCategories(result.items);
-                      final selectedPrimaryCategory = availablePrimaryCategories
-                              .contains(_selectedPrimaryCategory)
-                          ? _selectedPrimaryCategory
-                          : _allCategoryLabel;
-                      final availableMovieGenres =
-                          _collectAvailableMovieGenres(result.items);
-                      final selectedMovieGenre = selectedPrimaryCategory ==
-                                  _movieCategoryLabel &&
-                              availableMovieGenres.contains(_selectedMovieGenre)
-                          ? _selectedMovieGenre
-                          : _allCategoryLabel;
-                      final visibleItems = _sortAndFilterPersonCredits(
-                        items: result.items,
-                        selectedPrimaryCategory: selectedPrimaryCategory,
-                        selectedMovieGenre: selectedMovieGenre,
-                        sortMode: _sortMode,
-                      );
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _PersonCreditsControls(
-                            sortMode: _sortMode,
-                            selectedPrimaryCategory: selectedPrimaryCategory,
-                            availablePrimaryCategories:
-                                availablePrimaryCategories,
-                            selectedMovieGenre: selectedMovieGenre,
-                            availableMovieGenres: availableMovieGenres,
-                            onSortChanged: (value) {
-                              if (_sortMode == value) {
-                                return;
-                              }
-                              setState(() {
-                                _sortMode = value;
-                              });
-                            },
-                            onPrimaryCategoryChanged: (value) {
-                              if (_selectedPrimaryCategory == value) {
-                                return;
-                              }
-                              setState(() {
-                                _selectedPrimaryCategory = value;
-                                if (value != _movieCategoryLabel) {
-                                  _selectedMovieGenre = _allCategoryLabel;
+    return AppPrimaryScrollController(
+      controller: _scrollController,
+      child: TvPageFocusScope(
+        controller: _tvFocusMemoryController,
+        scopeId: _personCreditsFocusScopeId(target),
+        isTelevision: isTelevision,
+        child: Scaffold(
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              AppPageBackground(
+                child: ListView(
+                  controller: _scrollController,
+                  padding: overlayToolbarPagePadding(context),
+                  children: [
+                    _PersonCreditsHeader(
+                      target: target,
+                      isTelevision: isTelevision,
+                      focusNode: _headerFocusNode,
+                    ),
+                    const SizedBox(height: 22),
+                    resultAsync.when(
+                      data: (result) {
+                        if (result.items.isEmpty) {
+                          return _EmptyState(message: result.message);
+                        }
+                        final availablePrimaryCategories =
+                            _collectAvailablePrimaryCategories(result.items);
+                        final selectedPrimaryCategory =
+                            availablePrimaryCategories
+                                    .contains(_selectedPrimaryCategory)
+                                ? _selectedPrimaryCategory
+                                : _allCategoryLabel;
+                        final availableMovieGenres =
+                            _collectAvailableMovieGenres(result.items);
+                        final selectedMovieGenre =
+                            selectedPrimaryCategory == _movieCategoryLabel &&
+                                    availableMovieGenres
+                                        .contains(_selectedMovieGenre)
+                                ? _selectedMovieGenre
+                                : _allCategoryLabel;
+                        final visibleItems = _sortAndFilterPersonCredits(
+                          items: result.items,
+                          selectedPrimaryCategory: selectedPrimaryCategory,
+                          selectedMovieGenre: selectedMovieGenre,
+                          sortMode: _sortMode,
+                        );
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _PersonCreditsControls(
+                              sortMode: _sortMode,
+                              selectedPrimaryCategory: selectedPrimaryCategory,
+                              availablePrimaryCategories:
+                                  availablePrimaryCategories,
+                              selectedMovieGenre: selectedMovieGenre,
+                              availableMovieGenres: availableMovieGenres,
+                              onSortChanged: (value) {
+                                if (_sortMode == value) {
+                                  return;
                                 }
-                              });
-                            },
-                            onMovieGenreChanged: (value) {
-                              if (_selectedMovieGenre == value) {
-                                return;
-                              }
-                              setState(() {
-                                _selectedMovieGenre = value;
-                              });
-                            },
-                          ),
-                          if (visibleItems.isEmpty)
-                            const _EmptyState(message: '当前筛选下没有结果')
-                          else
-                            _PersonCreditsGrid(items: visibleItems),
-                        ],
-                      );
-                    },
-                    loading: () => const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 48),
-                      child: Center(child: CircularProgressIndicator()),
+                                setState(() {
+                                  _sortMode = value;
+                                });
+                              },
+                              onPrimaryCategoryChanged: (value) {
+                                if (_selectedPrimaryCategory == value) {
+                                  return;
+                                }
+                                setState(() {
+                                  _selectedPrimaryCategory = value;
+                                  if (value != _movieCategoryLabel) {
+                                    _selectedMovieGenre = _allCategoryLabel;
+                                  }
+                                });
+                              },
+                              onMovieGenreChanged: (value) {
+                                if (_selectedMovieGenre == value) {
+                                  return;
+                                }
+                                setState(() {
+                                  _selectedMovieGenre = value;
+                                });
+                              },
+                            ),
+                            if (visibleItems.isEmpty)
+                              const _EmptyState(message: '当前筛选下没有结果')
+                            else
+                              _PersonCreditsGrid(items: visibleItems),
+                          ],
+                        );
+                      },
+                      loading: () => const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 48),
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
+                      error: (error, stackTrace) => _EmptyState(
+                        message: '加载关联影片失败：$error',
+                      ),
                     ),
-                    error: (error, stackTrace) => _EmptyState(
-                      message: '加载关联影片失败：$error',
-                    ),
-                  ),
-                  appPageBottomSpacer(),
-                ],
+                    appPageBottomSpacer(),
+                  ],
+                ),
               ),
-            ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: OverlayToolbar(
-                onBack: () => context.pop(),
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: OverlayToolbar(
+                  onBack: () => context.pop(),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

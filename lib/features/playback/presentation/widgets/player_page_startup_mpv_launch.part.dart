@@ -26,7 +26,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     _closePlayerPageAfterExternalLaunch();
   }
 
-  Future<bool> _launchWithNativeContainer(PlaybackTarget target) async {
+  Future<void> _launchWithNativeContainer(PlaybackTarget target) async {
     _traceQuarkPlaybackStartup(
       'quark.launch.native.begin',
       target: target,
@@ -44,11 +44,12 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
         'message': result.message,
       },
     );
-    if (!result.launched) {
-      return false;
-    }
+    _ensureExternalLaunchSucceeded(
+      launched: result.launched,
+      message: result.message,
+      fallbackMessage: '原生播放器启动失败',
+    );
     _closePlayerPageAfterExternalLaunch();
-    return true;
   }
 
   Future<bool> _tryLaunchWithPerformanceFallback(
@@ -165,9 +166,6 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
         } catch (_) {
           break;
         }
-      }
-      if (!supportsNativePlayback(resolvedEntryTarget)) {
-        break;
       }
       resolvedEntries.add(entry.copyWith(target: resolvedEntryTarget));
     }

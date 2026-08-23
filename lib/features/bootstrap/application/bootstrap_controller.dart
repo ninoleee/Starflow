@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
@@ -132,7 +133,18 @@ class BootstrapController extends Notifier<BootstrapState> {
 
     try {
       await task();
-    } catch (_) {
+    } catch (error, stackTrace) {
+      appLogWarning(
+        'app.bootstrap',
+        'Bootstrap stage failed',
+        fields: <String, Object?>{
+          'step': currentStep,
+          'title': title,
+          'nonBlocking': nonBlockingErrorSubtitle != null,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (nonBlockingErrorSubtitle != null) {
         state = state.copyWith(subtitle: nonBlockingErrorSubtitle);
       }

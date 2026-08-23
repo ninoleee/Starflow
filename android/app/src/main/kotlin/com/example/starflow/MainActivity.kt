@@ -30,7 +30,6 @@ class MainActivity : FlutterActivity() {
     private val nativePlaybackLaunchHandler = Handler(Looper.getMainLooper())
     private var pendingNativePlaybackLaunchResult: MethodChannel.Result? = null
     private var pendingNativePlaybackLaunchRequestId = ""
-    private var nativePlaybackLaunchTimeout: Runnable? = null
     private val audioManager by lazy {
         getSystemService(Context.AUDIO_SERVICE) as AudioManager
     }
@@ -152,21 +151,10 @@ class MainActivity : FlutterActivity() {
                                 return
                             }
                             completeNativePlaybackLaunch(
-                                resultCode == NativePlaybackActivity.RESULT_PLAYBACK_READY,
+                                resultCode != NativePlaybackActivity.RESULT_PLAYBACK_FAILED,
                             )
                         }
                     }
-                    val timeout = Runnable {
-                        if (pendingNativePlaybackLaunchRequestId == requestId) {
-                            cancelNativePlaybackLaunch(requestId)
-                            completeNativePlaybackLaunch(false)
-                        }
-                    }
-                    nativePlaybackLaunchTimeout = timeout
-                    nativePlaybackLaunchHandler.postDelayed(
-                        timeout,
-                        NATIVE_PLAYBACK_LAUNCH_TIMEOUT_MS,
-                    )
 
                     try {
                         val intent = Intent(this, NativePlaybackActivity::class.java).apply {
@@ -230,28 +218,10 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun completeNativePlaybackLaunch(launched: Boolean) {
-        nativePlaybackLaunchTimeout?.let(nativePlaybackLaunchHandler::removeCallbacks)
-        nativePlaybackLaunchTimeout = null
         val result = pendingNativePlaybackLaunchResult
         pendingNativePlaybackLaunchResult = null
         pendingNativePlaybackLaunchRequestId = ""
         result?.success(launched)
-    }
-
-    private fun cancelNativePlaybackLaunch(requestId: String) {
-        try {
-            sendBroadcast(
-                Intent(NativePlaybackActivity.ACTION_CANCEL_LAUNCH).apply {
-                    setPackage(packageName)
-                    putExtra(NativePlaybackActivity.EXTRA_CANCEL_LAUNCH_REQUEST_ID, requestId)
-                },
-            )
-        } catch (_: Throwable) {
-        }
-    }
-
-    companion object {
-        private const val NATIVE_PLAYBACK_LAUNCH_TIMEOUT_MS = 30_000L
     }
 
     override fun onUserLeaveHint() {

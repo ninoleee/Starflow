@@ -68,6 +68,9 @@ OUTPUT_NAME="${APP_NAME}_v${VERSION}.ipa"
 FAST_IPA_DIR="build/ios/ipa_fast"
 
 echo "Building IPA for $APP_NAME ($VERSION+$BUILD_NUMBER, $BUILD_DATE)..."
+echo "Cleaning cached Flutter and iOS Native Assets..."
+flutter clean
+
 if [[ "$ARCHIVE" == "1" ]]; then
   flutter build ipa \
     --release \
@@ -86,6 +89,12 @@ if [[ "$ARCHIVE" == "1" ]]; then
   fi
 
   SOURCE_IPA="${IPA_CANDIDATES[0]}"
+  APP_BUNDLE="build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app"
+  if [[ ! -d "$APP_BUNDLE" ]]; then
+    echo "Error: app bundle not found for framework verification: $APP_BUNDLE"
+    exit 1
+  fi
+  /bin/bash "$PROJECT_ROOT/scripts/verify_ios_device_frameworks.sh" "$APP_BUNDLE"
 else
   flutter build ios \
     --release \
@@ -98,6 +107,7 @@ else
     echo "Error: app bundle not found: $APP_BUNDLE"
     exit 1
   fi
+  /bin/bash "$PROJECT_ROOT/scripts/verify_ios_device_frameworks.sh" "$APP_BUNDLE"
 
   mkdir -p "$FAST_IPA_DIR"
   SOURCE_IPA="$FAST_IPA_DIR/$OUTPUT_NAME"

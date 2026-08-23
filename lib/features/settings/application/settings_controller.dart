@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/logging/app_log_api.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
@@ -300,6 +302,62 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   Future<void> replaceAllSettings(AppSettings settings) async {
     await _persist(settings);
+    await _applyLoggingSettings(settings);
+  }
+
+  Future<void> setLocalLoggingEnabled(bool enabled) async {
+    final current = state.value ?? await _repository.load();
+    final next = current.copyWith(localLoggingEnabled: enabled);
+    await _persist(next);
+    await _applyLoggingSettings(next);
+    if (enabled) {
+      appLogInfo('settings.logging', 'Local logging enabled');
+    }
+  }
+
+  Future<void> setLocalLogMaxSizeMb(int maxSizeMb) async {
+    final current = state.value ?? await _repository.load();
+    final next = current.copyWith(localLogMaxSizeMb: maxSizeMb);
+    await _persist(next);
+    await _applyLoggingSettings(next);
+    appLogInfo(
+      'settings.logging',
+      'Local log capacity updated',
+      fields: <String, Object?>{'maxSizeMb': next.localLogMaxSizeMb},
+    );
+  }
+
+  Future<void> setLocalLogRecordedLevels(Set<AppLogLevel> levels) async {
+    final current = state.value ?? await _repository.load();
+    final next = current.copyWith(
+      localLogRecordedLevels: Set<AppLogLevel>.from(levels),
+    );
+    await _persist(next);
+    await _applyLoggingSettings(next);
+    appLogInfo(
+      'settings.logging',
+      'Recorded log levels updated',
+      fields: <String, Object?>{
+        'levels': levels.map((level) => level.name).toList(growable: false),
+      },
+    );
+  }
+
+  Future<void> setLocalLogVisibleLevels(Set<AppLogLevel> levels) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(
+        localLogVisibleLevels: Set<AppLogLevel>.from(levels),
+      ),
+    );
+  }
+
+  Future<void> _applyLoggingSettings(AppSettings settings) {
+    return appLogger.configure(
+      enabled: settings.localLoggingEnabled,
+      maxBytes: settings.localLogMaxSizeMb * 1024 * 1024,
+      recordedLevels: settings.localLogRecordedLevels,
+    );
   }
 
   Future<void> setHomeHeroDisplayMode(HomeHeroDisplayMode mode) async {

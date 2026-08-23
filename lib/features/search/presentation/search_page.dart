@@ -624,295 +624,304 @@ class _SearchPageState extends ConsumerState<SearchPage>
       providers: enabledProviders,
     );
 
-    return TvPageFocusScope(
-      controller: _tvFocusMemoryController,
-      scopeId: widget.favoritesOnly ? 'favorites' : 'search',
-      isTelevision: isTelevision,
-      child: Scaffold(
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            AppPageBackground(
-              contentPadding: EdgeInsets.only(
-                top: MediaQuery.paddingOf(context).top,
-              ),
-              child: FocusTraversalGroup(
-                policy: OrderedTraversalPolicy(),
-                child: CustomScrollView(
-                  controller: _scrollController,
-                  physics: const BouncingScrollPhysics(
-                    parent: AlwaysScrollableScrollPhysics(),
-                  ),
-                  slivers: [
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: EdgeInsets.fromLTRB(
-                          kAppPageHorizontalPadding,
-                          headerTopInset,
-                          kAppPageHorizontalPadding,
-                          0,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (_showFavoriteResults)
-                              Text(
-                                '收藏',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineSmall
-                                    ?.copyWith(fontWeight: FontWeight.w800),
-                              )
-                            else
-                              FocusTraversalOrder(
-                                order: const NumericFocusOrder(1),
-                                child: isTelevision
-                                    ? _TelevisionSearchInput(
-                                        query: _controller.text.trim(),
-                                        focusNode: _queryFocusNode,
-                                        onEditQuery: _openTelevisionQueryDialog,
-                                        onSearch: _performSearch,
-                                        onToggleFavorites:
-                                            _toggleFavoriteResultsView,
-                                        showFavoriteResults:
-                                            _showFavoriteResults,
-                                      )
-                                    : Row(
-                                        children: [
-                                          Expanded(
-                                            child: TextField(
-                                              controller: _controller,
-                                              textInputAction:
-                                                  TextInputAction.search,
-                                              onSubmitted: (_) =>
-                                                  _performSearch(),
-                                              decoration: const InputDecoration(
-                                                hintText: '搜索电影、剧集或番剧资源',
+    return AppPrimaryScrollController(
+      controller: _scrollController,
+      child: TvPageFocusScope(
+        controller: _tvFocusMemoryController,
+        scopeId: widget.favoritesOnly ? 'favorites' : 'search',
+        isTelevision: isTelevision,
+        child: Scaffold(
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              AppPageBackground(
+                contentPadding: EdgeInsets.only(
+                  top: MediaQuery.paddingOf(context).top,
+                ),
+                child: FocusTraversalGroup(
+                  policy: OrderedTraversalPolicy(),
+                  child: CustomScrollView(
+                    controller: _scrollController,
+                    physics: const BouncingScrollPhysics(
+                      parent: AlwaysScrollableScrollPhysics(),
+                    ),
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            kAppPageHorizontalPadding,
+                            headerTopInset,
+                            kAppPageHorizontalPadding,
+                            0,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (_showFavoriteResults)
+                                Text(
+                                  '收藏',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineSmall
+                                      ?.copyWith(fontWeight: FontWeight.w800),
+                                )
+                              else
+                                FocusTraversalOrder(
+                                  order: const NumericFocusOrder(1),
+                                  child: isTelevision
+                                      ? _TelevisionSearchInput(
+                                          query: _controller.text.trim(),
+                                          focusNode: _queryFocusNode,
+                                          onEditQuery:
+                                              _openTelevisionQueryDialog,
+                                          onSearch: _performSearch,
+                                          onToggleFavorites:
+                                              _toggleFavoriteResultsView,
+                                          showFavoriteResults:
+                                              _showFavoriteResults,
+                                        )
+                                      : Row(
+                                          children: [
+                                            Expanded(
+                                              child: TextField(
+                                                controller: _controller,
+                                                textInputAction:
+                                                    TextInputAction.search,
+                                                onSubmitted: (_) =>
+                                                    _performSearch(),
+                                                decoration:
+                                                    const InputDecoration(
+                                                  hintText: '搜索电影、剧集或番剧资源',
+                                                ),
                                               ),
                                             ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          StarflowIconButton(
-                                            icon: Icons.search_rounded,
-                                            tooltip: '搜索',
-                                            onPressed: _performSearch,
-                                            variant:
-                                                StarflowButtonVariant.ghost,
-                                            size: 40,
-                                          ),
-                                          const SizedBox(width: 4),
-                                          StarflowIconButton(
-                                            icon: _showFavoriteResults
-                                                ? Icons.manage_search_rounded
-                                                : Icons.favorite_rounded,
-                                            tooltip: _showFavoriteResults
-                                                ? '返回搜索结果'
-                                                : '查看收藏',
-                                            onPressed:
-                                                _toggleFavoriteResultsView,
-                                            variant:
-                                                StarflowButtonVariant.ghost,
-                                            size: 40,
-                                          ),
-                                        ],
-                                      ),
-                              ),
-                            if (!_showFavoriteResults &&
-                                isTelevision &&
-                                _recentQueries.isNotEmpty) ...[
-                              const SizedBox(height: 14),
-                              Text(
-                                '最近搜索',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .labelLarge
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                              ),
-                              const SizedBox(height: 10),
-                              Wrap(
-                                spacing: 10,
-                                runSpacing: 10,
-                                children: [
-                                  for (var index = 0;
-                                      index < _recentQueries.length;
-                                      index++)
-                                    _SearchHistoryChip(
-                                      label: _recentQueries[index],
-                                      focusId: 'search:recent:$index',
-                                      onPressed: () => _runRecentQuery(
-                                          _recentQueries[index]),
-                                    ),
-                                ],
-                              ),
-                            ],
-                            const SizedBox(height: 10),
-                            if (!_showFavoriteResults && targets.length == 1)
-                              const Text(
-                                '还没有启用可搜索的来源，请先去设置页添加媒体源或搜索服务。',
-                              )
-                            else if (!_showFavoriteResults)
-                              FocusTraversalOrder(
-                                order: const NumericFocusOrder(2),
-                                child: isTelevision
-                                    ? Wrap(
-                                        spacing: 10,
-                                        runSpacing: 10,
-                                        children: [
-                                          for (var index = 0;
-                                              index < targets.length;
-                                              index++)
-                                            _SearchTargetChip(
-                                              target: targets[index],
-                                              selected: _selectedTargetIds
-                                                  .contains(targets[index].id),
-                                              isTelevision: true,
-                                              focusId:
-                                                  'search:target:${targets[index].id}',
-                                              onPressed: () {
-                                                _toggleTargetSelection(
-                                                  targets[index],
-                                                  targets,
-                                                );
-                                                if (_controller.text
-                                                    .trim()
-                                                    .isNotEmpty) {
-                                                  _performSearch();
-                                                }
-                                              },
+                                            const SizedBox(width: 8),
+                                            StarflowIconButton(
+                                              icon: Icons.search_rounded,
+                                              tooltip: '搜索',
+                                              onPressed: _performSearch,
+                                              variant:
+                                                  StarflowButtonVariant.ghost,
+                                              size: 40,
                                             ),
-                                        ],
-                                      )
-                                    : SizedBox(
-                                        height: 52,
-                                        child: ListView.separated(
-                                          scrollDirection: Axis.horizontal,
-                                          itemCount: targets.length,
-                                          separatorBuilder: (context, index) =>
-                                              const SizedBox(width: 8),
-                                          itemBuilder: (context, index) {
-                                            final target = targets[index];
-                                            return _SearchTargetChip(
-                                              target: target,
-                                              selected: _selectedTargetIds
-                                                  .contains(target.id),
-                                              isTelevision: false,
-                                              onPressed: () {
-                                                _toggleTargetSelection(
-                                                  target,
-                                                  targets,
-                                                );
-                                                if (_controller.text
-                                                    .trim()
-                                                    .isNotEmpty) {
-                                                  _performSearch();
-                                                }
-                                              },
-                                            );
-                                          },
+                                            const SizedBox(width: 4),
+                                            StarflowIconButton(
+                                              icon: _showFavoriteResults
+                                                  ? Icons.manage_search_rounded
+                                                  : Icons.favorite_rounded,
+                                              tooltip: _showFavoriteResults
+                                                  ? '返回搜索结果'
+                                                  : '查看收藏',
+                                              onPressed:
+                                                  _toggleFavoriteResultsView,
+                                              variant:
+                                                  StarflowButtonVariant.ghost,
+                                              size: 40,
+                                            ),
+                                          ],
                                         ),
+                                ),
+                              if (!_showFavoriteResults &&
+                                  isTelevision &&
+                                  _recentQueries.isNotEmpty) ...[
+                                const SizedBox(height: 14),
+                                Text(
+                                  '最近搜索',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelLarge
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w800,
                                       ),
-                              ),
-                            const SizedBox(height: 12),
-                            if (!_showFavoriteResults && _isSearching) ...[
-                              LinearProgressIndicator(
-                                value: _totalSearchTaskCount > 0
-                                    ? _completedSearchTaskCount /
-                                        _totalSearchTaskCount
-                                    : null,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                displayedResults.isEmpty
-                                    ? '正在搜索...'
-                                    : '正在继续搜索 $_completedSearchTaskCount/$_totalSearchTaskCount',
-                              ),
+                                ),
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 10,
+                                  runSpacing: 10,
+                                  children: [
+                                    for (var index = 0;
+                                        index < _recentQueries.length;
+                                        index++)
+                                      _SearchHistoryChip(
+                                        label: _recentQueries[index],
+                                        focusId: 'search:recent:$index',
+                                        onPressed: () => _runRecentQuery(
+                                            _recentQueries[index]),
+                                      ),
+                                  ],
+                                ),
+                              ],
                               const SizedBox(height: 10),
+                              if (!_showFavoriteResults && targets.length == 1)
+                                const Text(
+                                  '还没有启用可搜索的来源，请先去设置页添加媒体源或搜索服务。',
+                                )
+                              else if (!_showFavoriteResults)
+                                FocusTraversalOrder(
+                                  order: const NumericFocusOrder(2),
+                                  child: isTelevision
+                                      ? Wrap(
+                                          spacing: 10,
+                                          runSpacing: 10,
+                                          children: [
+                                            for (var index = 0;
+                                                index < targets.length;
+                                                index++)
+                                              _SearchTargetChip(
+                                                target: targets[index],
+                                                selected:
+                                                    _selectedTargetIds.contains(
+                                                        targets[index].id),
+                                                isTelevision: true,
+                                                focusId:
+                                                    'search:target:${targets[index].id}',
+                                                onPressed: () {
+                                                  _toggleTargetSelection(
+                                                    targets[index],
+                                                    targets,
+                                                  );
+                                                  if (_controller.text
+                                                      .trim()
+                                                      .isNotEmpty) {
+                                                    _performSearch();
+                                                  }
+                                                },
+                                              ),
+                                          ],
+                                        )
+                                      : SizedBox(
+                                          height: 52,
+                                          child: ListView.separated(
+                                            scrollDirection: Axis.horizontal,
+                                            itemCount: targets.length,
+                                            separatorBuilder:
+                                                (context, index) =>
+                                                    const SizedBox(width: 8),
+                                            itemBuilder: (context, index) {
+                                              final target = targets[index];
+                                              return _SearchTargetChip(
+                                                target: target,
+                                                selected: _selectedTargetIds
+                                                    .contains(target.id),
+                                                isTelevision: false,
+                                                onPressed: () {
+                                                  _toggleTargetSelection(
+                                                    target,
+                                                    targets,
+                                                  );
+                                                  if (_controller.text
+                                                      .trim()
+                                                      .isNotEmpty) {
+                                                    _performSearch();
+                                                  }
+                                                },
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                ),
+                              const SizedBox(height: 12),
+                              if (!_showFavoriteResults && _isSearching) ...[
+                                LinearProgressIndicator(
+                                  value: _totalSearchTaskCount > 0
+                                      ? _completedSearchTaskCount /
+                                          _totalSearchTaskCount
+                                      : null,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  displayedResults.isEmpty
+                                      ? '正在搜索...'
+                                      : '正在继续搜索 $_completedSearchTaskCount/$_totalSearchTaskCount',
+                                ),
+                                const SizedBox(height: 10),
+                              ],
+                              if (_showFavoriteResults &&
+                                  displayedResults.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child:
+                                      Text('收藏 ${displayedResults.length} 条'),
+                                )
+                              else if (_controller.text.trim().isNotEmpty &&
+                                  (displayedResults.isNotEmpty ||
+                                      _filteredResultCount > 0))
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Text(
+                                    '结果 ${displayedResults.length} 条 · 过滤 $_filteredResultCount 条',
+                                  ),
+                                ),
+                              if (!_showFavoriteResults &&
+                                  _errorMessage != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Text(
+                                    _errorMessage == '当前没有启用搜索目标。'
+                                        ? _errorMessage!
+                                        : '搜索失败：$_errorMessage',
+                                  ),
+                                )
+                              else if (displayedResults.isEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Text(
+                                    _showFavoriteResults
+                                        ? '还没有收藏结果。'
+                                        : _controller.text.trim().isEmpty
+                                            ? '输入关键字后开始搜索。'
+                                            : _filteredResultCount > 0
+                                                ? '没有可用结果，已过滤 $_filteredResultCount 条结果。'
+                                                : '没有找到结果。',
+                                  ),
+                                ),
                             ],
-                            if (_showFavoriteResults &&
-                                displayedResults.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Text('收藏 ${displayedResults.length} 条'),
-                              )
-                            else if (_controller.text.trim().isNotEmpty &&
-                                (displayedResults.isNotEmpty ||
-                                    _filteredResultCount > 0))
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Text(
-                                  '结果 ${displayedResults.length} 条 · 过滤 $_filteredResultCount 条',
-                                ),
-                              ),
-                            if (!_showFavoriteResults && _errorMessage != null)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Text(
-                                  _errorMessage == '当前没有启用搜索目标。'
-                                      ? _errorMessage!
-                                      : '搜索失败：$_errorMessage',
-                                ),
-                              )
-                            else if (displayedResults.isEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Text(
-                                  _showFavoriteResults
-                                      ? '还没有收藏结果。'
-                                      : _controller.text.trim().isEmpty
-                                          ? '输入关键字后开始搜索。'
-                                          : _filteredResultCount > 0
-                                              ? '没有可用结果，已过滤 $_filteredResultCount 条结果。'
-                                              : '没有找到结果。',
-                                ),
-                              ),
-                          ],
+                          ),
                         ),
                       ),
-                    ),
-                    if (displayedResults.isNotEmpty)
-                      SliverList(
-                        delegate: SliverChildBuilderDelegate(
-                          (context, index) {
-                            final result = displayedResults[index];
-                            return _SearchResultCard(
-                              result: result,
-                              focusId: 'search:result:${result.id}',
-                              isSaving: _savingResultIds.contains(result.id),
-                              isFavorite: _favoriteResultKeys.contains(
-                                searchResultFavoriteKey(result),
-                              ),
-                              showSaveAction: _canSaveResultToQuark(
+                      if (displayedResults.isNotEmpty)
+                        SliverList(
+                          delegate: SliverChildBuilderDelegate(
+                            (context, index) {
+                              final result = displayedResults[index];
+                              return _SearchResultCard(
                                 result: result,
-                                networkStorage: networkStorage,
-                              ),
-                              onSave: () => _saveResultToQuark(
-                                result: result,
-                                networkStorage: networkStorage,
-                              ),
-                              onToggleFavorite: () {
-                                unawaited(_toggleFavoriteResult(result));
-                              },
-                            );
-                          },
-                          childCount: displayedResults.length,
+                                focusId: 'search:result:${result.id}',
+                                isSaving: _savingResultIds.contains(result.id),
+                                isFavorite: _favoriteResultKeys.contains(
+                                  searchResultFavoriteKey(result),
+                                ),
+                                showSaveAction: _canSaveResultToQuark(
+                                  result: result,
+                                  networkStorage: networkStorage,
+                                ),
+                                onSave: () => _saveResultToQuark(
+                                  result: result,
+                                  networkStorage: networkStorage,
+                                ),
+                                onToggleFavorite: () {
+                                  unawaited(_toggleFavoriteResult(result));
+                                },
+                              );
+                            },
+                            childCount: displayedResults.length,
+                          ),
                         ),
-                      ),
-                    appPageBottomSliverSpacer(),
-                  ],
+                      appPageBottomSliverSpacer(),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: OverlayToolbar(
-                onBack: _handleBack,
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: OverlayToolbar(
+                  onBack: _handleBack,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -7,9 +7,6 @@ import android.app.Dialog
 import android.app.PendingIntent
 import android.app.PictureInPictureParams
 import android.content.Intent
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.content.SharedPreferences
@@ -70,20 +67,15 @@ class NativePlaybackActivity : Activity() {
     private var launchResultReceiver: ResultReceiver? = null
     private var launchRequestId = ""
     private var launchResultDelivered = false
-    private var launchCancellationReceiverRegistered = false
-    private val launchCancellationReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, cancellationIntent: Intent?) {
-            val cancelRequestId = cancellationIntent
-                ?.getStringExtra(EXTRA_CANCEL_LAUNCH_REQUEST_ID)
-                ?.trim()
-                .orEmpty()
-            if (cancelRequestId == launchRequestId && !launchResultDelivered) {
-                reportPlaybackLaunchResult(
-                    ready = false,
-                    message = "等待首帧超时",
-                )
-                finish()
-            }
+    private val playbackLaunchTimeoutHandler = Handler(Looper.getMainLooper())
+    private val playbackLaunchTimeoutRunnable = Runnable {
+        if (!launchResultDelivered && !isFinishing && !isDestroyed) {
+            pendingResumePositionOverrideMs = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+            releasePlayer()
+            showPlaybackFailureDialog(
+                message = "30 秒内未显示视频画面，请检查网络或重试播放。",
+                launchPending = true,
+            )
         }
     }
     private var restoredResumePositionMs: Long = 0L
@@ -191,7 +183,8 @@ class NativePlaybackActivity : Activity() {
         }
 
         override fun onRenderedFirstFrame() {
-            reportPlaybackLaunchResult(ready = true)
+            cancelPlaybackLaunchTimeout()
+            reportPlaybackLaunchResult(RESULT_PLAYBACK_READY)
         }
 
         override fun onPositionDiscontinuity(
@@ -227,7 +220,6 @@ class NativePlaybackActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         sharedPreferences = getSharedPreferences(SHARED_PREFERENCES_NAME, MODE_PRIVATE)
         applyPlaybackIntent(intent)
-        registerLaunchCancellationReceiver()
 
         setContentView(
             if (isTelevisionDevice) {
@@ -281,7 +273,7 @@ class NativePlaybackActivity : Activity() {
     override fun onNewIntent(newIntent: Intent) {
         super.onNewIntent(newIntent)
         reportPlaybackLaunchResult(
-            ready = false,
+            resultCode = RESULT_PLAYBACK_CANCELLED,
             message = "播放请求已被新的影片替换",
         )
         persistPlaybackProgress(force = true)
@@ -338,8 +330,6 @@ class NativePlaybackActivity : Activity() {
         trackSelectionDialog?.setOnDismissListener(null)
         trackSelectionDialog?.dismiss()
         trackSelectionDialog = null
-        playbackErrorDialog?.dismiss()
-        playbackErrorDialog = null
         persistPlaybackProgress(force = true)
         if (isFinishing) {
             releasePlayer()
@@ -349,17 +339,12 @@ class NativePlaybackActivity : Activity() {
 
     override fun onDestroy() {
         reportPlaybackLaunchResult(
-            ready = false,
+            resultCode = RESULT_PLAYBACK_CANCELLED,
             message = "原生播放器在画面就绪前已关闭",
         )
         releasePlayer()
-        if (launchCancellationReceiverRegistered) {
-            try {
-                unregisterReceiver(launchCancellationReceiver)
-            } catch (_: Throwable) {
-            }
-            launchCancellationReceiverRegistered = false
-        }
+        playbackErrorDialog?.dismiss()
+        playbackErrorDialog = null
         playbackSystemSessionManager.release()
         super.onDestroy()
     }
@@ -382,24 +367,6 @@ class NativePlaybackActivity : Activity() {
             playbackIntent.getStringExtra(EXTRA_EPISODE_QUEUE_JSON)?.trim().orEmpty(),
         )
         restoreExternalSubtitleSourceFromTarget()
-    }
-
-    private fun registerLaunchCancellationReceiver() {
-        if (launchCancellationReceiverRegistered) {
-            return
-        }
-        val filter = IntentFilter(ACTION_CANCEL_LAUNCH)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(
-                launchCancellationReceiver,
-                filter,
-                Context.RECEIVER_NOT_EXPORTED,
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(launchCancellationReceiver, filter)
-        }
-        launchCancellationReceiverRegistered = true
     }
 
     private fun resetPlaybackStateForNewIntent() {
@@ -428,7 +395,7 @@ class NativePlaybackActivity : Activity() {
         }
     }
 
-    private fun reportPlaybackLaunchResult(ready: Boolean, message: String = "") {
+    private fun reportPlaybackLaunchResult(resultCode: Int, message: String = "") {
         if (launchResultDelivered) {
             return
         }
@@ -436,7 +403,7 @@ class NativePlaybackActivity : Activity() {
         val receiver = launchResultReceiver
         launchResultReceiver = null
         receiver?.send(
-            if (ready) RESULT_PLAYBACK_READY else RESULT_PLAYBACK_FAILED,
+            resultCode,
             Bundle().apply {
                 putString(RESULT_DATA_REQUEST_ID, launchRequestId)
                 putString(RESULT_DATA_MESSAGE, message)
@@ -446,12 +413,17 @@ class NativePlaybackActivity : Activity() {
 
     private fun handlePlayerError(error: PlaybackException) {
         val message = buildPlaybackErrorMessage(error)
-        if (!launchResultDelivered) {
-            reportPlaybackLaunchResult(ready = false, message = message)
-            showToast("原生播放器无法播放，正在切换兼容播放器")
-            finish()
+        val launchPending = !launchResultDelivered
+        cancelPlaybackLaunchTimeout()
+        if (isFinishing || isDestroyed || playbackErrorDialog?.isShowing == true) {
             return
         }
+        pendingResumePositionOverrideMs = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+        releasePlayer()
+        showPlaybackFailureDialog(message, launchPending)
+    }
+
+    private fun showPlaybackFailureDialog(message: String, launchPending: Boolean) {
         if (isFinishing || isDestroyed || playbackErrorDialog?.isShowing == true) {
             return
         }
@@ -461,14 +433,17 @@ class NativePlaybackActivity : Activity() {
             .setCancelable(false)
             .setPositiveButton("重试") { _, _ ->
                 playbackErrorDialog = null
-                val retryPositionMs = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
-                pendingResumePositionOverrideMs = retryPositionMs
                 nextInitializePlayWhenReady = true
-                releasePlayer()
                 initializePlayer()
             }
             .setNegativeButton("退出") { _, _ ->
                 playbackErrorDialog = null
+                if (launchPending) {
+                    reportPlaybackLaunchResult(
+                        resultCode = RESULT_PLAYBACK_CANCELLED,
+                        message = "用户退出原生播放器",
+                    )
+                }
                 finish()
             }
             .create()
@@ -480,6 +455,20 @@ class NativePlaybackActivity : Activity() {
                 }
                 dialog.show()
             }
+    }
+
+    private fun schedulePlaybackLaunchTimeout() {
+        playbackLaunchTimeoutHandler.removeCallbacks(playbackLaunchTimeoutRunnable)
+        if (!launchResultDelivered) {
+            playbackLaunchTimeoutHandler.postDelayed(
+                playbackLaunchTimeoutRunnable,
+                PLAYBACK_LAUNCH_TIMEOUT_MS,
+            )
+        }
+    }
+
+    private fun cancelPlaybackLaunchTimeout() {
+        playbackLaunchTimeoutHandler.removeCallbacks(playbackLaunchTimeoutRunnable)
     }
 
     private fun buildPlaybackErrorMessage(error: PlaybackException): String {
@@ -1018,6 +1007,7 @@ class NativePlaybackActivity : Activity() {
         }
         startPlaybackWatchdog()
         startPlaybackRuntimeLoop()
+        schedulePlaybackLaunchTimeout()
     }
 
     private fun buildMediaCodecSelector(preferSoftware: Boolean): MediaCodecSelector {
@@ -1037,6 +1027,7 @@ class NativePlaybackActivity : Activity() {
     }
 
     private fun releasePlayer() {
+        cancelPlaybackLaunchTimeout()
         stopPlaybackWatchdog()
         stopPlaybackRuntimeLoop()
         playerView.player = null
@@ -3038,6 +3029,7 @@ class NativePlaybackActivity : Activity() {
         private const val NATIVE_HTTP_CONNECT_TIMEOUT_MS = 15_000
         private const val NATIVE_HTTP_READ_TIMEOUT_MS = 30_000
         private const val NATIVE_LOAD_ERROR_RETRY_COUNT = 8
+        private const val PLAYBACK_LAUNCH_TIMEOUT_MS = 30_000L
         private const val PLAYBACK_WATCHDOG_INTERVAL_MS = 5_000L
         private const val PLAYBACK_WATCHDOG_PROGRESS_TIMEOUT_MS = 15_000L
         private const val PLAYBACK_WATCHDOG_BUFFERING_TIMEOUT_MS = 45_000L
@@ -3062,11 +3054,10 @@ class NativePlaybackActivity : Activity() {
         const val EXTRA_EPISODE_QUEUE_JSON = "episodeQueueJson"
         const val EXTRA_LAUNCH_REQUEST_ID = "launchRequestId"
         const val EXTRA_LAUNCH_RESULT_RECEIVER = "launchResultReceiver"
-        const val EXTRA_CANCEL_LAUNCH_REQUEST_ID = "cancelLaunchRequestId"
-        const val ACTION_CANCEL_LAUNCH = "com.example.starflow.CANCEL_NATIVE_PLAYBACK_LAUNCH"
         const val RESULT_DATA_REQUEST_ID = "requestId"
         const val RESULT_DATA_MESSAGE = "message"
         const val RESULT_PLAYBACK_READY = 1
+        const val RESULT_PLAYBACK_CANCELLED = 2
         const val RESULT_PLAYBACK_FAILED = 0
     }
 }

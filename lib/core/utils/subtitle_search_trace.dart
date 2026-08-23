@@ -1,10 +1,30 @@
-bool get subtitleSearchTraceEnabled => false;
+import 'package:starflow/core/logging/app_log_api.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 
-void setSubtitleSearchTraceEnabled(bool enabled) {}
+bool _subtitleSearchTraceCategoryEnabled = true;
+
+bool get subtitleSearchTraceEnabled =>
+    _subtitleSearchTraceCategoryEnabled && appLogger.isEnabled;
+
+void setSubtitleSearchTraceEnabled(bool enabled) {
+  _subtitleSearchTraceCategoryEnabled = enabled;
+}
 
 void subtitleSearchTrace(
   String stage, {
   Map<String, Object?> fields = const <String, Object?>{},
   Object? error,
   StackTrace? stackTrace,
-}) {}
+}) {
+  if (!subtitleSearchTraceEnabled) {
+    return;
+  }
+  appLogger.log(
+    error == null ? AppLogLevel.trace : AppLogLevel.error,
+    'subtitle',
+    stage,
+    fields: fields,
+    error: error,
+    stackTrace: stackTrace,
+  );
+}

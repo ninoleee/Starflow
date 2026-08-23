@@ -27,7 +27,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
     if (!Platform.isAndroid && !Platform.isIOS) {
       return const NativePlaybackLaunchResult(
         launched: false,
-        message: 'App 内原生播放器容器页当前仅支持 Android 和 iOS。',
+        message: '原生播放器（实验性）当前仅支持 Android 和 iOS。',
       );
     }
 
@@ -59,9 +59,8 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
           'playbackTargetJson': jsonEncode(target.toJson()),
           'playbackItemKey': buildPlaybackItemKey(target),
           'seriesKey': buildSeriesKeyForTarget(target),
-          'episodeQueueJson': episodeQueue == null
-              ? ''
-              : jsonEncode(episodeQueue.toJson()),
+          'episodeQueueJson':
+              episodeQueue == null ? '' : jsonEncode(episodeQueue.toJson()),
         },
       );
       _traceQuarkNativeLaunch(
