@@ -9,6 +9,7 @@ import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/details/presentation/widgets/detail_hero_section.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
@@ -44,6 +45,9 @@ class _MetadataIndexManagementPageState
   late final FocusNode _yearFocusNode;
   late final FocusNode _preferSeriesFocusNode;
   late final FocusNode _searchFocusNode;
+  late final FocusNode _autoRefreshFocusNode;
+  late final List<FocusNode> _wmdbApplyFocusNodes;
+  late final List<FocusNode> _tmdbApplyFocusNodes;
   late bool _preferSeries;
   late Future<NasMediaIndexRecord?> _recordFuture;
   final TvFocusMemoryController _tvFocusMemoryController =
@@ -74,10 +78,21 @@ class _MetadataIndexManagementPageState
     _preferSeriesFocusNode =
         FocusNode(debugLabel: 'metadata-index-prefer-series');
     _searchFocusNode = FocusNode(debugLabel: 'metadata-index-search');
+    _autoRefreshFocusNode =
+        FocusNode(debugLabel: 'metadata-index-auto-refresh');
+    _wmdbApplyFocusNodes = List<FocusNode>.generate(
+      3,
+      (index) => FocusNode(debugLabel: 'metadata-index-apply-wmdb-$index'),
+    );
+    _tmdbApplyFocusNodes = List<FocusNode>.generate(
+      3,
+      (index) => FocusNode(debugLabel: 'metadata-index-apply-tmdb-$index'),
+    );
     final itemType = _currentTarget.itemType.trim().toLowerCase();
     _preferSeries =
         itemType == 'series' || itemType == 'season' || itemType == 'episode';
     _recordFuture = _loadRecord();
+    _scheduleTvFocusRecovery();
   }
 
   @override
@@ -88,6 +103,13 @@ class _MetadataIndexManagementPageState
     _yearFocusNode.dispose();
     _preferSeriesFocusNode.dispose();
     _searchFocusNode.dispose();
+    _autoRefreshFocusNode.dispose();
+    for (final focusNode in _wmdbApplyFocusNodes) {
+      focusNode.dispose();
+    }
+    for (final focusNode in _tmdbApplyFocusNodes) {
+      focusNode.dispose();
+    }
     _tvFocusMemoryController.dispose();
     super.dispose();
   }
@@ -161,6 +183,7 @@ class _MetadataIndexManagementPageState
       _wmdbMessage = '';
       _tmdbMessage = '';
     });
+    _scheduleTvFocusRecovery();
 
     final settings = ref.read(appSettingsProvider);
     Future<(List<MetadataMatchResult>, String)> resolveTmdb() async {
@@ -217,6 +240,51 @@ class _MetadataIndexManagementPageState
       _tmdbResults = tmdbResolved.$1;
       _tmdbMessage = tmdbResolved.$2;
     });
+    _scheduleTvFocusRecovery(preferResults: true);
+  }
+
+  void _scheduleTvFocusRecovery({bool preferResults = false}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      final isTelevision = ref.read(isTelevisionProvider).value ?? false;
+      if (!isTelevision || _hasUsableFocus()) {
+        return;
+      }
+      requestDetailFocus(_metadataIndexFallbackFocusNodes(
+        preferResults: preferResults,
+      ));
+    });
+  }
+
+  bool _hasUsableFocus() {
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    return primaryFocus != null &&
+        primaryFocus.context != null &&
+        primaryFocus.canRequestFocus;
+  }
+
+  Iterable<FocusNode> _metadataIndexFallbackFocusNodes({
+    required bool preferResults,
+  }) sync* {
+    if (preferResults) {
+      for (var index = 0;
+          index < _wmdbResults.length && index < _wmdbApplyFocusNodes.length;
+          index++) {
+        yield _wmdbApplyFocusNodes[index];
+      }
+      for (var index = 0;
+          index < _tmdbResults.length && index < _tmdbApplyFocusNodes.length;
+          index++) {
+        yield _tmdbApplyFocusNodes[index];
+      }
+    }
+    yield _searchFocusNode;
+    yield _autoRefreshFocusNode;
+    yield _preferSeriesFocusNode;
+    yield _queryFocusNode;
+    yield _yearFocusNode;
   }
 
   Widget _wrapTelevisionSearchField({
@@ -307,6 +375,7 @@ class _MetadataIndexManagementPageState
     setState(() {
       _isApplying = true;
     });
+    _scheduleTvFocusRecovery();
 
     try {
       final searchQuery = _effectiveSearchQuery();
@@ -337,6 +406,7 @@ class _MetadataIndexManagementPageState
         setState(() {
           _isApplying = false;
         });
+        _scheduleTvFocusRecovery();
       }
     }
   }
@@ -490,6 +560,7 @@ class _MetadataIndexManagementPageState
     setState(() {
       _isAutoRefreshing = true;
     });
+    _scheduleTvFocusRecovery();
 
     try {
       final resolvedTarget = await _resolveAutomaticRefreshTarget();
@@ -515,6 +586,7 @@ class _MetadataIndexManagementPageState
         setState(() {
           _isAutoRefreshing = false;
         });
+        _scheduleTvFocusRecovery();
       }
     }
   }
@@ -622,6 +694,7 @@ class _MetadataIndexManagementPageState
                                             ? '更新中...'
                                             : '自动更新',
                                         icon: Icons.refresh_rounded,
+                                        focusNode: _autoRefreshFocusNode,
                                         focusId: 'detail:index:auto-refresh',
                                         onPressed: _isAutoRefreshing
                                             ? null
@@ -829,6 +902,7 @@ class _MetadataIndexManagementPageState
                           actionLabel: '应用 WMDB 结果',
                           isApplying: _isApplying,
                           isTelevision: isTelevision,
+                          focusNodes: _wmdbApplyFocusNodes,
                           focusIdPrefix: 'detail:index:apply:wmdb',
                           onApply: _applyMetadataMatch,
                         ),
@@ -840,6 +914,7 @@ class _MetadataIndexManagementPageState
                           actionLabel: '应用 TMDB 结果',
                           isApplying: _isApplying,
                           isTelevision: isTelevision,
+                          focusNodes: _tmdbApplyFocusNodes,
                           focusIdPrefix: 'detail:index:apply:tmdb',
                           onApply: _applyMetadataMatch,
                         ),
@@ -1034,6 +1109,7 @@ class _ProviderResultCard extends StatelessWidget {
     required this.actionLabel,
     required this.isApplying,
     required this.isTelevision,
+    required this.focusNodes,
     required this.onApply,
     this.focusIdPrefix,
   });
@@ -1044,6 +1120,7 @@ class _ProviderResultCard extends StatelessWidget {
   final String actionLabel;
   final bool isApplying;
   final bool isTelevision;
+  final List<FocusNode> focusNodes;
   final Future<void> Function(MetadataMatchResult result)? onApply;
   final String? focusIdPrefix;
 
@@ -1084,6 +1161,9 @@ class _ProviderResultCard extends StatelessWidget {
                       ? TvAdaptiveButton(
                           label: isApplying ? '应用中...' : actionLabel,
                           icon: Icons.save_rounded,
+                          focusNode: index < focusNodes.length
+                              ? focusNodes[index]
+                              : null,
                           onPressed: isApplying
                               ? null
                               : () {

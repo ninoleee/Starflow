@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/logging/app_logger.dart';
+import 'package:starflow/core/network/network_failure.dart';
 
 final starflowHttpClientProvider = Provider<http.Client>((ref) {
   final client = StarflowHttpClient(http.Client());
@@ -13,9 +14,13 @@ final starflowHttpClientProvider = Provider<http.Client>((ref) {
 });
 
 class StarflowHttpClient extends http.BaseClient {
-  StarflowHttpClient(this._inner);
+  StarflowHttpClient(
+    this._inner, {
+    this.requestTimeout = const Duration(seconds: 20),
+  });
 
   final http.Client _inner;
+  final Duration requestTimeout;
 
   static const String _proxyBase = String.fromEnvironment(
     'STARFLOW_WEB_PROXY_BASE',
@@ -34,26 +39,43 @@ class StarflowHttpClient extends http.BaseClient {
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     final originalUrl = request.url;
     try {
-      final response = _proxyEnabled
-          ? await _sendProxied(request, originalUrl)
-          : await _inner.send(request);
+      final Future<http.StreamedResponse> responseFuture = _proxyEnabled
+          ? _sendProxied(request, originalUrl)
+          : _inner.send(request);
+      final http.StreamedResponse response = requestTimeout > Duration.zero
+          ? await responseFuture.timeout(requestTimeout)
+          : await responseFuture;
       if (response.statusCode >= 400) {
+        final failure = classifyNetworkFailure(
+          http.ClientException('HTTP error response'),
+          statusCode: response.statusCode,
+        );
         appLogWarning(
           'network.http',
           'HTTP request returned an error response',
-          fields: _requestLogFields(
-            request,
-            originalUrl,
-            statusCode: response.statusCode,
-          ),
+          fields: <String, Object?>{
+            ..._requestLogFields(
+              request,
+              originalUrl,
+              statusCode: response.statusCode,
+            ),
+            'failureKind': failure.kind.name,
+            'transient': failure.isTransient,
+          },
         );
       }
       return response;
     } catch (error, stackTrace) {
+      final failure = classifyNetworkFailure(error);
       appLogError(
         'network.http',
         'HTTP request failed',
-        fields: _requestLogFields(request, originalUrl),
+        fields: <String, Object?>{
+          ..._requestLogFields(request, originalUrl),
+          'failureKind': failure.kind.name,
+          'transient': failure.isTransient,
+          'timeoutMs': requestTimeout.inMilliseconds,
+        },
         error: error,
         stackTrace: stackTrace,
       );
