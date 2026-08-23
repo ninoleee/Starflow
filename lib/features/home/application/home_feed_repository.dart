@@ -221,6 +221,7 @@ Future<HomeSectionViewModel> _buildLibrarySectionSeed({
   required String subtitle,
   LibraryCollectionTarget? viewAllTarget,
 }) async {
+  final mappingStopwatch = Stopwatch()..start();
   final seedTargets =
       items.map(MediaDetailTarget.fromMediaItem).toList(growable: false);
   final detailTargets = seedTargets;
@@ -243,7 +244,7 @@ Future<HomeSectionViewModel> _buildLibrarySectionSeed({
     );
   }
 
-  return HomeSectionViewModel(
+  final section = HomeSectionViewModel(
     id: module.id,
     title: module.title,
     subtitle: subtitle,
@@ -254,6 +255,12 @@ Future<HomeSectionViewModel> _buildLibrarySectionSeed({
         ? null
         : HomeSectionViewAllTarget.collection(viewAllTarget),
   );
+  _logHomeSectionMapping(
+    module: module,
+    itemCount: viewModels.length,
+    stopwatch: mappingStopwatch,
+  );
+  return section;
 }
 
 Future<HomeSectionViewModel> _applyCachedHomeSection({
@@ -717,6 +724,7 @@ Future<HomeSectionViewModel> _buildRecentPlaybackSectionSeed({
   required HomeModuleConfig module,
   required List<PlaybackProgressEntry> entries,
 }) async {
+  final mappingStopwatch = Stopwatch()..start();
   final seedTargets =
       entries.map(_buildRecentPlaybackDetailTarget).toList(growable: false);
   final detailTargets = seedTargets;
@@ -738,7 +746,7 @@ Future<HomeSectionViewModel> _buildRecentPlaybackSectionSeed({
     );
   }
 
-  return HomeSectionViewModel(
+  final section = HomeSectionViewModel(
     id: module.id,
     title: module.title,
     subtitle: module.description,
@@ -746,6 +754,12 @@ Future<HomeSectionViewModel> _buildRecentPlaybackSectionSeed({
     layout: HomeSectionLayout.posterRail,
     items: items,
   );
+  _logHomeSectionMapping(
+    module: module,
+    itemCount: items.length,
+    stopwatch: mappingStopwatch,
+  );
+  return section;
 }
 
 MediaDetailTarget _buildRecentPlaybackDetailTarget(
@@ -916,6 +930,7 @@ Future<HomeSectionViewModel> _buildDoubanSectionSeed({
   required List<DoubanEntry> entries,
   required String emptyMessage,
 }) async {
+  final mappingStopwatch = Stopwatch()..start();
   final seedTargets = entries
       .map(
         (entry) => MediaDetailTarget(
@@ -960,7 +975,7 @@ Future<HomeSectionViewModel> _buildDoubanSectionSeed({
     ));
   }
 
-  return HomeSectionViewModel(
+  final section = HomeSectionViewModel(
     id: module.id,
     title: module.title,
     subtitle: module.description,
@@ -969,6 +984,12 @@ Future<HomeSectionViewModel> _buildDoubanSectionSeed({
     items: items,
     viewAllTarget: HomeSectionViewAllTarget.module(module),
   );
+  _logHomeSectionMapping(
+    module: module,
+    itemCount: items.length,
+    stopwatch: mappingStopwatch,
+  );
+  return section;
 }
 
 Future<HomeSectionViewModel> _buildCarouselSectionSeed({
@@ -976,6 +997,7 @@ Future<HomeSectionViewModel> _buildCarouselSectionSeed({
   required List<DoubanCarouselEntry> items,
   required String emptyMessage,
 }) async {
+  final mappingStopwatch = Stopwatch()..start();
   final seedTargets = items
       .map(
         (item) => MediaDetailTarget(
@@ -1018,13 +1040,37 @@ Future<HomeSectionViewModel> _buildCarouselSectionSeed({
     ));
   }
 
-  return HomeSectionViewModel(
+  final section = HomeSectionViewModel(
     id: module.id,
     title: module.title,
     subtitle: module.description,
     emptyMessage: emptyMessage,
     layout: HomeSectionLayout.carousel,
     carouselItems: carouselItems,
+  );
+  _logHomeSectionMapping(
+    module: module,
+    itemCount: carouselItems.length,
+    stopwatch: mappingStopwatch,
+  );
+  return section;
+}
+
+void _logHomeSectionMapping({
+  required HomeModuleConfig module,
+  required int itemCount,
+  required Stopwatch stopwatch,
+}) {
+  stopwatch.stop();
+  appLogTrace(
+    'home.performance',
+    'Home section view models mapped',
+    fields: <String, Object?>{
+      'moduleId': module.id,
+      'moduleType': module.type.name,
+      'itemCount': itemCount,
+      'durationMs': stopwatch.elapsedMicroseconds / 1000,
+    },
   );
 }
 

@@ -31,6 +31,33 @@ void main() {
       <bool>[false, true],
     );
   });
+
+  test('home feed load limits persist through the settings controller',
+      () async {
+    final repository = _OutOfOrderSettingsRepository(SeedData.defaultSettings);
+    final container = ProviderContainer(
+      overrides: [
+        appSettingsRepositoryProvider.overrideWithValue(repository),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container.read(settingsControllerProvider.future);
+    final controller = container.read(settingsControllerProvider.notifier);
+
+    await controller.setHomeFeedMaxConcurrency(4);
+    await controller.setHomeFeedInitialBatchSize(3);
+
+    expect(repository.settings.homeFeedMaxConcurrency, 4);
+    expect(repository.settings.homeFeedInitialBatchSize, 3);
+    expect(
+      container.read(appSettingsProvider).homeFeedMaxConcurrency,
+      4,
+    );
+    expect(
+      container.read(appSettingsProvider).homeFeedInitialBatchSize,
+      3,
+    );
+  });
 }
 
 class _OutOfOrderSettingsRepository implements AppSettingsRepository {

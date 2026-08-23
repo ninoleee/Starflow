@@ -6,6 +6,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
+import 'package:starflow/features/home/application/home_feed_load_scheduler.dart';
 import 'package:starflow/features/library/application/library_refresh_revision.dart';
 import 'package:starflow/features/library/application/nas_media_index_revision.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
@@ -92,9 +93,6 @@ class HomePageController {
     T Function<T>(ProviderListenable<T> provider) read,
   ) {
     final modules = read(homeEnabledModulesProvider);
-    read(homeRecentItemsProvider.future);
-    read(homeRecentPlaybackEntriesProvider.future);
-    read(homeCarouselItemsProvider.future);
     for (final module in modules) {
       read(homeSectionProvider(module.id).future);
     }
@@ -227,16 +225,56 @@ final _homeSectionSeedProvider = FutureProvider.autoDispose
   if (module == null) {
     return null;
   }
-  return ref.read(homeFeedRepositoryProvider).buildSectionSeed(
-        module: module,
-        mediaRepository: ref.read(mediaRepositoryProvider),
-        discoveryRepository: ref.read(discoveryRepositoryProvider),
-        doubanAccount: ref.watch(homeDoubanAccountProvider),
-        mediaSources: ref.watch(homeMediaSourcesProvider),
-        recentItems: ref.watch(homeRecentItemsProvider.future),
-        recentPlaybackEntries:
-            ref.watch(homeRecentPlaybackEntriesProvider.future),
-        carouselItems: ref.watch(homeCarouselItemsProvider.future),
+  if (module.type == HomeModuleType.recentPlayback) {
+    ref.watch(playbackHistoryRevisionProvider);
+  }
+  final limits = ref.read(homeFeedLoadLimitsProvider);
+  final homeFeedRepository = ref.read(homeFeedRepositoryProvider);
+  final mediaRepository = ref.read(mediaRepositoryProvider);
+  final discoveryRepository = ref.read(discoveryRepositoryProvider);
+  final doubanAccount = ref.watch(homeDoubanAccountProvider);
+  final mediaSources = ref.watch(homeMediaSourcesProvider);
+  final enabledModules = ref.watch(homeEnabledModulesProvider);
+  final playbackMemoryRepository = ref.read(playbackMemoryRepositoryProvider);
+  return ref.read(homeFeedLoadSchedulerProvider).runLoad(
+        moduleId: module.id,
+        maxConcurrency: limits.maxConcurrency,
+        initialBatchSize: limits.initialBatchSize,
+        task: () async {
+          final recentItems = module.type == HomeModuleType.recentlyAdded
+              ? homeFeedRepository.loadRecentItems(
+                  enabledModules: enabledModules,
+                  mediaRepository: mediaRepository,
+                )
+              : Future<List<MediaItem>>.value(const <MediaItem>[]);
+          final recentPlaybackEntries =
+              module.type == HomeModuleType.recentPlayback
+                  ? homeFeedRepository.loadRecentPlaybackEntries(
+                      enabledModules: enabledModules,
+                      playbackMemoryRepository: playbackMemoryRepository,
+                    )
+                  : Future<List<PlaybackProgressEntry>>.value(
+                      const <PlaybackProgressEntry>[],
+                    );
+          final carouselItems = module.type == HomeModuleType.doubanCarousel
+              ? homeFeedRepository.loadCarouselItems(
+                  enabledModules: enabledModules,
+                  discoveryRepository: discoveryRepository,
+                )
+              : Future<List<DoubanCarouselEntry>>.value(
+                  const <DoubanCarouselEntry>[],
+                );
+          return homeFeedRepository.buildSectionSeed(
+            module: module,
+            mediaRepository: mediaRepository,
+            discoveryRepository: discoveryRepository,
+            doubanAccount: doubanAccount,
+            mediaSources: mediaSources,
+            recentItems: recentItems,
+            recentPlaybackEntries: recentPlaybackEntries,
+            carouselItems: carouselItems,
+          );
+        },
       );
 });
 
@@ -246,16 +284,22 @@ final homeSectionProvider =
   // be reapplied on explicit refresh boundaries such as startup/settings save,
   // instead of every background cache write.
   ref.watch(homeMetadataAutoRefreshRevisionProvider);
+  final scheduler = ref.read(homeFeedLoadSchedulerProvider);
+  final homeFeedRepository = ref.read(homeFeedRepositoryProvider);
+  final localStorageCacheRepository =
+      ref.read(localStorageCacheRepositoryProvider);
   final seedSection =
       await ref.watch(_homeSectionSeedProvider(moduleId).future);
   if (seedSection == null) {
     return null;
   }
-  return ref.read(homeFeedRepositoryProvider).applyCachedSection(
-        section: seedSection,
-        localStorageCacheRepository:
-            ref.read(localStorageCacheRepositoryProvider),
-      );
+  return scheduler.runSerializedApply(
+    moduleId: moduleId,
+    task: () => homeFeedRepository.applyCachedSection(
+      section: seedSection,
+      localStorageCacheRepository: localStorageCacheRepository,
+    ),
+  );
 });
 
 final homeSectionsProvider = Provider<List<HomeSectionViewModel>>((ref) {

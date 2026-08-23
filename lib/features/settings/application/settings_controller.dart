@@ -12,6 +12,7 @@ import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
+import 'package:starflow/features/home/application/home_feed_load_scheduler.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
@@ -502,6 +503,20 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     );
   }
 
+  Future<void> setHomeFeedMaxConcurrency(int maxConcurrency) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(homeFeedMaxConcurrency: maxConcurrency),
+    );
+  }
+
+  Future<void> setHomeFeedInitialBatchSize(int batchSize) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(homeFeedInitialBatchSize: batchSize),
+    );
+  }
+
   Future<void> setPerformanceSlimDetailHeroEnabled(bool enabled) async {
     final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(performanceSlimDetailHeroEnabled: enabled));
@@ -614,6 +629,10 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     ref.read(metadataPrefetchConcurrencyLimiterProvider).updateLimits(
           maxConcurrency: normalized.metadataPrefetchMaxConcurrency,
           initialBatchSize: normalized.metadataPrefetchInitialBatchSize,
+        );
+    ref.read(homeFeedLoadSchedulerProvider).updateLimits(
+          maxConcurrency: normalized.homeFeedMaxConcurrency,
+          initialBatchSize: normalized.homeFeedInitialBatchSize,
         );
     ref.read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
   }

@@ -53,6 +53,34 @@ void main() {
     );
   });
 
+  test('app settings persist and clamp home feed load limits', () {
+    final settings = AppSettings.fromJson(const <String, dynamic>{
+      'homeFeedMaxConcurrency': 4,
+      'homeFeedInitialBatchSize': 3,
+    });
+
+    expect(settings.homeFeedMaxConcurrency, 4);
+    expect(settings.homeFeedInitialBatchSize, 3);
+    expect(settings.toJson()['homeFeedMaxConcurrency'], 4);
+    expect(settings.toJson()['homeFeedInitialBatchSize'], 3);
+    expect(
+      AppSettings.fromJson(const <String, dynamic>{}).homeFeedMaxConcurrency,
+      kHomeFeedMaxConcurrencyDefault,
+    );
+    expect(
+      AppSettings.fromJson(const <String, dynamic>{}).homeFeedInitialBatchSize,
+      kHomeFeedInitialBatchSizeDefault,
+    );
+    expect(
+      settings.copyWith(homeFeedMaxConcurrency: 99).homeFeedMaxConcurrency,
+      kHomeFeedMaxConcurrencyMax,
+    );
+    expect(
+      settings.copyWith(homeFeedInitialBatchSize: 0).homeFeedInitialBatchSize,
+      kHomeFeedInitialBatchSizeMin,
+    );
+  });
+
   test('app settings persist local logging preferences', () {
     final settings = AppSettings.fromJson(const <String, dynamic>{
       'localLoggingEnabled': false,

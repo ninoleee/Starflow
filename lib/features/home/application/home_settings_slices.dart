@@ -22,6 +22,18 @@ final homeMediaSourcesProvider = Provider<List<MediaSourceConfig>>((ref) {
   );
 });
 
+final homeFeedLoadLimitsProvider =
+    Provider<({int maxConcurrency, int initialBatchSize})>((ref) {
+  return ref.watch(
+    appSettingsProvider.select(
+      (settings) => (
+        maxConcurrency: settings.homeFeedMaxConcurrency,
+        initialBatchSize: settings.homeFeedInitialBatchSize,
+      ),
+    ),
+  );
+});
+
 final homeSelectableMediaSourcesProvider = Provider<List<MediaSourceConfig>>((
   ref,
 ) {

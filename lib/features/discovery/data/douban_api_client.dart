@@ -4,17 +4,23 @@ import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
+import 'package:starflow/features/discovery/data/douban_network_guard.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 
 final doubanApiClientProvider = Provider<DoubanApiClient>((ref) {
   final client = ref.watch(starflowHttpClientProvider);
-  return DoubanApiClient(client);
+  final networkGuard = ref.watch(doubanNetworkGuardProvider);
+  return DoubanApiClient(client, networkGuard: networkGuard);
 });
 
 class DoubanApiClient {
-  DoubanApiClient(this._client);
+  DoubanApiClient(
+    this._client, {
+    DoubanNetworkGuard? networkGuard,
+  }) : _networkGuard = networkGuard ?? DoubanNetworkGuard();
 
   final http.Client _client;
+  final DoubanNetworkGuard _networkGuard;
 
   static const _userAgent =
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
@@ -120,7 +126,8 @@ class DoubanApiClient {
   }
 
   Future<List<DoubanCarouselEntry>> fetchCarouselItems() async {
-    final response = await _client.get(
+    final response = await _networkGuard.get(
+      _client,
       Uri.parse(
         'https://gist.githubusercontent.com/huangxd-/5ae61c105b417218b9e5bad7073d2f36/raw/douban_carousel.json',
       ),
@@ -228,7 +235,8 @@ class DoubanApiClient {
     Uri uri, {
     Map<String, String> headers = const {},
   }) async {
-    final response = await _client.get(
+    final response = await _networkGuard.get(
+      _client,
       uri,
       headers: {
         'User-Agent': _userAgent,

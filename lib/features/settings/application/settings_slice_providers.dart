@@ -120,6 +120,8 @@ final settingsPerformanceSliceProvider = Provider<SettingsPerformanceSlice>(
               settings.metadataPrefetchMaxConcurrency,
           metadataPrefetchInitialBatchSize:
               settings.metadataPrefetchInitialBatchSize,
+          homeFeedMaxConcurrency: settings.homeFeedMaxConcurrency,
+          homeFeedInitialBatchSize: settings.homeFeedInitialBatchSize,
         ),
       ),
     );
@@ -325,6 +327,8 @@ class SettingsPerformanceSlice {
     required this.effectiveLiveItemHeroOverlayEnabled,
     required this.metadataPrefetchMaxConcurrency,
     required this.metadataPrefetchInitialBatchSize,
+    required this.homeFeedMaxConcurrency,
+    required this.homeFeedInitialBatchSize,
   });
 
   final bool highPerformanceModeEnabled;
@@ -335,6 +339,8 @@ class SettingsPerformanceSlice {
   final bool effectiveLiveItemHeroOverlayEnabled;
   final int metadataPrefetchMaxConcurrency;
   final int metadataPrefetchInitialBatchSize;
+  final int homeFeedMaxConcurrency;
+  final int homeFeedInitialBatchSize;
 
   @override
   bool operator ==(Object other) {
@@ -352,7 +358,9 @@ class SettingsPerformanceSlice {
             other.metadataPrefetchMaxConcurrency ==
                 metadataPrefetchMaxConcurrency &&
             other.metadataPrefetchInitialBatchSize ==
-                metadataPrefetchInitialBatchSize;
+                metadataPrefetchInitialBatchSize &&
+            other.homeFeedMaxConcurrency == homeFeedMaxConcurrency &&
+            other.homeFeedInitialBatchSize == homeFeedInitialBatchSize;
   }
 
   @override
@@ -365,6 +373,8 @@ class SettingsPerformanceSlice {
         effectiveLiveItemHeroOverlayEnabled,
         metadataPrefetchMaxConcurrency,
         metadataPrefetchInitialBatchSize,
+        homeFeedMaxConcurrency,
+        homeFeedInitialBatchSize,
       );
 }
 

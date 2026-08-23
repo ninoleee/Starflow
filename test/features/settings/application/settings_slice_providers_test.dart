@@ -135,6 +135,8 @@ void main() {
         effectiveLiveItemHeroOverlayEnabled: false,
         metadataPrefetchMaxConcurrency: 4,
         metadataPrefetchInitialBatchSize: 18,
+        homeFeedMaxConcurrency: kHomeFeedMaxConcurrencyDefault,
+        homeFeedInitialBatchSize: kHomeFeedInitialBatchSizeDefault,
       ),
     );
   });

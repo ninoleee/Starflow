@@ -201,6 +201,48 @@ class PerformanceSettingsPage extends ConsumerWidget {
                     );
                   },
           ),
+          SettingsStepperTile(
+            title: '首页模块最大并发数',
+            subtitle: '同时拉取的首页内容模块数量。TV 或低性能设备建议设为 1–2；只影响首页，不影响元数据补全。',
+            value: '${settings.homeFeedMaxConcurrency}',
+            onDecrease:
+                settings.homeFeedMaxConcurrency <= kHomeFeedMaxConcurrencyMin
+                    ? null
+                    : () {
+                        controller.setHomeFeedMaxConcurrency(
+                          settings.homeFeedMaxConcurrency - 1,
+                        );
+                      },
+            onIncrease:
+                settings.homeFeedMaxConcurrency >= kHomeFeedMaxConcurrencyMax
+                    ? null
+                    : () {
+                        controller.setHomeFeedMaxConcurrency(
+                          settings.homeFeedMaxConcurrency + 1,
+                        );
+                      },
+          ),
+          SettingsStepperTile(
+            title: '首页首批优先模块数',
+            subtitle: '进入首页后优先启动的前几个模块；其余模块会自动错峰加载，不会遗漏。TV 推荐 1–2。',
+            value: '${settings.homeFeedInitialBatchSize}',
+            onDecrease: settings.homeFeedInitialBatchSize <=
+                    kHomeFeedInitialBatchSizeMin
+                ? null
+                : () {
+                    controller.setHomeFeedInitialBatchSize(
+                      settings.homeFeedInitialBatchSize - 1,
+                    );
+                  },
+            onIncrease: settings.homeFeedInitialBatchSize >=
+                    kHomeFeedInitialBatchSizeMax
+                ? null
+                : () {
+                    controller.setHomeFeedInitialBatchSize(
+                      settings.homeFeedInitialBatchSize + 1,
+                    );
+                  },
+          ),
         ]),
       ],
     );
