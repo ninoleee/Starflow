@@ -7,6 +7,52 @@ import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  test('app settings persist and clamp metadata prefetch limits', () {
+    final settings = AppSettings.fromJson(const <String, dynamic>{
+      'metadataPrefetchMaxConcurrency': 4,
+      'metadataPrefetchInitialBatchSize': 18,
+    });
+
+    expect(settings.metadataPrefetchMaxConcurrency, 4);
+    expect(settings.metadataPrefetchInitialBatchSize, 18);
+    expect(settings.toJson()['metadataPrefetchMaxConcurrency'], 4);
+    expect(settings.toJson()['metadataPrefetchInitialBatchSize'], 18);
+    expect(
+      AppSettings.fromJson(const <String, dynamic>{})
+          .metadataPrefetchMaxConcurrency,
+      kMetadataPrefetchMaxConcurrencyDefault,
+    );
+    expect(
+      AppSettings.fromJson(const <String, dynamic>{})
+          .metadataPrefetchInitialBatchSize,
+      kMetadataPrefetchInitialBatchSizeDefault,
+    );
+    expect(
+      AppSettings.fromJson(const <String, dynamic>{
+        'metadataPrefetchMaxConcurrency': 99,
+      }).metadataPrefetchMaxConcurrency,
+      kMetadataPrefetchMaxConcurrencyMax,
+    );
+    expect(
+      AppSettings.fromJson(const <String, dynamic>{
+        'metadataPrefetchInitialBatchSize': 99,
+      }).metadataPrefetchInitialBatchSize,
+      kMetadataPrefetchInitialBatchSizeMax,
+    );
+    expect(
+      settings
+          .copyWith(metadataPrefetchMaxConcurrency: 0)
+          .metadataPrefetchMaxConcurrency,
+      kMetadataPrefetchMaxConcurrencyMin,
+    );
+    expect(
+      settings
+          .copyWith(metadataPrefetchInitialBatchSize: 0)
+          .metadataPrefetchInitialBatchSize,
+      kMetadataPrefetchInitialBatchSizeMin,
+    );
+  });
+
   test('app settings persist local logging preferences', () {
     final settings = AppSettings.fromJson(const <String, dynamic>{
       'localLoggingEnabled': false,
@@ -270,6 +316,14 @@ void main() {
     expect(cleared.performanceLeanPlaybackUiEnabled, isFalse);
     expect(cleared.performanceAggressivePlaybackTuningEnabled, isFalse);
     expect(cleared.performanceAutoDowngradeHeavyPlaybackEnabled, isFalse);
+    expect(
+      cleared.metadataPrefetchMaxConcurrency,
+      kMetadataPrefetchMaxConcurrencyDefault,
+    );
+    expect(
+      cleared.metadataPrefetchInitialBatchSize,
+      kMetadataPrefetchInitialBatchSizeDefault,
+    );
     expect(cleared.effectiveUiPerformanceTier, AppUiPerformanceTier.rich);
     expect(cleared.effectiveTranslucentEffectsEnabled, isTrue);
     expect(cleared.effectiveNavigationAutoHideEnabled, isTrue);
@@ -601,6 +655,14 @@ void main() {
     expect(settings.performanceAggressivePlaybackTuningEnabled, isTrue);
     expect(settings.performanceAutoDowngradeHeavyPlaybackEnabled, isTrue);
     expect(
+      settings.metadataPrefetchMaxConcurrency,
+      kMetadataPrefetchMaxConcurrencyMin,
+    );
+    expect(
+      settings.metadataPrefetchInitialBatchSize,
+      kMetadataPrefetchInitialBatchSizeMin,
+    );
+    expect(
         settings.effectiveUiPerformanceTier, AppUiPerformanceTier.performance);
     expect(settings.effectiveStartupProbeEnabled, isFalse);
   });
@@ -627,9 +689,9 @@ void main() {
     expect(settings.highPerformanceModeEnabled, isTrue);
     expect(settings.homeStartupAutoRefreshEnabled, isFalse);
     expect(settings.homeStartupAutoRefreshEmbyEnabled, isFalse);
-    expect(settings.tmdbMetadataMatchEnabled, isFalse);
-    expect(settings.wmdbMetadataMatchEnabled, isFalse);
-    expect(settings.imdbRatingMatchEnabled, isFalse);
+    expect(settings.tmdbMetadataMatchEnabled, isTrue);
+    expect(settings.wmdbMetadataMatchEnabled, isTrue);
+    expect(settings.imdbRatingMatchEnabled, isTrue);
     expect(settings.detailAutoLibraryMatchEnabled, isTrue);
     expect(settings.playbackBackgroundPlaybackEnabled, isFalse);
     expect(settings.playbackMpvDoubleTapToSeekEnabled, isFalse);

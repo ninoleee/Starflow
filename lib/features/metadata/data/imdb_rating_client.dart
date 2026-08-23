@@ -5,21 +5,33 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
+import 'package:starflow/features/metadata/data/metadata_network_guard.dart';
 
 final imdbRatingClientProvider = Provider<ImdbRatingClient>((ref) {
   final client = ref.watch(starflowHttpClientProvider);
-  return ImdbRatingClient(client);
+  return ImdbRatingClient(
+    client,
+    networkGuard: ref.watch(metadataNetworkGuardProvider),
+  );
 });
 
 class ImdbRatingClient {
-  ImdbRatingClient(this._client);
+  ImdbRatingClient(
+    this._client, {
+    MetadataNetworkGuard? networkGuard,
+  }) : _networkGuard = networkGuard ?? MetadataNetworkGuard();
 
   final http.Client _client;
+  final MetadataNetworkGuard _networkGuard;
   Future<List<int>>? _ratingsDatasetFuture;
   final Map<String, ImdbRatingMatch?> _lookupCache = {};
+  final Map<String, List<_ImdbSuggestionItem>> _suggestionCache = {};
+  final Map<String, Future<List<_ImdbSuggestionItem>>> _suggestionInflight = {};
 
   void clearCache({bool includeDataset = false}) {
     _lookupCache.clear();
+    _suggestionCache.clear();
+    _suggestionInflight.clear();
     if (includeDataset) {
       _ratingsDatasetFuture = null;
     }
@@ -169,7 +181,41 @@ class ImdbRatingClient {
       return const <_ImdbSuggestionItem>[];
     }
 
-    final response = await _client.get(
+    final cacheKey = [
+      cleanedQuery.toLowerCase(),
+      year,
+      preferSeries ? 'series' : 'movie',
+    ].join('|');
+    final cached = _suggestionCache[cacheKey];
+    if (cached != null) {
+      return cached;
+    }
+    final inflight = _suggestionInflight[cacheKey];
+    if (inflight != null) {
+      return inflight;
+    }
+    final future = _matchSuggestionsUncached(
+      cleanedQuery: cleanedQuery,
+      year: year,
+      preferSeries: preferSeries,
+    );
+    _suggestionInflight[cacheKey] = future;
+    try {
+      final result = await future;
+      _suggestionCache[cacheKey] = result;
+      return result;
+    } finally {
+      _suggestionInflight.remove(cacheKey);
+    }
+  }
+
+  Future<List<_ImdbSuggestionItem>> _matchSuggestionsUncached({
+    required String cleanedQuery,
+    required int year,
+    required bool preferSeries,
+  }) async {
+    final response = await _networkGuard.get(
+      _client,
       _buildSuggestionUri(cleanedQuery),
       headers: const {
         'Accept': 'application/json',
@@ -235,7 +281,8 @@ class ImdbRatingClient {
 
   Future<List<int>> _loadRatingsDataset() {
     return _ratingsDatasetFuture ??= () async {
-      final response = await _client.get(
+      final response = await _networkGuard.get(
+        _client,
         Uri.parse('https://datasets.imdbws.com/title.ratings.tsv.gz'),
         headers: const {
           'Accept': 'application/gzip',

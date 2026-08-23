@@ -137,6 +137,17 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
       return;
     }
     try {
+      if (ref.read(startupCrashRecoveryActiveProvider)) {
+        appLogInfo(
+          'home.refresh',
+          'Cold start home refresh skipped',
+          fields: const <String, Object?>{
+            'reason': 'temporary-startup-recovery',
+            'savedSettingsChanged': false,
+          },
+        );
+        return;
+      }
       final settings = ref.read(appSettingsProvider);
       if (!settings.homeStartupAutoRefreshEnabled) {
         return;

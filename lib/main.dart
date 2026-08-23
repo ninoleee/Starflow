@@ -46,7 +46,8 @@ Future<void> main() async {
         );
       }
 
-      await startupCrashRecovery.beginStartup().catchError((Object error) {
+      final recoveredFromUncleanStartup =
+          await startupCrashRecovery.beginStartup().catchError((Object error) {
         appLogWarning(
           'app.startup',
           'Startup crash recovery could not begin',
@@ -54,11 +55,26 @@ Future<void> main() async {
         );
         return false;
       });
+      if (recoveredFromUncleanStartup) {
+        appLogWarning(
+          'app.startup',
+          'Temporary startup recovery activated',
+          fields: const <String, Object?>{
+            'savedSettingsChanged': false,
+            'startupRefreshSkipped': true,
+          },
+        );
+      }
       MediaKit.ensureInitialized();
       runApp(
-        const ProviderScope(
+        ProviderScope(
+          overrides: [
+            startupCrashRecoveryActiveProvider.overrideWithValue(
+              recoveredFromUncleanStartup,
+            ),
+          ],
           retry: disableRiverpodRetry,
-          child: StarflowApp(),
+          child: const StarflowApp(),
         ),
       );
     },

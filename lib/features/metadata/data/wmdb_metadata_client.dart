@@ -5,16 +5,24 @@ import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/utils/metadata_search_trace.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
+import 'package:starflow/features/metadata/data/metadata_network_guard.dart';
 
 final wmdbMetadataClientProvider = Provider<WmdbMetadataClient>((ref) {
   final client = ref.watch(starflowHttpClientProvider);
-  return WmdbMetadataClient(client);
+  return WmdbMetadataClient(
+    client,
+    networkGuard: ref.watch(metadataNetworkGuardProvider),
+  );
 });
 
 class WmdbMetadataClient {
-  WmdbMetadataClient(this._client);
+  WmdbMetadataClient(
+    this._client, {
+    MetadataNetworkGuard? networkGuard,
+  }) : _networkGuard = networkGuard ?? MetadataNetworkGuard();
 
   final http.Client _client;
+  final MetadataNetworkGuard _networkGuard;
   final Map<String, MetadataMatchResult?> _resolvedMatches = {};
   final Map<String, Future<MetadataMatchResult?>> _inflightMatches = {};
 
@@ -217,7 +225,8 @@ class WmdbMetadataClient {
       if (year > 0) 'year': '$year',
     };
     final uri = Uri.https('api.wmdb.tv', '/api/v1/movie/search', parameters);
-    final response = await _client.get(
+    final response = await _networkGuard.get(
+      _client,
       uri,
       headers: const {'Accept': 'application/json'},
     );
@@ -288,7 +297,8 @@ class WmdbMetadataClient {
       uri: uri,
       details: 'doubanId=$doubanId',
     );
-    final response = await _client.get(
+    final response = await _networkGuard.get(
+      _client,
       uri,
       headers: const {'Accept': 'application/json'},
     );
@@ -339,7 +349,8 @@ class WmdbMetadataClient {
       details:
           'query=${query.trim()} year=$year preferSeries=$preferSeries actor=$actorHint',
     );
-    final response = await _client.get(
+    final response = await _networkGuard.get(
+      _client,
       uri,
       headers: const {'Accept': 'application/json'},
     );

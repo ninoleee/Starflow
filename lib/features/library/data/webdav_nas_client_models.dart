@@ -21,6 +21,7 @@ class _WebDavEntry {
     required this.contentType,
     required this.sizeBytes,
     required this.modifiedAt,
+    required this.etag,
     required this.isSelf,
   });
 
@@ -30,6 +31,7 @@ class _WebDavEntry {
   final String contentType;
   final int sizeBytes;
   final DateTime? modifiedAt;
+  final String etag;
   final bool isSelf;
 }
 
@@ -157,6 +159,79 @@ class WebDavMetadataSeed {
       height: height ?? this.height,
       bitrate: bitrate ?? this.bitrate,
       hasSidecarMatch: hasSidecarMatch ?? this.hasSidecarMatch,
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+        'title': title,
+        'overview': overview,
+        'posterUrl': posterUrl,
+        'posterHeaders': posterHeaders,
+        'backdropUrl': backdropUrl,
+        'backdropHeaders': backdropHeaders,
+        'logoUrl': logoUrl,
+        'logoHeaders': logoHeaders,
+        'bannerUrl': bannerUrl,
+        'bannerHeaders': bannerHeaders,
+        'extraBackdropUrls': extraBackdropUrls,
+        'extraBackdropHeaders': extraBackdropHeaders,
+        'year': year,
+        'durationLabel': durationLabel,
+        'genres': genres,
+        'directors': directors,
+        'actors': actors,
+        'itemType': itemType,
+        'seasonNumber': seasonNumber,
+        'episodeNumber': episodeNumber,
+        'imdbId': imdbId,
+        'tmdbId': tmdbId,
+        'container': container,
+        'videoCodec': videoCodec,
+        'audioCodec': audioCodec,
+        'width': width,
+        'height': height,
+        'bitrate': bitrate,
+        'hasSidecarMatch': hasSidecarMatch,
+      };
+
+  factory WebDavMetadataSeed.fromJson(Map<String, dynamic> json) {
+    Map<String, String> stringMap(Object? value) => Map<String, String>.from(
+          (value as Map? ?? const <String, String>{}).map(
+            (key, value) => MapEntry('$key', '$value'),
+          ),
+        );
+    List<String> stringList(Object? value) =>
+        (value as List? ?? const []).map((item) => '$item').toList();
+    return WebDavMetadataSeed(
+      title: json['title'] as String? ?? '',
+      overview: json['overview'] as String? ?? '',
+      posterUrl: json['posterUrl'] as String? ?? '',
+      posterHeaders: stringMap(json['posterHeaders']),
+      backdropUrl: json['backdropUrl'] as String? ?? '',
+      backdropHeaders: stringMap(json['backdropHeaders']),
+      logoUrl: json['logoUrl'] as String? ?? '',
+      logoHeaders: stringMap(json['logoHeaders']),
+      bannerUrl: json['bannerUrl'] as String? ?? '',
+      bannerHeaders: stringMap(json['bannerHeaders']),
+      extraBackdropUrls: stringList(json['extraBackdropUrls']),
+      extraBackdropHeaders: stringMap(json['extraBackdropHeaders']),
+      year: (json['year'] as num?)?.toInt() ?? 0,
+      durationLabel: json['durationLabel'] as String? ?? '',
+      genres: stringList(json['genres']),
+      directors: stringList(json['directors']),
+      actors: stringList(json['actors']),
+      itemType: json['itemType'] as String? ?? '',
+      seasonNumber: (json['seasonNumber'] as num?)?.toInt(),
+      episodeNumber: (json['episodeNumber'] as num?)?.toInt(),
+      imdbId: json['imdbId'] as String? ?? '',
+      tmdbId: json['tmdbId'] as String? ?? '',
+      container: json['container'] as String? ?? '',
+      videoCodec: json['videoCodec'] as String? ?? '',
+      audioCodec: json['audioCodec'] as String? ?? '',
+      width: (json['width'] as num?)?.toInt(),
+      height: (json['height'] as num?)?.toInt(),
+      bitrate: (json['bitrate'] as num?)?.toInt(),
+      hasSidecarMatch: json['hasSidecarMatch'] as bool? ?? false,
     );
   }
 }
@@ -439,6 +514,49 @@ class ExternalScanPendingItem {
       metadataSeed: metadataSeed,
     );
   }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+        'resourceId': resourceId,
+        'fileName': fileName,
+        'actualAddress': actualAddress,
+        'sectionId': sectionId,
+        'sectionName': sectionName,
+        'streamUrl': streamUrl,
+        'streamHeaders': streamHeaders,
+        'playbackItemId': playbackItemId,
+        'addedAt': addedAt.toIso8601String(),
+        'modifiedAt': modifiedAt?.toIso8601String(),
+        'fileSizeBytes': fileSizeBytes,
+        'metadataSeed': metadataSeed.toJson(),
+        'relativeDirectories': relativeDirectories,
+      };
+
+  factory ExternalScanPendingItem.fromJson(Map<String, dynamic> json) {
+    return ExternalScanPendingItem(
+      resourceId: json['resourceId'] as String? ?? '',
+      fileName: json['fileName'] as String? ?? '',
+      actualAddress: json['actualAddress'] as String? ?? '',
+      sectionId: json['sectionId'] as String? ?? '',
+      sectionName: json['sectionName'] as String? ?? '',
+      streamUrl: json['streamUrl'] as String? ?? '',
+      streamHeaders: Map<String, String>.from(
+        (json['streamHeaders'] as Map? ?? const {}).map(
+          (key, value) => MapEntry('$key', '$value'),
+        ),
+      ),
+      playbackItemId: json['playbackItemId'] as String? ?? '',
+      addedAt: DateTime.tryParse(json['addedAt'] as String? ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      modifiedAt: DateTime.tryParse(json['modifiedAt'] as String? ?? ''),
+      fileSizeBytes: (json['fileSizeBytes'] as num?)?.toInt() ?? 0,
+      metadataSeed: WebDavMetadataSeed.fromJson(
+        Map<String, dynamic>.from(json['metadataSeed'] as Map? ?? const {}),
+      ),
+      relativeDirectories: (json['relativeDirectories'] as List? ?? const [])
+          .map((item) => '$item')
+          .toList(growable: false),
+    );
+  }
 }
 
 class _DirectoryWalkResult {
@@ -454,10 +572,12 @@ class _DirectoryWalkResult {
 class _DirectorySubtreeCacheEntry {
   const _DirectorySubtreeCacheEntry({
     required this.directoryModifiedAt,
+    required this.directoryEtag,
     required this.items,
   });
 
   final DateTime directoryModifiedAt;
+  final String directoryEtag;
   final List<ExternalScanPendingItem> items;
 }
 

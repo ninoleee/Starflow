@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -17,14 +16,8 @@ class HomeSettingsPage extends ConsumerWidget {
     final heroSlice = ref.watch(settingsHeroSliceProvider);
     final heroCandidates = ref.watch(homeHeroModuleCandidatesProvider);
     final heroModule = ref.watch(homeHeroModuleProvider);
-    final settings = ref.watch(appSettingsProvider);
     final controller = ref.read(settingsControllerProvider.notifier);
-    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final heroEnabled = heroModule?.enabled ?? false;
-    final startupEmbyEnabled =
-        settings.effectiveHomeStartupAutoRefreshEmbyEnabled(
-      isTelevision: isTelevision,
-    );
 
     return SettingsPageScaffold(
       onBack: () => Navigator.of(context).pop(),
@@ -86,27 +79,6 @@ class HomeSettingsPage extends ConsumerWidget {
           value: '模块显示、顺序与豆瓣内容',
           onPressed: () => context.pushNamed('home-editor'),
         ),
-        const SettingsSectionTitle(label: '启动行为'),
-        ...buildSettingsTileGroup([
-          StarflowToggleTile(
-            title: '启动时自动刷新首页',
-            subtitle: '冷启动应用后，首页模块会在后台重新拉取一次最新数据。',
-            value: settings.homeStartupAutoRefreshEnabled,
-            onChanged: controller.setHomeStartupAutoRefreshEnabled,
-          ),
-          StarflowToggleTile(
-            title: '同时刷新 Emby 媒体源',
-            subtitle: settings.homeStartupAutoRefreshEnabled
-                ? (isTelevision
-                    ? 'TV 端默认关闭以避免冷启动卡顿，需要时可手动开启。'
-                    : '关闭后启动时仅刷新首页模块缓存，不触发 Emby 全量同步。')
-                : '需先开启“启动时自动刷新首页”。',
-            value: startupEmbyEnabled,
-            onChanged: settings.homeStartupAutoRefreshEnabled
-                ? controller.setHomeStartupAutoRefreshEmbyEnabled
-                : null,
-          ),
-        ]),
       ],
     );
   }

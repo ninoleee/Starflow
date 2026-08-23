@@ -35,6 +35,7 @@ Future<List<_WebDavEntry>> _parseWebDavXmlInBackground({
           modifiedAt: (entry['modifiedAt'] as String?)?.isNotEmpty == true
               ? DateTime.tryParse(entry['modifiedAt']! as String)
               : null,
+          etag: entry['etag']! as String,
           isSelf: entry['isSelf']! as bool,
         ),
       )
@@ -53,6 +54,20 @@ Future<List<_PendingWebDavScannedItem>> _applyStructureInferenceInBackground(
   return Isolate.run(
     () => applyExternalDirectoryStructureInference(items, source: source),
     debugName: 'starflow-webdav-structure',
+  );
+}
+
+Future<List<Map<String, Object?>>> _serializeWebDavSubtreeInBackground(
+  List<ExternalScanPendingItem> items,
+) {
+  if (kIsWeb || items.length < 32) {
+    return Future.value(
+      items.map((item) => item.toJson()).toList(growable: false),
+    );
+  }
+  return Isolate.run(
+    () => items.map((item) => item.toJson()).toList(growable: false),
+    debugName: 'starflow-webdav-cache-serialize',
   );
 }
 
@@ -95,6 +110,7 @@ List<Map<String, Object?>> _parseWebDavXmlPayload({
           ) ??
           0,
       'modifiedAt': modifiedAt?.toIso8601String() ?? '',
+      'etag': _parsedWebDavChildText(prop, 'getetag').trim(),
       'isSelf': _normalizeParsedWebDavUri(resolvedUri) == normalizedSelf,
     };
   }).toList(growable: false);

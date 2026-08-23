@@ -24,6 +24,7 @@ import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/presentation/widgets/library_paged_grid.dart';
+import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
@@ -318,6 +319,12 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       <LibraryFilter, AsyncValue<List<MediaCollection>>>{};
 
   @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_deferPrefetchForForegroundInteraction);
+  }
+
+  @override
   void dispose() {
     _topFilterFocusNode.dispose();
     _scrollController.dispose();
@@ -341,6 +348,22 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       _isIncrementalRefreshing = false;
       _isForceRescanning = false;
     });
+  }
+
+  @override
+  void onPageBecameActive() {
+    _deferPrefetchForForegroundInteraction(reason: 'library.page-active');
+  }
+
+  void _deferPrefetchForForegroundInteraction({
+    String reason = 'library.scroll',
+  }) {
+    if (!mounted || !isPageVisible) {
+      return;
+    }
+    ref
+        .read(metadataPrefetchConcurrencyLimiterProvider)
+        .deferForForegroundInteraction(reason: reason);
   }
 
   void _handleBack() {
@@ -398,6 +421,9 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       mediaSources,
       filter: activeFilter,
     );
+    if (displayAsync.isLoading || collectionsAsync.isLoading) {
+      _deferPrefetchForForegroundInteraction(reason: 'library.content-loading');
+    }
 
     return AppPrimaryScrollController(
       controller: _scrollController,

@@ -32,6 +32,13 @@ abstract class NasMediaIndexStore {
     bool clearMissingRecords = false,
   });
 
+  Future<void> patchSourceRecords({
+    required String sourceId,
+    required List<NasMediaIndexRecord> upsertedRecords,
+    required List<String> deletedRecordIds,
+    required NasMediaIndexSourceState state,
+  });
+
   Future<LocalStorageCacheSummary> inspectSummary();
 
   Future<void> clearAll();
@@ -49,6 +56,8 @@ class SembastNasMediaIndexStore implements NasMediaIndexStore {
       stringMapStoreFactory.store('nas_media_index_records');
   final StoreRef<String, Map<String, dynamic>> _sourceStore =
       stringMapStoreFactory.store('nas_media_index_sources');
+  final StoreRef<String, Map<String, dynamic>> _directoryCacheStore =
+      stringMapStoreFactory.store('webdav_directory_subtrees');
 
   Future<Database>? _databaseFuture;
 
@@ -62,6 +71,7 @@ class SembastNasMediaIndexStore implements NasMediaIndexStore {
     await database.transaction((transaction) async {
       await _recordStore.delete(transaction);
       await _sourceStore.delete(transaction);
+      await _directoryCacheStore.delete(transaction);
     });
   }
 
@@ -83,6 +93,12 @@ class SembastNasMediaIndexStore implements NasMediaIndexStore {
         await _recordStore.record(record.key).delete(transaction);
       }
       await _sourceStore.record(normalizedSourceId).delete(transaction);
+      await _directoryCacheStore.delete(
+        transaction,
+        finder: Finder(
+          filter: Filter.equals('sourceId', normalizedSourceId),
+        ),
+      );
     });
   }
 
@@ -171,19 +187,54 @@ class SembastNasMediaIndexStore implements NasMediaIndexStore {
   }
 
   @override
+  Future<void> patchSourceRecords({
+    required String sourceId,
+    required List<NasMediaIndexRecord> upsertedRecords,
+    required List<String> deletedRecordIds,
+    required NasMediaIndexSourceState state,
+  }) async {
+    final normalizedSourceId = sourceId.trim();
+    if (normalizedSourceId.isEmpty) {
+      return;
+    }
+    final database = await _database();
+    await database.transaction((transaction) async {
+      for (final recordId in deletedRecordIds) {
+        final normalizedRecordId = recordId.trim();
+        if (normalizedRecordId.isNotEmpty) {
+          await _recordStore.record(normalizedRecordId).delete(transaction);
+        }
+      }
+      for (final record in upsertedRecords) {
+        await _recordStore.record(record.id).put(transaction, record.toJson());
+      }
+      await _sourceStore.record(normalizedSourceId).put(
+            transaction,
+            state.toJson(),
+          );
+    });
+  }
+
+  @override
   Future<LocalStorageCacheSummary> inspectSummary() async {
     final database = await _database();
     final records = await _recordStore.find(database);
     final states = await _sourceStore.find(database);
+    final directoryCaches = await _directoryCacheStore.find(database);
     final totalBytes = utf8
             .encode(jsonEncode(records.map((item) => item.value).toList()))
             .length +
         utf8
             .encode(jsonEncode(states.map((item) => item.value).toList()))
+            .length +
+        utf8
+            .encode(
+              jsonEncode(directoryCaches.map((item) => item.value).toList()),
+            )
             .length;
     return LocalStorageCacheSummary(
       type: LocalStorageCacheType.nasMetadataIndex,
-      entryCount: records.length,
+      entryCount: records.length + directoryCaches.length,
       totalBytes: totalBytes,
     );
   }

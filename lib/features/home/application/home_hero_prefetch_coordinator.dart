@@ -6,9 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/details/application/detail_target_resolver.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
-import 'package:starflow/features/details/presentation/media_detail_page.dart';
-import 'package:starflow/features/library/data/nas_media_indexer.dart';
-import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
@@ -94,16 +92,42 @@ class HomeHeroPrefetchCoordinator {
       return;
     }
     try {
-      await Future.wait(
-        targets.map(
-          (target) => _refreshSingleMetadataIfNeeded(
+      final maxConcurrency =
+          ref.read(appSettingsProvider).metadataPrefetchMaxConcurrency;
+      final limiter = ref.read(metadataPrefetchConcurrencyLimiterProvider);
+      var nextIndex = 0;
+
+      Future<void> runWorker() async {
+        while (nextIndex < targets.length) {
+          if (!_isRefreshSessionActive(
             ref: ref,
-            target: target,
             sessionId: sessionId,
             isPageActive: isPageActive,
-            forceMetadataRefresh: forceMetadataRefresh,
-          ),
-        ),
+          )) {
+            return;
+          }
+          final target = targets[nextIndex++];
+          await limiter.run<void>(
+            maxConcurrency:
+                ref.read(appSettingsProvider).metadataPrefetchMaxConcurrency,
+            initialBatchSize:
+                ref.read(appSettingsProvider).metadataPrefetchInitialBatchSize,
+            task: () => _refreshSingleMetadataIfNeeded(
+              ref: ref,
+              target: target,
+              sessionId: sessionId,
+              isPageActive: isPageActive,
+              forceMetadataRefresh: forceMetadataRefresh,
+            ),
+          );
+          await Future<void>.delayed(Duration.zero);
+        }
+      }
+
+      final workerCount =
+          targets.length < maxConcurrency ? targets.length : maxConcurrency;
+      await Future.wait(
+        List<Future<void>>.generate(workerCount, (_) => runWorker()),
         eagerError: false,
       );
     } catch (error, stackTrace) {
@@ -138,30 +162,6 @@ class HomeHeroPrefetchCoordinator {
       }
       final workingTarget = _ensureHeroSearchQuery(target);
       final cacheRepository = ref.read(localStorageCacheRepositoryProvider);
-
-      if (workingTarget.sourceKind == MediaSourceKind.nas &&
-          workingTarget.sourceId.trim().isNotEmpty &&
-          workingTarget.itemId.trim().isNotEmpty) {
-        final updatedTarget = await ref
-            .read(nasMediaIndexerProvider)
-            .enrichDetailTargetMetadataIfNeeded(workingTarget);
-        if (!_isRefreshSessionActive(
-          ref: ref,
-          sessionId: sessionId,
-          isPageActive: isPageActive,
-        )) {
-          return;
-        }
-        final resolvedTarget = updatedTarget ?? workingTarget;
-        if (!_heroMetadataRefreshProducedUpdate(target, resolvedTarget)) {
-          return;
-        }
-        await cacheRepository.saveDetailTarget(
-          seedTarget: target,
-          resolvedTarget: resolvedTarget,
-        );
-        return;
-      }
 
       final settings = ref.read(appSettingsProvider);
       if (!_canAttemptHeroMetadataRefresh(settings, workingTarget)) {
@@ -199,14 +199,12 @@ class HomeHeroPrefetchCoordinator {
       }
 
       try {
-        final updatedTarget = forceMetadataRefresh
-            ? await ref.read(detailTargetResolverProvider).resolveMetadataOnly(
+        final updatedTarget =
+            await ref.read(detailTargetResolverProvider).resolveMetadataOnly(
                   target: workingTarget,
                   backgroundWorkSuspended: false,
-                  forceMetadataRefresh: true,
-                )
-            : await ref
-                .read(enrichedDetailTargetProvider(workingTarget).future);
+                  forceMetadataRefresh: forceMetadataRefresh,
+                );
         if (!_isRefreshSessionActive(
           ref: ref,
           sessionId: sessionId,

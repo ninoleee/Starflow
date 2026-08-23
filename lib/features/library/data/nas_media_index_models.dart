@@ -3,11 +3,15 @@ import 'package:starflow/features/library/domain/media_models.dart';
 enum NasMetadataFetchStatus {
   never,
   succeeded,
-  failed,
+  noMatch,
+  transientFailure,
+  permanentFailure,
 }
 
 extension NasMetadataFetchStatusX on NasMetadataFetchStatus {
-  bool get hasAttempted => this != NasMetadataFetchStatus.never;
+  bool get hasAttempted =>
+      this != NasMetadataFetchStatus.never &&
+      this != NasMetadataFetchStatus.transientFailure;
 
   bool get isSuccessful => this == NasMetadataFetchStatus.succeeded;
 
@@ -17,7 +21,12 @@ extension NasMetadataFetchStatusX on NasMetadataFetchStatus {
       case 'succeeded':
         return NasMetadataFetchStatus.succeeded;
       case 'failed':
-        return NasMetadataFetchStatus.failed;
+      case 'nomatch':
+        return NasMetadataFetchStatus.noMatch;
+      case 'transientfailure':
+        return NasMetadataFetchStatus.transientFailure;
+      case 'permanentfailure':
+        return NasMetadataFetchStatus.permanentFailure;
       case 'never':
       case '':
         return NasMetadataFetchStatus.never;
@@ -55,6 +64,8 @@ class NasMediaIndexRecord {
     this.manualMetadataLocked = false,
     this.recognizedSeasonNumber,
     this.recognizedEpisodeNumber,
+    this.metadataFailureCount = 0,
+    this.metadataRetryAfter,
   });
 
   final String id;
@@ -83,6 +94,8 @@ class NasMediaIndexRecord {
   final NasMetadataFetchStatus imdbStatus;
   final MediaItem item;
   final bool manualMetadataLocked;
+  final int metadataFailureCount;
+  final DateTime? metadataRetryAfter;
 
   bool get sidecarMatched => sidecarStatus.isSuccessful;
 
@@ -126,6 +139,8 @@ class NasMediaIndexRecord {
       'tmdbStatus': tmdbStatus.name,
       'imdbStatus': imdbStatus.name,
       'manualMetadataLocked': manualMetadataLocked,
+      'metadataFailureCount': metadataFailureCount,
+      'metadataRetryAfter': metadataRetryAfter?.toIso8601String(),
       'item': item.toJson(),
     };
   }
@@ -162,6 +177,10 @@ class NasMediaIndexRecord {
       tmdbStatus: NasMetadataFetchStatusX.fromJsonValue(json['tmdbStatus']),
       imdbStatus: NasMetadataFetchStatusX.fromJsonValue(json['imdbStatus']),
       manualMetadataLocked: json['manualMetadataLocked'] as bool? ?? false,
+      metadataFailureCount:
+          (json['metadataFailureCount'] as num?)?.toInt() ?? 0,
+      metadataRetryAfter:
+          DateTime.tryParse(json['metadataRetryAfter'] as String? ?? ''),
       item: MediaItem.fromJson(
         Map<String, dynamic>.from(json['item'] as Map? ?? const {}),
       ),

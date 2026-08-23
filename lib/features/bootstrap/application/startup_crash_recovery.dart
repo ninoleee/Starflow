@@ -1,31 +1,24 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
-import 'package:starflow/features/settings/data/app_settings_repository.dart';
-import 'package:starflow/features/settings/domain/app_settings.dart';
 
 const _startupInProgressKey = 'starflow.startup.in_progress.v1';
+
+/// True only for the current process when the previous process did not finish
+/// startup. Recovery must never overwrite persisted user settings.
+final startupCrashRecoveryActiveProvider = Provider<bool>((ref) => false);
 
 class StartupCrashRecovery {
   StartupCrashRecovery({
     PreferencesStore? preferences,
-    AppSettingsRepository? settingsRepository,
-  })  : _preferences = preferences ?? AppPreferencesStore(),
-        _settingsRepository =
-            settingsRepository ?? LocalAppSettingsRepository();
+  }) : _preferences = preferences ?? AppPreferencesStore();
 
   final PreferencesStore _preferences;
-  final AppSettingsRepository _settingsRepository;
 
   Future<bool> beginStartup() async {
     final previousStartupMarker =
         await _preferences.getString(_startupInProgressKey);
     final recovered = previousStartupMarker != null &&
         previousStartupMarker.trim().isNotEmpty;
-
-    if (recovered) {
-      final settings = await _settingsRepository.load();
-      await _settingsRepository
-          .save(settings.applyStartupCrashRecoveryPreset());
-    }
 
     await _preferences.setString(
       _startupInProgressKey,

@@ -1788,6 +1788,14 @@ class _NoopNasMediaIndexStore implements NasMediaIndexStore {
     required NasMediaIndexSourceState state,
     bool clearMissingRecords = false,
   }) async {}
+
+  @override
+  Future<void> patchSourceRecords({
+    required String sourceId,
+    required List<NasMediaIndexRecord> upsertedRecords,
+    required List<String> deletedRecordIds,
+    required NasMediaIndexSourceState state,
+  }) async {}
 }
 
 class _NoopMediaRepository implements MediaRepository {

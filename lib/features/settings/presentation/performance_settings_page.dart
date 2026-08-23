@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/application/settings_slice_providers.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 String performanceSettingsSummary(
@@ -46,6 +47,16 @@ class PerformanceSettingsPage extends ConsumerWidget {
     final controller = ref.read(settingsControllerProvider.notifier);
     final theme = Theme.of(context);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+    final startupRefreshSettings = ref.watch(
+      appSettingsProvider.select(
+        (settings) => (
+          enabled: settings.homeStartupAutoRefreshEnabled,
+          embyEnabled: settings.homeStartupAutoRefreshEmbyEnabled,
+        ),
+      ),
+    );
+    final startupEmbyEnabled =
+        startupRefreshSettings.embyEnabled ?? !isTelevision;
 
     return SettingsPageScaffold(
       onBack: () => Navigator.of(context).pop(),
@@ -117,6 +128,24 @@ class PerformanceSettingsPage extends ConsumerWidget {
         const SettingsSectionTitle(label: '内容刷新'),
         ...buildSettingsTileGroup([
           SettingsToggleTile(
+            title: '启动时自动刷新首页',
+            subtitle: '冷启动应用后，首页模块会在后台重新拉取一次最新数据。',
+            value: startupRefreshSettings.enabled,
+            onChanged: controller.setHomeStartupAutoRefreshEnabled,
+          ),
+          SettingsToggleTile(
+            title: '同时刷新 Emby 媒体源',
+            subtitle: startupRefreshSettings.enabled
+                ? (isTelevision
+                    ? 'TV 端默认关闭以避免冷启动卡顿，需要时可手动开启。'
+                    : '关闭后启动时仅刷新首页模块缓存，不触发 Emby 全量同步。')
+                : '需先开启“启动时自动刷新首页”。',
+            value: startupEmbyEnabled,
+            onChanged: startupRefreshSettings.enabled
+                ? controller.setHomeStartupAutoRefreshEmbyEnabled
+                : null,
+          ),
+          SettingsToggleTile(
             title: '运行时卡片 / Hero 局部更新',
             subtitle: isTelevision
                 ? 'TV 端为保证滚动和焦点稳定，已强制关闭这类运行时局部刷新；普通端仍可按需开启。'
@@ -126,6 +155,50 @@ class PerformanceSettingsPage extends ConsumerWidget {
                 ? null
                 : (value) {
                     controller.setPerformanceLiveItemHeroOverlayEnabled(value);
+                  },
+          ),
+          SettingsStepperTile(
+            title: '后台元数据最大并发数',
+            subtitle: '同时执行的首页 Hero、评分和元数据补全任务数量。TV 或低性能设备建议设为 1–2；数值过高可能造成卡顿。',
+            value: '${settings.metadataPrefetchMaxConcurrency}',
+            onDecrease: settings.metadataPrefetchMaxConcurrency <=
+                    kMetadataPrefetchMaxConcurrencyMin
+                ? null
+                : () {
+                    controller.setMetadataPrefetchMaxConcurrency(
+                      settings.metadataPrefetchMaxConcurrency - 1,
+                    );
+                  },
+            onIncrease: settings.metadataPrefetchMaxConcurrency >=
+                    kMetadataPrefetchMaxConcurrencyMax
+                ? null
+                : () {
+                    controller.setMetadataPrefetchMaxConcurrency(
+                      settings.metadataPrefetchMaxConcurrency + 1,
+                    );
+                  },
+          ),
+          SettingsStepperTile(
+            title: '首批元数据预取数量',
+            subtitle: 'Hero、评分和各首页分区合计先处理的数量；剩余内容会在后台分批补齐，不会丢弃。TV 推荐 12。',
+            value: '${settings.metadataPrefetchInitialBatchSize}',
+            onDecrease: settings.metadataPrefetchInitialBatchSize <=
+                    kMetadataPrefetchInitialBatchSizeMin
+                ? null
+                : () {
+                    controller.setMetadataPrefetchInitialBatchSize(
+                      settings.metadataPrefetchInitialBatchSize -
+                          kMetadataPrefetchInitialBatchSizeStep,
+                    );
+                  },
+            onIncrease: settings.metadataPrefetchInitialBatchSize >=
+                    kMetadataPrefetchInitialBatchSizeMax
+                ? null
+                : () {
+                    controller.setMetadataPrefetchInitialBatchSize(
+                      settings.metadataPrefetchInitialBatchSize +
+                          kMetadataPrefetchInitialBatchSizeStep,
+                    );
                   },
           ),
         ]),

@@ -58,10 +58,7 @@ extension HomeModuleTypeX on HomeModuleType {
   }
 }
 
-enum HomeHeroDisplayMode {
-  normal,
-  borderless,
-}
+enum HomeHeroDisplayMode { normal, borderless }
 
 extension HomeHeroDisplayModeX on HomeHeroDisplayMode {
   String get label {
@@ -82,10 +79,7 @@ extension HomeHeroDisplayModeX on HomeHeroDisplayMode {
   }
 }
 
-enum HomeHeroStyle {
-  composite,
-  poster,
-}
+enum HomeHeroStyle { composite, poster }
 
 extension HomeHeroStyleX on HomeHeroStyle {
   String get label {
@@ -106,10 +100,7 @@ extension HomeHeroStyleX on HomeHeroStyle {
   }
 }
 
-enum PlaybackSubtitlePreference {
-  auto,
-  off,
-}
+enum PlaybackSubtitlePreference { auto, off }
 
 extension PlaybackSubtitlePreferenceX on PlaybackSubtitlePreference {
   String get label {
@@ -139,11 +130,7 @@ extension PlaybackSubtitlePreferenceX on PlaybackSubtitlePreference {
   }
 }
 
-enum PlaybackEngine {
-  embeddedMpv,
-  nativeContainer,
-  systemPlayer,
-}
+enum PlaybackEngine { embeddedMpv, nativeContainer, systemPlayer }
 
 extension PlaybackEngineX on PlaybackEngine {
   String get label {
@@ -178,11 +165,7 @@ extension PlaybackEngineX on PlaybackEngine {
   }
 }
 
-enum PlaybackDecodeMode {
-  auto,
-  hardwarePreferred,
-  softwarePreferred,
-}
+enum PlaybackDecodeMode { auto, hardwarePreferred, softwarePreferred }
 
 extension PlaybackDecodeModeX on PlaybackDecodeMode {
   String get label {
@@ -217,11 +200,7 @@ extension PlaybackDecodeModeX on PlaybackDecodeMode {
   }
 }
 
-enum PlaybackMpvQualityPreset {
-  qualityFirst,
-  balanced,
-  performanceFirst,
-}
+enum PlaybackMpvQualityPreset { qualityFirst, balanced, performanceFirst }
 
 extension PlaybackMpvQualityPresetX on PlaybackMpvQualityPreset {
   String get label {
@@ -260,6 +239,19 @@ const double kPlaybackSubtitleScaleDefault = 32.0;
 const int kSubtitleSearchMaxValidatedCandidatesMin = 1;
 const int kSubtitleSearchMaxValidatedCandidatesMax = 20;
 const int kSubtitleSearchMaxValidatedCandidatesDefault = 5;
+const int kMetadataPrefetchMaxConcurrencyMin = 1;
+const int kMetadataPrefetchMaxConcurrencyMax = 6;
+const int kMetadataPrefetchMaxConcurrencyDefault = 2;
+const int kMetadataPrefetchInitialBatchSizeMin = 6;
+const int kMetadataPrefetchInitialBatchSizeMax = 24;
+const int kMetadataPrefetchInitialBatchSizeStep = 6;
+const int kMetadataPrefetchInitialBatchSizeDefault = 12;
+const int kHomeFeedMaxConcurrencyMin = 1;
+const int kHomeFeedMaxConcurrencyMax = 6;
+const int kHomeFeedMaxConcurrencyDefault = 2;
+const int kHomeFeedInitialBatchSizeMin = 1;
+const int kHomeFeedInitialBatchSizeMax = 6;
+const int kHomeFeedInitialBatchSizeDefault = 2;
 const int kLocalLogMaxSizeMbDefault = 20;
 const List<int> kLocalLogMaxSizeOptionsMb = <int>[5, 10, 20, 50, 100];
 const Set<AppLogLevel> kDefaultLocalLogRecordedLevels =
@@ -272,6 +264,39 @@ int normalizeLocalLogMaxSizeMb(int value) {
     return value;
   }
   return kLocalLogMaxSizeMbDefault;
+}
+
+int clampMetadataPrefetchMaxConcurrency(int value) {
+  return value.clamp(
+    kMetadataPrefetchMaxConcurrencyMin,
+    kMetadataPrefetchMaxConcurrencyMax,
+  );
+}
+
+int clampMetadataPrefetchInitialBatchSize(int value) {
+  final clamped = value.clamp(
+    kMetadataPrefetchInitialBatchSizeMin,
+    kMetadataPrefetchInitialBatchSizeMax,
+  );
+  final steps = ((clamped - kMetadataPrefetchInitialBatchSizeMin) /
+          kMetadataPrefetchInitialBatchSizeStep)
+      .round();
+  return kMetadataPrefetchInitialBatchSizeMin +
+      steps * kMetadataPrefetchInitialBatchSizeStep;
+}
+
+int clampHomeFeedMaxConcurrency(int value) {
+  return value.clamp(
+    kHomeFeedMaxConcurrencyMin,
+    kHomeFeedMaxConcurrencyMax,
+  );
+}
+
+int clampHomeFeedInitialBatchSize(int value) {
+  return value.clamp(
+    kHomeFeedInitialBatchSizeMin,
+    kHomeFeedInitialBatchSizeMax,
+  );
 }
 
 Set<AppLogLevel> parseLocalLogLevels(
@@ -830,6 +855,12 @@ class AppSettings {
     this.performanceLeanPlaybackUiEnabled = false,
     this.performanceAggressivePlaybackTuningEnabled = false,
     this.performanceAutoDowngradeHeavyPlaybackEnabled = false,
+    this.metadataPrefetchMaxConcurrency =
+        kMetadataPrefetchMaxConcurrencyDefault,
+    this.metadataPrefetchInitialBatchSize =
+        kMetadataPrefetchInitialBatchSizeDefault,
+    this.homeFeedMaxConcurrency = kHomeFeedMaxConcurrencyDefault,
+    this.homeFeedInitialBatchSize = kHomeFeedInitialBatchSizeDefault,
     this.tmdbMetadataMatchEnabled = false,
     this.wmdbMetadataMatchEnabled = false,
     this.metadataMatchPriority = MetadataMatchProvider.tmdb,
@@ -895,6 +926,10 @@ class AppSettings {
   final bool performanceLeanPlaybackUiEnabled;
   final bool performanceAggressivePlaybackTuningEnabled;
   final bool performanceAutoDowngradeHeavyPlaybackEnabled;
+  final int metadataPrefetchMaxConcurrency;
+  final int metadataPrefetchInitialBatchSize;
+  final int homeFeedMaxConcurrency;
+  final int homeFeedInitialBatchSize;
   final bool tmdbMetadataMatchEnabled;
   final bool wmdbMetadataMatchEnabled;
   final MetadataMatchProvider metadataMatchPriority;
@@ -958,6 +993,10 @@ class AppSettings {
     bool? performanceLeanPlaybackUiEnabled,
     bool? performanceAggressivePlaybackTuningEnabled,
     bool? performanceAutoDowngradeHeavyPlaybackEnabled,
+    int? metadataPrefetchMaxConcurrency,
+    int? metadataPrefetchInitialBatchSize,
+    int? homeFeedMaxConcurrency,
+    int? homeFeedInitialBatchSize,
     bool? tmdbMetadataMatchEnabled,
     bool? wmdbMetadataMatchEnabled,
     MetadataMatchProvider? metadataMatchPriority,
@@ -1051,6 +1090,20 @@ class AppSettings {
       performanceAutoDowngradeHeavyPlaybackEnabled:
           performanceAutoDowngradeHeavyPlaybackEnabled ??
               this.performanceAutoDowngradeHeavyPlaybackEnabled,
+      metadataPrefetchMaxConcurrency: metadataPrefetchMaxConcurrency == null
+          ? this.metadataPrefetchMaxConcurrency
+          : clampMetadataPrefetchMaxConcurrency(metadataPrefetchMaxConcurrency),
+      metadataPrefetchInitialBatchSize: metadataPrefetchInitialBatchSize == null
+          ? this.metadataPrefetchInitialBatchSize
+          : clampMetadataPrefetchInitialBatchSize(
+              metadataPrefetchInitialBatchSize,
+            ),
+      homeFeedMaxConcurrency: homeFeedMaxConcurrency == null
+          ? this.homeFeedMaxConcurrency
+          : clampHomeFeedMaxConcurrency(homeFeedMaxConcurrency),
+      homeFeedInitialBatchSize: homeFeedInitialBatchSize == null
+          ? this.homeFeedInitialBatchSize
+          : clampHomeFeedInitialBatchSize(homeFeedInitialBatchSize),
       tmdbMetadataMatchEnabled:
           tmdbMetadataMatchEnabled ?? this.tmdbMetadataMatchEnabled,
       wmdbMetadataMatchEnabled:
@@ -1109,8 +1162,7 @@ class AppSettings {
       playbackMpvStallAutoRecoveryEnabled:
           playbackMpvStallAutoRecoveryEnabled ??
               this.playbackMpvStallAutoRecoveryEnabled,
-      localLoggingEnabled:
-          localLoggingEnabled ?? this.localLoggingEnabled,
+      localLoggingEnabled: localLoggingEnabled ?? this.localLoggingEnabled,
       localLogMaxSizeMb: localLogMaxSizeMb == null
           ? this.localLogMaxSizeMb
           : normalizeLocalLogMaxSizeMb(localLogMaxSizeMb),
@@ -1158,6 +1210,10 @@ class AppSettings {
           performanceAggressivePlaybackTuningEnabled,
       'performanceAutoDowngradeHeavyPlaybackEnabled':
           performanceAutoDowngradeHeavyPlaybackEnabled,
+      'metadataPrefetchMaxConcurrency': metadataPrefetchMaxConcurrency,
+      'metadataPrefetchInitialBatchSize': metadataPrefetchInitialBatchSize,
+      'homeFeedMaxConcurrency': homeFeedMaxConcurrency,
+      'homeFeedInitialBatchSize': homeFeedInitialBatchSize,
       'tmdbMetadataMatchEnabled': tmdbMetadataMatchEnabled,
       'wmdbMetadataMatchEnabled': wmdbMetadataMatchEnabled,
       'metadataMatchPriority': metadataMatchPriority.name,
@@ -1211,9 +1267,8 @@ class AppSettings {
     final rawHomeHeroStyle = (json['homeHeroStyle'] as String? ?? '').trim();
     final rawHomeModules = (json['homeModules'] as List<dynamic>? ?? [])
         .map(
-          (item) => HomeModuleConfig.fromJson(
-            Map<String, dynamic>.from(item as Map),
-          ),
+          (item) =>
+              HomeModuleConfig.fromJson(Map<String, dynamic>.from(item as Map)),
         )
         .toList();
     return AppSettings(
@@ -1232,18 +1287,14 @@ class AppSettings {
           )
           .toList(),
       doubanAccount: DoubanAccountConfig.fromJson(
-        Map<String, dynamic>.from(
-          (json['doubanAccount'] as Map?) ?? const {},
-        ),
+        Map<String, dynamic>.from((json['doubanAccount'] as Map?) ?? const {}),
       ),
       homeModules: _normalizeHomeModules(
         rawHomeModules,
         legacyHeroEnabled: legacyHeroEnabled,
       ),
       networkStorage: NetworkStorageConfig.fromJson(
-        Map<String, dynamic>.from(
-          (json['networkStorage'] as Map?) ?? const {},
-        ),
+        Map<String, dynamic>.from((json['networkStorage'] as Map?) ?? const {}),
       ),
       homeHeroSourceModuleId: json['homeHeroSourceModuleId'] as String? ?? '',
       homeHeroDisplayMode: json.containsKey('homeHeroDisplayMode')
@@ -1251,9 +1302,7 @@ class AppSettings {
               json['homeHeroDisplayMode'] as String? ?? '',
             )
           : _parseLegacyHomeHeroDisplayMode(rawHomeHeroStyle),
-      homeHeroStyle: _parseHomeHeroStyle(
-        rawHomeHeroStyle,
-      ),
+      homeHeroStyle: _parseHomeHeroStyle(rawHomeHeroStyle),
       homeHeroLogoTitleEnabled:
           json['homeHeroLogoTitleEnabled'] as bool? ?? false,
       homeHeroBackgroundEnabled:
@@ -1298,6 +1347,22 @@ class AppSettings {
       performanceAutoDowngradeHeavyPlaybackEnabled:
           json['performanceAutoDowngradeHeavyPlaybackEnabled'] as bool? ??
               false,
+      metadataPrefetchMaxConcurrency: clampMetadataPrefetchMaxConcurrency(
+        (json['metadataPrefetchMaxConcurrency'] as num?)?.toInt() ??
+            kMetadataPrefetchMaxConcurrencyDefault,
+      ),
+      metadataPrefetchInitialBatchSize: clampMetadataPrefetchInitialBatchSize(
+        (json['metadataPrefetchInitialBatchSize'] as num?)?.toInt() ??
+            kMetadataPrefetchInitialBatchSizeDefault,
+      ),
+      homeFeedMaxConcurrency: clampHomeFeedMaxConcurrency(
+        (json['homeFeedMaxConcurrency'] as num?)?.toInt() ??
+            kHomeFeedMaxConcurrencyDefault,
+      ),
+      homeFeedInitialBatchSize: clampHomeFeedInitialBatchSize(
+        (json['homeFeedInitialBatchSize'] as num?)?.toInt() ??
+            kHomeFeedInitialBatchSizeDefault,
+      ),
       tmdbMetadataMatchEnabled: json['tmdbMetadataMatchEnabled'] as bool? ??
           legacyImdbAutoMatchEnabled,
       wmdbMetadataMatchEnabled:
@@ -1308,24 +1373,30 @@ class AppSettings {
       imdbRatingMatchEnabled: json['imdbRatingMatchEnabled'] as bool? ?? false,
       detailAutoLibraryMatchEnabled:
           json['detailAutoLibraryMatchEnabled'] as bool? ?? false,
-      libraryMatchSourceIds:
-          _parseNormalizedStringList(json['libraryMatchSourceIds']),
+      libraryMatchSourceIds: _parseNormalizedStringList(
+        json['libraryMatchSourceIds'],
+      ),
       searchSourceIds: _parseNormalizedStringList(json['searchSourceIds']),
       tmdbReadAccessToken: json['tmdbReadAccessToken'] as String? ?? '',
       playbackOpenTimeoutSeconds:
-          ((json['playbackOpenTimeoutSeconds'] as num?)?.toInt() ?? 20)
-              .clamp(1, 600),
+          ((json['playbackOpenTimeoutSeconds'] as num?)?.toInt() ?? 20).clamp(
+        1,
+        600,
+      ),
       playbackDefaultSpeed:
-          ((json['playbackDefaultSpeed'] as num?)?.toDouble() ?? 1.0)
-              .clamp(0.75, 2.0),
+          ((json['playbackDefaultSpeed'] as num?)?.toDouble() ?? 1.0).clamp(
+        0.75,
+        2.0,
+      ),
       playbackSubtitlePreference: PlaybackSubtitlePreferenceX.fromName(
         json['playbackSubtitlePreference'] as String? ?? '',
       ),
       playbackSubtitleScale: parsePlaybackSubtitleScale(
         json['playbackSubtitleScale'],
       ),
-      onlineSubtitleSources:
-          _parseOnlineSubtitleSources(json['onlineSubtitleSources']),
+      onlineSubtitleSources: _parseOnlineSubtitleSources(
+        json['onlineSubtitleSources'],
+      ),
       assrtToken: json['assrtToken'] as String? ?? '',
       opensubtitlesEnabled: json['opensubtitlesEnabled'] as bool? ?? false,
       opensubtitlesUsername: json['opensubtitlesUsername'] as String? ?? '',
@@ -1376,11 +1447,7 @@ class AppSettings {
   }
 }
 
-enum AppUiPerformanceTier {
-  rich,
-  balanced,
-  performance,
-}
+enum AppUiPerformanceTier { rich, balanced, performance }
 
 extension AppSettingsPerformanceX on AppSettings {
   AppSettings applyHighPerformancePreset() {
@@ -1400,16 +1467,25 @@ extension AppSettingsPerformanceX on AppSettings {
       performanceLeanPlaybackUiEnabled: true,
       performanceAggressivePlaybackTuningEnabled: true,
       performanceAutoDowngradeHeavyPlaybackEnabled: true,
+      metadataPrefetchMaxConcurrency: kMetadataPrefetchMaxConcurrencyMin,
+      metadataPrefetchInitialBatchSize: kMetadataPrefetchInitialBatchSizeMin,
+      homeFeedMaxConcurrency: kHomeFeedMaxConcurrencyMin,
+      homeFeedInitialBatchSize: kHomeFeedInitialBatchSizeMin,
     );
   }
 
   AppSettings applyStartupCrashRecoveryPreset() {
+    final savedMetadataPrefetchMaxConcurrency = metadataPrefetchMaxConcurrency;
+    final savedMetadataPrefetchInitialBatchSize =
+        metadataPrefetchInitialBatchSize;
     return applyHighPerformancePreset().copyWith(
+      // Keep user-controlled metadata settings stable. Recovery disables the
+      // automatic startup refresh below, which is sufficient to prevent a
+      // second heavy cold start without silently changing online completion.
+      metadataPrefetchMaxConcurrency: savedMetadataPrefetchMaxConcurrency,
+      metadataPrefetchInitialBatchSize: savedMetadataPrefetchInitialBatchSize,
       homeStartupAutoRefreshEnabled: false,
       homeStartupAutoRefreshEmbyEnabled: false,
-      tmdbMetadataMatchEnabled: false,
-      wmdbMetadataMatchEnabled: false,
-      imdbRatingMatchEnabled: false,
       playbackBackgroundPlaybackEnabled: false,
       playbackMpvQualityPreset: PlaybackMpvQualityPreset.performanceFirst,
       playbackMpvDoubleTapToSeekEnabled: false,
@@ -1436,6 +1512,11 @@ extension AppSettingsPerformanceX on AppSettings {
       performanceLeanPlaybackUiEnabled: false,
       performanceAggressivePlaybackTuningEnabled: false,
       performanceAutoDowngradeHeavyPlaybackEnabled: false,
+      metadataPrefetchMaxConcurrency: kMetadataPrefetchMaxConcurrencyDefault,
+      metadataPrefetchInitialBatchSize:
+          kMetadataPrefetchInitialBatchSizeDefault,
+      homeFeedMaxConcurrency: kHomeFeedMaxConcurrencyDefault,
+      homeFeedInitialBatchSize: kHomeFeedInitialBatchSizeDefault,
     );
   }
 

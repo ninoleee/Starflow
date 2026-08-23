@@ -9,6 +9,7 @@ import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
+import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
@@ -49,6 +50,8 @@ final effectivePlaybackBackgroundEnabledProvider = Provider<bool>((ref) {
 });
 
 class SettingsController extends AsyncNotifier<AppSettings> {
+  Future<void> _persistenceTail = Future<void>.value();
+
   AppSettingsRepository get _repository =>
       ref.read(appSettingsRepositoryProvider);
 
@@ -481,6 +484,24 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     );
   }
 
+  Future<void> setMetadataPrefetchMaxConcurrency(int maxConcurrency) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(
+        metadataPrefetchMaxConcurrency: maxConcurrency,
+      ),
+    );
+  }
+
+  Future<void> setMetadataPrefetchInitialBatchSize(int batchSize) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(
+        metadataPrefetchInitialBatchSize: batchSize,
+      ),
+    );
+  }
+
   Future<void> setPerformanceSlimDetailHeroEnabled(bool enabled) async {
     final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(performanceSlimDetailHeroEnabled: enabled));
@@ -576,7 +597,24 @@ class SettingsController extends AsyncNotifier<AppSettings> {
       homeModules: _normalizeHomeModuleOrder(next.homeModules),
     );
     state = AsyncData(normalized);
-    await _repository.save(normalized);
+    final saveFuture = _persistenceTail.then(
+      (_) => _repository.save(normalized),
+    );
+    _persistenceTail = saveFuture.catchError(
+      (Object error, StackTrace stackTrace) {
+        appLogError(
+          'settings.persistence',
+          'Settings write failed',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      },
+    );
+    await saveFuture;
+    ref.read(metadataPrefetchConcurrencyLimiterProvider).updateLimits(
+          maxConcurrency: normalized.metadataPrefetchMaxConcurrency,
+          initialBatchSize: normalized.metadataPrefetchInitialBatchSize,
+        );
     ref.read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
   }
 

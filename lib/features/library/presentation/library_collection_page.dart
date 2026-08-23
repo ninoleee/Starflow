@@ -20,6 +20,7 @@ import 'package:starflow/features/library/domain/library_collection_models.dart'
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/presentation/widgets/library_paged_grid.dart';
+import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
@@ -122,6 +123,12 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
           AsyncValue<LibraryVisiblePageItemsResult>>{};
 
   @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_deferPrefetchForForegroundInteraction);
+  }
+
+  @override
   void dispose() {
     _headerFocusNode.dispose();
     _scrollController.dispose();
@@ -137,6 +144,24 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
             includeForceFull: false,
           ),
     );
+  }
+
+  @override
+  void onPageBecameActive() {
+    _deferPrefetchForForegroundInteraction(
+      reason: 'library.collection-page-active',
+    );
+  }
+
+  void _deferPrefetchForForegroundInteraction({
+    String reason = 'library.collection-scroll',
+  }) {
+    if (!mounted || !isPageVisible) {
+      return;
+    }
+    ref
+        .read(metadataPrefetchConcurrencyLimiterProvider)
+        .deferForForegroundInteraction(reason: reason);
   }
 
   @override
@@ -161,6 +186,11 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
       },
       fallbackValue: const AsyncLoading<LibraryVisiblePageItemsResult>(),
     );
+    if (displayAsync.isLoading) {
+      _deferPrefetchForForegroundInteraction(
+        reason: 'library.collection-content-loading',
+      );
+    }
 
     final headerContent = Column(
       crossAxisAlignment: CrossAxisAlignment.start,

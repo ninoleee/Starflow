@@ -5,16 +5,24 @@ import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/utils/metadata_search_trace.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
+import 'package:starflow/features/metadata/data/metadata_network_guard.dart';
 
 final tmdbMetadataClientProvider = Provider<TmdbMetadataClient>((ref) {
   final client = ref.watch(starflowHttpClientProvider);
-  return TmdbMetadataClient(client);
+  return TmdbMetadataClient(
+    client,
+    networkGuard: ref.watch(metadataNetworkGuardProvider),
+  );
 });
 
 class TmdbMetadataClient {
-  TmdbMetadataClient(this._client);
+  TmdbMetadataClient(
+    this._client, {
+    MetadataNetworkGuard? networkGuard,
+  }) : _networkGuard = networkGuard ?? MetadataNetworkGuard();
 
   final http.Client _client;
+  final MetadataNetworkGuard _networkGuard;
   final Map<String, TmdbMetadataMatch?> _resolvedMatches = {};
   final Map<String, Future<TmdbMetadataMatch?>> _inflightMatches = {};
 
@@ -133,7 +141,8 @@ class TmdbMetadataClient {
       return const <TmdbMetadataMatch>[];
     }
 
-    final searchResponse = await _client.get(
+    final searchResponse = await _networkGuard.get(
+      _client,
       _buildSearchUri(cleanedQuery),
       headers: _buildHeaders(cleanedToken),
     );
@@ -277,7 +286,8 @@ class TmdbMetadataClient {
         'uri': searchUri,
       },
     );
-    final searchResponse = await _client.get(
+    final searchResponse = await _networkGuard.get(
+      _client,
       searchUri,
       headers: _buildHeaders(readAccessToken),
     );
@@ -372,7 +382,8 @@ class TmdbMetadataClient {
         'uri': findUri,
       },
     );
-    final findResponse = await _client.get(
+    final findResponse = await _networkGuard.get(
+      _client,
       findUri,
       headers: _buildHeaders(readAccessToken),
     );
@@ -682,7 +693,8 @@ class TmdbMetadataClient {
         'uri': detailsUri,
       },
     );
-    final detailsResponse = await _client.get(
+    final detailsResponse = await _networkGuard.get(
+      _client,
       detailsUri,
       headers: _buildHeaders(readAccessToken),
     );
@@ -835,7 +847,8 @@ class TmdbMetadataClient {
       return '';
     }
 
-    final response = await _client.get(
+    final response = await _networkGuard.get(
+      _client,
       Uri.https(
         'api.themoviedb.org',
         '/3/tv/$seriesId/season/$seasonNumber/episode/$episodeNumber',
@@ -872,7 +885,8 @@ class TmdbMetadataClient {
       return const [];
     }
 
-    final searchResponse = await _client.get(
+    final searchResponse = await _networkGuard.get(
+      _client,
       _buildPersonSearchUri(trimmedName),
       headers: _buildHeaders(cleanedToken),
     );
@@ -909,7 +923,8 @@ class TmdbMetadataClient {
       return const [];
     }
 
-    final creditsResponse = await _client.get(
+    final creditsResponse = await _networkGuard.get(
+      _client,
       _buildPersonCombinedCreditsUri(personId),
       headers: _buildHeaders(cleanedToken),
     );

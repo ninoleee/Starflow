@@ -114,5 +114,55 @@ void main() {
       expect(result!.imdbId, 'tt3581920');
       expect(result.ratingLabel, 'IMDb 8.6');
     });
+
+    test('deduplicates repeated series suggestion lookups', () async {
+      var suggestionRequests = 0;
+      final client = ImdbRatingClient(
+        MockClient((request) async {
+          if (request.url.host == 'v3.sg.media-imdb.com') {
+            suggestionRequests += 1;
+            return http.Response(
+              jsonEncode({
+                'd': [
+                  {
+                    'id': 'tt3581920',
+                    'l': 'The Last of Us',
+                    'q': 'TV series',
+                    'qid': 'tvSeries',
+                    'rank': 10,
+                    'y': 2023,
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+          if (request.url.host == 'datasets.imdbws.com') {
+            final payload = utf8.encode(
+              'tconst\taverageRating\tnumVotes\n'
+              'tt3581920\t8.6\t666000\n',
+            );
+            return http.Response.bytes(
+              GZipEncoder().encodeBytes(payload),
+              200,
+            );
+          }
+          throw UnsupportedError('Unexpected request: ${request.url}');
+        }),
+      );
+
+      await client.matchRating(
+        query: 'The Last of Us',
+        year: 2023,
+        preferSeries: true,
+      );
+      await client.matchRating(
+        query: 'The Last of Us',
+        year: 2023,
+        preferSeries: true,
+      );
+
+      expect(suggestionRequests, 1);
+    });
   });
 }

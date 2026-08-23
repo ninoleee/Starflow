@@ -3,8 +3,8 @@ part of 'nas_media_indexer.dart';
 class NasMediaIndexerConcurrencyLimits {
   const NasMediaIndexerConcurrencyLimits({
     this.sourceRefreshConcurrency = 1,
-    this.collectionRefreshConcurrency = 2,
-    this.enrichmentConcurrency = 2,
+    this.collectionRefreshConcurrency = 1,
+    this.enrichmentConcurrency = 1,
   });
 
   final int sourceRefreshConcurrency;

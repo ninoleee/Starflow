@@ -5,13 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/features/details/application/detail_target_resolver.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
-import 'package:starflow/features/library/data/nas_media_indexer.dart';
-import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 class DetailRatingPrefetchCoordinator {
-  static const int _maxParallelPrefetchWorkers = 3;
-
   int _refreshSessionId = 0;
   final Set<String> _scheduledRefreshKeys = <String>{};
 
@@ -133,9 +131,11 @@ class DetailRatingPrefetchCoordinator {
 
       final updates = <DetailTargetCacheSaveRequest>[];
       var nextIndex = 0;
-      final workerCount = targets.length < _maxParallelPrefetchWorkers
-          ? targets.length
-          : _maxParallelPrefetchWorkers;
+      final maxConcurrency =
+          ref.read(appSettingsProvider).metadataPrefetchMaxConcurrency;
+      final limiter = ref.read(metadataPrefetchConcurrencyLimiterProvider);
+      final workerCount =
+          targets.length < maxConcurrency ? targets.length : maxConcurrency;
 
       Future<void> runWorker() async {
         while (true) {
@@ -150,13 +150,19 @@ class DetailRatingPrefetchCoordinator {
             return;
           }
           final target = targets[nextIndex++];
-          final update = await _prefetchSingleTarget(
-            ref: ref,
-            target: target,
-            sessionId: sessionId,
-            isPageActive: isPageActive,
-            cacheRepository: cacheRepository,
-            preferDoubanOnly: preferDoubanOnly,
+          final update = await limiter.run<DetailTargetCacheSaveRequest?>(
+            maxConcurrency:
+                ref.read(appSettingsProvider).metadataPrefetchMaxConcurrency,
+            initialBatchSize:
+                ref.read(appSettingsProvider).metadataPrefetchInitialBatchSize,
+            task: () => _prefetchSingleTarget(
+              ref: ref,
+              target: target,
+              sessionId: sessionId,
+              isPageActive: isPageActive,
+              cacheRepository: cacheRepository,
+              preferDoubanOnly: preferDoubanOnly,
+            ),
           );
           if (update != null) {
             updates.add(update);
@@ -234,15 +240,7 @@ class DetailRatingPrefetchCoordinator {
         return null;
       }
 
-      MediaDetailTarget? updatedTarget;
-      if (target.sourceKind == MediaSourceKind.nas &&
-          target.sourceId.trim().isNotEmpty &&
-          target.itemId.trim().isNotEmpty) {
-        updatedTarget = await ref
-            .read(nasMediaIndexerProvider)
-            .enrichDetailTargetMetadataIfNeeded(target);
-      }
-      updatedTarget ??=
+      final updatedTarget =
           await ref.read(detailTargetResolverProvider).resolveMetadataOnly(
                 target: target,
                 backgroundWorkSuspended: false,

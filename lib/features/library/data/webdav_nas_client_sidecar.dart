@@ -868,14 +868,16 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     }
   }
 
-  _DirectorySubtreeCacheEntry? _loadCachedDirectorySubtree({
+  Future<_DirectorySubtreeCacheEntry?> _loadCachedDirectorySubtree({
     required MediaSourceConfig source,
     required Uri uri,
     required bool includeSidecarMetadata,
     required DateTime? directoryModifiedAt,
+    required String directoryEtag,
   }) {
-    if (directoryModifiedAt == null) {
-      return null;
+    final normalizedEtag = directoryEtag.trim();
+    if (directoryModifiedAt == null && normalizedEtag.isEmpty) {
+      return Future.value(null);
     }
     final key = _directorySubtreeCacheKey(
       source,
@@ -883,17 +885,75 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
       includeSidecarMetadata: includeSidecarMetadata,
     );
     final cached = _directorySubtreeCache[key];
-    if (cached == null || cached.directoryModifiedAt != directoryModifiedAt) {
-      return null;
+    if (cached != null &&
+        ((normalizedEtag.isNotEmpty &&
+                cached.directoryEtag == normalizedEtag) ||
+            (normalizedEtag.isEmpty &&
+                cached.directoryModifiedAt == directoryModifiedAt))) {
+      return Future.value(cached);
     }
-    return cached;
+    final cacheStore = _directoryCacheStore;
+    if (cacheStore == null) {
+      return Future.value(null);
+    }
+    return cacheStore.load(key).then((raw) {
+      if (raw == null) {
+        return null;
+      }
+      final matchesFingerprint = normalizedEtag.isNotEmpty
+          ? raw['directoryEtag'] == normalizedEtag
+          : raw['directoryModifiedAt'] ==
+              directoryModifiedAt?.toIso8601String();
+      if (!matchesFingerprint) {
+        return null;
+      }
+      final cachedAt = DateTime.tryParse(raw['cachedAt'] as String? ?? '');
+      if (cachedAt == null ||
+          DateTime.now().difference(cachedAt) > const Duration(days: 30)) {
+        return null;
+      }
+      final items = (raw['items'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) => ExternalScanPendingItem.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .toList(growable: false);
+      final entry = _DirectorySubtreeCacheEntry(
+        directoryModifiedAt:
+            directoryModifiedAt ?? DateTime.fromMillisecondsSinceEpoch(0),
+        directoryEtag: normalizedEtag,
+        items: items,
+      );
+      _directorySubtreeCache[key] = entry;
+      appLogTrace(
+        'library.scan-cache',
+        'Persistent WebDAV directory cache hit',
+        fields: <String, Object?>{
+          'sourceId': source.id,
+          'itemCount': items.length,
+        },
+      );
+      return entry;
+    }).catchError((error, stackTrace) {
+      appLogWarning(
+        'library.scan-cache',
+        'Persistent WebDAV directory cache read failed',
+        fields: <String, Object?>{'sourceId': source.id},
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return null;
+    });
   }
 
   void _storeCachedDirectorySubtree({
     required MediaSourceConfig source,
     required Uri uri,
     required bool includeSidecarMetadata,
-    required DateTime directoryModifiedAt,
+    required DateTime? directoryModifiedAt,
+    required String directoryEtag,
     required List<_PendingWebDavScannedItem> items,
   }) {
     final key = _directorySubtreeCacheKey(
@@ -902,9 +962,33 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
       includeSidecarMetadata: includeSidecarMetadata,
     );
     _directorySubtreeCache[key] = _DirectorySubtreeCacheEntry(
-      directoryModifiedAt: directoryModifiedAt,
+      directoryModifiedAt:
+          directoryModifiedAt ?? DateTime.fromMillisecondsSinceEpoch(0),
+      directoryEtag: directoryEtag.trim(),
       items: items,
     );
+    final cacheStore = _directoryCacheStore;
+    if (cacheStore != null) {
+      unawaited(
+        _serializeWebDavSubtreeInBackground(items).then((serializedItems) {
+          return cacheStore.save(key, <String, dynamic>{
+            'sourceId': source.id,
+            'directoryModifiedAt': directoryModifiedAt?.toIso8601String() ?? '',
+            'directoryEtag': directoryEtag.trim(),
+            'cachedAt': DateTime.now().toIso8601String(),
+            'items': serializedItems,
+          });
+        }).catchError((error, stackTrace) {
+          appLogWarning(
+            'library.scan-cache',
+            'Persistent WebDAV directory cache write failed',
+            fields: <String, Object?>{'sourceId': source.id},
+            error: error,
+            stackTrace: stackTrace,
+          );
+        }),
+      );
+    }
   }
 
   List<_PendingWebDavScannedItem> _rebasePendingItemsForRoot(

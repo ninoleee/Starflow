@@ -116,6 +116,10 @@ final settingsPerformanceSliceProvider = Provider<SettingsPerformanceSlice>(
               settings.performanceLiveItemHeroOverlayEnabled,
           effectiveLiveItemHeroOverlayEnabled:
               effectiveLiveItemHeroOverlayEnabled,
+          metadataPrefetchMaxConcurrency:
+              settings.metadataPrefetchMaxConcurrency,
+          metadataPrefetchInitialBatchSize:
+              settings.metadataPrefetchInitialBatchSize,
         ),
       ),
     );
@@ -319,6 +323,8 @@ class SettingsPerformanceSlice {
     required this.homeHeroBackgroundEnabled,
     required this.configuredLiveItemHeroOverlayEnabled,
     required this.effectiveLiveItemHeroOverlayEnabled,
+    required this.metadataPrefetchMaxConcurrency,
+    required this.metadataPrefetchInitialBatchSize,
   });
 
   final bool highPerformanceModeEnabled;
@@ -327,6 +333,8 @@ class SettingsPerformanceSlice {
   final bool homeHeroBackgroundEnabled;
   final bool configuredLiveItemHeroOverlayEnabled;
   final bool effectiveLiveItemHeroOverlayEnabled;
+  final int metadataPrefetchMaxConcurrency;
+  final int metadataPrefetchInitialBatchSize;
 
   @override
   bool operator ==(Object other) {
@@ -340,7 +348,11 @@ class SettingsPerformanceSlice {
             other.configuredLiveItemHeroOverlayEnabled ==
                 configuredLiveItemHeroOverlayEnabled &&
             other.effectiveLiveItemHeroOverlayEnabled ==
-                effectiveLiveItemHeroOverlayEnabled;
+                effectiveLiveItemHeroOverlayEnabled &&
+            other.metadataPrefetchMaxConcurrency ==
+                metadataPrefetchMaxConcurrency &&
+            other.metadataPrefetchInitialBatchSize ==
+                metadataPrefetchInitialBatchSize;
   }
 
   @override
@@ -351,6 +363,8 @@ class SettingsPerformanceSlice {
         homeHeroBackgroundEnabled,
         configuredLiveItemHeroOverlayEnabled,
         effectiveLiveItemHeroOverlayEnabled,
+        metadataPrefetchMaxConcurrency,
+        metadataPrefetchInitialBatchSize,
       );
 }
 

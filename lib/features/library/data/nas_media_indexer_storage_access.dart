@@ -310,6 +310,8 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
       wmdbStatus: existing.wmdbStatus,
       tmdbStatus: existing.tmdbStatus,
       imdbStatus: existing.imdbStatus,
+      metadataFailureCount: existing.metadataFailureCount,
+      metadataRetryAfter: existing.metadataRetryAfter,
       manualMetadataLocked: existing.manualMetadataLocked,
       item: refreshedItem,
     );
@@ -522,21 +524,66 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
         .toList(growable: false);
   }
 
-  Future<void> _persistSourceRecords({
+  Future<void> _patchSourceRecords({
     required String sourceId,
-    required List<NasMediaIndexRecord> records,
+    required List<NasMediaIndexRecord> currentRecords,
+    required List<NasMediaIndexRecord> upsertedRecords,
+    required List<String> deletedRecordIds,
     required NasMediaIndexSourceState state,
   }) async {
     final normalizedSourceId = sourceId.trim();
-    final normalizedRecords = List<NasMediaIndexRecord>.unmodifiable(records);
-
-    await _store.replaceSourceRecords(
-      sourceId: normalizedSourceId,
-      records: normalizedRecords,
-      state: state,
-    );
+    if (normalizedSourceId.isEmpty) {
+      return;
+    }
+    if (upsertedRecords.isEmpty && deletedRecordIds.isEmpty) {
+      await _store.patchSourceRecords(
+        sourceId: normalizedSourceId,
+        upsertedRecords: const [],
+        deletedRecordIds: const [],
+        state: state,
+      );
+      return;
+    }
+    const batchSize = 16;
+    var upsertOffset = 0;
+    var deleteOffset = 0;
+    while (upsertOffset < upsertedRecords.length ||
+        deleteOffset < deletedRecordIds.length) {
+      final nextUpsertOffset = upsertOffset + batchSize < upsertedRecords.length
+          ? upsertOffset + batchSize
+          : upsertedRecords.length;
+      final nextDeleteOffset =
+          deleteOffset + batchSize < deletedRecordIds.length
+              ? deleteOffset + batchSize
+              : deletedRecordIds.length;
+      await _store.patchSourceRecords(
+        sourceId: normalizedSourceId,
+        upsertedRecords: upsertedRecords.sublist(
+          upsertOffset,
+          nextUpsertOffset,
+        ),
+        deletedRecordIds: deletedRecordIds.sublist(
+          deleteOffset,
+          nextDeleteOffset,
+        ),
+        state: state,
+      );
+      upsertOffset = nextUpsertOffset;
+      deleteOffset = nextDeleteOffset;
+      await Future<void>.delayed(Duration.zero);
+    }
+    final deleted = deletedRecordIds.toSet();
+    final byId = <String, NasMediaIndexRecord>{
+      for (final record in currentRecords)
+        if (!deleted.contains(record.id)) record.id: record,
+    };
+    for (final record in upsertedRecords) {
+      byId[record.id] = record;
+    }
+    final nextRecords = byId.values.toList(growable: false)
+      ..sort((left, right) => right.item.addedAt.compareTo(left.item.addedAt));
     _libraryMatchCaches[normalizedSourceId] =
-        _buildLibraryMatchCache(normalizedRecords);
+        _buildLibraryMatchCache(nextRecords);
   }
 
   Future<List<NasMediaIndexRecord>> _loadSourceRecordsCached(

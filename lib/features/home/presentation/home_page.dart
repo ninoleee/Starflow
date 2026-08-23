@@ -22,6 +22,7 @@ import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/home/application/home_hero_prefetch_coordinator.dart';
 import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -127,6 +128,12 @@ class _HomePageState extends ConsumerState<HomePage>
   }
 
   @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_deferPrefetchForForegroundInteraction);
+  }
+
+  @override
   void dispose() {
     _scrollController.dispose();
     _heroNextSectionFocusNode.dispose();
@@ -137,9 +144,21 @@ class _HomePageState extends ConsumerState<HomePage>
 
   @override
   void onPageBecameActive() {
+    _deferPrefetchForForegroundInteraction(reason: 'home.page-active');
     // Keep stable cached sections when returning to home, and only warm data
     // sources opportunistically.
     primeHomeModulesFromWidget(ref);
+  }
+
+  void _deferPrefetchForForegroundInteraction({
+    String reason = 'home.scroll',
+  }) {
+    if (!mounted || !isPageVisible) {
+      return;
+    }
+    ref
+        .read(metadataPrefetchConcurrencyLimiterProvider)
+        .deferForForegroundInteraction(reason: reason);
   }
 
   @override
@@ -220,6 +239,9 @@ class _HomePageState extends ConsumerState<HomePage>
     final simplifyHeroBackdrop = lightweightHomeHeroEnabled;
     final resolvedSections = resolvedSectionsState.sections;
     final hasPendingSections = resolvedSectionsState.hasPendingSections;
+    if (hasPendingSections) {
+      _deferPrefetchForForegroundInteraction(reason: 'home.content-loading');
+    }
 
     return AppPrimaryScrollController(
       controller: _scrollController,

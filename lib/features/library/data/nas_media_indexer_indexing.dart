@@ -99,6 +99,8 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
         wmdbStatus: existingRecord.wmdbStatus,
         tmdbStatus: existingRecord.tmdbStatus,
         imdbStatus: existingRecord.imdbStatus,
+        metadataFailureCount: existingRecord.metadataFailureCount,
+        metadataRetryAfter: existingRecord.metadataRetryAfter,
         manualMetadataLocked: true,
         item: refreshedItem,
       );
@@ -185,11 +187,14 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     var wmdbStatus = existingRecord?.wmdbStatus ?? NasMetadataFetchStatus.never;
     var tmdbStatus = existingRecord?.tmdbStatus ?? NasMetadataFetchStatus.never;
     var imdbStatus = existingRecord?.imdbStatus ?? NasMetadataFetchStatus.never;
+    var metadataFailureCount = existingRecord?.metadataFailureCount ?? 0;
+    var metadataRetryAfter = existingRecord?.metadataRetryAfter;
+    var transientFailureOccurred = false;
 
     if (markSidecarAttempt) {
       sidecarStatus = seed.hasSidecarMatch
           ? NasMetadataFetchStatus.succeeded
-          : NasMetadataFetchStatus.failed;
+          : NasMetadataFetchStatus.noMatch;
     }
 
     final baseQuery = _buildMetadataMatchQuery(
@@ -205,7 +210,7 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     var resolvedOnlineMovieType = false;
 
     if (applyOnlineMetadata &&
-        wmdbStatus == NasMetadataFetchStatus.never &&
+        _shouldAttemptMetadataStatus(wmdbStatus) &&
         settings.wmdbMetadataMatchEnabled &&
         baseQuery.isNotEmpty) {
       try {
@@ -281,15 +286,17 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
             tmdbId = wmdbMatch.tmdbId.trim();
           }
         } else {
-          wmdbStatus = NasMetadataFetchStatus.failed;
+          wmdbStatus = NasMetadataFetchStatus.noMatch;
         }
-      } catch (_) {
-        wmdbStatus = NasMetadataFetchStatus.failed;
+      } catch (error) {
+        wmdbStatus = _metadataFailureStatus(error);
+        transientFailureOccurred =
+            wmdbStatus == NasMetadataFetchStatus.transientFailure;
       }
     }
 
     if (applyOnlineMetadata &&
-        tmdbStatus == NasMetadataFetchStatus.never &&
+        _shouldAttemptMetadataStatus(tmdbStatus) &&
         settings.tmdbMetadataMatchEnabled &&
         settings.tmdbReadAccessToken.trim().isNotEmpty &&
         baseQuery.isNotEmpty) {
@@ -426,12 +433,56 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
               tmdbId = '${tmdbMatch.tmdbId}';
             }
           } else {
-            tmdbStatus = NasMetadataFetchStatus.failed;
+            tmdbStatus = NasMetadataFetchStatus.noMatch;
           }
-        } catch (_) {
-          tmdbStatus = NasMetadataFetchStatus.failed;
+        } catch (error) {
+          tmdbStatus = _metadataFailureStatus(error);
+          transientFailureOccurred = transientFailureOccurred ||
+              tmdbStatus == NasMetadataFetchStatus.transientFailure;
         }
       }
+    }
+
+    if (applyOnlineMetadata &&
+        _shouldAttemptMetadataStatus(imdbStatus) &&
+        settings.imdbRatingMatchEnabled &&
+        baseQuery.isNotEmpty) {
+      try {
+        final imdbMatch = await _imdbRatingClient.matchRating(
+          query: baseQuery,
+          year: year,
+          preferSeries: preferSeries,
+          imdbId: imdbId,
+        );
+        if (imdbMatch == null) {
+          imdbStatus = NasMetadataFetchStatus.noMatch;
+        } else {
+          imdbStatus = NasMetadataFetchStatus.succeeded;
+          if (imdbId.trim().isEmpty) {
+            imdbId = imdbMatch.imdbId.trim();
+          }
+          if (imdbMatch.ratingLabel.trim().isNotEmpty) {
+            ratingLabels = _mergeLabels(
+              ratingLabels,
+              [imdbMatch.ratingLabel.trim()],
+            );
+          }
+        }
+      } catch (error) {
+        imdbStatus = _metadataFailureStatus(error);
+        transientFailureOccurred = transientFailureOccurred ||
+            imdbStatus == NasMetadataFetchStatus.transientFailure;
+      }
+    }
+
+    if (transientFailureOccurred) {
+      metadataFailureCount = (metadataFailureCount + 1).clamp(1, 8);
+      metadataRetryAfter = indexedAt.add(
+        _metadataRetryDelay(metadataFailureCount),
+      );
+    } else {
+      metadataFailureCount = 0;
+      metadataRetryAfter = null;
     }
 
     if (!typeLocked && itemType.trim().isEmpty) {
@@ -556,6 +607,8 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       wmdbStatus: wmdbStatus,
       tmdbStatus: tmdbStatus,
       imdbStatus: imdbStatus,
+      metadataFailureCount: metadataFailureCount,
+      metadataRetryAfter: metadataRetryAfter,
       manualMetadataLocked: manualMetadataLocked,
       item: item,
     );

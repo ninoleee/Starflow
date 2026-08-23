@@ -35,6 +35,7 @@ import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
+import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
@@ -1215,6 +1216,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   void initState() {
     super.initState();
     _pageController = DetailPageController();
+    _scrollController.addListener(_deferPrefetchForForegroundInteraction);
   }
 
   @override
@@ -1254,8 +1256,20 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
 
   @override
   void onPageBecameActive() {
+    _deferPrefetchForForegroundInteraction(reason: 'detail.page-active');
     unawaited(_loadFavoriteSearchResults());
     _startDetailTasks();
+  }
+
+  void _deferPrefetchForForegroundInteraction({
+    String reason = 'detail.scroll',
+  }) {
+    if (!mounted || !isPageVisible) {
+      return;
+    }
+    ref
+        .read(metadataPrefetchConcurrencyLimiterProvider)
+        .deferForForegroundInteraction(reason: reason);
   }
 
   @override
@@ -1694,8 +1708,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       if (!_isSessionActive(sessionId)) {
         return;
       }
+      final foregroundLease = ref
+          .read(metadataPrefetchConcurrencyLimiterProvider)
+          .beginForegroundWork(reason: 'detail.startup');
       unawaited(
-        _runDeferredDetailStartup(sessionId).catchError(
+        _runDeferredDetailStartup(sessionId)
+            .whenComplete(foregroundLease.release)
+            .catchError(
           (Object error, StackTrace stackTrace) {
             detailResourceSwitchTrace(
               'startup.error',
@@ -2404,6 +2423,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     }
 
     _isRefreshingMetadata = true;
+    final foregroundLease = ref
+        .read(metadataPrefetchConcurrencyLimiterProvider)
+        .beginForegroundWork(reason: 'detail.metadata-refresh');
 
     var changed = false;
     try {
@@ -2472,6 +2494,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       );
       return;
     } finally {
+      foregroundLease.release();
       if (_isSessionActive(activeSessionId) && _isRefreshingMetadata) {
         _isRefreshingMetadata = false;
       }

@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -11,6 +13,113 @@ import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+const int _detailCacheBackgroundRecordThreshold = 16;
+const int _detailCacheBackgroundDecodeThreshold = 64 * 1024;
+
+class _EncodedDetailCachePayload {
+  const _EncodedDetailCachePayload({
+    required this.raw,
+    required this.byteLength,
+    required this.usedBackgroundIsolate,
+  });
+
+  final String raw;
+  final int byteLength;
+  final bool usedBackgroundIsolate;
+}
+
+class _DecodedDetailCachePayload {
+  const _DecodedDetailCachePayload({
+    required this.payload,
+    required this.byteLength,
+    required this.isValid,
+    required this.usedBackgroundIsolate,
+  });
+
+  final _DetailCachePayload payload;
+  final int byteLength;
+  final bool isValid;
+  final bool usedBackgroundIsolate;
+}
+
+_EncodedDetailCachePayload _encodeDetailCachePayload(
+  _DetailCachePayload payload, {
+  required bool usedBackgroundIsolate,
+}) {
+  final raw = jsonEncode(payload.toJson());
+  return _EncodedDetailCachePayload(
+    raw: raw,
+    byteLength: utf8.encode(raw).length,
+    usedBackgroundIsolate: usedBackgroundIsolate,
+  );
+}
+
+_DecodedDetailCachePayload _decodeDetailCachePayload(
+  String raw, {
+  required bool usedBackgroundIsolate,
+}) {
+  final byteLength = utf8.encode(raw).length;
+  try {
+    return _DecodedDetailCachePayload(
+      payload: _DetailCachePayload.fromJson(
+        Map<String, dynamic>.from(jsonDecode(raw) as Map),
+      ),
+      byteLength: byteLength,
+      isValid: true,
+      usedBackgroundIsolate: usedBackgroundIsolate,
+    );
+  } catch (_) {
+    return _DecodedDetailCachePayload(
+      payload: const _DetailCachePayload(),
+      byteLength: byteLength,
+      isValid: false,
+      usedBackgroundIsolate: usedBackgroundIsolate,
+    );
+  }
+}
+
+Future<_EncodedDetailCachePayload> _encodeDetailCachePayloadOffUiThread(
+  _DetailCachePayload payload,
+) {
+  final useBackgroundIsolate = !kIsWeb &&
+      payload.records.length >= _detailCacheBackgroundRecordThreshold;
+  if (!useBackgroundIsolate) {
+    return Future<_EncodedDetailCachePayload>.value(
+      _encodeDetailCachePayload(
+        payload,
+        usedBackgroundIsolate: false,
+      ),
+    );
+  }
+  return Isolate.run(
+    () => _encodeDetailCachePayload(
+      payload,
+      usedBackgroundIsolate: true,
+    ),
+  );
+}
+
+Future<_DecodedDetailCachePayload> _decodeDetailCachePayloadOffUiThread(
+  String raw,
+) {
+  final useBackgroundIsolate =
+      !kIsWeb && raw.length >= _detailCacheBackgroundDecodeThreshold;
+  if (!useBackgroundIsolate) {
+    return Future<_DecodedDetailCachePayload>.value(
+      _decodeDetailCachePayload(
+        raw,
+        usedBackgroundIsolate: false,
+      ),
+    );
+  }
+  return Isolate.run(
+    () => _decodeDetailCachePayload(
+      raw,
+      usedBackgroundIsolate: true,
+    ),
+  );
+}
 
 final localStorageCacheRepositoryProvider =
     Provider<LocalStorageCacheRepository>(
@@ -101,6 +210,7 @@ class LocalStorageCacheRepository {
   bool _pendingDetailCacheInvalidateAll = false;
   _DetailCachePayload? _detailPayloadCache;
   Future<_DetailCachePayload>? _detailPayloadLoadFuture;
+  Future<void> _detailMutationTail = Future<void>.value();
   _EmbyLibraryCachePayload? _embyLibraryPayloadCache;
   Future<_EmbyLibraryCachePayload>? _embyLibraryPayloadLoadFuture;
 
@@ -378,6 +488,18 @@ class LocalStorageCacheRepository {
       return;
     }
 
+    await _runSerializedDetailMutation(
+      () => _saveDetailTargetsBatchUnlocked(
+        requestList,
+        persistToStorage: persistToStorage,
+      ),
+    );
+  }
+
+  Future<void> _saveDetailTargetsBatchUnlocked(
+    List<DetailTargetCacheSaveRequest> requestList, {
+    required bool persistToStorage,
+  }) async {
     final payload = await _loadDetailPayload();
     final nextRecords = <String, _CachedDetailRecord>{...payload.records};
     final nextLookupKeys = <String, String>{...payload.lookupKeys};
@@ -427,6 +549,23 @@ class LocalStorageCacheRepository {
         changedFields: changedFields,
       ),
     );
+  }
+
+  Future<void> _runSerializedDetailMutation(
+    Future<void> Function() operation,
+  ) {
+    final previous = _detailMutationTail;
+    final completer = Completer<void>();
+    _detailMutationTail = () async {
+      await previous;
+      try {
+        await operation();
+        completer.complete();
+      } catch (error, stackTrace) {
+        completer.completeError(error, stackTrace);
+      }
+    }();
+    return completer.future;
   }
 
   _AppliedDetailTargetSave? _applyDetailTargetSave({
@@ -542,6 +681,10 @@ class LocalStorageCacheRepository {
   }
 
   Future<void> clearDetailCache() async {
+    await _runSerializedDetailMutation(_clearDetailCacheUnlocked);
+  }
+
+  Future<void> _clearDetailCacheUnlocked() async {
     await _preferences.remove(_detailCacheKey);
     _detailPayloadCache = const _DetailCachePayload();
     _detailPayloadLoadFuture = null;
@@ -556,6 +699,14 @@ class LocalStorageCacheRepository {
       return;
     }
 
+    await _runSerializedDetailMutation(
+      () => _clearDetailCacheForSourceUnlocked(normalizedSourceId),
+    );
+  }
+
+  Future<void> _clearDetailCacheForSourceUnlocked(
+    String normalizedSourceId,
+  ) async {
     final payload = await _loadDetailPayload();
     if (payload.records.isEmpty || payload.lookupKeys.isEmpty) {
       return;
@@ -613,6 +764,22 @@ class LocalStorageCacheRepository {
       return;
     }
 
+    await _runSerializedDetailMutation(
+      () => _clearDetailCacheForResourceUnlocked(
+        normalizedSourceId: normalizedSourceId,
+        normalizedResourceId: normalizedResourceId,
+        normalizedResourcePath: normalizedResourcePath,
+        treatAsScope: treatAsScope,
+      ),
+    );
+  }
+
+  Future<void> _clearDetailCacheForResourceUnlocked({
+    required String normalizedSourceId,
+    required String normalizedResourceId,
+    required String normalizedResourcePath,
+    required bool treatAsScope,
+  }) async {
     final payload = await _loadDetailPayload();
     if (payload.records.isEmpty || payload.lookupKeys.isEmpty) {
       return;
@@ -880,20 +1047,84 @@ class LocalStorageCacheRepository {
       return const _DetailCachePayload();
     }
 
-    try {
-      return _DetailCachePayload.fromJson(
-        Map<String, dynamic>.from(jsonDecode(raw) as Map),
+    final stopwatch = Stopwatch()..start();
+    final decoded = await _decodeDetailCachePayloadOffUiThread(raw);
+    stopwatch.stop();
+    if (!decoded.isValid) {
+      appLogWarning(
+        'storage.detail-cache',
+        'Detail cache payload could not be decoded',
+        fields: <String, Object?>{
+          'encodedBytes': decoded.byteLength,
+          'decodeDurationMs': stopwatch.elapsedMilliseconds,
+          'backgroundIsolate': decoded.usedBackgroundIsolate,
+        },
       );
-    } catch (_) {
       return const _DetailCachePayload();
     }
+    appLogTrace(
+      'storage.detail-cache',
+      'Detail cache payload decoded',
+      fields: <String, Object?>{
+        'recordCount': decoded.payload.records.length,
+        'lookupKeyCount': decoded.payload.lookupKeys.length,
+        'encodedBytes': decoded.byteLength,
+        'decodeDurationMs': stopwatch.elapsedMilliseconds,
+        'backgroundIsolate': decoded.usedBackgroundIsolate,
+      },
+    );
+    return decoded.payload;
   }
 
   Future<void> _saveDetailPayload(_DetailCachePayload payload) async {
-    _detailPayloadCache = payload;
-    _detailPayloadLoadFuture = null;
-    final raw = jsonEncode(payload.toJson());
-    await _preferences.setString(_detailCacheKey, raw);
+    final totalStopwatch = Stopwatch()..start();
+    final encodeStopwatch = Stopwatch()..start();
+    appLogTrace(
+      'storage.detail-cache',
+      'Detail cache persistence started',
+      fields: <String, Object?>{
+        'recordCount': payload.records.length,
+        'lookupKeyCount': payload.lookupKeys.length,
+      },
+    );
+    try {
+      final encoded = await _encodeDetailCachePayloadOffUiThread(payload);
+      encodeStopwatch.stop();
+      final writeStopwatch = Stopwatch()..start();
+      await _preferences.setString(_detailCacheKey, encoded.raw);
+      writeStopwatch.stop();
+      totalStopwatch.stop();
+      _detailPayloadCache = payload;
+      _detailPayloadLoadFuture = null;
+      appLogTrace(
+        'storage.detail-cache',
+        'Detail cache persistence completed',
+        fields: <String, Object?>{
+          'recordCount': payload.records.length,
+          'lookupKeyCount': payload.lookupKeys.length,
+          'encodedBytes': encoded.byteLength,
+          'encodeDurationMs': encodeStopwatch.elapsedMilliseconds,
+          'backgroundIsolate': encoded.usedBackgroundIsolate,
+          'writeDurationMs': writeStopwatch.elapsedMilliseconds,
+          'totalDurationMs': totalStopwatch.elapsedMilliseconds,
+        },
+      );
+    } catch (error, stackTrace) {
+      encodeStopwatch.stop();
+      totalStopwatch.stop();
+      appLogError(
+        'storage.detail-cache',
+        'Detail cache persistence failed',
+        fields: <String, Object?>{
+          'recordCount': payload.records.length,
+          'lookupKeyCount': payload.lookupKeys.length,
+          'elapsedMs': totalStopwatch.elapsedMilliseconds,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    }
   }
 
   void _scheduleDetailCacheChangedNotification(

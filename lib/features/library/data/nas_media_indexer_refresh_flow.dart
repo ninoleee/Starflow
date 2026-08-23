@@ -112,9 +112,11 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
 
     final existingRecords = await _loadSourceRecordsCached(source.id);
     final now = DateTime.now();
-    await _persistSourceRecords(
+    await _patchSourceRecords(
       sourceId: source.id,
-      records: existingRecords,
+      currentRecords: existingRecords,
+      upsertedRecords: const [],
+      deletedRecordIds: const [],
       state: NasMediaIndexSourceState(
         sourceId: source.id,
         lastIndexedAt: now,
@@ -163,9 +165,20 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     }
     final now = DateTime.now();
     final existingState = await _store.loadSourceState(normalizedSourceId);
-    await _persistSourceRecords(
+    final deletedRecordIds = records
+        .where(
+          (record) => _isRecordWithinScope(
+            record,
+            scopeSegments: scopeSegments,
+          ),
+        )
+        .map((record) => record.id)
+        .toList(growable: false);
+    await _patchSourceRecords(
       sourceId: normalizedSourceId,
-      records: nextRecords,
+      currentRecords: records,
+      upsertedRecords: const [],
+      deletedRecordIds: deletedRecordIds,
       state: NasMediaIndexSourceState(
         sourceId: normalizedSourceId,
         lastIndexedAt: now,
@@ -331,6 +344,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     }
 
     final nextRecords = [...records];
+    final changedRecords = <NasMediaIndexRecord>[];
     var changed = false;
     final now = DateTime.now();
     for (final targetIndex in targetIndices) {
@@ -338,7 +352,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       if (currentRecord.manualMetadataLocked) {
         continue;
       }
-      nextRecords[targetIndex] = NasMediaIndexRecord(
+      final updatedRecord = NasMediaIndexRecord(
         id: currentRecord.id,
         sourceId: currentRecord.sourceId,
         sectionId: currentRecord.sectionId,
@@ -363,9 +377,13 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         wmdbStatus: currentRecord.wmdbStatus,
         tmdbStatus: currentRecord.tmdbStatus,
         imdbStatus: currentRecord.imdbStatus,
+        metadataFailureCount: currentRecord.metadataFailureCount,
+        metadataRetryAfter: currentRecord.metadataRetryAfter,
         manualMetadataLocked: true,
         item: currentRecord.item,
       );
+      nextRecords[targetIndex] = updatedRecord;
+      changedRecords.add(updatedRecord);
       changed = true;
     }
 
@@ -374,9 +392,11 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     }
 
     final existingState = await _store.loadSourceState(sourceId);
-    await _persistSourceRecords(
+    await _patchSourceRecords(
       sourceId: sourceId,
-      records: nextRecords,
+      currentRecords: records,
+      upsertedRecords: changedRecords,
+      deletedRecordIds: const [],
       state: NasMediaIndexSourceState(
         sourceId: sourceId,
         lastIndexedAt: now,
@@ -621,92 +641,95 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     }
 
     final controller = _RefreshTaskController();
-    final future = _sourceBudget.withPermit(() async {
-      try {
-        if (forceFullRescan) {
-          _wmdbMetadataClient.clearCache();
-          _tmdbMetadataClient.clearCache();
-          _imdbRatingClient.clearCache();
-        }
-
-        final settings = _readSettingsForRefresh();
-        final shouldStageMetadata = source.webDavSidecarScrapingEnabled ||
-            _hasOnlineMetadataEnabled(settings);
-        final requiresSidecarMetadata = source.webDavSidecarScrapingEnabled;
-        final requiresOnlineMetadata = _hasOnlineMetadataEnabled(settings);
-        final phaseResult = await _refreshSourcePhase(
-          source,
-          scopedCollections: scopedCollections,
-          limitPerCollection: limitPerCollection,
-          includeSidecarMetadata: false,
-          includeOnlineMetadata: false,
-          forceFullRescan: forceFullRescan,
-          resetScanCaches: true,
-          clearProgressWhenDone: !shouldStageMetadata,
-          phaseLabel: '建立索引中',
-          collectEnrichmentCandidates: shouldStageMetadata,
-          controller: controller,
-        );
-        controller.throwIfCancelled();
-        appLogInfo(
-          'library.index',
-          'Primary media indexing completed',
-          fields: <String, Object?>{
-            'sourceId': normalizedSourceId,
-            'forceFullRescan': forceFullRescan,
-            'enrichmentCandidateCount': phaseResult.enrichmentCandidates.length,
-            'durationMs': stopwatch.elapsedMilliseconds,
-          },
-        );
-        if (shouldStageMetadata) {
-          if (phaseResult.enrichmentCandidates.isEmpty) {
-            _clearProgressSafely(normalizedSourceId);
-          } else {
-            _scheduleBackgroundEnrichment(
-              source,
-              scopedCollections: scopedCollections,
-              enrichmentCandidates: phaseResult.enrichmentCandidates,
-              includeSidecarMetadata: requiresSidecarMetadata,
-              includeOnlineMetadata: requiresOnlineMetadata,
-              forceFullRescan: forceFullRescan,
-              controller: controller,
-            );
+    final future = _sourceBudget.withPermit(() {
+      return _withGlobalBackgroundPermit(() async {
+        try {
+          if (forceFullRescan) {
+            _wmdbMetadataClient.clearCache();
+            _tmdbMetadataClient.clearCache();
+            _imdbRatingClient.clearCache();
           }
-        }
-      } on _RefreshCancelledException {
-        appLogInfo(
-          'library.index',
-          'Media index refresh cancelled',
-          fields: <String, Object?>{
-            'sourceId': normalizedSourceId,
-            'forceFullRescan': forceFullRescan,
-            'durationMs': stopwatch.elapsedMilliseconds,
-          },
-        );
-        _clearProgressSafely(normalizedSourceId);
-      } catch (error, stackTrace) {
-        _clearProgressSafely(normalizedSourceId);
-        if (_isProviderContainerDisposedError(error)) {
-          return;
-        }
 
-        appLogError(
-          'library.index',
-          'Media index refresh failed',
-          fields: <String, Object?>{
-            'sourceId': normalizedSourceId,
-            'sourceKind': source.kind.name,
-            'forceFullRescan': forceFullRescan,
-            'durationMs': stopwatch.elapsedMilliseconds,
-          },
-          error: error,
-          stackTrace: stackTrace,
-        );
+          final settings = _readSettingsForRefresh();
+          final shouldStageMetadata = source.webDavSidecarScrapingEnabled ||
+              _hasOnlineMetadataEnabled(settings);
+          final requiresSidecarMetadata = source.webDavSidecarScrapingEnabled;
+          final requiresOnlineMetadata = _hasOnlineMetadataEnabled(settings);
+          final phaseResult = await _refreshSourcePhase(
+            source,
+            scopedCollections: scopedCollections,
+            limitPerCollection: limitPerCollection,
+            includeSidecarMetadata: false,
+            includeOnlineMetadata: false,
+            forceFullRescan: forceFullRescan,
+            resetScanCaches: true,
+            clearProgressWhenDone: !shouldStageMetadata,
+            phaseLabel: '建立索引中',
+            collectEnrichmentCandidates: shouldStageMetadata,
+            controller: controller,
+          );
+          controller.throwIfCancelled();
+          appLogInfo(
+            'library.index',
+            'Primary media indexing completed',
+            fields: <String, Object?>{
+              'sourceId': normalizedSourceId,
+              'forceFullRescan': forceFullRescan,
+              'enrichmentCandidateCount':
+                  phaseResult.enrichmentCandidates.length,
+              'durationMs': stopwatch.elapsedMilliseconds,
+            },
+          );
+          if (shouldStageMetadata) {
+            if (phaseResult.enrichmentCandidates.isEmpty) {
+              _clearProgressSafely(normalizedSourceId);
+            } else {
+              _scheduleBackgroundEnrichment(
+                source,
+                scopedCollections: scopedCollections,
+                enrichmentCandidates: phaseResult.enrichmentCandidates,
+                includeSidecarMetadata: requiresSidecarMetadata,
+                includeOnlineMetadata: requiresOnlineMetadata,
+                forceFullRescan: forceFullRescan,
+                controller: controller,
+              );
+            }
+          }
+        } on _RefreshCancelledException {
+          appLogInfo(
+            'library.index',
+            'Media index refresh cancelled',
+            fields: <String, Object?>{
+              'sourceId': normalizedSourceId,
+              'forceFullRescan': forceFullRescan,
+              'durationMs': stopwatch.elapsedMilliseconds,
+            },
+          );
+          _clearProgressSafely(normalizedSourceId);
+        } catch (error, stackTrace) {
+          _clearProgressSafely(normalizedSourceId);
+          if (_isProviderContainerDisposedError(error)) {
+            return;
+          }
 
-        Error.throwWithStackTrace(error, stackTrace);
-      } finally {
-        _activeRefreshTasks.remove(taskKey);
-      }
+          appLogError(
+            'library.index',
+            'Media index refresh failed',
+            fields: <String, Object?>{
+              'sourceId': normalizedSourceId,
+              'sourceKind': source.kind.name,
+              'forceFullRescan': forceFullRescan,
+              'durationMs': stopwatch.elapsedMilliseconds,
+            },
+            error: error,
+            stackTrace: stackTrace,
+          );
+
+          Error.throwWithStackTrace(error, stackTrace);
+        } finally {
+          _activeRefreshTasks.remove(taskKey);
+        }
+      }, maintenance: true);
     });
     _activeRefreshTasks[taskKey] = _RefreshTaskHandle(
       future: future,
@@ -750,6 +773,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
 
     final now = DateTime.now();
     final nextRecords = [...records];
+    final changedRecords = <NasMediaIndexRecord>[];
     final selectedResourceIds = targetIndices
         .map((index) => records[index].resourceId)
         .where((id) => id.trim().isNotEmpty)
@@ -774,7 +798,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
                   imdbRatingMatch: imdbRatingMatch,
                 );
       final resolvedTitle = metadataMatch?.title.trim() ?? '';
-      nextRecords[targetIndex] = NasMediaIndexRecord(
+      final updatedRecord = NasMediaIndexRecord(
         id: currentRecord.id,
         sourceId: currentRecord.sourceId,
         sectionId: currentRecord.sectionId,
@@ -819,14 +843,20 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         imdbStatus: (imdbRatingMatch?.ratingLabel.trim().isNotEmpty ?? false)
             ? NasMetadataFetchStatus.succeeded
             : currentRecord.imdbStatus,
+        metadataFailureCount: 0,
+        metadataRetryAfter: null,
         manualMetadataLocked: true,
         item: nextItem,
       );
+      nextRecords[targetIndex] = updatedRecord;
+      changedRecords.add(updatedRecord);
     }
     final existingState = await _store.loadSourceState(sourceId);
-    await _persistSourceRecords(
+    await _patchSourceRecords(
       sourceId: sourceId,
-      records: nextRecords,
+      currentRecords: records,
+      upsertedRecords: changedRecords,
+      deletedRecordIds: const [],
       state: NasMediaIndexSourceState(
         sourceId: sourceId,
         lastIndexedAt: now,
@@ -1043,6 +1073,8 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       }
     }
     final nextRecords = <NasMediaIndexRecord>[];
+    final recordsToUpsert = <NasMediaIndexRecord>[];
+    final scannedResourceIds = <String>{};
     final enrichmentCandidates = <WebDavScannedItem>[];
 
     appLogInfo(
@@ -1061,6 +1093,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       }
       controller.throwIfCancelled();
       final scannedItem = scannedItems[index];
+      scannedResourceIds.add(scannedItem.resourceId);
       final fingerprint = _buildFingerprint(
         sourceId: source.id,
         resourcePath: scannedItem.actualAddress,
@@ -1080,38 +1113,38 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
           hasRequiredOnlineMetadata;
       final isIncrementalCandidate =
           existing == null || existing.fingerprint != fingerprint;
-      final needsFurtherEnrichment =
-          collectEnrichmentCandidates && isIncrementalCandidate;
+      final needsFurtherEnrichment = collectEnrichmentCandidates &&
+          (isIncrementalCandidate ||
+              (source.webDavSidecarScrapingEnabled &&
+                  !_hasAttemptStatus(existing.sidecarStatus)) ||
+              !_hasCompletedOnlineAttempts(existing, settings));
       if (needsFurtherEnrichment) {
         enrichmentCandidates.add(scannedItem);
       }
       if (canReuse) {
-        nextRecords.add(
-          _reuseRecord(
-            existing,
-            scannedItem: scannedItem,
-            source: source,
-            indexedAt: now,
-          ),
+        final reusedRecord = _reuseRecord(
+          existing,
+          scannedItem: scannedItem,
+          source: source,
+          indexedAt: now,
         );
+        nextRecords.add(reusedRecord);
       } else {
-        nextRecords.add(
-          await _indexScannedItem(
-            source,
-            scannedItem,
-            indexedAt: now,
-            fingerprint: fingerprint,
-            existingRecord: existing != null &&
-                    (existing.fingerprint == fingerprint ||
-                        preserveManualMetadata)
-                ? existing
-                : null,
-            applyOnlineMetadata:
-                includeOnlineMetadata && !preserveManualMetadata,
-            markSidecarAttempt:
-                includeSidecarMetadata && !preserveManualMetadata,
-          ),
+        final indexedRecord = await _indexScannedItem(
+          source,
+          scannedItem,
+          indexedAt: now,
+          fingerprint: fingerprint,
+          existingRecord: existing != null &&
+                  (existing.fingerprint == fingerprint ||
+                      preserveManualMetadata)
+              ? existing
+              : null,
+          applyOnlineMetadata: includeOnlineMetadata && !preserveManualMetadata,
+          markSidecarAttempt: includeSidecarMetadata && !preserveManualMetadata,
         );
+        nextRecords.add(indexedRecord);
+        recordsToUpsert.add(indexedRecord);
       }
       _progressController.updateIndexing(
         sourceId: normalizedSourceId,
@@ -1142,9 +1175,15 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       },
     );
     final existingState = await _store.loadSourceState(source.id);
-    await _persistSourceRecords(
+    final deletedRecordIds = existingRecords.values
+        .where((record) => !scannedResourceIds.contains(record.resourceId))
+        .map((record) => record.id)
+        .toList(growable: false);
+    await _patchSourceRecords(
       sourceId: source.id,
-      records: nextRecords,
+      currentRecords: existingRecordList,
+      upsertedRecords: recordsToUpsert,
+      deletedRecordIds: deletedRecordIds,
       state: NasMediaIndexSourceState(
         sourceId: source.id,
         lastIndexedAt: now,
@@ -1161,11 +1200,15 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       fields: <String, Object?>{
         'sourceId': normalizedSourceId,
         'recordCount': nextRecords.length,
+        'updatedCount': recordsToUpsert.length,
+        'deletedCount': deletedRecordIds.length,
         'durationMs': persistenceStopwatch.elapsedMilliseconds,
         'phaseDurationMs': phaseStopwatch.elapsedMilliseconds,
       },
     );
-    _notifyIndexChangedSafely();
+    if (recordsToUpsert.isNotEmpty || deletedRecordIds.isNotEmpty) {
+      _notifyIndexChangedSafely();
+    }
 
     if (clearProgressWhenDone) {
       _clearProgressSafely(normalizedSourceId);
@@ -1188,54 +1231,59 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     if (_backgroundEnrichmentTasks.containsKey(taskKey)) {
       return;
     }
-    final future = _enrichmentBudget.withPermit(() async {
-      try {
-        await _refreshSelectedItemsPhase(
-          source,
-          scannedItems: enrichmentCandidates,
-          includeSidecarMetadata: includeSidecarMetadata,
-          includeOnlineMetadata: includeOnlineMetadata,
-          phaseLabel: forceFullRescan
-              ? '全量补元数据'
-              : ((includeOnlineMetadata || includeSidecarMetadata)
-                  ? '增量补元数据'
-                  : '后台补全'),
-          controller: controller,
-        );
-        appLogInfo(
-          'library.index',
-          'Background metadata enrichment completed',
-          fields: <String, Object?>{
-            'sourceId': source.id,
-            'itemCount': enrichmentCandidates.length,
-            'sidecarMetadata': includeSidecarMetadata,
-            'onlineMetadata': includeOnlineMetadata,
-          },
-        );
-      } on _RefreshCancelledException {
-        _clearProgressSafely(source.id);
-      } catch (error, stackTrace) {
-        if (_isProviderContainerDisposedError(error)) {
+    final stopwatch = Stopwatch()..start();
+    final future = _enrichmentBudget.withPermit(() {
+      return _withGlobalBackgroundPermit(() async {
+        try {
+          await _refreshSelectedItemsPhase(
+            source,
+            scannedItems: enrichmentCandidates,
+            includeSidecarMetadata: includeSidecarMetadata,
+            includeOnlineMetadata: includeOnlineMetadata,
+            phaseLabel: forceFullRescan
+                ? '全量补元数据'
+                : ((includeOnlineMetadata || includeSidecarMetadata)
+                    ? '增量补元数据'
+                    : '后台补全'),
+            controller: controller,
+          );
+          appLogInfo(
+            'library.index',
+            'Background metadata enrichment completed',
+            fields: <String, Object?>{
+              'sourceId': source.id,
+              'itemCount': enrichmentCandidates.length,
+              'sidecarMetadata': includeSidecarMetadata,
+              'onlineMetadata': includeOnlineMetadata,
+              'durationMs': stopwatch.elapsedMilliseconds,
+            },
+          );
+        } on _RefreshCancelledException {
           _clearProgressSafely(source.id);
-          return;
-        }
+        } catch (error, stackTrace) {
+          if (_isProviderContainerDisposedError(error)) {
+            _clearProgressSafely(source.id);
+            return;
+          }
 
-        _clearProgressSafely(source.id);
-        appLogWarning(
-          'library.index',
-          'Background metadata enrichment failed',
-          fields: <String, Object?>{
-            'sourceId': source.id,
-            'itemCount': enrichmentCandidates.length,
-            'sidecarMetadata': includeSidecarMetadata,
-            'onlineMetadata': includeOnlineMetadata,
-          },
-          error: error,
-          stackTrace: stackTrace,
-        );
-      } finally {
-        _backgroundEnrichmentTasks.remove(taskKey);
-      }
+          _clearProgressSafely(source.id);
+          appLogWarning(
+            'library.index',
+            'Background metadata enrichment failed',
+            fields: <String, Object?>{
+              'sourceId': source.id,
+              'itemCount': enrichmentCandidates.length,
+              'sidecarMetadata': includeSidecarMetadata,
+              'onlineMetadata': includeOnlineMetadata,
+              'durationMs': stopwatch.elapsedMilliseconds,
+            },
+            error: error,
+            stackTrace: stackTrace,
+          );
+        } finally {
+          _backgroundEnrichmentTasks.remove(taskKey);
+        }
+      });
     });
     _backgroundEnrichmentTasks[taskKey] = _RefreshTaskHandle(
       future: future,
@@ -1268,6 +1316,18 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     }
     final recordIndexByResourceId = <String, int>{};
     final nextRecords = [...records];
+    final changedRecords = <String, NasMediaIndexRecord>{};
+    final deletedRecordIds = <String>[];
+    var skippedCount = 0;
+    var sidecarAttemptCount = 0;
+    var onlineAttemptCount = 0;
+    var wmdbAttemptCount = 0;
+    var tmdbAttemptCount = 0;
+    var imdbAttemptCount = 0;
+    var matchedCount = 0;
+    var noMatchCount = 0;
+    var transientFailureCount = 0;
+    var permanentFailureCount = 0;
     for (var index = 0; index < nextRecords.length; index++) {
       recordIndexByResourceId[nextRecords[index].resourceId] = index;
     }
@@ -1280,6 +1340,9 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       );
     }
     for (var index = 0; index < scannedItems.length; index++) {
+      if (index > 0 && index % 8 == 0) {
+        await Future<void>.delayed(Duration.zero);
+      }
       controller.throwIfCancelled();
       final scannedItem = scannedItems[index];
       final recordIndex = recordIndexByResourceId[scannedItem.resourceId];
@@ -1295,6 +1358,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
           !isManualMetadataLocked &&
           _hasPendingOnlineAttempts(currentRecord, settings);
       if (!shouldAttemptSidecar && !shouldAttemptOnline) {
+        skippedCount += 1;
         if (reportProgress) {
           _progressController.updateIndexing(
             sourceId: normalizedSourceId,
@@ -1304,6 +1368,30 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
           );
         }
         continue;
+      }
+      if (shouldAttemptSidecar) {
+        sidecarAttemptCount += 1;
+      }
+      if (shouldAttemptOnline) {
+        onlineAttemptCount += 1;
+        final hasQuery = currentRecord.searchQuery.trim().isNotEmpty ||
+            currentRecord.recognizedTitle.trim().isNotEmpty;
+        if (hasQuery &&
+            settings.wmdbMetadataMatchEnabled &&
+            _shouldAttemptMetadataStatus(currentRecord.wmdbStatus)) {
+          wmdbAttemptCount += 1;
+        }
+        if (hasQuery &&
+            settings.tmdbMetadataMatchEnabled &&
+            settings.tmdbReadAccessToken.trim().isNotEmpty &&
+            _shouldAttemptMetadataStatus(currentRecord.tmdbStatus)) {
+          tmdbAttemptCount += 1;
+        }
+        if (hasQuery &&
+            settings.imdbRatingMatchEnabled &&
+            _shouldAttemptMetadataStatus(currentRecord.imdbStatus)) {
+          imdbAttemptCount += 1;
+        }
       }
       final enrichedItem = shouldAttemptSidecar
           ? await (() async {
@@ -1326,6 +1414,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
           : scannedItem;
       controller.throwIfCancelled();
       if (shouldAttemptSidecar && enrichedItem == null) {
+        deletedRecordIds.add(currentRecord.id);
         nextRecords.removeAt(recordIndex);
         recordIndexByResourceId
           ..clear()
@@ -1355,7 +1444,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         modifiedAt: effectiveItem.modifiedAt,
         fileSizeBytes: effectiveItem.fileSizeBytes,
       );
-      nextRecords[recordIndex] = await _indexScannedItem(
+      final updatedRecord = await _indexScannedItem(
         source,
         effectiveItem,
         indexedAt: now,
@@ -1364,6 +1453,24 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         applyOnlineMetadata: shouldAttemptOnline,
         markSidecarAttempt: shouldAttemptSidecar,
       );
+      nextRecords[recordIndex] = updatedRecord;
+      changedRecords[updatedRecord.id] = updatedRecord;
+      final statuses = <NasMetadataFetchStatus>[
+        updatedRecord.wmdbStatus,
+        updatedRecord.tmdbStatus,
+        updatedRecord.imdbStatus,
+      ];
+      if (statuses.contains(NasMetadataFetchStatus.transientFailure)) {
+        transientFailureCount += 1;
+      }
+      if (statuses.contains(NasMetadataFetchStatus.permanentFailure)) {
+        permanentFailureCount += 1;
+      }
+      if (statuses.contains(NasMetadataFetchStatus.succeeded)) {
+        matchedCount += 1;
+      } else if (statuses.contains(NasMetadataFetchStatus.noMatch)) {
+        noMatchCount += 1;
+      }
       if (reportProgress) {
         _progressController.updateIndexing(
           sourceId: normalizedSourceId,
@@ -1375,9 +1482,12 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     }
     controller.throwIfCancelled();
     final existingState = await _store.loadSourceState(source.id);
-    await _persistSourceRecords(
+    final persistenceStopwatch = Stopwatch()..start();
+    await _patchSourceRecords(
       sourceId: source.id,
-      records: nextRecords,
+      currentRecords: records,
+      upsertedRecords: changedRecords.values.toList(growable: false),
+      deletedRecordIds: deletedRecordIds,
       state: NasMediaIndexSourceState(
         sourceId: source.id,
         lastIndexedAt: now,
@@ -1388,7 +1498,31 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
             : (existingState?.emptyAutoRebuildAttempted ?? false),
       ),
     );
-    _notifyIndexChangedSafely();
+    if (changedRecords.isNotEmpty || deletedRecordIds.isNotEmpty) {
+      _notifyIndexChangedSafely();
+    }
+    appLogInfo(
+      'library.index',
+      'Incremental metadata index patch completed',
+      fields: <String, Object?>{
+        'sourceId': normalizedSourceId,
+        'candidateCount': scannedItems.length,
+        'updatedCount': changedRecords.length,
+        'deletedCount': deletedRecordIds.length,
+        'skippedCount': skippedCount,
+        'sidecarAttemptCount': sidecarAttemptCount,
+        'onlineAttemptCount': onlineAttemptCount,
+        'wmdbAttemptCount': wmdbAttemptCount,
+        'tmdbAttemptCount': tmdbAttemptCount,
+        'imdbAttemptCount': imdbAttemptCount,
+        'matchedCount': matchedCount,
+        'noMatchCount': noMatchCount,
+        'transientFailureCount': transientFailureCount,
+        'permanentFailureCount': permanentFailureCount,
+        'recordCount': nextRecords.length,
+        'durationMs': persistenceStopwatch.elapsedMilliseconds,
+      },
+    );
     if (reportProgress) {
       _clearProgressSafely(normalizedSourceId);
     }

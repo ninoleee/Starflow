@@ -15,6 +15,7 @@ import 'package:starflow/features/library/domain/media_naming.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/nas_media_recognition.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
+import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
@@ -40,6 +41,7 @@ final nasMediaIndexerProvider = Provider<NasMediaIndexer>((ref) {
     notifyIndexChanged: () {
       ref.read(nasMediaIndexRevisionProvider.notifier).state++;
     },
+    backgroundLimiter: ref.read(metadataPrefetchConcurrencyLimiterProvider),
   );
   ref.onDispose(() {
     unawaited(indexer.dispose());
@@ -58,6 +60,7 @@ class NasMediaIndexer {
     required AppSettings Function() readSettings,
     required WebDavScrapeProgressController progressController,
     void Function()? notifyIndexChanged,
+    MetadataPrefetchConcurrencyLimiter? backgroundLimiter,
     NasMediaIndexerConcurrencyLimits concurrencyLimits =
         const NasMediaIndexerConcurrencyLimits(),
   })  : _store = store,
@@ -69,6 +72,7 @@ class NasMediaIndexer {
         _readSettings = readSettings,
         _progressController = progressController,
         _notifyIndexChanged = notifyIndexChanged,
+        _backgroundLimiter = backgroundLimiter,
         _sourceBudget = _ConcurrencyBudget(
           concurrencyLimits.normalizedSourceRefreshConcurrency,
         ),
@@ -92,6 +96,7 @@ class NasMediaIndexer {
   final AppSettings Function() _readSettings;
   final WebDavScrapeProgressController _progressController;
   final void Function()? _notifyIndexChanged;
+  final MetadataPrefetchConcurrencyLimiter? _backgroundLimiter;
   final Map<String, _RefreshTaskHandle> _activeRefreshTasks =
       <String, _RefreshTaskHandle>{};
   final Map<String, _RefreshTaskHandle> _backgroundEnrichmentTasks =
@@ -102,6 +107,28 @@ class NasMediaIndexer {
   final _ConcurrencyBudget _sourceBudget;
   final _ConcurrencyBudget _collectionBudget;
   final _ConcurrencyBudget _enrichmentBudget;
+
+  Future<T> _withGlobalBackgroundPermit<T>(
+    Future<T> Function() task, {
+    bool maintenance = false,
+  }) {
+    final limiter = _backgroundLimiter;
+    if (limiter == null) {
+      return task();
+    }
+    final settings = _readSettingsForRefresh();
+    if (maintenance) {
+      return limiter.runMaintenance(
+        maxConcurrency: settings.metadataPrefetchMaxConcurrency,
+        task: task,
+      );
+    }
+    return limiter.run(
+      maxConcurrency: settings.metadataPrefetchMaxConcurrency,
+      initialBatchSize: settings.metadataPrefetchInitialBatchSize,
+      task: task,
+    );
+  }
 
   Future<void> dispose() async {
     if (_isDisposed) {
@@ -753,6 +780,11 @@ class NasMediaIndexer {
     return (status ?? NasMetadataFetchStatus.never).hasAttempted;
   }
 
+  bool _shouldAttemptMetadataStatus(NasMetadataFetchStatus status) {
+    return status == NasMetadataFetchStatus.never ||
+        status == NasMetadataFetchStatus.transientFailure;
+  }
+
   bool _hasCompletedOnlineAttempts(
     NasMediaIndexRecord? record,
     AppSettings settings,
@@ -761,6 +793,10 @@ class NasMediaIndexer {
       return false;
     }
     if (record.manualMetadataLocked) {
+      return true;
+    }
+    final retryAfter = record.metadataRetryAfter;
+    if (retryAfter != null && DateTime.now().isBefore(retryAfter)) {
       return true;
     }
     if (settings.wmdbMetadataMatchEnabled && !record.wmdbStatus.hasAttempted) {
@@ -775,6 +811,29 @@ class NasMediaIndexer {
       return false;
     }
     return true;
+  }
+
+  NasMetadataFetchStatus _metadataFailureStatus(Object error) {
+    final message = error.toString().toLowerCase();
+    final isPermanentClientFailure = RegExp(
+      r'http\s+(400|401|403|404|405|410|422)',
+    ).hasMatch(message);
+    if (isPermanentClientFailure) {
+      return NasMetadataFetchStatus.permanentFailure;
+    }
+    return NasMetadataFetchStatus.transientFailure;
+  }
+
+  Duration _metadataRetryDelay(int failureCount) {
+    const delays = <Duration>[
+      Duration(minutes: 1),
+      Duration(minutes: 5),
+      Duration(minutes: 30),
+      Duration(hours: 2),
+      Duration(hours: 6),
+    ];
+    final index = (failureCount - 1).clamp(0, delays.length - 1);
+    return delays[index];
   }
 
   bool _hasPendingOnlineAttempts(
@@ -868,14 +927,18 @@ class NasMediaIndexer {
         imdbRatingMatch: imdbRatingMatch,
       );
 
-  Future<void> _persistSourceRecords({
+  Future<void> _patchSourceRecords({
     required String sourceId,
-    required List<NasMediaIndexRecord> records,
+    required List<NasMediaIndexRecord> currentRecords,
+    required List<NasMediaIndexRecord> upsertedRecords,
+    required List<String> deletedRecordIds,
     required NasMediaIndexSourceState state,
   }) =>
-      _NasMediaIndexerStorageAccessX(this)._persistSourceRecords(
+      _NasMediaIndexerStorageAccessX(this)._patchSourceRecords(
         sourceId: sourceId,
-        records: records,
+        currentRecords: currentRecords,
+        upsertedRecords: upsertedRecords,
+        deletedRecordIds: deletedRecordIds,
         state: state,
       );
 

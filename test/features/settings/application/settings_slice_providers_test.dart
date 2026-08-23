@@ -113,6 +113,8 @@ void main() {
       'autoHideNavigationBarEnabled': false,
       'homeHeroBackgroundEnabled': false,
       'performanceLiveItemHeroOverlayEnabled': false,
+      'metadataPrefetchMaxConcurrency': 4,
+      'metadataPrefetchInitialBatchSize': 18,
     });
     final container = ProviderContainer(
       overrides: [
@@ -131,6 +133,8 @@ void main() {
         homeHeroBackgroundEnabled: false,
         configuredLiveItemHeroOverlayEnabled: false,
         effectiveLiveItemHeroOverlayEnabled: false,
+        metadataPrefetchMaxConcurrency: 4,
+        metadataPrefetchInitialBatchSize: 18,
       ),
     );
   });

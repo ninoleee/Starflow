@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
 
@@ -7,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/features/library/data/season_folder_label_parser.dart';
+import 'package:starflow/features/library/data/webdav_directory_cache_store.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/nas_media_recognition.dart';
@@ -20,16 +22,23 @@ part 'webdav_nas_client_background.dart';
 
 final webDavNasClientProvider = Provider<WebDavNasClient>((ref) {
   final client = ref.watch(starflowHttpClientProvider);
-  return WebDavNasClient(client);
+  return WebDavNasClient(
+    client,
+    directoryCacheStore: ref.read(webDavDirectoryCacheStoreProvider),
+  );
 });
 
 class WebDavNasClient {
-  WebDavNasClient(this._client);
+  WebDavNasClient(
+    this._client, {
+    WebDavDirectoryCacheStore? directoryCacheStore,
+  }) : _directoryCacheStore = directoryCacheStore;
 
-  static const int _maxConcurrentDirectoryWalks = 4;
-  static const int _maxConcurrentFilePreparations = 8;
+  static const int _maxConcurrentDirectoryWalks = 2;
+  static const int _maxConcurrentFilePreparations = 4;
 
   final http.Client _client;
+  final WebDavDirectoryCacheStore? _directoryCacheStore;
   final Map<String, _ParsedNfoMetadata?> _nfoCache =
       <String, _ParsedNfoMetadata?>{};
   final Map<String, Future<_ParsedNfoMetadata?>> _nfoInflight =
@@ -197,6 +206,7 @@ class WebDavNasClient {
       int depth,
       int remaining, {
       DateTime? directoryModifiedAt,
+      String directoryEtag = '',
     }) async {
       _throwIfCancelled(shouldCancel);
       if (remaining <= 0) {
@@ -209,11 +219,12 @@ class WebDavNasClient {
         return const _DirectoryWalkResult();
       }
 
-      final cachedSubtree = _loadCachedDirectorySubtree(
+      final cachedSubtree = await _loadCachedDirectorySubtree(
         source: source,
         uri: uri,
         includeSidecarMetadata: shouldLoadSidecarMetadata,
         directoryModifiedAt: directoryModifiedAt,
+        directoryEtag: directoryEtag,
       );
       if (cachedSubtree != null) {
         final rebasedItems = _rebasePendingItemsForRoot(
@@ -259,6 +270,7 @@ class WebDavNasClient {
             depth + 1,
             remaining,
             directoryModifiedAt: entry.modifiedAt,
+            directoryEtag: entry.etag,
           );
           childDirectoryResults[entryIndex] = childResult;
           late final Future<void> completion;
@@ -321,12 +333,14 @@ class WebDavNasClient {
         truncated = truncated || childResult.truncated;
       }
 
-      if (!truncated && directoryModifiedAt != null) {
+      if (!truncated &&
+          (directoryModifiedAt != null || directoryEtag.trim().isNotEmpty)) {
         _storeCachedDirectorySubtree(
           source: source,
           uri: uri,
           includeSidecarMetadata: shouldLoadSidecarMetadata,
           directoryModifiedAt: directoryModifiedAt,
+          directoryEtag: directoryEtag,
           items: _rebasePendingItemsForRoot(
             collected,
             rootUri: uri,
@@ -596,6 +610,10 @@ class WebDavNasClient {
       throw Exception('WebDAV 删除失败：HTTP ${response.statusCode}');
     }
     _resetScanCaches();
+    final cacheStore = _directoryCacheStore;
+    if (cacheStore != null) {
+      unawaited(cacheStore.removeSource(source.id));
+    }
     if (_looksLikePlayableResourceUri(targetUri)) {
       final parentUri = _parentDirectoryUri(targetUri);
       if (parentUri != null) {

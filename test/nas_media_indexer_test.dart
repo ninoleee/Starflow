@@ -3267,7 +3267,7 @@ void main() {
     expect(client.scanResourceCallCount, 1);
 
     final firstRecord = (await store.loadSourceRecords(source.id)).single;
-    expect(firstRecord.sidecarStatus, NasMetadataFetchStatus.failed);
+    expect(firstRecord.sidecarStatus, NasMetadataFetchStatus.noMatch);
 
     await indexer.refreshSource(source, forceFullRescan: true);
     await _drainAsyncTasks();
@@ -3674,7 +3674,7 @@ void main() {
     expect(wmdbRequestCount, 1);
 
     final firstRecord = (await store.loadSourceRecords(source.id)).single;
-    expect(firstRecord.wmdbStatus, NasMetadataFetchStatus.failed);
+    expect(firstRecord.wmdbStatus, NasMetadataFetchStatus.noMatch);
 
     await indexer.refreshSource(source, forceFullRescan: true);
     await _drainAsyncTasks();
@@ -4389,6 +4389,9 @@ void main() {
       ),
       readSettings: () => settings,
       progressController: WebDavScrapeProgressController(),
+      concurrencyLimits: const NasMediaIndexerConcurrencyLimits(
+        collectionRefreshConcurrency: 2,
+      ),
     );
     const source = MediaSourceConfig(
       id: 'webdav-concurrent-collections',
@@ -4774,6 +4777,27 @@ class _MemoryNasMediaIndexStore implements NasMediaIndexStore {
       }
       _records[sourceId] = merged.values.toList(growable: false);
     }
+    _states[sourceId] = state;
+  }
+
+  @override
+  Future<void> patchSourceRecords({
+    required String sourceId,
+    required List<NasMediaIndexRecord> upsertedRecords,
+    required List<String> deletedRecordIds,
+    required NasMediaIndexSourceState state,
+  }) async {
+    final merged = <String, NasMediaIndexRecord>{
+      for (final record in _records[sourceId] ?? const <NasMediaIndexRecord>[])
+        record.id: record,
+    };
+    for (final recordId in deletedRecordIds) {
+      merged.remove(recordId);
+    }
+    for (final record in upsertedRecords) {
+      merged[record.id] = record;
+    }
+    _records[sourceId] = merged.values.toList(growable: false);
     _states[sourceId] = state;
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -176,6 +177,88 @@ void main() {
     expect(results[0]?.posterUrl, 'https://image.example.com/first.jpg');
     expect(results[1]?.posterUrl, 'https://image.example.com/second.jpg');
     expect(results[2], isNull);
+  });
+
+  test('serializes concurrent detail cache writes without losing records',
+      () async {
+    final preferences = _TrackingPreferencesStore();
+    final repository = LocalStorageCacheRepository(preferences: preferences);
+    const firstSeed = MediaDetailTarget(
+      title: 'First Concurrent Movie',
+      posterUrl: '',
+      overview: '',
+      tmdbId: 'concurrent-1',
+    );
+    const secondSeed = MediaDetailTarget(
+      title: 'Second Concurrent Movie',
+      posterUrl: '',
+      overview: '',
+      tmdbId: 'concurrent-2',
+    );
+
+    await Future.wait([
+      repository.saveDetailTarget(
+        seedTarget: firstSeed,
+        resolvedTarget: firstSeed.copyWith(
+          posterUrl: 'https://image.example.com/concurrent-1.jpg',
+        ),
+      ),
+      repository.saveDetailTarget(
+        seedTarget: secondSeed,
+        resolvedTarget: secondSeed.copyWith(
+          posterUrl: 'https://image.example.com/concurrent-2.jpg',
+        ),
+      ),
+    ]);
+
+    final reloaded = LocalStorageCacheRepository(preferences: preferences);
+    final restored = await reloaded.loadDetailTargetsBatch(const [
+      firstSeed,
+      secondSeed,
+    ]);
+
+    expect(
+        restored[0]?.posterUrl, 'https://image.example.com/concurrent-1.jpg');
+    expect(
+        restored[1]?.posterUrl, 'https://image.example.com/concurrent-2.jpg');
+    expect(preferences.peakConcurrentWrites, 1);
+  });
+
+  test('round trips a large detail cache through background serialization',
+      () async {
+    final preferences = _TrackingPreferencesStore();
+    final repository = LocalStorageCacheRepository(preferences: preferences);
+    final largeOverview = List<String>.filled(4096, 'x').join();
+    final seeds = List<MediaDetailTarget>.generate(
+      16,
+      (index) => MediaDetailTarget(
+        title: 'Large Cache Movie $index',
+        posterUrl: '',
+        overview: '',
+        tmdbId: 'large-cache-$index',
+      ),
+    );
+
+    await repository.saveDetailTargetsBatch([
+      for (var index = 0; index < seeds.length; index += 1)
+        DetailTargetCacheSaveRequest(
+          seedTarget: seeds[index],
+          resolvedTarget: seeds[index].copyWith(
+            posterUrl: 'https://image.example.com/large-$index.jpg',
+            overview: largeOverview,
+          ),
+        ),
+    ]);
+
+    final reloaded = LocalStorageCacheRepository(preferences: preferences);
+    final restored = await reloaded.loadDetailTargetsBatch(seeds);
+    final summary = await reloaded.inspectDetailCache();
+
+    expect(restored, hasLength(16));
+    expect(
+        restored.every((target) => target?.overview == largeOverview), isTrue);
+    expect(summary.entryCount, 16);
+    expect(summary.totalBytes, greaterThan(64 * 1024));
   });
 
   test('batches scoped detail cache change notifications', () async {
@@ -603,4 +686,40 @@ void main() {
       '/cache/sub-2/Planet.Earth.II.srt',
     );
   });
+}
+
+class _TrackingPreferencesStore implements PreferencesStore {
+  final Map<String, Object> _values = <String, Object>{};
+  int _activeWrites = 0;
+  int peakConcurrentWrites = 0;
+
+  @override
+  Future<String?> getString(String key) async => _values[key] as String?;
+
+  @override
+  Future<List<String>?> getStringList(String key) async {
+    final value = _values[key];
+    return value is List<String> ? List<String>.from(value) : null;
+  }
+
+  @override
+  Future<void> setString(String key, String value) async {
+    _activeWrites += 1;
+    if (_activeWrites > peakConcurrentWrites) {
+      peakConcurrentWrites = _activeWrites;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    _values[key] = value;
+    _activeWrites -= 1;
+  }
+
+  @override
+  Future<void> setStringList(String key, List<String> value) async {
+    _values[key] = List<String>.from(value);
+  }
+
+  @override
+  Future<void> remove(String key) async {
+    _values.remove(key);
+  }
 }
