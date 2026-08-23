@@ -9,3 +9,9 @@
 - Name the normal artifact `starflow-tv-major.month.sequence.apk` and the embedded-settings artifact `starflow-tv-config-major.month.sequence.apk`.
 - Output the final artifact to the desktop by default. Embed settings only when the user explicitly supplies a settings JSON file.
 - If PowerShell is unavailable, reproduce the preset behavior exactly instead of falling back to a raw `flutter build apk` artifact.
+
+## Documentation synchronization
+
+- When user-facing behavior changes, keep `README.md` and the relevant files under `docs/` aligned with the implementation in the same change.
+- Treat `docs/architecture.md` as the source for component boundaries, `docs/development-network.md` as the source for runtime/build networking, and the two performance documents as the source for host and device measurements.
+- Do not describe application logging as disabled: the legacy trace helpers are silent, while the structured local logger, Android native exit capture, preview, filtering, clearing, and export flows are active.

@@ -12,6 +12,7 @@ Starflow 不是单一播放器，而是一个面向个人影音库的统一入�
 - 播放：内置 `MPV` + App 内原生播放器容器页 + 系统播放器
 - 入库联动：夸克保存、`SmartStrm` Webhook、自动增量刷新索引
 - 本地持久化：设置、详情缓存、图片缓存、`WebDAV` 元数据索引
+- 诊断与运维：结构化本地日志、Android 原生退出信息、日志预览与导出
 
 ## 2. 技术基线
 
@@ -79,6 +80,8 @@ lib/
 
 - 平台识别
 - HTTP 客户端包装
+- 统一网络失败分类、策略化超时、幂等重试约束与按主机熔断
+- 结构化日志 API、敏感字段脱敏、文件轮转与帧性能监控
 - 本地图片缓存抽象
 - 持久化图片缓存的 `URL + headers` identity、磁盘 metadata、过期与 stale fallback 策略
 - 通用组件
@@ -140,7 +143,7 @@ lib/
 - Inno Setup 编译器当前会优先在 `E:` 和 `C:` 下的常见安装目录查找 `ISCC.exe`
 - `scripts/connect_mumu.ps1` 会扫描 MuMu 的 `vm_config.json`，优先尝试桥接模式的 `guest_ip:5555`，再回退到 `127.0.0.1:host_port`
 
-## 3.1 近期架构与性能收口（2026-04）
+## 3.1 近期架构与性能收口（2026-08）
 
 这一轮已经落地的 `P0` 收口主要有这些：
 
@@ -165,6 +168,10 @@ lib/
 - 首页 application 收口：`home_controller.dart` 现在主要保留 controller 与 provider wiring，`home_controller_models.dart` 承载 view model，`home_feed_repository.dart` 承载首页 seed/cached section 装配
 - `PlaybackMemoryRepository` 已补单调递增 `updatedAt` 策略，保证最近播放在 Windows 或高频保存场景下仍按真正“最后一次写入”稳定排序
 - NAS 索引链收口：`NasMediaIndexer` 已拆成 `nas_media_indexer_refresh_flow.dart / nas_media_indexer_storage_access.dart / nas_media_indexer_indexing.dart / nas_media_indexer_grouping.dart / nas_media_indexer_refresh_support.dart` 多段 `part` 文件；主文件回到约 `1k` 行量级，先把刷新编排、存储访问、metadata 匹配与分组逻辑解耦，为后续 isolate 化、`IndexStore` 增量 upsert 和多级并发预算继续铺路
+- 首页模块加载与元数据预取已拆成独立调度器：前者限制首页数据源扇出并串行应用结果，后者统一约束 Hero、评分、元数据补全和显式维护任务；交互前台租约会暂缓新的后台预取
+- 冷启动刷新已增加 Bootstrap 完成标记，主壳不会再重复执行同一轮首页刷新；是否刷新首页及 Emby 由独立持久化设置控制
+- 网络层新增 `NetworkFailureInfo / NetworkRequestPolicy / NetworkRequestGuard`，统一错误分类、超时、幂等重试边界和按策略/主机隔离的熔断状态
+- 诊断链新增结构化本地日志、敏感信息脱敏、文件轮转、固定区域预览、按级别记录/展示、日志清理及平台化导出；Android 还会合并上次 ANR、崩溃、低内存与资源异常退出信息
 
 聚焦验证结果：
 
@@ -235,6 +242,26 @@ lib/
   - `SettingsController -> AppSettings`
   - `AppSettings -> 各 feature slice provider`
   - `Home / Detail / Playback / Library` 仅订阅所需 slice，减少整份 `AppSettings` 宽监听导致的重建。
+
+## 3.3 网络与日志基础层
+
+运行期网络入口分成“共享传输层”和“业务策略层”：
+
+- `StarflowHttpClient` 是 Emby、WebDAV、豆瓣、元数据、搜索、字幕、夸克和 SmartStrm 等客户端的共享传输包装；默认等待响应头上限为 `20` 秒
+- `network_failure.dart` 把错误统一归类为 `timeout / tlsHandshake / dns / connection / connectionClosed / httpStatus / circuitOpen / cancelled / unknown`
+- `NetworkRequestGuard` 按 `policy + host` 保存连续临时故障状态，提供总请求超时、可选的幂等重试和熔断；非幂等操作默认不重试
+- 豆瓣与元数据策略当前使用 `6` 秒总请求超时、连续 `3` 次临时故障后熔断、熔断 `2` 分钟；保留原有业务异常类型以兼容调用方
+- HTTP `408 / 425 / 429 / 5xx` 视为临时状态；鉴权失败、资源不存在等永久状态不会触发临时故障策略
+- 共享传输日志只记录 method、scheme、host、port、path、status 和错误分类，不记录请求头、Cookie、Token 或完整 query
+
+日志层由 `app_log_api.dart`、平台实现和设置页组成：
+
+- IO 平台使用 JSON Lines，保存当前日志、上一份轮转日志和 Android 原生日志
+- 容量默认 `20 MB`，会在应用日志和原生日志之间预留预算并自动裁剪最早内容
+- `TRACE / INFO / WARNING / ERROR` 的记录级别与预览级别独立持久化
+- 预览读取最近 `300` 条、展示筛选后的最新 `100` 条，TV 端条目和滚动区域均可聚焦
+- 导出会合并轮转文件；TV 通过临时局域网 HTTP 页面和二维码下载，iOS 使用系统文件导出器，其他支持文件的平台使用对应文件流程
+- Android 原生侧读取 `ApplicationExitInfo`，把上一进程的 ANR、Java/Native 崩溃、低内存和资源异常退出合并进日志
 
 ## 4. 核心设计取向
 
@@ -361,7 +388,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 这一步会遍历作用域内目录来识别变更，但不会越过到其他分区
 - sidecar 和在线元数据补全只针对增量项继续执行
 - 只有当当前作用域索引为空时，才允许在后台调度一次自动全量重建；读链路本身不再同步等待这次重建
-- 当前仓库的应用侧 trace helper 保持静音
+- 旧的应用侧 trace helper 保持静音；正式诊断信息统一进入结构化日志系统
 
 `NasMediaIndexer` 负责的事情包括：
 
@@ -480,7 +507,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 手动搜索 `WMDB / TMDB`
 - 直接写回本地索引和详情缓存
 - 手动应用命中结果时会强制覆盖本地已存在的标题、简介、图片、人物、公司 Logo 和外部 ID，不再只补空字段
-- `TV` 模式下会给自动更新、搜索和 `WMDB / TMDB` 应用按钮保留稳定 `FocusNode`；搜索结果或更新状态异步重建后，如果当前没有可用焦点，会按“可应用结果 -> 开始搜索 -> 自动更新 -> 输入项”的顺序恢复焦点
+- `TV` 模式下会给自动更新、搜索和 `WMDB / TMDB` 应用按钮保留稳定 `FocusNode`；按上 / 下方向键时，会按“自动更新 -> 搜索词 -> 年份 -> 剧集优先 -> 开始搜索 -> WMDB 结果 -> TMDB 结果”的顺序强制切换焦点，并跳过当前不可用的节点
 - 详情页“手动更新信息”同样会直接重新搜索，并把命中的在线结果覆盖到当前详情缓存
 - 人物关联影片页支持按年份新到旧 / 旧到新排序，也支持按类别筛选；排序与筛选都基于已拿到的人物作品结果在本地完成
 
@@ -730,6 +757,10 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 自动隐藏菜单栏
 - Hero 全屏背景图
 - 运行时卡片 / Hero 局部更新
+- 启动时自动刷新首页，以及是否同时刷新 Emby 媒体源
+- 后台元数据最大并发数、首批元数据预取数量
+- 首页模块最大并发数、首页首批优先模块数
+- 本地日志开关、容量、记录级别与预览级别
 
 播放设置在页面结构上额外做了分组：
 
@@ -772,6 +803,8 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 会启动一个临时本地 HTTP 服务，并在电视上展示访问码、端口与局域网地址
 - 手机与电视连接同一网络后，可直接下载当前配置或上传 JSON 覆盖本机设置
 - 关闭传输弹窗后会立刻停止该临时传输服务，不保留后台进程
+- 独立的日志二级页：固定区域预览、按级别筛选、刷新、清理和导出
+- TV 日志导出与配置传输共用局域网地址卡片和二维码交互；手机扫码即可打开当前会话页面
 
 Android TV 下的设置页还额外做了遥控器适配：
 
@@ -811,6 +844,10 @@ Android TV 下的设置页还额外做了遥控器适配：
 用于保存：
 
 - 当前不再为在线字幕保留长期副本
+- `logs/starflow.log`：当前结构化应用日志
+- `logs/starflow.previous.log`：上一份轮转应用日志
+- `logs/starflow-native.log`：Android 原生生命周期与上次异常退出日志
+- `starflow-native-logging.json`：供 Android 原生日志读取的开关、容量和级别配置
 
 ### 临时目录
 
@@ -890,6 +927,9 @@ Android TV 下的设置页还额外做了遥控器适配：
 - 夸克保存和 `SmartStrm`
 - 播放记忆与最近播放排序稳定性
 - 播放启动准备与路由判定
+- 统一网络错误分类、超时、幂等重试边界与按主机熔断
+- 本地日志轮转、脱敏、原生日志合并、预览与导出
+- 首页模块和元数据预取的独立并发/首批预算
 
 ## 15. 当前架构判断
 

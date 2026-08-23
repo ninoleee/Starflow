@@ -7,7 +7,7 @@
 
 `tool/perf/run_perf_baselines.dart` is the centralized script for capturing the five core performance baselines we are tracking: startup, home feed, detail screen, playback warm launch, and index refresh latency. Run it any time you change shared data layers, split hot UI files, or adjust the rendering/animation budget, so regressions are caught before a release.
 
-### 2026-04-11 sync
+### 2026-08-23 sync
 The latest architecture pass moved several hot paths out of single large files:
 
 * Home presentation is now split between `home_page.dart`, `home_page_hero.dart`, and `home_page_sections.dart`.
@@ -15,6 +15,11 @@ The latest architecture pass moved several hot paths out of single large files:
 * Playback presentation is now split between `player_page.dart` and `presentation/widgets/player_page_*.part.dart` plus shared overlay/dialog widgets.
 * NAS indexing is now split across `nas_media_indexer.dart` and the `nas_media_indexer_*` part files (`grouping`, `refresh_flow`, `storage_access`, `indexing`, `refresh_support`).
 * Recent playback ordering now depends on the monotonic `updatedAt` behavior in `playback_memory_repository.dart`, which matters most on Windows where multiple saves can happen in the same millisecond.
+* Home source loading and metadata prefetching now have separate schedulers. Record both maximum-concurrency and initial-batch settings with every comparable baseline.
+* The default Home budget is `2` concurrent modules with `2` modules in the first batch; remaining modules are admitted in later batches and result application is serialized.
+* The default metadata budget is `2` concurrent tasks with `12` tasks in the first batch; scrolling, focus movement, page transitions, and foreground work temporarily defer new background starts.
+* Bootstrap and the navigation shell share cold-start refresh completion state, so a baseline should contain at most one automatic Home refresh cycle.
+* Structured logging and the frame monitor are active by default. Keep the same recorded log levels across comparison runs because trace-heavy diagnostics add some I/O.
 
 ### When to run
 * After modifying performance-sensitive controllers such as `HomePageController`, `HomeFeedRepository`, playback startup coordinators/resolvers, or retained async controllers that were part of the P0/P1 efforts.
@@ -23,6 +28,7 @@ The latest architecture pass moved several hot paths out of single large files:
 * After touching `player_page.dart`, `presentation/widgets/player_page_*.part.dart`, `player_mpv_controls_overlay.dart`, `player_playback_options_dialog.dart`, or playback startup routing/execution, because they directly affect `player_open`.
 * After touching `nas_media_indexer.dart` or any `nas_media_indexer_*` part file, because those changes can shift both `index_refresh` and any home/detail path that depends on index freshness.
 * After changing `playback_memory_repository.dart`, because recent playback ordering changes can indirectly affect home feed stability and smoke expectations.
+* After changing `home_feed_load_scheduler.dart`, `metadata_prefetch_concurrency_limiter.dart`, network guards, startup refresh settings, or structured logging.
 * Before merging large refactors that could affect the timeline between user interaction and the first frame.
 
 ### Command
@@ -55,9 +61,13 @@ flutter test test/playback_memory_repository_test.dart test/features/playback/ap
 
 dart analyze lib/features/library/data/nas_media_indexer.dart lib/features/library/data/nas_media_indexer_grouping.dart lib/features/library/data/nas_media_indexer_refresh_flow.dart lib/features/library/data/nas_media_indexer_refresh_support.dart
 flutter test test/nas_media_indexer_test.dart
+
+dart analyze lib/core/network lib/core/logging lib/features/home/application/home_feed_load_scheduler.dart lib/features/metadata/application/metadata_prefetch_concurrency_limiter.dart
+flutter test test/network_failure_test.dart test/network_request_guard_test.dart test/starflow_http_client_test.dart test/metadata_prefetch_concurrency_limiter_test.dart
 ```
 
 ### Tips
 * Run under the same system load you plan to ship under so the numbers stay comparable.
 * Re-run the script after applying the fix if the regression was real; this rewrites the baseline JSON, which you can commit alongside the change when the new numbers are expected.
 * If a baseline regresses right after a file split, verify the focused tests first. In this codebase, regressions after refactors are often caused by wiring/state-order changes rather than the split itself.
+* Keep `highPerformanceModeEnabled`, both startup refresh switches, both scheduler concurrency values, both initial-batch values, and log levels identical when comparing two runs.

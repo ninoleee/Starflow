@@ -9,7 +9,6 @@ import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
-import 'package:starflow/features/details/presentation/widgets/detail_hero_section.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
@@ -92,7 +91,6 @@ class _MetadataIndexManagementPageState
     _preferSeries =
         itemType == 'series' || itemType == 'season' || itemType == 'episode';
     _recordFuture = _loadRecord();
-    _scheduleTvFocusRecovery();
   }
 
   @override
@@ -183,7 +181,6 @@ class _MetadataIndexManagementPageState
       _wmdbMessage = '';
       _tmdbMessage = '';
     });
-    _scheduleTvFocusRecovery();
 
     final settings = ref.read(appSettingsProvider);
     Future<(List<MetadataMatchResult>, String)> resolveTmdb() async {
@@ -240,35 +237,52 @@ class _MetadataIndexManagementPageState
       _tmdbResults = tmdbResolved.$1;
       _tmdbMessage = tmdbResolved.$2;
     });
-    _scheduleTvFocusRecovery(preferResults: true);
   }
 
-  void _scheduleTvFocusRecovery({bool preferResults = false}) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      final isTelevision = ref.read(isTelevisionProvider).value ?? false;
-      if (!isTelevision || _hasUsableFocus()) {
-        return;
-      }
-      requestDetailFocus(_metadataIndexFallbackFocusNodes(
-        preferResults: preferResults,
-      ));
-    });
-  }
+  bool _handleMetadataIndexDirection(TraversalDirection direction) {
+    if (direction != TraversalDirection.up &&
+        direction != TraversalDirection.down) {
+      return false;
+    }
 
-  bool _hasUsableFocus() {
+    final nodes = _availableMetadataIndexFocusNodes().toList(growable: false);
+    if (nodes.isEmpty) {
+      return true;
+    }
+
     final primaryFocus = FocusManager.instance.primaryFocus;
-    return primaryFocus != null &&
-        primaryFocus.context != null &&
-        primaryFocus.canRequestFocus;
+    final currentIndex = primaryFocus == null
+        ? -1
+        : nodes.indexWhere(
+            (node) => identical(node, primaryFocus) || node.hasFocus,
+          );
+    if (currentIndex < 0) {
+      _requestMetadataIndexFocus(
+        direction == TraversalDirection.up ? nodes.last : nodes.first,
+      );
+      return true;
+    }
+
+    final nextIndex = switch (direction) {
+      TraversalDirection.up => (currentIndex - 1).clamp(0, nodes.length - 1),
+      TraversalDirection.down => (currentIndex + 1).clamp(0, nodes.length - 1),
+      _ => currentIndex,
+    };
+    _requestMetadataIndexFocus(nodes[nextIndex]);
+    return true;
   }
 
-  Iterable<FocusNode> _metadataIndexFallbackFocusNodes({
-    required bool preferResults,
-  }) sync* {
-    if (preferResults) {
+  Iterable<FocusNode> _availableMetadataIndexFocusNodes() sync* {
+    if (!_isAutoRefreshing) {
+      yield _autoRefreshFocusNode;
+    }
+    yield _queryFocusNode;
+    yield _yearFocusNode;
+    yield _preferSeriesFocusNode;
+    if (!_isSearching) {
+      yield _searchFocusNode;
+    }
+    if (!_isApplying) {
       for (var index = 0;
           index < _wmdbResults.length && index < _wmdbApplyFocusNodes.length;
           index++) {
@@ -280,11 +294,19 @@ class _MetadataIndexManagementPageState
         yield _tmdbApplyFocusNodes[index];
       }
     }
-    yield _searchFocusNode;
-    yield _autoRefreshFocusNode;
-    yield _preferSeriesFocusNode;
-    yield _queryFocusNode;
-    yield _yearFocusNode;
+  }
+
+  void _requestMetadataIndexFocus(FocusNode node) {
+    if (node.context == null || !node.canRequestFocus) {
+      return;
+    }
+    node.requestFocus();
+    Scrollable.ensureVisible(
+      node.context!,
+      alignment: 0.45,
+      duration: const Duration(milliseconds: 140),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   Widget _wrapTelevisionSearchField({
@@ -375,7 +397,6 @@ class _MetadataIndexManagementPageState
     setState(() {
       _isApplying = true;
     });
-    _scheduleTvFocusRecovery();
 
     try {
       final searchQuery = _effectiveSearchQuery();
@@ -406,7 +427,6 @@ class _MetadataIndexManagementPageState
         setState(() {
           _isApplying = false;
         });
-        _scheduleTvFocusRecovery();
       }
     }
   }
@@ -560,7 +580,6 @@ class _MetadataIndexManagementPageState
     setState(() {
       _isAutoRefreshing = true;
     });
-    _scheduleTvFocusRecovery();
 
     try {
       final resolvedTarget = await _resolveAutomaticRefreshTarget();
@@ -586,7 +605,6 @@ class _MetadataIndexManagementPageState
         setState(() {
           _isAutoRefreshing = false;
         });
-        _scheduleTvFocusRecovery();
       }
     }
   }
@@ -646,234 +664,68 @@ class _MetadataIndexManagementPageState
         backgroundColor: Colors.transparent,
         body: AppPageBackground(
           contentPadding: appPageContentPadding(context),
-          child: Stack(
-            children: [
-              FocusTraversalGroup(
-                policy: OrderedTraversalPolicy(),
-                child: FutureBuilder<NasMediaIndexRecord?>(
-                  future: _recordFuture,
-                  builder: (context, snapshot) {
-                    return ListView(
-                      padding: EdgeInsets.zero,
-                      children: [
-                        SizedBox(
-                          height: MediaQuery.paddingOf(context).top +
-                              kToolbarHeight +
-                              12,
-                        ),
-                        _SectionPanel(
-                          title: '信息管理',
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _currentTarget.title,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleLarge
-                                    ?.copyWith(fontWeight: FontWeight.w800),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                '所有详情页都可以在这里手动搜索 WMDB / TMDB。有本地索引时写回索引，没有本地索引时写回当前详情缓存。',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
-                                    ),
-                              ),
-                              const SizedBox(height: 12),
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: isTelevision
-                                    ? TvAdaptiveButton(
-                                        label: _isAutoRefreshing
-                                            ? '更新中...'
-                                            : '自动更新',
-                                        icon: Icons.refresh_rounded,
-                                        focusNode: _autoRefreshFocusNode,
-                                        focusId: 'detail:index:auto-refresh',
-                                        onPressed: _isAutoRefreshing
-                                            ? null
-                                            : _runAutomaticRefresh,
-                                      )
-                                    : FilledButton.icon(
-                                        onPressed: _isAutoRefreshing
-                                            ? null
-                                            : _runAutomaticRefresh,
-                                        icon: _isAutoRefreshing
-                                            ? const SizedBox(
-                                                width: 16,
-                                                height: 16,
-                                                child:
-                                                    CircularProgressIndicator(
-                                                  strokeWidth: 2,
-                                                ),
-                                              )
-                                            : const Icon(
-                                                Icons.refresh_rounded,
-                                              ),
-                                        label: Text(
-                                          _isAutoRefreshing ? '更新中...' : '自动更新',
-                                        ),
-                                      ),
-                              ),
-                            ],
+          child: TvDirectionalActionPanel(
+            enabled: isTelevision,
+            onDirection: _handleMetadataIndexDirection,
+            child: Stack(
+              children: [
+                FocusTraversalGroup(
+                  policy: OrderedTraversalPolicy(),
+                  child: FutureBuilder<NasMediaIndexRecord?>(
+                    future: _recordFuture,
+                    builder: (context, snapshot) {
+                      return ListView(
+                        padding: EdgeInsets.zero,
+                        children: [
+                          SizedBox(
+                            height: MediaQuery.paddingOf(context).top +
+                                kToolbarHeight +
+                                12,
                           ),
-                        ),
-                        const SizedBox(height: 16),
-                        _SectionPanel(
-                          title: _supportsLocalMetadataIndex(_currentTarget)
-                              ? '当前索引'
-                              : '当前缓存',
-                          child: snapshot.connectionState ==
-                                  ConnectionState.waiting
-                              ? const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 16),
-                                  child: LinearProgressIndicator(),
-                                )
-                              : snapshot.hasError
-                                  ? Text('读取索引失败：${snapshot.error}')
-                                  : _CurrentIndexCard(
-                                      record: snapshot.data,
-                                      supportsLocalIndex:
-                                          _supportsLocalMetadataIndex(
-                                        _currentTarget,
-                                      ),
-                                    ),
-                        ),
-                        const SizedBox(height: 16),
-                        _SectionPanel(
-                          title: '手动搜索',
-                          child: Column(
-                            children: [
-                              FocusTraversalOrder(
-                                order: const NumericFocusOrder(1),
-                                child: _wrapTelevisionSearchField(
-                                  enabled: isTelevision,
-                                  focusNode: _queryFocusNode,
-                                  child: TextField(
-                                    controller: _queryController,
-                                    focusNode: _queryFocusNode,
-                                    textInputAction: TextInputAction.search,
-                                    decoration: const InputDecoration(
-                                      labelText: '片名 / 搜索词',
-                                      hintText: '输入要手动匹配的片名',
-                                      border: OutlineInputBorder(),
-                                    ),
-                                    onSubmitted: (_) => _runSearch(),
-                                  ),
+                          _SectionPanel(
+                            title: '信息管理',
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _currentTarget.title,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleLarge
+                                      ?.copyWith(fontWeight: FontWeight.w800),
                                 ),
-                              ),
-                              const SizedBox(height: 12),
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  FocusTraversalOrder(
-                                    order: const NumericFocusOrder(2),
-                                    child: SizedBox(
-                                      width: 120,
-                                      child: _wrapTelevisionSearchField(
-                                        enabled: isTelevision,
-                                        focusNode: _yearFocusNode,
-                                        child: TextField(
-                                          controller: _yearController,
-                                          focusNode: _yearFocusNode,
-                                          keyboardType: TextInputType.number,
-                                          textInputAction: TextInputAction.done,
-                                          decoration: const InputDecoration(
-                                            labelText: '年份',
-                                            hintText: '可选',
-                                            border: OutlineInputBorder(),
-                                          ),
-                                        ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  '所有详情页都可以在这里手动搜索 WMDB / TMDB。有本地索引时写回索引，没有本地索引时写回当前详情缓存。',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
                                       ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: FocusTraversalOrder(
-                                      order: const NumericFocusOrder(3),
-                                      child: isTelevision
-                                          ? TvFocusableAction(
-                                              onPressed: () {
-                                                setState(() {
-                                                  _preferSeries =
-                                                      !_preferSeries;
-                                                });
-                                              },
-                                              focusNode: _preferSeriesFocusNode,
-                                              focusId:
-                                                  'detail:index:prefer-series',
-                                              borderRadius:
-                                                  BorderRadius.circular(18),
-                                              child: Container(
-                                                decoration: BoxDecoration(
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .surfaceContainerHighest,
-                                                  borderRadius:
-                                                      BorderRadius.circular(18),
-                                                ),
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                  horizontal: 14,
-                                                  vertical: 16,
-                                                ),
-                                                child: Row(
-                                                  children: [
-                                                    const Expanded(
-                                                      child: Text(
-                                                        '按剧集优先匹配',
-                                                      ),
-                                                    ),
-                                                    Icon(
-                                                      _preferSeries
-                                                          ? Icons
-                                                              .check_circle_rounded
-                                                          : Icons
-                                                              .radio_button_unchecked_rounded,
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            )
-                                          : StarflowToggleTile(
-                                              title: '按剧集优先匹配',
-                                              value: _preferSeries,
-                                              onChanged: (value) {
-                                                setState(() {
-                                                  _preferSeries = value;
-                                                });
-                                              },
-                                            ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: FocusTraversalOrder(
-                                  order: const NumericFocusOrder(4),
+                                ),
+                                const SizedBox(height: 12),
+                                Align(
+                                  alignment: Alignment.centerLeft,
                                   child: isTelevision
                                       ? TvAdaptiveButton(
-                                          label:
-                                              _isSearching ? '搜索中...' : '开始搜索',
-                                          icon: Icons.manage_search_rounded,
-                                          autofocus: true,
-                                          focusNode: _searchFocusNode,
-                                          onPressed:
-                                              _isSearching ? null : _runSearch,
-                                          focusId: 'detail:index:search',
+                                          label: _isAutoRefreshing
+                                              ? '更新中...'
+                                              : '自动更新',
+                                          icon: Icons.refresh_rounded,
+                                          focusNode: _autoRefreshFocusNode,
+                                          focusId: 'detail:index:auto-refresh',
+                                          onPressed: _isAutoRefreshing
+                                              ? null
+                                              : _runAutomaticRefresh,
                                         )
                                       : FilledButton.icon(
-                                          onPressed:
-                                              _isSearching ? null : _runSearch,
-                                          icon: _isSearching
+                                          onPressed: _isAutoRefreshing
+                                              ? null
+                                              : _runAutomaticRefresh,
+                                          icon: _isAutoRefreshing
                                               ? const SizedBox(
                                                   width: 16,
                                                   height: 16,
@@ -883,52 +735,230 @@ class _MetadataIndexManagementPageState
                                                   ),
                                                 )
                                               : const Icon(
-                                                  Icons.manage_search_rounded,
+                                                  Icons.refresh_rounded,
                                                 ),
                                           label: Text(
-                                            _isSearching ? '搜索中...' : '开始搜索',
+                                            _isAutoRefreshing
+                                                ? '更新中...'
+                                                : '自动更新',
                                           ),
                                         ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 16),
-                        _ProviderResultCard(
-                          title: 'WMDB',
-                          results: _wmdbResults,
-                          message: _wmdbMessage,
-                          actionLabel: '应用 WMDB 结果',
-                          isApplying: _isApplying,
-                          isTelevision: isTelevision,
-                          focusNodes: _wmdbApplyFocusNodes,
-                          focusIdPrefix: 'detail:index:apply:wmdb',
-                          onApply: _applyMetadataMatch,
-                        ),
-                        const SizedBox(height: 12),
-                        _ProviderResultCard(
-                          title: 'TMDB',
-                          results: _tmdbResults,
-                          message: _tmdbMessage,
-                          actionLabel: '应用 TMDB 结果',
-                          isApplying: _isApplying,
-                          isTelevision: isTelevision,
-                          focusNodes: _tmdbApplyFocusNodes,
-                          focusIdPrefix: 'detail:index:apply:tmdb',
-                          onApply: _applyMetadataMatch,
-                        ),
-                        const SizedBox(height: 24),
-                        appPageBottomSpacer(),
-                      ],
-                    );
-                  },
+                          const SizedBox(height: 16),
+                          _SectionPanel(
+                            title: _supportsLocalMetadataIndex(_currentTarget)
+                                ? '当前索引'
+                                : '当前缓存',
+                            child: snapshot.connectionState ==
+                                    ConnectionState.waiting
+                                ? const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 16),
+                                    child: LinearProgressIndicator(),
+                                  )
+                                : snapshot.hasError
+                                    ? Text('读取索引失败：${snapshot.error}')
+                                    : _CurrentIndexCard(
+                                        record: snapshot.data,
+                                        supportsLocalIndex:
+                                            _supportsLocalMetadataIndex(
+                                          _currentTarget,
+                                        ),
+                                      ),
+                          ),
+                          const SizedBox(height: 16),
+                          _SectionPanel(
+                            title: '手动搜索',
+                            child: Column(
+                              children: [
+                                FocusTraversalOrder(
+                                  order: const NumericFocusOrder(1),
+                                  child: _wrapTelevisionSearchField(
+                                    enabled: isTelevision,
+                                    focusNode: _queryFocusNode,
+                                    child: TextField(
+                                      controller: _queryController,
+                                      focusNode: _queryFocusNode,
+                                      textInputAction: TextInputAction.search,
+                                      decoration: const InputDecoration(
+                                        labelText: '片名 / 搜索词',
+                                        hintText: '输入要手动匹配的片名',
+                                        border: OutlineInputBorder(),
+                                      ),
+                                      onSubmitted: (_) => _runSearch(),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    FocusTraversalOrder(
+                                      order: const NumericFocusOrder(2),
+                                      child: SizedBox(
+                                        width: 120,
+                                        child: _wrapTelevisionSearchField(
+                                          enabled: isTelevision,
+                                          focusNode: _yearFocusNode,
+                                          child: TextField(
+                                            controller: _yearController,
+                                            focusNode: _yearFocusNode,
+                                            keyboardType: TextInputType.number,
+                                            textInputAction:
+                                                TextInputAction.done,
+                                            decoration: const InputDecoration(
+                                              labelText: '年份',
+                                              hintText: '可选',
+                                              border: OutlineInputBorder(),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: FocusTraversalOrder(
+                                        order: const NumericFocusOrder(3),
+                                        child: isTelevision
+                                            ? TvFocusableAction(
+                                                onPressed: () {
+                                                  setState(() {
+                                                    _preferSeries =
+                                                        !_preferSeries;
+                                                  });
+                                                },
+                                                focusNode:
+                                                    _preferSeriesFocusNode,
+                                                focusId:
+                                                    'detail:index:prefer-series',
+                                                borderRadius:
+                                                    BorderRadius.circular(18),
+                                                child: Container(
+                                                  decoration: BoxDecoration(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .surfaceContainerHighest,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            18),
+                                                  ),
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                    horizontal: 14,
+                                                    vertical: 16,
+                                                  ),
+                                                  child: Row(
+                                                    children: [
+                                                      const Expanded(
+                                                        child: Text(
+                                                          '按剧集优先匹配',
+                                                        ),
+                                                      ),
+                                                      Icon(
+                                                        _preferSeries
+                                                            ? Icons
+                                                                .check_circle_rounded
+                                                            : Icons
+                                                                .radio_button_unchecked_rounded,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              )
+                                            : StarflowToggleTile(
+                                                title: '按剧集优先匹配',
+                                                value: _preferSeries,
+                                                onChanged: (value) {
+                                                  setState(() {
+                                                    _preferSeries = value;
+                                                  });
+                                                },
+                                              ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: FocusTraversalOrder(
+                                    order: const NumericFocusOrder(4),
+                                    child: isTelevision
+                                        ? TvAdaptiveButton(
+                                            label: _isSearching
+                                                ? '搜索中...'
+                                                : '开始搜索',
+                                            icon: Icons.manage_search_rounded,
+                                            autofocus: true,
+                                            focusNode: _searchFocusNode,
+                                            onPressed: _isSearching
+                                                ? null
+                                                : _runSearch,
+                                            focusId: 'detail:index:search',
+                                          )
+                                        : FilledButton.icon(
+                                            onPressed: _isSearching
+                                                ? null
+                                                : _runSearch,
+                                            icon: _isSearching
+                                                ? const SizedBox(
+                                                    width: 16,
+                                                    height: 16,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                                  )
+                                                : const Icon(
+                                                    Icons.manage_search_rounded,
+                                                  ),
+                                            label: Text(
+                                              _isSearching ? '搜索中...' : '开始搜索',
+                                            ),
+                                          ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _ProviderResultCard(
+                            title: 'WMDB',
+                            results: _wmdbResults,
+                            message: _wmdbMessage,
+                            actionLabel: '应用 WMDB 结果',
+                            isApplying: _isApplying,
+                            isTelevision: isTelevision,
+                            focusNodes: _wmdbApplyFocusNodes,
+                            focusIdPrefix: 'detail:index:apply:wmdb',
+                            onApply: _applyMetadataMatch,
+                          ),
+                          const SizedBox(height: 12),
+                          _ProviderResultCard(
+                            title: 'TMDB',
+                            results: _tmdbResults,
+                            message: _tmdbMessage,
+                            actionLabel: '应用 TMDB 结果',
+                            isApplying: _isApplying,
+                            isTelevision: isTelevision,
+                            focusNodes: _tmdbApplyFocusNodes,
+                            focusIdPrefix: 'detail:index:apply:tmdb',
+                            onApply: _applyMetadataMatch,
+                          ),
+                          const SizedBox(height: 24),
+                          appPageBottomSpacer(),
+                        ],
+                      );
+                    },
+                  ),
                 ),
-              ),
-              OverlayToolbar(
-                onBack: () => Navigator.of(context).maybePop(_currentTarget),
-              ),
-            ],
+                OverlayToolbar(
+                  onBack: () => Navigator.of(context).maybePop(_currentTarget),
+                ),
+              ],
+            ),
           ),
         ),
       ),
