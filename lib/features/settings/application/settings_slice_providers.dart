@@ -108,20 +108,36 @@ final settingsPerformanceSliceProvider = Provider<SettingsPerformanceSlice>(
     return ref.watch(
       appSettingsProvider.select(
         (settings) => SettingsPerformanceSlice(
-          highPerformanceModeEnabled: settings.highPerformanceModeEnabled,
           translucentEffectsEnabled: settings.translucentEffectsEnabled,
           autoHideNavigationBarEnabled: settings.autoHideNavigationBarEnabled,
           homeHeroBackgroundEnabled: settings.homeHeroBackgroundEnabled,
+          reduceDecorationsEnabled:
+              settings.performanceReduceDecorationsEnabled,
+          reduceMotionEnabled: settings.performanceReduceMotionEnabled,
+          staticNavigationEnabled: settings.performanceStaticNavigationEnabled,
+          staticHomeHeroEnabled: settings.performanceStaticHomeHeroEnabled,
+          lightweightHomeHeroEnabled:
+              settings.performanceLightweightHomeHeroEnabled,
           configuredLiveItemHeroOverlayEnabled:
               settings.performanceLiveItemHeroOverlayEnabled,
           effectiveLiveItemHeroOverlayEnabled:
               effectiveLiveItemHeroOverlayEnabled,
+          aggressivePlaybackTuningEnabled:
+              settings.performanceAggressivePlaybackTuningEnabled,
           metadataPrefetchMaxConcurrency:
               settings.metadataPrefetchMaxConcurrency,
           metadataPrefetchInitialBatchSize:
               settings.metadataPrefetchInitialBatchSize,
+          metadataPrefetchBatchDelayMs: settings.metadataPrefetchBatchDelayMs,
+          metadataPrefetchForegroundResumeDelayMs:
+              settings.metadataPrefetchForegroundResumeDelayMs,
           homeFeedMaxConcurrency: settings.homeFeedMaxConcurrency,
           homeFeedInitialBatchSize: settings.homeFeedInitialBatchSize,
+          homeFeedBatchDelayMs: settings.homeFeedBatchDelayMs,
+          nasSourceRefreshConcurrency: settings.nasSourceRefreshConcurrency,
+          nasCollectionRefreshConcurrency:
+              settings.nasCollectionRefreshConcurrency,
+          nasEnrichmentConcurrency: settings.nasEnrichmentConcurrency,
         ),
       ),
     );
@@ -319,63 +335,111 @@ class SettingsPlaybackSlice {
 @immutable
 class SettingsPerformanceSlice {
   const SettingsPerformanceSlice({
-    required this.highPerformanceModeEnabled,
     required this.translucentEffectsEnabled,
     required this.autoHideNavigationBarEnabled,
     required this.homeHeroBackgroundEnabled,
+    required this.reduceDecorationsEnabled,
+    required this.reduceMotionEnabled,
+    required this.staticNavigationEnabled,
+    required this.staticHomeHeroEnabled,
+    required this.lightweightHomeHeroEnabled,
     required this.configuredLiveItemHeroOverlayEnabled,
     required this.effectiveLiveItemHeroOverlayEnabled,
+    required this.aggressivePlaybackTuningEnabled,
     required this.metadataPrefetchMaxConcurrency,
     required this.metadataPrefetchInitialBatchSize,
+    required this.metadataPrefetchBatchDelayMs,
+    required this.metadataPrefetchForegroundResumeDelayMs,
     required this.homeFeedMaxConcurrency,
     required this.homeFeedInitialBatchSize,
+    required this.homeFeedBatchDelayMs,
+    required this.nasSourceRefreshConcurrency,
+    required this.nasCollectionRefreshConcurrency,
+    required this.nasEnrichmentConcurrency,
   });
 
-  final bool highPerformanceModeEnabled;
   final bool translucentEffectsEnabled;
   final bool autoHideNavigationBarEnabled;
   final bool homeHeroBackgroundEnabled;
+  final bool reduceDecorationsEnabled;
+  final bool reduceMotionEnabled;
+  final bool staticNavigationEnabled;
+  final bool staticHomeHeroEnabled;
+  final bool lightweightHomeHeroEnabled;
   final bool configuredLiveItemHeroOverlayEnabled;
   final bool effectiveLiveItemHeroOverlayEnabled;
+  final bool aggressivePlaybackTuningEnabled;
   final int metadataPrefetchMaxConcurrency;
   final int metadataPrefetchInitialBatchSize;
+  final int metadataPrefetchBatchDelayMs;
+  final int metadataPrefetchForegroundResumeDelayMs;
   final int homeFeedMaxConcurrency;
   final int homeFeedInitialBatchSize;
+  final int homeFeedBatchDelayMs;
+  final int nasSourceRefreshConcurrency;
+  final int nasCollectionRefreshConcurrency;
+  final int nasEnrichmentConcurrency;
 
   @override
   bool operator ==(Object other) {
     return identical(this, other) ||
         other is SettingsPerformanceSlice &&
-            other.highPerformanceModeEnabled == highPerformanceModeEnabled &&
             other.translucentEffectsEnabled == translucentEffectsEnabled &&
             other.autoHideNavigationBarEnabled ==
                 autoHideNavigationBarEnabled &&
             other.homeHeroBackgroundEnabled == homeHeroBackgroundEnabled &&
+            other.reduceDecorationsEnabled == reduceDecorationsEnabled &&
+            other.reduceMotionEnabled == reduceMotionEnabled &&
+            other.staticNavigationEnabled == staticNavigationEnabled &&
+            other.staticHomeHeroEnabled == staticHomeHeroEnabled &&
+            other.lightweightHomeHeroEnabled == lightweightHomeHeroEnabled &&
             other.configuredLiveItemHeroOverlayEnabled ==
                 configuredLiveItemHeroOverlayEnabled &&
             other.effectiveLiveItemHeroOverlayEnabled ==
                 effectiveLiveItemHeroOverlayEnabled &&
+            other.aggressivePlaybackTuningEnabled ==
+                aggressivePlaybackTuningEnabled &&
             other.metadataPrefetchMaxConcurrency ==
                 metadataPrefetchMaxConcurrency &&
             other.metadataPrefetchInitialBatchSize ==
                 metadataPrefetchInitialBatchSize &&
+            other.metadataPrefetchBatchDelayMs ==
+                metadataPrefetchBatchDelayMs &&
+            other.metadataPrefetchForegroundResumeDelayMs ==
+                metadataPrefetchForegroundResumeDelayMs &&
             other.homeFeedMaxConcurrency == homeFeedMaxConcurrency &&
-            other.homeFeedInitialBatchSize == homeFeedInitialBatchSize;
+            other.homeFeedInitialBatchSize == homeFeedInitialBatchSize &&
+            other.homeFeedBatchDelayMs == homeFeedBatchDelayMs &&
+            other.nasSourceRefreshConcurrency == nasSourceRefreshConcurrency &&
+            other.nasCollectionRefreshConcurrency ==
+                nasCollectionRefreshConcurrency &&
+            other.nasEnrichmentConcurrency == nasEnrichmentConcurrency;
   }
 
   @override
-  int get hashCode => Object.hash(
-        highPerformanceModeEnabled,
+  int get hashCode => Object.hashAll([
         translucentEffectsEnabled,
         autoHideNavigationBarEnabled,
         homeHeroBackgroundEnabled,
+        reduceDecorationsEnabled,
+        reduceMotionEnabled,
+        staticNavigationEnabled,
+        staticHomeHeroEnabled,
+        lightweightHomeHeroEnabled,
         configuredLiveItemHeroOverlayEnabled,
         effectiveLiveItemHeroOverlayEnabled,
+        aggressivePlaybackTuningEnabled,
         metadataPrefetchMaxConcurrency,
         metadataPrefetchInitialBatchSize,
+        metadataPrefetchBatchDelayMs,
+        metadataPrefetchForegroundResumeDelayMs,
         homeFeedMaxConcurrency,
         homeFeedInitialBatchSize,
-      );
+        homeFeedBatchDelayMs,
+        nasSourceRefreshConcurrency,
+        nasCollectionRefreshConcurrency,
+        nasEnrichmentConcurrency,
+      ]);
 }
 
 @immutable

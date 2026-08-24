@@ -97,7 +97,9 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
             bottom: false,
             child: TvDirectionalActionPanel(
               onMoveDown: () {
-                playPauseFocusNode.requestFocus();
+                requestTvFocus(
+                  playPauseFocusNode,
+                );
               },
               child: Row(
                 children: [
@@ -147,7 +149,9 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
                   const SizedBox(height: 12),
                   TvDirectionalActionPanel(
                     onMoveUp: () {
-                      backFocusNode.requestFocus();
+                      requestTvFocus(
+                        backFocusNode,
+                      );
                     },
                     child: Row(
                       children: [

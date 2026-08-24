@@ -6,47 +6,40 @@ import 'package:http/http.dart' as http;
 import 'package:starflow/core/utils/network_image_headers.dart';
 
 void main() {
-  group('networkImageHeadersForUrl', () {
-    test('returns Douban headers for Douban image hosts', () {
-      final headers = networkImageHeadersForUrl(
-        'https://img9.doubanio.com/view/photo/l_ratio_poster/public/p123.webp',
-      );
+  test('networkImageHeadersForUrl only adds headers for Douban images', () {
+    final headers = networkImageHeadersForUrl(
+      'https://img9.doubanio.com/view/photo/l_ratio_poster/public/p123.webp',
+    );
 
-      expect(headers, isNotNull);
-      expect(headers!['Referer'], 'https://m.douban.com/');
-      expect(headers['Accept'], contains('image/webp'));
-    });
-
-    test('returns null for unrelated hosts', () {
-      final headers = networkImageHeadersForUrl(
+    expect(headers, isNotNull);
+    expect(headers!['Referer'], 'https://m.douban.com/');
+    expect(headers['Accept'], contains('image/webp'));
+    expect(
+      networkImageHeadersForUrl(
         'https://image.tmdb.org/t/p/w500/sample.jpg',
-      );
-
-      expect(headers, isNull);
-    });
+      ),
+      isNull,
+    );
   });
 
   group('validateNetworkImageHttpResponse', () {
-    test('accepts image content-type responses without extra byte sniffing',
-        () {
-      final bytes = Uint8List.fromList(List<int>.filled(16, 0x41));
-      final response = http.Response.bytes(
-        bytes,
+    test('accepts image content type or recognizable image bytes', () {
+      final contentTypeBytes = Uint8List.fromList(List<int>.filled(16, 0x41));
+      final contentTypeResponse = http.Response.bytes(
+        contentTypeBytes,
         200,
         headers: const <String, String>{'content-type': 'image/png'},
       );
 
       expect(
         validateNetworkImageHttpResponse(
-          response,
+          contentTypeResponse,
           url: 'https://example.com/poster.png',
         ),
-        same(bytes),
+        same(contentTypeBytes),
       );
-    });
 
-    test('accepts magic-byte image responses when content-type is generic', () {
-      final bytes = Uint8List.fromList(<int>[
+      final magicBytes = Uint8List.fromList(<int>[
         0x89,
         0x50,
         0x4E,
@@ -60,8 +53,8 @@ void main() {
         0x00,
         0x00,
       ]);
-      final response = http.Response.bytes(
-        bytes,
+      final magicResponse = http.Response.bytes(
+        magicBytes,
         200,
         headers: const <String, String>{
           'content-type': 'application/octet-stream',
@@ -70,58 +63,50 @@ void main() {
 
       expect(
         validateNetworkImageHttpResponse(
-          response,
+          magicResponse,
           url: 'https://example.com/poster',
         ),
-        same(bytes),
+        same(magicBytes),
       );
     });
 
-    test('rejects non-2xx responses', () {
-      final response = http.Response.bytes(
-        Uint8List.fromList(<int>[0x01]),
-        404,
-      );
-
-      expect(
-        () => validateNetworkImageHttpResponse(
-          response,
+    test('rejects failed, empty, and non-image responses', () {
+      final cases = <({String name, String url, http.Response response})>[
+        (
+          name: 'non-2xx status',
           url: 'https://example.com/missing.png',
+          response: http.Response.bytes(Uint8List.fromList(<int>[0x01]), 404),
         ),
-        throwsA(isA<StateError>()),
-      );
-    });
-
-    test('rejects empty bodies', () {
-      final response = http.Response.bytes(
-        Uint8List(0),
-        200,
-        headers: const <String, String>{'content-type': 'image/png'},
-      );
-
-      expect(
-        () => validateNetworkImageHttpResponse(
-          response,
+        (
+          name: 'empty body',
           url: 'https://example.com/empty.png',
+          response: http.Response.bytes(
+            Uint8List(0),
+            200,
+            headers: const <String, String>{'content-type': 'image/png'},
+          ),
         ),
-        throwsA(isA<StateError>()),
-      );
-    });
-
-    test('rejects non-image content without recognizable bytes', () {
-      final response = http.Response.bytes(
-        Uint8List.fromList(utf8.encode('not an image')),
-        200,
-        headers: const <String, String>{'content-type': 'text/plain'},
-      );
-
-      expect(
-        () => validateNetworkImageHttpResponse(
-          response,
+        (
+          name: 'unrecognized non-image body',
           url: 'https://example.com/not-image.txt',
+          response: http.Response.bytes(
+            Uint8List.fromList(utf8.encode('not an image')),
+            200,
+            headers: const <String, String>{'content-type': 'text/plain'},
+          ),
         ),
-        throwsA(isA<StateError>()),
-      );
+      ];
+
+      for (final scenario in cases) {
+        expect(
+          () => validateNetworkImageHttpResponse(
+            scenario.response,
+            url: scenario.url,
+          ),
+          throwsA(isA<StateError>()),
+          reason: scenario.name,
+        );
+      }
     });
   });
 }

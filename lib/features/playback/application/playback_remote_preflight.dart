@@ -50,6 +50,16 @@ class PlaybackRemotePreflightResult {
   final String? errorMessage;
 
   bool get hasHardFailure => !canStream || !acceptableStatus;
+
+  int? get estimatedSpeedBytesPerSecond {
+    if (sampledBytes <= 0 || duration.inMicroseconds <= 0) {
+      return null;
+    }
+    return (sampledBytes *
+            Duration.microsecondsPerSecond /
+            duration.inMicroseconds)
+        .round();
+  }
 }
 
 class PlaybackRemotePreflightOptions {
@@ -79,7 +89,7 @@ class PlaybackRemotePreflight {
     PlaybackTarget target, {
     PlaybackRemotePreflightOptions options =
         const PlaybackRemotePreflightOptions(),
-    }) async {
+  }) async {
     final startedAt = DateTime.now();
     final streamUrl = _resolveTransportUrl(target);
     if (streamUrl.isEmpty) {
@@ -111,16 +121,14 @@ class PlaybackRemotePreflight {
 
     final client = _clientFactory();
     try {
-      final request = http.Request('GET', uri)
-        ..headers.addAll(target.headers);
+      final request = http.Request('GET', uri)..headers.addAll(target.headers);
       final rangeEnd = options.rangeProbeBytes > 0
           ? options.rangeProbeBytes - 1
           : 255 * 1024;
       request.headers['Range'] = 'bytes=0-$rangeEnd';
 
-      final response = await client
-          .send(request)
-          .timeout(options.requestTimeout);
+      final response =
+          await client.send(request).timeout(options.requestTimeout);
       final sampledBytes = await _readSampleBytes(
         response,
         sampleBytes: options.readSampleBytes,

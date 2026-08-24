@@ -76,7 +76,7 @@ class _ConcurrencyBudget {
   _ConcurrencyBudget(int maxParallelism)
       : _maxParallelism = maxParallelism < 1 ? 1 : maxParallelism;
 
-  final int _maxParallelism;
+  int _maxParallelism;
   int _inFlight = 0;
   final Queue<Completer<void>> _waiters = Queue<Completer<void>>();
 
@@ -87,6 +87,11 @@ class _ConcurrencyBudget {
     } finally {
       _release();
     }
+  }
+
+  void updateMaxParallelism(int maxParallelism) {
+    _maxParallelism = maxParallelism < 1 ? 1 : maxParallelism;
+    _drainWaiters();
   }
 
   Future<void> _acquire() async {
@@ -100,15 +105,20 @@ class _ConcurrencyBudget {
   }
 
   void _release() {
-    if (_waiters.isNotEmpty) {
-      final waiter = _waiters.removeFirst();
-      if (!waiter.isCompleted) {
-        waiter.complete();
-      }
-      return;
-    }
     if (_inFlight > 0) {
       _inFlight -= 1;
+    }
+    _drainWaiters();
+  }
+
+  void _drainWaiters() {
+    while (_inFlight < _maxParallelism && _waiters.isNotEmpty) {
+      final waiter = _waiters.removeFirst();
+      if (waiter.isCompleted) {
+        continue;
+      }
+      _inFlight += 1;
+      waiter.complete();
     }
   }
 }

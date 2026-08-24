@@ -24,7 +24,6 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         'needsResolution': startupTarget.needsResolution,
         'decodeMode': _playbackDecodeMode.name,
         'qualityPresetRequested': _playbackMpvQualityPreset.name,
-        'qualityAutoDowngrade': _autoDowngradePlaybackQualityEnabled,
         'leanUi': _leanPlaybackUiEnabled,
         'aggressiveTuning': _aggressivePlaybackTuningEnabled,
       },
@@ -90,7 +89,6 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       final executor = PlaybackStartupExecutor(
         launchSystemPlayer: _launchWithSystemPlayer,
         launchNativeContainer: _launchWithNativeContainer,
-        launchPerformanceFallback: _tryLaunchWithPerformanceFallback,
       );
       final shouldOpen = await executor.execute(
         outcome.routeAction,
@@ -110,13 +108,13 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       _adaptiveTopChromeController.setVisible(true);
       final diagnostics = await _prepareStartupDiagnostics(resolvedTarget);
       final preflight = diagnostics.preflight;
-      final probe = diagnostics.probe;
+      final networkEstimate = diagnostics.networkEstimate;
       final settings = outcome.settings;
       final timeoutSeconds = _resolvePlaybackOpenTimeoutSeconds(
         baseSeconds: settings.playbackOpenTimeoutSeconds.clamp(1, 600),
         target: resolvedTarget,
         preflight: preflight,
-        probe: probe,
+        networkEstimate: networkEstimate,
       );
       _traceWindowsMpv(
         'windows-mpv.initialize.open-start',
@@ -269,21 +267,12 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   Future<
       ({
         PlaybackRemotePreflightResult? preflight,
-        _StartupProbeResult probe
+        _PlaybackNetworkEstimate networkEstimate
       })> _prepareStartupDiagnostics(PlaybackTarget target) async {
-    final preflightFuture = _shouldRunRemotePreflight(target)
+    final preflight = await (_shouldRunRemotePreflight(target)
         ? _playbackRemotePreflight.probe(target)
-        : Future<PlaybackRemotePreflightResult?>.value(null);
-    final probeFuture = _startupProbeEnabled
-        ? _probeStartup(target)
-        : Future<_StartupProbeResult>.value(const _StartupProbeResult());
-
-    final results = await Future.wait<Object?>([
-      preflightFuture,
-      probeFuture,
-    ]);
-    final preflight = results[0] as PlaybackRemotePreflightResult?;
-    final probe = results[1] as _StartupProbeResult;
+        : Future<PlaybackRemotePreflightResult?>.value(null));
+    final networkEstimate = _PlaybackNetworkEstimate.fromPreflight(preflight);
 
     if (preflight != null) {
       _traceWindowsMpv(
@@ -303,11 +292,11 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     if (mounted) {
       setState(() {
         _lastRemotePreflight = preflight;
-        _startupProbe = probe;
+        _networkEstimate = networkEstimate;
       });
     } else {
       _lastRemotePreflight = preflight;
-      _startupProbe = probe;
+      _networkEstimate = networkEstimate;
     }
 
     if (preflight != null && preflight.hasHardFailure) {
@@ -316,7 +305,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       );
     }
 
-    return (preflight: preflight, probe: probe);
+    return (preflight: preflight, networkEstimate: networkEstimate);
   }
 
   bool _shouldRunRemotePreflight(PlaybackTarget target) {
@@ -331,19 +320,19 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     required int baseSeconds,
     required PlaybackTarget target,
     PlaybackRemotePreflightResult? preflight,
-    required _StartupProbeResult probe,
+    required _PlaybackNetworkEstimate networkEstimate,
   }) {
     var resolved = baseSeconds;
-    final startupProbeMegabitsPerSecond =
-        probe.estimatedSpeedBytesPerSecond == null
+    final estimatedMegabitsPerSecond =
+        networkEstimate.estimatedSpeedBytesPerSecond == null
             ? null
-            : (probe.estimatedSpeedBytesPerSecond! * 8) / 1000000;
-    final lowStartupSpeed = startupProbeMegabitsPerSecond != null &&
-        startupProbeMegabitsPerSecond > 0 &&
-        startupProbeMegabitsPerSecond < 16;
-    final criticalStartupSpeed = startupProbeMegabitsPerSecond != null &&
-        startupProbeMegabitsPerSecond > 0 &&
-        startupProbeMegabitsPerSecond < 8;
+            : (networkEstimate.estimatedSpeedBytesPerSecond! * 8) / 1000000;
+    final lowStartupSpeed = estimatedMegabitsPerSecond != null &&
+        estimatedMegabitsPerSecond > 0 &&
+        estimatedMegabitsPerSecond < 16;
+    final criticalStartupSpeed = estimatedMegabitsPerSecond != null &&
+        estimatedMegabitsPerSecond > 0 &&
+        estimatedMegabitsPerSecond < 8;
     final remotePlayback = _isLikelyRemotePlaybackTarget(target);
 
     if (remotePlayback && resolved < 28) {

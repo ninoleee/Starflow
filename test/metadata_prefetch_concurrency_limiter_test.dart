@@ -131,6 +131,30 @@ void main() {
     expect(limiter.pendingCount, 0);
   });
 
+  test('per-run continuation delay updates the active scheduler policy',
+      () async {
+    final limiter = MetadataPrefetchConcurrencyLimiter(
+      backgroundBatchDelay: const Duration(seconds: 1),
+    );
+    addTearDown(limiter.dispose);
+    var started = 0;
+
+    final tasks = List<Future<void>>.generate(7, (_) {
+      return limiter.run<void>(
+        maxConcurrency: 2,
+        initialBatchSize: 6,
+        backgroundBatchDelay: Duration.zero,
+        task: () async {
+          started += 1;
+        },
+      );
+    });
+
+    await Future.wait(tasks);
+    expect(started, 7);
+    expect(limiter.isBackgroundBatchDelayed, isFalse);
+  });
+
   test('restores the full initial group after a continuous idle period',
       () async {
     final limiter = MetadataPrefetchConcurrencyLimiter(

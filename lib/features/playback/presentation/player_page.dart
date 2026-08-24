@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:go_router/go_router.dart';
-import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:path/path.dart' as p;
@@ -138,7 +137,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   StreamSubscription<double>? _playerBufferingPercentageSubscription;
   PlaybackTarget? _resolvedTarget;
   PlaybackEpisodeQueue? _episodeQueue;
-  _StartupProbeResult _startupProbe = const _StartupProbeResult();
+  _PlaybackNetworkEstimate _networkEstimate = const _PlaybackNetworkEstimate();
   SeriesSkipPreference? _seriesSkipPreference;
   Object? _error;
   bool _isReady = false;
@@ -447,14 +446,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool get _mpvStallAutoRecoveryEnabled =>
       _playbackSettings.playbackMpvStallAutoRecoveryEnabled;
 
-  bool get _autoDowngradePlaybackQualityEnabled =>
-      _playbackSettings.performanceAutoDowngradeHeavyPlaybackEnabled;
-
-  bool get _startupProbeEnabled =>
-      _playbackSettings.effectiveStartupProbeEnabled;
-
-  double? get _startupProbeMegabitsPerSecond {
-    final bytesPerSecond = _startupProbe.estimatedSpeedBytesPerSecond;
+  double? get _networkEstimateMegabitsPerSecond {
+    final bytesPerSecond = _networkEstimate.estimatedSpeedBytesPerSecond;
     if (bytesPerSecond == null || bytesPerSecond <= 0) {
       return null;
     }
@@ -894,10 +887,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 }
 
-class _StartupProbeResult {
-  const _StartupProbeResult({
+class _PlaybackNetworkEstimate {
+  const _PlaybackNetworkEstimate({
     this.estimatedSpeedBytesPerSecond,
   });
+
+  factory _PlaybackNetworkEstimate.fromPreflight(
+    PlaybackRemotePreflightResult? preflight,
+  ) {
+    final bytesPerSecond = preflight?.estimatedSpeedBytesPerSecond;
+    if (bytesPerSecond == null) {
+      return const _PlaybackNetworkEstimate();
+    }
+    return _PlaybackNetworkEstimate(
+      estimatedSpeedBytesPerSecond: bytesPerSecond,
+    );
+  }
 
   final int? estimatedSpeedBytesPerSecond;
 

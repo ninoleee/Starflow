@@ -64,7 +64,6 @@ void main() {
             const <String, dynamic>{},
           ).copyWith(
             playbackEngine: PlaybackEngine.embeddedMpv,
-            performanceAutoDowngradeHeavyPlaybackEnabled: true,
           ),
           isTelevision: true,
           isWeb: false,
@@ -79,11 +78,11 @@ void main() {
       expect(result.skipPreference!.enabled, isTrue);
       expect(
         result.startupRoute,
-        PlaybackStartupRouteAction.launchPerformanceFallback,
+        PlaybackStartupRouteAction.openEmbeddedMpv,
       );
     });
 
-    test('keeps embedded route when no heavy-tv fallback conditions', () async {
+    test('keeps embedded route for ordinary targets', () async {
       final prefs = await SharedPreferences.getInstance();
       final repository = PlaybackMemoryRepository(sharedPreferences: prefs);
       final resolvedTarget = baseEpisodeTarget.copyWith(
@@ -100,7 +99,6 @@ void main() {
             const <String, dynamic>{},
           ).copyWith(
             playbackEngine: PlaybackEngine.embeddedMpv,
-            performanceAutoDowngradeHeavyPlaybackEnabled: true,
           ),
           isTelevision: false,
           isWeb: false,

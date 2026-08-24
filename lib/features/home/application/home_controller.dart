@@ -240,6 +240,7 @@ final _homeSectionSeedProvider = FutureProvider.autoDispose
         moduleId: module.id,
         maxConcurrency: limits.maxConcurrency,
         initialBatchSize: limits.initialBatchSize,
+        backgroundBatchDelay: Duration(milliseconds: limits.batchDelayMs),
         task: () async {
           final recentItems = module.type == HomeModuleType.recentlyAdded
               ? homeFeedRepository.loadRecentItems(

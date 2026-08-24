@@ -492,7 +492,9 @@ bool requestDetailFocus(Iterable<FocusNode?> nodes) {
     if (node == null || !node.canRequestFocus || node.context == null) {
       continue;
     }
-    node.requestFocus();
+    requestTvFocus(
+      node,
+    );
     return true;
   }
   return false;

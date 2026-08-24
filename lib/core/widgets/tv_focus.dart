@@ -45,33 +45,6 @@ bool _watchLightweightTvFocusEnabled(
   return ref.watch(_lightweightTvFocusSettingsProvider);
 }
 
-class TvFocusMemoryController extends ChangeNotifier {}
-
-class TvFocusMemoryScope extends InheritedWidget {
-  const TvFocusMemoryScope({
-    super.key,
-    required this.controller,
-    required this.scopeId,
-    this.enabled = true,
-    required super.child,
-  });
-
-  final TvFocusMemoryController controller;
-  final String scopeId;
-  final bool enabled;
-
-  static TvFocusMemoryScope? maybeOf(BuildContext context) {
-    return context.dependOnInheritedWidgetOfExactType<TvFocusMemoryScope>();
-  }
-
-  @override
-  bool updateShouldNotify(covariant TvFocusMemoryScope oldWidget) {
-    return controller != oldWidget.controller ||
-        scopeId != oldWidget.scopeId ||
-        enabled != oldWidget.enabled;
-  }
-}
-
 class TvMenuButtonScope extends InheritedWidget {
   const TvMenuButtonScope({
     super.key,
@@ -92,16 +65,6 @@ class TvMenuButtonScope extends InheritedWidget {
 }
 
 String buildTvFocusId({
-  required String prefix,
-  Iterable<Object?> segments = const [],
-}) {
-  return _buildTvFocusKey(
-    prefix: prefix,
-    segments: segments,
-  );
-}
-
-String buildTvFocusScopeId({
   required String prefix,
   Iterable<Object?> segments = const [],
 }) {
@@ -156,6 +119,17 @@ bool handleTvDirectionalFocusBoundary(
   return false;
 }
 
+void requestTvFocus(
+  FocusNode focusNode, {
+  FocusScopeNode? scope,
+}) {
+  if (scope != null) {
+    scope.requestFocus(focusNode);
+    return;
+  }
+  focusNode.requestFocus();
+}
+
 class TvDirectionalFocusBoundary extends StatelessWidget {
   const TvDirectionalFocusBoundary({
     super.key,
@@ -189,21 +163,20 @@ class TvDirectionalFocusBoundary extends StatelessWidget {
 class TvPageFocusScope extends StatelessWidget {
   const TvPageFocusScope({
     super.key,
-    required this.controller,
-    required this.scopeId,
     required this.isTelevision,
     required this.child,
     this.onMoveLeftOut,
   });
 
-  final TvFocusMemoryController controller;
-  final String scopeId;
   final bool isTelevision;
   final Widget child;
   final VoidCallback? onMoveLeftOut;
 
   @override
   Widget build(BuildContext context) {
+    if (!isTelevision) {
+      return child;
+    }
     return TvDirectionalFocusBoundary(
       onMoveLeftOut: onMoveLeftOut,
       child: child,
@@ -1413,19 +1386,11 @@ void scheduleTelevisionDialogInitialFocus({
         focusNode.context == null) {
       return;
     }
-    focusNode.requestFocus();
+    requestTvFocus(focusNode);
   }
 
   WidgetsBinding.instance.addPostFrameCallback((_) {
     requestIfNeeded();
-    Future<void>.delayed(
-      const Duration(milliseconds: 120),
-      requestIfNeeded,
-    );
-    Future<void>.delayed(
-      const Duration(milliseconds: 320),
-      requestIfNeeded,
-    );
   });
 }
 
@@ -1499,7 +1464,7 @@ bool _hasFocusedTvDialogNode(Iterable<FocusNode> nodes) {
 bool _focusFirstAvailableTvDialogNode(Iterable<FocusNode> nodes) {
   for (final node in nodes) {
     if (node.canRequestFocus) {
-      node.requestFocus();
+      requestTvFocus(node);
       return true;
     }
   }

@@ -15,18 +15,107 @@ import 'package:starflow/features/settings/presentation/webdav_directory_picker_
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
-class NetworkStorageSettingsPage extends ConsumerStatefulWidget {
-  const NetworkStorageSettingsPage({super.key, required this.initial});
+enum NetworkStorageEditorSection { quark, smartStrm, synchronization }
 
-  final NetworkStorageConfig initial;
+class NetworkStorageSettingsPage extends ConsumerWidget {
+  const NetworkStorageSettingsPage({super.key});
 
   @override
-  ConsumerState<NetworkStorageSettingsPage> createState() =>
-      _NetworkStorageSettingsPageState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final config = ref.watch(
+      appSettingsProvider.select((settings) => settings.networkStorage),
+    );
+    final theme = Theme.of(context);
+    return SettingsPageScaffold(
+      onBack: () => Navigator.of(context).pop(),
+      children: [
+        Text('网络存储', style: theme.textTheme.headlineSmall),
+        const SizedBox(height: 8),
+        Text(
+          '分别管理夸克、SmartStrm 和同步索引设置。',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SettingsSectionTitle(label: '分类'),
+        ...buildSettingsTileGroup([
+          SettingsSelectionTile(
+            title: '夸克云盘',
+            subtitle: config.quarkCookie.trim().isEmpty
+                ? 'Cookie 与保存目录未配置'
+                : '保存目录：${config.quarkSaveFolderPath}',
+            value: '',
+            autofocus: true,
+            focusId: 'network-storage:quark',
+            onPressed: () => _openEditor(
+              context,
+              config,
+              NetworkStorageEditorSection.quark,
+            ),
+          ),
+          SettingsSelectionTile(
+            title: 'SmartStrm',
+            subtitle: config.smartStrmWebhookUrl.trim().isEmpty
+                ? 'Webhook 未配置'
+                : '任务：${config.smartStrmTaskName}',
+            value: '',
+            focusId: 'network-storage:smart-strm',
+            onPressed: () => _openEditor(
+              context,
+              config,
+              NetworkStorageEditorSection.smartStrm,
+            ),
+          ),
+          SettingsSelectionTile(
+            title: '同步与索引刷新',
+            subtitle:
+                '监听目录 ${config.syncDeleteQuarkWebDavDirectories.length} 个 · 刷新来源 ${config.refreshMediaSourceIds.length} 个',
+            value: '',
+            focusId: 'network-storage:synchronization',
+            onPressed: () => _openEditor(
+              context,
+              config,
+              NetworkStorageEditorSection.synchronization,
+            ),
+          ),
+        ]),
+      ],
+    );
+  }
+
+  Future<void> _openEditor(
+    BuildContext context,
+    NetworkStorageConfig initial,
+    NetworkStorageEditorSection section,
+  ) {
+    return Navigator.of(context, rootNavigator: true).push<void>(
+      NoAnimationMaterialPageRoute<void>(
+        builder: (context) => NetworkStorageEditorPage(
+          initial: initial,
+          section: section,
+        ),
+      ),
+    );
+  }
 }
 
-class _NetworkStorageSettingsPageState
-    extends ConsumerState<NetworkStorageSettingsPage> {
+class NetworkStorageEditorPage extends ConsumerStatefulWidget {
+  const NetworkStorageEditorPage({
+    super.key,
+    required this.initial,
+    required this.section,
+  });
+
+  final NetworkStorageConfig initial;
+  final NetworkStorageEditorSection section;
+
+  @override
+  ConsumerState<NetworkStorageEditorPage> createState() =>
+      _NetworkStorageEditorPageState();
+}
+
+class _NetworkStorageEditorPageState
+    extends ConsumerState<NetworkStorageEditorPage> {
   late final TextEditingController _quarkCookieController;
   late final TextEditingController _smartStrmWebhookController;
   late final TextEditingController _smartStrmTaskNameController;
@@ -443,194 +532,218 @@ class _NetworkStorageSettingsPageState
           onPressed: _saveDraft,
         ),
         children: [
-          const SettingsSectionTitle(label: '夸克保存'),
-          SettingsTextInputField(
-            controller: _quarkCookieController,
-            labelText: '夸克 Cookie',
-            minLines: 2,
-            maxLines: 4,
-            autocorrect: false,
-            hintText: '用于搜索结果一键保存到夸克网盘',
-            summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
-          ),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              SettingsActionButton(
-                label: _isTestingQuarkConnection ? '测试中...' : '测试夸克连接',
-                icon: Icons.cloud_done_outlined,
-                onPressed:
-                    _isTestingQuarkConnection ? null : _testQuarkConnection,
-              ),
-              SettingsActionButton(
-                label: '选择默认保存文件夹',
-                icon: Icons.folder_open_rounded,
-                onPressed: _pickQuarkFolder,
-              ),
-              SettingsActionButton(
-                label: '管理当前保存目录',
-                icon: Icons.delete_outline_rounded,
-                onPressed: _openQuarkDirectoryManager,
-                variant: StarflowButtonVariant.ghost,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text('默认保存到：$_quarkFolderPath'),
-          const SizedBox(height: 12),
-          StarflowToggleTile(
-            title: '同步删除夸克目录',
-            subtitle:
-                '开启后，删除命中下方监听目录中的 WebDAV 文件或文件夹时，也会到当前夸克保存目录里删除匹配到的影片或剧集目录。',
-            value: _syncDeleteQuarkEnabled,
-            onChanged: (value) {
-              setState(() {
-                _syncDeleteQuarkEnabled = value;
-              });
-            },
-          ),
-          const SizedBox(height: 12),
-          const SettingsSectionTitle(label: 'WebDAV 删除监听目录'),
           Text(
-            '只会在这里选中的 WebDAV 目录范围内触发夸克同步删除。',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+            switch (widget.section) {
+              NetworkStorageEditorSection.quark => '夸克云盘',
+              NetworkStorageEditorSection.smartStrm => 'SmartStrm',
+              NetworkStorageEditorSection.synchronization => '同步与索引刷新',
+            },
+            style: Theme.of(context).textTheme.headlineSmall,
           ),
-          const SizedBox(height: 12),
-          if (syncDeleteWebDavSources.isNotEmpty)
+          if (widget.section == NetworkStorageEditorSection.quark) ...[
+            const SettingsSectionTitle(label: '夸克保存'),
+            SettingsTextInputField(
+              controller: _quarkCookieController,
+              labelText: '夸克 Cookie',
+              minLines: 2,
+              maxLines: 4,
+              autocorrect: false,
+              hintText: '用于搜索结果一键保存到夸克网盘',
+              summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
+              autofocus: true,
+              focusId: 'network-storage-quark:cookie',
+            ),
             Wrap(
               spacing: 12,
               runSpacing: 12,
               children: [
-                for (final source in syncDeleteWebDavSources)
+                SettingsActionButton(
+                  label: _isTestingQuarkConnection ? '测试中...' : '测试夸克连接',
+                  icon: Icons.cloud_done_outlined,
+                  onPressed:
+                      _isTestingQuarkConnection ? null : _testQuarkConnection,
+                ),
+                SettingsActionButton(
+                  label: '选择默认保存文件夹',
+                  icon: Icons.folder_open_rounded,
+                  onPressed: _pickQuarkFolder,
+                ),
+                SettingsActionButton(
+                  label: '管理当前保存目录',
+                  icon: Icons.delete_outline_rounded,
+                  onPressed: _openQuarkDirectoryManager,
+                  variant: StarflowButtonVariant.ghost,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text('默认保存到：$_quarkFolderPath'),
+          ],
+          if (widget.section ==
+              NetworkStorageEditorSection.synchronization) ...[
+            const SettingsSectionTitle(label: '同步删除'),
+            StarflowToggleTile(
+              title: '同步删除夸克目录',
+              subtitle:
+                  '开启后，删除命中下方监听目录中的 WebDAV 文件或文件夹时，也会到当前夸克保存目录里删除匹配到的影片或剧集目录。',
+              value: _syncDeleteQuarkEnabled,
+              autofocus: true,
+              focusId: 'network-storage-sync:delete',
+              onChanged: (value) {
+                setState(() {
+                  _syncDeleteQuarkEnabled = value;
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+            const SettingsSectionTitle(label: 'WebDAV 删除监听目录'),
+            Text(
+              '只会在这里选中的 WebDAV 目录范围内触发夸克同步删除。',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 12),
+            if (syncDeleteWebDavSources.isNotEmpty)
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  for (final source in syncDeleteWebDavSources)
+                    SettingsActionButton(
+                      label: '添加 ${source.name}',
+                      icon: Icons.folder_open_rounded,
+                      onPressed: () => _pickSyncDeleteWebDavDirectory(source),
+                      variant: StarflowButtonVariant.ghost,
+                    ),
+                ],
+              )
+            else
+              const Text('无已启用的 WebDAV 来源'),
+            const SizedBox(height: 12),
+            if (selectedSyncDeleteDirectories.isNotEmpty)
+              ...selectedSyncDeleteDirectories.map(
+                (directory) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: SettingsSelectionTile(
+                    title: directory.sourceName.isEmpty
+                        ? directory.sourceId
+                        : directory.sourceName,
+                    subtitle: directory.directoryLabel.isEmpty
+                        ? _pathLabel(directory.directoryId)
+                        : directory.directoryLabel,
+                    value: '监听中',
+                    onPressed: null,
+                    leading: const Icon(Icons.folder_copy_outlined),
+                    trailing: IconButton(
+                      tooltip: '移除',
+                      onPressed: () =>
+                          _removeSyncDeleteWebDavDirectory(directory),
+                      icon: const Icon(Icons.delete_outline_rounded),
+                    ),
+                  ),
+                ),
+              )
+            else
+              const Text('未选择目录'),
+          ],
+          if (widget.section == NetworkStorageEditorSection.smartStrm) ...[
+            const SettingsSectionTitle(label: 'SmartStrm'),
+            SettingsTextInputField(
+              controller: _smartStrmWebhookController,
+              labelText: 'Webhook 地址',
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              hintText: 'http://yourip:8024/webhook/abcdef123456',
+              autofocus: true,
+              focusId: 'network-storage-smart-strm:webhook',
+            ),
+            const SizedBox(height: 12),
+            SettingsTextInputField(
+              controller: _smartStrmTaskNameController,
+              labelText: '任务名',
+              hintText: 'movie_task',
+            ),
+            const SizedBox(height: 12),
+            SettingsSelectionTile(
+              title: 'STRM 触发等待时间',
+              subtitle: '保存到夸克后，等待多久再触发 Smart STRM 任务。',
+              value: '${_smartStrmDelaySeconds()} 秒',
+              onPressed: _openSmartStrmDelayPicker,
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                SettingsActionButton(
+                  label: _isTestingSmartStrm ? '测试中...' : '测试 STRM 任务',
+                  icon: Icons.bolt_rounded,
+                  onPressed: _isTestingSmartStrm ? null : _testSmartStrmTask,
+                ),
+              ],
+            ),
+          ],
+          if (widget.section ==
+              NetworkStorageEditorSection.synchronization) ...[
+            const SettingsSectionTitle(label: '自动增量刷新索引'),
+            SettingsSelectionTile(
+              title: '索引刷新等待时间',
+              subtitle: '任务结束后，等待多久再自动执行媒体库增量刷新。',
+              value: '${_refreshDelaySeconds()} 秒',
+              onPressed: _openRefreshDelayPicker,
+            ),
+            const SizedBox(height: 12),
+            if (refreshableSources.isNotEmpty) ...[
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
                   SettingsActionButton(
-                    label: '添加 ${source.name}',
-                    icon: Icons.folder_open_rounded,
-                    onPressed: () => _pickSyncDeleteWebDavDirectory(source),
+                    label: '全选',
+                    icon: Icons.select_all_rounded,
+                    onPressed: () {
+                      setState(() {
+                        _refreshSourceIds = refreshableSourceIds;
+                      });
+                    },
                     variant: StarflowButtonVariant.ghost,
                   ),
-              ],
-            )
-          else
-            const Text('无已启用的 WebDAV 来源'),
-          const SizedBox(height: 12),
-          if (selectedSyncDeleteDirectories.isNotEmpty)
-            ...selectedSyncDeleteDirectories.map(
-              (directory) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: SettingsSelectionTile(
-                  title: directory.sourceName.isEmpty
-                      ? directory.sourceId
-                      : directory.sourceName,
-                  subtitle: directory.directoryLabel.isEmpty
-                      ? _pathLabel(directory.directoryId)
-                      : directory.directoryLabel,
-                  value: '监听中',
-                  onPressed: null,
-                  leading: const Icon(Icons.folder_copy_outlined),
-                  trailing: IconButton(
-                    tooltip: '移除',
-                    onPressed: () =>
-                        _removeSyncDeleteWebDavDirectory(directory),
-                    icon: const Icon(Icons.delete_outline_rounded),
+                  SettingsActionButton(
+                    label: '清空',
+                    icon: Icons.clear_all_rounded,
+                    onPressed: () {
+                      setState(() {
+                        _refreshSourceIds.clear();
+                      });
+                    },
+                    variant: StarflowButtonVariant.ghost,
+                  ),
+                ],
+              ),
+              ...refreshableSources.map(
+                (source) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: StarflowCheckboxTile(
+                    title: source.name,
+                    value: selectedRefreshSourceIds.contains(source.id),
+                    onChanged: (value) {
+                      setState(() {
+                        final next = {..._refreshSourceIds};
+                        if (value) {
+                          next.add(source.id);
+                        } else {
+                          next.remove(source.id);
+                        }
+                        _refreshSourceIds = next;
+                      });
+                    },
                   ),
                 ),
               ),
-            )
-          else
-            const Text('未选择目录'),
-          const SettingsSectionTitle(label: 'SmartStrm'),
-          SettingsTextInputField(
-            controller: _smartStrmWebhookController,
-            labelText: 'Webhook 地址',
-            keyboardType: TextInputType.url,
-            autocorrect: false,
-            hintText: 'http://yourip:8024/webhook/abcdef123456',
-          ),
-          const SizedBox(height: 12),
-          SettingsTextInputField(
-            controller: _smartStrmTaskNameController,
-            labelText: '任务名',
-            hintText: 'movie_task',
-          ),
-          const SizedBox(height: 12),
-          SettingsSelectionTile(
-            title: 'STRM 触发等待时间',
-            subtitle: '保存到夸克后，等待多久再触发 Smart STRM 任务。',
-            value: '${_smartStrmDelaySeconds()} 秒',
-            onPressed: _openSmartStrmDelayPicker,
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              SettingsActionButton(
-                label: _isTestingSmartStrm ? '测试中...' : '测试 STRM 任务',
-                icon: Icons.bolt_rounded,
-                onPressed: _isTestingSmartStrm ? null : _testSmartStrmTask,
-              ),
-            ],
-          ),
-          const SettingsSectionTitle(label: '自动增量刷新索引'),
-          SettingsSelectionTile(
-            title: '索引刷新等待时间',
-            subtitle: '任务结束后，等待多久再自动执行媒体库增量刷新。',
-            value: '${_refreshDelaySeconds()} 秒',
-            onPressed: _openRefreshDelayPicker,
-          ),
-          const SizedBox(height: 12),
-          if (refreshableSources.isNotEmpty) ...[
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                SettingsActionButton(
-                  label: '全选',
-                  icon: Icons.select_all_rounded,
-                  onPressed: () {
-                    setState(() {
-                      _refreshSourceIds = refreshableSourceIds;
-                    });
-                  },
-                  variant: StarflowButtonVariant.ghost,
-                ),
-                SettingsActionButton(
-                  label: '清空',
-                  icon: Icons.clear_all_rounded,
-                  onPressed: () {
-                    setState(() {
-                      _refreshSourceIds.clear();
-                    });
-                  },
-                  variant: StarflowButtonVariant.ghost,
-                ),
-              ],
-            ),
-            ...refreshableSources.map(
-              (source) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: StarflowCheckboxTile(
-                  title: source.name,
-                  value: selectedRefreshSourceIds.contains(source.id),
-                  onChanged: (value) {
-                    setState(() {
-                      final next = {..._refreshSourceIds};
-                      if (value) {
-                        next.add(source.id);
-                      } else {
-                        next.remove(source.id);
-                      }
-                      _refreshSourceIds = next;
-                    });
-                  },
-                ),
-              ),
-            ),
-          ] else
-            const Text('无'),
+            ] else
+              const Text('无'),
+          ],
         ],
       ),
     );

@@ -77,8 +77,6 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
   final ScrollController _scrollController = ScrollController();
   final FocusNode _headerFocusNode =
       FocusNode(debugLabel: 'person-credits-header');
-  final TvFocusMemoryController _tvFocusMemoryController =
-      TvFocusMemoryController();
   final RetainedAsyncController<_PersonCreditsPageResult> _retainedResultAsync =
       RetainedAsyncController<_PersonCreditsPageResult>();
   _PersonCreditsSortMode _sortMode = _PersonCreditsSortMode.newest;
@@ -102,7 +100,6 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
   void dispose() {
     _headerFocusNode.dispose();
     _scrollController.dispose();
-    _tvFocusMemoryController.dispose();
     super.dispose();
   }
 
@@ -120,8 +117,6 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
     return AppPrimaryScrollController(
       controller: _scrollController,
       child: TvPageFocusScope(
-        controller: _tvFocusMemoryController,
-        scopeId: _personCreditsFocusScopeId(target),
         isTelevision: isTelevision,
         child: Scaffold(
           body: Stack(
@@ -538,17 +533,6 @@ const List<String> _varietyCategoryKeywords = [
   'concert',
   'talk show',
 ];
-
-String _personCreditsFocusScopeId(PersonCreditsPageTarget target) {
-  return buildTvFocusScopeId(
-    prefix: 'person-credits',
-    segments: [
-      target.role.name,
-      target.person.name,
-      target.person.avatarUrl,
-    ],
-  );
-}
 
 List<AppNetworkImageSource> _buildPosterFallbackSources(
     MediaDetailTarget target) {

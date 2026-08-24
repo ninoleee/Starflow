@@ -15,9 +15,10 @@ The latest architecture pass moved several hot paths out of single large files:
 * Playback presentation is now split between `player_page.dart` and `presentation/widgets/player_page_*.part.dart` plus shared overlay/dialog widgets.
 * NAS indexing is now split across `nas_media_indexer.dart` and the `nas_media_indexer_*` part files (`grouping`, `refresh_flow`, `storage_access`, `indexing`, `refresh_support`).
 * Recent playback ordering now depends on the monotonic `updatedAt` behavior in `playback_memory_repository.dart`, which matters most on Windows where multiple saves can happen in the same millisecond.
-* Home source loading and metadata prefetching now have separate schedulers. Record both maximum-concurrency and initial-batch settings with every comparable baseline.
-* The default Home budget is `2` concurrent modules with `2` modules in the first batch; remaining modules are admitted in later batches and result application is serialized.
-* The default metadata budget is `2` concurrent tasks with `12` tasks in the first batch; scrolling, focus movement, page transitions, and foreground work temporarily defer new background starts.
+* Home source loading and metadata prefetching now have separate schedulers. Record maximum concurrency, initial batch size, continuation delay, and foreground resume delay with every comparable baseline.
+* The default Home budget is `2` concurrent modules with `2` modules in the first batch and a `350ms` continuation delay; remaining modules are admitted in later batches and result application is serialized.
+* The default metadata budget is `2` concurrent tasks with `12` tasks in the first batch and a `300ms` continuation delay; scrolling, focus movement, and page transitions defer new starts for `400ms` by default. Content-loading deferral is edge-triggered rather than renewed by every rebuild.
+* NAS/WebDAV source, collection, and enrichment budgets are independently configurable from `1–4`, with defaults of `1 / 2 / 2`; enrichment still shares the global metadata cap.
 * Bootstrap and the navigation shell share cold-start refresh completion state, so a baseline should contain at most one automatic Home refresh cycle.
 * Structured logging and the frame monitor are active by default. Keep the same recorded log levels across comparison runs because trace-heavy diagnostics add some I/O.
 
@@ -70,4 +71,4 @@ flutter test test/network_failure_test.dart test/network_request_guard_test.dart
 * Run under the same system load you plan to ship under so the numbers stay comparable.
 * Re-run the script after applying the fix if the regression was real; this rewrites the baseline JSON, which you can commit alongside the change when the new numbers are expected.
 * If a baseline regresses right after a file split, verify the focused tests first. In this codebase, regressions after refactors are often caused by wiring/state-order changes rather than the split itself.
-* Keep `highPerformanceModeEnabled`, both startup refresh switches, both scheduler concurrency values, both initial-batch values, and log levels identical when comparing two runs.
+* Keep the independent visual/playback switches, both startup refresh switches, scheduler concurrency/batch/delay values, NAS/WebDAV concurrency values, and log levels identical when comparing two runs. TV-fixed protections are platform rules rather than comparison-time switches.

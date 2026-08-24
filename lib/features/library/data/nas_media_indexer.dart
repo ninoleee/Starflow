@@ -61,8 +61,7 @@ class NasMediaIndexer {
     required WebDavScrapeProgressController progressController,
     void Function()? notifyIndexChanged,
     MetadataPrefetchConcurrencyLimiter? backgroundLimiter,
-    NasMediaIndexerConcurrencyLimits concurrencyLimits =
-        const NasMediaIndexerConcurrencyLimits(),
+    NasMediaIndexerConcurrencyLimits? concurrencyLimits,
   })  : _store = store,
         _webDavNasClient = webDavNasClient,
         _quarkExternalStorageClient = quarkExternalStorageClient,
@@ -73,14 +72,18 @@ class NasMediaIndexer {
         _progressController = progressController,
         _notifyIndexChanged = notifyIndexChanged,
         _backgroundLimiter = backgroundLimiter,
+        _concurrencyLimitsOverride = concurrencyLimits,
         _sourceBudget = _ConcurrencyBudget(
-          concurrencyLimits.normalizedSourceRefreshConcurrency,
+          concurrencyLimits?.normalizedSourceRefreshConcurrency ??
+              kNasSourceRefreshConcurrencyDefault,
         ),
         _collectionBudget = _ConcurrencyBudget(
-          concurrencyLimits.normalizedCollectionRefreshConcurrency,
+          concurrencyLimits?.normalizedCollectionRefreshConcurrency ??
+              kNasCollectionRefreshConcurrencyDefault,
         ),
         _enrichmentBudget = _ConcurrencyBudget(
-          concurrencyLimits.normalizedEnrichmentConcurrency,
+          concurrencyLimits?.normalizedEnrichmentConcurrency ??
+              kNasEnrichmentConcurrencyDefault,
         );
 
   static const int _defaultRefreshLimitPerCollection = 1200;
@@ -97,6 +100,7 @@ class NasMediaIndexer {
   final WebDavScrapeProgressController _progressController;
   final void Function()? _notifyIndexChanged;
   final MetadataPrefetchConcurrencyLimiter? _backgroundLimiter;
+  final NasMediaIndexerConcurrencyLimits? _concurrencyLimitsOverride;
   final Map<String, _RefreshTaskHandle> _activeRefreshTasks =
       <String, _RefreshTaskHandle>{};
   final Map<String, _RefreshTaskHandle> _backgroundEnrichmentTasks =
@@ -107,6 +111,21 @@ class NasMediaIndexer {
   final _ConcurrencyBudget _sourceBudget;
   final _ConcurrencyBudget _collectionBudget;
   final _ConcurrencyBudget _enrichmentBudget;
+
+  void _updateIndexerConcurrencyLimits() {
+    final override = _concurrencyLimitsOverride;
+    if (override != null) {
+      return;
+    }
+    final settings = _readSettingsForRefresh();
+    _sourceBudget.updateMaxParallelism(settings.nasSourceRefreshConcurrency);
+    _collectionBudget.updateMaxParallelism(
+      settings.nasCollectionRefreshConcurrency,
+    );
+    _enrichmentBudget.updateMaxParallelism(
+      settings.nasEnrichmentConcurrency,
+    );
+  }
 
   Future<T> _withGlobalBackgroundPermit<T>(
     Future<T> Function() task, {
@@ -126,6 +145,9 @@ class NasMediaIndexer {
     return limiter.run(
       maxConcurrency: settings.metadataPrefetchMaxConcurrency,
       initialBatchSize: settings.metadataPrefetchInitialBatchSize,
+      backgroundBatchDelay: Duration(
+        milliseconds: settings.metadataPrefetchBatchDelayMs,
+      ),
       task: task,
     );
   }

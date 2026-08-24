@@ -7,16 +7,25 @@ import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
-  test('app settings persist and clamp metadata prefetch limits', () {
+  test('app settings persist and clamp scheduling limits', () {
     final settings = AppSettings.fromJson(const <String, dynamic>{
       'metadataPrefetchMaxConcurrency': 4,
       'metadataPrefetchInitialBatchSize': 18,
+      'metadataPrefetchBatchDelayMs': 250,
+      'metadataPrefetchForegroundResumeDelayMs': 500,
     });
 
     expect(settings.metadataPrefetchMaxConcurrency, 4);
     expect(settings.metadataPrefetchInitialBatchSize, 18);
+    expect(settings.metadataPrefetchBatchDelayMs, 250);
+    expect(settings.metadataPrefetchForegroundResumeDelayMs, 500);
     expect(settings.toJson()['metadataPrefetchMaxConcurrency'], 4);
     expect(settings.toJson()['metadataPrefetchInitialBatchSize'], 18);
+    expect(settings.toJson()['metadataPrefetchBatchDelayMs'], 250);
+    expect(
+      settings.toJson()['metadataPrefetchForegroundResumeDelayMs'],
+      500,
+    );
     expect(
       AppSettings.fromJson(const <String, dynamic>{})
           .metadataPrefetchMaxConcurrency,
@@ -51,18 +60,27 @@ void main() {
           .metadataPrefetchInitialBatchSize,
       kMetadataPrefetchInitialBatchSizeMin,
     );
-  });
-
-  test('app settings persist and clamp home feed load limits', () {
-    final settings = AppSettings.fromJson(const <String, dynamic>{
+    final feedSettings = AppSettings.fromJson(const <String, dynamic>{
       'homeFeedMaxConcurrency': 4,
       'homeFeedInitialBatchSize': 3,
+      'homeFeedBatchDelayMs': 250,
+      'nasSourceRefreshConcurrency': 2,
+      'nasCollectionRefreshConcurrency': 3,
+      'nasEnrichmentConcurrency': 4,
     });
 
-    expect(settings.homeFeedMaxConcurrency, 4);
-    expect(settings.homeFeedInitialBatchSize, 3);
-    expect(settings.toJson()['homeFeedMaxConcurrency'], 4);
-    expect(settings.toJson()['homeFeedInitialBatchSize'], 3);
+    expect(feedSettings.homeFeedMaxConcurrency, 4);
+    expect(feedSettings.homeFeedInitialBatchSize, 3);
+    expect(feedSettings.homeFeedBatchDelayMs, 250);
+    expect(feedSettings.nasSourceRefreshConcurrency, 2);
+    expect(feedSettings.nasCollectionRefreshConcurrency, 3);
+    expect(feedSettings.nasEnrichmentConcurrency, 4);
+    expect(feedSettings.toJson()['homeFeedMaxConcurrency'], 4);
+    expect(feedSettings.toJson()['homeFeedInitialBatchSize'], 3);
+    expect(feedSettings.toJson()['homeFeedBatchDelayMs'], 250);
+    expect(feedSettings.toJson()['nasSourceRefreshConcurrency'], 2);
+    expect(feedSettings.toJson()['nasCollectionRefreshConcurrency'], 3);
+    expect(feedSettings.toJson()['nasEnrichmentConcurrency'], 4);
     expect(
       AppSettings.fromJson(const <String, dynamic>{}).homeFeedMaxConcurrency,
       kHomeFeedMaxConcurrencyDefault,
@@ -72,13 +90,47 @@ void main() {
       kHomeFeedInitialBatchSizeDefault,
     );
     expect(
-      settings.copyWith(homeFeedMaxConcurrency: 99).homeFeedMaxConcurrency,
+      feedSettings.copyWith(homeFeedMaxConcurrency: 99).homeFeedMaxConcurrency,
       kHomeFeedMaxConcurrencyMax,
     );
     expect(
-      settings.copyWith(homeFeedInitialBatchSize: 0).homeFeedInitialBatchSize,
+      feedSettings
+          .copyWith(homeFeedInitialBatchSize: 0)
+          .homeFeedInitialBatchSize,
       kHomeFeedInitialBatchSizeMin,
     );
+  });
+
+  test('legacy high performance minimum scheduling migrates to balanced', () {
+    final migrated = AppSettings.fromJson(const <String, dynamic>{
+      'highPerformanceModeEnabled': true,
+      'metadataPrefetchMaxConcurrency': 1,
+      'metadataPrefetchInitialBatchSize': 6,
+      'homeFeedMaxConcurrency': 1,
+      'homeFeedInitialBatchSize': 1,
+    });
+
+    expect(
+      migrated.metadataPrefetchMaxConcurrency,
+      kMetadataPrefetchMaxConcurrencyDefault,
+    );
+    expect(
+      migrated.metadataPrefetchInitialBatchSize,
+      kMetadataPrefetchInitialBatchSizeDefault,
+    );
+    expect(migrated.homeFeedMaxConcurrency, kHomeFeedMaxConcurrencyDefault);
+    expect(migrated.homeFeedInitialBatchSize, kHomeFeedInitialBatchSizeDefault);
+
+    final explicitNewSettings = AppSettings.fromJson(const <String, dynamic>{
+      'highPerformanceModeEnabled': true,
+      'metadataPrefetchMaxConcurrency': 1,
+      'metadataPrefetchInitialBatchSize': 6,
+      'metadataPrefetchBatchDelayMs': 300,
+      'homeFeedMaxConcurrency': 1,
+      'homeFeedInitialBatchSize': 1,
+    });
+    expect(explicitNewSettings.metadataPrefetchMaxConcurrency, 1);
+    expect(explicitNewSettings.homeFeedMaxConcurrency, 1);
   });
 
   test('app settings persist local logging preferences', () {
@@ -126,7 +178,7 @@ void main() {
     expect(noLevels.localLogVisibleLevels, isEmpty);
   });
 
-  test('app settings persist home hero display mode, style and switches', () {
+  test('app settings persist and default home and playback options', () {
     final settings = AppSettings.fromJson({
       'homeHeroDisplayMode': 'borderless',
       'homeHeroStyle': 'poster',
@@ -206,7 +258,6 @@ void main() {
     expect(settings.playbackMpvLongPressSpeedBoostEnabled, isFalse);
     expect(settings.playbackMpvStallAutoRecoveryEnabled, isFalse);
     expect(settings.performanceAggressivePlaybackTuningEnabled, isTrue);
-    expect(settings.performanceAutoDowngradeHeavyPlaybackEnabled, isTrue);
     expect(settings.toJson()['homeHeroDisplayMode'], 'borderless');
     expect(settings.toJson()['homeHeroStyle'], 'poster');
     expect(settings.toJson()['homeHeroBackgroundEnabled'], isFalse);
@@ -246,134 +297,120 @@ void main() {
       isTrue,
     );
     expect(
-      settings.toJson()['performanceAutoDowngradeHeavyPlaybackEnabled'],
-      isTrue,
+      settings.toJson().containsKey(
+            'performanceAutoDowngradeHeavyPlaybackEnabled',
+          ),
+      isFalse,
     );
-  });
+    final defaults = AppSettings.fromJson(const {});
 
-  test('app settings default hero display mode and style', () {
-    final settings = AppSettings.fromJson(const {});
-
-    expect(settings.homeHeroDisplayMode, HomeHeroDisplayMode.normal);
-    expect(settings.homeHeroStyle, HomeHeroStyle.composite);
-    expect(settings.homeHeroBackgroundEnabled, isTrue);
-    expect(settings.translucentEffectsEnabled, isTrue);
-    expect(settings.autoHideNavigationBarEnabled, isTrue);
-    expect(settings.homeNavigationSingleTapCleanupEnabled, isTrue);
-    expect(settings.performanceLiveItemHeroOverlayEnabled, isTrue);
+    expect(defaults.homeHeroDisplayMode, HomeHeroDisplayMode.normal);
+    expect(defaults.homeHeroStyle, HomeHeroStyle.composite);
+    expect(defaults.homeHeroBackgroundEnabled, isTrue);
+    expect(defaults.translucentEffectsEnabled, isTrue);
+    expect(defaults.autoHideNavigationBarEnabled, isTrue);
+    expect(defaults.homeNavigationSingleTapCleanupEnabled, isTrue);
+    expect(defaults.performanceLiveItemHeroOverlayEnabled, isTrue);
     expect(
-      settings.homeModules
+      defaults.homeModules
           .firstWhere((item) => item.type == HomeModuleType.hero)
           .enabled,
       isTrue,
     );
-    expect(settings.playbackOpenTimeoutSeconds, 20);
-    expect(settings.playbackDefaultSpeed, 1.0);
+    expect(defaults.playbackOpenTimeoutSeconds, 20);
+    expect(defaults.playbackDefaultSpeed, 1.0);
     expect(
-      settings.playbackSubtitlePreference,
+      defaults.playbackSubtitlePreference,
       PlaybackSubtitlePreference.auto,
     );
-    expect(settings.playbackSubtitleScale, 32.0);
-    expect(settings.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
-    expect(settings.assrtToken, isEmpty);
-    expect(settings.opensubtitlesEnabled, isFalse);
-    expect(settings.opensubtitlesUsername, isEmpty);
-    expect(settings.opensubtitlesPassword, isEmpty);
-    expect(settings.subdlEnabled, isFalse);
-    expect(settings.subdlApiKey, isEmpty);
-    expect(settings.subtitlePreferredLanguages, isEmpty);
+    expect(defaults.playbackSubtitleScale, 32.0);
+    expect(defaults.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
+    expect(defaults.assrtToken, isEmpty);
+    expect(defaults.opensubtitlesEnabled, isFalse);
+    expect(defaults.opensubtitlesUsername, isEmpty);
+    expect(defaults.opensubtitlesPassword, isEmpty);
+    expect(defaults.subdlEnabled, isFalse);
+    expect(defaults.subdlApiKey, isEmpty);
+    expect(defaults.subtitlePreferredLanguages, isEmpty);
     expect(
-      settings.subtitleSearchMaxValidatedCandidates,
+      defaults.subtitleSearchMaxValidatedCandidates,
       kSubtitleSearchMaxValidatedCandidatesDefault,
     );
-    expect(settings.configuredStructuredSubtitleSources, isEmpty);
-    expect(settings.playbackBackgroundPlaybackEnabled, isTrue);
-    expect(settings.playbackEngine, PlaybackEngine.embeddedMpv);
-    expect(settings.playbackDecodeMode, PlaybackDecodeMode.auto);
+    expect(defaults.configuredStructuredSubtitleSources, isEmpty);
+    expect(defaults.playbackBackgroundPlaybackEnabled, isTrue);
+    expect(defaults.playbackEngine, PlaybackEngine.embeddedMpv);
+    expect(defaults.playbackDecodeMode, PlaybackDecodeMode.auto);
     expect(
-      settings.playbackMpvQualityPreset,
+      defaults.playbackMpvQualityPreset,
       PlaybackMpvQualityPreset.performanceFirst,
     );
-    expect(settings.playbackMpvDoubleTapToSeekEnabled, isTrue);
-    expect(settings.playbackMpvSwipeToSeekEnabled, isTrue);
-    expect(settings.playbackMpvLongPressSpeedBoostEnabled, isTrue);
-    expect(settings.playbackMpvStallAutoRecoveryEnabled, isTrue);
-    expect(settings.performanceAggressivePlaybackTuningEnabled, isFalse);
-    expect(settings.performanceAutoDowngradeHeavyPlaybackEnabled, isFalse);
-    expect(settings.detailAutoLibraryMatchEnabled, isFalse);
+    expect(defaults.playbackMpvDoubleTapToSeekEnabled, isTrue);
+    expect(defaults.playbackMpvSwipeToSeekEnabled, isTrue);
+    expect(defaults.playbackMpvLongPressSpeedBoostEnabled, isTrue);
+    expect(defaults.playbackMpvStallAutoRecoveryEnabled, isTrue);
+    expect(defaults.performanceAggressivePlaybackTuningEnabled, isFalse);
+    expect(defaults.detailAutoLibraryMatchEnabled, isFalse);
   });
 
-  test(
-      'high performance preset marker no longer overrides runtime effective settings',
-      () {
+  test('legacy high performance marker is ignored at runtime and export', () {
     final settings = AppSettings.fromJson({
       'highPerformanceModeEnabled': true,
       'translucentEffectsEnabled': true,
       'autoHideNavigationBarEnabled': true,
       'performanceReduceMotionEnabled': false,
       'performanceStaticNavigationEnabled': false,
-      'performanceLeanPlaybackUiEnabled': false,
+      'performanceLeanPlaybackUiEnabled': true,
+      'playbackStartupProbeEnabled': false,
     });
 
-    expect(settings.effectiveUiPerformanceTier, AppUiPerformanceTier.rich);
     expect(settings.effectiveTranslucentEffectsEnabled, isTrue);
     expect(settings.effectiveNavigationAutoHideEnabled, isTrue);
     expect(
       settings.effectiveLeanPlaybackUiEnabled(isTelevision: false),
       isFalse,
     );
-  });
-
-  test('clearing high performance preset restores rich visual defaults', () {
-    final settings =
-        AppSettings.fromJson(const {}).applyHighPerformancePreset();
-    final cleared = settings.clearHighPerformancePresetMarker();
-
-    expect(cleared.highPerformanceModeEnabled, isFalse);
-    expect(cleared.translucentEffectsEnabled, isTrue);
-    expect(cleared.autoHideNavigationBarEnabled, isTrue);
-    expect(cleared.homeHeroBackgroundEnabled, isTrue);
-    expect(cleared.performanceReduceDecorationsEnabled, isFalse);
-    expect(cleared.performanceReduceMotionEnabled, isFalse);
-    expect(cleared.performanceStaticNavigationEnabled, isFalse);
-    expect(cleared.performanceLightweightTvFocusEnabled, isFalse);
-    expect(cleared.performanceStaticHomeHeroEnabled, isFalse);
-    expect(cleared.performanceLightweightHomeHeroEnabled, isFalse);
-    expect(cleared.performanceLiveItemHeroOverlayEnabled, isTrue);
-    expect(cleared.performanceSlimDetailHeroEnabled, isFalse);
-    expect(cleared.performanceLeanPlaybackUiEnabled, isFalse);
-    expect(cleared.performanceAggressivePlaybackTuningEnabled, isFalse);
-    expect(cleared.performanceAutoDowngradeHeavyPlaybackEnabled, isFalse);
     expect(
-      cleared.metadataPrefetchMaxConcurrency,
-      kMetadataPrefetchMaxConcurrencyDefault,
-    );
-    expect(
-      cleared.metadataPrefetchInitialBatchSize,
-      kMetadataPrefetchInitialBatchSizeDefault,
-    );
-    expect(cleared.effectiveUiPerformanceTier, AppUiPerformanceTier.rich);
-    expect(cleared.effectiveTranslucentEffectsEnabled, isTrue);
-    expect(cleared.effectiveNavigationAutoHideEnabled, isTrue);
-    expect(
-      cleared.effectiveLightweightHomeHeroEnabled(isTelevision: false),
+      settings.toJson().containsKey('performanceLeanPlaybackUiEnabled'),
       isFalse,
     );
+    expect(
+      settings.toJson().containsKey('playbackStartupProbeEnabled'),
+      isFalse,
+    );
+    expect(
+        settings.toJson().containsKey('highPerformanceModeEnabled'), isFalse);
   });
 
-  test('manual visual switches remain effective inside high performance preset',
+  test('performance switches are independent and TV protections stay fixed',
       () {
-    final settings =
-        AppSettings.fromJson(const {}).applyHighPerformancePreset().copyWith(
-              translucentEffectsEnabled: true,
-              autoHideNavigationBarEnabled: true,
-            );
+    final settings = AppSettings.fromJson(const <String, dynamic>{
+      'performanceReduceMotionEnabled': true,
+      'performanceStaticNavigationEnabled': false,
+      'performanceLightweightHomeHeroEnabled': false,
+      'performanceSlimDetailHeroEnabled': true,
+      'performanceLeanPlaybackUiEnabled': true,
+    });
 
-    expect(settings.highPerformanceModeEnabled, isTrue);
+    expect(settings.effectiveReduceMotionEnabled, isTrue);
+    expect(settings.effectiveStaticNavigationEnabled, isFalse);
     expect(
-        settings.effectiveUiPerformanceTier, AppUiPerformanceTier.performance);
-    expect(settings.effectiveTranslucentEffectsEnabled, isTrue);
-    expect(settings.effectiveNavigationAutoHideEnabled, isTrue);
+      settings.effectiveLightweightHomeHeroEnabled(isTelevision: false),
+      isFalse,
+    );
+    expect(settings.effectiveSlimDetailHeroEnabled(isTelevision: true), isTrue);
+    expect(settings.effectiveLeanPlaybackUiEnabled(isTelevision: true), isTrue);
+    expect(
+      settings.effectiveSlimDetailHeroEnabled(isTelevision: false),
+      isFalse,
+    );
+    expect(
+      settings.effectiveLeanPlaybackUiEnabled(isTelevision: false),
+      isFalse,
+    );
+    expect(
+      settings.effectiveLightweightTvFocusEnabled(isTelevision: true),
+      isTrue,
+    );
   });
 
   test(
@@ -500,7 +537,7 @@ void main() {
     );
   });
 
-  test('app settings persist network storage config', () {
+  test('app settings persist and default network storage config', () {
     final settings = AppSettings.fromJson({
       'networkStorage': {
         'quarkCookie': 'foo=bar',
@@ -570,21 +607,18 @@ void main() {
     expect(json['smartStrmTaskName'], 'movie_task');
     expect(json['refreshMediaSourceIds'], ['emby-a', 'webdav-b']);
     expect(json['refreshDelaySeconds'], 8);
-  });
+    final defaults = AppSettings.fromJson(const {});
 
-  test('app settings default network storage config is empty', () {
-    final settings = AppSettings.fromJson(const {});
-
-    expect(settings.networkStorage.quarkCookie, isEmpty);
-    expect(settings.networkStorage.quarkSaveFolderId, '0');
-    expect(settings.networkStorage.quarkSaveFolderPath, '/');
-    expect(settings.networkStorage.syncDeleteQuarkEnabled, isFalse);
-    expect(settings.networkStorage.syncDeleteQuarkWebDavDirectories, isEmpty);
-    expect(settings.networkStorage.smartStrmWebhookUrl, isEmpty);
-    expect(settings.networkStorage.smartStrmTaskName, isEmpty);
-    expect(settings.networkStorage.refreshMediaSourceIds, isEmpty);
-    expect(settings.networkStorage.refreshDelaySeconds, 1);
-    expect(settings.networkStorage.hasAnyConfigured, isFalse);
+    expect(defaults.networkStorage.quarkCookie, isEmpty);
+    expect(defaults.networkStorage.quarkSaveFolderId, '0');
+    expect(defaults.networkStorage.quarkSaveFolderPath, '/');
+    expect(defaults.networkStorage.syncDeleteQuarkEnabled, isFalse);
+    expect(defaults.networkStorage.syncDeleteQuarkWebDavDirectories, isEmpty);
+    expect(defaults.networkStorage.smartStrmWebhookUrl, isEmpty);
+    expect(defaults.networkStorage.smartStrmTaskName, isEmpty);
+    expect(defaults.networkStorage.refreshMediaSourceIds, isEmpty);
+    expect(defaults.networkStorage.refreshDelaySeconds, 1);
+    expect(defaults.networkStorage.hasAnyConfigured, isFalse);
   });
 
   test('seed defaults enable douban and preload built-in douban modules', () {
@@ -630,27 +664,25 @@ void main() {
     expect(copied.playbackSubtitleScale, kPlaybackSubtitleScaleMin);
   });
 
-  test('unknown subtitle source list falls back to assrt only', () {
-    final settings = AppSettings.fromJson({
+  test('subtitle provider settings normalize invalid and missing values', () {
+    final unknownSources = AppSettings.fromJson({
       'onlineSubtitleSources': ['invalid-source'],
     });
 
-    expect(settings.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
-  });
+    expect(unknownSources.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
 
-  test('subtitle provider settings are normalized and clamped', () {
-    final settings = AppSettings.fromJson({
+    final normalized = AppSettings.fromJson({
       'subtitlePreferredLanguages': [' zh-CN ', 'en', '', 'EN'],
       'subtitleSearchMaxValidatedCandidates': 99,
     });
 
-    expect(settings.subtitlePreferredLanguages, ['zh-cn', 'en']);
+    expect(normalized.subtitlePreferredLanguages, ['zh-cn', 'en']);
     expect(
-      settings.subtitleSearchMaxValidatedCandidates,
+      normalized.subtitleSearchMaxValidatedCandidates,
       kSubtitleSearchMaxValidatedCandidatesMax,
     );
 
-    final copied = settings.copyWith(
+    final copied = normalized.copyWith(
       subtitlePreferredLanguages: ['zh-tw', 'zh-tw', 'ja'],
       subtitleSearchMaxValidatedCandidates: 0,
     );
@@ -660,43 +692,55 @@ void main() {
       copied.subtitleSearchMaxValidatedCandidates,
       kSubtitleSearchMaxValidatedCandidatesMin,
     );
-  });
-
-  test('assrt requires token before becoming an effective subtitle source', () {
-    final settings = AppSettings.fromJson({
+    final withoutToken = AppSettings.fromJson({
       'onlineSubtitleSources': ['assrt'],
     });
 
-    expect(settings.assrtApiSearchEnabled, isFalse);
-    expect(settings.configuredStructuredSubtitleSources, isEmpty);
-    expect(settings.effectiveOnlineSubtitleSources, isEmpty);
+    expect(withoutToken.assrtApiSearchEnabled, isFalse);
+    expect(withoutToken.configuredStructuredSubtitleSources, isEmpty);
+    expect(withoutToken.effectiveOnlineSubtitleSources, isEmpty);
   });
 
-  test('high performance preset turns on playback tuning flags', () {
-    final settings = const AppSettings(
+  test('startup crash recovery applies one consistent safe preset', () {
+    final schedulingSettings = const AppSettings(
       mediaSources: [],
       searchProviders: [],
       doubanAccount: DoubanAccountConfig(enabled: false),
       homeModules: [],
-    ).applyHighPerformancePreset();
+      metadataPrefetchMaxConcurrency: 3,
+      metadataPrefetchInitialBatchSize: 18,
+      metadataPrefetchBatchDelayMs: 250,
+      metadataPrefetchForegroundResumeDelayMs: 500,
+      homeFeedMaxConcurrency: 3,
+      homeFeedInitialBatchSize: 3,
+      homeFeedBatchDelayMs: 250,
+      nasSourceRefreshConcurrency: 2,
+      nasCollectionRefreshConcurrency: 3,
+      nasEnrichmentConcurrency: 2,
+    ).applyStartupCrashRecoveryPreset();
 
-    expect(settings.performanceAggressivePlaybackTuningEnabled, isTrue);
-    expect(settings.performanceAutoDowngradeHeavyPlaybackEnabled, isTrue);
     expect(
-      settings.metadataPrefetchMaxConcurrency,
-      kMetadataPrefetchMaxConcurrencyMin,
+      schedulingSettings.performanceAggressivePlaybackTuningEnabled,
+      isTrue,
     );
     expect(
-      settings.metadataPrefetchInitialBatchSize,
-      kMetadataPrefetchInitialBatchSizeMin,
+      schedulingSettings.metadataPrefetchMaxConcurrency,
+      3,
     );
     expect(
-        settings.effectiveUiPerformanceTier, AppUiPerformanceTier.performance);
-    expect(settings.effectiveStartupProbeEnabled, isFalse);
-  });
+      schedulingSettings.metadataPrefetchInitialBatchSize,
+      18,
+    );
+    expect(schedulingSettings.metadataPrefetchBatchDelayMs, 250);
+    expect(schedulingSettings.metadataPrefetchForegroundResumeDelayMs, 500);
+    expect(schedulingSettings.homeFeedMaxConcurrency, 3);
+    expect(schedulingSettings.homeFeedInitialBatchSize, 3);
+    expect(schedulingSettings.homeFeedBatchDelayMs, 250);
+    expect(schedulingSettings.nasSourceRefreshConcurrency, 2);
+    expect(schedulingSettings.nasCollectionRefreshConcurrency, 3);
+    expect(schedulingSettings.nasEnrichmentConcurrency, 2);
 
-  test('startup crash recovery preset disables automatic heavy work', () {
-    final settings = const AppSettings(
+    final safeSettings = const AppSettings(
       mediaSources: [],
       searchProviders: [],
       doubanAccount: DoubanAccountConfig(enabled: false),
@@ -714,21 +758,30 @@ void main() {
       playbackMpvStallAutoRecoveryEnabled: true,
     ).applyStartupCrashRecoveryPreset();
 
-    expect(settings.highPerformanceModeEnabled, isTrue);
-    expect(settings.homeStartupAutoRefreshEnabled, isFalse);
-    expect(settings.homeStartupAutoRefreshEmbyEnabled, isFalse);
-    expect(settings.tmdbMetadataMatchEnabled, isTrue);
-    expect(settings.wmdbMetadataMatchEnabled, isTrue);
-    expect(settings.imdbRatingMatchEnabled, isTrue);
-    expect(settings.detailAutoLibraryMatchEnabled, isTrue);
-    expect(settings.playbackBackgroundPlaybackEnabled, isFalse);
-    expect(settings.playbackMpvDoubleTapToSeekEnabled, isFalse);
-    expect(settings.playbackMpvSwipeToSeekEnabled, isFalse);
-    expect(settings.playbackMpvLongPressSpeedBoostEnabled, isFalse);
-    expect(settings.playbackMpvStallAutoRecoveryEnabled, isFalse);
+    expect(safeSettings.homeStartupAutoRefreshEnabled, isFalse);
+    expect(safeSettings.homeStartupAutoRefreshEmbyEnabled, isFalse);
+    expect(safeSettings.tmdbMetadataMatchEnabled, isTrue);
+    expect(safeSettings.wmdbMetadataMatchEnabled, isTrue);
+    expect(safeSettings.imdbRatingMatchEnabled, isTrue);
+    expect(safeSettings.detailAutoLibraryMatchEnabled, isTrue);
+    expect(safeSettings.playbackBackgroundPlaybackEnabled, isFalse);
+    expect(safeSettings.playbackMpvDoubleTapToSeekEnabled, isFalse);
+    expect(safeSettings.playbackMpvSwipeToSeekEnabled, isFalse);
+    expect(safeSettings.playbackMpvLongPressSpeedBoostEnabled, isFalse);
+    expect(safeSettings.playbackMpvStallAutoRecoveryEnabled, isFalse);
+
+    const cleanupSettings = AppSettings(
+      mediaSources: [],
+      searchProviders: [],
+      doubanAccount: DoubanAccountConfig(enabled: false),
+      homeModules: [],
+      homeNavigationSingleTapCleanupEnabled: false,
+    );
     expect(
-      settings.effectiveUiPerformanceTier,
-      AppUiPerformanceTier.performance,
+      cleanupSettings
+          .applyStartupCrashRecoveryPreset()
+          .homeNavigationSingleTapCleanupEnabled,
+      isFalse,
     );
   });
 
@@ -765,48 +818,6 @@ void main() {
         kNavigationDestinationFavorites,
         kNavigationDestinationSettings,
       ],
-    );
-  });
-
-  test('high performance presets preserve detail auto matching', () {
-    const settings = AppSettings(
-      mediaSources: [],
-      searchProviders: [],
-      doubanAccount: DoubanAccountConfig(enabled: false),
-      homeModules: [],
-      detailAutoLibraryMatchEnabled: true,
-    );
-
-    expect(
-      settings.applyHighPerformancePreset().detailAutoLibraryMatchEnabled,
-      isTrue,
-    );
-    expect(
-      settings.applyStartupCrashRecoveryPreset().detailAutoLibraryMatchEnabled,
-      isTrue,
-    );
-  });
-
-  test('performance presets preserve the home single tap cleanup switch', () {
-    const settings = AppSettings(
-      mediaSources: [],
-      searchProviders: [],
-      doubanAccount: DoubanAccountConfig(enabled: false),
-      homeModules: [],
-      homeNavigationSingleTapCleanupEnabled: false,
-    );
-
-    expect(
-      settings
-          .applyHighPerformancePreset()
-          .homeNavigationSingleTapCleanupEnabled,
-      isFalse,
-    );
-    expect(
-      settings
-          .applyStartupCrashRecoveryPreset()
-          .homeNavigationSingleTapCleanupEnabled,
-      isFalse,
     );
   });
 }

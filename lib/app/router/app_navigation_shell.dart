@@ -510,7 +510,9 @@ class _TelevisionNavigationShellState
       if (!node.canRequestFocus) {
         return;
       }
-      node.requestFocus();
+      requestTvFocus(
+        node,
+      );
     });
   }
 

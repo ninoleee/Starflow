@@ -64,86 +64,82 @@ Future<T?> showDetailTelevisionPickerDialog<T>({
                 maxHeight:
                     MediaQuery.sizeOf(dialogContext).height * maxHeightFactor,
               ),
-              child: FocusTraversalGroup(
-                policy: OrderedTraversalPolicy(),
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: options.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final option = options[index];
-                    final isSelected = option.value == selectedValue;
-                    return TvFocusableAction(
-                      focusNode: optionFocusNodes[index],
-                      focusId: option.focusId,
-                      autofocus: index == autofocusIndex,
-                      onPressed: () =>
-                          Navigator.of(dialogContext).pop(option.value),
-                      borderRadius: BorderRadius.circular(18),
-                      focusScale: kTvButtonFocusScale,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: options.length,
+                separatorBuilder: (context, index) =>
+                    const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final option = options[index];
+                  final isSelected = option.value == selectedValue;
+                  return TvFocusableAction(
+                    focusNode: optionFocusNodes[index],
+                    focusId: option.focusId,
+                    onPressed: () =>
+                        Navigator.of(dialogContext).pop(option.value),
+                    borderRadius: BorderRadius.circular(18),
+                    focusScale: kTvButtonFocusScale,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? Colors.white.withValues(alpha: 0.14)
+                            : Colors.white.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
                           color: isSelected
-                              ? Colors.white.withValues(alpha: 0.14)
-                              : Colors.white.withValues(alpha: 0.06),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: isSelected
-                                ? Colors.white.withValues(alpha: 0.4)
-                                : Colors.white.withValues(alpha: 0.08),
-                          ),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(
-                                isSelected
-                                    ? Icons.check_circle_rounded
-                                    : Icons.radio_button_unchecked_rounded,
-                                color: Colors.white,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      option.title,
-                                      maxLines: titleMaxLines,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    if (option.subtitle.trim().isNotEmpty)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 4),
-                                        child: Text(
-                                          option.subtitle,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            color: Color(0xFF9DB0CF),
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
+                              ? Colors.white.withValues(alpha: 0.4)
+                              : Colors.white.withValues(alpha: 0.08),
                         ),
                       ),
-                    );
-                  },
-                ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              isSelected
+                                  ? Icons.check_circle_rounded
+                                  : Icons.radio_button_unchecked_rounded,
+                              color: Colors.white,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    option.title,
+                                    maxLines: titleMaxLines,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  if (option.subtitle.trim().isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: Text(
+                                        option.subtitle,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Color(0xFF9DB0CF),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
           ),

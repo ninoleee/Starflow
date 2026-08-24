@@ -3,7 +3,6 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
-import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
   group('MPV playback policy', () {
@@ -50,60 +49,6 @@ void main() {
 
       expect(isHeavyPlaybackTargetMetadata(heavyTarget), isTrue);
       expect(isHeavyPlaybackTargetMetadata(lightTarget), isFalse);
-    });
-
-    test('auto downgrades quality-first for heavy windowed windows playback',
-        () {
-      const target = PlaybackTarget(
-        title: '4K HEVC',
-        sourceId: 'emby-main',
-        streamUrl: 'https://example.com/movie.mkv',
-        sourceName: 'Emby',
-        sourceKind: MediaSourceKind.emby,
-        width: 3840,
-        height: 2160,
-        bitrate: 22000000,
-        videoCodec: 'hevc',
-      );
-
-      final preset = resolveEffectivePlaybackMpvQualityPreset(
-        requestedPreset: PlaybackMpvQualityPreset.qualityFirst,
-        target: target,
-        isWindowsPlatform: true,
-        isTelevision: false,
-        isFullscreen: false,
-        aggressiveTuningEnabled: false,
-        decodeMode: PlaybackDecodeMode.auto,
-      );
-
-      expect(preset, PlaybackMpvQualityPreset.performanceFirst);
-    });
-
-    test('downgrades high-risk fullscreen remote playback to performance-first',
-        () {
-      const target = PlaybackTarget(
-        title: '1080p AVC',
-        sourceId: 'emby-main',
-        streamUrl: 'https://example.com/movie.mkv',
-        sourceName: 'Emby',
-        sourceKind: MediaSourceKind.emby,
-        width: 1920,
-        height: 1080,
-        bitrate: 8000000,
-        videoCodec: 'h264',
-      );
-
-      final preset = resolveEffectivePlaybackMpvQualityPreset(
-        requestedPreset: PlaybackMpvQualityPreset.qualityFirst,
-        target: target,
-        isWindowsPlatform: true,
-        isTelevision: false,
-        isFullscreen: true,
-        aggressiveTuningEnabled: false,
-        decodeMode: PlaybackDecodeMode.auto,
-      );
-
-      expect(preset, PlaybackMpvQualityPreset.performanceFirst);
     });
 
     test('uses high-risk buffered tuning profile for heavy http playback', () {

@@ -656,48 +656,41 @@ Future<T?> showSettingsOptionDialog<T>({
             scheduleInitialOptionFocus();
           }
 
-          final dialog = FocusTraversalGroup(
-            policy: OrderedTraversalPolicy(),
-            child: SimpleDialog(
-              title: Text(title),
-              children: [
-                for (var index = 0; index < options.length; index++)
-                  FocusTraversalOrder(
-                    order: NumericFocusOrder(index.toDouble()),
+          final dialog = SimpleDialog(
+            title: Text(title),
+            children: [
+              for (var index = 0; index < options.length; index++)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: TvFocusableAction(
+                    onPressed: () =>
+                        Navigator.of(dialogContext).pop(options[index]),
+                    focusNode: optionFocusNodes[index],
+                    focusId: buildTvFocusId(
+                      prefix: 'settings-option-dialog',
+                      segments: [
+                        title,
+                        index,
+                        labelBuilder(options[index]),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                    visualStyle: TvFocusVisualStyle.subtle,
+                    focusScale: kTvButtonFocusScale,
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: TvFocusableAction(
-                        onPressed: () =>
-                            Navigator.of(dialogContext).pop(options[index]),
-                        focusNode: optionFocusNodes[index],
-                        focusId: buildTvFocusId(
-                          prefix: 'settings-option-dialog',
-                          segments: [
-                            title,
-                            index,
-                            labelBuilder(options[index]),
-                          ],
-                        ),
-                        autofocus: index == 0,
-                        borderRadius: BorderRadius.circular(14),
-                        visualStyle: TvFocusVisualStyle.subtle,
-                        focusScale: kTvButtonFocusScale,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 12,
-                          ),
-                          child: Text(
-                            options[index] == currentValue
-                                ? '${labelBuilder(options[index])}  当前'
-                                : labelBuilder(options[index]),
-                          ),
-                        ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
+                      ),
+                      child: Text(
+                        options[index] == currentValue
+                            ? '${labelBuilder(options[index])}  当前'
+                            : labelBuilder(options[index]),
                       ),
                     ),
                   ),
-              ],
-            ),
+                ),
+            ],
           );
 
           return wrapTelevisionDialogBackHandling(

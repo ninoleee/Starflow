@@ -413,9 +413,14 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     );
   }
 
-  Future<void> setTranslucentEffectsEnabled(bool enabled) async {
+  Future<void> setSimplifiedVisualEffectsEnabled(bool enabled) async {
     final current = state.value ?? await _repository.load();
-    await _persist(current.copyWith(translucentEffectsEnabled: enabled));
+    await _persist(
+      current.copyWith(
+        translucentEffectsEnabled: !enabled,
+        performanceReduceDecorationsEnabled: enabled,
+      ),
+    );
   }
 
   Future<void> setAutoHideNavigationBarEnabled(bool enabled) async {
@@ -432,49 +437,23 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     );
   }
 
-  Future<void> setHighPerformanceModeEnabled(bool enabled) async {
-    final current = state.value ?? await _repository.load();
-    final next = enabled
-        ? current.applyHighPerformancePreset()
-        : current.clearHighPerformancePresetMarker();
-    await _persist(next);
-  }
-
-  Future<void> setPerformanceReduceDecorationsEnabled(bool enabled) async {
+  Future<void> setReducedInterfaceMotionEnabled(bool enabled) async {
     final current = state.value ?? await _repository.load();
     await _persist(
-      current.copyWith(performanceReduceDecorationsEnabled: enabled),
+      current.copyWith(
+        performanceReduceMotionEnabled: enabled,
+        performanceStaticNavigationEnabled: enabled,
+      ),
     );
   }
 
-  Future<void> setPerformanceReduceMotionEnabled(bool enabled) async {
-    final current = state.value ?? await _repository.load();
-    await _persist(current.copyWith(performanceReduceMotionEnabled: enabled));
-  }
-
-  Future<void> setPerformanceStaticNavigationEnabled(bool enabled) async {
+  Future<void> setSimplifiedHomeHeroEnabled(bool enabled) async {
     final current = state.value ?? await _repository.load();
     await _persist(
-      current.copyWith(performanceStaticNavigationEnabled: enabled),
-    );
-  }
-
-  Future<void> setPerformanceLightweightTvFocusEnabled(bool enabled) async {
-    final current = state.value ?? await _repository.load();
-    await _persist(
-      current.copyWith(performanceLightweightTvFocusEnabled: enabled),
-    );
-  }
-
-  Future<void> setPerformanceStaticHomeHeroEnabled(bool enabled) async {
-    final current = state.value ?? await _repository.load();
-    await _persist(current.copyWith(performanceStaticHomeHeroEnabled: enabled));
-  }
-
-  Future<void> setPerformanceLightweightHomeHeroEnabled(bool enabled) async {
-    final current = state.value ?? await _repository.load();
-    await _persist(
-      current.copyWith(performanceLightweightHomeHeroEnabled: enabled),
+      current.copyWith(
+        performanceStaticHomeHeroEnabled: enabled,
+        performanceLightweightHomeHeroEnabled: enabled,
+      ),
     );
   }
 
@@ -503,6 +482,20 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     );
   }
 
+  Future<void> setMetadataPrefetchBatchDelayMs(int delayMs) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(metadataPrefetchBatchDelayMs: delayMs),
+    );
+  }
+
+  Future<void> setMetadataPrefetchForegroundResumeDelayMs(int delayMs) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(metadataPrefetchForegroundResumeDelayMs: delayMs),
+    );
+  }
+
   Future<void> setHomeFeedMaxConcurrency(int maxConcurrency) async {
     final current = state.value ?? await _repository.load();
     await _persist(
@@ -517,14 +510,30 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     );
   }
 
-  Future<void> setPerformanceSlimDetailHeroEnabled(bool enabled) async {
+  Future<void> setHomeFeedBatchDelayMs(int delayMs) async {
     final current = state.value ?? await _repository.load();
-    await _persist(current.copyWith(performanceSlimDetailHeroEnabled: enabled));
+    await _persist(current.copyWith(homeFeedBatchDelayMs: delayMs));
   }
 
-  Future<void> setPerformanceLeanPlaybackUiEnabled(bool enabled) async {
+  Future<void> setNasSourceRefreshConcurrency(int concurrency) async {
     final current = state.value ?? await _repository.load();
-    await _persist(current.copyWith(performanceLeanPlaybackUiEnabled: enabled));
+    await _persist(
+      current.copyWith(nasSourceRefreshConcurrency: concurrency),
+    );
+  }
+
+  Future<void> setNasCollectionRefreshConcurrency(int concurrency) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(nasCollectionRefreshConcurrency: concurrency),
+    );
+  }
+
+  Future<void> setNasEnrichmentConcurrency(int concurrency) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(nasEnrichmentConcurrency: concurrency),
+    );
   }
 
   Future<void> setPerformanceAggressivePlaybackTuningEnabled(
@@ -533,17 +542,6 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     final current = state.value ?? await _repository.load();
     await _persist(
       current.copyWith(performanceAggressivePlaybackTuningEnabled: enabled),
-    );
-  }
-
-  Future<void> setPerformanceAutoDowngradeHeavyPlaybackEnabled(
-    bool enabled,
-  ) async {
-    final current = state.value ?? await _repository.load();
-    await _persist(
-      current.copyWith(
-        performanceAutoDowngradeHeavyPlaybackEnabled: enabled,
-      ),
     );
   }
 
@@ -629,10 +627,16 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     ref.read(metadataPrefetchConcurrencyLimiterProvider).updateLimits(
           maxConcurrency: normalized.metadataPrefetchMaxConcurrency,
           initialBatchSize: normalized.metadataPrefetchInitialBatchSize,
+          backgroundBatchDelay: Duration(
+            milliseconds: normalized.metadataPrefetchBatchDelayMs,
+          ),
         );
     ref.read(homeFeedLoadSchedulerProvider).updateLimits(
           maxConcurrency: normalized.homeFeedMaxConcurrency,
           initialBatchSize: normalized.homeFeedInitialBatchSize,
+          backgroundBatchDelay: Duration(
+            milliseconds: normalized.homeFeedBatchDelayMs,
+          ),
         );
     ref.read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
   }

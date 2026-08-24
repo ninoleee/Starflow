@@ -12,21 +12,46 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/application/settings_slice_providers.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
+part 'metadata_match_settings_widgets.part.dart';
+
 class MetadataMatchSettingsPage extends ConsumerWidget {
   const MetadataMatchSettingsPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsMetadataMatchSliceProvider);
+    final detailAutoLibraryMatchEnabled =
+        ref.watch(settingsDetailAutoLibraryMatchEnabledProvider);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
 
     return SettingsPageScaffold(
+      onBack: () => Navigator.of(context).pop(),
       children: [
+        Text('元数据匹配', style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 8),
+        Text(
+          '统一管理匹配优先级、TMDB 与 WMDB，并可直接测试服务可用性。',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: 18),
         SectionPanel(
           title: '匹配策略',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              SettingsToggleTile(
+                title: '自动匹配本地资源',
+                subtitle: '进入详情页时自动尝试匹配已启用的媒体源。',
+                value: detailAutoLibraryMatchEnabled,
+                autofocus: isTelevision,
+                focusId: 'metadata-match:auto-library-match',
+                onChanged: ref
+                    .read(settingsControllerProvider.notifier)
+                    .setDetailAutoLibraryMatchEnabled,
+              ),
+              const SizedBox(height: 14),
               Text(
                 '优先顺序',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -38,6 +63,7 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                 StarflowSelectionTile(
                   title: '优先顺序',
                   value: '${settings.metadataMatchPriority.label} 优先',
+                  focusId: 'metadata-match:priority',
                   onPressed: () => _openPriorityPicker(
                     context,
                     ref,
@@ -69,9 +95,11 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
           title: 'TMDB',
           child: Column(
             children: [
-              _MetadataToggleTile(
+              SettingsToggleTile(
                 title: '启用 TMDB 自动补全影片信息',
+                subtitle: '自动搜索并补充简介、海报、评分和外部 ID。',
                 value: settings.tmdbMetadataMatchEnabled,
+                focusId: 'metadata-match:tmdb-enabled',
                 onChanged: (value) {
                   ref
                       .read(settingsControllerProvider.notifier)
@@ -120,9 +148,11 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
           title: 'WMDB',
           child: Column(
             children: [
-              _MetadataToggleTile(
+              SettingsToggleTile(
                 title: '启用 WMDB 自动补全影片信息',
+                subtitle: '在 TMDB 之外补充中文信息和评分数据。',
                 value: settings.wmdbMetadataMatchEnabled,
+                focusId: 'metadata-match:wmdb-enabled',
                 onChanged: (value) {
                   ref
                       .read(settingsControllerProvider.notifier)
@@ -150,24 +180,12 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
     WidgetRef ref,
     MetadataMatchProvider current,
   ) async {
-    final selected = await showDialog<MetadataMatchProvider>(
+    final selected = await showSettingsOptionDialog<MetadataMatchProvider>(
       context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: const Text('选择优先顺序'),
-          children: [
-            for (final provider in MetadataMatchProvider.values)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(context).pop(provider),
-                child: Text(
-                  provider == current
-                      ? '${provider.label} 优先  当前'
-                      : '${provider.label} 优先',
-                ),
-              ),
-          ],
-        );
-      },
+      title: '选择优先顺序',
+      options: MetadataMatchProvider.values,
+      currentValue: current,
+      labelBuilder: (provider) => '${provider.label} 优先',
     );
     if (selected == null) {
       return;
@@ -324,106 +342,91 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                 }
               }
 
-              final dialog = FocusTraversalGroup(
-                policy: OrderedTraversalPolicy(),
-                child: AlertDialog(
-                  title: const Text('测试 TMDB'),
-                  content: SizedBox(
-                    width: 420,
-                    child: SingleChildScrollView(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(1),
-                            child: wrapTelevisionDialogFieldTraversal(
-                              enabled: isTelevision,
-                              child: TextField(
-                                controller: controller,
-                                focusNode: queryFocusNode,
-                                autofocus: true,
-                                textInputAction: TextInputAction.search,
-                                decoration: const InputDecoration(
-                                  labelText: '测试片名',
-                                  hintText: '例如：这个杀手不太冷',
-                                  border: OutlineInputBorder(),
-                                ),
-                                onSubmitted: (_) => runTest(),
-                              ),
+              final dialog = AlertDialog(
+                title: const Text('测试 TMDB'),
+                content: SizedBox(
+                  width: 420,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        wrapTelevisionDialogFieldTraversal(
+                          enabled: isTelevision,
+                          child: TextField(
+                            controller: controller,
+                            focusNode: queryFocusNode,
+                            autofocus: true,
+                            textInputAction: TextInputAction.search,
+                            decoration: const InputDecoration(
+                              labelText: '测试片名',
+                              hintText: '例如：这个杀手不太冷',
+                              border: OutlineInputBorder(),
                             ),
+                            onSubmitted: (_) => runTest(),
                           ),
-                          const SizedBox(height: 10),
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(2),
-                            child: StarflowCheckboxTile(
-                              focusNode: preferSeriesFocusNode,
-                              title: '优先按剧集匹配',
-                              value: preferSeries,
-                              onChanged: (value) {
-                                setState(() {
-                                  preferSeries = value;
-                                });
-                              },
-                            ),
-                          ),
-                          if (loading) ...[
-                            const SizedBox(height: 6),
-                            const LinearProgressIndicator(),
-                          ],
-                          if (message.trim().isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            Text(
-                              message,
-                              style: TextStyle(
-                                color: result == null
-                                    ? const Color(0xFFE79A9A)
-                                    : const Color(0xFF9FD6B3),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                          if (result != null) ...[
-                            const SizedBox(height: 12),
-                            _TestResultCard(
-                              title: result!.title,
-                              imageUrl: result!.posterUrl,
-                              lines: [
-                                '年份：${result!.year > 0 ? result!.year : '未知'}',
-                                '海报：${result!.posterUrl.trim().isEmpty ? '无' : '有'}',
-                                'IMDb ID：${result!.imdbId.trim().isEmpty ? '无' : result!.imdbId}',
-                                if (result!.ratingLabels.isNotEmpty)
-                                  '评分：${result!.ratingLabels.join(' · ')}',
-                              ],
-                              overview: result!.overview,
-                            ),
-                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        StarflowCheckboxTile(
+                          focusNode: preferSeriesFocusNode,
+                          title: '优先按剧集匹配',
+                          value: preferSeries,
+                          onChanged: (value) {
+                            setState(() {
+                              preferSeries = value;
+                            });
+                          },
+                        ),
+                        if (loading) ...[
+                          const SizedBox(height: 6),
+                          const LinearProgressIndicator(),
                         ],
-                      ),
+                        if (message.trim().isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            message,
+                            style: TextStyle(
+                              color: result == null
+                                  ? const Color(0xFFE79A9A)
+                                  : const Color(0xFF9FD6B3),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                        if (result != null) ...[
+                          const SizedBox(height: 12),
+                          _TestResultCard(
+                            title: result!.title,
+                            imageUrl: result!.posterUrl,
+                            lines: [
+                              '年份：${result!.year > 0 ? result!.year : '未知'}',
+                              '海报：${result!.posterUrl.trim().isEmpty ? '无' : '有'}',
+                              'IMDb ID：${result!.imdbId.trim().isEmpty ? '无' : result!.imdbId}',
+                              if (result!.ratingLabels.isNotEmpty)
+                                '评分：${result!.ratingLabels.join(' · ')}',
+                            ],
+                            overview: result!.overview,
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  actions: [
-                    FocusTraversalOrder(
-                      order: const NumericFocusOrder(3),
-                      child: SettingsActionButton(
-                        label: '关闭',
-                        icon: Icons.close_rounded,
-                        focusNode: closeFocusNode,
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                        variant: StarflowButtonVariant.ghost,
-                      ),
-                    ),
-                    FocusTraversalOrder(
-                      order: const NumericFocusOrder(4),
-                      child: SettingsActionButton(
-                        label: '开始测试',
-                        icon: Icons.play_arrow_rounded,
-                        focusNode: startFocusNode,
-                        onPressed: loading ? null : runTest,
-                      ),
-                    ),
-                  ],
                 ),
+                actions: [
+                  SettingsActionButton(
+                    label: '关闭',
+                    icon: Icons.close_rounded,
+                    focusNode: closeFocusNode,
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    variant: StarflowButtonVariant.ghost,
+                  ),
+                  SettingsActionButton(
+                    label: '开始测试',
+                    icon: Icons.play_arrow_rounded,
+                    focusNode: startFocusNode,
+                    onPressed: loading ? null : runTest,
+                  ),
+                ],
               );
               return wrapTelevisionDialogBackHandling(
                 enabled: isTelevision,
@@ -513,146 +516,125 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                 }
               }
 
-              final dialog = FocusTraversalGroup(
-                policy: OrderedTraversalPolicy(),
-                child: AlertDialog(
-                  title: const Text('测试 WMDB'),
-                  content: SizedBox(
-                    width: 440,
-                    child: SingleChildScrollView(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(1),
-                            child: wrapTelevisionDialogFieldTraversal(
-                              enabled: isTelevision,
-                              child: TextField(
-                                controller: doubanIdController,
-                                focusNode: doubanFocusNode,
-                                autofocus: true,
-                                textInputAction: TextInputAction.next,
-                                decoration: const InputDecoration(
-                                  labelText: 'Douban ID',
-                                  hintText: '填了就走直查接口，例如：1297574',
-                                  border: OutlineInputBorder(),
-                                ),
-                              ),
+              final dialog = AlertDialog(
+                title: const Text('测试 WMDB'),
+                content: SizedBox(
+                  width: 440,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        wrapTelevisionDialogFieldTraversal(
+                          enabled: isTelevision,
+                          child: TextField(
+                            controller: doubanIdController,
+                            focusNode: doubanFocusNode,
+                            autofocus: true,
+                            textInputAction: TextInputAction.next,
+                            decoration: const InputDecoration(
+                              labelText: 'Douban ID',
+                              hintText: '填了就走直查接口，例如：1297574',
+                              border: OutlineInputBorder(),
                             ),
                           ),
+                        ),
+                        const SizedBox(height: 10),
+                        wrapTelevisionDialogFieldTraversal(
+                          enabled: isTelevision,
+                          child: TextField(
+                            controller: titleController,
+                            focusNode: titleFocusNode,
+                            textInputAction: TextInputAction.next,
+                            decoration: const InputDecoration(
+                              labelText: '片名',
+                              hintText: '不填 Douban ID 时会用它搜索',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        wrapTelevisionDialogFieldTraversal(
+                          enabled: isTelevision,
+                          child: TextField(
+                            controller: actorController,
+                            focusNode: actorFocusNode,
+                            textInputAction: TextInputAction.next,
+                            decoration: const InputDecoration(
+                              labelText: '主演',
+                              hintText: '可选，用于提高搜索命中率',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        wrapTelevisionDialogFieldTraversal(
+                          enabled: isTelevision,
+                          child: TextField(
+                            controller: yearController,
+                            focusNode: yearFocusNode,
+                            keyboardType: TextInputType.number,
+                            textInputAction: TextInputAction.done,
+                            decoration: const InputDecoration(
+                              labelText: '年份',
+                              hintText: '可选，例如：1986',
+                              border: OutlineInputBorder(),
+                            ),
+                            onSubmitted: (_) => runTest(),
+                          ),
+                        ),
+                        if (loading) ...[
                           const SizedBox(height: 10),
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(2),
-                            child: wrapTelevisionDialogFieldTraversal(
-                              enabled: isTelevision,
-                              child: TextField(
-                                controller: titleController,
-                                focusNode: titleFocusNode,
-                                textInputAction: TextInputAction.next,
-                                decoration: const InputDecoration(
-                                  labelText: '片名',
-                                  hintText: '不填 Douban ID 时会用它搜索',
-                                  border: OutlineInputBorder(),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(3),
-                            child: wrapTelevisionDialogFieldTraversal(
-                              enabled: isTelevision,
-                              child: TextField(
-                                controller: actorController,
-                                focusNode: actorFocusNode,
-                                textInputAction: TextInputAction.next,
-                                decoration: const InputDecoration(
-                                  labelText: '主演',
-                                  hintText: '可选，用于提高搜索命中率',
-                                  border: OutlineInputBorder(),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(4),
-                            child: wrapTelevisionDialogFieldTraversal(
-                              enabled: isTelevision,
-                              child: TextField(
-                                controller: yearController,
-                                focusNode: yearFocusNode,
-                                keyboardType: TextInputType.number,
-                                textInputAction: TextInputAction.done,
-                                decoration: const InputDecoration(
-                                  labelText: '年份',
-                                  hintText: '可选，例如：1986',
-                                  border: OutlineInputBorder(),
-                                ),
-                                onSubmitted: (_) => runTest(),
-                              ),
-                            ),
-                          ),
-                          if (loading) ...[
-                            const SizedBox(height: 10),
-                            const LinearProgressIndicator(),
-                          ],
-                          if (message.trim().isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            Text(
-                              message,
-                              style: TextStyle(
-                                color: result == null
-                                    ? const Color(0xFFE79A9A)
-                                    : const Color(0xFF9FD6B3),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                          if (result != null) ...[
-                            const SizedBox(height: 12),
-                            _TestResultCard(
-                              title: result!.title,
-                              imageUrl: result!.posterUrl,
-                              lines: [
-                                '来源：${result!.provider.label}',
-                                '年份：${result!.year > 0 ? result!.year : '未知'}',
-                                '海报：${result!.posterUrl.trim().isEmpty ? '无' : '有'}',
-                                '豆瓣 ID：${result!.doubanId.trim().isEmpty ? '无' : result!.doubanId}',
-                                'IMDb ID：${result!.imdbId.trim().isEmpty ? '无' : result!.imdbId}',
-                                if (result!.ratingLabels.isNotEmpty)
-                                  '评分：${result!.ratingLabels.join(' · ')}',
-                              ],
-                              overview: result!.overview,
-                            ),
-                          ],
+                          const LinearProgressIndicator(),
                         ],
-                      ),
+                        if (message.trim().isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            message,
+                            style: TextStyle(
+                              color: result == null
+                                  ? const Color(0xFFE79A9A)
+                                  : const Color(0xFF9FD6B3),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                        if (result != null) ...[
+                          const SizedBox(height: 12),
+                          _TestResultCard(
+                            title: result!.title,
+                            imageUrl: result!.posterUrl,
+                            lines: [
+                              '来源：${result!.provider.label}',
+                              '年份：${result!.year > 0 ? result!.year : '未知'}',
+                              '海报：${result!.posterUrl.trim().isEmpty ? '无' : '有'}',
+                              '豆瓣 ID：${result!.doubanId.trim().isEmpty ? '无' : result!.doubanId}',
+                              'IMDb ID：${result!.imdbId.trim().isEmpty ? '无' : result!.imdbId}',
+                              if (result!.ratingLabels.isNotEmpty)
+                                '评分：${result!.ratingLabels.join(' · ')}',
+                            ],
+                            overview: result!.overview,
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  actions: [
-                    FocusTraversalOrder(
-                      order: const NumericFocusOrder(5),
-                      child: SettingsActionButton(
-                        label: '关闭',
-                        icon: Icons.close_rounded,
-                        focusNode: closeFocusNode,
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                        variant: StarflowButtonVariant.ghost,
-                      ),
-                    ),
-                    FocusTraversalOrder(
-                      order: const NumericFocusOrder(6),
-                      child: SettingsActionButton(
-                        label: '开始测试',
-                        icon: Icons.play_arrow_rounded,
-                        focusNode: startFocusNode,
-                        onPressed: loading ? null : runTest,
-                      ),
-                    ),
-                  ],
                 ),
+                actions: [
+                  SettingsActionButton(
+                    label: '关闭',
+                    icon: Icons.close_rounded,
+                    focusNode: closeFocusNode,
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    variant: StarflowButtonVariant.ghost,
+                  ),
+                  SettingsActionButton(
+                    label: '开始测试',
+                    icon: Icons.play_arrow_rounded,
+                    focusNode: startFocusNode,
+                    onPressed: loading ? null : runTest,
+                  ),
+                ],
               );
               return wrapTelevisionDialogBackHandling(
                 enabled: isTelevision,
@@ -688,132 +670,5 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
       closeFocusNode.dispose();
       startFocusNode.dispose();
     }
-  }
-}
-
-class _MetadataToggleTile extends StatelessWidget {
-  const _MetadataToggleTile({
-    required this.title,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final String title;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return StarflowToggleTile(
-      title: title,
-      value: value,
-      onChanged: onChanged,
-    );
-  }
-}
-
-class _TestResultCard extends StatelessWidget {
-  const _TestResultCard({
-    required this.title,
-    required this.lines,
-    this.imageUrl = '',
-    this.overview = '',
-  });
-
-  final String title;
-  final List<String> lines;
-  final String imageUrl;
-  final String overview;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (imageUrl.trim().isNotEmpty) ...[
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: AppNetworkImage(
-                imageUrl,
-                headers: networkImageHeadersForUrl(imageUrl),
-                width: 86,
-                height: 124,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return _TestPosterPlaceholder(title: title);
-                },
-                loadingBuilder: (context) {
-                  return const SizedBox(
-                    width: 86,
-                    height: 124,
-                    child: Center(
-                        child: CircularProgressIndicator(strokeWidth: 2)),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(width: 12),
-          ],
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 6),
-                for (final line in lines) Text(line),
-                if (overview.trim().isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    overview,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TestPosterPlaceholder extends StatelessWidget {
-  const _TestPosterPlaceholder({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final trimmed = title.trim();
-    final letter = trimmed.isEmpty ? '?' : trimmed.substring(0, 1);
-    return Container(
-      width: 86,
-      height: 124,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        letter.toUpperCase(),
-        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-            ),
-      ),
-    );
   }
 }

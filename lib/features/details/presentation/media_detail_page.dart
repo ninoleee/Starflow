@@ -1195,8 +1195,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       FocusNode(debugLabel: 'detail-hero-artwork');
   final FocusNode _heroPlayFocusNode =
       FocusNode(debugLabel: 'detail-hero-play');
-  final TvFocusMemoryController _tvFocusMemoryController =
-      TvFocusMemoryController();
   final RetainedAsyncController<MediaDetailTarget> _retainedTargetAsync =
       RetainedAsyncController<MediaDetailTarget>();
   final RetainedAsyncController<DetailSeriesBrowserState?>
@@ -1250,7 +1248,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     _heroArtworkFocusNode.dispose();
     _heroPlayFocusNode.dispose();
     _scrollController.dispose();
-    _tvFocusMemoryController.dispose();
     super.dispose();
   }
 
@@ -1269,7 +1266,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     }
     ref
         .read(metadataPrefetchConcurrencyLimiterProvider)
-        .deferForForegroundInteraction(reason: reason);
+        .deferForForegroundInteraction(
+          reason: reason,
+          resumeDelay: Duration(
+            milliseconds: ref
+                .read(appSettingsProvider)
+                .metadataPrefetchForegroundResumeDelayMs,
+          ),
+        );
   }
 
   @override
@@ -1710,7 +1714,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       }
       final foregroundLease = ref
           .read(metadataPrefetchConcurrencyLimiterProvider)
-          .beginForegroundWork(reason: 'detail.startup');
+          .beginForegroundWork(
+            reason: 'detail.startup',
+            resumeDelay: Duration(
+              milliseconds: ref
+                  .read(appSettingsProvider)
+                  .metadataPrefetchForegroundResumeDelayMs,
+            ),
+          );
       unawaited(
         _runDeferredDetailStartup(sessionId)
             .whenComplete(foregroundLease.release)
@@ -2425,7 +2436,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     _isRefreshingMetadata = true;
     final foregroundLease = ref
         .read(metadataPrefetchConcurrencyLimiterProvider)
-        .beginForegroundWork(reason: 'detail.metadata-refresh');
+        .beginForegroundWork(
+          reason: 'detail.metadata-refresh',
+          resumeDelay: Duration(
+            milliseconds: ref
+                .read(appSettingsProvider)
+                .metadataPrefetchForegroundResumeDelayMs,
+          ),
+        );
 
     var changed = false;
     try {
@@ -2871,8 +2889,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     return AppPrimaryScrollController(
       controller: _scrollController,
       child: TvPageFocusScope(
-        controller: _tvFocusMemoryController,
-        scopeId: _detailFocusScopeId(widget.target),
         isTelevision: isTelevision,
         child: Scaffold(
           backgroundColor: const Color(0xFF030914),
@@ -3096,30 +3112,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       ),
     );
   }
-}
-
-String _detailFocusScopeId(MediaDetailTarget target) {
-  return buildTvFocusScopeId(
-    prefix: 'detail',
-    segments: [
-      target.sourceKind?.name,
-      target.sourceId,
-      target.sectionId,
-      target.itemId,
-      target.tmdbId,
-      target.imdbId,
-      target.doubanId,
-      target.tvdbId,
-      target.wikidataId,
-      target.tmdbSetId,
-      target.itemType,
-      if (target.seasonNumber != null) 'season-${target.seasonNumber}',
-      if (target.episodeNumber != null) 'episode-${target.episodeNumber}',
-      if (target.year > 0) target.year,
-      target.searchQuery,
-      target.title,
-    ],
-  );
 }
 
 String _availabilityFeedbackLabel(String label) {

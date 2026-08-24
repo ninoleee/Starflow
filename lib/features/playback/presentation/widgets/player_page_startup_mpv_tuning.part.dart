@@ -128,27 +128,9 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
   }
 
   PlaybackMpvQualityPreset _resolveEffectiveMpvQualityPreset(
-    PlaybackTarget target,
+    PlaybackTarget _,
   ) {
-    final requestedPreset = _playbackMpvQualityPreset;
-    if (!_autoDowngradePlaybackQualityEnabled) {
-      return requestedPreset;
-    }
-    return resolveEffectivePlaybackMpvQualityPreset(
-      requestedPreset: requestedPreset,
-      target: target,
-      isWindowsPlatform:
-          !kIsWeb && defaultTargetPlatform == TargetPlatform.windows,
-      isTelevision: _isTelevisionPlaybackDevice,
-      isFullscreen: _isEmbeddedMpvFullscreen,
-      aggressiveTuningEnabled: _aggressivePlaybackTuningEnabled,
-      decodeMode: _playbackDecodeMode,
-      remotePlaybackOverride: _isLikelyRemotePlaybackTarget(target),
-      highRiskContainerOverride:
-          isHighRiskRemotePlaybackContainer(target) ||
-          _remotePreflightIndicatesRangeRisk,
-      startupProbeMegabitsPerSecond: _startupProbeMegabitsPerSecond,
-    );
+    return _playbackMpvQualityPreset;
   }
 
   Future<void> _syncEmbeddedMpvFullscreen(bool isFullscreen) async {
@@ -190,7 +172,7 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
       target: target,
       aggressiveTuning: aggressiveTuning,
       heavyPlayback: heavyPlayback,
-      startupProbeMegabitsPerSecond: _startupProbeMegabitsPerSecond,
+      preflightEstimatedMegabitsPerSecond: _networkEstimateMegabitsPerSecond,
       highRiskContainerOverride: highRiskContainer,
     );
     final backBufferBytes = _resolveMpvBackBufferSizeBytes(
@@ -282,8 +264,8 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
         'bufferSizeBytes': bufferSizeBytes,
         'backBufferBytes': backBufferBytes,
         'quarkTuning': isLikelyQuarkPlaybackTarget(target),
-        'startupProbeMbps':
-            _startupProbeMegabitsPerSecond?.toStringAsFixed(2) ?? '',
+        'preflightEstimatedMbps':
+            _networkEstimateMegabitsPerSecond?.toStringAsFixed(2) ?? '',
         'rangeRisk': _remotePreflightIndicatesRangeRisk,
         'remoteProfile': remoteProfile == null
             ? ''

@@ -4295,6 +4295,7 @@ void main() {
       wmdbMetadataMatchEnabled: false,
       tmdbMetadataMatchEnabled: false,
       imdbRatingMatchEnabled: false,
+      nasSourceRefreshConcurrency: 1,
     );
     final indexer = NasMediaIndexer(
       store: store,
@@ -4374,6 +4375,7 @@ void main() {
       wmdbMetadataMatchEnabled: false,
       tmdbMetadataMatchEnabled: false,
       imdbRatingMatchEnabled: false,
+      nasCollectionRefreshConcurrency: 2,
     );
     final indexer = NasMediaIndexer(
       store: store,
@@ -4389,9 +4391,6 @@ void main() {
       ),
       readSettings: () => settings,
       progressController: WebDavScrapeProgressController(),
-      concurrencyLimits: const NasMediaIndexerConcurrencyLimits(
-        collectionRefreshConcurrency: 2,
-      ),
     );
     const source = MediaSourceConfig(
       id: 'webdav-concurrent-collections',

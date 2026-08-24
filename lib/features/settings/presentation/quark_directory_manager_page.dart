@@ -252,6 +252,7 @@ class _QuarkDirectoryManagerPageState
     );
 
     return SettingsPageScaffold(
+      onBack: () => Navigator.of(context).pop(),
       trailing: trailing,
       children: [
         const Text(

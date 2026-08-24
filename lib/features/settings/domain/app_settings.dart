@@ -246,12 +246,29 @@ const int kMetadataPrefetchInitialBatchSizeMin = 6;
 const int kMetadataPrefetchInitialBatchSizeMax = 24;
 const int kMetadataPrefetchInitialBatchSizeStep = 6;
 const int kMetadataPrefetchInitialBatchSizeDefault = 12;
+const int kMetadataPrefetchBatchDelayMsMin = 0;
+const int kMetadataPrefetchBatchDelayMsMax = 1000;
+const int kMetadataPrefetchBatchDelayMsStep = 50;
+const int kMetadataPrefetchBatchDelayMsDefault = 300;
+const int kMetadataPrefetchForegroundResumeDelayMsMin = 0;
+const int kMetadataPrefetchForegroundResumeDelayMsMax = 2000;
+const int kMetadataPrefetchForegroundResumeDelayMsStep = 100;
+const int kMetadataPrefetchForegroundResumeDelayMsDefault = 400;
 const int kHomeFeedMaxConcurrencyMin = 1;
 const int kHomeFeedMaxConcurrencyMax = 6;
 const int kHomeFeedMaxConcurrencyDefault = 2;
 const int kHomeFeedInitialBatchSizeMin = 1;
 const int kHomeFeedInitialBatchSizeMax = 6;
 const int kHomeFeedInitialBatchSizeDefault = 2;
+const int kHomeFeedBatchDelayMsMin = 0;
+const int kHomeFeedBatchDelayMsMax = 1000;
+const int kHomeFeedBatchDelayMsStep = 50;
+const int kHomeFeedBatchDelayMsDefault = 350;
+const int kNasRefreshConcurrencyMin = 1;
+const int kNasRefreshConcurrencyMax = 4;
+const int kNasSourceRefreshConcurrencyDefault = 1;
+const int kNasCollectionRefreshConcurrencyDefault = 2;
+const int kNasEnrichmentConcurrencyDefault = 2;
 const int kLocalLogMaxSizeMbDefault = 20;
 const List<int> kLocalLogMaxSizeOptionsMb = <int>[5, 10, 20, 50, 100];
 const Set<AppLogLevel> kDefaultLocalLogRecordedLevels =
@@ -298,6 +315,26 @@ int clampHomeFeedInitialBatchSize(int value) {
     kHomeFeedInitialBatchSizeMax,
   );
 }
+
+int clampMetadataPrefetchBatchDelayMs(int value) => value.clamp(
+      kMetadataPrefetchBatchDelayMsMin,
+      kMetadataPrefetchBatchDelayMsMax,
+    );
+
+int clampMetadataPrefetchForegroundResumeDelayMs(int value) => value.clamp(
+      kMetadataPrefetchForegroundResumeDelayMsMin,
+      kMetadataPrefetchForegroundResumeDelayMsMax,
+    );
+
+int clampHomeFeedBatchDelayMs(int value) => value.clamp(
+      kHomeFeedBatchDelayMsMin,
+      kHomeFeedBatchDelayMsMax,
+    );
+
+int clampNasRefreshConcurrency(int value) => value.clamp(
+      kNasRefreshConcurrencyMin,
+      kNasRefreshConcurrencyMax,
+    );
 
 Set<AppLogLevel> parseLocalLogLevels(
   Object? value, {
@@ -843,24 +880,27 @@ class AppSettings {
     this.translucentEffectsEnabled = true,
     this.autoHideNavigationBarEnabled = true,
     this.navigationDestinationIds = kDefaultNavigationDestinationIds,
-    this.highPerformanceModeEnabled = false,
     this.performanceReduceDecorationsEnabled = false,
     this.performanceReduceMotionEnabled = false,
     this.performanceStaticNavigationEnabled = false,
-    this.performanceLightweightTvFocusEnabled = false,
     this.performanceStaticHomeHeroEnabled = false,
     this.performanceLightweightHomeHeroEnabled = false,
     this.performanceLiveItemHeroOverlayEnabled = true,
-    this.performanceSlimDetailHeroEnabled = false,
-    this.performanceLeanPlaybackUiEnabled = false,
     this.performanceAggressivePlaybackTuningEnabled = false,
-    this.performanceAutoDowngradeHeavyPlaybackEnabled = false,
     this.metadataPrefetchMaxConcurrency =
         kMetadataPrefetchMaxConcurrencyDefault,
     this.metadataPrefetchInitialBatchSize =
         kMetadataPrefetchInitialBatchSizeDefault,
+    this.metadataPrefetchBatchDelayMs = kMetadataPrefetchBatchDelayMsDefault,
+    this.metadataPrefetchForegroundResumeDelayMs =
+        kMetadataPrefetchForegroundResumeDelayMsDefault,
     this.homeFeedMaxConcurrency = kHomeFeedMaxConcurrencyDefault,
     this.homeFeedInitialBatchSize = kHomeFeedInitialBatchSizeDefault,
+    this.homeFeedBatchDelayMs = kHomeFeedBatchDelayMsDefault,
+    this.nasSourceRefreshConcurrency = kNasSourceRefreshConcurrencyDefault,
+    this.nasCollectionRefreshConcurrency =
+        kNasCollectionRefreshConcurrencyDefault,
+    this.nasEnrichmentConcurrency = kNasEnrichmentConcurrencyDefault,
     this.tmdbMetadataMatchEnabled = false,
     this.wmdbMetadataMatchEnabled = false,
     this.metadataMatchPriority = MetadataMatchProvider.tmdb,
@@ -914,22 +954,23 @@ class AppSettings {
   final bool translucentEffectsEnabled;
   final bool autoHideNavigationBarEnabled;
   final List<String> navigationDestinationIds;
-  final bool highPerformanceModeEnabled;
   final bool performanceReduceDecorationsEnabled;
   final bool performanceReduceMotionEnabled;
   final bool performanceStaticNavigationEnabled;
-  final bool performanceLightweightTvFocusEnabled;
   final bool performanceStaticHomeHeroEnabled;
   final bool performanceLightweightHomeHeroEnabled;
   final bool performanceLiveItemHeroOverlayEnabled;
-  final bool performanceSlimDetailHeroEnabled;
-  final bool performanceLeanPlaybackUiEnabled;
   final bool performanceAggressivePlaybackTuningEnabled;
-  final bool performanceAutoDowngradeHeavyPlaybackEnabled;
   final int metadataPrefetchMaxConcurrency;
   final int metadataPrefetchInitialBatchSize;
+  final int metadataPrefetchBatchDelayMs;
+  final int metadataPrefetchForegroundResumeDelayMs;
   final int homeFeedMaxConcurrency;
   final int homeFeedInitialBatchSize;
+  final int homeFeedBatchDelayMs;
+  final int nasSourceRefreshConcurrency;
+  final int nasCollectionRefreshConcurrency;
+  final int nasEnrichmentConcurrency;
   final bool tmdbMetadataMatchEnabled;
   final bool wmdbMetadataMatchEnabled;
   final MetadataMatchProvider metadataMatchPriority;
@@ -981,22 +1022,23 @@ class AppSettings {
     bool? translucentEffectsEnabled,
     bool? autoHideNavigationBarEnabled,
     List<String>? navigationDestinationIds,
-    bool? highPerformanceModeEnabled,
     bool? performanceReduceDecorationsEnabled,
     bool? performanceReduceMotionEnabled,
     bool? performanceStaticNavigationEnabled,
-    bool? performanceLightweightTvFocusEnabled,
     bool? performanceStaticHomeHeroEnabled,
     bool? performanceLightweightHomeHeroEnabled,
     bool? performanceLiveItemHeroOverlayEnabled,
-    bool? performanceSlimDetailHeroEnabled,
-    bool? performanceLeanPlaybackUiEnabled,
     bool? performanceAggressivePlaybackTuningEnabled,
-    bool? performanceAutoDowngradeHeavyPlaybackEnabled,
     int? metadataPrefetchMaxConcurrency,
     int? metadataPrefetchInitialBatchSize,
+    int? metadataPrefetchBatchDelayMs,
+    int? metadataPrefetchForegroundResumeDelayMs,
     int? homeFeedMaxConcurrency,
     int? homeFeedInitialBatchSize,
+    int? homeFeedBatchDelayMs,
+    int? nasSourceRefreshConcurrency,
+    int? nasCollectionRefreshConcurrency,
+    int? nasEnrichmentConcurrency,
     bool? tmdbMetadataMatchEnabled,
     bool? wmdbMetadataMatchEnabled,
     MetadataMatchProvider? metadataMatchPriority,
@@ -1060,8 +1102,6 @@ class AppSettings {
           autoHideNavigationBarEnabled ?? this.autoHideNavigationBarEnabled,
       navigationDestinationIds:
           navigationDestinationIds ?? this.navigationDestinationIds,
-      highPerformanceModeEnabled:
-          highPerformanceModeEnabled ?? this.highPerformanceModeEnabled,
       performanceReduceDecorationsEnabled:
           performanceReduceDecorationsEnabled ??
               this.performanceReduceDecorationsEnabled,
@@ -1069,9 +1109,6 @@ class AppSettings {
           performanceReduceMotionEnabled ?? this.performanceReduceMotionEnabled,
       performanceStaticNavigationEnabled: performanceStaticNavigationEnabled ??
           this.performanceStaticNavigationEnabled,
-      performanceLightweightTvFocusEnabled:
-          performanceLightweightTvFocusEnabled ??
-              this.performanceLightweightTvFocusEnabled,
       performanceStaticHomeHeroEnabled: performanceStaticHomeHeroEnabled ??
           this.performanceStaticHomeHeroEnabled,
       performanceLightweightHomeHeroEnabled:
@@ -1080,16 +1117,9 @@ class AppSettings {
       performanceLiveItemHeroOverlayEnabled:
           performanceLiveItemHeroOverlayEnabled ??
               this.performanceLiveItemHeroOverlayEnabled,
-      performanceSlimDetailHeroEnabled: performanceSlimDetailHeroEnabled ??
-          this.performanceSlimDetailHeroEnabled,
-      performanceLeanPlaybackUiEnabled: performanceLeanPlaybackUiEnabled ??
-          this.performanceLeanPlaybackUiEnabled,
       performanceAggressivePlaybackTuningEnabled:
           performanceAggressivePlaybackTuningEnabled ??
               this.performanceAggressivePlaybackTuningEnabled,
-      performanceAutoDowngradeHeavyPlaybackEnabled:
-          performanceAutoDowngradeHeavyPlaybackEnabled ??
-              this.performanceAutoDowngradeHeavyPlaybackEnabled,
       metadataPrefetchMaxConcurrency: metadataPrefetchMaxConcurrency == null
           ? this.metadataPrefetchMaxConcurrency
           : clampMetadataPrefetchMaxConcurrency(metadataPrefetchMaxConcurrency),
@@ -1098,12 +1128,33 @@ class AppSettings {
           : clampMetadataPrefetchInitialBatchSize(
               metadataPrefetchInitialBatchSize,
             ),
+      metadataPrefetchBatchDelayMs: metadataPrefetchBatchDelayMs == null
+          ? this.metadataPrefetchBatchDelayMs
+          : clampMetadataPrefetchBatchDelayMs(metadataPrefetchBatchDelayMs),
+      metadataPrefetchForegroundResumeDelayMs:
+          metadataPrefetchForegroundResumeDelayMs == null
+              ? this.metadataPrefetchForegroundResumeDelayMs
+              : clampMetadataPrefetchForegroundResumeDelayMs(
+                  metadataPrefetchForegroundResumeDelayMs,
+                ),
       homeFeedMaxConcurrency: homeFeedMaxConcurrency == null
           ? this.homeFeedMaxConcurrency
           : clampHomeFeedMaxConcurrency(homeFeedMaxConcurrency),
       homeFeedInitialBatchSize: homeFeedInitialBatchSize == null
           ? this.homeFeedInitialBatchSize
           : clampHomeFeedInitialBatchSize(homeFeedInitialBatchSize),
+      homeFeedBatchDelayMs: homeFeedBatchDelayMs == null
+          ? this.homeFeedBatchDelayMs
+          : clampHomeFeedBatchDelayMs(homeFeedBatchDelayMs),
+      nasSourceRefreshConcurrency: nasSourceRefreshConcurrency == null
+          ? this.nasSourceRefreshConcurrency
+          : clampNasRefreshConcurrency(nasSourceRefreshConcurrency),
+      nasCollectionRefreshConcurrency: nasCollectionRefreshConcurrency == null
+          ? this.nasCollectionRefreshConcurrency
+          : clampNasRefreshConcurrency(nasCollectionRefreshConcurrency),
+      nasEnrichmentConcurrency: nasEnrichmentConcurrency == null
+          ? this.nasEnrichmentConcurrency
+          : clampNasRefreshConcurrency(nasEnrichmentConcurrency),
       tmdbMetadataMatchEnabled:
           tmdbMetadataMatchEnabled ?? this.tmdbMetadataMatchEnabled,
       wmdbMetadataMatchEnabled:
@@ -1192,28 +1243,28 @@ class AppSettings {
       'translucentEffectsEnabled': translucentEffectsEnabled,
       'autoHideNavigationBarEnabled': autoHideNavigationBarEnabled,
       'navigationDestinationIds': navigationDestinationIds,
-      'highPerformanceModeEnabled': highPerformanceModeEnabled,
       'performanceReduceDecorationsEnabled':
           performanceReduceDecorationsEnabled,
       'performanceReduceMotionEnabled': performanceReduceMotionEnabled,
       'performanceStaticNavigationEnabled': performanceStaticNavigationEnabled,
-      'performanceLightweightTvFocusEnabled':
-          performanceLightweightTvFocusEnabled,
       'performanceStaticHomeHeroEnabled': performanceStaticHomeHeroEnabled,
       'performanceLightweightHomeHeroEnabled':
           performanceLightweightHomeHeroEnabled,
       'performanceLiveItemHeroOverlayEnabled':
           performanceLiveItemHeroOverlayEnabled,
-      'performanceSlimDetailHeroEnabled': performanceSlimDetailHeroEnabled,
-      'performanceLeanPlaybackUiEnabled': performanceLeanPlaybackUiEnabled,
       'performanceAggressivePlaybackTuningEnabled':
           performanceAggressivePlaybackTuningEnabled,
-      'performanceAutoDowngradeHeavyPlaybackEnabled':
-          performanceAutoDowngradeHeavyPlaybackEnabled,
       'metadataPrefetchMaxConcurrency': metadataPrefetchMaxConcurrency,
       'metadataPrefetchInitialBatchSize': metadataPrefetchInitialBatchSize,
+      'metadataPrefetchBatchDelayMs': metadataPrefetchBatchDelayMs,
+      'metadataPrefetchForegroundResumeDelayMs':
+          metadataPrefetchForegroundResumeDelayMs,
       'homeFeedMaxConcurrency': homeFeedMaxConcurrency,
       'homeFeedInitialBatchSize': homeFeedInitialBatchSize,
+      'homeFeedBatchDelayMs': homeFeedBatchDelayMs,
+      'nasSourceRefreshConcurrency': nasSourceRefreshConcurrency,
+      'nasCollectionRefreshConcurrency': nasCollectionRefreshConcurrency,
+      'nasEnrichmentConcurrency': nasEnrichmentConcurrency,
       'tmdbMetadataMatchEnabled': tmdbMetadataMatchEnabled,
       'wmdbMetadataMatchEnabled': wmdbMetadataMatchEnabled,
       'metadataMatchPriority': metadataMatchPriority.name,
@@ -1271,6 +1322,19 @@ class AppSettings {
               HomeModuleConfig.fromJson(Map<String, dynamic>.from(item as Map)),
         )
         .toList();
+    final highPerformanceModeEnabled =
+        json['highPerformanceModeEnabled'] as bool? ?? false;
+    final shouldMigrateLegacyHighPerformanceScheduling =
+        highPerformanceModeEnabled &&
+            !json.containsKey('metadataPrefetchBatchDelayMs') &&
+            (json['metadataPrefetchMaxConcurrency'] as num?)?.toInt() ==
+                kMetadataPrefetchMaxConcurrencyMin &&
+            (json['metadataPrefetchInitialBatchSize'] as num?)?.toInt() ==
+                kMetadataPrefetchInitialBatchSizeMin &&
+            (json['homeFeedMaxConcurrency'] as num?)?.toInt() ==
+                kHomeFeedMaxConcurrencyMin &&
+            (json['homeFeedInitialBatchSize'] as num?)?.toInt() ==
+                kHomeFeedInitialBatchSizeMin;
     return AppSettings(
       mediaSources: (json['mediaSources'] as List<dynamic>? ?? [])
           .map(
@@ -1322,46 +1386,68 @@ class AppSettings {
               _parseNormalizedStringList(json['navigationDestinationIds']),
             )
           : kDefaultNavigationDestinationIds,
-      highPerformanceModeEnabled:
-          json['highPerformanceModeEnabled'] as bool? ?? false,
       performanceReduceDecorationsEnabled:
           json['performanceReduceDecorationsEnabled'] as bool? ?? false,
       performanceReduceMotionEnabled:
           json['performanceReduceMotionEnabled'] as bool? ?? false,
       performanceStaticNavigationEnabled:
           json['performanceStaticNavigationEnabled'] as bool? ?? false,
-      performanceLightweightTvFocusEnabled:
-          json['performanceLightweightTvFocusEnabled'] as bool? ?? false,
       performanceStaticHomeHeroEnabled:
           json['performanceStaticHomeHeroEnabled'] as bool? ?? false,
       performanceLightweightHomeHeroEnabled:
           json['performanceLightweightHomeHeroEnabled'] as bool? ?? false,
       performanceLiveItemHeroOverlayEnabled:
           json['performanceLiveItemHeroOverlayEnabled'] as bool? ?? true,
-      performanceSlimDetailHeroEnabled:
-          json['performanceSlimDetailHeroEnabled'] as bool? ?? false,
-      performanceLeanPlaybackUiEnabled:
-          json['performanceLeanPlaybackUiEnabled'] as bool? ?? false,
       performanceAggressivePlaybackTuningEnabled:
           json['performanceAggressivePlaybackTuningEnabled'] as bool? ?? false,
-      performanceAutoDowngradeHeavyPlaybackEnabled:
-          json['performanceAutoDowngradeHeavyPlaybackEnabled'] as bool? ??
-              false,
       metadataPrefetchMaxConcurrency: clampMetadataPrefetchMaxConcurrency(
-        (json['metadataPrefetchMaxConcurrency'] as num?)?.toInt() ??
-            kMetadataPrefetchMaxConcurrencyDefault,
+        shouldMigrateLegacyHighPerformanceScheduling
+            ? kMetadataPrefetchMaxConcurrencyDefault
+            : (json['metadataPrefetchMaxConcurrency'] as num?)?.toInt() ??
+                kMetadataPrefetchMaxConcurrencyDefault,
       ),
       metadataPrefetchInitialBatchSize: clampMetadataPrefetchInitialBatchSize(
-        (json['metadataPrefetchInitialBatchSize'] as num?)?.toInt() ??
-            kMetadataPrefetchInitialBatchSizeDefault,
+        shouldMigrateLegacyHighPerformanceScheduling
+            ? kMetadataPrefetchInitialBatchSizeDefault
+            : (json['metadataPrefetchInitialBatchSize'] as num?)?.toInt() ??
+                kMetadataPrefetchInitialBatchSizeDefault,
+      ),
+      metadataPrefetchBatchDelayMs: clampMetadataPrefetchBatchDelayMs(
+        (json['metadataPrefetchBatchDelayMs'] as num?)?.toInt() ??
+            kMetadataPrefetchBatchDelayMsDefault,
+      ),
+      metadataPrefetchForegroundResumeDelayMs:
+          clampMetadataPrefetchForegroundResumeDelayMs(
+        (json['metadataPrefetchForegroundResumeDelayMs'] as num?)?.toInt() ??
+            kMetadataPrefetchForegroundResumeDelayMsDefault,
       ),
       homeFeedMaxConcurrency: clampHomeFeedMaxConcurrency(
-        (json['homeFeedMaxConcurrency'] as num?)?.toInt() ??
-            kHomeFeedMaxConcurrencyDefault,
+        shouldMigrateLegacyHighPerformanceScheduling
+            ? kHomeFeedMaxConcurrencyDefault
+            : (json['homeFeedMaxConcurrency'] as num?)?.toInt() ??
+                kHomeFeedMaxConcurrencyDefault,
       ),
       homeFeedInitialBatchSize: clampHomeFeedInitialBatchSize(
-        (json['homeFeedInitialBatchSize'] as num?)?.toInt() ??
-            kHomeFeedInitialBatchSizeDefault,
+        shouldMigrateLegacyHighPerformanceScheduling
+            ? kHomeFeedInitialBatchSizeDefault
+            : (json['homeFeedInitialBatchSize'] as num?)?.toInt() ??
+                kHomeFeedInitialBatchSizeDefault,
+      ),
+      homeFeedBatchDelayMs: clampHomeFeedBatchDelayMs(
+        (json['homeFeedBatchDelayMs'] as num?)?.toInt() ??
+            kHomeFeedBatchDelayMsDefault,
+      ),
+      nasSourceRefreshConcurrency: clampNasRefreshConcurrency(
+        (json['nasSourceRefreshConcurrency'] as num?)?.toInt() ??
+            kNasSourceRefreshConcurrencyDefault,
+      ),
+      nasCollectionRefreshConcurrency: clampNasRefreshConcurrency(
+        (json['nasCollectionRefreshConcurrency'] as num?)?.toInt() ??
+            kNasCollectionRefreshConcurrencyDefault,
+      ),
+      nasEnrichmentConcurrency: clampNasRefreshConcurrency(
+        (json['nasEnrichmentConcurrency'] as num?)?.toInt() ??
+            kNasEnrichmentConcurrencyDefault,
       ),
       tmdbMetadataMatchEnabled: json['tmdbMetadataMatchEnabled'] as bool? ??
           legacyImdbAutoMatchEnabled,
@@ -1447,43 +1533,19 @@ class AppSettings {
   }
 }
 
-enum AppUiPerformanceTier { rich, balanced, performance }
-
 extension AppSettingsPerformanceX on AppSettings {
-  AppSettings applyHighPerformancePreset() {
+  AppSettings applyStartupCrashRecoveryPreset() {
     return copyWith(
-      highPerformanceModeEnabled: true,
       translucentEffectsEnabled: false,
       autoHideNavigationBarEnabled: false,
       homeHeroBackgroundEnabled: false,
       performanceReduceDecorationsEnabled: true,
       performanceReduceMotionEnabled: true,
       performanceStaticNavigationEnabled: true,
-      performanceLightweightTvFocusEnabled: true,
       performanceStaticHomeHeroEnabled: true,
       performanceLightweightHomeHeroEnabled: true,
       performanceLiveItemHeroOverlayEnabled: false,
-      performanceSlimDetailHeroEnabled: true,
-      performanceLeanPlaybackUiEnabled: true,
       performanceAggressivePlaybackTuningEnabled: true,
-      performanceAutoDowngradeHeavyPlaybackEnabled: true,
-      metadataPrefetchMaxConcurrency: kMetadataPrefetchMaxConcurrencyMin,
-      metadataPrefetchInitialBatchSize: kMetadataPrefetchInitialBatchSizeMin,
-      homeFeedMaxConcurrency: kHomeFeedMaxConcurrencyMin,
-      homeFeedInitialBatchSize: kHomeFeedInitialBatchSizeMin,
-    );
-  }
-
-  AppSettings applyStartupCrashRecoveryPreset() {
-    final savedMetadataPrefetchMaxConcurrency = metadataPrefetchMaxConcurrency;
-    final savedMetadataPrefetchInitialBatchSize =
-        metadataPrefetchInitialBatchSize;
-    return applyHighPerformancePreset().copyWith(
-      // Keep user-controlled metadata settings stable. Recovery disables the
-      // automatic startup refresh below, which is sufficient to prevent a
-      // second heavy cold start without silently changing online completion.
-      metadataPrefetchMaxConcurrency: savedMetadataPrefetchMaxConcurrency,
-      metadataPrefetchInitialBatchSize: savedMetadataPrefetchInitialBatchSize,
       homeStartupAutoRefreshEnabled: false,
       homeStartupAutoRefreshEmbyEnabled: false,
       playbackBackgroundPlaybackEnabled: false,
@@ -1495,61 +1557,12 @@ extension AppSettingsPerformanceX on AppSettings {
     );
   }
 
-  AppSettings clearHighPerformancePresetMarker() {
-    return copyWith(
-      highPerformanceModeEnabled: false,
-      translucentEffectsEnabled: true,
-      autoHideNavigationBarEnabled: true,
-      homeHeroBackgroundEnabled: true,
-      performanceReduceDecorationsEnabled: false,
-      performanceReduceMotionEnabled: false,
-      performanceStaticNavigationEnabled: false,
-      performanceLightweightTvFocusEnabled: false,
-      performanceStaticHomeHeroEnabled: false,
-      performanceLightweightHomeHeroEnabled: false,
-      performanceLiveItemHeroOverlayEnabled: true,
-      performanceSlimDetailHeroEnabled: false,
-      performanceLeanPlaybackUiEnabled: false,
-      performanceAggressivePlaybackTuningEnabled: false,
-      performanceAutoDowngradeHeavyPlaybackEnabled: false,
-      metadataPrefetchMaxConcurrency: kMetadataPrefetchMaxConcurrencyDefault,
-      metadataPrefetchInitialBatchSize:
-          kMetadataPrefetchInitialBatchSizeDefault,
-      homeFeedMaxConcurrency: kHomeFeedMaxConcurrencyDefault,
-      homeFeedInitialBatchSize: kHomeFeedInitialBatchSizeDefault,
-    );
-  }
-
-  AppUiPerformanceTier get effectiveUiPerformanceTier {
-    final enabledPerformanceToggles = <bool>[
-      performanceReduceDecorationsEnabled,
-      performanceReduceMotionEnabled,
-      performanceStaticNavigationEnabled,
-      performanceLightweightTvFocusEnabled,
-      performanceStaticHomeHeroEnabled,
-      performanceLightweightHomeHeroEnabled,
-      !performanceLiveItemHeroOverlayEnabled,
-      performanceSlimDetailHeroEnabled,
-      performanceLeanPlaybackUiEnabled,
-    ].where((enabled) => enabled).length;
-
-    if (enabledPerformanceToggles >= 3) {
-      return AppUiPerformanceTier.performance;
-    }
-    if (enabledPerformanceToggles > 0) {
-      return AppUiPerformanceTier.balanced;
-    }
-    return AppUiPerformanceTier.rich;
-  }
-
   bool get effectiveReduceMotionEnabled {
-    return performanceReduceMotionEnabled ||
-        effectiveUiPerformanceTier == AppUiPerformanceTier.performance;
+    return performanceReduceMotionEnabled;
   }
 
   bool get effectiveStaticNavigationEnabled {
-    return performanceStaticNavigationEnabled ||
-        effectiveUiPerformanceTier == AppUiPerformanceTier.performance;
+    return performanceStaticNavigationEnabled;
   }
 
   bool get effectiveNavigationAnimationEnabled {
@@ -1595,30 +1608,19 @@ extension AppSettingsPerformanceX on AppSettings {
   }
 
   bool effectiveLeanPlaybackUiEnabled({required bool isTelevision}) {
-    return isTelevision ||
-        performanceLeanPlaybackUiEnabled ||
-        effectiveUiPerformanceTier == AppUiPerformanceTier.performance;
+    return isTelevision;
   }
 
   bool effectiveLightweightHomeHeroEnabled({required bool isTelevision}) {
-    return performanceLightweightHomeHeroEnabled ||
-        effectiveUiPerformanceTier == AppUiPerformanceTier.performance;
+    return performanceLightweightHomeHeroEnabled;
   }
 
   bool effectiveSlimDetailHeroEnabled({required bool isTelevision}) {
-    return isTelevision ||
-        performanceSlimDetailHeroEnabled ||
-        effectiveUiPerformanceTier == AppUiPerformanceTier.performance;
+    return isTelevision;
   }
 
   bool effectiveLightweightTvFocusEnabled({required bool isTelevision}) {
-    return isTelevision &&
-        (performanceLightweightTvFocusEnabled ||
-            effectiveUiPerformanceTier == AppUiPerformanceTier.performance);
-  }
-
-  bool get effectiveStartupProbeEnabled {
-    return effectiveUiPerformanceTier != AppUiPerformanceTier.performance;
+    return isTelevision;
   }
 
   bool get effectiveFullscreenRouteAnimationEnabled {

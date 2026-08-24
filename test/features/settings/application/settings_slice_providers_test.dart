@@ -108,11 +108,16 @@ void main() {
 
   test('performance slice respects performance toggles', () {
     final settings = AppSettings.fromJson({
-      'highPerformanceModeEnabled': true,
       'translucentEffectsEnabled': false,
       'autoHideNavigationBarEnabled': false,
       'homeHeroBackgroundEnabled': false,
+      'performanceReduceDecorationsEnabled': true,
+      'performanceReduceMotionEnabled': true,
+      'performanceStaticNavigationEnabled': true,
+      'performanceStaticHomeHeroEnabled': true,
+      'performanceLightweightHomeHeroEnabled': true,
       'performanceLiveItemHeroOverlayEnabled': false,
+      'performanceAggressivePlaybackTuningEnabled': true,
       'metadataPrefetchMaxConcurrency': 4,
       'metadataPrefetchInitialBatchSize': 18,
     });
@@ -127,16 +132,29 @@ void main() {
     expect(
       container.read(settingsPerformanceSliceProvider),
       const SettingsPerformanceSlice(
-        highPerformanceModeEnabled: true,
         translucentEffectsEnabled: false,
         autoHideNavigationBarEnabled: false,
         homeHeroBackgroundEnabled: false,
+        reduceDecorationsEnabled: true,
+        reduceMotionEnabled: true,
+        staticNavigationEnabled: true,
+        staticHomeHeroEnabled: true,
+        lightweightHomeHeroEnabled: true,
         configuredLiveItemHeroOverlayEnabled: false,
         effectiveLiveItemHeroOverlayEnabled: false,
+        aggressivePlaybackTuningEnabled: true,
         metadataPrefetchMaxConcurrency: 4,
         metadataPrefetchInitialBatchSize: 18,
+        metadataPrefetchBatchDelayMs: kMetadataPrefetchBatchDelayMsDefault,
+        metadataPrefetchForegroundResumeDelayMs:
+            kMetadataPrefetchForegroundResumeDelayMsDefault,
         homeFeedMaxConcurrency: kHomeFeedMaxConcurrencyDefault,
         homeFeedInitialBatchSize: kHomeFeedInitialBatchSizeDefault,
+        homeFeedBatchDelayMs: kHomeFeedBatchDelayMsDefault,
+        nasSourceRefreshConcurrency: kNasSourceRefreshConcurrencyDefault,
+        nasCollectionRefreshConcurrency:
+            kNasCollectionRefreshConcurrencyDefault,
+        nasEnrichmentConcurrency: kNasEnrichmentConcurrencyDefault,
       ),
     );
   });

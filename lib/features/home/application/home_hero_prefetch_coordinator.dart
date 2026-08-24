@@ -112,6 +112,10 @@ class HomeHeroPrefetchCoordinator {
                 ref.read(appSettingsProvider).metadataPrefetchMaxConcurrency,
             initialBatchSize:
                 ref.read(appSettingsProvider).metadataPrefetchInitialBatchSize,
+            backgroundBatchDelay: Duration(
+              milliseconds:
+                  ref.read(appSettingsProvider).metadataPrefetchBatchDelayMs,
+            ),
             task: () => _refreshSingleMetadataIfNeeded(
               ref: ref,
               target: target,

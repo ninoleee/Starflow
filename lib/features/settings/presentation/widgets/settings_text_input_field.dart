@@ -21,6 +21,8 @@ class SettingsTextInputField extends ConsumerWidget {
     this.autofillHints,
     this.alignLabelWithHint = false,
     this.summaryBuilder,
+    this.autofocus = false,
+    this.focusId,
   });
 
   final TextEditingController controller;
@@ -36,6 +38,8 @@ class SettingsTextInputField extends ConsumerWidget {
   final Iterable<String>? autofillHints;
   final bool alignLabelWithHint;
   final String Function(String value)? summaryBuilder;
+  final bool autofocus;
+  final String? focusId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -51,6 +55,7 @@ class SettingsTextInputField extends ConsumerWidget {
         autocorrect: autocorrect,
         inputFormatters: inputFormatters,
         autofillHints: autofillHints,
+        autofocus: autofocus,
         decoration: InputDecoration(
           labelText: labelText,
           hintText: hintText.isEmpty ? null : hintText,
@@ -65,6 +70,8 @@ class SettingsTextInputField extends ConsumerWidget {
         return SettingsSelectionTile(
           title: labelText,
           value: _resolveTelevisionSummary(value.text),
+          autofocus: autofocus,
+          focusId: focusId,
           onPressed: () => _openTelevisionEditor(context),
         );
       },

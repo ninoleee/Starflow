@@ -7,6 +7,24 @@ import 'package:starflow/features/playback/domain/playback_models.dart';
 
 void main() {
   group('PlaybackRemotePreflight', () {
+    test('derives a reusable speed estimate from sampled bytes and duration',
+        () {
+      const result = PlaybackRemotePreflightResult(
+        attempted: true,
+        canStream: true,
+        acceptableStatus: true,
+        supportsByteRange: true,
+        authLikelyInvalid: false,
+        linkLikelyExpired: false,
+        statusCode: 206,
+        sampledBytes: 128 * 1024,
+        failureReason: PlaybackRemotePreflightFailureReason.none,
+        duration: Duration(milliseconds: 500),
+      );
+
+      expect(result.estimatedSpeedBytesPerSecond, 256 * 1024);
+    });
+
     test('returns unsupported scheme for non-http urls', () async {
       final helper = PlaybackRemotePreflight(
         clientFactory: () => MockClient((_) async => http.Response('', 200)),
@@ -106,7 +124,8 @@ void main() {
 
       expect(result.canStream, isFalse);
       expect(result.authLikelyInvalid, isTrue);
-      expect(result.failureReason, PlaybackRemotePreflightFailureReason.unauthorized);
+      expect(result.failureReason,
+          PlaybackRemotePreflightFailureReason.unauthorized);
     });
 
     test('reports likely expired link for 410', () async {
@@ -125,7 +144,8 @@ void main() {
 
       expect(result.canStream, isFalse);
       expect(result.linkLikelyExpired, isTrue);
-      expect(result.failureReason, PlaybackRemotePreflightFailureReason.linkExpired);
+      expect(result.failureReason,
+          PlaybackRemotePreflightFailureReason.linkExpired);
     });
 
     test('reports timeout when request exceeds short timeout', () async {
@@ -152,7 +172,8 @@ void main() {
       );
 
       expect(result.canStream, isFalse);
-      expect(result.failureReason, PlaybackRemotePreflightFailureReason.timeout);
+      expect(
+          result.failureReason, PlaybackRemotePreflightFailureReason.timeout);
     });
 
     test('reports server failure for 5xx', () async {
@@ -171,10 +192,12 @@ void main() {
 
       expect(result.canStream, isFalse);
       expect(result.acceptableStatus, isFalse);
-      expect(result.failureReason, PlaybackRemotePreflightFailureReason.serverError);
+      expect(result.failureReason,
+          PlaybackRemotePreflightFailureReason.serverError);
     });
 
-    test('prefers actual remote address when stream url points to loopback relay',
+    test(
+        'prefers actual remote address when stream url points to loopback relay',
         () async {
       http.BaseRequest? capturedRequest;
       final helper = PlaybackRemotePreflight(

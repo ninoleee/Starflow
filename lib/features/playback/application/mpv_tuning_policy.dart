@@ -1,7 +1,6 @@
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
-import 'package:starflow/features/settings/domain/app_settings.dart';
 
 const Set<String> _kBufferedRemotePlaybackSchemes = {
   'http',
@@ -108,107 +107,6 @@ bool _isVeryHeavyPlaybackTargetMetadata(PlaybackTarget target) {
       (is4k && codecComplexityRisk && veryHighBitrate);
 }
 
-PlaybackMpvQualityPreset resolveEffectivePlaybackMpvQualityPreset({
-  required PlaybackMpvQualityPreset requestedPreset,
-  required PlaybackTarget target,
-  required bool isWindowsPlatform,
-  required bool isTelevision,
-  required bool isFullscreen,
-  required bool aggressiveTuningEnabled,
-  required PlaybackDecodeMode decodeMode,
-  bool? remotePlaybackOverride,
-  bool? highRiskContainerOverride,
-  double? startupProbeMegabitsPerSecond,
-}) {
-  if (requestedPreset == PlaybackMpvQualityPreset.performanceFirst) {
-    return requestedPreset;
-  }
-
-  final codecComplexityRisk = _isCodecComplexityRisk(target);
-  final heavyPlayback = isHeavyPlaybackTargetMetadata(target);
-  final veryHeavyPlayback = _isVeryHeavyPlaybackTargetMetadata(target);
-  final remotePlayback =
-      remotePlaybackOverride ?? isLikelyRemotePlaybackTargetTransport(target);
-  final highRiskContainer =
-      highRiskContainerOverride ?? isHighRiskRemotePlaybackContainer(target);
-  final quarkPlayback = isLikelyQuarkPlaybackTarget(target);
-  final measuredSpeedMbps = startupProbeMegabitsPerSecond;
-  final lowStartupSpeed = measuredSpeedMbps != null &&
-      measuredSpeedMbps > 0 &&
-      measuredSpeedMbps < 16;
-  final criticalStartupSpeed = measuredSpeedMbps != null &&
-      measuredSpeedMbps > 0 &&
-      measuredSpeedMbps < 8;
-  final constrainedStartupSpeed = measuredSpeedMbps != null &&
-      measuredSpeedMbps > 0 &&
-      measuredSpeedMbps < 24;
-  final windowedWindows = isWindowsPlatform && !isTelevision && !isFullscreen;
-  final remoteRisk = remotePlayback &&
-      (quarkPlayback ||
-          heavyPlayback ||
-          veryHeavyPlayback ||
-          codecComplexityRisk ||
-          highRiskContainer ||
-          constrainedStartupSpeed);
-  final severeRemoteRisk = remotePlayback &&
-      (criticalStartupSpeed ||
-          veryHeavyPlayback ||
-          (decodeMode == PlaybackDecodeMode.softwarePreferred &&
-              (codecComplexityRisk || heavyPlayback)) ||
-          (lowStartupSpeed &&
-              (codecComplexityRisk || highRiskContainer || heavyPlayback)));
-
-  if (requestedPreset == PlaybackMpvQualityPreset.qualityFirst) {
-    if (severeRemoteRisk || remoteRisk) {
-      return PlaybackMpvQualityPreset.performanceFirst;
-    }
-    if (heavyPlayback &&
-        (codecComplexityRisk ||
-            decodeMode == PlaybackDecodeMode.softwarePreferred ||
-            (aggressiveTuningEnabled && constrainedStartupSpeed))) {
-      return PlaybackMpvQualityPreset.balanced;
-    }
-    if (veryHeavyPlayback) {
-      return PlaybackMpvQualityPreset.balanced;
-    }
-    if (heavyPlayback && windowedWindows) {
-      return windowedWindows
-          ? PlaybackMpvQualityPreset.performanceFirst
-          : PlaybackMpvQualityPreset.balanced;
-    }
-    if (windowedWindows && remotePlayback) {
-      return PlaybackMpvQualityPreset.performanceFirst;
-    }
-  }
-
-  if (requestedPreset == PlaybackMpvQualityPreset.balanced &&
-      ((remoteRisk || severeRemoteRisk) ||
-          (windowedWindows &&
-              heavyPlayback &&
-              (aggressiveTuningEnabled ||
-                  decodeMode == PlaybackDecodeMode.softwarePreferred)) ||
-          (remotePlayback &&
-              (veryHeavyPlayback ||
-                  (heavyPlayback &&
-                      (codecComplexityRisk ||
-                          highRiskContainer ||
-                          lowStartupSpeed)) ||
-                  (decodeMode == PlaybackDecodeMode.softwarePreferred &&
-                      (heavyPlayback ||
-                          codecComplexityRisk ||
-                          highRiskContainer ||
-                          lowStartupSpeed)) ||
-                  quarkPlayback)) ||
-          (!remotePlayback &&
-              heavyPlayback &&
-              decodeMode == PlaybackDecodeMode.softwarePreferred &&
-              (codecComplexityRisk || highRiskContainer)))) {
-    return PlaybackMpvQualityPreset.performanceFirst;
-  }
-
-  return requestedPreset;
-}
-
 class MpvRemotePlaybackTuningProfile {
   const MpvRemotePlaybackTuningProfile({
     required this.networkTimeoutSeconds,
@@ -235,7 +133,7 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
   required PlaybackTarget target,
   required bool aggressiveTuning,
   required bool heavyPlayback,
-  double? startupProbeMegabitsPerSecond,
+  double? preflightEstimatedMegabitsPerSecond,
   bool? highRiskContainerOverride,
 }) {
   final _ = aggressiveTuning;
@@ -243,7 +141,7 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
       ? target.actualAddress
       : target.streamUrl;
   final scheme = playbackUrlScheme(transportUrl);
-  final measuredSpeedMbps = startupProbeMegabitsPerSecond;
+  final measuredSpeedMbps = preflightEstimatedMegabitsPerSecond;
   final lowStartupSpeed = measuredSpeedMbps != null &&
       measuredSpeedMbps > 0 &&
       measuredSpeedMbps < 16;

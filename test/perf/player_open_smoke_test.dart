@@ -71,7 +71,6 @@ void main() {
         ),
       ],
       playbackEngine: PlaybackEngine.embeddedMpv,
-      performanceAutoDowngradeHeavyPlaybackEnabled: true,
     );
 
     final container = ProviderContainer(
@@ -99,7 +98,7 @@ void main() {
     expect(outcome.startupPreparation.skipPreference?.enabled, isTrue);
     expect(
       outcome.startupPreparation.startupRoute,
-      PlaybackStartupRouteAction.launchPerformanceFallback,
+      PlaybackStartupRouteAction.openEmbeddedMpv,
     );
 
     final actions = <String>[];
@@ -108,10 +107,6 @@ void main() {
       launchNativeContainer: (_) async {
         actions.add('launch-native');
       },
-      launchPerformanceFallback: (_) async {
-        actions.add('launch-performance');
-        return false;
-      },
     );
 
     final shouldOpenEmbedded = await executor.execute(
@@ -119,7 +114,7 @@ void main() {
       outcome.resolvedTarget,
     );
 
-    expect(actions, ['launch-performance']);
+    expect(actions, isEmpty);
     expect(shouldOpenEmbedded, isTrue);
   });
 }

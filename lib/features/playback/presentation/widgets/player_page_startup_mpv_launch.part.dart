@@ -52,44 +52,6 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     _closePlayerPageAfterExternalLaunch();
   }
 
-  Future<bool> _tryLaunchWithPerformanceFallback(
-    PlaybackTarget target,
-  ) async {
-    _traceQuarkPlaybackStartup(
-      'quark.launch.fallback.begin',
-      target: target,
-      fields: {'decodeMode': _playbackDecodeMode.name},
-    );
-    final nativeResult = await _launchNativePlaybackTarget(target);
-    _traceQuarkPlaybackStartup(
-      'quark.launch.fallback.native-result',
-      target: target,
-      fields: {
-        'launched': nativeResult.launched,
-        'message': nativeResult.message,
-      },
-    );
-    if (nativeResult.launched) {
-      _closePlayerPageAfterExternalLaunch();
-      return true;
-    }
-
-    final systemResult = await _launchSystemPlaybackTarget(target);
-    _traceQuarkPlaybackStartup(
-      'quark.launch.fallback.system-result',
-      target: target,
-      fields: {
-        'launched': systemResult.launched,
-        'message': systemResult.message,
-      },
-    );
-    if (!systemResult.launched) {
-      return false;
-    }
-    _closePlayerPageAfterExternalLaunch();
-    return true;
-  }
-
   Future<NativePlaybackLaunchResult> _launchNativePlaybackTarget(
     PlaybackTarget target,
   ) async {

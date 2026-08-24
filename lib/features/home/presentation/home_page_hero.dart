@@ -613,7 +613,9 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     if (!focusNode.canRequestFocus) {
       return;
     }
-    focusNode.requestFocus();
+    requestTvFocus(
+      focusNode,
+    );
   }
 
   void _focusCurrentCard() {
@@ -624,7 +626,9 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     if (!node.canRequestFocus) {
       return;
     }
-    node.requestFocus();
+    requestTvFocus(
+      node,
+    );
   }
 
   @override

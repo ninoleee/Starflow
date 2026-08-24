@@ -56,10 +56,6 @@ Future<PlaybackStartupPreparationResult> preparePlaybackStartup(
       isWeb: input.isWeb,
       platform: input.platform,
     ),
-    performanceAutoDowngradeHeavyPlaybackEnabled:
-        input.settings.performanceAutoDowngradeHeavyPlaybackEnabled,
-    isTelevision: input.isTelevision,
-    isWeb: input.isWeb,
     target: input.resolvedTarget,
   );
   final startupRoute = decidePlaybackStartupRoute(startupRouteInput);

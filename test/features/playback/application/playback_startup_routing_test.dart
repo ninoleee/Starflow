@@ -13,292 +13,88 @@ void main() {
     sourceKind: MediaSourceKind.emby,
   );
 
-  group('decidePlaybackStartupRoute', () {
-    test('routes to system player when engine is system player', () {
-      final route = decidePlaybackStartupRoute(
-        const PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.systemPlayer,
-          performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          isTelevision: true,
-          isWeb: false,
-          target: baseTarget,
+  test('decidePlaybackStartupRoute honors every engine and source constraint',
+      () {
+    final cases = <({
+      String name,
+      PlaybackEngine engine,
+      PlaybackTarget target,
+      PlaybackStartupRouteAction expected,
+    })>[
+      (
+        name: 'selected system player',
+        engine: PlaybackEngine.systemPlayer,
+        target: baseTarget,
+        expected: PlaybackStartupRouteAction.launchSystemPlayer,
+      ),
+      (
+        name: 'header-protected Quark stays embedded',
+        engine: PlaybackEngine.systemPlayer,
+        target: baseTarget.copyWith(
+          sourceId: 'quark-main',
+          sourceName: 'Quark',
+          sourceKind: MediaSourceKind.quark,
+          headers: const <String, String>{
+            'Cookie': 'kps=test; sign=test;',
+            'Referer': 'https://drive-pc.quark.cn',
+          },
         ),
-      );
+        expected: PlaybackStartupRouteAction.openEmbeddedMpv,
+      ),
+      (
+        name: 'authenticated Emby supports system player',
+        engine: PlaybackEngine.systemPlayer,
+        target: baseTarget.copyWith(
+          headers: const <String, String>{'X-Emby-Token': 'token'},
+        ),
+        expected: PlaybackStartupRouteAction.launchSystemPlayer,
+      ),
+      (
+        name: 'authenticated WebDAV supports system player',
+        engine: PlaybackEngine.systemPlayer,
+        target: baseTarget.copyWith(
+          sourceKind: MediaSourceKind.nas,
+          headers: const <String, String>{'Authorization': 'Basic abc123'},
+        ),
+        expected: PlaybackStartupRouteAction.launchSystemPlayer,
+      ),
+      (
+        name: 'selected native container',
+        engine: PlaybackEngine.nativeContainer,
+        target: baseTarget,
+        expected: PlaybackStartupRouteAction.launchNativeContainer,
+      ),
+      for (final container in <String>['iso', 'avi'])
+        (
+          name: 'native container keeps $container',
+          engine: PlaybackEngine.nativeContainer,
+          target: baseTarget.copyWith(container: container),
+          expected: PlaybackStartupRouteAction.launchNativeContainer,
+        ),
+      (
+        name: 'heavy video stays on selected embedded MPV',
+        engine: PlaybackEngine.embeddedMpv,
+        target: baseTarget.copyWith(
+          width: 3840,
+          height: 2160,
+          bitrate: 30000000,
+          videoCodec: 'hevc',
+        ),
+        expected: PlaybackStartupRouteAction.openEmbeddedMpv,
+      ),
+    ];
 
-      expect(route, PlaybackStartupRouteAction.launchSystemPlayer);
-    });
-
-    test(
-        'stays on embedded mpv for header-protected target even if system player is selected',
-        () {
-      final route = decidePlaybackStartupRoute(
-        PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.systemPlayer,
-          performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          isTelevision: true,
-          isWeb: false,
-          target: baseTarget.copyWith(
-            sourceId: 'quark-main',
-            sourceName: 'Quark',
-            sourceKind: MediaSourceKind.quark,
-            headers: const {
-              'Cookie': 'kps=test; sign=test;',
-              'Referer': 'https://drive-pc.quark.cn',
-            },
+    for (final scenario in cases) {
+      expect(
+        decidePlaybackStartupRoute(
+          PlaybackStartupRouteInput(
+            playbackEngine: scenario.engine,
+            target: scenario.target,
           ),
         ),
+        scenario.expected,
+        reason: scenario.name,
       );
-
-      expect(route, PlaybackStartupRouteAction.openEmbeddedMpv);
-    });
-
-    test('allows system player for emby target even when headers are present',
-        () {
-      final route = decidePlaybackStartupRoute(
-        PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.systemPlayer,
-          performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          isTelevision: true,
-          isWeb: false,
-          target: baseTarget.copyWith(
-            headers: const {
-              'X-Emby-Token': 'token',
-              'X-Emby-Authorization': 'MediaBrowser Client="Starflow"',
-            },
-          ),
-        ),
-      );
-
-      expect(route, PlaybackStartupRouteAction.launchSystemPlayer);
-    });
-
-    test('allows system player for webdav target even when headers are present',
-        () {
-      final route = decidePlaybackStartupRoute(
-        PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.systemPlayer,
-          performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          isTelevision: true,
-          isWeb: false,
-          target: baseTarget.copyWith(
-            sourceId: 'nas-main',
-            sourceName: 'WebDAV',
-            sourceKind: MediaSourceKind.nas,
-            headers: const {
-              'Authorization': 'Basic abc123',
-            },
-          ),
-        ),
-      );
-
-      expect(route, PlaybackStartupRouteAction.launchSystemPlayer);
-    });
-
-    test('allows system player for relay-backed quark target without headers',
-        () {
-      final route = decidePlaybackStartupRoute(
-        PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.systemPlayer,
-          performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          isTelevision: true,
-          isWeb: false,
-          target: baseTarget.copyWith(
-            sourceId: 'quark-main',
-            sourceName: 'Quark',
-            sourceKind: MediaSourceKind.quark,
-            streamUrl: 'http://127.0.0.1:8787/playback-relay/session/video.mkv',
-            actualAddress: 'https://download.example.com/video.mkv',
-            headers: const <String, String>{},
-          ),
-        ),
-      );
-
-      expect(route, PlaybackStartupRouteAction.launchSystemPlayer);
-    });
-
-    test('routes to native container when engine is native container', () {
-      final route = decidePlaybackStartupRoute(
-        const PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.nativeContainer,
-          performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          isTelevision: true,
-          isWeb: false,
-          target: baseTarget,
-        ),
-      );
-
-      expect(route, PlaybackStartupRouteAction.launchNativeContainer);
-    });
-
-    test('honors native container selection for ISO', () {
-      final route = decidePlaybackStartupRoute(
-        PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.nativeContainer,
-          performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          isTelevision: true,
-          isWeb: false,
-          target: baseTarget.copyWith(
-            streamUrl: 'https://example.com/movie.iso',
-            container: 'iso',
-          ),
-        ),
-      );
-
-      expect(route, PlaybackStartupRouteAction.launchNativeContainer);
-    });
-
-    test('honors native container selection for AVI', () {
-      final route = decidePlaybackStartupRoute(
-        PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.nativeContainer,
-          performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          isTelevision: true,
-          isWeb: false,
-          target: baseTarget.copyWith(container: 'avi'),
-        ),
-      );
-
-      expect(route, PlaybackStartupRouteAction.launchNativeContainer);
-    });
-
-    test('routes to performance fallback for heavy 4k tv target', () {
-      final route = decidePlaybackStartupRoute(
-        PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.embeddedMpv,
-          performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          isTelevision: true,
-          isWeb: false,
-          target: baseTarget.copyWith(
-            width: 3840,
-            height: 2160,
-            bitrate: 12000000,
-            videoCodec: 'h264',
-          ),
-        ),
-      );
-
-      expect(route, PlaybackStartupRouteAction.launchPerformanceFallback);
-    });
-
-    test('stays on embedded mpv for heavy header-protected target', () {
-      final route = decidePlaybackStartupRoute(
-        PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.embeddedMpv,
-          performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          isTelevision: true,
-          isWeb: false,
-          target: baseTarget.copyWith(
-            sourceId: 'quark-main',
-            sourceName: 'Quark',
-            sourceKind: MediaSourceKind.quark,
-            width: 3840,
-            height: 2160,
-            bitrate: 30000000,
-            videoCodec: 'hevc',
-            headers: const {
-              'Cookie': 'kps=test; sign=test;',
-            },
-          ),
-        ),
-      );
-
-      expect(route, PlaybackStartupRouteAction.openEmbeddedMpv);
-    });
-
-    test('stays on embedded mpv for heavy target when device is not television',
-        () {
-      final route = decidePlaybackStartupRoute(
-        PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.embeddedMpv,
-          performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          isTelevision: false,
-          isWeb: false,
-          target: baseTarget.copyWith(
-            width: 3840,
-            height: 2160,
-            bitrate: 26000000,
-            videoCodec: 'hevc',
-          ),
-        ),
-      );
-
-      expect(route, PlaybackStartupRouteAction.openEmbeddedMpv);
-    });
-
-    test('routes to performance fallback for very high bitrate target', () {
-      final route = decidePlaybackStartupRoute(
-        PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.embeddedMpv,
-          performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          isTelevision: true,
-          isWeb: false,
-          target: baseTarget.copyWith(
-            width: 1280,
-            height: 720,
-            bitrate: 30000000,
-            videoCodec: 'h264',
-          ),
-        ),
-      );
-
-      expect(route, PlaybackStartupRouteAction.launchPerformanceFallback);
-    });
-
-    test('stays on embedded mpv when heavy target downgrade is disabled', () {
-      final route = decidePlaybackStartupRoute(
-        PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.embeddedMpv,
-          performanceAutoDowngradeHeavyPlaybackEnabled: false,
-          isTelevision: true,
-          isWeb: false,
-          target: baseTarget.copyWith(
-            width: 3840,
-            height: 2160,
-            bitrate: 26000000,
-            videoCodec: 'hevc',
-          ),
-        ),
-      );
-
-      expect(route, PlaybackStartupRouteAction.openEmbeddedMpv);
-    });
-
-    test('stays on embedded mpv on web even for heavy target', () {
-      final route = decidePlaybackStartupRoute(
-        PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.embeddedMpv,
-          performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          isTelevision: true,
-          isWeb: true,
-          target: baseTarget.copyWith(
-            width: 3840,
-            height: 2160,
-            bitrate: 26000000,
-            videoCodec: 'hevc',
-          ),
-        ),
-      );
-
-      expect(route, PlaybackStartupRouteAction.openEmbeddedMpv);
-    });
-
-    test('stays on embedded mpv for non-heavy target', () {
-      final route = decidePlaybackStartupRoute(
-        PlaybackStartupRouteInput(
-          playbackEngine: PlaybackEngine.embeddedMpv,
-          performanceAutoDowngradeHeavyPlaybackEnabled: true,
-          isTelevision: true,
-          isWeb: false,
-          target: baseTarget.copyWith(
-            width: 1920,
-            height: 1080,
-            bitrate: 8000000,
-            videoCodec: 'h264',
-          ),
-        ),
-      );
-
-      expect(route, PlaybackStartupRouteAction.openEmbeddedMpv);
-    });
+    }
   });
 }

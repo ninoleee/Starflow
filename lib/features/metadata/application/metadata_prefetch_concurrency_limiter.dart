@@ -17,11 +17,13 @@ final metadataPrefetchConcurrencyLimiterProvider =
 /// is released in small background batches so it cannot monopolize a weak TV.
 class MetadataPrefetchConcurrencyLimiter {
   MetadataPrefetchConcurrencyLimiter({
-    this.backgroundBatchDelay = const Duration(milliseconds: 750),
+    Duration backgroundBatchDelay = const Duration(
+      milliseconds: kMetadataPrefetchBatchDelayMsDefault,
+    ),
     this.idleResetDelay = const Duration(seconds: 3),
-  });
+  }) : _backgroundBatchDelay = backgroundBatchDelay;
 
-  final Duration backgroundBatchDelay;
+  Duration _backgroundBatchDelay;
   final Duration idleResetDelay;
   final Queue<void Function()> _pending = Queue<void Function()>();
   final Queue<void Function()> _maintenancePending = Queue<void Function()>();
@@ -46,6 +48,9 @@ class MetadataPrefetchConcurrencyLimiter {
   /// lose results or leave provider futures unresolved.
   MetadataPrefetchForegroundLease beginForegroundWork({
     required String reason,
+    Duration resumeDelay = const Duration(
+      milliseconds: kMetadataPrefetchForegroundResumeDelayMsDefault,
+    ),
   }) {
     final wasPaused = isPausedForForeground;
     _foregroundQuietTimer?.cancel();
@@ -55,6 +60,7 @@ class MetadataPrefetchConcurrencyLimiter {
       _logForegroundPause(reason);
     }
     return MetadataPrefetchForegroundLease._(
+      resumeDelay,
       (resumeDelay) => _endForegroundWork(
         reason: reason,
         resumeDelay: resumeDelay,
@@ -66,7 +72,9 @@ class MetadataPrefetchConcurrencyLimiter {
   /// page transitions without requiring a long-lived task lease.
   void deferForForegroundInteraction({
     required String reason,
-    Duration resumeDelay = const Duration(seconds: 1),
+    Duration resumeDelay = const Duration(
+      milliseconds: kMetadataPrefetchForegroundResumeDelayMsDefault,
+    ),
   }) {
     final wasPaused = isPausedForForeground;
     _scheduleForegroundResume(resumeDelay);
@@ -78,11 +86,13 @@ class MetadataPrefetchConcurrencyLimiter {
   Future<T> run<T>({
     required int maxConcurrency,
     int initialBatchSize = kMetadataPrefetchInitialBatchSizeDefault,
+    Duration? backgroundBatchDelay,
     required Future<T> Function() task,
   }) {
     updateLimits(
       maxConcurrency: maxConcurrency,
       initialBatchSize: initialBatchSize,
+      backgroundBatchDelay: backgroundBatchDelay,
     );
     _idleResetTimer?.cancel();
     _idleResetTimer = null;
@@ -148,6 +158,7 @@ class MetadataPrefetchConcurrencyLimiter {
   void updateLimits({
     required int maxConcurrency,
     required int initialBatchSize,
+    Duration? backgroundBatchDelay,
   }) {
     _maxConcurrency = clampMetadataPrefetchMaxConcurrency(maxConcurrency);
     final normalizedBatchSize =
@@ -157,6 +168,11 @@ class MetadataPrefetchConcurrencyLimiter {
       if (!_activityStarted) {
         _remainingStartsInBatch = normalizedBatchSize;
       }
+    }
+    if (backgroundBatchDelay != null) {
+      _backgroundBatchDelay = backgroundBatchDelay.isNegative
+          ? Duration.zero
+          : backgroundBatchDelay;
     }
     _drain();
   }
@@ -265,12 +281,12 @@ class MetadataPrefetchConcurrencyLimiter {
       'metadata.prefetch-scheduler',
       'Metadata prefetch continuation delayed',
       fields: <String, Object?>{
-        'delayMs': backgroundBatchDelay.inMilliseconds,
+        'delayMs': _backgroundBatchDelay.inMilliseconds,
         'nextBatchSize': nextBatchSize,
         'pendingCount': _pending.length,
       },
     );
-    _backgroundBatchTimer = Timer(backgroundBatchDelay, () {
+    _backgroundBatchTimer = Timer(_backgroundBatchDelay, () {
       _backgroundBatchTimer = null;
       _remainingStartsInBatch = nextBatchSize;
       _drain();
@@ -302,16 +318,20 @@ class MetadataPrefetchConcurrencyLimiter {
 }
 
 class MetadataPrefetchForegroundLease {
-  MetadataPrefetchForegroundLease._(this._releaseCallback);
+  MetadataPrefetchForegroundLease._(
+    this._defaultResumeDelay,
+    this._releaseCallback,
+  );
 
+  final Duration _defaultResumeDelay;
   final void Function(Duration resumeDelay) _releaseCallback;
   bool _released = false;
 
-  void release({Duration resumeDelay = const Duration(seconds: 1)}) {
+  void release({Duration? resumeDelay}) {
     if (_released) {
       return;
     }
     _released = true;
-    _releaseCallback(resumeDelay);
+    _releaseCallback(resumeDelay ?? _defaultResumeDelay);
   }
 }

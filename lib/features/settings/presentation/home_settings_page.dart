@@ -22,7 +22,23 @@ class HomeSettingsPage extends ConsumerWidget {
     return SettingsPageScaffold(
       onBack: () => Navigator.of(context).pop(),
       children: [
+        Text('首页设置', style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 8),
+        Text(
+          '管理首页 Hero 的展示方式、数据来源和模块布局。',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
         const SettingsSectionTitle(label: '首页 Hero'),
+        SettingsToggleTile(
+          title: '启用 Hero',
+          value: heroEnabled,
+          autofocus: true,
+          focusId: 'home-settings:hero-enabled',
+          onChanged: controller.setHomeHeroEnabled,
+        ),
+        const SizedBox(height: 14),
         Text(
           'Hero 展示方式',
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -46,18 +62,13 @@ class HomeSettingsPage extends ConsumerWidget {
         ),
         const SizedBox(height: 14),
         ...buildSettingsTileGroup([
-          StarflowToggleTile(
+          SettingsToggleTile(
             title: '标题优先展示 Logo',
             value: heroSlice.logoTitleEnabled,
             onChanged:
                 heroEnabled ? controller.setHomeHeroLogoTitleEnabled : null,
           ),
-          StarflowToggleTile(
-            title: '启用 Hero',
-            value: heroEnabled,
-            onChanged: controller.setHomeHeroEnabled,
-          ),
-          StarflowSelectionTile(
+          SettingsSelectionTile(
             title: 'Hero 数据来源',
             value: _heroSourceLabel(
               heroSlice: heroSlice,
@@ -74,7 +85,7 @@ class HomeSettingsPage extends ConsumerWidget {
           ),
         ]),
         const SettingsSectionTitle(label: '首页模块'),
-        StarflowSelectionTile(
+        SettingsSelectionTile(
           title: '打开首页编辑器',
           value: '模块显示、顺序与豆瓣内容',
           onPressed: () => context.pushNamed('home-editor'),
@@ -103,28 +114,16 @@ Future<void> _openHeroSourcePicker(
   required SettingsHeroSlice heroSlice,
   required List<HomeModuleConfig> heroCandidates,
 }) async {
-  final selection = await showDialog<String>(
+  final options = ['', ...heroCandidates.map((module) => module.id)];
+  final labels = {
+    for (final module in heroCandidates) module.id: module.title,
+  };
+  final selection = await showSettingsOptionDialog<String>(
     context: context,
-    builder: (context) => SimpleDialog(
-      title: const Text('选择 Hero 数据来源'),
-      children: [
-        SimpleDialogOption(
-          onPressed: () => Navigator.of(context).pop(''),
-          child: Text(
-            heroSlice.sourceModuleId.trim().isEmpty ? '自动选择  当前' : '自动选择',
-          ),
-        ),
-        for (final module in heroCandidates)
-          SimpleDialogOption(
-            onPressed: () => Navigator.of(context).pop(module.id),
-            child: Text(
-              module.id == heroSlice.sourceModuleId
-                  ? '${module.title}  当前'
-                  : module.title,
-            ),
-          ),
-      ],
-    ),
+    title: '选择 Hero 数据来源',
+    options: options,
+    currentValue: heroSlice.sourceModuleId,
+    labelBuilder: (value) => value.isEmpty ? '自动选择' : labels[value] ?? value,
   );
   if (selection != null) {
     await controller.setHomeHeroSourceModuleId(selection);

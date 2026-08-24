@@ -76,9 +76,19 @@ class _LocalStorageSettingsPageState
     final summariesAsync = ref.watch(localStorageSummariesProvider);
 
     return SettingsPageScaffold(
+      onBack: () => Navigator.of(context).pop(),
       children: [
+        Text('本地存储', style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 8),
+        Text(
+          '查看并清理媒体资料、图片、字幕和使用记录缓存。',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: 18),
         SectionPanel(
-          title: '本地存储',
+          title: '存储占用',
           subtitle: '这里只展示可安全清理的本地索引、缓存和历史记录，不包含应用设置本身。',
           child: summariesAsync.when(
             data: (summaries) {

@@ -155,6 +155,10 @@ class DetailRatingPrefetchCoordinator {
                 ref.read(appSettingsProvider).metadataPrefetchMaxConcurrency,
             initialBatchSize:
                 ref.read(appSettingsProvider).metadataPrefetchInitialBatchSize,
+            backgroundBatchDelay: Duration(
+              milliseconds:
+                  ref.read(appSettingsProvider).metadataPrefetchBatchDelayMs,
+            ),
             task: () => _prefetchSingleTarget(
               ref: ref,
               target: target,

@@ -86,8 +86,8 @@ lib/
 - 持久化图片缓存的 `URL + headers` identity、磁盘 metadata、过期与 stale fallback 策略
 - 通用组件
 - 网络图片请求头和调试工具
-- `TV` 焦点组件、菜单键动作和焦点记忆
-- `TV` 焦点记忆当前通过 `InheritedWidget` 传递，不再把 remember / clear 当成广播式页面重建信号
+- `TV` 焦点组件、菜单键动作和页面边界处理
+- `TV` 主要页面和弹窗的普通方向键使用 Flutter 默认寻焦，不再声明 `OrderedTraversalPolicy / NumericFocusOrder`；文本编辑弹窗仅在输入框局部把上下键映射为前后焦点，选择弹窗只在首帧请求一次初始焦点，不安排延迟补焦点
 - `TV` 焦点视觉态已经收敛到 `ValueNotifier + ValueListenableBuilder` 局部更新，并补了 `TvFocusVisualStyle.none`
 - `TV` 页面级焦点边界、页头回顶锚点和统一的上下方向焦点兜底
 - `TV` 页面级焦点壳与方向动作面板，便于首页、搜索、媒体库、详情、设置等页共用同一套焦点边界
@@ -159,16 +159,17 @@ lib/
 - 详情页局部状态收口：本地资源匹配和播放版本选择改成 `ValueNotifier + ValueListenableBuilder`，高频状态变化只刷新资源信息区，不再带动整页详情重建
 - 图片缓存收口：持久化图片缓存 identity 升级成 `URL + headers`，并增加磁盘 metadata、`30` 天 TTL、stale fallback 与更稳定的内存淘汰策略；同一候选图的解析/尺寸分析 future 也开始在组件间共享，减少同屏重复拉图与重复解码
 - 绘制范围收口：页面背景 glow、桌面横向翻页按钮和海报卡片布局已经分别加上独立重绘边界或局部 notifier，滚动和焦点切换时避免整段区域跟着重建
-- 统一性能派生：`AppSettingsPerformanceX` 新增 `effectiveUiPerformanceTier` 及一组 `effective*` 派生入口，路由、导航壳和播放器统一按同一档位判断动画、磨砂、自动隐藏和轻量播放 UI
+- 性能设置解耦：移除统一性能档位，路由、导航壳、首页 Hero 和播放器分别读取独立设置；`AppSettingsPerformanceX` 只保留平台固定规则与必要的 `effective*` 入口
 - 读链路与后台任务分离：空索引时的自动重建通过 `EmptyLibraryAutoRebuildScheduler` 后台 best-effort 调度，读链路不再同步阻塞一次重建
-- 播放启动拆分：`PlaybackStartupCoordinator` 串起目标解析、续播/跳过准备与路由判定，`PlaybackStartupExecutor` 负责执行系统播放器 / 原生容器 / 性能回退分支，`player_page.dart` 只保留页面壳和内置 `MPV` 打开编排
+- 播放启动拆分：`PlaybackStartupCoordinator` 串起目标解析、续播/跳过准备与路由判定，`PlaybackStartupExecutor` 负责执行系统播放器 / 原生容器 / 内置 MPV 分支，`player_page.dart` 只保留页面壳和内置 `MPV` 打开编排
 - `TV` 播放控制层收口：播放器页把高频控制状态合并成单个 notifier，替代多层 `StreamBuilder` 套娃，减少播放中叠层刷新成本
 - 播放页 presentation 收口：`player_page.dart` 已继续瘦身，平台会话、启动/MPV、运行期动作和播放器控制拆到 `player_page_platform_session.part.dart`、`player_page_startup_mpv.part.dart`、`player_page_runtime_actions.part.dart`、`player_page_controls.part.dart`；控制叠层、播放设置、启动覆盖层、TV chrome 与运行期对话框拆到独立 widget 文件
-- `mpv_tuning_policy.dart` 负责收口 `MPV` 的远程/直播识别、重片源判定、运行期质量预设降档和本地 `ISO` 设备源判断，避免这些策略散落在页面状态里
+- `mpv_tuning_policy.dart` 负责收口 `MPV` 的远程/直播识别、重片源判定、缓冲参数调节和本地 `ISO` 设备源判断，避免这些策略散落在页面状态里
 - 首页 application 收口：`home_controller.dart` 现在主要保留 controller 与 provider wiring，`home_controller_models.dart` 承载 view model，`home_feed_repository.dart` 承载首页 seed/cached section 装配
 - `PlaybackMemoryRepository` 已补单调递增 `updatedAt` 策略，保证最近播放在 Windows 或高频保存场景下仍按真正“最后一次写入”稳定排序
 - NAS 索引链收口：`NasMediaIndexer` 已拆成 `nas_media_indexer_refresh_flow.dart / nas_media_indexer_storage_access.dart / nas_media_indexer_indexing.dart / nas_media_indexer_grouping.dart / nas_media_indexer_refresh_support.dart` 多段 `part` 文件；主文件回到约 `1k` 行量级，先把刷新编排、存储访问、metadata 匹配与分组逻辑解耦，为后续 isolate 化、`IndexStore` 增量 upsert 和多级并发预算继续铺路
-- 首页模块加载与元数据预取已拆成独立调度器：前者限制首页数据源扇出并串行应用结果，后者统一约束 Hero、评分、元数据补全和显式维护任务；交互前台租约会暂缓新的后台预取
+- 首页模块加载与元数据预取已拆成独立调度器：前者限制首页数据源扇出并串行应用结果，后者统一约束 Hero、评分、元数据补全和显式维护任务；最大并发、首批数量和后续批次间隔均由持久化设置驱动
+- 元数据调度器在前台交互结束后按可配置静默期恢复；首页、媒体库和集合页只在进入“内容加载中”状态时申请一次静默期，避免 widget rebuild 持续推迟后台任务
 - 冷启动刷新已增加 Bootstrap 完成标记，主壳不会再重复执行同一轮首页刷新；是否刷新首页及 Emby 由独立持久化设置控制
 - 网络层新增 `NetworkFailureInfo / NetworkRequestPolicy / NetworkRequestGuard`，统一错误分类、超时、幂等重试边界和按策略/主机隔离的熔断状态
 - 诊断链新增结构化本地日志、敏感信息脱敏、文件轮转、固定区域预览、按级别记录/展示、日志清理及平台化导出；Android 还会合并上次 ANR、崩溃、低内存与资源异常退出信息
@@ -217,7 +218,7 @@ lib/
 
 - `PlaybackTargetResolver`：先把播放目标解析到可播地址/headers。
 - `PlaybackStartupCoordinator`：统一串起目标解析、续播/跳过配置读取与路由判定输入准备。
-- `PlaybackEngineRouter`：封装路由判定（系统播放器 / 原生容器 / 性能回退 / 内置 MPV）。
+- `PlaybackEngineRouter`：封装路由判定（系统播放器 / 原生容器 / 内置 MPV）。
 - `PlaybackStartupExecutor`：执行路由动作，并返回是否继续走内置 `MPV` 打开链。
 - `player_page.dart`：只保留页面壳、状态字段和顶层装配；平台会话、启动/MPV、运行期动作和播放器控制已经沉到 `presentation/widgets/player_page_*.part.dart` 与独立 widgets。
 - `PlaybackMemoryRepository`：负责最近播放/续播记忆，并通过单调递增 `updatedAt` 保证最近播放列表稳定排序。
@@ -355,7 +356,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - `Hero` 当前项、翻页按钮和指示状态已经收口到局部监听；切换当前 Hero 时不会再带动首页根节点整块重建
 - 首次进入首页时，如果 Hero 条目信息不全且还没有 metadata refresh 成功 / 失败标记，会后台 best-effort 补一次信息，并把结果写回详情缓存
 - 首页 `Hero`、背景图与海报图会按显示尺寸传递 decode 尺寸；移动端 `PageController` 也做了边界稳定化，降低首屏切换和大图解码抖动
-- 高性能模式开启时，Hero 会被强制收敛为静态单卡、无阴影，并关闭翻页按钮、指示点与全屏背景图
+- 静态 Hero 与精简 Hero 视觉由一个界面开关原子更新，全屏背景图仍单独持久化
 - `TV` 首页会给 Hero、模块标题和内容区之间补齐明确的方向焦点路径，避免焦点停在 Hero 图片层后无法继续下移
 - 桌面端首页普通横向海报流也会复用统一的左右翻页按钮，而不是只让 Hero 独占这套交互
 
@@ -410,7 +411,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 对 `2.巴以 / 5.美国 / 9.韩国` 这类“数字 + 标题”的专题目录，会额外要求同级里存在多个同类兄弟目录，避免把普通数字目录误判成季
 - 一旦当前层被识别为季目录，上一级目录就会作为剧名；像 `怪奇物语/Season 1/Season 2`、`怪奇物语/Stranger.Things.S02.2160p.BluRay.REMUX` 都会把 `怪奇物语` 当剧名
 - 当路径里已经确认存在显式季目录时，即使当前只有一季，也会继续保留“剧 -> 季 -> 集”层级，不再因为单季而直接拍平成集列表
-- 当前实现上，`NasMediaIndexer` 已拆成 grouping / refresh flow / storage access / indexing / refresh support 多个 part 文件；并发预算也在 indexer 内按 `source / collection / enrichment` 三层收口
+- 当前实现上，`NasMediaIndexer` 已拆成 grouping / refresh flow / storage access / indexing / refresh support 多个 part 文件；并发预算也在 indexer 内按 `source / collection / enrichment` 三层收口，并在每轮任务开始前读取最新持久化设置，修改后无需重启
 
 当前文件组织上，`NasMediaIndexer` 已按职责拆成：
 
@@ -438,7 +439,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 
 `Quark` 媒体源当前走“目录直连”模型：
 
-- 复用 `设置 -> 网络存储 -> 夸克与 STRM` 中保存的全局 `Cookie`
+- 复用 `设置 -> 内容与来源 -> 网络存储 -> 夸克云盘` 中保存的全局 `Cookie`
 - 通过选择一个夸克目录，把该目录作为本地媒体源根目录
 - 可继续选择根目录下的子目录作为分区范围
 - 索引、结构推断和在线搜刮配置复用 `WebDAV` 同一套外部存储扫描与 `NasMediaIndexer` 规则，包括本地 sidecar、顶层推断目录和“剧集只按剧名层级搜刮”
@@ -477,14 +478,14 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 详情页与人物作品页已经收口到 `RetainedAsyncController`；页面 inactive、切回前台或播放期间页面让路时，会优先保留最近一次已解析结果
 - 详情页在 inactive 时会取消当前匹配 / 刷新会话，但不会再无条件失效成功缓存；重新回到页面时优先复用已有详情结果
 - 网络图片在展示层支持候选图回退，主图 `404` 或解码失败时会自动尝试下一张候选 artwork
-- 详情页已经移除内联字幕搜索与外挂字幕选择；在线字幕搜索只保留在播放器页与独立字幕搜索页，仍按 `设置 -> 播放 -> 字幕` 里的配置使用 `ASSRT API / OpenSubtitles / SubDL`
+- 详情页已经移除内联字幕搜索与外挂字幕选择；在线字幕搜索只保留在播放器页与独立字幕搜索页，仍按 `设置 -> 播放 -> 播放器与字幕 -> 字幕` 里的配置使用 `ASSRT API / OpenSubtitles / SubDL`
 - 详情页不再把字幕候选或选中项写入详情缓存，也不会在进入播放器前向播放目标注入外挂字幕；字幕选择改由播放器页会话独立持有
 - 详情页资源信息区可直接切换播放器；这个入口最终会调用 `SettingsController.setPlaybackEngine(...)`，因此会和设置页里的全局默认播放器保持同一份持久化值
 
 当前详情页与元数据链路还额外承担这些能力：
 
 - 顶部 Hero 优先使用背景图，不再重复放置海报；文字覆盖区域单独加阴影，未覆盖区域保持原图
-- 高性能模式开启时，详情页顶部大图区会进一步收紧高度、缩小信息区，并减少背景遮罩层
+- 非 TV 使用标准详情 Hero；TV 固定使用精简详情 Hero
 - `TMDB` 已接入 `poster / backdrop / still / profile / logo` 等图片字段，并把 `TMDB x.x` 写入统一评分标签链路；当前不再主动去 `IMDb` 搜索信息，`IMDb` 相关标签只会在上游 `WMDB / TMDB` 已返回时参与展示和保存
 - 详情页评分标签会按来源归一去重；`豆瓣 / IMDb / TMDB` 各最多保留一条，避免 seed target、详情缓存和后续在线补全合并后出现重复评分标签
 - 人物头像统一来自 `TMDB profile`，详情页公司 Logo 来自 `TMDB production_companies.logo_path`，不再把 `networks` 混作公司展示
@@ -507,15 +508,15 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 手动搜索 `WMDB / TMDB`
 - 直接写回本地索引和详情缓存
 - 手动应用命中结果时会强制覆盖本地已存在的标题、简介、图片、人物、公司 Logo 和外部 ID，不再只补空字段
-- `TV` 模式下会给自动更新、搜索和 `WMDB / TMDB` 应用按钮保留稳定 `FocusNode`；按上 / 下方向键时，会按“自动更新 -> 搜索词 -> 年份 -> 剧集优先 -> 开始搜索 -> WMDB 结果 -> TMDB 结果”的顺序强制切换焦点，并跳过当前不可用的节点
+- `TV` 模式下进入信息管理页后，会在路由首帧结束时主动请求首屏“自动更新”按钮焦点，不依赖离屏搜索按钮的 autofocus
 - 详情页“手动更新信息”同样会直接重新搜索，并把命中的在线结果覆盖到当前详情缓存
 - 人物关联影片页支持按年份新到旧 / 旧到新排序，也支持按类别筛选；排序与筛选都基于已拿到的人物作品结果在本地完成
 
 详情页本地资源匹配当前还有这些约束：
 
-- 自动匹配由 `设置 -> 元数据与评分 -> 详情页自动匹配本地资源` 控制，默认关闭
+- 自动匹配由 `设置 -> 元数据 -> 元数据匹配 -> 自动匹配本地资源` 控制，默认关闭
 - 当自动匹配关闭时，详情页只保留“重新匹配资源”这一条手动触发路径
-- `设置 -> 元数据与评分 -> 匹配来源` 会直接限制详情页本地资源匹配的实际扫描范围；只会扫描被选中的已启用 `Emby / WebDAV / Quark` 来源
+- `设置 -> 内容与来源 -> 媒体源管理 -> 详情页匹配来源` 会直接限制详情页本地资源匹配的实际扫描范围；只会扫描被选中的已启用 `Emby / WebDAV / Quark` 来源
 - 如果“匹配来源”未单独勾选，则默认使用全部已启用来源；如果保存的来源 ID 已失效，则自动回退到全部已启用来源
 - 如果详情页 seed target 本身来自媒体库卡片或指定来源模块，并已经带了 `sourceId / sourceKind / itemId / sectionId` 这类来源上下文，匹配链路会先优先处理这个来源，而不是把所有来源完全等价并行处理
 - 对非 `series` 聚合页，如果入口 target 本身已经是该来源下的已解析资源，候选列表会先直接补入这条入口资源；手动重新匹配时也会跳过对这个入口来源的重复扫描
@@ -555,7 +556,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 
 搜索来源还有一层全局设置约束：
 
-- `设置 -> 搜索服务 -> 搜索来源` 会直接决定搜索页允许参与执行的本地媒体源和在线 provider
+- `设置 -> 内容与来源 -> 搜索服务管理 -> 搜索来源` 会直接决定搜索页允许参与执行的本地媒体源和在线 provider
 - 如果该设置未单独勾选任何来源，则默认使用全部已启用来源
 - 如果保存的来源 ID 已失效，则自动回退到全部已启用来源
 - 搜索页内记住的勾选项只是这层全局范围内的二次筛选，不会越过全局设置重新启用被禁用的来源
@@ -591,7 +592,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 1. 进入播放器页
 2. `PlaybackStartupCoordinator` 解析播放目标，读取本地续播和按剧跳过偏好，并得到路由动作
 3. 如果是 `Emby / Quark`，会在这一步补齐真实播放源和请求头
-4. `PlaybackStartupExecutor` 按播放器内核、`TV` / 高压力片源与性能策略执行系统播放器、原生容器或性能回退分支
+4. `PlaybackStartupExecutor` 按用户选择的播放器内核执行系统播放器、原生容器或内置 MPV 分支
 5. 如果执行结果要求继续走内置 `MPV`，则进入轻量探测和等待态展示
 6. 调用内置 `MPV` 打开链并应用启动期调优
 7. 失败自动重试，最多 `3` 次
@@ -653,28 +654,29 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 播放器页本身不再直接承载全部启动决策；目标解析、路由判定与执行分支已经拆到独立 application 文件，页面层主要负责装配、等待态和内置 `MPV` 运行期行为，便于 controller 级测试和后续替换策略
 - 播放器页 presentation 也已进一步拆开：`player_page.dart` 主要保留会话和流程编排，控制叠层、启动等待态、播放设置弹窗与平台会话子树分别沉到 `presentation/widgets` 与 `player_page_*.part.dart`
 
-高性能模式在全局视觉层面当前还会做这些简化：
+设置分类当前按能力拆分：
 
-- 所有客户端关闭磨砂/模糊背景、菜单栏自动隐藏、Hero 全屏背景图与页面背景 glow
-- 关闭启动页入场动画与主导航切换动画，并把导航改成静态常驻
-- 首页 Hero 固定为静态单卡海报样式，关闭翻页按钮、指示点和分页缓动
-- 详情页顶部大图区会进一步瘦身，减少大面积背景叠层
-- 移除通用 `SectionPanel` 阴影
-- `TV` 焦点样式切到无缩放、无阴影的轻量高亮
-- 播放器里进一步简化叠层显示和字幕背景，并更积极偏向硬解
-- 路由、导航壳和播放器当前都会统一消费 `AppSettingsPerformanceX.effective*` 派生值，而不是各自单独解释高性能开关
+- 设置首页按内容来源、元数据、播放、界面、性能后台和数据维护分类；不再保留 `PerformanceSettingsPage` 中转目录
+- `InterfaceSettingsPage`、`PlaybackTuningSettingsPage` 和 `TaskSchedulingSettingsPage` 分别由“界面效果 / MPV 调优 / 任务调度”直接打开；自动匹配本地资源归入元数据匹配页，首页单击清理归入界面效果页
+- `MediaSourceSettingsPage`、`SearchServiceSettingsPage` 和 `NetworkStorageSettingsPage` 同属内容来源；网络存储的夸克、SmartStrm、同步索引编辑器通过 section 收口为三个三级入口
+- `playback_settings_page.dart` 与 `playback_subtitle_settings_page.part.dart` 分离播放器偏好和字幕表单；日志预览组件、元数据测试卡片也分别下沉到 `logging_settings_widgets.part.dart` 与 `metadata_match_settings_widgets.part.dart`
+- 媒体源编辑器把 `Emby / WebDAV / Quark` 连接表单下沉到 `media_source_editor_forms.part.dart`，WebDAV 路径统一复用 `WebDavDirectoryPickerPage`，不再维护第二套私有目录浏览器
+- 透明磨砂与简化装饰、减少动画与静态导航、静态 Hero 与精简 Hero 分别合并为三个原子更新的界面开关；菜单栏自动隐藏和 Hero 背景继续独立保存
+- 非 TV 使用标准详情 Hero 与标准播放界面，可单独设置激进 MPV 调优
+- `TV` 固定使用无缩放 / 无阴影的轻量焦点、精简详情 Hero 与精简播放界面，并固定关闭自动更新卡片信息；固定项不在 TV 设置页展示开关
+- 路由、导航壳和播放器直接消费对应独立设置；不再根据启用项数量推导隐藏的统一性能档位
 - 内置 `MPV` 会在启动前按片源、平台与模式做额外调优：
   - 动态选择前向缓冲与回看缓冲
   - 默认开启 `demuxer thread`，并关闭 `interpolation / deband / audio-display`
   - 对远程流按 buffered remote 与 low-latency remote 两类配置不同的 `network-timeout / cache / cache-secs / demuxer` 参数
-  - 质量预设支持按窗口态 Windows、远程流和重片源做运行期自动降档，但不会覆盖设置页里保存的默认预设
-  - 在高性能模式、`TV`、重片源或高压力场景下尝试应用 `fast profile`
-  - `TV` 与高性能模式下会进一步简化字幕渲染，降低叠加压力
+  - 质量预设保持用户选择，不再按窗口状态、远程流或重片源自动降档
+  - 可单独启用 `fast profile`；重片源或高压力场景仍按运行时策略调节
+  - `TV` 固定使用精简字幕与控制叠层，降低叠加压力
   - 软解优先且片源较重时，适度降低解码侧开销，优先换取稳定性
 
 播放性能模式的运行期保护目前还包括：
 
-- 播放会话打开后，会直接通过统一的 `backgroundWorkSuspendedProvider` 把“非播放优先级”的页面工作切到暂停态，不再要求先手动开启高性能模式
+- 播放会话打开后，会直接通过统一的 `backgroundWorkSuspendedProvider` 把“非播放优先级”的页面工作切到暂停态，不依赖任何手动性能开关
 - 播放页会更早把播放性能模式切到 active，尽量在首帧前就压住底层壳层动画与后台工作
 - `StatefulShellRoute.indexedStack` 下的隐藏分支会关闭 `HeroMode`、`TickerMode`，并忽略命中测试，减少播放器上层的 Flutter 合成干扰
 - 首页 `Hero` 后台补数在暂停态下不会继续触发
@@ -698,7 +700,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - iOS 的播放会话桥接由 `ios/Runner/PlaybackSystemSessionBridge.swift` 承担，`AppDelegate` 会把它绑定到 Flutter channel，用于原生播放会话、遥控器命令和 AirPlay 入口
 - Android 系统播放器优先调用原生 `ACTION_VIEW`，并显式标记 `video/*`
 - 桌面端系统播放器通过临时 `.m3u` 交给系统默认视频应用
-- 高性能模式开启后会更积极优先硬解；其中 Android TV 如果识别到高码率或高压力片源，会优先尝试切到 App 内原生播放器，再退到系统播放器
+- 重型视频不会再因启发式规则自动改变播放器路径；内置 MPV 仅在当前会话内按片源调整缓冲与解码参数
 - 内置 `MPV` 会跟随设置切换解码模式；系统播放器无法稳定回传进度，且解码方式由外部播放器自行决定，因此续播记忆只在内置 `MPV` 和 App 内原生播放器里生效
 - 自动跳过片头片尾当前只在内置 `MPV` 里生效
 - 字幕偏移当前支持内置 `MPV` 与 Android 原生播放器的外挂字幕链路；iOS 原生播放器暂未提供字幕偏移
@@ -740,8 +742,8 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
   - 当前夸克保存目录管理与删除
   - `SmartStrm` Webhook、任务名、`STRM` 触发等待时间
   - 自动增量刷新索引的媒体源选择与“索引刷新等待时间”
-- 元数据与评分
-- 本地资源匹配来源
+- 元数据匹配
+- 媒体源管理内的详情页匹配来源
 - 播放超时
 - 解码模式
 - 后台播放
@@ -752,14 +754,18 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 各在线字幕来源的专属配置（`ASSRT Token / OpenSubtitles 账号密码 / SubDL API Key`）
 - 优先语言（`简体中文 / 繁体中文 / 英语 / 日语 / 韩语`，可多选；不选时按字幕结果和系统语言自动处理）与单次最多验证条数
 - 播放器内核
-- 透明磨砂效果
-- 高性能模式
+- 简化界面特效（关闭透明磨砂并减少装饰）
+- 减少界面动画（减少动画并使用静态导航切换）
+- 简化首页 Hero（静态与精简效果同步）
+- 精简详情 Hero 与精简播放界面（仅 TV 固定启用，不保存用户开关）
+- 激进 MPV 调优
 - 自动隐藏菜单栏
 - Hero 全屏背景图
-- 运行时卡片 / Hero 局部更新
+- 自动更新卡片信息（非 TV）
 - 启动时自动刷新首页，以及是否同时刷新 Emby 媒体源
-- 后台元数据最大并发数、首批元数据预取数量
-- 首页模块最大并发数、首页首批优先模块数
+- 后台元数据最大并发数、首批元数据预取数量、后台批次间隔与交互结束后恢复时间
+- 首页模块最大并发数、首页首批优先模块数与后台批次间隔
+- NAS / WebDAV 来源刷新、集合扫描与索引补全最大并发数
 - 本地日志开关、容量、记录级别与预览级别
 
 播放设置在页面结构上额外做了分组：
@@ -767,8 +773,9 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 一级页放播放器内核、打开超时、后台播放、默认倍速等主偏好
 - 字幕默认项收拢到“字幕”二级页
 - 详情页资源信息区对播放器内核的切换会直接复用同一个 `setPlaybackEngine(...)` 写回入口，因此不会出现“详情页一种默认、设置页另一种默认”的分叉
-- `AppSettingsPerformanceX` 会把高性能模式和相关细项统一派生成有效档位；路由、导航、首页 Hero、详情页和播放器都通过这组 `effective*` 入口读取实际生效值
-- 运行时卡片 / Hero 局部更新默认可在普通端按需开关；`TV` 端会强制关闭，设置页展示的是实际生效值而不是单纯保存值
+- `AppSettingsPerformanceX` 只负责平台固定规则和少量有效值派生；独立子项不会因其它开关数量变化而自动联动
+- 设置反序列化仍会读取旧高性能标记，仅用于识别遗留的 `1 / 6 / 1 / 1` 调度组合并迁移到平衡默认值；新配置不再输出该标记，包含新版延迟字段的配置视为用户明确设置，不参与迁移
+- “自动更新卡片信息”默认可在普通端按需开关；`TV` 端固定关闭，设置页不显示重复开关
 
 设置编辑页在 TV 下还额外做了输入方式分流：
 
@@ -778,8 +785,8 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 媒体源、搜索服务、豆瓣账号、网络存储、播放、配置管理等主要设置页，当前尽量共用同一套页面骨架和按钮分类，减少页面间的操作分叉
 - 搜索来源、匹配来源等多选项当前统一复用同一套复选弹窗；`TV / 触屏` 共享一套选择流程与焦点逻辑
 - `WebDAV` 路径选择页会缓存目录 Future，避免同一目录在页面重建或来回切换时重复列目录
-- 高性能模式开启时，会先为透明磨砂效果、自动隐藏菜单栏、Hero 背景图和运行时局部更新套用推荐轻量值；这些已单独列出的子项之后仍可按需单独改回
-- `TV` 端同样会把“运行时卡片 / Hero 局部更新”按实际生效值固定为关闭，避免焦点浏览和滚动过程中被后台缓存更新继续唤醒局部 provider 链路
+- 三组界面简化开关、自动隐藏菜单栏、Hero 背景图和运行时局部更新分别保存，不再由统一性能档位批量套用或恢复
+- `TV` 端把“自动更新卡片信息”固定为关闭且不展示开关，避免焦点浏览和滚动过程中被后台缓存更新继续唤醒局部 provider 链路
 - 首页、搜索、设置页以及部分壳层组件已经开始改成 slice provider 订阅；高频页面会优先只读取需要的设置片段，而不是整份 `AppSettings`
 
 播放器运行期状态还会额外保存：
@@ -812,7 +819,7 @@ Android TV 下的设置页还额外做了遥控器适配：
 - 多个二级设置页的主要按钮与保存操作支持焦点可达
 - 长列表中的焦点会尽量停在屏幕中部，滚动容器随焦点一起平滑移动
 - 媒体源、搜索服务、豆瓣账号、网络存储等编辑页里的文本项会先显示成可聚焦条目，再进入独立编辑弹窗
-- 已加入“高性能模式”总开关，用于在所有客户端进一步压低动画、模糊背景、通用阴影和播放页叠层，并把导航收敛为静态常驻、首页 Hero 收敛为静态单卡海报；TV 端还会额外简化焦点样式
+- 播放、界面与性能后台页面从一级分类直接进入，每页首个条目具有明确 TV 初始焦点
 - 多数设置编辑页已经统一到同一种工具栏、保存按钮、危险操作按钮和选择条目样式
 - 仍有少量弹窗和编辑流需要继续补齐焦点细节
 
@@ -886,12 +893,11 @@ Android TV 下的设置页还额外做了遥控器适配：
 - Release APK 当前启用了 `v1 + v2` 签名，兼容老一些的电视安装器
 - 当前 Release APK 仍使用本机 debug keystore 签名；如果设备里已有其他签名的旧版 `com.example.starflow`，覆盖安装会失败，需要先卸载旧包
 - `TvMenuButtonScope` 用来把菜单键语义统一上抛到页面壳
-- `TvFocusMemoryScope` 用来记录首页、搜索、媒体库、详情等页面上次停留的焦点元素
-- `TvFocusMemoryScope` 当前已经改成 `InheritedWidget` 传递；记忆写入和清除不会再广播式触发整页依赖刷新
-- `TvReturnToTopScope` 与 `TvDirectionalFocusBoundary` 用来给主要页面建立统一的页头回顶、上下方向越界兜底和模块间焦点切换规则
+- `TvReturnToTopScope` 与 `TvDirectionalFocusBoundary` 只负责页头回顶和方向越界；普通候选仍由 Flutter 默认策略决定
+- 首页、搜索、媒体库、详情与设置页不再挂载空的焦点记忆作用域，也不做坐标校验或反向候选拦截
 - `TvFocusableAction` 在垂直滚动容器里会尝试把焦点项保持在视口中线附近，降低 TV 遥控器纵向浏览时的视线跳动
-- `TvFocusableAction` 的焦点视觉态已经改成局部 `ValueNotifier` 更新；轻量模式下可切到 outline only 或直接 `none`
-- `SettingsTextInputField` 会在 TV 模式下把页面内文本输入改成“设置条目 + 弹窗编辑”交互，减少焦点被输入法占据的情况
+- `TvFocusableAction` 的焦点视觉态已经改成局部 `ValueNotifier` 更新；TV 固定使用无缩放、无阴影的轻量高亮
+- `SettingsTextInputField` 会在 TV 模式下把页面内文本输入改成“设置条目 + 弹窗编辑”交互；弹窗输入框局部保留上下键退出处理，减少焦点被输入法占据的情况
 - 配置管理当前按平台分支：
   - Android TV 使用应用内局域网传输
   - Web 使用浏览器下载和本地文件选择器，不需要手填路径

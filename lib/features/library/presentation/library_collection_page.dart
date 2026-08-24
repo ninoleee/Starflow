@@ -110,11 +110,10 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
     with PageActivityMixin<LibraryCollectionPage> {
   static const int _gridPageSize = 24;
   int _currentPage = 0;
+  bool _contentLoadingDeferralActive = false;
   final ScrollController _scrollController = ScrollController();
   final FocusNode _headerFocusNode =
       FocusNode(debugLabel: 'library-collection-header');
-  final TvFocusMemoryController _tvFocusMemoryController =
-      TvFocusMemoryController();
   final DetailRatingPrefetchCoordinator _ratingPrefetchCoordinator =
       DetailRatingPrefetchCoordinator();
   final Map<LibraryCollectionVisiblePageRequest,
@@ -132,7 +131,6 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
   void dispose() {
     _headerFocusNode.dispose();
     _scrollController.dispose();
-    _tvFocusMemoryController.dispose();
     super.dispose();
   }
 
@@ -161,7 +159,28 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
     }
     ref
         .read(metadataPrefetchConcurrencyLimiterProvider)
-        .deferForForegroundInteraction(reason: reason);
+        .deferForForegroundInteraction(
+          reason: reason,
+          resumeDelay: Duration(
+            milliseconds: ref
+                .read(appSettingsProvider)
+                .metadataPrefetchForegroundResumeDelayMs,
+          ),
+        );
+  }
+
+  void _deferPrefetchWhileContentLoading(bool isLoading) {
+    if (!isLoading) {
+      _contentLoadingDeferralActive = false;
+      return;
+    }
+    if (_contentLoadingDeferralActive) {
+      return;
+    }
+    _contentLoadingDeferralActive = true;
+    _deferPrefetchForForegroundInteraction(
+      reason: 'library.collection-content-loading',
+    );
   }
 
   @override
@@ -186,11 +205,7 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
       },
       fallbackValue: const AsyncLoading<LibraryVisiblePageItemsResult>(),
     );
-    if (displayAsync.isLoading) {
-      _deferPrefetchForForegroundInteraction(
-        reason: 'library.collection-content-loading',
-      );
-    }
+    _deferPrefetchWhileContentLoading(displayAsync.isLoading);
 
     final headerContent = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -218,8 +233,6 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
     return AppPrimaryScrollController(
       controller: _scrollController,
       child: TvPageFocusScope(
-        controller: _tvFocusMemoryController,
-        scopeId: _libraryCollectionFocusScopeId(target),
         isTelevision: isTelevision,
         child: Scaffold(
           body: Stack(
@@ -602,19 +615,6 @@ enum _LibraryCollectionItemAction {
   rebuildSourceIndex,
   manualIndex,
   deleteResource,
-}
-
-String _libraryCollectionFocusScopeId(LibraryCollectionTarget target) {
-  return buildTvFocusScopeId(
-    prefix: 'library-collection',
-    segments: [
-      target.sourceKind.name,
-      target.sourceId,
-      target.sectionId,
-      target.title,
-      target.subtitle,
-    ],
-  );
 }
 
 String _libraryCollectionGridFocusScopePrefix(LibraryCollectionTarget target) {

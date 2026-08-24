@@ -23,6 +23,9 @@ class _WebDavDirectoryPickerPageState
     extends ConsumerState<WebDavDirectoryPickerPage> {
   late String _currentPath;
   late String _rootPath;
+  late Future<List<MediaCollection>> _foldersFuture;
+  final Map<String, Future<List<MediaCollection>>> _folderFutureCache =
+      <String, Future<List<MediaCollection>>>{};
   bool _skipAutoSaveOnPop = false;
 
   @override
@@ -36,13 +39,29 @@ class _WebDavDirectoryPickerPageState
         : sourceLibraryPath.isNotEmpty
             ? sourceLibraryPath
             : _rootPath;
+    _foldersFuture = _resolveFoldersFuture(_currentPath);
   }
 
-  Future<List<MediaCollection>> _loadFolders() {
-    return ref.read(webDavNasClientProvider).fetchCollections(
-          widget.source,
-          directoryId: _currentPath,
-        );
+  Future<List<MediaCollection>> _resolveFoldersFuture(String directoryId) {
+    final normalized = directoryId.trim();
+    return _folderFutureCache.putIfAbsent(
+      normalized,
+      () => ref.read(webDavNasClientProvider).fetchCollections(
+            widget.source,
+            directoryId: normalized,
+          ),
+    );
+  }
+
+  void _setCurrentPath(String nextPath) {
+    final normalized = nextPath.trim();
+    if (normalized.isEmpty || normalized == _currentPath) {
+      return;
+    }
+    setState(() {
+      _currentPath = normalized;
+      _foldersFuture = _resolveFoldersFuture(normalized);
+    });
   }
 
   String _pathLabel(String raw) {
@@ -126,16 +145,14 @@ class _WebDavDirectoryPickerPageState
             SettingsActionButton(
               label: '返回上一级目录',
               icon: Icons.arrow_upward_rounded,
-              onPressed: () {
-                setState(() {
-                  _currentPath = parentPath;
-                });
-              },
+              autofocus: true,
+              focusId: 'webdav-directory:parent',
+              onPressed: () => _setCurrentPath(parentPath),
             ),
           ],
           const SettingsSectionTitle(label: '子文件夹'),
           FutureBuilder<List<MediaCollection>>(
-            future: _loadFolders(),
+            future: _foldersFuture,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Padding(
@@ -166,11 +183,10 @@ class _WebDavDirectoryPickerPageState
                         subtitle: folder.id,
                         value: '进入',
                         leading: const Icon(Icons.folder_open_rounded),
-                        onPressed: () {
-                          setState(() {
-                            _currentPath = folder.id;
-                          });
-                        },
+                        autofocus:
+                            parentPath == null && folder == folders.first,
+                        focusId: 'webdav-directory:${folder.id}',
+                        onPressed: () => _setCurrentPath(folder.id),
                       ),
                     ),
                 ],

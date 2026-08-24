@@ -9,21 +9,22 @@ import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
-import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/application/settings_slice_providers.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/home_settings_page.dart';
-import 'package:starflow/features/settings/presentation/media_source_editor_page.dart';
+import 'package:starflow/features/settings/presentation/interface_settings_page.dart';
+import 'package:starflow/features/settings/presentation/media_source_settings_page.dart';
 import 'package:starflow/features/settings/presentation/metadata_match_settings_page.dart';
 import 'package:starflow/features/settings/presentation/local_storage_settings_page.dart';
 import 'package:starflow/features/settings/presentation/logging_settings_page.dart';
 import 'package:starflow/features/settings/presentation/network_storage_settings_page.dart';
-import 'package:starflow/features/settings/presentation/performance_settings_page.dart';
 import 'package:starflow/features/settings/presentation/playback_settings_page.dart';
-import 'package:starflow/features/settings/presentation/search_provider_editor_page.dart';
+import 'package:starflow/features/settings/presentation/playback_tuning_settings_page.dart';
+import 'package:starflow/features/settings/presentation/search_service_settings_page.dart';
 import 'package:starflow/features/settings/presentation/settings_management_page.dart';
 import 'package:starflow/features/settings/presentation/settings_version_label.dart';
+import 'package:starflow/features/settings/presentation/task_scheduling_settings_page.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 final Future<PackageInfo> _settingsPagePackageInfoFuture =
@@ -40,14 +41,8 @@ class SettingsPage extends ConsumerStatefulWidget {
     WidgetRef ref, {
     required ScrollController scrollController,
     required FocusNode headerFocusNode,
-    required TvFocusMemoryController tvFocusMemoryController,
   }) {
     final mediaSources = ref.watch(settingsMediaSourcesProvider);
-    final searchProviders = ref.watch(settingsSearchProvidersProvider);
-    final searchSourceIds = ref.watch(settingsSearchSourceIdsProvider);
-    final libraryMatchSourceIds =
-        ref.watch(settingsLibraryMatchSourceIdsProvider);
-    final networkStorage = ref.watch(settingsNetworkStorageProvider);
     final playbackSlice = ref.watch(settingsPlaybackSliceProvider);
     final performanceSlice = ref.watch(settingsPerformanceSliceProvider);
     final loading = ref.watch(settingsControllerProvider).isLoading;
@@ -60,8 +55,6 @@ class SettingsPage extends ConsumerStatefulWidget {
     return AppPrimaryScrollController(
       controller: scrollController,
       child: TvPageFocusScope(
-        controller: tvFocusMemoryController,
-        scopeId: 'settings',
         isTelevision: isTelevision,
         child: Scaffold(
           body: AppPageBackground(
@@ -69,223 +62,145 @@ class SettingsPage extends ConsumerStatefulWidget {
               context,
               includeBottomNavigationBar: true,
             ),
-            child: FocusTraversalGroup(
-              policy: OrderedTraversalPolicy(),
-              child: ListView(
-                controller: scrollController,
-                padding: EdgeInsets.zero,
-                children: [
-                  if (loading) const LinearProgressIndicator(),
-                  _SettingsPageHeader(
-                    isTelevision: isTelevision,
-                    focusNode: headerFocusNode,
-                  ),
-                  const SizedBox(height: 18),
-                  SectionPanel(
-                    title: '媒体源',
-                    child: Column(
-                      children: [
-                        ...mediaSources.map(
-                          (source) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: _SettingsTile(
-                              title: source.name,
-                              value: source.enabled,
-                              onChanged: (value) {
-                                ref
-                                    .read(settingsControllerProvider.notifier)
-                                    .toggleMediaSource(source.id, value);
-                              },
-                              onEdit: () => _openMediaSourceEditor(
-                                context,
-                                existing: source,
-                              ),
-                            ),
-                          ),
-                        ),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: StarflowButton(
-                            label: '新增媒体源',
-                            icon: Icons.add_rounded,
-                            onPressed: () => _openMediaSourceEditor(context),
-                            variant: StarflowButtonVariant.secondary,
-                            compact: true,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  SectionPanel(
-                    title: '搜索服务',
-                    child: Column(
-                      children: [
-                        ...searchProviders.map(
-                          (provider) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: _SettingsTile(
-                              title: provider.name,
-                              value: provider.enabled,
-                              onChanged: (value) {
-                                ref
-                                    .read(settingsControllerProvider.notifier)
-                                    .toggleSearchProvider(provider.id, value);
-                              },
-                              onEdit: () => _openSearchProviderEditor(
-                                context,
-                                existing: provider,
-                              ),
-                            ),
-                          ),
-                        ),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: StarflowButton(
-                            label: '新增搜索服务',
-                            icon: Icons.add_rounded,
-                            onPressed: () => _openSearchProviderEditor(context),
-                            variant: StarflowButtonVariant.secondary,
-                            compact: true,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        _SettingsNavigationTile(
-                          title: '搜索来源',
-                          subtitle: _searchSourceSummary(
-                            mediaSources: mediaSources,
-                            searchProviders: searchProviders,
-                            searchSourceIds: searchSourceIds,
-                          ),
-                          onTap: () => _openSearchSourcePicker(
-                            context,
-                            ref,
-                            mediaSources: mediaSources,
-                            searchProviders: searchProviders,
-                            searchSourceIds: searchSourceIds,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  SectionPanel(
-                    title: '元数据与评分',
-                    child: Column(
-                      children: [
-                        _SettingsNavigationTile(
-                          title: '打开匹配与评分设置',
-                          subtitle: 'TMDB、评分与匹配优先级',
-                          onTap: () => _openMetadataMatchSettings(context),
-                        ),
-                        const SizedBox(height: 10),
-                        _SettingsNavigationTile(
-                          title: '匹配来源',
-                          subtitle: _libraryMatchSourceSummary(
-                            mediaSources: mediaSources,
-                            selectedIds: libraryMatchSourceIds,
-                          ),
-                          onTap: () => _openLibraryMatchSourcePicker(
-                            context,
-                            ref,
-                            mediaSources: mediaSources,
-                            selectedIds: libraryMatchSourceIds,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  SectionPanel(
-                    title: '网络存储',
-                    child: _SettingsNavigationTile(
-                      title: '夸克与 STRM',
-                      onTap: () => _openNetworkStorageSettings(
-                        context,
-                        networkStorage,
+            child: ListView(
+              controller: scrollController,
+              padding: EdgeInsets.zero,
+              children: [
+                if (loading) const LinearProgressIndicator(),
+                _SettingsPageHeader(
+                  isTelevision: isTelevision,
+                  focusNode: headerFocusNode,
+                ),
+                const SizedBox(height: 18),
+                SectionPanel(
+                  title: '内容与来源',
+                  child: Column(
+                    children: [
+                      _SettingsNavigationTile(
+                        title: '媒体源管理',
+                        subtitle: _enabledCountSummary(mediaSources),
+                        onTap: () => _openMediaSourceSettings(context),
                       ),
-                    ),
+                      const SizedBox(height: 10),
+                      _SettingsNavigationTile(
+                        title: '搜索服务管理',
+                        subtitle: '在线服务与搜索来源',
+                        onTap: () => _openSearchServiceSettings(context),
+                      ),
+                      const SizedBox(height: 10),
+                      _SettingsNavigationTile(
+                        title: '网络存储',
+                        subtitle: '夸克、SmartStrm、同步与索引刷新',
+                        onTap: () => _openNetworkStorageSettings(context),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 18),
-                  SectionPanel(
-                    title: '本地存储',
-                    child: _SettingsNavigationTile(
-                      title: '查看分类与清理',
-                      onTap: () => _openLocalStorageSettings(context),
-                    ),
+                ),
+                const SizedBox(height: 18),
+                SectionPanel(
+                  title: '元数据',
+                  child: _SettingsNavigationTile(
+                    title: '元数据匹配',
+                    subtitle: 'TMDB、WMDB、自动匹配与匹配优先级',
+                    onTap: () => _openMetadataMatchSettings(context),
                   ),
-                  const SizedBox(height: 18),
-                  SectionPanel(
-                    title: '日志',
-                    child: _SettingsNavigationTile(
-                      title: '日志管理',
-                      subtitle: '导出、记录级别、预览、容量限制与清理',
-                      onTap: () => _openLoggingSettings(context),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  SectionPanel(
-                    title: '配置管理',
-                    child: _SettingsNavigationTile(
-                      title: '导入与导出配置',
-                      onTap: () => _openSettingsManagement(context),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  SectionPanel(
-                    title: '播放',
-                    child: Column(
-                      children: [
-                        _SettingsNavigationTile(
-                          title: '播放器与字幕',
-                          subtitle: _playbackSettingsSummary(
-                            playbackSlice,
-                            isTelevision: isTelevision,
-                          ),
-                          onTap: () => _openPlaybackSettings(
-                            context,
-                            playbackSlice,
-                          ),
+                ),
+                const SizedBox(height: 18),
+                SectionPanel(
+                  title: '播放',
+                  child: Column(
+                    children: [
+                      _SettingsNavigationTile(
+                        title: '播放器与字幕',
+                        subtitle: _playbackSettingsSummary(
+                          playbackSlice,
+                          isTelevision: isTelevision,
                         ),
-                      ],
-                    ),
+                        onTap: () => _openPlaybackSettings(
+                          context,
+                          playbackSlice,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      _SettingsNavigationTile(
+                        title: 'MPV 调优',
+                        subtitle:
+                            performanceSlice.aggressivePlaybackTuningEnabled
+                                ? '激进性能调优已开启'
+                                : '使用标准播放参数',
+                        onTap: () => _openPlaybackTuningSettings(context),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 18),
-                  SectionPanel(
-                    title: '外观',
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _SettingsNavigationTile(
-                          title: '首页设置',
-                          subtitle: 'Hero、首页模块与启动刷新',
-                          onTap: () => _openHomeSettings(context),
+                ),
+                const SizedBox(height: 18),
+                SectionPanel(
+                  title: '界面',
+                  child: Column(
+                    children: [
+                      _SettingsNavigationTile(
+                        title: '首页设置',
+                        subtitle: 'Hero、首页模块与数据来源',
+                        onTap: () => _openHomeSettings(context),
+                      ),
+                      const SizedBox(height: 10),
+                      _SettingsNavigationTile(
+                        title: '界面效果',
+                        subtitle: '特效、动画、Hero 与导航交互',
+                        onTap: () => _openInterfaceSettings(context),
+                      ),
+                      const SizedBox(height: 10),
+                      _SettingsNavigationTile(
+                        title: '菜单栏按钮',
+                        subtitle: _navigationDestinationSummary(
+                          navigationDestinationIds,
                         ),
-                        const SizedBox(height: 10),
-                        _SettingsNavigationTile(
-                          title: '高性能与轻量模式',
-                          subtitle:
-                              performanceSettingsSummary(performanceSlice),
-                          onTap: () => _openPerformanceSettings(context),
+                        onTap: () => _openNavigationDestinationPicker(
+                          context,
+                          ref,
+                          selectedIds: navigationDestinationIds,
                         ),
-                        const SizedBox(height: 10),
-                        _SettingsNavigationTile(
-                          title: '菜单栏按钮',
-                          subtitle: _navigationDestinationSummary(
-                            navigationDestinationIds,
-                          ),
-                          onTap: () => _openNavigationDestinationPicker(
-                            context,
-                            ref,
-                            selectedIds: navigationDestinationIds,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  const _SettingsPageVersionFooter(),
-                ],
-              ),
+                ),
+                const SizedBox(height: 18),
+                SectionPanel(
+                  title: '性能与后台',
+                  child: _SettingsNavigationTile(
+                    title: '任务调度',
+                    subtitle:
+                        '元数据并发 ${performanceSlice.metadataPrefetchMaxConcurrency} · 首页并发 ${performanceSlice.homeFeedMaxConcurrency}',
+                    onTap: () => _openBackgroundTaskSettings(context),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                SectionPanel(
+                  title: '数据与维护',
+                  child: Column(
+                    children: [
+                      _SettingsNavigationTile(
+                        title: '本地存储',
+                        subtitle: '查看分类占用并安全清理缓存',
+                        onTap: () => _openLocalStorageSettings(context),
+                      ),
+                      const SizedBox(height: 10),
+                      _SettingsNavigationTile(
+                        title: '日志',
+                        subtitle: '记录、预览、筛选、导出与清理',
+                        onTap: () => _openLoggingSettings(context),
+                      ),
+                      const SizedBox(height: 10),
+                      _SettingsNavigationTile(
+                        title: '配置管理',
+                        subtitle: '导入、导出与 TV 二维码传输',
+                        onTap: () => _openSettingsManagement(context),
+                      ),
+                    ],
+                  ),
+                ),
+                const _SettingsPageVersionFooter(),
+              ],
             ),
           ),
         ),
@@ -293,24 +208,18 @@ class SettingsPage extends ConsumerStatefulWidget {
     );
   }
 
-  Future<void> _openMediaSourceEditor(
-    BuildContext context, {
-    MediaSourceConfig? existing,
-  }) {
+  Future<void> _openMediaSourceSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
       NoAnimationMaterialPageRoute<void>(
-        builder: (context) => MediaSourceEditorPage(initial: existing),
+        builder: (context) => const MediaSourceSettingsPage(),
       ),
     );
   }
 
-  Future<void> _openSearchProviderEditor(
-    BuildContext context, {
-    SearchProviderConfig? existing,
-  }) {
+  Future<void> _openSearchServiceSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
       NoAnimationMaterialPageRoute<void>(
-        builder: (context) => SearchProviderEditorPage(initial: existing),
+        builder: (context) => const SearchServiceSettingsPage(),
       ),
     );
   }
@@ -323,116 +232,10 @@ class SettingsPage extends ConsumerStatefulWidget {
     );
   }
 
-  Future<void> _openSearchSourcePicker(
-    BuildContext context,
-    WidgetRef ref, {
-    required List<MediaSourceConfig> mediaSources,
-    required List<SearchProviderConfig> searchProviders,
-    required List<String> searchSourceIds,
-  }) async {
-    final availableLocalSources = mediaSources
-        .where(_isSelectableLocalMediaSource)
-        .toList(growable: false);
-    final availableProviders = searchProviders
-        .where((provider) => provider.enabled)
-        .toList(growable: false);
-    if (availableLocalSources.isEmpty && availableProviders.isEmpty) {
-      return;
-    }
-
-    final initialSelection = searchSourceIds.toSet();
-    final selected = await showSettingsCheckboxSelectionDialog<String>(
-      context: context,
-      title: '选择搜索来源',
-      initialSelection: initialSelection,
-      allLabel: '全部已启用来源',
-      allSubtitle: '清空单独选择，搜索时使用全部已启用本地源和搜索服务',
-      sections: [
-        if (availableLocalSources.isNotEmpty)
-          SettingsCheckboxDialogSection<String>(
-            title: '本地媒体源',
-            options: availableLocalSources
-                .map(
-                  (source) => SettingsCheckboxDialogOption<String>(
-                    value: searchSourceSettingIdForMediaSource(source.id),
-                    title: source.name,
-                    subtitle: source.kind.label,
-                  ),
-                )
-                .toList(growable: false),
-          ),
-        if (availableProviders.isNotEmpty)
-          SettingsCheckboxDialogSection<String>(
-            title: '搜索服务',
-            options: availableProviders
-                .map(
-                  (provider) => SettingsCheckboxDialogOption<String>(
-                    value: searchSourceSettingIdForProvider(provider.id),
-                    title: provider.name,
-                    subtitle: provider.kind.label,
-                  ),
-                )
-                .toList(growable: false),
-          ),
-      ],
-    );
-    if (selected == null) {
-      return;
-    }
-    await ref
-        .read(settingsControllerProvider.notifier)
-        .setSearchSourceIds(selected.toList(growable: false));
-  }
-
-  Future<void> _openLibraryMatchSourcePicker(
-    BuildContext context,
-    WidgetRef ref, {
-    required List<MediaSourceConfig> mediaSources,
-    required List<String> selectedIds,
-  }) async {
-    final availableSources = mediaSources
-        .where(_isSelectableLocalMediaSource)
-        .toList(growable: false);
-    if (availableSources.isEmpty) {
-      return;
-    }
-
-    final initialSelection = selectedIds.toSet();
-    final selected = await showSettingsCheckboxSelectionDialog<String>(
-      context: context,
-      title: '选择匹配来源',
-      initialSelection: initialSelection,
-      allLabel: '全部已启用来源',
-      allSubtitle: '清空单独选择，匹配时扫描全部已启用媒体源',
-      sections: [
-        SettingsCheckboxDialogSection<String>(
-          options: availableSources
-              .map(
-                (source) => SettingsCheckboxDialogOption<String>(
-                  value: source.id,
-                  title: source.name,
-                  subtitle: source.kind.label,
-                ),
-              )
-              .toList(growable: false),
-        ),
-      ],
-    );
-    if (selected == null) {
-      return;
-    }
-    await ref
-        .read(settingsControllerProvider.notifier)
-        .setLibraryMatchSourceIds(selected.toList(growable: false));
-  }
-
-  Future<void> _openNetworkStorageSettings(
-    BuildContext context,
-    NetworkStorageConfig initial,
-  ) {
+  Future<void> _openNetworkStorageSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
       NoAnimationMaterialPageRoute<void>(
-        builder: (context) => NetworkStorageSettingsPage(initial: initial),
+        builder: (context) => const NetworkStorageSettingsPage(),
       ),
     );
   }
@@ -476,10 +279,26 @@ class SettingsPage extends ConsumerStatefulWidget {
     );
   }
 
-  Future<void> _openPerformanceSettings(BuildContext context) {
+  Future<void> _openPlaybackTuningSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
       NoAnimationMaterialPageRoute<void>(
-        builder: (context) => const PerformanceSettingsPage(),
+        builder: (context) => const PlaybackTuningSettingsPage(),
+      ),
+    );
+  }
+
+  Future<void> _openInterfaceSettings(BuildContext context) {
+    return Navigator.of(context, rootNavigator: true).push<void>(
+      NoAnimationMaterialPageRoute<void>(
+        builder: (context) => const InterfaceSettingsPage(),
+      ),
+    );
+  }
+
+  Future<void> _openBackgroundTaskSettings(BuildContext context) {
+    return Navigator.of(context, rootNavigator: true).push<void>(
+      NoAnimationMaterialPageRoute<void>(
+        builder: (context) => const TaskSchedulingSettingsPage(),
       ),
     );
   }
@@ -637,14 +456,11 @@ class _SettingsPageVersionFooter extends StatelessWidget {
 class _SettingsPageState extends ConsumerState<SettingsPage> {
   final ScrollController _scrollController = ScrollController();
   final FocusNode _headerFocusNode = FocusNode(debugLabel: 'settings-header');
-  final TvFocusMemoryController _tvFocusMemoryController =
-      TvFocusMemoryController();
 
   @override
   void dispose() {
     _headerFocusNode.dispose();
     _scrollController.dispose();
-    _tvFocusMemoryController.dispose();
     super.dispose();
   }
 
@@ -655,7 +471,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       ref,
       scrollController: _scrollController,
       headerFocusNode: _headerFocusNode,
-      tvFocusMemoryController: _tvFocusMemoryController,
     );
   }
 }
@@ -714,89 +529,12 @@ String _navigationDestinationSummary(List<String> selectedIds) {
   return selected.map((id) => labels[id]).whereType<String>().join('、');
 }
 
-String _searchSourceSummary({
-  required List<MediaSourceConfig> mediaSources,
-  required List<SearchProviderConfig> searchProviders,
-  required List<String> searchSourceIds,
-}) {
-  final availableLocalSources =
-      mediaSources.where(_isSelectableLocalMediaSource).toList(growable: false);
-  final availableProviders = searchProviders
-      .where((provider) => provider.enabled)
-      .toList(growable: false);
-  final totalCount = availableLocalSources.length + availableProviders.length;
-  if (totalCount == 0) {
-    return '暂无可选来源';
+String _enabledCountSummary(List<MediaSourceConfig> sources) {
+  if (sources.isEmpty) {
+    return '尚未添加';
   }
-
-  final selectedIds = searchSourceIds.toSet();
-  if (selectedIds.isEmpty) {
-    return '全部已启用来源';
-  }
-
-  final selectedLabels = <String>[
-    ...availableLocalSources
-        .where(
-          (source) => selectedIds.contains(
-            searchSourceSettingIdForMediaSource(source.id),
-          ),
-        )
-        .map((source) => source.name),
-    ...availableProviders
-        .where(
-          (provider) => selectedIds.contains(
-            searchSourceSettingIdForProvider(provider.id),
-          ),
-        )
-        .map((provider) => provider.name),
-  ];
-  if (selectedLabels.isEmpty || selectedLabels.length >= totalCount) {
-    return '全部已启用来源';
-  }
-  if (selectedLabels.length <= 2) {
-    return selectedLabels.join('、');
-  }
-  return '${selectedLabels.take(2).join('、')} 等 ${selectedLabels.length} 个来源';
-}
-
-String _libraryMatchSourceSummary({
-  required List<MediaSourceConfig> mediaSources,
-  required List<String> selectedIds,
-}) {
-  final availableSources =
-      mediaSources.where(_isSelectableLocalMediaSource).toList(growable: false);
-  if (availableSources.isEmpty) {
-    return '暂无可选来源';
-  }
-
-  final selectedIdsSet = selectedIds.toSet();
-  if (selectedIdsSet.isEmpty) {
-    return '全部已启用来源';
-  }
-
-  final selectedNames = availableSources
-      .where((source) => selectedIdsSet.contains(source.id))
-      .map((source) => source.name)
-      .toList(growable: false);
-  if (selectedNames.isEmpty ||
-      selectedNames.length >= availableSources.length) {
-    return '全部已启用来源';
-  }
-  if (selectedNames.length <= 2) {
-    return selectedNames.join('、');
-  }
-  return '${selectedNames.take(2).join('、')} 等 ${selectedNames.length} 个来源';
-}
-
-bool _isSelectableLocalMediaSource(MediaSourceConfig source) {
-  if (!source.enabled) {
-    return false;
-  }
-  if (source.kind == MediaSourceKind.quark) {
-    return source.hasConfiguredQuarkFolder;
-  }
-  return source.kind == MediaSourceKind.emby ||
-      source.kind == MediaSourceKind.nas;
+  final enabledCount = sources.where((source) => source.enabled).length;
+  return '已启用 $enabledCount / ${sources.length}';
 }
 
 String _formatPlaybackSpeedLabel(double speed) {
@@ -804,109 +542,6 @@ String _formatPlaybackSpeedLabel(double speed) {
     return '${speed.toStringAsFixed(0)}x';
   }
   return '${speed.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '')}x';
-}
-
-class _SettingsTile extends StatelessWidget {
-  const _SettingsTile({
-    required this.title,
-    required this.value,
-    required this.onChanged,
-    required this.onEdit,
-  });
-
-  final String title;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-  final VoidCallback onEdit;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 720;
-        final toggleLabel = value ? '已开启' : '已关闭';
-        final toggleIcon =
-            value ? Icons.toggle_on_rounded : Icons.toggle_off_outlined;
-        return Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(
-              color: scheme.outlineVariant,
-            ),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      value ? '已开启' : '已关闭',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              compact
-                  ? StarflowIconButton(
-                      icon: Icons.edit_outlined,
-                      onPressed: onEdit,
-                      variant: StarflowButtonVariant.secondary,
-                      tooltip: '编辑',
-                    )
-                  : StarflowButton(
-                      label: '编辑',
-                      icon: Icons.edit_outlined,
-                      onPressed: onEdit,
-                      variant: StarflowButtonVariant.secondary,
-                      compact: true,
-                    ),
-              const SizedBox(width: 8),
-              compact
-                  ? StarflowIconButton(
-                      icon: toggleIcon,
-                      iconColor: value ? null : scheme.onSurfaceVariant,
-                      onPressed: () => onChanged(!value),
-                      variant: value
-                          ? StarflowButtonVariant.primary
-                          : StarflowButtonVariant.secondary,
-                      tooltip: toggleLabel,
-                    )
-                  : StarflowButton(
-                      label: toggleLabel,
-                      icon: toggleIcon,
-                      iconColor: value ? null : scheme.onSurfaceVariant,
-                      onPressed: () => onChanged(!value),
-                      variant: value
-                          ? StarflowButtonVariant.primary
-                          : StarflowButtonVariant.secondary,
-                      compact: true,
-                    ),
-            ],
-          ),
-        );
-      },
-    );
-  }
 }
 
 class _SettingsPageHeader extends StatelessWidget {
@@ -929,13 +564,6 @@ class _SettingsPageHeader extends StatelessWidget {
             '设置',
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.w800,
-                ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '集中管理媒体源、搜索服务、元数据、网络存储、播放与首页展示。',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
           ),
         ],

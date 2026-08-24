@@ -18,12 +18,14 @@ final homeFeedLoadSchedulerProvider = Provider<HomeFeedLoadScheduler>((ref) {
 /// serialized so several network completions cannot rebuild Home together.
 class HomeFeedLoadScheduler {
   HomeFeedLoadScheduler({
-    this.backgroundBatchDelay = const Duration(milliseconds: 350),
+    Duration backgroundBatchDelay = const Duration(
+      milliseconds: kHomeFeedBatchDelayMsDefault,
+    ),
     this.resultApplySpacing = const Duration(milliseconds: 20),
     this.idleResetDelay = const Duration(seconds: 3),
-  });
+  }) : _backgroundBatchDelay = backgroundBatchDelay;
 
-  final Duration backgroundBatchDelay;
+  Duration _backgroundBatchDelay;
   final Duration resultApplySpacing;
   final Duration idleResetDelay;
   final Queue<void Function()> _pendingLoads = Queue<void Function()>();
@@ -46,11 +48,13 @@ class HomeFeedLoadScheduler {
     required String moduleId,
     required int maxConcurrency,
     required int initialBatchSize,
+    Duration? backgroundBatchDelay,
     required Future<T> Function() task,
   }) {
     _updateLimits(
       maxConcurrency: maxConcurrency,
       initialBatchSize: initialBatchSize,
+      backgroundBatchDelay: backgroundBatchDelay,
     );
     _idleResetTimer?.cancel();
     _idleResetTimer = null;
@@ -63,7 +67,7 @@ class HomeFeedLoadScheduler {
         fields: <String, Object?>{
           'maxConcurrency': _maxConcurrency,
           'initialBatchSize': _initialBatchSize,
-          'backgroundBatchDelayMs': backgroundBatchDelay.inMilliseconds,
+          'backgroundBatchDelayMs': _backgroundBatchDelay.inMilliseconds,
         },
       );
     }
@@ -130,10 +134,12 @@ class HomeFeedLoadScheduler {
   void updateLimits({
     required int maxConcurrency,
     required int initialBatchSize,
+    Duration? backgroundBatchDelay,
   }) {
     _updateLimits(
       maxConcurrency: maxConcurrency,
       initialBatchSize: initialBatchSize,
+      backgroundBatchDelay: backgroundBatchDelay,
     );
     _drainLoads();
   }
@@ -146,6 +152,7 @@ class HomeFeedLoadScheduler {
   void _updateLimits({
     required int maxConcurrency,
     required int initialBatchSize,
+    Duration? backgroundBatchDelay,
   }) {
     _maxConcurrency = clampHomeFeedMaxConcurrency(maxConcurrency);
     final normalizedBatchSize = clampHomeFeedInitialBatchSize(initialBatchSize);
@@ -154,6 +161,11 @@ class HomeFeedLoadScheduler {
       if (!_cycleStarted) {
         _remainingStartsInBatch = normalizedBatchSize;
       }
+    }
+    if (backgroundBatchDelay != null) {
+      _backgroundBatchDelay = backgroundBatchDelay.isNegative
+          ? Duration.zero
+          : backgroundBatchDelay;
     }
   }
 
@@ -168,7 +180,7 @@ class HomeFeedLoadScheduler {
       _pendingLoads.removeFirst()();
     }
     if (_pendingLoads.isNotEmpty && _remainingStartsInBatch == 0) {
-      _batchTimer = Timer(backgroundBatchDelay, () {
+      _batchTimer = Timer(_backgroundBatchDelay, () {
         _batchTimer = null;
         _remainingStartsInBatch = _maxConcurrency;
         appLogTrace(

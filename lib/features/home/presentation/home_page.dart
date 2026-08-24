@@ -98,8 +98,6 @@ class _HomePageState extends ConsumerState<HomePage>
   String _pinnedHeroSectionId = '';
   String _lastHeroSourceModuleId = '';
   final ScrollController _scrollController = ScrollController();
-  final TvFocusMemoryController _tvFocusMemoryController =
-      TvFocusMemoryController();
   final ValueNotifier<_HomeHeroSelection> _heroSelectionNotifier =
       ValueNotifier<_HomeHeroSelection>(const _HomeHeroSelection.empty());
   final HomeHeroPrefetchCoordinator _heroPrefetchCoordinator =
@@ -114,6 +112,7 @@ class _HomePageState extends ConsumerState<HomePage>
   int _observedHomeNavigationResetRevision = 0;
   int _scheduledHeroMetadataAutoRefreshRevision = 0;
   int _scheduledHeroExplicitRefreshRevision = 0;
+  bool _contentLoadingDeferralActive = false;
 
   bool get _showHeroPagerButtons {
     if (kIsWeb) {
@@ -137,7 +136,6 @@ class _HomePageState extends ConsumerState<HomePage>
   void dispose() {
     _scrollController.dispose();
     _heroNextSectionFocusNode.dispose();
-    _tvFocusMemoryController.dispose();
     _heroSelectionNotifier.dispose();
     super.dispose();
   }
@@ -158,7 +156,26 @@ class _HomePageState extends ConsumerState<HomePage>
     }
     ref
         .read(metadataPrefetchConcurrencyLimiterProvider)
-        .deferForForegroundInteraction(reason: reason);
+        .deferForForegroundInteraction(
+          reason: reason,
+          resumeDelay: Duration(
+            milliseconds: ref
+                .read(appSettingsProvider)
+                .metadataPrefetchForegroundResumeDelayMs,
+          ),
+        );
+  }
+
+  void _deferPrefetchWhileContentLoading(bool isLoading) {
+    if (!isLoading) {
+      _contentLoadingDeferralActive = false;
+      return;
+    }
+    if (_contentLoadingDeferralActive) {
+      return;
+    }
+    _contentLoadingDeferralActive = true;
+    _deferPrefetchForForegroundInteraction(reason: 'home.content-loading');
   }
 
   @override
@@ -239,15 +256,11 @@ class _HomePageState extends ConsumerState<HomePage>
     final simplifyHeroBackdrop = lightweightHomeHeroEnabled;
     final resolvedSections = resolvedSectionsState.sections;
     final hasPendingSections = resolvedSectionsState.hasPendingSections;
-    if (hasPendingSections) {
-      _deferPrefetchForForegroundInteraction(reason: 'home.content-loading');
-    }
+    _deferPrefetchWhileContentLoading(hasPendingSections);
 
     return AppPrimaryScrollController(
       controller: _scrollController,
       child: TvPageFocusScope(
-        controller: _tvFocusMemoryController,
-        scopeId: 'home',
         isTelevision: isTelevision,
         child: Scaffold(
           backgroundColor: Colors.transparent,
@@ -514,7 +527,10 @@ class _HomePageState extends ConsumerState<HomePage>
     if (targetContext == null || !_heroNextSectionFocusNode.canRequestFocus) {
       return false;
     }
-    FocusScope.of(targetContext).requestFocus(_heroNextSectionFocusNode);
+    requestTvFocus(
+      _heroNextSectionFocusNode,
+      scope: FocusScope.of(targetContext),
+    );
     return true;
   }
 

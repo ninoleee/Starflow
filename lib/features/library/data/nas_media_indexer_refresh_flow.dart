@@ -641,6 +641,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     }
 
     final controller = _RefreshTaskController();
+    _updateIndexerConcurrencyLimits();
     final future = _sourceBudget.withPermit(() {
       return _withGlobalBackgroundPermit(() async {
         try {
@@ -919,6 +920,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     required _RefreshTaskController controller,
   }) async {
     controller.throwIfCancelled();
+    _updateIndexerConcurrencyLimits();
     if (scopedCollections != null && scopedCollections.isNotEmpty) {
       _progressController.startScanning(
         sourceId: source.id,
@@ -1231,6 +1233,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     if (_backgroundEnrichmentTasks.containsKey(taskKey)) {
       return;
     }
+    _updateIndexerConcurrencyLimits();
     final stopwatch = Stopwatch()..start();
     final future = _enrichmentBudget.withPermit(() {
       return _withGlobalBackgroundPermit(() async {

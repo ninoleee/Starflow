@@ -80,4 +80,28 @@ void main() {
     expect(order, <String>['one', 'two', 'three']);
     expect(maxActive, 1);
   });
+
+  test('per-load continuation delay updates the active scheduler policy',
+      () async {
+    final scheduler = HomeFeedLoadScheduler(
+      backgroundBatchDelay: const Duration(seconds: 1),
+    );
+    addTearDown(scheduler.dispose);
+    final starts = <String>[];
+
+    final tasks = List<Future<void>>.generate(3, (index) {
+      return scheduler.runLoad<void>(
+        moduleId: 'module-$index',
+        maxConcurrency: 2,
+        initialBatchSize: 1,
+        backgroundBatchDelay: Duration.zero,
+        task: () async {
+          starts.add('module-$index');
+        },
+      );
+    });
+
+    await Future.wait(tasks);
+    expect(starts, hasLength(3));
+  });
 }

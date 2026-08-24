@@ -29,8 +29,6 @@ class SubtitleSearchPage extends ConsumerStatefulWidget {
 class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
   late final TextEditingController _controller;
   late final List<OnlineSubtitleSource> _availableSources;
-  final TvFocusMemoryController _focusMemoryController =
-      TvFocusMemoryController();
   late List<OnlineSubtitleSource> _selectedSources;
   List<SubtitleSearchResult> _results = const [];
   Map<String, SubtitleSearchSelection> _validatedSelectionsByResultId =
@@ -82,7 +80,6 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
 
   @override
   void dispose() {
-    _focusMemoryController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -486,9 +483,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         ),
         body: AppPageBackground(
           child: SafeArea(
-            child: TvFocusMemoryScope(
-              controller: _focusMemoryController,
-              scopeId: 'subtitle-search',
+            child: TvPageFocusScope(
+              isTelevision: isTelevision,
               child: Column(
                 children: [
                   Padding(

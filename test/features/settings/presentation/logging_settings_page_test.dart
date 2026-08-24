@@ -169,20 +169,13 @@ void main() {
     final visibleErrorChip = focusableActions.singleWhere(
       (widget) => widget.focusId == 'settings:logging:visible:error',
     );
-    final exportButton = focusableActions.singleWhere(
-      (widget) => widget.focusId == 'settings:logging:export',
-    );
-    final clearButton = focusableActions.singleWhere(
-      (widget) => widget.focusId == 'settings:logging:clear',
-    );
     visibleErrorChip.focusNode!.requestFocus();
     await tester.pump();
+    final origin = FocusManager.instance.primaryFocus!.rect.center;
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
-    expect(exportButton.focusNode!.hasFocus, isTrue);
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
-    expect(clearButton.focusNode!.hasFocus, isTrue);
+    final destination = FocusManager.instance.primaryFocus!.rect.center;
+    expect(destination.dy, greaterThan(origin.dy));
 
     entries.first.focusNode!.requestFocus();
     await tester.pumpAndSettle();

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -96,6 +97,53 @@ void main() {
     await tester.pump();
 
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'search-query');
+  });
+
+  testWidgets('TV query dialog moves down out of its text field',
+      (tester) async {
+    SharedPreferences.setMockInitialValues(const {});
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(
+            const AppSettings(
+              mediaSources: <MediaSourceConfig>[],
+              searchProviders: <SearchProviderConfig>[],
+              doubanAccount: DoubanAccountConfig(enabled: false),
+              homeModules: <HomeModuleConfig>[],
+            ),
+          ),
+        ],
+        child: const MaterialApp(
+          home: SearchPage(
+            initialQuery: '测试电影',
+            showBackButton: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      'search-query-dialog-field',
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      isNot('search-query-dialog-field'),
+    );
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      anyOf('search-query-dialog-cancel', 'search-query-dialog-submit'),
+    );
   });
 
   testWidgets('detail search restores TV focus after online result update',

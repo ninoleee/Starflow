@@ -10,8 +10,11 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/presentation/quark_folder_picker_page.dart';
+import 'package:starflow/features/settings/presentation/webdav_directory_picker_page.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
+
+part 'media_source_editor_forms.part.dart';
 
 /// 全屏编辑媒体源（替代原先窄对话框，便于长表单与键盘避让）。
 class MediaSourceEditorPage extends ConsumerStatefulWidget {
@@ -603,7 +606,10 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
 
     final pickedPath = await Navigator.of(context).push<String>(
       NoAnimationMaterialPageRoute<String>(
-        builder: (context) => _WebDavPathPickerPage(source: _draftConfig()),
+        builder: (context) => WebDavDirectoryPickerPage(
+          source: _draftConfig(),
+          initialPath: _selectedNasPath,
+        ),
       ),
     );
 
@@ -809,11 +815,24 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         ),
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: [
+          Text(
+            widget.initial == null ? '新增媒体源' : '编辑媒体源',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '配置来源连接、展示分区和索引规则。离开时会询问是否保存未提交的修改。',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
           const SettingsSectionTitle(label: '基本信息'),
           ...buildSettingsTileGroup([
             SettingsTextInputField(
               controller: _nameController,
               labelText: '名称',
+              autofocus: true,
+              focusId: 'media-source-editor:name',
               textInputAction: TextInputAction.next,
             ),
             SettingsSelectionTile(
@@ -823,101 +842,33 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
             ),
           ], spacing: 12),
           const SettingsSectionTitle(label: '连接'),
-          ...buildSettingsTileGroup([
-            if (!isQuark)
-              SettingsTextInputField(
-                controller: _endpointController,
-                labelText: isEmby ? 'Endpoint' : 'WebDAV Endpoint',
-                keyboardType: TextInputType.url,
-                textInputAction: TextInputAction.next,
-                autocorrect: false,
-                hintText: isEmby
-                    ? 'https://emby.example.com'
-                    : 'https://nas.example.com/dav',
-              ),
-            if (isNas)
-              SettingsSelectionTile(
-                title: '当前路径',
-                value:
-                    _selectedNasPath.trim().isEmpty ? '根目录' : _selectedNasPath,
-                onPressed: _endpointController.text.trim().isEmpty
-                    ? null
-                    : _pickWebDavPath,
-              ),
-            if (isQuark)
-              SettingsSelectionTile(
-                title: '当前目录',
-                value: _selectedQuarkFolderPath.trim().isEmpty
-                    ? '未选择'
-                    : _selectedQuarkFolderPath,
-                subtitle: quarkCookieConfigured
-                    ? '复用「夸克与 STRM」里的全局 Cookie'
-                    : '请先在「夸克与 STRM」中填写夸克 Cookie',
-                onPressed: quarkCookieConfigured ? _pickQuarkFolder : null,
-              ),
-          ], spacing: 12),
-          if (!isQuark) ...[
-            const SizedBox(height: 12),
-            AutofillGroup(
-              child: Column(
-                children: buildSettingsTileGroup([
-                  SettingsTextInputField(
-                    controller: _usernameController,
-                    labelText: isEmby ? 'Emby 用户名' : '用户名',
-                    textInputAction: TextInputAction.next,
-                    autofillHints: const [AutofillHints.username],
-                  ),
-                  SettingsTextInputField(
-                    controller: _passwordController,
-                    labelText: isEmby ? 'Emby 密码' : 'WebDAV 密码',
-                    obscureText: true,
-                    textInputAction: TextInputAction.done,
-                    autofillHints: const [AutofillHints.password],
-                    summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
-                  ),
-                ], spacing: 12),
-              ),
-            ),
-          ],
-          if (isEmby) ...[
-            const SizedBox(height: 8),
-            SettingsExpandableSection(
-              title: '高级（可选）',
-              subtitle: '手动粘贴 Access Token / API Key',
-              expanded: _advancedTokenExpanded,
-              onChanged: (expanded) {
+          if (isEmby)
+            _EmbySourceConnectionForm(
+              endpointController: _endpointController,
+              usernameController: _usernameController,
+              passwordController: _passwordController,
+              tokenController: _tokenController,
+              advancedExpanded: _advancedTokenExpanded,
+              onAdvancedChanged: (expanded) {
                 setState(() => _advancedTokenExpanded = expanded);
               },
-              children: [
-                SettingsTextInputField(
-                  controller: _tokenController,
-                  labelText: 'Access Token / API Key',
-                  minLines: 1,
-                  maxLines: 4,
-                  alignLabelWithHint: true,
-                  summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
-                ),
-              ],
+            )
+          else if (isNas)
+            _WebDavSourceConnectionForm(
+              endpointController: _endpointController,
+              usernameController: _usernameController,
+              passwordController: _passwordController,
+              selectedPath: _selectedNasPath,
+              onPickPath: _endpointController.text.trim().isEmpty
+                  ? null
+                  : _pickWebDavPath,
+            )
+          else
+            _QuarkSourceConnectionForm(
+              cookieConfigured: quarkCookieConfigured,
+              selectedPath: _selectedQuarkFolderPath,
+              onPickFolder: quarkCookieConfigured ? _pickQuarkFolder : null,
             ),
-          ] else if (isNas) ...[
-            const SizedBox(height: 12),
-            Text(
-              '可直接填写 WebDAV 地址、用户名和密码。',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ] else ...[
-            const SizedBox(height: 12),
-            Text(
-              quarkCookieConfigured
-                  ? '夸克媒体源会复用全局 Cookie，只需选择目录并测试连接。'
-                  : '请先到「夸克与 STRM」填写夸克 Cookie，再回来选择目录。',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ],
           const SettingsSectionTitle(label: '选择分区'),
           if (_availableSections.isNotEmpty)
             Padding(
@@ -1211,186 +1162,6 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
               ),
             ),
           ],
-        ],
-      ),
-    );
-  }
-}
-
-class _WebDavPathPickerPage extends ConsumerStatefulWidget {
-  const _WebDavPathPickerPage({required this.source});
-
-  final MediaSourceConfig source;
-
-  @override
-  ConsumerState<_WebDavPathPickerPage> createState() =>
-      _WebDavPathPickerPageState();
-}
-
-class _WebDavPathPickerPageState extends ConsumerState<_WebDavPathPickerPage> {
-  late String _currentPath;
-  late String _rootPath;
-  late Future<List<MediaCollection>> _foldersFuture;
-  final Map<String, Future<List<MediaCollection>>> _folderFutureCache =
-      <String, Future<List<MediaCollection>>>{};
-  bool _skipAutoSaveOnPop = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _rootPath = widget.source.endpoint.trim();
-    _currentPath = widget.source.libraryPath.trim().isNotEmpty
-        ? widget.source.libraryPath.trim()
-        : _rootPath;
-    _foldersFuture = _resolveFoldersFuture(_currentPath);
-  }
-
-  Future<List<MediaCollection>> _resolveFoldersFuture(String directoryId) {
-    final normalizedDirectoryId = directoryId.trim();
-    return _folderFutureCache.putIfAbsent(
-      normalizedDirectoryId,
-      () => ref.read(webDavNasClientProvider).fetchCollections(
-            widget.source,
-            directoryId: normalizedDirectoryId,
-          ),
-    );
-  }
-
-  void _setCurrentPath(String nextPath) {
-    final normalizedNextPath = nextPath.trim();
-    if (normalizedNextPath.isEmpty || normalizedNextPath == _currentPath) {
-      return;
-    }
-    setState(() {
-      _currentPath = normalizedNextPath;
-      _foldersFuture = _resolveFoldersFuture(normalizedNextPath);
-    });
-  }
-
-  String _pathLabel(String raw) {
-    final uri = Uri.tryParse(raw);
-    if (uri == null) {
-      return raw;
-    }
-    final path = uri.path.isEmpty ? '/' : uri.path;
-    return '${uri.host}$path';
-  }
-
-  String? _parentPath(String raw) {
-    final uri = Uri.tryParse(raw);
-    final rootUri = Uri.tryParse(_rootPath);
-    if (uri == null) {
-      return null;
-    }
-    if (rootUri != null &&
-        _normalizeDirectoryUri(uri) == _normalizeDirectoryUri(rootUri)) {
-      return null;
-    }
-    final segments =
-        uri.pathSegments.where((segment) => segment.isNotEmpty).toList();
-    if (segments.isEmpty) {
-      return null;
-    }
-    final parentSegments = segments.take(segments.length - 1).toList();
-    final parentPath =
-        parentSegments.isEmpty ? '/' : '/${parentSegments.join('/')}/';
-    final parent =
-        uri.replace(path: parentPath, query: null, fragment: null).toString();
-    if (rootUri == null) {
-      return parent;
-    }
-    final normalizedParent = _normalizeDirectoryUri(Uri.parse(parent));
-    final normalizedRoot = _normalizeDirectoryUri(rootUri);
-    if (!normalizedParent.path.startsWith(normalizedRoot.path)) {
-      return null;
-    }
-    return parent;
-  }
-
-  Uri _normalizeDirectoryUri(Uri uri) {
-    final normalizedPath = uri.path.endsWith('/') ? uri.path : '${uri.path}/';
-    return uri.replace(path: normalizedPath, query: null, fragment: null);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final parentPath = _parentPath(_currentPath);
-    return PopScope<String>(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, result) {
-        if (didPop || _skipAutoSaveOnPop) {
-          return;
-        }
-        _skipAutoSaveOnPop = true;
-        Navigator.of(context).pop(_currentPath);
-      },
-      child: SettingsPageScaffold(
-        onBack: () {
-          _skipAutoSaveOnPop = true;
-          Navigator.of(context).pop(_currentPath);
-        },
-        trailing: SettingsToolbarButton(
-          label: '选这里',
-          icon: Icons.check_rounded,
-          onPressed: () {
-            _skipAutoSaveOnPop = true;
-            Navigator.of(context).pop(_currentPath);
-          },
-        ),
-        children: [
-          const SettingsSectionTitle(label: '当前路径'),
-          SelectableText(
-            _pathLabel(_currentPath),
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          if (parentPath != null) ...[
-            const SizedBox(height: 16),
-            SettingsActionButton(
-              label: '返回上一级目录',
-              icon: Icons.arrow_upward_rounded,
-              onPressed: () => _setCurrentPath(parentPath),
-            ),
-          ],
-          const SettingsSectionTitle(label: '子文件夹'),
-          FutureBuilder<List<MediaCollection>>(
-            future: _foldersFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Padding(
-                  padding: EdgeInsets.only(top: 40),
-                  child: Center(child: CircularProgressIndicator()),
-                );
-              }
-              if (snapshot.hasError) {
-                return Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text('读取路径失败：${snapshot.error}'),
-                );
-              }
-              final folders = snapshot.data ?? const <MediaCollection>[];
-              if (folders.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.only(top: 8),
-                  child: Text('当前路径下没有子文件夹，可以直接选择这里作为根路径。'),
-                );
-              }
-              return Column(
-                children: [
-                  for (final folder in folders)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: SettingsSelectionTile(
-                        title: folder.title,
-                        subtitle: folder.id,
-                        value: '进入',
-                        leading: const Icon(Icons.folder_open_rounded),
-                        onPressed: () => _setCurrentPath(folder.id),
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
         ],
       ),
     );

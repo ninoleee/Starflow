@@ -67,10 +67,20 @@ class _SettingsManagementPageState
         (usesWebTransfer || isIos) && service.supportsSystemExport;
 
     return SettingsPageScaffold(
+      onBack: () => Navigator.of(context).pop(),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       children: [
+        Text('配置管理', style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 8),
+        Text(
+          '导入或导出完整设置；TV 端可通过二维码在同一网络传输。',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: 18),
         SectionPanel(
-          title: '配置管理',
+          title: '导入与导出',
           child: service.isSupported
               ? isTelevision
                   ? _buildTelevisionTransferContent()

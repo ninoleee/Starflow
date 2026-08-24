@@ -303,11 +303,10 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   bool _isIncrementalRefreshing = false;
   bool _isForceRescanning = false;
   int _refreshIntentSerial = 0;
+  bool _contentLoadingDeferralActive = false;
   final ScrollController _scrollController = ScrollController();
   final FocusNode _topFilterFocusNode =
       FocusNode(debugLabel: 'library-filter-top');
-  final TvFocusMemoryController _tvFocusMemoryController =
-      TvFocusMemoryController();
   final DetailRatingPrefetchCoordinator _ratingPrefetchCoordinator =
       DetailRatingPrefetchCoordinator();
   final Map<LibraryVisiblePageRequest,
@@ -328,7 +327,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   void dispose() {
     _topFilterFocusNode.dispose();
     _scrollController.dispose();
-    _tvFocusMemoryController.dispose();
     super.dispose();
   }
 
@@ -363,7 +361,26 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     }
     ref
         .read(metadataPrefetchConcurrencyLimiterProvider)
-        .deferForForegroundInteraction(reason: reason);
+        .deferForForegroundInteraction(
+          reason: reason,
+          resumeDelay: Duration(
+            milliseconds: ref
+                .read(appSettingsProvider)
+                .metadataPrefetchForegroundResumeDelayMs,
+          ),
+        );
+  }
+
+  void _deferPrefetchWhileContentLoading(bool isLoading) {
+    if (!isLoading) {
+      _contentLoadingDeferralActive = false;
+      return;
+    }
+    if (_contentLoadingDeferralActive) {
+      return;
+    }
+    _contentLoadingDeferralActive = true;
+    _deferPrefetchForForegroundInteraction(reason: 'library.content-loading');
   }
 
   void _handleBack() {
@@ -421,15 +438,13 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       mediaSources,
       filter: activeFilter,
     );
-    if (displayAsync.isLoading || collectionsAsync.isLoading) {
-      _deferPrefetchForForegroundInteraction(reason: 'library.content-loading');
-    }
+    _deferPrefetchWhileContentLoading(
+      displayAsync.isLoading || collectionsAsync.isLoading,
+    );
 
     return AppPrimaryScrollController(
       controller: _scrollController,
       child: TvPageFocusScope(
-        controller: _tvFocusMemoryController,
-        scopeId: 'library',
         isTelevision: isTelevision,
         child: Scaffold(
           body: Stack(

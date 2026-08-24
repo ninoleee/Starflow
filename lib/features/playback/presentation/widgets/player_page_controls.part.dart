@@ -293,7 +293,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
     if (player == null || videoController == null) {
       final startupOverlay = PlayerStartupOverlay(
         target: _resolvedTarget ?? widget.target,
-        speedLabel: _startupProbe.speedLabel,
+        speedLabel: _networkEstimate.speedLabel,
       );
       if (isTelevision) {
         return startupOverlay;
@@ -386,7 +386,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
               return IgnorePointer(
                 child: PlayerStartupOverlay(
                   target: _resolvedTarget ?? widget.target,
-                  speedLabel: _startupProbe.speedLabel,
+                  speedLabel: _networkEstimate.speedLabel,
                   bufferingProgress: progressSnapshot.data,
                 ),
               );
@@ -422,7 +422,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
                 ignoring: !isTelevision,
                 child: PlayerStartupOverlay(
                   target: _resolvedTarget ?? widget.target,
-                  speedLabel: _startupProbe.speedLabel,
+                  speedLabel: _networkEstimate.speedLabel,
                 ),
               ),
             );

@@ -103,6 +103,7 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
   @override
   Widget build(BuildContext context) {
     return SettingsPageScaffold(
+      onBack: () => Navigator.of(context).pop(),
       trailing: SettingsToolbarButton(
         label: '选择',
         icon: Icons.check_rounded,
@@ -139,14 +140,16 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
         else if (_entries.isEmpty)
           const Text('当前目录下没有子文件夹')
         else
-          ..._entries.map(
-            (entry) => Padding(
+          ..._entries.indexed.map(
+            (indexedEntry) => Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: StarflowSelectionTile(
                 leading: const Icon(Icons.folder_outlined),
-                title: entry.name,
-                subtitle: entry.path,
-                onPressed: () => _goToEntry(entry),
+                autofocus: indexedEntry.$1 == 0,
+                focusId: 'quark-folder:${indexedEntry.$2.fid}',
+                title: indexedEntry.$2.name,
+                subtitle: indexedEntry.$2.path,
+                onPressed: () => _goToEntry(indexedEntry.$2),
               ),
             ),
           ),

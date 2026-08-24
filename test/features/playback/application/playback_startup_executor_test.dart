@@ -17,7 +17,6 @@ void main() {
     final executor = PlaybackStartupExecutor(
       launchSystemPlayer: (_) async {},
       launchNativeContainer: (_) async {},
-      launchPerformanceFallback: (_) async => false,
     );
 
     expect(
@@ -33,7 +32,6 @@ void main() {
     final executor = PlaybackStartupExecutor(
       launchSystemPlayer: (_) async {},
       launchNativeContainer: (_) async {},
-      launchPerformanceFallback: (_) async => false,
     );
 
     expect(
