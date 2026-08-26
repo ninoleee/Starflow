@@ -85,6 +85,102 @@ void main() {
       {2, 19},
     );
   });
+
+  test('keeps year folders but collapses unclear quality-count wrappers', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'call-me-2025-01',
+          address: '/movies/strm/quark/披荆斩棘2026/2025/第01期.strm',
+          directories: const ['strm', 'quark', '披荆斩棘2026', '2025'],
+        ),
+        _pendingItem(
+          id: 'call-me-2025-02',
+          address: '/movies/strm/quark/披荆斩棘2026/2025/第02期.strm',
+          directories: const ['strm', 'quark', '披荆斩棘2026', '2025'],
+        ),
+        _pendingItem(
+          id: 'call-me-2026-01',
+          address: '/movies/strm/quark/披荆斩棘2026/2026（4K）/第01期.strm',
+          directories: const ['strm', 'quark', '披荆斩棘2026', '2026（4K）'],
+        ),
+        _pendingItem(
+          id: 'call-me-4k-count-01',
+          address: '/movies/strm/quark/披荆斩棘2026/4K 12集/第03期.strm',
+          directories: const ['strm', 'quark', '披荆斩棘2026', '4K 12集'],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(resolved, hasLength(4));
+    expect(
+      resolved.map((item) => item.metadataSeed.itemType),
+      everyElement('episode'),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.seasonNumber),
+      everyElement(isNotNull),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.seasonNumber).toSet(),
+      {1, 2, 3},
+    );
+    expect(
+      resolved
+          .singleWhere((item) => item.resourceId == 'call-me-4k-count-01')
+          .metadataSeed
+          .seasonNumber,
+      1,
+    );
+    expect(
+      resolved
+          .singleWhere((item) => item.resourceId == 'call-me-2025-01')
+          .metadataSeed
+          .seasonNumber,
+      2,
+    );
+    expect(
+      resolved
+          .singleWhere((item) => item.resourceId == 'call-me-2026-01')
+          .metadataSeed
+          .seasonNumber,
+      3,
+    );
+  });
+
+  test('keeps collapsed wrapper episodes out of a root specials group', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'show-special',
+          address: '/movies/strm/quark/节目/花絮.strm',
+          directories: const ['strm', 'quark', '节目'],
+        ),
+        _pendingItem(
+          id: 'show-main-episode',
+          address: '/movies/strm/quark/节目/4K 12集/第01期.strm',
+          directories: const ['strm', 'quark', '节目', '4K 12集'],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(
+      resolved
+          .singleWhere((item) => item.resourceId == 'show-special')
+          .metadataSeed
+          .seasonNumber,
+      0,
+    );
+    expect(
+      resolved
+          .singleWhere((item) => item.resourceId == 'show-main-episode')
+          .metadataSeed
+          .seasonNumber,
+      1,
+    );
+  });
 }
 
 ExternalScanPendingItem _pendingItem({

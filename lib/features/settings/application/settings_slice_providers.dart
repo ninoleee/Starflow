@@ -124,20 +124,14 @@ final settingsPerformanceSliceProvider = Provider<SettingsPerformanceSlice>(
               effectiveLiveItemHeroOverlayEnabled,
           aggressivePlaybackTuningEnabled:
               settings.performanceAggressivePlaybackTuningEnabled,
-          metadataPrefetchMaxConcurrency:
-              settings.metadataPrefetchMaxConcurrency,
+          taskMaxConcurrency: settings.taskMaxConcurrency,
           metadataPrefetchInitialBatchSize:
               settings.metadataPrefetchInitialBatchSize,
           metadataPrefetchBatchDelayMs: settings.metadataPrefetchBatchDelayMs,
           metadataPrefetchForegroundResumeDelayMs:
               settings.metadataPrefetchForegroundResumeDelayMs,
-          homeFeedMaxConcurrency: settings.homeFeedMaxConcurrency,
           homeFeedInitialBatchSize: settings.homeFeedInitialBatchSize,
           homeFeedBatchDelayMs: settings.homeFeedBatchDelayMs,
-          nasSourceRefreshConcurrency: settings.nasSourceRefreshConcurrency,
-          nasCollectionRefreshConcurrency:
-              settings.nasCollectionRefreshConcurrency,
-          nasEnrichmentConcurrency: settings.nasEnrichmentConcurrency,
         ),
       ),
     );
@@ -346,16 +340,12 @@ class SettingsPerformanceSlice {
     required this.configuredLiveItemHeroOverlayEnabled,
     required this.effectiveLiveItemHeroOverlayEnabled,
     required this.aggressivePlaybackTuningEnabled,
-    required this.metadataPrefetchMaxConcurrency,
+    required this.taskMaxConcurrency,
     required this.metadataPrefetchInitialBatchSize,
     required this.metadataPrefetchBatchDelayMs,
     required this.metadataPrefetchForegroundResumeDelayMs,
-    required this.homeFeedMaxConcurrency,
     required this.homeFeedInitialBatchSize,
     required this.homeFeedBatchDelayMs,
-    required this.nasSourceRefreshConcurrency,
-    required this.nasCollectionRefreshConcurrency,
-    required this.nasEnrichmentConcurrency,
   });
 
   final bool translucentEffectsEnabled;
@@ -369,16 +359,12 @@ class SettingsPerformanceSlice {
   final bool configuredLiveItemHeroOverlayEnabled;
   final bool effectiveLiveItemHeroOverlayEnabled;
   final bool aggressivePlaybackTuningEnabled;
-  final int metadataPrefetchMaxConcurrency;
+  final int taskMaxConcurrency;
   final int metadataPrefetchInitialBatchSize;
   final int metadataPrefetchBatchDelayMs;
   final int metadataPrefetchForegroundResumeDelayMs;
-  final int homeFeedMaxConcurrency;
   final int homeFeedInitialBatchSize;
   final int homeFeedBatchDelayMs;
-  final int nasSourceRefreshConcurrency;
-  final int nasCollectionRefreshConcurrency;
-  final int nasEnrichmentConcurrency;
 
   @override
   bool operator ==(Object other) {
@@ -399,21 +385,15 @@ class SettingsPerformanceSlice {
                 effectiveLiveItemHeroOverlayEnabled &&
             other.aggressivePlaybackTuningEnabled ==
                 aggressivePlaybackTuningEnabled &&
-            other.metadataPrefetchMaxConcurrency ==
-                metadataPrefetchMaxConcurrency &&
+            other.taskMaxConcurrency == taskMaxConcurrency &&
             other.metadataPrefetchInitialBatchSize ==
                 metadataPrefetchInitialBatchSize &&
             other.metadataPrefetchBatchDelayMs ==
                 metadataPrefetchBatchDelayMs &&
             other.metadataPrefetchForegroundResumeDelayMs ==
                 metadataPrefetchForegroundResumeDelayMs &&
-            other.homeFeedMaxConcurrency == homeFeedMaxConcurrency &&
             other.homeFeedInitialBatchSize == homeFeedInitialBatchSize &&
-            other.homeFeedBatchDelayMs == homeFeedBatchDelayMs &&
-            other.nasSourceRefreshConcurrency == nasSourceRefreshConcurrency &&
-            other.nasCollectionRefreshConcurrency ==
-                nasCollectionRefreshConcurrency &&
-            other.nasEnrichmentConcurrency == nasEnrichmentConcurrency;
+            other.homeFeedBatchDelayMs == homeFeedBatchDelayMs;
   }
 
   @override
@@ -429,16 +409,12 @@ class SettingsPerformanceSlice {
         configuredLiveItemHeroOverlayEnabled,
         effectiveLiveItemHeroOverlayEnabled,
         aggressivePlaybackTuningEnabled,
-        metadataPrefetchMaxConcurrency,
+        taskMaxConcurrency,
         metadataPrefetchInitialBatchSize,
         metadataPrefetchBatchDelayMs,
         metadataPrefetchForegroundResumeDelayMs,
-        homeFeedMaxConcurrency,
         homeFeedInitialBatchSize,
         homeFeedBatchDelayMs,
-        nasSourceRefreshConcurrency,
-        nasCollectionRefreshConcurrency,
-        nasEnrichmentConcurrency,
       ]);
 }
 

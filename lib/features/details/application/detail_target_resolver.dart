@@ -820,6 +820,21 @@ PlaybackTarget? _mergeCachedPlaybackTarget(
     return currentValue.trim().isNotEmpty ? currentValue : cachedValue;
   }
 
+  Map<String, String> preferIdentityHeaders({
+    required String currentValue,
+    required Map<String, String> currentHeaders,
+    required String cachedValue,
+    required Map<String, String> cachedHeaders,
+  }) {
+    if (preferCachedSourceContext && cachedValue.trim().isNotEmpty) {
+      return cachedHeaders;
+    }
+    if (!preferCachedSourceContext && currentValue.trim().isNotEmpty) {
+      return currentHeaders;
+    }
+    return preferCachedSourceContext ? currentHeaders : cachedHeaders;
+  }
+
   T? preferNullableIdentity<T>(T? currentValue, T? cachedValue) {
     if (preferCachedSourceContext) {
       return cachedValue ?? currentValue;
@@ -845,6 +860,20 @@ PlaybackTarget? _mergeCachedPlaybackTarget(
     preferredMediaSourceId: current.preferredMediaSourceId.trim().isNotEmpty
         ? current.preferredMediaSourceId
         : cached.preferredMediaSourceId,
+    posterUrl: preferIdentity(current.posterUrl, cached.posterUrl),
+    posterHeaders: preferIdentityHeaders(
+      currentValue: current.posterUrl,
+      currentHeaders: current.posterHeaders,
+      cachedValue: cached.posterUrl,
+      cachedHeaders: cached.posterHeaders,
+    ),
+    backdropUrl: preferIdentity(current.backdropUrl, cached.backdropUrl),
+    backdropHeaders: preferIdentityHeaders(
+      currentValue: current.backdropUrl,
+      currentHeaders: current.backdropHeaders,
+      cachedValue: cached.backdropUrl,
+      cachedHeaders: cached.backdropHeaders,
+    ),
     subtitle:
         current.subtitle.trim().isNotEmpty ? current.subtitle : cached.subtitle,
     headers: current.headers.isNotEmpty ? current.headers : cached.headers,

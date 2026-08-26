@@ -204,6 +204,9 @@ class NasMediaRecognizer {
     if (looksLikeSeasonFolderLabel(input)) {
       return false;
     }
+    if (looksLikeQualityEpisodeCountFolderLabel(input)) {
+      return true;
+    }
     return _wrapperDescriptorPattern.hasMatch(compact);
   }
 

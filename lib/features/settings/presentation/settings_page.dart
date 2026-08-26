@@ -169,8 +169,7 @@ class SettingsPage extends ConsumerStatefulWidget {
                   title: '性能与后台',
                   child: _SettingsNavigationTile(
                     title: '任务调度',
-                    subtitle:
-                        '元数据并发 ${performanceSlice.metadataPrefetchMaxConcurrency} · 首页并发 ${performanceSlice.homeFeedMaxConcurrency}',
+                    subtitle: '最大并发 ${performanceSlice.taskMaxConcurrency}',
                     onTap: () => _openBackgroundTaskSettings(context),
                   ),
                 ),

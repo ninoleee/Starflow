@@ -16,6 +16,11 @@ abstract class PersistentImageCache {
     bool persist = true,
   });
 
+  Future<void> evict(
+    String url, {
+    Map<String, String>? headers,
+  });
+
   Future<LocalStorageCacheSummary> inspect();
 
   Future<void> clear();

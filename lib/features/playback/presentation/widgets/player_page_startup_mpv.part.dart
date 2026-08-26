@@ -143,12 +143,12 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
           'windows-mpv.player.playing',
           fields: {'playing': playing},
         );
-        if (_isTelevisionPlaybackDevice) {
+        if (_isTelevisionPlaybackDevice && _shouldUpdatePlaybackVisualState) {
           _updateTvPlaybackState(playing: playing);
         }
         unawaited(_syncBackgroundPlayback(enabled: playing));
         unawaited(_syncPlaybackSystemSession(force: true));
-        if (_isTelevisionPlaybackDevice) {
+        if (_isTelevisionPlaybackDevice && _shouldUpdatePlaybackVisualState) {
           if (!playing) {
             _showTvPlaybackChrome(autoHide: false);
           } else if (_tvPlaybackChromeVisible) {
@@ -177,7 +177,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         duration,
       ) {
         _latestDuration = duration;
-        if (_isTelevisionPlaybackDevice) {
+        if (_isTelevisionPlaybackDevice && _shouldUpdatePlaybackVisualState) {
           _updateTvPlaybackState(duration: duration);
         }
         unawaited(_syncPlaybackSystemSession());
@@ -186,7 +186,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         position,
       ) {
         _latestPosition = position;
-        if (_isTelevisionPlaybackDevice) {
+        if (_isTelevisionPlaybackDevice && _shouldUpdatePlaybackVisualState) {
           _updateTvPlaybackState(position: position);
         }
         _maybeApplyAutoSkip(playback.player, position);

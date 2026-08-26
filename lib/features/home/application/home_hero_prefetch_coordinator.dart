@@ -92,8 +92,7 @@ class HomeHeroPrefetchCoordinator {
       return;
     }
     try {
-      final maxConcurrency =
-          ref.read(appSettingsProvider).metadataPrefetchMaxConcurrency;
+      final maxConcurrency = ref.read(appSettingsProvider).taskMaxConcurrency;
       final limiter = ref.read(metadataPrefetchConcurrencyLimiterProvider);
       var nextIndex = 0;
 
@@ -108,8 +107,7 @@ class HomeHeroPrefetchCoordinator {
           }
           final target = targets[nextIndex++];
           await limiter.run<void>(
-            maxConcurrency:
-                ref.read(appSettingsProvider).metadataPrefetchMaxConcurrency,
+            maxConcurrency: ref.read(appSettingsProvider).taskMaxConcurrency,
             initialBatchSize:
                 ref.read(appSettingsProvider).metadataPrefetchInitialBatchSize,
             backgroundBatchDelay: Duration(

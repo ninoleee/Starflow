@@ -6,7 +6,9 @@ import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/library/application/emby_refresh_progress.dart';
 import 'package:starflow/features/library/application/library_refresh_revision.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/webdav_directory_cache_store.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/metadata/data/metadata_network_guard.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 
@@ -64,21 +66,36 @@ class MediaRefreshCoordinator {
   Future<void> refreshSelectedSources({
     required List<String> sourceIds,
     int delaySeconds = 0,
+    bool invalidateWebDavDirectoryCache = false,
+    bool allowNetworkProbe = false,
   }) async {
+    if (allowNetworkProbe) {
+      _ref
+          .read(metadataNetworkGuardProvider)
+          .allowManualProbe(reason: 'manual-library-refresh');
+    }
     await _runRefresh(
       sourceIds: sourceIds,
       delaySeconds: delaySeconds,
       forceFullRescan: false,
+      invalidateWebDavDirectoryCache: invalidateWebDavDirectoryCache,
     );
   }
 
   Future<void> rebuildSelectedSources({
     required List<String> sourceIds,
+    bool allowNetworkProbe = false,
   }) async {
+    if (allowNetworkProbe) {
+      _ref
+          .read(metadataNetworkGuardProvider)
+          .allowManualProbe(reason: 'manual-library-rebuild');
+    }
     await _runRefresh(
       sourceIds: sourceIds,
       delaySeconds: 0,
       forceFullRescan: true,
+      invalidateWebDavDirectoryCache: true,
     );
   }
 
@@ -129,6 +146,7 @@ class MediaRefreshCoordinator {
     required List<String> sourceIds,
     required int delaySeconds,
     required bool forceFullRescan,
+    required bool invalidateWebDavDirectoryCache,
   }) async {
     final normalizedIds = sourceIds
         .map((item) => item.trim())
@@ -202,6 +220,29 @@ class MediaRefreshCoordinator {
 
     final repository = _ref.read(mediaRepositoryProvider);
     await repository.cancelActiveWebDavRefreshes(includeForceFull: true);
+    final webDavSourceIds = _ref
+        .read(appSettingsProvider)
+        .mediaSources
+        .where(
+          (source) =>
+              source.enabled &&
+              source.kind == MediaSourceKind.nas &&
+              scopedIds.contains(source.id),
+        )
+        .map((source) => source.id)
+        .toList(growable: false);
+    if (invalidateWebDavDirectoryCache && webDavSourceIds.isNotEmpty) {
+      final cacheStore = _ref.read(webDavDirectoryCacheStoreProvider);
+      await Future.wait(webDavSourceIds.map(cacheStore.removeSource));
+      appLogInfo(
+        'library.scan-cache',
+        'Persistent WebDAV directory cache invalidated before refresh',
+        fields: <String, Object?>{
+          'sourceIds': webDavSourceIds,
+          'forceFullRescan': forceFullRescan,
+        },
+      );
+    }
     var completedCount = 0;
     var failedCount = 0;
     await Future.wait(

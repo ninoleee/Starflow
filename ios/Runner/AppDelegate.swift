@@ -261,16 +261,10 @@ import UIKit
   }
 
   private func configureBackgroundPlayback(enabled: Bool) {
-    let session = AVAudioSession.sharedInstance()
-    do {
-      if enabled {
-        try session.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay])
-        try session.setActive(true)
-      } else {
-        try session.setActive(false, options: [.notifyOthersOnDeactivation])
-      }
-    } catch {
-    }
+    StarflowAudioSession.configurePlayback(
+      enabled: enabled,
+      owner: "background-playback"
+    )
   }
 
   private func exportDocument(
@@ -682,6 +676,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   private var playbackFailureAlert: UIAlertController?
   private let stallRecovery = NativePlaybackStallRecovery()
   private let metricsTracker = NativePlaybackMetricsTracker()
+  private let artworkLoader = StarflowNowPlayingArtworkLoader()
   private var timeObserverToken: Any?
   private var endObserver: NSObjectProtocol?
   private var playbackStateObservation: NSKeyValueObservation?
@@ -854,20 +849,10 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   }
 
   private func configureAudioSession(enabled: Bool) {
-    let session = AVAudioSession.sharedInstance()
-    do {
-      if enabled {
-        try session.setCategory(
-          .playback,
-          mode: .moviePlayback,
-          options: [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
-        )
-        try session.setActive(true)
-      } else {
-        try session.setActive(false, options: [.notifyOthersOnDeactivation])
-      }
-    } catch {
-    }
+    StarflowAudioSession.configurePlayback(
+      enabled: enabled,
+      owner: "native-playback-container"
+    )
   }
 
   private func installRemoteCommands() {
@@ -1037,6 +1022,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     let targetObject = playbackStore.decodeTargetJson(request.playbackTargetJson)
     let seriesTitle = (targetObject["seriesTitle"] as? String)?.nonEmptyTrimmed ?? ""
     let sourceName = (targetObject["sourceName"] as? String)?.nonEmptyTrimmed ?? ""
+    let artwork = resolveNowPlayingArtwork(from: targetObject)
     var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
     info[MPMediaItemPropertyTitle] = request.title.isEmpty ? "Starflow" : request.title
 
@@ -1062,7 +1048,36 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     info[MPNowPlayingInfoPropertyPlaybackRate] =
       player.timeControlStatus == .playing ? max(Double(player.rate), 1.0) : 0.0
     info[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
+    artworkLoader.applyArtwork(
+      to: &info,
+      urlString: artwork.url,
+      headers: artwork.headers
+    ) { [weak self] in
+      self?.updateNowPlayingInfo()
+    }
     MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+  }
+
+  private func resolveNowPlayingArtwork(
+    from targetObject: [String: Any]
+  ) -> (url: String, headers: [String: String]) {
+    let posterUrl = (targetObject["posterUrl"] as? String)?.nonEmptyTrimmed ?? ""
+    if !posterUrl.isEmpty {
+      return (
+        posterUrl,
+        normalizedStringMap(targetObject["posterHeaders"] as? [String: Any])
+      )
+    }
+
+    let backdropUrl = (targetObject["backdropUrl"] as? String)?.nonEmptyTrimmed ?? ""
+    if !backdropUrl.isEmpty {
+      return (
+        backdropUrl,
+        normalizedStringMap(targetObject["backdropHeaders"] as? [String: Any])
+      )
+    }
+
+    return ("", [:])
   }
 
   private func installPlaybackStateObserver(for player: AVPlayer) {
@@ -1312,6 +1327,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
 
     player?.pause()
     uninstallRemoteCommands()
+    artworkLoader.reset()
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     if hadPlayback {
       configureAudioSession(enabled: false)

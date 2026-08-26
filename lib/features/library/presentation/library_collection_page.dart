@@ -515,9 +515,10 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
 
     switch (action) {
       case _LibraryCollectionItemAction.rebuildSourceIndex:
-        await ref
-            .read(mediaRefreshCoordinatorProvider)
-            .rebuildSelectedSources(sourceIds: [item.sourceId]);
+        await ref.read(mediaRefreshCoordinatorProvider).rebuildSelectedSources(
+          sourceIds: [item.sourceId],
+          allowNetworkProbe: true,
+        );
       case _LibraryCollectionItemAction.manualIndex:
         context.pushNamed(
           'metadata-index',

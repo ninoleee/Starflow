@@ -136,6 +136,7 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
     } else {
       posterChild = AppNetworkImage(
         trimmedPoster,
+        debugLabel: 'poster:${widget.title}',
         cachePolicy: widget.posterCachePolicy,
         headers: widget.posterHeaders,
         fallbackSources: widget.posterFallbackSources

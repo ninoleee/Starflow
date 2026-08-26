@@ -276,4 +276,79 @@ void main() {
     await prefetch;
     expect(prefetchStarted, isTrue);
   });
+
+  test('navigation recovery clears quiet delay and starts queued prefetch',
+      () async {
+    final limiter = MetadataPrefetchConcurrencyLimiter();
+    addTearDown(limiter.dispose);
+    var started = false;
+
+    limiter.deferForForegroundInteraction(
+      reason: 'home.scroll',
+      resumeDelay: const Duration(seconds: 1),
+    );
+    final task = limiter.run<void>(
+      maxConcurrency: 1,
+      task: () async {
+        started = true;
+      },
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(started, isFalse);
+
+    limiter.recoverAfterUserNavigation();
+    await task;
+    expect(started, isTrue);
+    expect(limiter.isPausedForForeground, isFalse);
+  });
+
+  test('navigation recovery does not bypass an active foreground lease',
+      () async {
+    final limiter = MetadataPrefetchConcurrencyLimiter();
+    addTearDown(limiter.dispose);
+    final lease = limiter.beginForegroundWork(reason: 'exit-confirmation');
+    var started = false;
+
+    final task = limiter.run<void>(
+      maxConcurrency: 1,
+      task: () async {
+        started = true;
+      },
+    );
+    limiter.recoverAfterUserNavigation();
+    await Future<void>.delayed(Duration.zero);
+    expect(started, isFalse);
+    expect(limiter.isPausedForForeground, isTrue);
+
+    lease.release(resumeDelay: Duration.zero);
+    await task;
+    expect(started, isTrue);
+  });
+
+  test('global pause holds maintenance and prefetch admission together',
+      () async {
+    final limiter = MetadataPrefetchConcurrencyLimiter();
+    addTearDown(limiter.dispose);
+    final lease = limiter.beginGlobalPause(reason: 'app-paused');
+    final starts = <String>[];
+
+    final maintenance = limiter.runMaintenance<void>(
+      maxConcurrency: 1,
+      task: () async {
+        starts.add('maintenance');
+      },
+    );
+    final prefetch = limiter.run<void>(
+      maxConcurrency: 1,
+      task: () async {
+        starts.add('prefetch');
+      },
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(starts, isEmpty);
+
+    lease.release();
+    await Future.wait(<Future<void>>[maintenance, prefetch]);
+    expect(starts, <String>['maintenance', 'prefetch']);
+  });
 }

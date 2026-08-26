@@ -30,13 +30,6 @@ class SearchServiceSettingsPage extends ConsumerWidget {
       ),
       children: [
         Text('搜索服务管理', style: theme.textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Text(
-          '管理在线搜索服务，并选择搜索时使用的本地与在线来源。',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
         const SettingsSectionTitle(label: '搜索来源'),
         SettingsSelectionTile(
           title: '选择搜索来源',

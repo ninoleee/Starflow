@@ -705,6 +705,10 @@ bool _samePlaybackTarget(PlaybackTarget? left, PlaybackTarget? right) {
       left.seriesId == right.seriesId &&
       left.seriesTitle == right.seriesTitle &&
       left.preferredMediaSourceId == right.preferredMediaSourceId &&
+      left.posterUrl == right.posterUrl &&
+      _sameStringMap(left.posterHeaders, right.posterHeaders) &&
+      left.backdropUrl == right.backdropUrl &&
+      _sameStringMap(left.backdropHeaders, right.backdropHeaders) &&
       left.subtitle == right.subtitle &&
       left.externalSubtitleFilePath == right.externalSubtitleFilePath &&
       left.externalSubtitleDisplayName == right.externalSubtitleDisplayName &&
@@ -784,7 +788,10 @@ MediaDetailTarget _buildRecentPlaybackDetailTarget(
       : (target.title.trim().isNotEmpty ? target.title : target.subtitle);
   return MediaDetailTarget(
     title: resolvedTitle,
-    posterUrl: '',
+    posterUrl: target.posterUrl,
+    posterHeaders: target.posterHeaders,
+    backdropUrl: target.backdropUrl,
+    backdropHeaders: target.backdropHeaders,
     overview: target.subtitle,
     year: target.year,
     availabilityLabel: target.canPlay

@@ -27,6 +27,7 @@ xcuserdata/
 .pub-cache/
 .idea/
 .metadata
+.workbuddy/
 android/.gradle/
 android/app/debug
 android/app/profile

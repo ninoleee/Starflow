@@ -819,13 +819,6 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
             widget.initial == null ? '新增媒体源' : '编辑媒体源',
             style: Theme.of(context).textTheme.headlineSmall,
           ),
-          const SizedBox(height: 8),
-          Text(
-            '配置来源连接、展示分区和索引规则。离开时会询问是否保存未提交的修改。',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-          ),
           const SettingsSectionTitle(label: '基本信息'),
           ...buildSettingsTileGroup([
             SettingsTextInputField(
@@ -977,8 +970,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
               ),
             if (supportsNasInferenceOptions)
               SettingsToggleTile(
-                title: '剧集只按剧名层级搜刮',
-                subtitle: '仅目录结构推断开启时生效。开启后，在线搜刮只用目录推导出的剧名，不再把集标题拼进查询。',
+                title: '剧集复用系列级图片',
+                subtitle: '仅目录结构推断开启时生效。所有模式都先按剧名匹配；开启后还会跳过单集剧照请求。',
                 value: _webDavSeriesScrapeUsesDirectoryTitleOnly,
                 onChanged: (value) {
                   setState(() {
@@ -988,6 +981,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
               ),
           ], spacing: 12),
           if (supportsNasInferenceOptions) ...[
+            const SettingsSectionTitle(label: '目录规则'),
             SettingsTextInputField(
               controller: _webDavExcludedKeywordsController,
               labelText: '过滤关键字',

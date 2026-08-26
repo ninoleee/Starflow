@@ -609,12 +609,29 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     );
   }
 
-  void _focusPagerButton(FocusNode focusNode) {
-    if (!focusNode.canRequestFocus) {
-      return;
+  bool _focusPagerButton(FocusNode focusNode) {
+    if (focusNode.context == null || !focusNode.canRequestFocus) {
+      return false;
     }
     requestTvFocus(
       focusNode,
+    );
+    return true;
+  }
+
+  void _focusPreviousControl() {
+    if (_focusPagerButton(_previousPagerButtonFocusNode)) {
+      return;
+    }
+    TvMenuButtonScope.maybeOf(context)?.onMenuButtonPressed();
+  }
+
+  void _focusNextControl() {
+    if (_focusPagerButton(_nextPagerButtonFocusNode)) {
+      return;
+    }
+    FocusManager.instance.primaryFocus?.focusInDirection(
+      TraversalDirection.right,
     );
   }
 
@@ -670,10 +687,8 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                         focusNode: _focusNodeForItem(item.id),
                         focusId: '${widget.focusScopePrefix}:${item.id}',
                         autofocus: index == _currentPageIndex,
-                        onFocusPreviousControl: () =>
-                            _focusPagerButton(_previousPagerButtonFocusNode),
-                        onFocusNextControl: () =>
-                            _focusPagerButton(_nextPagerButtonFocusNode),
+                        onFocusPreviousControl: _focusPreviousControl,
+                        onFocusNextControl: _focusNextControl,
                         onFocusBelowControl: widget.onFocusBelowControl,
                         onFocused: widget.onHeroFocusGained,
                       ),
@@ -836,7 +851,7 @@ class _HeroPagerButton extends StatelessWidget {
       onMoveRight: onMoveRight,
       onMoveDown: onFocusBelowControl,
       child: TvFocusableAction(
-        onPressed: onPressed ?? () {},
+        onPressed: enabled ? onPressed : null,
         focusNode: focusNode,
         focusId: focusId,
         borderRadius: BorderRadius.circular(999),
@@ -1139,6 +1154,7 @@ class _FeaturedHeroArtwork extends StatelessWidget {
         if (!selectedImage.preferContain) {
           return AppNetworkImage(
             selectedImage.url,
+            debugLabel: 'home.hero.artwork:${item.id}',
             headers: selectedImage.headers,
             fit: BoxFit.cover,
             alignment: Alignment.center,
@@ -1150,6 +1166,7 @@ class _FeaturedHeroArtwork extends StatelessWidget {
         if (isPortraitScreen) {
           return AppNetworkImage(
             selectedImage.url,
+            debugLabel: 'home.hero.artwork:${item.id}',
             headers: selectedImage.headers,
             fit: BoxFit.cover,
             alignment: Alignment.center,
@@ -1189,6 +1206,7 @@ class _FeaturedHeroArtwork extends StatelessWidget {
                     ),
               child: AppNetworkImage(
                 selectedImage.url,
+                debugLabel: 'home.hero.artwork:${item.id}',
                 headers: selectedImage.headers,
                 fit: BoxFit.contain,
                 alignment: useCenteredContainLayout
@@ -1227,6 +1245,7 @@ class _HeroTitle extends StatelessWidget {
         constraints: _resolveHeroLogoConstraints(displayMode),
         child: AppNetworkImage(
           item.detailTarget.logoUrl,
+          debugLabel: 'home.hero.logo:${item.id}',
           headers: item.detailTarget.logoHeaders,
           fit: BoxFit.contain,
           alignment: Alignment.centerLeft,

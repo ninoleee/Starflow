@@ -43,6 +43,8 @@ class NetworkRequestGuard {
   final NetworkRequestPolicy policy;
   final NetworkCircuitExceptionFactory _circuitExceptionFactory;
   final Map<String, _NetworkHostFailureState> _hosts = {};
+  final Set<String> _manualProbeAllowedHosts = <String>{};
+  final Set<String> _manualProbeInFlightHosts = <String>{};
 
   Future<http.Response> get(
     http.Client client,
@@ -64,70 +66,123 @@ class NetworkRequestGuard {
     bool idempotent = false,
   }) async {
     final host = uri.host.toLowerCase();
-    _throwIfCircuitOpen(host);
+    final isManualProbe = _enterCircuit(host);
 
-    var attempt = 0;
-    while (true) {
-      try {
-        final response = await request().timeout(policy.requestTimeout);
-        final statusCode = statusCodeOf?.call(response);
-        if (statusCode == null || !isTransientHttpStatus(statusCode)) {
-          _hosts.remove(host);
-          return response;
-        }
-        if (_shouldRetry(attempt: attempt, idempotent: idempotent)) {
-          attempt += 1;
-          await _waitBeforeRetry(
+    try {
+      var attempt = 0;
+      while (true) {
+        try {
+          final response = await request().timeout(policy.requestTimeout);
+          final statusCode = statusCodeOf?.call(response);
+          if (statusCode == null || !isTransientHttpStatus(statusCode)) {
+            _hosts.remove(host);
+            _manualProbeAllowedHosts.remove(host);
+            return response;
+          }
+          if (_shouldRetry(attempt: attempt, idempotent: idempotent)) {
+            attempt += 1;
+            await _waitBeforeRetry(
+              host: host,
+              attempt: attempt,
+              failureKind: NetworkFailureKind.httpStatus,
+            );
+            continue;
+          }
+          _recordTransientFailure(
             host: host,
-            attempt: attempt,
             failureKind: NetworkFailureKind.httpStatus,
+            statusCode: statusCode,
           );
-          continue;
-        }
-        _recordTransientFailure(
-          host: host,
-          failureKind: NetworkFailureKind.httpStatus,
-          statusCode: statusCode,
-        );
-        return response;
-      } catch (error) {
-        if (error is NetworkCircuitOpenException) {
-          rethrow;
-        }
-        final failure = classifyNetworkFailure(error);
-        if (!failure.isTransient) {
-          rethrow;
-        }
-        if (_shouldRetry(attempt: attempt, idempotent: idempotent)) {
-          attempt += 1;
-          await _waitBeforeRetry(
+          return response;
+        } catch (error) {
+          if (error is NetworkCircuitOpenException) {
+            rethrow;
+          }
+          final failure = classifyNetworkFailure(error);
+          if (!failure.isTransient) {
+            rethrow;
+          }
+          if (_shouldRetry(attempt: attempt, idempotent: idempotent)) {
+            attempt += 1;
+            await _waitBeforeRetry(
+              host: host,
+              attempt: attempt,
+              failureKind: failure.kind,
+            );
+            continue;
+          }
+          _recordTransientFailure(
             host: host,
-            attempt: attempt,
             failureKind: failure.kind,
           );
-          continue;
+          rethrow;
         }
-        _recordTransientFailure(
-          host: host,
-          failureKind: failure.kind,
-        );
-        rethrow;
+      }
+    } finally {
+      if (isManualProbe) {
+        _manualProbeInFlightHosts.remove(host);
       }
     }
   }
 
   void resetHost(String host) {
-    _hosts.remove(host.trim().toLowerCase());
+    final normalizedHost = host.trim().toLowerCase();
+    _hosts.remove(normalizedHost);
+    _manualProbeAllowedHosts.remove(normalizedHost);
+    _manualProbeInFlightHosts.remove(normalizedHost);
   }
 
-  void _throwIfCircuitOpen(String host) {
+  /// Allows the next explicit user request to probe each currently open host.
+  /// A host admits only one probe at a time and keeps its failure state until
+  /// that probe succeeds.
+  void allowSingleProbeForOpenHosts({required String reason}) {
+    final now = DateTime.now();
+    final hosts = _hosts.entries
+        .where(
+          (entry) =>
+              entry.value.openUntil != null &&
+              now.isBefore(entry.value.openUntil!),
+        )
+        .map((entry) => entry.key)
+        .toList(growable: false);
+    _manualProbeAllowedHosts.addAll(hosts);
+    if (hosts.isEmpty) {
+      return;
+    }
+    appLogInfo(
+      policy.logCategory,
+      'Manual network circuit probe armed',
+      fields: <String, Object?>{
+        'policy': policy.id,
+        'reason': reason,
+        'hostCount': hosts.length,
+        'hosts': hosts,
+      },
+    );
+  }
+
+  bool _enterCircuit(String host) {
     final state = _hosts[host];
     final now = DateTime.now();
     if (state?.openUntil == null || !now.isBefore(state!.openUntil!)) {
       if (state?.openUntil != null) {
         _hosts.remove(host);
       }
-      return;
+      _manualProbeAllowedHosts.remove(host);
+      return false;
+    }
+    if (_manualProbeAllowedHosts.remove(host) &&
+        _manualProbeInFlightHosts.add(host)) {
+      appLogInfo(
+        policy.logCategory,
+        'Manual request admitted as half-open circuit probe',
+        fields: <String, Object?>{
+          'policy': policy.id,
+          'host': host,
+          'failureCount': state.consecutiveFailures,
+        },
+      );
+      return true;
     }
     appLogTrace(
       policy.logCategory,

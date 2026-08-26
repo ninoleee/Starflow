@@ -18,7 +18,7 @@ final appSettingsRepositoryProvider = Provider<AppSettingsRepository>(
 );
 
 class LocalAppSettingsRepository implements AppSettingsRepository {
-  static const _settingsKey = 'starflow.settings.v1';
+  static const _settingsKey = 'starflow.settings.v2';
   static const _bundledSettingsKey = 'assets/bootstrap/embedded_settings.json';
   final AppPreferencesStore _preferences = AppPreferencesStore();
 
@@ -33,10 +33,8 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
 
     try {
       final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
-      final settings = AppSettings.fromJson(decoded);
-      final migrated = _migrateLegacyNetworkStorage(settings);
-      final sanitized = _stripLegacyDemoData(migrated);
-      final reconciled = _reconcileSyncDeleteWebDavDirectories(sanitized);
+      final settings = AppSettings.fromCurrentJson(decoded);
+      final reconciled = _reconcileSyncDeleteWebDavDirectories(settings);
       if (jsonEncode(settings.toJson()) != jsonEncode(reconciled.toJson())) {
         await save(reconciled);
       }
@@ -60,86 +58,11 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
         return SeedData.defaultSettings;
       }
       final decoded = Map<String, dynamic>.from(jsonDecode(bundledRaw) as Map);
-      final settings = AppSettings.fromJson(decoded);
-      return _reconcileSyncDeleteWebDavDirectories(
-        _stripLegacyDemoData(_migrateLegacyNetworkStorage(settings)),
-      );
+      final settings = AppSettings.fromCurrentJson(decoded);
+      return _reconcileSyncDeleteWebDavDirectories(settings);
     } catch (_) {
       return SeedData.defaultSettings;
     }
-  }
-
-  AppSettings _migrateLegacyNetworkStorage(AppSettings settings) {
-    if (settings.networkStorage.hasAnyConfigured) {
-      return settings;
-    }
-
-    for (final provider in settings.searchProviders) {
-      final hasLegacyConfig = provider.quarkCookie.trim().isNotEmpty ||
-          provider.smartStrmWebhookUrl.trim().isNotEmpty ||
-          provider.smartStrmTaskName.trim().isNotEmpty ||
-          provider.quarkSaveFolderId.trim() != '0' ||
-          provider.quarkSaveFolderPath.trim() != '/';
-      if (!hasLegacyConfig) {
-        continue;
-      }
-      return settings.copyWith(
-        networkStorage: NetworkStorageConfig(
-          quarkCookie: provider.quarkCookie,
-          quarkSaveFolderId: provider.quarkSaveFolderId,
-          quarkSaveFolderPath: provider.quarkSaveFolderPath,
-          smartStrmWebhookUrl: provider.smartStrmWebhookUrl,
-          smartStrmTaskName: provider.smartStrmTaskName,
-        ),
-      );
-    }
-
-    return settings;
-  }
-
-  AppSettings _stripLegacyDemoData(AppSettings settings) {
-    final mediaSources = settings.mediaSources
-        .where(
-          (item) =>
-              item.id != 'emby-main' &&
-              item.id != 'nas-living-room' &&
-              !item.endpoint.contains('example.com'),
-        )
-        .toList();
-    final searchProviders = settings.searchProviders
-        .where(
-          (item) =>
-              item.id == 'pansou-api' || !item.endpoint.contains('example.com'),
-        )
-        .toList();
-    final isDemoDouban = settings.doubanAccount.userId == 'demo-user';
-    final homeModules = settings.homeModules.where((module) {
-      if (module.id == 'module-douban-recommendations' ||
-          module.id == 'module-douban-wish' ||
-          module.id == 'module-emby-library' ||
-          module.id == 'module-nas-library') {
-        return false;
-      }
-      if (module.type == HomeModuleType.doubanCarousel) {
-        return false;
-      }
-      if (module.type == HomeModuleType.librarySection &&
-          (!module.enabled ||
-              module.sectionId.trim().isEmpty ||
-              module.sourceId.trim().isEmpty)) {
-        return false;
-      }
-      return true;
-    }).toList();
-
-    return settings.copyWith(
-      mediaSources: mediaSources,
-      searchProviders: searchProviders,
-      doubanAccount: isDemoDouban
-          ? SeedData.defaultSettings.doubanAccount
-          : settings.doubanAccount,
-      homeModules: homeModules,
-    );
   }
 
   AppSettings _reconcileSyncDeleteWebDavDirectories(AppSettings settings) {

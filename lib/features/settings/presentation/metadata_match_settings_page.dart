@@ -28,13 +28,6 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
       onBack: () => Navigator.of(context).pop(),
       children: [
         Text('元数据匹配', style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Text(
-          '统一管理匹配优先级、TMDB 与 WMDB，并可直接测试服务可用性。',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-        ),
         const SizedBox(height: 18),
         SectionPanel(
           title: '匹配策略',

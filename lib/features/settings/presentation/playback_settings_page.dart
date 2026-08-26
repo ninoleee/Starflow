@@ -297,13 +297,6 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
                   fontWeight: FontWeight.w800,
                 ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            '默认偏好会在每次打开播放器时自动生效。',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-          ),
           const SizedBox(height: 18),
           SettingsSelectionTile(
             title: '最大超时时间（秒）',
@@ -419,7 +412,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
           else
             SettingsToggleTile(
               title: '后台播放',
-              subtitle: 'Android 切后台会进入小窗继续播放；iOS 会继续后台播放音频。',
+              subtitle: 'Android 切后台进入小窗；iOS 继续后台音频，并在锁屏 / 控制中心显示封面。',
               value: _draftBackgroundPlaybackEnabled,
               onChanged: (value) {
                 setState(() {

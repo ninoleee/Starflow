@@ -204,6 +204,15 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       fallbackTitle:
           title.trim().isNotEmpty ? title.trim() : recognition.searchQuery,
     );
+    final metadataMatchYear = _buildMetadataMatchYear(
+      source: source,
+      scannedItem: scannedItem,
+      recognition: recognition,
+      query: baseQuery,
+      fallbackYear: year,
+    );
+    final metadataMatchActors =
+        useSeriesLevelScrape ? const <String>[] : actors;
     var preferSeries = recognition.preferSeries ||
         itemType.trim().toLowerCase() == 'episode' ||
         itemType.trim().toLowerCase() == 'series';
@@ -216,9 +225,9 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       try {
         final wmdbMatch = await _wmdbMetadataClient.matchTitle(
           query: baseQuery,
-          year: year > 0 ? year : recognition.year,
+          year: metadataMatchYear,
           preferSeries: preferSeries,
-          actors: actors,
+          actors: metadataMatchActors,
         );
         if (wmdbMatch != null) {
           if (!typeLocked && wmdbMatch.isMovie) {
@@ -310,9 +319,9 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       if (needsTmdb) {
         try {
           final tmdbMatch = await _tmdbMetadataClient.matchTitle(
-            query: title.trim().isNotEmpty ? title.trim() : baseQuery,
+            query: baseQuery,
             readAccessToken: settings.tmdbReadAccessToken.trim(),
-            year: year,
+            year: metadataMatchYear,
             preferSeries: preferSeries,
           );
           if (tmdbMatch != null) {
@@ -450,7 +459,7 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       try {
         final imdbMatch = await _imdbRatingClient.matchRating(
           query: baseQuery,
-          year: year,
+          year: metadataMatchYear,
           preferSeries: preferSeries,
           imdbId: imdbId,
         );
@@ -633,30 +642,15 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
             source.normalizedWebDavSeriesTitleFilterKeywords,
       ),
     );
-    final fileTitle = _cleanIndexedTitleLabel(
-      scannedItem.metadataSeed.title.trim().isNotEmpty
-          ? scannedItem.metadataSeed.title.trim()
-          : _stripExtension(scannedItem.fileName).trim(),
-    );
-    final normalizedSeries = _normalizeMetadataQueryToken(seriesTitle);
-    final normalizedFile = _normalizeMetadataQueryToken(fileTitle);
-
     if (seriesTitle.isEmpty) {
       return baseTitle;
     }
-    if (_shouldUseStructureInferredSeriesLevelScrape(source, scannedItem)) {
-      return seriesTitle;
-    }
-    if (fileTitle.isEmpty) {
-      return seriesTitle;
-    }
-    if (normalizedSeries.isNotEmpty &&
-        normalizedFile.isNotEmpty &&
-        (normalizedFile.contains(normalizedSeries) ||
-            normalizedSeries.contains(normalizedFile))) {
-      return fileTitle;
-    }
-    return '$seriesTitle $fileTitle'.trim();
+    // Online providers identify the series first. Searching every episode
+    // filename separately is both inaccurate and extremely expensive for a
+    // large season: the provider clients can now share one in-flight/cached
+    // series match across every episode. Episode numbers are still used later
+    // when a per-episode still is requested.
+    return seriesTitle;
   }
 
   String _normalizeMetadataQueryToken(String value) {
@@ -664,6 +658,50 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
           RegExp(r'[\s\-_.,:;!?/\\|()\[\]{}<>《》【】"“”·]+'),
           '',
         );
+  }
+
+  int _buildMetadataMatchYear({
+    required MediaSourceConfig source,
+    required WebDavScannedItem scannedItem,
+    required NasMediaRecognition recognition,
+    required String query,
+    required int fallbackYear,
+  }) {
+    if (!_shouldUseStructureInferredSeriesLevelScrape(source, scannedItem)) {
+      return fallbackYear > 0 ? fallbackYear : recognition.year;
+    }
+
+    final normalizedQuery = _normalizeMetadataQueryToken(query);
+    if (normalizedQuery.isEmpty) {
+      return 0;
+    }
+    final segments = _pathSegments(scannedItem.actualAddress);
+    if (segments.length < 2) {
+      return 0;
+    }
+    for (var index = segments.length - 2; index >= 0; index--) {
+      final segment = segments[index];
+      if (_looksLikeSeasonFolderLabel(segment)) {
+        continue;
+      }
+      final cleanedSegment = _cleanIndexedTitleLabel(segment);
+      if (_normalizeMetadataQueryToken(cleanedSegment) != normalizedQuery) {
+        continue;
+      }
+      final directoryRecognition = NasMediaRecognizer.recognize(
+        segment,
+        seriesTitleFilterKeywords:
+            source.normalizedWebDavSeriesTitleFilterKeywords,
+        specialEpisodeKeywords: source.normalizedWebDavSpecialCategoryKeywords,
+      );
+      if (directoryRecognition.year > 0) {
+        return directoryRecognition.year;
+      }
+    }
+    // Episode NFO years are usually air dates. Using them here would split one
+    // series into many provider cache keys, so a directory without a series
+    // year deliberately shares the yearless series lookup.
+    return 0;
   }
 
   String _seriesTitleFromScannedItem(
@@ -797,15 +835,6 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       return null;
     }
     return lastInferredTitle;
-  }
-
-  String _stripExtension(String value) {
-    final trimmed = value.trim();
-    final lastDot = trimmed.lastIndexOf('.');
-    if (lastDot <= 0) {
-      return trimmed;
-    }
-    return trimmed.substring(0, lastDot);
   }
 
   String _buildScopeKey(

@@ -107,13 +107,6 @@ class _DoubanAccountEditorPageState
         ),
         children: [
           Text('豆瓣账号', style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 8),
-          Text(
-            '管理豆瓣用户标识和会话，用于推荐与“想看”等功能。',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-          ),
           const SettingsSectionTitle(label: '账号'),
           SettingsTextInputField(
             controller: _userIdController,

@@ -34,6 +34,7 @@ class LibraryPagedGrid extends ConsumerWidget {
     this.emptyMessage = '无',
     this.pageSize = 24,
     this.header,
+    this.autofocusFirstItem = true,
   });
 
   final List<MediaItem> pageItems;
@@ -46,6 +47,7 @@ class LibraryPagedGrid extends ConsumerWidget {
   final String emptyMessage;
   final int pageSize;
   final Widget? header;
+  final bool autofocusFirstItem;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -104,7 +106,7 @@ class LibraryPagedGrid extends ConsumerWidget {
               ),
               itemBuilder: (context, index) => _LibraryPagedGridTile(
                 seedItem: pageItems[index],
-                index: index,
+                autofocus: autofocusFirstItem && index == 0,
                 focusScopePrefix: focusScopePrefix,
                 onItemContextAction: onItemContextAction,
               ),
@@ -150,6 +152,7 @@ class LibraryPagedGridSliver extends ConsumerWidget {
     this.emptyMessage = '无',
     this.pageSize = 24,
     this.header,
+    this.autofocusFirstItem = true,
   });
 
   final List<MediaItem> pageItems;
@@ -162,6 +165,7 @@ class LibraryPagedGridSliver extends ConsumerWidget {
   final String emptyMessage;
   final int pageSize;
   final Widget? header;
+  final bool autofocusFirstItem;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -221,7 +225,7 @@ class LibraryPagedGridSliver extends ConsumerWidget {
                 delegate: SliverChildBuilderDelegate(
                   (context, index) => _LibraryPagedGridTile(
                     seedItem: pageItems[index],
-                    index: index,
+                    autofocus: autofocusFirstItem && index == 0,
                     focusScopePrefix: focusScopePrefix,
                     onItemContextAction: onItemContextAction,
                   ),
@@ -313,13 +317,13 @@ class LibraryPagedGridKeyboardActions extends StatelessWidget {
 class _LibraryPagedGridTile extends ConsumerWidget {
   const _LibraryPagedGridTile({
     required this.seedItem,
-    required this.index,
+    required this.autofocus,
     required this.focusScopePrefix,
     required this.onItemContextAction,
   });
 
   final MediaItem seedItem;
-  final int index;
+  final bool autofocus;
   final String focusScopePrefix;
   final ValueChanged<MediaItem>? onItemContextAction;
 
@@ -353,7 +357,7 @@ class _LibraryPagedGridTile extends ConsumerWidget {
         focusScopePrefix: focusScopePrefix,
         item: item,
       ),
-      autofocus: index == 0,
+      autofocus: autofocus,
       tvPosterFocusOutlineOnly: true,
       tvPosterFocusShowBorder: false,
       tvPosterFocusScale: 1.06,

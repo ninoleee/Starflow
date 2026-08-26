@@ -171,7 +171,7 @@ class SettingsLanTransferService {
         if (decoded is! Map) {
           throw const FormatException('配置内容不是合法的 JSON 对象。');
         }
-        final imported = AppSettings.fromJson(
+        final imported = AppSettings.fromCurrentJson(
           Map<String, dynamic>.from(decoded),
         );
         try {

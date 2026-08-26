@@ -413,6 +413,7 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
     if (trimmedUrl.isNotEmpty) {
       final image = AppNetworkImage(
         trimmedUrl,
+        debugLabel: 'home.hero.backdrop',
         headers: imageHeaders,
         fit: BoxFit.cover,
         alignment: Alignment.topCenter,
@@ -958,6 +959,7 @@ class _HomeCarouselCard extends StatelessWidget {
               if (item.imageUrl.trim().isNotEmpty)
                 AppNetworkImage(
                   item.imageUrl,
+                  debugLabel: 'home.carousel:${item.id}',
                   fit: BoxFit.cover,
                   cacheWidth: cacheWidth,
                   cacheHeight: cacheHeight,

@@ -16,9 +16,11 @@ import 'package:starflow/core/widgets/starflow_action_dialog.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/bootstrap/application/startup_crash_recovery.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
+import 'package:starflow/features/home/application/home_feed_load_scheduler.dart';
 import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -100,17 +102,21 @@ class AppNavigationShell extends ConsumerStatefulWidget {
   ConsumerState<AppNavigationShell> createState() => _AppNavigationShellState();
 }
 
-class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
+class _AppNavigationShellState extends ConsumerState<AppNavigationShell>
+    with WidgetsBindingObserver {
   static const int _homeBranchIndex = 0;
   bool _isBottomBarVisible = true;
   bool _coldStartHomeRefreshScheduled = false;
+  int _tvFocusRecoveryRevision = 0;
   final HomeNavigationTapCoordinator _homeNavigationTapCoordinator =
       HomeNavigationTapCoordinator();
+  MetadataPrefetchForegroundLease? _exitDialogPrefetchLease;
   ProviderSubscription<bool>? _autoHideNavigationBarSubscription;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _autoHideNavigationBarSubscription = ref.listenManual<bool>(
       _navigationAutoHideProvider,
       (previous, next) {
@@ -185,9 +191,19 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _exitDialogPrefetchLease?.release(resumeDelay: Duration.zero);
+    _exitDialogPrefetchLease = null;
     _homeNavigationTapCoordinator.dispose();
     _autoHideNavigationBarSubscription?.close();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _requestTvFocusRecovery();
+    }
   }
 
   bool _handleScrollNotification(ScrollNotification notification) {
@@ -220,12 +236,14 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
     if (index != _homeBranchIndex) {
       _homeNavigationTapCoordinator.cancel();
       widget.navigationShell.goBranch(index);
+      _requestTvFocusRecovery();
       return;
     }
 
     final wasAlreadyOnHome =
         widget.navigationShell.currentIndex == _homeBranchIndex;
     widget.navigationShell.goBranch(index);
+    _requestTvFocusRecovery();
     final singleTapCleanupEnabled =
         ref.read(appSettingsProvider).homeNavigationSingleTapCleanupEnabled;
     if (!singleTapCleanupEnabled) {
@@ -247,11 +265,39 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
 
   Future<void> _handleHomeSingleTap() async {
     ref.read(homeNavigationResetRevisionProvider.notifier).state += 1;
+    ref.read(homeFeedLoadSchedulerProvider).recoverAfterUserNavigation();
+    ref
+        .read(metadataPrefetchConcurrencyLimiterProvider)
+        .recoverAfterUserNavigation();
     await ref.read(mediaRefreshCoordinatorProvider).cancelBackgroundTasks();
   }
 
+  void _handleExitDialogVisibilityChanged(bool visible) {
+    if (visible) {
+      _exitDialogPrefetchLease ??= ref
+          .read(metadataPrefetchConcurrencyLimiterProvider)
+          .beginForegroundWork(
+            reason: 'app-exit-confirmation',
+            resumeDelay: Duration.zero,
+          );
+      return;
+    }
+    _exitDialogPrefetchLease?.release(resumeDelay: Duration.zero);
+    _exitDialogPrefetchLease = null;
+    _requestTvFocusRecovery();
+  }
+
+  void _requestTvFocusRecovery() {
+    if (!mounted || !(ref.read(isTelevisionProvider).value ?? false)) {
+      return;
+    }
+    setState(() {
+      _tvFocusRecoveryRevision += 1;
+    });
+  }
+
   void _refreshHomeFromNavigation() {
-    unawaited(refreshHomeModules(ref));
+    unawaited(refreshHomeModules(ref, allowNetworkProbe: true));
     unawaited(_refreshHomeEmbySources());
   }
 
@@ -372,6 +418,8 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell> {
               items: visibleNavigationItems,
               currentIndex: widget.navigationShell.currentIndex,
               onDestinationSelected: _handleDestinationSelected,
+              onExitDialogVisibilityChanged: _handleExitDialogVisibilityChanged,
+              focusRecoveryRevision: _tvFocusRecoveryRevision,
               translucentEffectsEnabled: translucentEffectsEnabled,
               autoHideNavigationBarEnabled: autoHideNavigationBarEnabled,
               staticNavigationEnabled: performanceStaticNavigationEnabled,
@@ -416,6 +464,8 @@ class _TelevisionNavigationShell extends StatefulWidget {
     required this.items,
     required this.currentIndex,
     required this.onDestinationSelected,
+    required this.onExitDialogVisibilityChanged,
+    required this.focusRecoveryRevision,
     required this.child,
     required this.translucentEffectsEnabled,
     required this.autoHideNavigationBarEnabled,
@@ -426,6 +476,8 @@ class _TelevisionNavigationShell extends StatefulWidget {
   final int currentIndex;
   final List<_NavigationItemData> items;
   final ValueChanged<int> onDestinationSelected;
+  final ValueChanged<bool> onExitDialogVisibilityChanged;
+  final int focusRecoveryRevision;
   final Widget child;
   final bool translucentEffectsEnabled;
   final bool autoHideNavigationBarEnabled;
@@ -445,58 +497,58 @@ class _TelevisionNavigationShellState
   );
   bool _isExitDialogVisible = false;
   bool _isSidebarVisible = true;
-  bool _sidebarVisibilitySyncScheduled = false;
-  bool _sidebarFocusListenerAttached = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _setSidebarFocusListenerEnabled(widget.autoHideNavigationBarEnabled);
-  }
 
   @override
   void didUpdateWidget(covariant _TelevisionNavigationShell oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _setSidebarFocusListenerEnabled(widget.autoHideNavigationBarEnabled);
+    if (oldWidget.focusRecoveryRevision != widget.focusRecoveryRevision) {
+      _scheduleFocusRecoveryIfMissing();
+    }
     if (!widget.autoHideNavigationBarEnabled) {
       _setSidebarVisible(true);
       return;
     }
     if (oldWidget.autoHideNavigationBarEnabled !=
         widget.autoHideNavigationBarEnabled) {
-      _scheduleSidebarVisibilitySync();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _setSidebarVisible(_isSidebarFocused);
+        }
+      });
     }
+  }
+
+  void _scheduleFocusRecoveryIfMissing() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _isExitDialogVisible || _hasActionablePrimaryFocus()) {
+        return;
+      }
+      _focusCurrentDestination(onlyIfStillMissing: true);
+    });
+  }
+
+  bool _hasActionablePrimaryFocus() {
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    return primaryFocus != null &&
+        primaryFocus is! FocusScopeNode &&
+        primaryFocus.context != null &&
+        primaryFocus.canRequestFocus;
   }
 
   @override
   void dispose() {
-    _setSidebarFocusListenerEnabled(false);
     for (final node in _destinationFocusNodes) {
       node.dispose();
     }
     super.dispose();
   }
 
-  void _setSidebarFocusListenerEnabled(bool enabled) {
-    if (enabled == _sidebarFocusListenerAttached) {
-      return;
-    }
-    if (enabled) {
-      FocusManager.instance.addListener(_scheduleSidebarVisibilitySync);
-      _sidebarFocusListenerAttached = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _syncSidebarVisibility();
-      });
-      return;
-    }
-    FocusManager.instance.removeListener(_scheduleSidebarVisibilitySync);
-    _sidebarFocusListenerAttached = false;
-  }
-
-  void _focusCurrentDestination() {
+  void _focusCurrentDestination({bool onlyIfStillMissing = false}) {
     _setSidebarVisible(true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _destinationFocusNodes.isEmpty) {
+      if (!mounted ||
+          _destinationFocusNodes.isEmpty ||
+          (onlyIfStillMissing && _hasActionablePrimaryFocus())) {
         return;
       }
       final currentDisplayIndex = widget.items.indexWhere(
@@ -520,29 +572,11 @@ class _TelevisionNavigationShellState
         (node) => node.hasFocus || node.hasPrimaryFocus,
       );
 
-  void _scheduleSidebarVisibilitySync() {
-    if (_sidebarVisibilitySyncScheduled) {
-      return;
-    }
-    _sidebarVisibilitySyncScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _sidebarVisibilitySyncScheduled = false;
-      _syncSidebarVisibility();
-    });
-  }
-
-  void _syncSidebarVisibility() {
-    if (!mounted) {
-      return;
-    }
+  void _handleSidebarFocusChanged(bool focused) {
     if (!widget.autoHideNavigationBarEnabled) {
-      _setSidebarVisible(true);
       return;
     }
-    if (FocusManager.instance.primaryFocus == null) {
-      return;
-    }
-    _setSidebarVisible(_isSidebarFocused);
+    _setSidebarVisible(focused);
   }
 
   void _setSidebarVisible(bool visible) {
@@ -567,31 +601,43 @@ class _TelevisionNavigationShellState
     }
 
     _isExitDialogVisible = true;
-    final shouldExit = await showStarflowActionDialog<bool>(
-          context: context,
-          title: '退出 Starflow？',
-          message: '再次确认后将关闭当前应用。',
-          actions: const [
-            StarflowDialogAction<bool>(
-              label: '取消',
-              value: false,
-              icon: Icons.close_rounded,
-              variant: StarflowButtonVariant.ghost,
-              autofocus: true,
-            ),
-            StarflowDialogAction<bool>(
-              label: '退出',
-              value: true,
-              icon: Icons.logout_rounded,
-              variant: StarflowButtonVariant.secondary,
-            ),
-          ],
-        ) ??
-        false;
-    _isExitDialogVisible = false;
+    widget.onExitDialogVisibilityChanged(true);
+    var shouldExit = false;
+    try {
+      shouldExit = await showStarflowActionDialog<bool>(
+            context: context,
+            title: '退出 Starflow？',
+            message: '再次确认后将关闭当前应用。',
+            actions: const [
+              StarflowDialogAction<bool>(
+                label: '取消',
+                value: false,
+                icon: Icons.close_rounded,
+                variant: StarflowButtonVariant.ghost,
+                autofocus: true,
+              ),
+              StarflowDialogAction<bool>(
+                label: '退出',
+                value: true,
+                icon: Icons.logout_rounded,
+                variant: StarflowButtonVariant.secondary,
+              ),
+            ],
+          ) ??
+          false;
+    } finally {
+      _isExitDialogVisible = false;
+      if (!shouldExit) {
+        widget.onExitDialogVisibilityChanged(false);
+      }
+    }
 
     if (shouldExit) {
-      await _exitApplication();
+      try {
+        await _exitApplication();
+      } finally {
+        widget.onExitDialogVisibilityChanged(false);
+      }
     }
   }
 
@@ -613,8 +659,12 @@ class _TelevisionNavigationShellState
 
   @override
   Widget build(BuildContext context) {
-    final sidebarVisible =
-        !widget.autoHideNavigationBarEnabled || _isSidebarVisible;
+    // A focused navigation destination must never be laid out at zero width.
+    // Keeping this invariant in the build itself also repairs a stale
+    // visibility state left by a focus transition during an animation.
+    final sidebarVisible = !widget.autoHideNavigationBarEnabled ||
+        _isSidebarVisible ||
+        _isSidebarFocused;
     final sidebarAnimationDuration =
         widget.navigationAnimationEnabled && !widget.staticNavigationEnabled
             ? const Duration(milliseconds: 180)
@@ -650,10 +700,15 @@ class _TelevisionNavigationShellState
               ),
             ),
     );
-    final sidebarSlot = SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 8, 10, 8),
-        child: sidebar,
+    final sidebarSlot = Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onFocusChange: _handleSidebarFocusChanged,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 10, 8),
+          child: sidebar,
+        ),
       ),
     );
 
@@ -689,9 +744,12 @@ class _TelevisionNavigationShellState
                         ),
                       );
                     },
-                    child: IgnorePointer(
-                      ignoring: !sidebarVisible,
-                      child: sidebarSlot,
+                    child: ExcludeFocus(
+                      excluding: !sidebarVisible,
+                      child: IgnorePointer(
+                        ignoring: !sidebarVisible,
+                        child: sidebarSlot,
+                      ),
                     ),
                   )
                 : (sidebarVisible

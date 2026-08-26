@@ -4,6 +4,7 @@ import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
+import 'package:starflow/features/discovery/data/douban_network_guard.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/home/application/home_feed_load_scheduler.dart';
@@ -12,6 +13,7 @@ import 'package:starflow/features/library/application/nas_media_index_revision.d
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/metadata/data/metadata_network_guard.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
@@ -325,7 +327,18 @@ void primeHomeModulesFromWidget(WidgetRef ref) {
   ref.read(homePageControllerProvider).primeModulesWithReader(ref.read);
 }
 
-Future<void> refreshHomeModules(WidgetRef ref) async {
+Future<void> refreshHomeModules(
+  WidgetRef ref, {
+  bool allowNetworkProbe = false,
+}) async {
+  if (allowNetworkProbe) {
+    ref
+        .read(doubanNetworkGuardProvider)
+        .allowManualProbe(reason: 'manual-home-refresh');
+    ref
+        .read(metadataNetworkGuardProvider)
+        .allowManualProbe(reason: 'manual-home-refresh');
+  }
   return ref.read(homePageControllerProvider).refreshModules(ref);
 }
 

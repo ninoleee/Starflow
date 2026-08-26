@@ -380,7 +380,7 @@ class _HomePageState extends ConsumerState<HomePage>
     final content = RefreshIndicator(
       color: Colors.white,
       backgroundColor: const Color(0xFF102033),
-      onRefresh: () => refreshHomeModules(ref),
+      onRefresh: () => refreshHomeModules(ref, allowNetworkProbe: true),
       child: ListView.builder(
         controller: _scrollController,
         physics: const BouncingScrollPhysics(

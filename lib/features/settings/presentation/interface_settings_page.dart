@@ -22,13 +22,6 @@ class InterfaceSettingsPage extends ConsumerWidget {
       onBack: () => Navigator.of(context).pop(),
       children: [
         Text('界面效果', style: theme.textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Text(
-          '调整页面合成、动画、菜单栏与首页 Hero。相同用途的底层选项会一起保存。',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
         const SettingsSectionTitle(label: '界面'),
         ...buildSettingsTileGroup([
           SettingsToggleTile(
@@ -77,7 +70,7 @@ class InterfaceSettingsPage extends ConsumerWidget {
         const SettingsSectionTitle(label: '导航交互'),
         SettingsToggleTile(
           title: '单击首页时清理后台任务',
-          subtitle: '开启后，单击菜单栏首页会停止非播放后台任务并回到顶部；双击首页仍执行刷新。',
+          subtitle: '开启后，单击菜单栏首页会停止非播放后台刷新、解除调度等待并回到顶部；双击首页仍执行刷新。',
           value: homeNavigationSingleTapCleanupEnabled,
           focusId: 'performance-interface:home-cleanup',
           onChanged: controller.setHomeNavigationSingleTapCleanupEnabled,

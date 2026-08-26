@@ -15,7 +15,10 @@ final nasMediaIndexStoreProvider = Provider<NasMediaIndexStore>((ref) {
 });
 
 abstract class NasMediaIndexStore {
-  Future<List<NasMediaIndexRecord>> loadSourceRecords(String sourceId);
+  Future<List<NasMediaIndexRecord>> loadSourceRecords(
+    String sourceId, {
+    String sectionId = '',
+  });
 
   Future<NasMediaIndexSourceState?> loadSourceState(String sourceId);
 
@@ -103,16 +106,25 @@ class SembastNasMediaIndexStore implements NasMediaIndexStore {
   }
 
   @override
-  Future<List<NasMediaIndexRecord>> loadSourceRecords(String sourceId) async {
+  Future<List<NasMediaIndexRecord>> loadSourceRecords(
+    String sourceId, {
+    String sectionId = '',
+  }) async {
     final normalizedSourceId = sourceId.trim();
     if (normalizedSourceId.isEmpty) {
       return const [];
     }
+    final normalizedSectionId = sectionId.trim();
     final database = await _database();
     final snapshot = await _recordStore.find(
       database,
       finder: Finder(
-        filter: Filter.equals('sourceId', normalizedSourceId),
+        filter: normalizedSectionId.isEmpty
+            ? Filter.equals('sourceId', normalizedSourceId)
+            : Filter.and(<Filter>[
+                Filter.equals('sourceId', normalizedSourceId),
+                Filter.equals('sectionId', normalizedSectionId),
+              ]),
       ),
     );
     final records = snapshot

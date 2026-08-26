@@ -2,8 +2,15 @@ part of 'nas_media_indexer.dart';
 
 extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
   List<MediaItem> materializeLibraryItems(List<NasMediaIndexRecord> records) {
-    final nonSeriesItems = <MediaItem>[];
     final groups = groupSeriesRecords(records);
+    return materializeLibraryItemsFromGroups(records, groups);
+  }
+
+  List<MediaItem> materializeLibraryItemsFromGroups(
+    List<NasMediaIndexRecord> records,
+    List<_SeriesRecordGroup> groups,
+  ) {
+    final nonSeriesItems = <MediaItem>[];
     final groupedResourceIds = groups
         .expand((group) => group.records.map((record) => record.resourceId))
         .toSet();
@@ -662,6 +669,9 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
     if (lastSegment == group.title) {
       return '第 $seasonNumber 季';
     }
+    if (NasMediaRecognizer.matchesWrapperFolderLabel(lastSegment)) {
+      return '第 $seasonNumber 季';
+    }
     return lastSegment;
   }
 
@@ -781,8 +791,12 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       cleanedValue: parentTitle,
       seriesTitleFilterKeywords: seriesTitleFilterKeywords,
     );
+    final parentIsGroupingDescription =
+        looksLikeYearGroupingFolderLabel(record.parentTitle) ||
+            looksLikeQualityEpisodeCountFolderLabel(record.parentTitle);
     final canUseParentTitle = parentTitle.isNotEmpty &&
         !parentLooksLikeSeason &&
+        !parentIsGroupingDescription &&
         !parentMatchesFilter;
     final prefersStructureGrouping =
         _prefersStructureRootSeriesGrouping(record, structureSeriesTitle);
@@ -1155,6 +1169,11 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       rawDirectory,
       seriesParent: seriesParent,
     )) {
+      return true;
+    }
+    if (!parentMatchesFilter &&
+        seriesParent.trim().isNotEmpty &&
+        looksLikeYearGroupingFolderLabel(rawDirectory)) {
       return true;
     }
     if (_looksLikeSeasonFolderLabel(rawDirectory) &&

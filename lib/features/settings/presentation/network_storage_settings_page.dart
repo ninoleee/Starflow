@@ -30,13 +30,6 @@ class NetworkStorageSettingsPage extends ConsumerWidget {
       onBack: () => Navigator.of(context).pop(),
       children: [
         Text('网络存储', style: theme.textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Text(
-          '分别管理夸克、SmartStrm 和同步索引设置。',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
         const SettingsSectionTitle(label: '分类'),
         ...buildSettingsTileGroup([
           SettingsSelectionTile(
@@ -553,6 +546,7 @@ class _NetworkStorageEditorPageState
               autofocus: true,
               focusId: 'network-storage-quark:cookie',
             ),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 12,
               runSpacing: 12,

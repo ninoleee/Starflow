@@ -76,8 +76,4 @@ class SeedData {
   );
 
   static const List<MediaItem> seedLibrary = [];
-
-  static const List<DoubanEntry> seedDoubanRecommendations = [];
-
-  static const List<DoubanEntry> seedDoubanWishList = [];
 }

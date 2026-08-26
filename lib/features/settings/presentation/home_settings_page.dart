@@ -23,13 +23,6 @@ class HomeSettingsPage extends ConsumerWidget {
       onBack: () => Navigator.of(context).pop(),
       children: [
         Text('首页设置', style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Text(
-          '管理首页 Hero 的展示方式、数据来源和模块布局。',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-        ),
         const SettingsSectionTitle(label: '首页 Hero'),
         SettingsToggleTile(
           title: '启用 Hero',

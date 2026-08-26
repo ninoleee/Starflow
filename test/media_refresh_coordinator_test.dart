@@ -12,6 +12,7 @@ import 'package:starflow/features/library/application/emby_refresh_progress.dart
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
+import 'package:starflow/features/library/data/webdav_directory_cache_store.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/presentation/library_page.dart';
@@ -206,6 +207,57 @@ void main() {
       expect(updatedItems.single.playbackItemId, 'new-file');
     });
 
+    test('save-triggered refresh invalidates persistent WebDAV scan cache',
+        () async {
+      final database = await databaseFactoryMemory.openDatabase(
+        'media-refresh-cache-invalidation-test',
+      );
+      addTearDown(database.close);
+      final cacheStore = WebDavDirectoryCacheStore(
+        databaseOpener: () async => database,
+      );
+      await cacheStore.save('stale-subtree', const <String, dynamic>{
+        'sourceId': 'nas-main',
+        'items': <Object>[],
+      });
+      final repository = _ImmediateRefreshMediaRepository(
+        onRefresh: () async {
+          expect(await cacheStore.load('stale-subtree'), isNull);
+        },
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [
+                MediaSourceConfig(
+                  id: 'nas-main',
+                  name: 'WebDAV',
+                  kind: MediaSourceKind.nas,
+                  endpoint: 'https://dav.example.com/movies/',
+                  enabled: true,
+                ),
+              ],
+              homeModules: const [],
+            ),
+          ),
+          mediaRepositoryProvider.overrideWithValue(repository),
+          webDavDirectoryCacheStoreProvider.overrideWithValue(cacheStore),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(mediaRefreshCoordinatorProvider)
+          .refreshSelectedSources(
+        sourceIds: const ['nas-main'],
+        invalidateWebDavDirectoryCache: true,
+      );
+
+      expect(repository.refreshSourceIds, const ['nas-main']);
+      expect(await cacheStore.load('stale-subtree'), isNull);
+    });
+
     test('cancelling background tasks stops remaining Emby refreshes',
         () async {
       final repository = _PendingRefreshMediaRepository();
@@ -345,4 +397,25 @@ class _PendingRefreshMediaRepository extends Fake implements MediaRepository {
   }) async {
     cancelCallCount += 1;
   }
+}
+
+class _ImmediateRefreshMediaRepository extends Fake implements MediaRepository {
+  _ImmediateRefreshMediaRepository({required this.onRefresh});
+
+  final Future<void> Function() onRefresh;
+  final List<String> refreshSourceIds = <String>[];
+
+  @override
+  Future<void> refreshSource({
+    required String sourceId,
+    bool forceFullRescan = false,
+  }) async {
+    refreshSourceIds.add(sourceId);
+    await onRefresh();
+  }
+
+  @override
+  Future<void> cancelActiveWebDavRefreshes({
+    bool includeForceFull = false,
+  }) async {}
 }

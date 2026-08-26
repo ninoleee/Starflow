@@ -36,6 +36,8 @@ class PlaybackSystemSessionState {
     required this.playing,
     this.buffering = false,
     this.speed = 1.0,
+    this.artworkUrl = '',
+    this.artworkHeaders = const {},
     this.canSeek = true,
     this.hasPrevious = false,
     this.hasNext = false,
@@ -48,6 +50,8 @@ class PlaybackSystemSessionState {
   final bool playing;
   final bool buffering;
   final double speed;
+  final String artworkUrl;
+  final Map<String, String> artworkHeaders;
   final bool canSeek;
   final bool hasPrevious;
   final bool hasNext;
@@ -61,6 +65,8 @@ class PlaybackSystemSessionState {
       'playing': playing,
       'buffering': buffering,
       'speed': speed,
+      'artworkUrl': artworkUrl,
+      'artworkHeaders': artworkHeaders,
       'canSeek': canSeek,
       'hasPrevious': hasPrevious,
       'hasNext': hasNext,

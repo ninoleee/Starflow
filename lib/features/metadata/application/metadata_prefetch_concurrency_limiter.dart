@@ -3,6 +3,7 @@ import 'dart:collection';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_logger.dart';
+import 'package:starflow/core/scheduling/queue_wait_diagnostics.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 final metadataPrefetchConcurrencyLimiterProvider =
@@ -21,14 +22,36 @@ class MetadataPrefetchConcurrencyLimiter {
       milliseconds: kMetadataPrefetchBatchDelayMsDefault,
     ),
     this.idleResetDelay = const Duration(seconds: 3),
-  }) : _backgroundBatchDelay = backgroundBatchDelay;
+    this.waitWarningThreshold = const Duration(seconds: 5),
+  }) : _backgroundBatchDelay = backgroundBatchDelay {
+    _waitDiagnostics = QueueWaitDiagnostics(
+      category: 'metadata.prefetch-scheduler',
+      message: 'Metadata prefetch work remained queued',
+      warningThreshold: waitWarningThreshold,
+      pendingCount: () => _pending.length + _maintenancePending.length,
+      oldestEnqueuedAt: _oldestPendingAt,
+      snapshotFields: () => <String, Object?>{
+        'activeCount': _activeCount,
+        'prefetchPendingCount': _pending.length,
+        'maintenancePendingCount': _maintenancePending.length,
+        'foregroundHoldCount': _foregroundHoldCount,
+        'globalPauseHoldCount': _globalPauseHoldCount,
+        'quietTimerActive': _foregroundQuietTimer != null,
+        'batchDelayed': _backgroundBatchTimer != null,
+        'maxConcurrency': _maxConcurrency,
+      },
+    );
+  }
 
   Duration _backgroundBatchDelay;
   final Duration idleResetDelay;
-  final Queue<void Function()> _pending = Queue<void Function()>();
-  final Queue<void Function()> _maintenancePending = Queue<void Function()>();
+  final Duration waitWarningThreshold;
+  final Queue<_QueuedMetadataWork> _pending = Queue<_QueuedMetadataWork>();
+  final Queue<_QueuedMetadataWork> _maintenancePending =
+      Queue<_QueuedMetadataWork>();
+  late final QueueWaitDiagnostics _waitDiagnostics;
   int _activeCount = 0;
-  int _maxConcurrency = kMetadataPrefetchMaxConcurrencyDefault;
+  int _maxConcurrency = kTaskMaxConcurrencyDefault;
   int _initialBatchSize = kMetadataPrefetchInitialBatchSizeDefault;
   int _remainingStartsInBatch = kMetadataPrefetchInitialBatchSizeDefault;
   bool _activityStarted = false;
@@ -36,12 +59,32 @@ class MetadataPrefetchConcurrencyLimiter {
   Timer? _idleResetTimer;
   Timer? _foregroundQuietTimer;
   int _foregroundHoldCount = 0;
+  int _globalPauseHoldCount = 0;
 
   int get activeCount => _activeCount;
   int get pendingCount => _pending.length + _maintenancePending.length;
   bool get isBackgroundBatchDelayed => _backgroundBatchTimer != null;
   bool get isPausedForForeground =>
-      _foregroundHoldCount > 0 || _foregroundQuietTimer != null;
+      _globalPauseHoldCount > 0 ||
+      _foregroundHoldCount > 0 ||
+      _foregroundQuietTimer != null;
+
+  MetadataPrefetchPauseLease beginGlobalPause({required String reason}) {
+    _globalPauseHoldCount += 1;
+    if (_globalPauseHoldCount == 1) {
+      _waitDiagnostics.pause();
+      appLogInfo(
+        'metadata.prefetch-scheduler',
+        'Metadata scheduler globally paused',
+        fields: <String, Object?>{
+          'reason': reason,
+          'activeCount': _activeCount,
+          'pendingCount': pendingCount,
+        },
+      );
+    }
+    return MetadataPrefetchPauseLease._(() => _endGlobalPause(reason));
+  }
 
   /// Stops new background prefetch work while an interactive foreground task
   /// is running. Already-started work is allowed to finish so callers do not
@@ -109,7 +152,7 @@ class MetadataPrefetchConcurrencyLimiter {
       );
     }
     final completer = Completer<T>();
-    _pending.add(() {
+    _pending.add(_QueuedMetadataWork(() {
       _activeCount += 1;
       Future<T>.sync(task)
           .then(
@@ -120,7 +163,8 @@ class MetadataPrefetchConcurrencyLimiter {
         _activeCount -= 1;
         _drain();
       });
-    });
+    }));
+    _waitDiagnostics.update();
     _drain();
     return completer.future;
   }
@@ -134,7 +178,7 @@ class MetadataPrefetchConcurrencyLimiter {
   }) {
     updateMaxConcurrency(maxConcurrency);
     final completer = Completer<T>();
-    _maintenancePending.add(() {
+    _maintenancePending.add(_QueuedMetadataWork(() {
       _activeCount += 1;
       Future<T>.sync(task)
           .then(
@@ -145,13 +189,14 @@ class MetadataPrefetchConcurrencyLimiter {
         _activeCount -= 1;
         _drain();
       });
-    });
+    }));
+    _waitDiagnostics.update();
     _drain();
     return completer.future;
   }
 
   void updateMaxConcurrency(int maxConcurrency) {
-    _maxConcurrency = clampMetadataPrefetchMaxConcurrency(maxConcurrency);
+    _maxConcurrency = clampTaskMaxConcurrency(maxConcurrency);
     _drain();
   }
 
@@ -160,7 +205,7 @@ class MetadataPrefetchConcurrencyLimiter {
     required int initialBatchSize,
     Duration? backgroundBatchDelay,
   }) {
-    _maxConcurrency = clampMetadataPrefetchMaxConcurrency(maxConcurrency);
+    _maxConcurrency = clampTaskMaxConcurrency(maxConcurrency);
     final normalizedBatchSize =
         clampMetadataPrefetchInitialBatchSize(initialBatchSize);
     if (_initialBatchSize != normalizedBatchSize) {
@@ -177,6 +222,40 @@ class MetadataPrefetchConcurrencyLimiter {
     _drain();
   }
 
+  /// Clears scheduler-owned wait windows after an explicit navigation reset.
+  /// Active work and foreground leases remain authoritative so recovery cannot
+  /// create duplicate requests or exceed the configured concurrency limit.
+  void recoverAfterUserNavigation() {
+    _backgroundBatchTimer?.cancel();
+    _backgroundBatchTimer = null;
+    _idleResetTimer?.cancel();
+    _idleResetTimer = null;
+    if (_foregroundHoldCount == 0) {
+      _foregroundQuietTimer?.cancel();
+      _foregroundQuietTimer = null;
+    }
+
+    if (_pending.isEmpty && _maintenancePending.isEmpty && _activeCount == 0) {
+      _activityStarted = false;
+      _remainingStartsInBatch = _initialBatchSize;
+    } else {
+      _activityStarted = true;
+      _remainingStartsInBatch = _maxConcurrency;
+    }
+
+    appLogInfo(
+      'metadata.prefetch-scheduler',
+      'Metadata prefetch scheduler soft recovery requested',
+      fields: <String, Object?>{
+        'activeCount': _activeCount,
+        'pendingCount': pendingCount,
+        'foregroundHoldCount': _foregroundHoldCount,
+        'maxConcurrency': _maxConcurrency,
+      },
+    );
+    _drain();
+  }
+
   void dispose() {
     _backgroundBatchTimer?.cancel();
     _backgroundBatchTimer = null;
@@ -184,20 +263,26 @@ class MetadataPrefetchConcurrencyLimiter {
     _idleResetTimer = null;
     _foregroundQuietTimer?.cancel();
     _foregroundQuietTimer = null;
+    _waitDiagnostics.dispose();
   }
 
   void _drain() {
+    if (_globalPauseHoldCount > 0) {
+      _waitDiagnostics.update();
+      return;
+    }
     while (_activeCount < _maxConcurrency && _maintenancePending.isNotEmpty) {
-      _maintenancePending.removeFirst()();
+      _maintenancePending.removeFirst().start();
     }
     if (isPausedForForeground || _backgroundBatchTimer != null) {
+      _waitDiagnostics.update();
       return;
     }
     while (_activeCount < _maxConcurrency &&
         _pending.isNotEmpty &&
         _remainingStartsInBatch > 0) {
       _remainingStartsInBatch -= 1;
-      _pending.removeFirst()();
+      _pending.removeFirst().start();
     }
     if (_pending.isNotEmpty && _remainingStartsInBatch == 0) {
       _scheduleBackgroundBatch();
@@ -209,6 +294,42 @@ class MetadataPrefetchConcurrencyLimiter {
         _activityStarted) {
       _scheduleIdleReset();
     }
+    _waitDiagnostics.update();
+  }
+
+  void _endGlobalPause(String reason) {
+    if (_globalPauseHoldCount == 0) {
+      return;
+    }
+    _globalPauseHoldCount -= 1;
+    if (_globalPauseHoldCount > 0) {
+      return;
+    }
+    appLogInfo(
+      'metadata.prefetch-scheduler',
+      'Metadata scheduler global pause released',
+      fields: <String, Object?>{
+        'reason': reason,
+        'activeCount': _activeCount,
+        'pendingCount': pendingCount,
+      },
+    );
+    _waitDiagnostics.resume();
+    _drain();
+  }
+
+  DateTime? _oldestPendingAt() {
+    final prefetchAt = _pending.isEmpty ? null : _pending.first.enqueuedAt;
+    final maintenanceAt = _maintenancePending.isEmpty
+        ? null
+        : _maintenancePending.first.enqueuedAt;
+    if (prefetchAt == null) {
+      return maintenanceAt;
+    }
+    if (maintenanceAt == null) {
+      return prefetchAt;
+    }
+    return prefetchAt.isBefore(maintenanceAt) ? prefetchAt : maintenanceAt;
   }
 
   void _endForegroundWork({
@@ -314,6 +435,28 @@ class MetadataPrefetchConcurrencyLimiter {
         },
       );
     });
+  }
+}
+
+class _QueuedMetadataWork {
+  _QueuedMetadataWork(this.start) : enqueuedAt = DateTime.now();
+
+  final void Function() start;
+  final DateTime enqueuedAt;
+}
+
+class MetadataPrefetchPauseLease {
+  MetadataPrefetchPauseLease._(this._releaseCallback);
+
+  final void Function() _releaseCallback;
+  bool _released = false;
+
+  void release() {
+    if (_released) {
+      return;
+    }
+    _released = true;
+    _releaseCallback();
   }
 }
 

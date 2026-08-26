@@ -131,8 +131,7 @@ class DetailRatingPrefetchCoordinator {
 
       final updates = <DetailTargetCacheSaveRequest>[];
       var nextIndex = 0;
-      final maxConcurrency =
-          ref.read(appSettingsProvider).metadataPrefetchMaxConcurrency;
+      final maxConcurrency = ref.read(appSettingsProvider).taskMaxConcurrency;
       final limiter = ref.read(metadataPrefetchConcurrencyLimiterProvider);
       final workerCount =
           targets.length < maxConcurrency ? targets.length : maxConcurrency;
@@ -151,8 +150,7 @@ class DetailRatingPrefetchCoordinator {
           }
           final target = targets[nextIndex++];
           final update = await limiter.run<DetailTargetCacheSaveRequest?>(
-            maxConcurrency:
-                ref.read(appSettingsProvider).metadataPrefetchMaxConcurrency,
+            maxConcurrency: ref.read(appSettingsProvider).taskMaxConcurrency,
             initialBatchSize:
                 ref.read(appSettingsProvider).metadataPrefetchInitialBatchSize,
             backgroundBatchDelay: Duration(

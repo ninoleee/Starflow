@@ -75,15 +75,15 @@ class NasMediaIndexer {
         _concurrencyLimitsOverride = concurrencyLimits,
         _sourceBudget = _ConcurrencyBudget(
           concurrencyLimits?.normalizedSourceRefreshConcurrency ??
-              kNasSourceRefreshConcurrencyDefault,
+              kTaskMaxConcurrencyDefault,
         ),
         _collectionBudget = _ConcurrencyBudget(
           concurrencyLimits?.normalizedCollectionRefreshConcurrency ??
-              kNasCollectionRefreshConcurrencyDefault,
+              kTaskMaxConcurrencyDefault,
         ),
         _enrichmentBudget = _ConcurrencyBudget(
           concurrencyLimits?.normalizedEnrichmentConcurrency ??
-              kNasEnrichmentConcurrencyDefault,
+              kTaskMaxConcurrencyDefault,
         );
 
   static const int _defaultRefreshLimitPerCollection = 1200;
@@ -112,19 +112,21 @@ class NasMediaIndexer {
   final _ConcurrencyBudget _collectionBudget;
   final _ConcurrencyBudget _enrichmentBudget;
 
+  int _nasSourceConcurrency(AppSettings settings) =>
+      settings.taskMaxConcurrency.clamp(1, 2);
+
+  int _nasWorkConcurrency(AppSettings settings) =>
+      settings.taskMaxConcurrency.clamp(1, 4);
+
   void _updateIndexerConcurrencyLimits() {
     final override = _concurrencyLimitsOverride;
     if (override != null) {
       return;
     }
     final settings = _readSettingsForRefresh();
-    _sourceBudget.updateMaxParallelism(settings.nasSourceRefreshConcurrency);
-    _collectionBudget.updateMaxParallelism(
-      settings.nasCollectionRefreshConcurrency,
-    );
-    _enrichmentBudget.updateMaxParallelism(
-      settings.nasEnrichmentConcurrency,
-    );
+    _sourceBudget.updateMaxParallelism(_nasSourceConcurrency(settings));
+    _collectionBudget.updateMaxParallelism(_nasWorkConcurrency(settings));
+    _enrichmentBudget.updateMaxParallelism(_nasWorkConcurrency(settings));
   }
 
   Future<T> _withGlobalBackgroundPermit<T>(
@@ -138,12 +140,12 @@ class NasMediaIndexer {
     final settings = _readSettingsForRefresh();
     if (maintenance) {
       return limiter.runMaintenance(
-        maxConcurrency: settings.metadataPrefetchMaxConcurrency,
+        maxConcurrency: settings.taskMaxConcurrency,
         task: task,
       );
     }
     return limiter.run(
-      maxConcurrency: settings.metadataPrefetchMaxConcurrency,
+      maxConcurrency: settings.taskMaxConcurrency,
       initialBatchSize: settings.metadataPrefetchInitialBatchSize,
       backgroundBatchDelay: Duration(
         milliseconds: settings.metadataPrefetchBatchDelayMs,
@@ -364,19 +366,26 @@ class NasMediaIndexer {
     }
 
     final normalizedSectionId = sectionId?.trim() ?? '';
-    final records = await _loadSourceRecordsCached(source.id);
-    return records
-        .where(
-          (record) =>
-              normalizedSectionId.isEmpty ||
-              record.sectionId == normalizedSectionId,
-        )
-        .toList(growable: false);
+    if (normalizedSectionId.isNotEmpty) {
+      return _store.loadSourceRecords(
+        source.id,
+        sectionId: normalizedSectionId,
+      );
+    }
+    return _loadSourceRecordsCached(source.id);
   }
 
   List<MediaItem> _materializeLibraryItems(List<NasMediaIndexRecord> records) {
     return _NasMediaIndexerGroupingSupportX(this)
         .materializeLibraryItems(records);
+  }
+
+  List<MediaItem> _materializeLibraryItemsFromGroups(
+    List<NasMediaIndexRecord> records,
+    List<_SeriesRecordGroup> groups,
+  ) {
+    return _NasMediaIndexerGroupingSupportX(this)
+        .materializeLibraryItemsFromGroups(records, groups);
   }
 
   List<_SeriesRecordGroup> _groupSeriesRecords(

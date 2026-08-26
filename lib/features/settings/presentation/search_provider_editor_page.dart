@@ -377,13 +377,6 @@ class _SearchProviderEditorPageState
             widget.initial == null ? '新增搜索服务' : '编辑搜索服务',
             style: Theme.of(context).textTheme.headlineSmall,
           ),
-          const SizedBox(height: 8),
-          Text(
-            '配置服务地址、认证信息和搜索能力。',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-          ),
           const SettingsSectionTitle(label: '基本信息'),
           ...buildSettingsTileGroup([
             SettingsTextInputField(
@@ -525,6 +518,7 @@ class _SearchProviderEditorPageState
               ),
             ],
           ),
+          const SizedBox(height: 12),
           ...buildSettingsTileGroup([
             SettingsTextInputField(
               controller: _blockedKeywordsController,

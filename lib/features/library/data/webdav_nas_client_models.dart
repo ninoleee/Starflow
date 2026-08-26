@@ -383,6 +383,26 @@ class _ArtworkResolution {
   final Map<String, String> headers;
 }
 
+class _WebDavSidecarDirectoryContext {
+  const _WebDavSidecarDirectoryContext({
+    this.seasonNfoMetadata,
+    this.seriesNfoMetadata,
+    this.parentPosterEntry,
+    this.backdropEntry,
+    this.logoEntry,
+    this.bannerEntry,
+    this.extraBackdropEntries = const [],
+  });
+
+  final _ParsedNfoMetadata? seasonNfoMetadata;
+  final _ParsedNfoMetadata? seriesNfoMetadata;
+  final _WebDavEntry? parentPosterEntry;
+  final _WebDavEntry? backdropEntry;
+  final _WebDavEntry? logoEntry;
+  final _WebDavEntry? bannerEntry;
+  final List<_WebDavEntry> extraBackdropEntries;
+}
+
 class _NfoStreamDetails {
   const _NfoStreamDetails({
     this.container = '',
@@ -405,11 +425,13 @@ class _SeriesRootInferencePlan {
   const _SeriesRootInferencePlan({
     required this.rootItemsAsSpecials,
     required this.seasonNumberByChildDirectory,
+    this.structuralChildDirectories = const <String>{},
     this.collapseChildDirectoriesToRoot = const <String>{},
   });
 
   final bool rootItemsAsSpecials;
   final Map<String, int?> seasonNumberByChildDirectory;
+  final Set<String> structuralChildDirectories;
   final Set<String> collapseChildDirectoriesToRoot;
 }
 

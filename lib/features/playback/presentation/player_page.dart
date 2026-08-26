@@ -204,8 +204,25 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _tvPlaybackStateNotifier.value = next;
   }
 
+  void _syncPlaybackVisualStateFromPlayer() {
+    if (!_isTelevisionPlaybackDevice || !_shouldUpdatePlaybackVisualState) {
+      return;
+    }
+    final player = _player;
+    if (player == null) {
+      return;
+    }
+    _updateTvPlaybackState(
+      position: player.state.position,
+      duration: player.state.duration,
+      playing: player.state.playing,
+      bufferingPercentage: player.state.bufferingPercentage,
+    );
+  }
+
   bool _tvExitDialogVisible = false;
   bool _isEmbeddedMpvFullscreen = false;
+  bool _playbackPageInForeground = true;
   double _adaptiveGestureBrightness = 0.5;
   double _adaptiveGestureVolume = 1.0;
   int _adaptiveGestureLevelsRevision = 0;
@@ -223,6 +240,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _lastPlaybackSystemSessionHasNext = false;
   String _lastPlaybackSystemSessionTitle = '';
   String _lastPlaybackSystemSessionSubtitle = '';
+  String _lastPlaybackSystemSessionArtworkUrl = '';
+  Map<String, String> _lastPlaybackSystemSessionArtworkHeaders = const {};
   int? _lastTracedVideoWidth;
   int? _lastTracedVideoHeight;
   bool? _lastTracedBufferingState;
@@ -377,8 +396,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _playbackPageInForeground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       unawaited(_bindAdaptiveGestureSystemLevels());
+      _syncPlaybackVisualStateFromPlayer();
     }
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
@@ -412,6 +433,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   bool get _backgroundPlaybackEnabled =>
       ref.read(effectivePlaybackBackgroundEnabledProvider);
+
+  bool get _shouldUpdatePlaybackVisualState => _playbackPageInForeground;
 
   AppSettings get _playbackSettings => ref.read(appSettingsProvider);
 

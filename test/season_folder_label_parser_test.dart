@@ -32,5 +32,15 @@ void main() {
       expect(looksLikeStrictSeasonFolderLabel('SE10'), isTrue);
       expect(looksLikeStrictSeasonFolderLabel('我的天才女友S3 蓝光版'), isFalse);
     });
+
+    test('recognizes nested year and quality episode-count grouping labels',
+        () {
+      expect(looksLikeYearGroupingFolderLabel('2025'), isTrue);
+      expect(looksLikeYearGroupingFolderLabel('2026（4K）'), isTrue);
+      expect(looksLikeYearGroupingFolderLabel('2026 电视剧'), isFalse);
+      expect(looksLikeQualityEpisodeCountFolderLabel('4K 12集'), isTrue);
+      expect(looksLikeQualityEpisodeCountFolderLabel('12集'), isFalse);
+      expect(parseSeasonNumberFromFolderLabel('4K 12集'), isNull);
+    });
   });
 }

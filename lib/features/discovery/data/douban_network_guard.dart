@@ -33,6 +33,10 @@ class DoubanNetworkGuard {
   }) {
     return _delegate.get(client, uri, headers: headers);
   }
+
+  void allowManualProbe({required String reason}) {
+    _delegate.allowSingleProbeForOpenHosts(reason: reason);
+  }
 }
 
 class DoubanNetworkCircuitOpenException extends NetworkCircuitOpenException {

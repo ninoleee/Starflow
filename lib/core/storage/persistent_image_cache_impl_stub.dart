@@ -19,6 +19,12 @@ class _StubPersistentImageCache implements PersistentImageCache {
   Future<void> clear() async {}
 
   @override
+  Future<void> evict(
+    String url, {
+    Map<String, String>? headers,
+  }) async {}
+
+  @override
   Future<LocalStorageCacheSummary> inspect() async {
     return const LocalStorageCacheSummary(
       type: LocalStorageCacheType.images,

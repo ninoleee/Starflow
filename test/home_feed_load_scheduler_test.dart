@@ -104,4 +104,75 @@ void main() {
     await Future.wait(tasks);
     expect(starts, hasLength(3));
   });
+
+  test('navigation recovery releases batch delay without resetting active work',
+      () async {
+    final scheduler = HomeFeedLoadScheduler(
+      backgroundBatchDelay: const Duration(seconds: 1),
+    );
+    addTearDown(scheduler.dispose);
+    final firstGate = Completer<void>();
+    final secondGate = Completer<void>();
+    final starts = <String>[];
+
+    final first = scheduler.runLoad<void>(
+      moduleId: 'first',
+      maxConcurrency: 2,
+      initialBatchSize: 1,
+      task: () async {
+        starts.add('first');
+        await firstGate.future;
+      },
+    );
+    final second = scheduler.runLoad<void>(
+      moduleId: 'second',
+      maxConcurrency: 2,
+      initialBatchSize: 1,
+      task: () async {
+        starts.add('second');
+        await secondGate.future;
+      },
+    );
+
+    await Future<void>.delayed(Duration.zero);
+    expect(starts, <String>['first']);
+    expect(scheduler.activeLoadCount, 1);
+
+    scheduler.recoverAfterUserNavigation();
+    await Future<void>.delayed(Duration.zero);
+    expect(starts, <String>['first', 'second']);
+    expect(scheduler.activeLoadCount, 2);
+
+    firstGate.complete();
+    secondGate.complete();
+    await Future.wait(<Future<void>>[first, second]);
+  });
+
+  test('pause lease holds new loads until every pause is released', () async {
+    final scheduler =
+        HomeFeedLoadScheduler(backgroundBatchDelay: Duration.zero);
+    addTearDown(scheduler.dispose);
+    final lifecycleLease = scheduler.beginPause(reason: 'app-paused');
+    final memoryLease = scheduler.beginPause(reason: 'memory-pressure');
+    var started = false;
+
+    final task = scheduler.runLoad<void>(
+      moduleId: 'paused-module',
+      maxConcurrency: 1,
+      initialBatchSize: 1,
+      task: () async {
+        started = true;
+      },
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(started, isFalse);
+
+    lifecycleLease.release();
+    await Future<void>.delayed(Duration.zero);
+    expect(started, isFalse);
+
+    memoryLease.release();
+    await task;
+    expect(started, isTrue);
+  });
 }

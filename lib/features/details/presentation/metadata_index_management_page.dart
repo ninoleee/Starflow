@@ -16,6 +16,7 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/presentation/library_collection_page.dart';
 import 'package:starflow/features/library/presentation/library_page.dart';
 import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
+import 'package:starflow/features/metadata/data/metadata_network_guard.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
@@ -236,6 +237,9 @@ class _MetadataIndexManagementPageState
       _wmdbMessage = '';
       _tmdbMessage = '';
     });
+    ref
+        .read(metadataNetworkGuardProvider)
+        .allowManualProbe(reason: 'manual-metadata-index-search');
 
     final settings = ref.read(appSettingsProvider);
     Future<(List<MetadataMatchResult>, String)> resolveTmdb() async {
@@ -567,6 +571,9 @@ class _MetadataIndexManagementPageState
     setState(() {
       _isAutoRefreshing = true;
     });
+    ref
+        .read(metadataNetworkGuardProvider)
+        .allowManualProbe(reason: 'manual-metadata-index-refresh');
 
     try {
       final resolvedTarget = await _resolveAutomaticRefreshTarget();

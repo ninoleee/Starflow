@@ -127,8 +127,7 @@ class _QuarkDirectoryManagerPageState
     }
     final confirmed = await _confirmDelete(
       title: '清空当前目录',
-      content:
-          '将把当前目录下的 ${_entries.length} 个项目移动到夸克回收站，是否继续？',
+      content: '将把当前目录下的 ${_entries.length} 个项目移动到夸克回收站，是否继续？',
       confirmLabel: '确认清空',
     );
     if (!confirmed) {
@@ -184,8 +183,7 @@ class _QuarkDirectoryManagerPageState
     required String confirmLabel,
   }) async {
     final isTelevision = ref.read(isTelevisionProvider).value ?? false;
-    final cancelFocusNode =
-        FocusNode(debugLabel: 'quark-delete-dialog-cancel');
+    final cancelFocusNode = FocusNode(debugLabel: 'quark-delete-dialog-cancel');
     final confirmFocusNode =
         FocusNode(debugLabel: 'quark-delete-dialog-confirm');
     try {
@@ -245,7 +243,8 @@ class _QuarkDirectoryManagerPageState
           SettingsToolbarButton(
             label: '清空当前目录',
             icon: Icons.delete_sweep_rounded,
-            onPressed: _isLoading || _isDeleting ? null : _clearCurrentDirectory,
+            onPressed:
+                _isLoading || _isDeleting ? null : _clearCurrentDirectory,
             loading: _isDeleting,
           ),
       ],
@@ -261,11 +260,6 @@ class _QuarkDirectoryManagerPageState
             fontSize: 20,
             fontWeight: FontWeight.w700,
           ),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          '这里只会操作当前夸克目录里的文件和文件夹。删除动作会移动到夸克回收站，不会直接做永久清除。',
-          style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 16),
         Wrap(

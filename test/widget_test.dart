@@ -747,6 +747,70 @@ void main() {
     expect(find.text('1.00 GB'), findsOneWidget);
     expect(find.textContaining('第1集 风暴前夜.mkv'), findsOneWidget);
   });
+
+  testWidgets('episode browser lazily builds a large season',
+      (WidgetTester tester) async {
+    const seriesTarget = MediaDetailTarget(
+      title: '长篇测试剧',
+      posterUrl: '',
+      overview: '',
+      itemId: 'series-large',
+      sourceId: 'nas-main',
+      itemType: 'series',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'NAS',
+    );
+    final episodes = List<MediaItem>.generate(
+      200,
+      (index) {
+        final episodeNumber = index + 1;
+        return MediaItem(
+          id: 'episode-$episodeNumber',
+          title: '测试第 $episodeNumber 集',
+          overview: '单集 $episodeNumber',
+          posterUrl: '',
+          year: 2026,
+          durationLabel: '45m',
+          genres: const [],
+          sourceId: 'nas-main',
+          sourceName: 'NAS',
+          sourceKind: MediaSourceKind.nas,
+          itemType: 'episode',
+          streamUrl: '',
+          seasonNumber: 1,
+          episodeNumber: episodeNumber,
+          addedAt: DateTime(2026, 8, 24),
+        );
+      },
+      growable: false,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          home: Scaffold(
+            body: DetailEpisodeBrowser(
+              seriesTarget: seriesTarget,
+              groups: [
+                DetailEpisodeGroup(
+                  id: 'season-large',
+                  title: '第 1 季',
+                  seasonNumber: 1,
+                  episodes: episodes,
+                ),
+              ],
+              selectedGroupId: 'season-large',
+              onSeasonSelected: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('测试第 1 集'), findsOneWidget);
+    expect(find.text('测试第 200 集'), findsNothing);
+  });
 }
 
 class _FakeMediaRepository implements MediaRepository {

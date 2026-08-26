@@ -28,13 +28,6 @@ class MediaSourceSettingsPage extends ConsumerWidget {
       ),
       children: [
         Text('媒体源管理', style: theme.textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Text(
-          '管理 Emby、NAS / WebDAV 和夸克媒体源。',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
         const SettingsSectionTitle(label: '匹配范围'),
         SettingsSelectionTile(
           title: '详情页匹配来源',

@@ -17,13 +17,6 @@ class PlaybackTuningSettingsPage extends ConsumerWidget {
       onBack: () => Navigator.of(context).pop(),
       children: [
         Text('MPV 调优', style: theme.textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Text(
-          '调整内置 MPV 的性能参数。一般设备建议保持标准模式，播放高码率片源不稳定时再开启。',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
         const SettingsSectionTitle(label: '性能参数'),
         ...buildSettingsTileGroup([
           SettingsToggleTile(

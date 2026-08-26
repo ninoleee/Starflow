@@ -59,13 +59,6 @@ class _LogExportPageState extends ConsumerState<LogExportPage> {
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       children: [
         Text('导出日志', style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Text(
-          '在手机、电脑或 TV 上保存日志，TV 端也可通过二维码在同一网络下载。',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-        ),
         const SizedBox(height: 18),
         SectionPanel(
           title: '导出方式',

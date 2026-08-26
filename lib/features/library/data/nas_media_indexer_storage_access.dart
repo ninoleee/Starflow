@@ -618,8 +618,24 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
     List<NasMediaIndexRecord> records,
   ) {
     final normalizedRecords = List<NasMediaIndexRecord>.unmodifiable(records);
+    final seriesGroups = List<_SeriesRecordGroup>.unmodifiable(
+      _groupSeriesRecords(normalizedRecords),
+    );
+    final recordsBySectionId = <String, List<NasMediaIndexRecord>>{};
+    for (final record in normalizedRecords) {
+      recordsBySectionId
+          .putIfAbsent(record.sectionId.trim(), () => <NasMediaIndexRecord>[])
+          .add(record);
+    }
+    final seriesGroupsBySectionId = <String, Map<String, _SeriesRecordGroup>>{};
+    for (final entry in recordsBySectionId.entries) {
+      seriesGroupsBySectionId[entry.key] = <String, _SeriesRecordGroup>{
+        for (final group in _groupSeriesRecords(entry.value))
+          group.seriesItemId: group,
+      };
+    }
     final libraryItems = List<MediaItem>.unmodifiable(
-      _materializeLibraryItems(normalizedRecords),
+      _materializeLibraryItemsFromGroups(normalizedRecords, seriesGroups),
     );
     final itemsByLookupKey = <String, List<MediaItem>>{};
     for (final item in libraryItems) {
@@ -631,6 +647,10 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
       records: normalizedRecords,
       libraryItems: libraryItems,
       itemsByLookupKey: itemsByLookupKey,
+      seriesGroupsByItemId: <String, _SeriesRecordGroup>{
+        for (final group in seriesGroups) group.seriesItemId: group,
+      },
+      seriesGroupsBySectionId: seriesGroupsBySectionId,
     );
   }
 
@@ -700,11 +720,15 @@ class _NasLibraryMatchCache {
     required this.records,
     required this.libraryItems,
     required this.itemsByLookupKey,
+    required this.seriesGroupsByItemId,
+    required this.seriesGroupsBySectionId,
   });
 
   final List<NasMediaIndexRecord> records;
   final List<MediaItem> libraryItems;
   final Map<String, List<MediaItem>> itemsByLookupKey;
+  final Map<String, _SeriesRecordGroup> seriesGroupsByItemId;
+  final Map<String, Map<String, _SeriesRecordGroup>> seriesGroupsBySectionId;
 
   List<MediaItem> findByExternalIds({
     String doubanId = '',

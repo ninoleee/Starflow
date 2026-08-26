@@ -464,11 +464,11 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     );
   }
 
-  Future<void> setMetadataPrefetchMaxConcurrency(int maxConcurrency) async {
+  Future<void> setTaskMaxConcurrency(int maxConcurrency) async {
     final current = state.value ?? await _repository.load();
     await _persist(
       current.copyWith(
-        metadataPrefetchMaxConcurrency: maxConcurrency,
+        taskMaxConcurrency: maxConcurrency,
       ),
     );
   }
@@ -496,13 +496,6 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     );
   }
 
-  Future<void> setHomeFeedMaxConcurrency(int maxConcurrency) async {
-    final current = state.value ?? await _repository.load();
-    await _persist(
-      current.copyWith(homeFeedMaxConcurrency: maxConcurrency),
-    );
-  }
-
   Future<void> setHomeFeedInitialBatchSize(int batchSize) async {
     final current = state.value ?? await _repository.load();
     await _persist(
@@ -513,27 +506,6 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   Future<void> setHomeFeedBatchDelayMs(int delayMs) async {
     final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(homeFeedBatchDelayMs: delayMs));
-  }
-
-  Future<void> setNasSourceRefreshConcurrency(int concurrency) async {
-    final current = state.value ?? await _repository.load();
-    await _persist(
-      current.copyWith(nasSourceRefreshConcurrency: concurrency),
-    );
-  }
-
-  Future<void> setNasCollectionRefreshConcurrency(int concurrency) async {
-    final current = state.value ?? await _repository.load();
-    await _persist(
-      current.copyWith(nasCollectionRefreshConcurrency: concurrency),
-    );
-  }
-
-  Future<void> setNasEnrichmentConcurrency(int concurrency) async {
-    final current = state.value ?? await _repository.load();
-    await _persist(
-      current.copyWith(nasEnrichmentConcurrency: concurrency),
-    );
   }
 
   Future<void> setPerformanceAggressivePlaybackTuningEnabled(
@@ -625,14 +597,14 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     );
     await saveFuture;
     ref.read(metadataPrefetchConcurrencyLimiterProvider).updateLimits(
-          maxConcurrency: normalized.metadataPrefetchMaxConcurrency,
+          maxConcurrency: normalized.taskMaxConcurrency,
           initialBatchSize: normalized.metadataPrefetchInitialBatchSize,
           backgroundBatchDelay: Duration(
             milliseconds: normalized.metadataPrefetchBatchDelayMs,
           ),
         );
     ref.read(homeFeedLoadSchedulerProvider).updateLimits(
-          maxConcurrency: normalized.homeFeedMaxConcurrency,
+          maxConcurrency: normalized.taskMaxConcurrency,
           initialBatchSize: normalized.homeFeedInitialBatchSize,
           backgroundBatchDelay: Duration(
             milliseconds: normalized.homeFeedBatchDelayMs,

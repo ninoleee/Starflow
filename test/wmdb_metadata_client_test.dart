@@ -7,6 +7,26 @@ import 'package:http/testing.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 
 void main() {
+  test('removes a duplicated trailing year from title search queries',
+      () async {
+    final client = WmdbMetadataClient(
+      MockClient((request) async {
+        expect(request.url.path, '/api/v1/movie/search');
+        expect(request.url.queryParameters['q'], '披荆斩棘');
+        expect(request.url.queryParameters['year'], '2026');
+        return http.Response(jsonEncode({'data': const []}), 200);
+      }),
+    );
+
+    final result = await client.matchTitle(
+      query: '披荆斩棘2026',
+      year: 2026,
+      preferSeries: true,
+    );
+
+    expect(result, isNull);
+  });
+
   group('WmdbMetadataClient', () {
     test('maps direct douban id lookup', () async {
       final client = WmdbMetadataClient(

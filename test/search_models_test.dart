@@ -6,10 +6,10 @@ void main() {
     test('disables unknown provider kinds instead of routing them as panSou',
         () {
       final config = SearchProviderConfig.fromJson(const {
-        'id': 'legacy-provider',
-        'name': 'Legacy',
-        'kind': 'legacy-kind',
-        'endpoint': 'https://legacy.example.com',
+        'id': 'unknown-provider',
+        'name': 'Unknown',
+        'kind': 'unknown-kind',
+        'endpoint': 'https://unknown.example.com',
         'enabled': true,
       });
 

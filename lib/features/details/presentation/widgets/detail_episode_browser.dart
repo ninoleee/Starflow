@@ -18,22 +18,20 @@ import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 final detailSeriesBrowserProvider = FutureProvider.autoDispose
-    .family<DetailSeriesBrowserState?, MediaDetailTarget>((
+    .family<DetailSeriesBrowserState?, DetailSeriesBrowserRequest>((
   ref,
-  target,
+  request,
 ) async {
-  if (!target.isSeries ||
-      target.sourceId.trim().isEmpty ||
-      target.itemId.trim().isEmpty) {
+  if (!request.isSeries || request.sourceId.isEmpty || request.itemId.isEmpty) {
     return null;
   }
 
   final repository = ref.read(mediaRepositoryProvider);
   final children = await repository.fetchChildren(
-    sourceId: target.sourceId,
-    parentId: target.itemId,
-    sectionId: target.sectionId,
-    sectionName: target.sectionName,
+    sourceId: request.sourceId,
+    parentId: request.itemId,
+    sectionId: request.sectionId,
+    sectionName: request.sectionName,
   );
 
   final seasons = children.where(_isSeasonItem).toList(growable: false);
@@ -59,10 +57,10 @@ final detailSeriesBrowserProvider = FutureProvider.autoDispose
   var firstSeasonPreloaded = false;
   try {
     final firstChildren = await repository.fetchChildren(
-      sourceId: target.sourceId,
+      sourceId: request.sourceId,
       parentId: firstSeason.id,
-      sectionId: target.sectionId,
-      sectionName: target.sectionName,
+      sectionId: request.sectionId,
+      sectionName: request.sectionName,
     );
     firstSeasonPreloaded = true;
     firstSeasonEpisodes = firstChildren.where(_isEpisodeItem).toList(
@@ -91,6 +89,42 @@ final detailSeriesBrowserProvider = FutureProvider.autoDispose
   }
   return groups.isEmpty ? null : DetailSeriesBrowserState(groups: groups);
 });
+
+class DetailSeriesBrowserRequest {
+  const DetailSeriesBrowserRequest({
+    required this.sourceId,
+    required this.itemId,
+    required this.sectionId,
+    required this.sectionName,
+    required this.isSeries,
+  });
+
+  factory DetailSeriesBrowserRequest.fromTarget(MediaDetailTarget target) {
+    return DetailSeriesBrowserRequest(
+      sourceId: target.sourceId.trim(),
+      itemId: target.itemId.trim(),
+      sectionId: target.sectionId.trim(),
+      sectionName: target.sectionName.trim(),
+      isSeries: target.isSeries,
+    );
+  }
+
+  final String sourceId;
+  final String itemId;
+  final String sectionId;
+  final String sectionName;
+  final bool isSeries;
+
+  String get _cacheKey => '$sourceId|$itemId|$sectionId|$sectionName|$isSeries';
+
+  @override
+  bool operator ==(Object other) {
+    return other is DetailSeriesBrowserRequest && other._cacheKey == _cacheKey;
+  }
+
+  @override
+  int get hashCode => _cacheKey.hashCode;
+}
 
 final detailSeasonEpisodesProvider = FutureProvider.autoDispose
     .family<List<MediaItem>, _DetailSeasonEpisodesRequest>(
@@ -722,7 +756,6 @@ class _DetailEpisodeArtwork extends StatelessWidget {
               cacheWidth: decodeSize?.width,
               cacheHeight: decodeSize?.height,
               fit: BoxFit.cover,
-              throttleOnTelevision: false,
               errorBuilder: (context, error, stackTrace) =>
                   _DetailEpisodeArtworkFallback(item: item),
             ),
@@ -814,6 +847,18 @@ PlaybackTarget itemToEpisodePlaybackTarget(
   return base.copyWith(
     seriesId: seriesTarget.itemId,
     seriesTitle: seriesTarget.title,
+    posterUrl: base.posterUrl.trim().isNotEmpty
+        ? base.posterUrl
+        : seriesTarget.posterUrl,
+    posterHeaders: base.posterUrl.trim().isNotEmpty
+        ? base.posterHeaders
+        : seriesTarget.posterHeaders,
+    backdropUrl: base.backdropUrl.trim().isNotEmpty
+        ? base.backdropUrl
+        : seriesTarget.backdropUrl,
+    backdropHeaders: base.backdropUrl.trim().isNotEmpty
+        ? base.backdropHeaders
+        : seriesTarget.backdropHeaders,
   );
 }
 

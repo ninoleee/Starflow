@@ -98,6 +98,35 @@ bool looksLikeNumericTopicSeason(String value) {
   );
 }
 
+bool looksLikeYearGroupingFolderLabel(String value) {
+  final normalized = _normalizeFullWidthDigits(value).trim();
+  if (normalized.isEmpty) {
+    return false;
+  }
+  return RegExp(
+    r'^(?:19|20)\d{2}(?:\s*[（(【\[]\s*(?:4k|8k|uhd|2160p|1080p|hdr)\s*[）)】\]])?$',
+    caseSensitive: false,
+  ).hasMatch(normalized);
+}
+
+bool looksLikeQualityEpisodeCountFolderLabel(String value) {
+  final normalized = _normalizeFullWidthDigits(value)
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[\s._\-（()）【】\[\]]+'), '');
+  if (normalized.isEmpty) {
+    return false;
+  }
+  final withoutQuality = normalized.replaceAll(
+    RegExp(r'(?:4k|8k|uhd|2160p|1080p|hdr)', caseSensitive: false),
+    '',
+  );
+  if (withoutQuality == normalized) {
+    return false;
+  }
+  return RegExp(r'^\d{1,4}(?:集|期|话)$').hasMatch(withoutQuality);
+}
+
 bool _looksLikeSpecialSeasonLabel(String value) {
   final asciiCompact = _normalizeFullWidthDigits(value)
       .trim()

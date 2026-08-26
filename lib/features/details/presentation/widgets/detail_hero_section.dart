@@ -596,7 +596,10 @@ PlaybackTarget? resolveStartPlaybackTarget(
   if (playbackTarget == null) {
     return null;
   }
-  return playbackTarget.copyWith(allowResume: false);
+  return _attachDetailArtworkToPlaybackTarget(
+    playbackTarget,
+    target,
+  ).copyWith(allowResume: false);
 }
 
 PlaybackTarget? resolveResumePlaybackTarget(
@@ -608,11 +611,37 @@ PlaybackTarget? resolveResumePlaybackTarget(
   }
   final targetSubtitle = target.playbackTarget;
   if (targetSubtitle == null) {
-    return resumeEntry.target.copyWith(allowResume: true);
+    return _attachDetailArtworkToPlaybackTarget(
+      resumeEntry.target,
+      target,
+    ).copyWith(allowResume: true);
   }
-  return resumeEntry.target.copyWith(
+  return _attachDetailArtworkToPlaybackTarget(
+    resumeEntry.target,
+    target,
+  ).copyWith(
     allowResume: true,
     externalSubtitleFilePath: targetSubtitle.externalSubtitleFilePath,
     externalSubtitleDisplayName: targetSubtitle.externalSubtitleDisplayName,
+  );
+}
+
+PlaybackTarget _attachDetailArtworkToPlaybackTarget(
+  PlaybackTarget playbackTarget,
+  MediaDetailTarget detailTarget,
+) {
+  return playbackTarget.copyWith(
+    posterUrl: detailTarget.posterUrl.trim().isNotEmpty
+        ? detailTarget.posterUrl
+        : playbackTarget.posterUrl,
+    posterHeaders: detailTarget.posterUrl.trim().isNotEmpty
+        ? detailTarget.posterHeaders
+        : playbackTarget.posterHeaders,
+    backdropUrl: detailTarget.backdropUrl.trim().isNotEmpty
+        ? detailTarget.backdropUrl
+        : playbackTarget.backdropUrl,
+    backdropHeaders: detailTarget.backdropUrl.trim().isNotEmpty
+        ? detailTarget.backdropHeaders
+        : playbackTarget.backdropHeaders,
   );
 }

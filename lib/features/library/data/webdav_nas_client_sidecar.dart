@@ -6,50 +6,20 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     required List<_WebDavEntry> siblings,
     required MediaSourceConfig source,
   }) async {
-    final currentDirectoryUri = _parentDirectoryUri(videoEntry.uri);
-    final parentDirectoryUri = currentDirectoryUri == null
-        ? null
-        : _parentDirectoryUri(currentDirectoryUri);
-    final grandParentDirectoryUri = parentDirectoryUri == null
-        ? null
-        : _parentDirectoryUri(parentDirectoryUri);
-
-    final parentEntries = parentDirectoryUri == null
-        ? const <_WebDavEntry>[]
-        : await _loadDirectoryEntries(parentDirectoryUri, source: source);
-    final grandParentEntries = grandParentDirectoryUri == null
-        ? const <_WebDavEntry>[]
-        : await _loadDirectoryEntries(grandParentDirectoryUri, source: source);
-
-    final primaryNfoEntry = _findBestNfoEntry(videoEntry, siblings);
-    final seasonNfoEntry = _findNamedNfoEntry(
-      siblings,
-      const ['season.nfo', 'index.nfo'],
-      excluding: primaryNfoEntry,
+    final directoryContext = await _loadSidecarDirectoryContext(
+      videoEntry,
+      siblings: siblings,
+      source: source,
     );
-    final seriesNfoEntry = _findNamedNfoEntry(
-          parentEntries,
-          const ['tvshow.nfo', 'index.nfo'],
-        ) ??
-        _findNamedNfoEntry(
-          grandParentEntries,
-          const ['tvshow.nfo', 'index.nfo'],
-        );
-
+    final primaryNfoEntry = _findBestNfoEntry(videoEntry, siblings);
     final primaryNfoMetadata = primaryNfoEntry == null
         ? null
         : await _loadNfoMetadata(primaryNfoEntry, source: source);
-    final seasonNfoMetadata = seasonNfoEntry == null
-        ? null
-        : await _loadNfoMetadata(seasonNfoEntry, source: source);
-    final seriesNfoMetadata = seriesNfoEntry == null
-        ? null
-        : await _loadNfoMetadata(seriesNfoEntry, source: source);
     final nfoMetadata = _mergeNfoMetadata(
       primary: primaryNfoMetadata,
       secondary: _mergeNfoMetadata(
-        primary: seasonNfoMetadata,
-        secondary: seriesNfoMetadata,
+        primary: directoryContext.seasonNfoMetadata,
+        secondary: directoryContext.seriesNfoMetadata,
       ),
     );
     final inferredMediaInfo = _inferMediaInfo(videoEntry);
@@ -60,27 +30,11 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
           siblings,
           seasonHint: nfoMetadata?.seasonNumber,
         ) ??
-        _findPosterByRole(parentEntries) ??
-        _findPosterByRole(grandParentEntries);
-    final localBackdropEntry = _findBackdropByRole(siblings) ??
-        _findBackdropByRole(parentEntries) ??
-        _findBackdropByRole(grandParentEntries);
-    final localLogoEntry = _findLogoByRole(siblings) ??
-        _findLogoByRole(parentEntries) ??
-        _findLogoByRole(grandParentEntries);
-    final localBannerEntry = _findBannerByRole(siblings) ??
-        _findBannerByRole(parentEntries) ??
-        _findBannerByRole(grandParentEntries);
-    final localExtraBackdropEntries = await _loadExtraBackdropEntries(
-      source: source,
-      candidates: [
-        (entries: siblings, baseUri: currentDirectoryUri),
-        if (parentDirectoryUri != null)
-          (entries: parentEntries, baseUri: parentDirectoryUri),
-        if (grandParentDirectoryUri != null)
-          (entries: grandParentEntries, baseUri: grandParentDirectoryUri),
-      ],
-    );
+        directoryContext.parentPosterEntry;
+    final localBackdropEntry = directoryContext.backdropEntry;
+    final localLogoEntry = directoryContext.logoEntry;
+    final localBannerEntry = directoryContext.bannerEntry;
+    final localExtraBackdropEntries = directoryContext.extraBackdropEntries;
 
     final posterArtwork = _resolveArtworkCandidate(
       source: source,
@@ -173,6 +127,105 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     );
 
     return seed;
+  }
+
+  Future<_WebDavSidecarDirectoryContext> _loadSidecarDirectoryContext(
+    _WebDavEntry videoEntry, {
+    required List<_WebDavEntry> siblings,
+    required MediaSourceConfig source,
+  }) {
+    final currentDirectoryUri = _parentDirectoryUri(videoEntry.uri);
+    if (currentDirectoryUri == null) {
+      return Future.value(const _WebDavSidecarDirectoryContext());
+    }
+    final key = _webDavCacheKey(source, currentDirectoryUri);
+    final cached = _sidecarDirectoryCache[key];
+    if (cached != null) {
+      return Future.value(cached);
+    }
+    final inflight = _sidecarDirectoryInflight[key];
+    if (inflight != null) {
+      return inflight;
+    }
+
+    final future = (() async {
+      final parentDirectoryUri = _parentDirectoryUri(currentDirectoryUri);
+      final grandParentDirectoryUri = parentDirectoryUri == null
+          ? null
+          : _parentDirectoryUri(parentDirectoryUri);
+      final parentEntries = parentDirectoryUri == null
+          ? const <_WebDavEntry>[]
+          : await _loadDirectoryEntries(parentDirectoryUri, source: source);
+      final grandParentEntries = grandParentDirectoryUri == null
+          ? const <_WebDavEntry>[]
+          : await _loadDirectoryEntries(
+              grandParentDirectoryUri,
+              source: source,
+            );
+      final seasonNfoEntry = _findNamedNfoEntry(
+        siblings,
+        const ['season.nfo', 'index.nfo'],
+      );
+      final seriesNfoEntry = _findNamedNfoEntry(
+            parentEntries,
+            const ['tvshow.nfo', 'index.nfo'],
+          ) ??
+          _findNamedNfoEntry(
+            grandParentEntries,
+            const ['tvshow.nfo', 'index.nfo'],
+          );
+      final seasonNfoMetadata = seasonNfoEntry == null
+          ? null
+          : await _loadNfoMetadata(seasonNfoEntry, source: source);
+      final seriesNfoMetadata = seriesNfoEntry == null
+          ? null
+          : await _loadNfoMetadata(seriesNfoEntry, source: source);
+      final extraBackdropEntries = await _loadExtraBackdropEntries(
+        source: source,
+        candidates: [
+          (entries: siblings, baseUri: currentDirectoryUri),
+          if (parentDirectoryUri != null)
+            (entries: parentEntries, baseUri: parentDirectoryUri),
+          if (grandParentDirectoryUri != null)
+            (entries: grandParentEntries, baseUri: grandParentDirectoryUri),
+        ],
+      );
+      appLogTrace(
+        'library.scan-cache',
+        'WebDAV sidecar directory context prepared',
+        fields: <String, Object?>{
+          'sourceId': source.id,
+          'directory': currentDirectoryUri.toString(),
+          'siblingCount': siblings.length,
+          'hasSeasonNfo': seasonNfoMetadata != null,
+          'hasSeriesNfo': seriesNfoMetadata != null,
+          'extraBackdropCount': extraBackdropEntries.length,
+        },
+      );
+      return _WebDavSidecarDirectoryContext(
+        seasonNfoMetadata: seasonNfoMetadata,
+        seriesNfoMetadata: seriesNfoMetadata,
+        parentPosterEntry: _findPosterByRole(parentEntries) ??
+            _findPosterByRole(grandParentEntries),
+        backdropEntry: _findBackdropByRole(siblings) ??
+            _findBackdropByRole(parentEntries) ??
+            _findBackdropByRole(grandParentEntries),
+        logoEntry: _findLogoByRole(siblings) ??
+            _findLogoByRole(parentEntries) ??
+            _findLogoByRole(grandParentEntries),
+        bannerEntry: _findBannerByRole(siblings) ??
+            _findBannerByRole(parentEntries) ??
+            _findBannerByRole(grandParentEntries),
+        extraBackdropEntries: extraBackdropEntries,
+      );
+    })();
+    _sidecarDirectoryInflight[key] = future;
+    future.then((value) {
+      _sidecarDirectoryCache[key] = value;
+    }).whenComplete(() {
+      _sidecarDirectoryInflight.remove(key);
+    });
+    return future;
   }
 
   WebDavMetadataSeed _buildBasicMetadataSeed(_WebDavEntry videoEntry) {
@@ -859,6 +912,8 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     _nfoInflight.clear();
     _directoryCache.clear();
     _directoryInflight.clear();
+    _sidecarDirectoryCache.clear();
+    _sidecarDirectoryInflight.clear();
     _directorySubtreeCache.clear();
   }
 

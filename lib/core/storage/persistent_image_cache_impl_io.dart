@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
@@ -18,6 +19,7 @@ class _IoPersistentImageCache implements PersistentImageCache {
   static const int _maxMemoryEntries = 256;
   static const int _maxMemoryBytes = 72 * 1024 * 1024;
   static const Duration _diskEntryMaxAge = Duration(days: 30);
+  static const Duration _networkRequestTimeout = Duration(seconds: 15);
 
   final http.Client _client;
   final LinkedHashMap<String, _MemoryImageEntry> _memoryCache = LinkedHashMap();
@@ -73,6 +75,26 @@ class _IoPersistentImageCache implements PersistentImageCache {
   }
 
   @override
+  Future<void> evict(
+    String url, {
+    Map<String, String>? headers,
+  }) async {
+    final trimmedUrl = url.trim();
+    if (trimmedUrl.isEmpty) {
+      return;
+    }
+    final cacheKey = _cacheIdentity(trimmedUrl, headers);
+    final memoryEntry = _memoryCache.remove(cacheKey);
+    if (memoryEntry != null) {
+      _memoryBytes -= memoryEntry.bytes.lengthInBytes;
+    }
+    _inflight.remove(cacheKey);
+    _rasterProviderInflight.remove(cacheKey);
+    await _deleteIfExists(await _cacheFile(cacheKey));
+    await _deleteIfExists(await _cacheMetadataFile(cacheKey));
+  }
+
+  @override
   Future<Uint8List> load(
     String url, {
     Map<String, String>? headers,
@@ -106,9 +128,20 @@ class _IoPersistentImageCache implements PersistentImageCache {
       headers: headers,
     );
     _inflight[cacheKey] = future;
-    future.whenComplete(() {
-      _inflight.remove(cacheKey);
-    });
+    unawaited(
+      future.then<void>(
+        (_) {
+          if (identical(_inflight[cacheKey], future)) {
+            _inflight.remove(cacheKey);
+          }
+        },
+        onError: (Object _, StackTrace __) {
+          if (identical(_inflight[cacheKey], future)) {
+            _inflight.remove(cacheKey);
+          }
+        },
+      ),
+    );
     return future;
   }
 
@@ -142,9 +175,20 @@ class _IoPersistentImageCache implements PersistentImageCache {
       headers: normalizedHeaders,
     );
     _rasterProviderInflight[cacheKey] = future;
-    future.whenComplete(() {
-      _rasterProviderInflight.remove(cacheKey);
-    });
+    unawaited(
+      future.then<void>(
+        (_) {
+          if (identical(_rasterProviderInflight[cacheKey], future)) {
+            _rasterProviderInflight.remove(cacheKey);
+          }
+        },
+        onError: (Object _, StackTrace __) {
+          if (identical(_rasterProviderInflight[cacheKey], future)) {
+            _rasterProviderInflight.remove(cacheKey);
+          }
+        },
+      ),
+    );
     return future;
   }
 
@@ -165,10 +209,6 @@ class _IoPersistentImageCache implements PersistentImageCache {
     }
 
     final staleBytes = diskBytes;
-    if (await file.exists()) {
-      await _deleteIfExists(file);
-      await _deleteIfExists(metadataFile);
-    }
 
     try {
       final bytes = await _fetchNetworkBytes(
@@ -217,10 +257,6 @@ class _IoPersistentImageCache implements PersistentImageCache {
     }
 
     final staleFile = hasDiskEntry ? file : null;
-    if (hasDiskEntry) {
-      await _deleteIfExists(file);
-      await _deleteIfExists(metadataFile);
-    }
 
     try {
       final bytes = await _fetchNetworkBytes(
@@ -254,7 +290,9 @@ class _IoPersistentImageCache implements PersistentImageCache {
     required String url,
     required Map<String, String>? headers,
   }) async {
-    final response = await _client.get(Uri.parse(url), headers: headers);
+    final response = await _client
+        .get(Uri.parse(url), headers: headers)
+        .timeout(_networkRequestTimeout);
     return validateNetworkImageHttpResponse(response, url: url);
   }
 

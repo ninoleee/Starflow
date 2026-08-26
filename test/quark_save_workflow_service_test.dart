@@ -44,6 +44,7 @@ void main() {
         refreshSelectedSources: ({
           required List<String> sourceIds,
           required int delaySeconds,
+          required bool invalidateWebDavDirectoryCache,
         }) async {},
       );
 
@@ -120,10 +121,12 @@ void main() {
         refreshSelectedSources: ({
           required List<String> sourceIds,
           required int delaySeconds,
+          required bool invalidateWebDavDirectoryCache,
         }) async {
           refreshCall = {
             'sourceIds': sourceIds,
             'delaySeconds': delaySeconds,
+            'invalidateWebDavDirectoryCache': invalidateWebDavDirectoryCache,
           };
         },
       );
@@ -169,6 +172,7 @@ void main() {
         {
           'sourceIds': ['quark-main', 'nas-main'],
           'delaySeconds': 6,
+          'invalidateWebDavDirectoryCache': true,
         },
       );
       expect(result.saveResult.targetFolderPath, '/影视/三体');
@@ -220,10 +224,12 @@ void main() {
         refreshSelectedSources: ({
           required List<String> sourceIds,
           required int delaySeconds,
+          required bool invalidateWebDavDirectoryCache,
         }) async {
           refreshCall = {
             'sourceIds': sourceIds,
             'delaySeconds': delaySeconds,
+            'invalidateWebDavDirectoryCache': invalidateWebDavDirectoryCache,
           };
         },
       );
@@ -247,6 +253,7 @@ void main() {
         {
           'sourceIds': ['quark-main'],
           'delaySeconds': 1,
+          'invalidateWebDavDirectoryCache': false,
         },
       );
       expect(

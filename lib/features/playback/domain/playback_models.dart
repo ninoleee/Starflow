@@ -18,6 +18,10 @@ class PlaybackTarget {
     this.seriesId = '',
     this.seriesTitle = '',
     this.preferredMediaSourceId = '',
+    this.posterUrl = '',
+    this.posterHeaders = const {},
+    this.backdropUrl = '',
+    this.backdropHeaders = const {},
     this.subtitle = '',
     this.externalSubtitleFilePath = '',
     this.externalSubtitleDisplayName = '',
@@ -49,6 +53,10 @@ class PlaybackTarget {
   final String seriesId;
   final String seriesTitle;
   final String preferredMediaSourceId;
+  final String posterUrl;
+  final Map<String, String> posterHeaders;
+  final String backdropUrl;
+  final Map<String, String> backdropHeaders;
   final String subtitle;
   final String externalSubtitleFilePath;
   final String externalSubtitleDisplayName;
@@ -80,6 +88,10 @@ class PlaybackTarget {
     String? seriesId,
     String? seriesTitle,
     String? preferredMediaSourceId,
+    String? posterUrl,
+    Map<String, String>? posterHeaders,
+    String? backdropUrl,
+    Map<String, String>? backdropHeaders,
     String? subtitle,
     String? externalSubtitleFilePath,
     String? externalSubtitleDisplayName,
@@ -112,6 +124,10 @@ class PlaybackTarget {
       seriesTitle: seriesTitle ?? this.seriesTitle,
       preferredMediaSourceId:
           preferredMediaSourceId ?? this.preferredMediaSourceId,
+      posterUrl: posterUrl ?? this.posterUrl,
+      posterHeaders: posterHeaders ?? this.posterHeaders,
+      backdropUrl: backdropUrl ?? this.backdropUrl,
+      backdropHeaders: backdropHeaders ?? this.backdropHeaders,
       subtitle: subtitle ?? this.subtitle,
       externalSubtitleFilePath:
           externalSubtitleFilePath ?? this.externalSubtitleFilePath,
@@ -223,6 +239,10 @@ class PlaybackTarget {
       imdbId: item.imdbId,
       tmdbId: item.tmdbId,
       preferredMediaSourceId: item.preferredMediaSourceId,
+      posterUrl: item.posterUrl,
+      posterHeaders: item.posterHeaders,
+      backdropUrl: item.backdropUrl,
+      backdropHeaders: item.backdropHeaders,
       subtitle: item.overview,
       externalSubtitleFilePath: '',
       externalSubtitleDisplayName: '',
@@ -259,6 +279,10 @@ class PlaybackTarget {
       'seriesId': seriesId,
       'seriesTitle': seriesTitle,
       'preferredMediaSourceId': preferredMediaSourceId,
+      'posterUrl': posterUrl,
+      'posterHeaders': posterHeaders,
+      'backdropUrl': backdropUrl,
+      'backdropHeaders': backdropHeaders,
       'subtitle': subtitle,
       'externalSubtitleFilePath': externalSubtitleFilePath,
       'externalSubtitleDisplayName': externalSubtitleDisplayName,
@@ -294,13 +318,18 @@ class PlaybackTarget {
       seriesId: json['seriesId'] as String? ?? '',
       seriesTitle: json['seriesTitle'] as String? ?? '',
       preferredMediaSourceId: json['preferredMediaSourceId'] as String? ?? '',
+      posterUrl: json['posterUrl'] as String? ?? '',
+      posterHeaders:
+          _parseStringMap(json['posterHeaders'] as Map<dynamic, dynamic>?),
+      backdropUrl: json['backdropUrl'] as String? ?? '',
+      backdropHeaders:
+          _parseStringMap(json['backdropHeaders'] as Map<dynamic, dynamic>?),
       subtitle: json['subtitle'] as String? ?? '',
       externalSubtitleFilePath:
           json['externalSubtitleFilePath'] as String? ?? '',
       externalSubtitleDisplayName:
           json['externalSubtitleDisplayName'] as String? ?? '',
-      headers: (json['headers'] as Map<dynamic, dynamic>? ?? const {})
-          .map((key, value) => MapEntry('$key', '$value')),
+      headers: _parseStringMap(json['headers'] as Map<dynamic, dynamic>?),
       container: json['container'] as String? ?? '',
       videoCodec: json['videoCodec'] as String? ?? '',
       audioCodec: json['audioCodec'] as String? ?? '',
@@ -312,6 +341,10 @@ class PlaybackTarget {
       fileSizeBytes: (json['fileSizeBytes'] as num?)?.toInt(),
     );
   }
+}
+
+Map<String, String> _parseStringMap(Map<dynamic, dynamic>? raw) {
+  return (raw ?? const {}).map((key, value) => MapEntry('$key', '$value'));
 }
 
 String formatByteSize(int? bytes) {

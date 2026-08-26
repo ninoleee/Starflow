@@ -7,8 +7,6 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 ICLOUD_ROOT="${ICLOUD_ROOT:-$HOME/Library/Mobile Documents/com~apple~CloudDocs}"
 ICLOUD_IPA_DIR="${ICLOUD_IPA_DIR:-$ICLOUD_ROOT/IPA}"
-EXPORT_METHOD="${EXPORT_METHOD:-development}"
-ARCHIVE="${ARCHIVE:-0}"
 
 cd "$PROJECT_ROOT"
 
@@ -64,59 +62,34 @@ fi
 VERSION="$(update_pubspec_version pubspec.yaml)"
 BUILD_NUMBER="$VERSION"
 BUILD_DATE="$(date +%Y-%m-%d)"
-OUTPUT_NAME="${APP_NAME}_v${VERSION}.ipa"
+OUTPUT_NAME="${APP_NAME}_v${VERSION}_unsigned.ipa"
 FAST_IPA_DIR="build/ios/ipa_fast"
 
-echo "Building IPA for $APP_NAME ($VERSION+$BUILD_NUMBER, $BUILD_DATE)..."
+echo "Building unsigned IPA for $APP_NAME ($VERSION+$BUILD_NUMBER, $BUILD_DATE)..."
 echo "Cleaning cached Flutter and iOS Native Assets..."
 flutter clean
 
-if [[ "$ARCHIVE" == "1" ]]; then
-  flutter build ipa \
-    --release \
-    --export-method "$EXPORT_METHOD" \
-    --build-name "$VERSION" \
-    --build-number "$BUILD_NUMBER" \
-    --dart-define "STARFLOW_BUILD_DATE=$BUILD_DATE"
+flutter build ios \
+  --release \
+  --no-codesign \
+  --build-name "$VERSION" \
+  --build-number "$BUILD_NUMBER" \
+  --dart-define "STARFLOW_BUILD_DATE=$BUILD_DATE"
 
-  shopt -s nullglob
-  IPA_CANDIDATES=(build/ios/ipa/*.ipa)
-  shopt -u nullglob
-
-  if [[ ${#IPA_CANDIDATES[@]} -eq 0 ]]; then
-    echo "Error: no IPA artifact found under build/ios/ipa."
-    exit 1
-  fi
-
-  SOURCE_IPA="${IPA_CANDIDATES[0]}"
-  APP_BUNDLE="build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app"
-  if [[ ! -d "$APP_BUNDLE" ]]; then
-    echo "Error: app bundle not found for framework verification: $APP_BUNDLE"
-    exit 1
-  fi
-  /bin/bash "$PROJECT_ROOT/scripts/verify_ios_device_frameworks.sh" "$APP_BUNDLE"
-else
-  flutter build ios \
-    --release \
-    --build-name "$VERSION" \
-    --build-number "$BUILD_NUMBER" \
-    --dart-define "STARFLOW_BUILD_DATE=$BUILD_DATE"
-
-  APP_BUNDLE="build/ios/iphoneos/Runner.app"
-  if [[ ! -d "$APP_BUNDLE" ]]; then
-    echo "Error: app bundle not found: $APP_BUNDLE"
-    exit 1
-  fi
-  /bin/bash "$PROJECT_ROOT/scripts/verify_ios_device_frameworks.sh" "$APP_BUNDLE"
-
-  mkdir -p "$FAST_IPA_DIR"
-  SOURCE_IPA="$FAST_IPA_DIR/$OUTPUT_NAME"
-  PACKAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/starflow-ipa.XXXXXX")"
-  trap 'rm -rf "$PACKAGE_DIR"' EXIT
-  mkdir -p "$PACKAGE_DIR/Payload"
-  ditto "$APP_BUNDLE" "$PACKAGE_DIR/Payload/Runner.app"
-  (cd "$PACKAGE_DIR" && zip -qry "$PROJECT_ROOT/$SOURCE_IPA" Payload)
+APP_BUNDLE="build/ios/iphoneos/Runner.app"
+if [[ ! -d "$APP_BUNDLE" ]]; then
+  echo "Error: app bundle not found: $APP_BUNDLE"
+  exit 1
 fi
+/bin/bash "$PROJECT_ROOT/scripts/verify_ios_device_frameworks.sh" "$APP_BUNDLE"
+
+mkdir -p "$FAST_IPA_DIR"
+SOURCE_IPA="$FAST_IPA_DIR/$OUTPUT_NAME"
+PACKAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/starflow-ipa.XXXXXX")"
+trap 'rm -rf "$PACKAGE_DIR"' EXIT
+mkdir -p "$PACKAGE_DIR/Payload"
+ditto "$APP_BUNDLE" "$PACKAGE_DIR/Payload/Runner.app"
+(cd "$PACKAGE_DIR" && zip -qry "$PROJECT_ROOT/$SOURCE_IPA" Payload)
 
 mkdir -p "$ICLOUD_IPA_DIR"
 cp -f "$SOURCE_IPA" "$ICLOUD_IPA_DIR/$OUTPUT_NAME"

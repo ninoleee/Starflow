@@ -1074,12 +1074,14 @@ void main() {
       ),
     );
 
-    await cacheRepository.saveDetailTarget(
+    final cacheSave = cacheRepository.saveDetailTarget(
       seedTarget: seedTarget,
       resolvedTarget: choiceB,
       libraryMatchChoices: const [choiceA, choiceB],
       selectedLibraryMatchIndex: 1,
     );
+    await tester.pump(const Duration(milliseconds: 20));
+    await cacheSave;
 
     await tester.pumpWidget(
       ProviderScope(
@@ -1765,7 +1767,10 @@ class _NoopNasMediaIndexStore implements NasMediaIndexStore {
   }
 
   @override
-  Future<List<NasMediaIndexRecord>> loadSourceRecords(String sourceId) async {
+  Future<List<NasMediaIndexRecord>> loadSourceRecords(
+    String sourceId, {
+    String sectionId = '',
+  }) async {
     return const [];
   }
 

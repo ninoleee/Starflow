@@ -142,4 +142,27 @@ void main() {
       expect(target.isIsoLike, isFalse);
     });
   });
+
+  group('PlaybackTarget artwork metadata', () {
+    test('keeps poster and backdrop fields in json', () {
+      const target = PlaybackTarget(
+        title: 'Movie',
+        sourceId: 'emby-main',
+        streamUrl: 'https://example.com/videos/movie.mkv',
+        sourceName: 'Emby',
+        sourceKind: MediaSourceKind.emby,
+        posterUrl: 'https://example.com/poster.jpg',
+        posterHeaders: {'Authorization': 'Bearer poster'},
+        backdropUrl: 'https://example.com/backdrop.jpg',
+        backdropHeaders: {'Authorization': 'Bearer backdrop'},
+      );
+
+      final restored = PlaybackTarget.fromJson(target.toJson());
+
+      expect(restored.posterUrl, target.posterUrl);
+      expect(restored.posterHeaders, target.posterHeaders);
+      expect(restored.backdropUrl, target.backdropUrl);
+      expect(restored.backdropHeaders, target.backdropHeaders);
+    });
+  });
 }

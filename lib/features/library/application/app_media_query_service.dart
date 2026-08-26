@@ -9,6 +9,7 @@ import 'package:starflow/features/library/data/quark_external_storage_client.dar
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
+import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
@@ -319,17 +320,27 @@ class AppMediaQueryService {
   }
 
   Future<CachedEmbyLibrarySnapshot> _loadCachedEmbySnapshot(
-    MediaSourceConfig source,
-  ) async {
+    MediaSourceConfig source, {
+    String? sectionId,
+    bool preferSourceSummary = false,
+  }) async {
     final cacheRepository = ref.read(localStorageCacheRepositoryProvider);
-    var snapshot = await cacheRepository.loadEmbyLibrarySnapshot(source.id);
+    var snapshot = await cacheRepository.loadEmbyLibrarySnapshot(
+      source.id,
+      sectionId: sectionId,
+      preferSourceSummary: preferSourceSummary,
+    );
     if (_shouldAutoRefreshEmbySource(source, snapshot)) {
       try {
         await refreshEmbySourceCache(source);
       } catch (_) {
         // Keep the cached snapshot empty and rely on manual refresh next.
       }
-      snapshot = await cacheRepository.loadEmbyLibrarySnapshot(source.id);
+      snapshot = await cacheRepository.loadEmbyLibrarySnapshot(
+        source.id,
+        sectionId: sectionId,
+        preferSourceSummary: preferSourceSummary,
+      );
     }
     return snapshot;
   }
@@ -360,11 +371,26 @@ class AppMediaQueryService {
 
     try {
       collections = await _embyApiClient.fetchCollections(source);
+      final settings = ref.read(appSettingsProvider);
+      final maxConcurrency = settings.taskMaxConcurrency;
+      final limiter = ref.read(metadataPrefetchConcurrencyLimiterProvider);
+      appLogInfo(
+        'library.refresh',
+        'Emby source section refresh started',
+        fields: <String, Object?>{
+          'sourceId': source.id,
+          'sectionCount': collections.length,
+          'maxConcurrency': maxConcurrency,
+        },
+      );
       final sectionItems = await Future.wait(
         collections.map((collection) async {
-          final items = await _loadEmbySectionItems(
-            source,
-            collection: collection,
+          final items = await limiter.runMaintenance(
+            maxConcurrency: maxConcurrency,
+            task: () => _loadEmbySectionItems(
+              source,
+              collection: collection,
+            ),
           );
           return MapEntry(collection.id.trim(), items);
         }),
@@ -612,7 +638,10 @@ class AppMediaQueryService {
       if (!source.hasActiveSession) {
         return const [];
       }
-      final snapshot = await _loadCachedEmbySnapshot(source);
+      final snapshot = await _loadCachedEmbySnapshot(
+        source,
+        preferSourceSummary: true,
+      );
       collections = snapshot.collections;
     } else if (source.kind == MediaSourceKind.quark) {
       collections = await _quarkExternalStorageClient.fetchCollections(source);
@@ -640,7 +669,11 @@ class AppMediaQueryService {
         if (!source.hasActiveSession) {
           return const _SourceFetchResult(items: <MediaItem>[]);
         }
-        final snapshot = await _loadCachedEmbySnapshot(source);
+        final snapshot = await _loadCachedEmbySnapshot(
+          source,
+          sectionId: sectionId,
+          preferSourceSummary: sectionId?.trim().isEmpty ?? true,
+        );
         return _SourceFetchResult(
           items: _resolveCachedEmbyItems(
             source,

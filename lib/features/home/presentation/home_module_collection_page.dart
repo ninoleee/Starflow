@@ -11,6 +11,7 @@ import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
+import 'package:starflow/features/discovery/data/douban_network_guard.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -43,6 +44,9 @@ class _HomeModuleCollectionPageState
           AppPageBackground(
             child: RefreshIndicator(
               onRefresh: () async {
+                ref
+                    .read(doubanNetworkGuardProvider)
+                    .allowManualProbe(reason: 'manual-home-module-refresh');
                 ref.invalidate(_homeModulePageProvider(pageRequest));
                 await ref.read(_homeModulePageProvider(pageRequest).future);
               },

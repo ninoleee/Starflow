@@ -157,13 +157,6 @@ class _PlaybackSubtitleSettingsPageState
                   fontWeight: FontWeight.w800,
                 ),
           ),
-          const SizedBox(height: 12),
-          Text(
-            '把默认字幕策略和默认字幕大小统一放在这里，播放器打开时会按这里的偏好先应用。',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-          ),
           const SizedBox(height: 18),
           SettingsSelectionTile(
             title: '默认字幕策略',

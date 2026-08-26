@@ -101,6 +101,8 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
       playing: player.state.playing,
       buffering: player.state.buffering,
       speed: player.state.rate,
+      artworkUrl: _buildPlaybackSystemSessionArtworkUrl(),
+      artworkHeaders: _buildPlaybackSystemSessionArtworkHeaders(),
       canSeek: true,
       hasPrevious: _episodeQueue?.hasPrevious ?? false,
       hasNext: _episodeQueue?.hasNext ?? false,
@@ -118,6 +120,12 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
     final hasNextChanged = state.hasNext != _lastPlaybackSystemSessionHasNext;
     final titleChanged = title != _lastPlaybackSystemSessionTitle;
     final subtitleChanged = subtitle != _lastPlaybackSystemSessionSubtitle;
+    final artworkUrlChanged =
+        state.artworkUrl != _lastPlaybackSystemSessionArtworkUrl;
+    final artworkHeadersChanged = !mapEquals(
+      state.artworkHeaders,
+      _lastPlaybackSystemSessionArtworkHeaders,
+    );
 
     if (!force &&
         !positionChanged &&
@@ -127,7 +135,9 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
         !hasPreviousChanged &&
         !hasNextChanged &&
         !titleChanged &&
-        !subtitleChanged) {
+        !subtitleChanged &&
+        !artworkUrlChanged &&
+        !artworkHeadersChanged) {
       return;
     }
 
@@ -139,6 +149,8 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
     _lastPlaybackSystemSessionHasNext = state.hasNext;
     _lastPlaybackSystemSessionTitle = state.title;
     _lastPlaybackSystemSessionSubtitle = state.subtitle;
+    _lastPlaybackSystemSessionArtworkUrl = state.artworkUrl;
+    _lastPlaybackSystemSessionArtworkHeaders = state.artworkHeaders;
 
     await PlaybackSystemSessionController.setActive(true);
     await PlaybackSystemSessionController.update(state);
@@ -236,5 +248,25 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
       if (target.formatLabel.trim().isNotEmpty) target.formatLabel.trim(),
     ];
     return parts.join(' · ');
+  }
+
+  String _buildPlaybackSystemSessionArtworkUrl() {
+    final target = _resolvedTarget ?? widget.target;
+    final posterUrl = target.posterUrl.trim();
+    if (posterUrl.isNotEmpty) {
+      return posterUrl;
+    }
+    return target.backdropUrl.trim();
+  }
+
+  Map<String, String> _buildPlaybackSystemSessionArtworkHeaders() {
+    final target = _resolvedTarget ?? widget.target;
+    if (target.posterUrl.trim().isNotEmpty) {
+      return target.posterHeaders;
+    }
+    if (target.backdropUrl.trim().isNotEmpty) {
+      return target.backdropHeaders;
+    }
+    return const {};
   }
 }

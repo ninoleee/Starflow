@@ -31,6 +31,7 @@ typedef QuarkSaveWorkflowResolveRefreshSourceIds = List<String> Function({
 typedef QuarkSaveWorkflowRefreshSelectedSources = Future<void> Function({
   required List<String> sourceIds,
   required int delaySeconds,
+  required bool invalidateWebDavDirectoryCache,
 });
 
 final quarkSaveWorkflowServiceProvider = Provider<QuarkSaveWorkflowService>((
@@ -79,10 +80,12 @@ final quarkSaveWorkflowServiceProvider = Provider<QuarkSaveWorkflowService>((
     refreshSelectedSources: ({
       required List<String> sourceIds,
       required int delaySeconds,
+      required bool invalidateWebDavDirectoryCache,
     }) {
       return ref.read(mediaRefreshCoordinatorProvider).refreshSelectedSources(
             sourceIds: sourceIds,
             delaySeconds: delaySeconds,
+            invalidateWebDavDirectoryCache: invalidateWebDavDirectoryCache,
           );
     },
   );
@@ -154,6 +157,7 @@ class QuarkSaveWorkflowService {
         _refreshSelectedSources(
           sourceIds: refreshSourceIds,
           delaySeconds: refreshDelaySeconds,
+          invalidateWebDavDirectoryCache: savedAnyFiles,
         ),
       );
     }

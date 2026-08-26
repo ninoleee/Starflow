@@ -37,7 +37,10 @@ class TmdbMetadataClient {
     int year = 0,
     bool preferSeries = false,
   }) async {
-    final cleanedQuery = _cleanQuery(query);
+    final cleanedQuery = MediaNaming.stripTrailingLookupYear(
+      _cleanQuery(query),
+      year: year,
+    );
     final cleanedToken = readAccessToken.trim();
     if (cleanedQuery.isEmpty || cleanedToken.isEmpty) {
       metadataSearchTrace(
@@ -135,7 +138,10 @@ class TmdbMetadataClient {
     bool preferSeries = false,
     int maxResults = 3,
   }) async {
-    final cleanedQuery = _cleanQuery(query);
+    final cleanedQuery = MediaNaming.stripTrailingLookupYear(
+      _cleanQuery(query),
+      year: year,
+    );
     final cleanedToken = readAccessToken.trim();
     if (cleanedQuery.isEmpty || cleanedToken.isEmpty || maxResults <= 0) {
       return const <TmdbMetadataMatch>[];

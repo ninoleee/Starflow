@@ -5,7 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/core/scheduling/queue_wait_diagnostics.dart';
 import 'package:starflow/core/storage/persistent_image_cache.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
 
@@ -13,7 +15,14 @@ typedef AppNetworkImageErrorBuilder = Widget Function(
     BuildContext context, Object error, StackTrace? stackTrace);
 typedef AppNetworkImageLoadingBuilder = Widget Function(BuildContext context);
 
-const int _kTvRasterImageLoadConcurrency = 8;
+const int _kTvRasterImageLoadConcurrency = 4;
+const Duration _kTvRasterImagePermitLease = Duration(seconds: 8);
+const Duration _kTvRasterImageWaitWarningThreshold = Duration(seconds: 4);
+const List<Duration> _kImageLoadRetryDelays = <Duration>[
+  Duration(seconds: 1),
+  Duration(seconds: 4),
+  Duration(seconds: 12),
+];
 
 final _tvRasterImageLoadGate =
     _TvRasterImageLoadGate(_kTvRasterImageLoadConcurrency);
@@ -85,6 +94,10 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   bool _tvRasterLoadSettled = false;
   int _activeCandidateIndex = 0;
   bool _candidateAdvanceScheduled = false;
+  Timer? _imageRetryTimer;
+  String? _imageRetryIdentity;
+  int _imageRetryAttempt = 0;
+  bool _imageRetryExhaustedLogged = false;
 
   @override
   void didUpdateWidget(covariant AppNetworkImage oldWidget) {
@@ -96,11 +109,14 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
           oldWidget.fallbackSources,
           widget.fallbackSources,
         )) {
-      _resetCandidateResolution();
+      _resetCandidateResolution(resetRetryState: true);
     }
   }
 
-  void _resetCandidateResolution({bool resetCandidateIndex = true}) {
+  void _resetCandidateResolution({
+    bool resetCandidateIndex = true,
+    bool resetRetryState = false,
+  }) {
     if (resetCandidateIndex) {
       _activeCandidateIndex = 0;
     }
@@ -108,6 +124,9 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     _resolvedSvgBytesFuture = null;
     _resolvedRasterProviderFuture = null;
     _resetTvRasterLoadThrottle();
+    if (resetRetryState) {
+      _resetImageRetryState();
+    }
   }
 
   void _scheduleAdvanceCandidate({
@@ -131,7 +150,10 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
       }
       setState(() {
         _activeCandidateIndex = safeIndex + 1;
-        _resetCandidateResolution(resetCandidateIndex: false);
+        _resetCandidateResolution(
+          resetCandidateIndex: false,
+          resetRetryState: false,
+        );
       });
     });
   }
@@ -172,6 +194,8 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
 
   @override
   void dispose() {
+    _imageRetryTimer?.cancel();
+    _imageRetryTimer = null;
     _resetTvRasterLoadThrottle();
     super.dispose();
   }
@@ -182,31 +206,10 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     required List<AppNetworkImageSource> candidates,
     required int candidateIndex,
   }) {
-    if (candidate.cachePolicy == AppNetworkImageCachePolicy.networkOnly) {
-      return SvgPicture.network(
-        candidate.url,
-        headers: candidate.headers.isEmpty ? null : candidate.headers,
-        width: widget.width,
-        height: widget.height,
-        fit: widget.fit ?? BoxFit.contain,
-        alignment: widget.alignment,
-        placeholderBuilder: (context) => _buildLoading(context),
-        errorBuilder: (context, error, stackTrace) {
-          return _buildCandidateFailure(
-            context,
-            error,
-            stackTrace,
-            candidates: candidates,
-            candidateIndex: candidateIndex,
-          );
-        },
-      );
-    }
-
     _resolvedSvgBytesFuture ??= persistentImageCache.load(
       candidate.url,
       headers: candidate.headers,
-      persist: true,
+      persist: candidate.cachePolicy == AppNetworkImageCachePolicy.persistent,
     );
     final resolvedSvgBytesFuture = _resolvedSvgBytesFuture!;
     return FutureBuilder<Uint8List>(
@@ -234,6 +237,24 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
           fit: widget.fit ?? BoxFit.contain,
           alignment: widget.alignment,
           placeholderBuilder: (context) => _buildLoading(context),
+          errorBuilder: (context, error, stackTrace) {
+            if (candidate.cachePolicy ==
+                AppNetworkImageCachePolicy.persistent) {
+              unawaited(
+                persistentImageCache.evict(
+                  candidate.url,
+                  headers: candidate.headers,
+                ),
+              );
+            }
+            return _buildCandidateFailure(
+              context,
+              error,
+              stackTrace,
+              candidates: candidates,
+              candidateIndex: candidateIndex,
+            );
+          },
         );
       },
     );
@@ -296,6 +317,16 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
         if (permit == null) {
           return _buildLoading(context);
         }
+        if (permit.isReleased) {
+          _tvRasterLoadSettled = true;
+          _tvRasterLoadRequest = null;
+          return _buildResolvedRasterCandidate(
+            context,
+            candidate: candidate,
+            candidates: candidates,
+            candidateIndex: candidateIndex,
+          );
+        }
 
         _trackTvRasterLoadPermit(permit);
         return _buildResolvedRasterCandidate(
@@ -316,22 +347,20 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     required int candidateIndex,
     VoidCallback? onLoadSettled,
   }) {
-    if (candidate.cachePolicy == AppNetworkImageCachePolicy.networkOnly) {
-      return _buildRasterImage(
-        context,
-        _networkRasterProvider(candidate),
-        candidates: candidates,
-        candidateIndex: candidateIndex,
-        onLoadSettled: onLoadSettled,
-      );
-    }
-
     _resolvedRasterProviderFuture ??=
-        persistentImageCache.resolveRasterProvider(
-      candidate.url,
-      headers: candidate.headers,
-      persist: true,
-    );
+        candidate.cachePolicy == AppNetworkImageCachePolicy.networkOnly
+            ? persistentImageCache
+                .load(
+                  candidate.url,
+                  headers: candidate.headers,
+                  persist: false,
+                )
+                .then<ImageProvider<Object>>((bytes) => MemoryImage(bytes))
+            : persistentImageCache.resolveRasterProvider(
+                candidate.url,
+                headers: candidate.headers,
+                persist: true,
+              );
     final resolvedRasterProviderFuture = _resolvedRasterProviderFuture!;
     return FutureBuilder<ImageProvider<Object>>(
       future: resolvedRasterProviderFuture,
@@ -355,6 +384,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
         return _buildRasterImage(
           context,
           provider,
+          candidate: candidate,
           candidates: candidates,
           candidateIndex: candidateIndex,
           onLoadSettled: onLoadSettled,
@@ -366,6 +396,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   Widget _buildRasterImage(
     BuildContext context,
     ImageProvider<Object> provider, {
+    required AppNetworkImageSource candidate,
     required List<AppNetworkImageSource> candidates,
     required int candidateIndex,
     VoidCallback? onLoadSettled,
@@ -386,12 +417,22 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
       frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
         if (wasSynchronouslyLoaded || frame != null) {
           onLoadSettled?.call();
+          _markImageLoadSucceeded();
           return child;
         }
         return _buildLoading(context);
       },
       errorBuilder: (context, error, stackTrace) {
         onLoadSettled?.call();
+        unawaited(rasterImageProvider.evict());
+        if (candidate.cachePolicy == AppNetworkImageCachePolicy.persistent) {
+          unawaited(
+            persistentImageCache.evict(
+              candidate.url,
+              headers: candidate.headers,
+            ),
+          );
+        }
         return _buildCandidateFailure(
           context,
           error,
@@ -412,14 +453,6 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     _tvRasterLoadPermitTimeout = Timer(const Duration(seconds: 4), () {
       _markTvRasterLoadSettled();
     });
-  }
-
-  ImageProvider<Object> _networkRasterProvider(
-      AppNetworkImageSource candidate) {
-    return NetworkImage(
-      candidate.url,
-      headers: candidate.headers.isEmpty ? null : candidate.headers,
-    );
   }
 
   void _ensureTvRasterLoadIdentity(String loadIdentity) {
@@ -482,7 +515,121 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
       );
       return _buildLoading(context);
     }
+    if (_scheduleImageRetry(candidates, error)) {
+      return _buildLoading(context);
+    }
     return _buildError(context, error, stackTrace);
+  }
+
+  bool _scheduleImageRetry(
+    List<AppNetworkImageSource> candidates,
+    Object error,
+  ) {
+    final identity = candidates
+        .map(
+          (source) => _buildSourceIdentity(
+            source.url,
+            source.headers,
+            cachePolicy: source.cachePolicy,
+          ),
+        )
+        .join('\u0000');
+    if (_imageRetryIdentity != identity) {
+      _resetImageRetryState();
+      _imageRetryIdentity = identity;
+    }
+    if (_imageRetryTimer != null) {
+      return true;
+    }
+    if (_imageRetryAttempt >= _kImageLoadRetryDelays.length) {
+      if (!_imageRetryExhaustedLogged) {
+        _imageRetryExhaustedLogged = true;
+        _logImageLoadFailure(
+          candidates.last,
+          error,
+          message: 'Image load retries exhausted',
+        );
+      }
+      return false;
+    }
+
+    if (_imageRetryAttempt == 0) {
+      _logImageLoadFailure(
+        candidates.last,
+        error,
+        message: 'Image load failed; retry scheduled',
+      );
+    }
+    final delay = _kImageLoadRetryDelays[_imageRetryAttempt];
+    _imageRetryAttempt += 1;
+    _imageRetryTimer = Timer(delay, () {
+      _imageRetryTimer = null;
+      if (!mounted) {
+        return;
+      }
+      final latestIdentity = _buildCandidateSources()
+          .map(
+            (source) => _buildSourceIdentity(
+              source.url,
+              source.headers,
+              cachePolicy: source.cachePolicy,
+            ),
+          )
+          .join('\u0000');
+      if (latestIdentity != identity) {
+        return;
+      }
+      setState(() {
+        _activeCandidateIndex = 0;
+        _candidateAdvanceScheduled = false;
+        _resetCandidateResolution(
+          resetCandidateIndex: false,
+          resetRetryState: false,
+        );
+      });
+    });
+    return true;
+  }
+
+  void _markImageLoadSucceeded() {
+    if (_imageRetryAttempt > 0) {
+      appLogTrace(
+        'image.load',
+        'Image load recovered after retry',
+        fields: <String, Object?>{
+          'retryAttempt': _imageRetryAttempt,
+          'debugLabel': widget.debugLabel,
+        },
+      );
+    }
+    _resetImageRetryState();
+  }
+
+  void _resetImageRetryState() {
+    _imageRetryTimer?.cancel();
+    _imageRetryTimer = null;
+    _imageRetryIdentity = null;
+    _imageRetryAttempt = 0;
+    _imageRetryExhaustedLogged = false;
+  }
+
+  void _logImageLoadFailure(
+    AppNetworkImageSource source,
+    Object error, {
+    required String message,
+  }) {
+    final uri = Uri.tryParse(source.url.trim());
+    appLogWarning(
+      'image.load',
+      message,
+      fields: <String, Object?>{
+        'host': uri?.host ?? '',
+        'cachePolicy': source.cachePolicy.name,
+        'retryAttempt': _imageRetryAttempt,
+        'debugLabel': widget.debugLabel,
+        'errorType': error.runtimeType.toString(),
+      },
+    );
   }
 
   Widget _buildLoading(BuildContext context) {
@@ -618,49 +765,87 @@ bool _shouldThrottleTvRasterLoads(AsyncValue<bool> isTelevision) {
 }
 
 class _TvRasterImageLoadGate {
-  _TvRasterImageLoadGate(this.maxConcurrent);
+  _TvRasterImageLoadGate(this.maxConcurrent) {
+    _waitDiagnostics = QueueWaitDiagnostics(
+      category: 'image.load-gate',
+      message: 'TV image load request remained queued',
+      warningThreshold: _kTvRasterImageWaitWarningThreshold,
+      pendingCount: () => _pending.length,
+      oldestEnqueuedAt: () =>
+          _pending.isEmpty ? null : _pending.first.enqueuedAt,
+      snapshotFields: () => <String, Object?>{
+        'activeCount': _activePermits.length,
+        'maxConcurrent': maxConcurrent,
+      },
+    );
+  }
 
   final int maxConcurrent;
   final Queue<_TvRasterImageLoadRequest> _pending =
       Queue<_TvRasterImageLoadRequest>();
-  int _active = 0;
+  final Set<_TvRasterImageLoadPermit> _activePermits =
+      <_TvRasterImageLoadPermit>{};
+  late final QueueWaitDiagnostics _waitDiagnostics;
 
   _TvRasterImageLoadRequest request() {
     final request = _TvRasterImageLoadRequest._(this);
     _pending.add(request);
+    _waitDiagnostics.update();
     _drain();
     return request;
   }
 
   void _cancel(_TvRasterImageLoadRequest request) {
     _pending.remove(request);
+    _waitDiagnostics.update();
   }
 
-  void _release() {
-    if (_active > 0) {
-      _active--;
+  void _release(_TvRasterImageLoadPermit permit) {
+    if (_activePermits.remove(permit)) {
+      scheduleMicrotask(_drain);
     }
-    scheduleMicrotask(_drain);
   }
 
   void _drain() {
-    while (_active < maxConcurrent && _pending.isNotEmpty) {
+    while (_activePermits.length < maxConcurrent && _pending.isNotEmpty) {
       final request = _pending.removeFirst();
       if (request._isCancelled) {
         continue;
       }
-      _active++;
-      request._complete(_TvRasterImageLoadPermit._(this));
+      final permit = _TvRasterImageLoadPermit._(
+        this,
+        lease: _kTvRasterImagePermitLease,
+      );
+      _activePermits.add(permit);
+      request._complete(permit);
     }
+    _waitDiagnostics.update();
+  }
+
+  void _handleLeaseExpired(_TvRasterImageLoadPermit permit) {
+    if (!_activePermits.contains(permit)) {
+      return;
+    }
+    appLogWarning(
+      'image.load-gate',
+      'TV image load permit lease expired and was released',
+      fields: <String, Object?>{
+        'activeCount': _activePermits.length,
+        'pendingCount': _pending.length,
+        'maxConcurrent': maxConcurrent,
+      },
+    );
+    permit.release();
   }
 }
 
 class _TvRasterImageLoadRequest {
-  _TvRasterImageLoadRequest._(this._gate);
+  _TvRasterImageLoadRequest._(this._gate) : enqueuedAt = DateTime.now();
 
   final _TvRasterImageLoadGate _gate;
   final Completer<_TvRasterImageLoadPermit> _completer =
       Completer<_TvRasterImageLoadPermit>();
+  final DateTime enqueuedAt;
   _TvRasterImageLoadPermit? _permit;
   bool _isCancelled = false;
 
@@ -691,16 +876,26 @@ class _TvRasterImageLoadRequest {
 }
 
 class _TvRasterImageLoadPermit {
-  _TvRasterImageLoadPermit._(this._gate);
+  _TvRasterImageLoadPermit._(
+    this._gate, {
+    required Duration lease,
+  }) {
+    _leaseTimer = Timer(lease, () => _gate._handleLeaseExpired(this));
+  }
 
   final _TvRasterImageLoadGate _gate;
+  Timer? _leaseTimer;
   bool _isReleased = false;
+
+  bool get isReleased => _isReleased;
 
   void release() {
     if (_isReleased) {
       return;
     }
     _isReleased = true;
-    _gate._release();
+    _leaseTimer?.cancel();
+    _leaseTimer = null;
+    _gate._release(this);
   }
 }

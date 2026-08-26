@@ -886,7 +886,9 @@ extension _PlayerPageStateControls on _PlayerPageState {
           'percent': bucket,
         },
       );
-      _updateTvPlaybackState(bufferingPercentage: percentage);
+      if (_shouldUpdatePlaybackVisualState) {
+        _updateTvPlaybackState(bufferingPercentage: percentage);
+      }
     });
   }
 

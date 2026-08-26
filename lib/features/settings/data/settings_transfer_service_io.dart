@@ -191,7 +191,7 @@ class LocalFileSettingsTransferService implements SettingsTransferService {
     if (decoded is! Map) {
       throw const FormatException('配置文件格式不正确，需要 JSON 对象。');
     }
-    return AppSettings.fromJson(
+    return AppSettings.fromCurrentJson(
       Map<String, dynamic>.from(decoded),
     );
   }

@@ -37,7 +37,7 @@ class _EmbySourceConnectionForm extends StatelessWidget {
             passwordLabel: 'Emby 密码',
           ),
         ], spacing: 12),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         SettingsExpandableSection(
           title: '高级（可选）',
           subtitle: '手动粘贴 Access Token / API Key',

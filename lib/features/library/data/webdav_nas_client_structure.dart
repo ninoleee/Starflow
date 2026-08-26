@@ -215,9 +215,8 @@ class _ExternalScanStructureModule {
         continue;
       }
       final childDirectoryName = relativeDirectories[ancestorLength];
-      final hintedSeasonNumber =
-          ancestorPlan.seasonNumberByChildDirectory[childDirectoryName];
-      if (hintedSeasonNumber != null) {
+      if (ancestorPlan.structuralChildDirectories
+          .contains(childDirectoryName)) {
         return ancestorKey;
       }
     }
@@ -304,18 +303,22 @@ class _ExternalScanStructureModule {
     final derivedSeasonNumber = matchesSpecialEpisodeKeyword
         ? 0
         : effectiveIsRootDirectFile
-            ? plan.rootItemsAsSpecials
-                ? 0
-                : 1
+            ? collapseChildDirectoryToRoot
+                ? 1
+                : plan.rootItemsAsSpecials
+                    ? 0
+                    : 1
             : hintedSeasonNumber;
     final resolvedExplicitSeasonNumber =
         matchesSpecialEpisodeKeyword ? 0 : explicitSeasonNumber;
     final seasonGroupKey = resolvedExplicitSeasonNumber != null
         ? _buildExplicitSeasonGroupKey(resolvedExplicitSeasonNumber)
         : effectiveIsRootDirectFile
-            ? (plan.rootItemsAsSpecials
-                ? _directSeasonGroupKey
-                : _implicitSeasonGroupKey)
+            ? (collapseChildDirectoryToRoot
+                ? _implicitSeasonGroupKey
+                : plan.rootItemsAsSpecials
+                    ? _directSeasonGroupKey
+                    : _implicitSeasonGroupKey)
             : hintedSeasonNumber != null
                 ? _buildExplicitSeasonGroupKey(hintedSeasonNumber)
                 : effectiveChildDirectoryName;
@@ -519,7 +522,8 @@ class _ExternalScanStructureModule {
           }
           return left.toLowerCase().compareTo(right.toLowerCase());
         });
-      var nextFallbackSeasonNumber = 1;
+      var nextFallbackSeasonNumber =
+          entry.value.contains(_implicitSeasonGroupKey) ? 2 : 1;
       for (final group in orderedGroups) {
         final explicitSeasonNumber = _parseExplicitSeasonGroupKey(group);
         final resolvedSeasonNumber =
@@ -549,6 +553,7 @@ class _ExternalScanStructureModule {
     }
 
     final seasonHintsByChildDirectory = <String, _SeasonDirectoryHint>{};
+    final structuralChildDirectories = <String>{};
     final collapseChildDirectoriesToRoot = <String>{};
     for (final entry in childGroups.entries) {
       final hint = _resolveSeasonDirectoryHint(
@@ -561,21 +566,16 @@ class _ExternalScanStructureModule {
       );
       if (hint != null) {
         seasonHintsByChildDirectory[entry.key] = hint;
+        structuralChildDirectories.add(entry.key);
       }
-    }
-
-    final hasOnlyFlatWrapperChildDirectories = childGroups.isNotEmpty &&
-        childGroups.entries.every(
-          (entry) => _isFlatWrapperChildDirectory(
-            directoryKey: directoryKey,
-            childDirectoryName: entry.key,
-            items: entry.value,
-          ),
-        );
-    final shouldCollapseWrapperChildDirectories =
-        hasOnlyFlatWrapperChildDirectories && directItems.length <= 3;
-    if (shouldCollapseWrapperChildDirectories) {
-      collapseChildDirectoriesToRoot.addAll(childGroups.keys);
+      if (_isFlatWrapperChildDirectory(
+        directoryKey: directoryKey,
+        childDirectoryName: entry.key,
+        items: entry.value,
+      )) {
+        structuralChildDirectories.add(entry.key);
+        collapseChildDirectoriesToRoot.add(entry.key);
+      }
     }
 
     final hasImplicitRootEpisodes =
@@ -598,6 +598,7 @@ class _ExternalScanStructureModule {
           childDirectoryName:
               seasonHintsByChildDirectory[childDirectoryName]?.seasonNumber,
       },
+      structuralChildDirectories: structuralChildDirectories,
       collapseChildDirectoriesToRoot: collapseChildDirectoriesToRoot,
     );
   }
@@ -637,6 +638,13 @@ class _ExternalScanStructureModule {
       return _SeasonDirectoryHint(
         seasonNumber: seasonNumber,
       );
+    }
+
+    if (_looksLikeYearGroupingDirectory(
+      childDirectoryName,
+      siblingDirectoryNames: siblingDirectoryNames,
+    )) {
+      return const _SeasonDirectoryHint(seasonNumber: null);
     }
 
     final childDirectoryDepth = _segmentsFromKey(parentDirectoryKey).length + 1;
@@ -736,6 +744,18 @@ class _ExternalScanStructureModule {
         .where((name) => _parseLeadingNumericSeasonNumber(name) != null)
         .length;
     return numericSiblingCount >= 2;
+  }
+
+  bool _looksLikeYearGroupingDirectory(
+    String value, {
+    required List<String> siblingDirectoryNames,
+  }) {
+    if (!looksLikeYearGroupingFolderLabel(value)) {
+      return false;
+    }
+    final yearSiblingCount =
+        siblingDirectoryNames.where(looksLikeYearGroupingFolderLabel).length;
+    return yearSiblingCount >= 2;
   }
 
   bool _matchesSpecialEpisodeKeyword(

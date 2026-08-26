@@ -55,8 +55,7 @@ void main() {
     expect(result.episodePart, isEmpty);
   });
 
-  test('NasMediaRecognizer does not attach part tokens to english extras',
-      () {
+  test('NasMediaRecognizer does not attach part tokens to english extras', () {
     final result = NasMediaRecognizer.recognize(
       'Show/2026.04.04-Behind.The.Scenes 第1期（上）.mp4',
       specialEpisodeKeywords: const ['behind the scenes'],
@@ -115,12 +114,17 @@ void main() {
     expect(result.preferSeries, isFalse);
   });
 
-  test('NasMediaRecognizer recognizes expanded wrapper tokens from open-source conventions',
+  test(
+      'NasMediaRecognizer recognizes expanded wrapper tokens from open-source conventions',
       () {
     expect(
       NasMediaRecognizer.matchesWrapperFolderLabel(
         'HdTv 1080i 3D HSBS x265 FLAC Dual Audio',
       ),
+      isTrue,
+    );
+    expect(
+      NasMediaRecognizer.matchesWrapperFolderLabel('4K 12集'),
       isTrue,
     );
   });
@@ -146,7 +150,8 @@ void main() {
     );
   });
 
-  test('MediaNaming normalizes expanded release tokens from shared lexicon', () {
+  test('MediaNaming normalizes expanded release tokens from shared lexicon',
+      () {
     expect(
       MediaNaming.normalizeLookupTitle(
         'Movie.1080i.HDTV.3D.HSBS.x265.FLAC.Dual-Audio',

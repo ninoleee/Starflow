@@ -526,7 +526,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
         _buildCollectionsSection(
           context: context,
           collectionsAsync: collectionsAsync,
-          isTelevision: false,
         ),
         _buildGrid(
           displayAsync,
@@ -577,7 +576,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
           child: _buildCollectionsSection(
             context: context,
             collectionsAsync: collectionsAsync,
-            isTelevision: true,
           ),
         ),
         ..._buildGridSlivers(
@@ -742,7 +740,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   Widget _buildCollectionsSection({
     required BuildContext context,
     required AsyncValue<List<MediaCollection>> collectionsAsync,
-    required bool isTelevision,
   }) {
     return collectionsAsync.when(
       data: (collections) {
@@ -771,7 +768,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
                   return _LibraryCollectionChip(
                     label: collection.title,
                     focusId: 'library:collection:${collection.id}',
-                    autofocus: index == 0 && isTelevision,
                     onPressed: () {
                       context.pushNamed(
                         'collection',
@@ -816,6 +812,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
           emptyMessage: '无',
           pageSize: _gridPageSize,
           header: _buildGridHeader(context, filter: filter),
+          autofocusFirstItem: false,
         );
       },
       loading: () => const Center(
@@ -845,6 +842,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
             emptyMessage: '无',
             pageSize: _gridPageSize,
             header: _buildGridHeader(context, filter: filter),
+            autofocusFirstItem: false,
           ),
         ];
       },
@@ -1123,9 +1121,10 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       _isForceRescanning = true;
     });
     try {
-      await ref
-          .read(mediaRefreshCoordinatorProvider)
-          .rebuildSelectedSources(sourceIds: scope.sourceIds);
+      await ref.read(mediaRefreshCoordinatorProvider).rebuildSelectedSources(
+            sourceIds: scope.sourceIds,
+            allowNetworkProbe: true,
+          );
       for (final filter in LibraryFilter.values) {
         ref.invalidate(librarySeedItemsProvider(filter));
         ref.invalidate(libraryItemsProvider(filter));
@@ -1164,6 +1163,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     try {
       await ref.read(mediaRefreshCoordinatorProvider).refreshSelectedSources(
             sourceIds: scope.sourceIds,
+            allowNetworkProbe: true,
           );
       if (refreshIntent != _refreshIntentSerial) {
         return;
@@ -1423,13 +1423,11 @@ class _LibraryCollectionChip extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.focusId,
-    this.autofocus = false,
   });
 
   final String label;
   final VoidCallback onPressed;
   final String? focusId;
-  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
@@ -1438,7 +1436,6 @@ class _LibraryCollectionChip extends StatelessWidget {
       selected: false,
       onPressed: onPressed,
       focusId: focusId,
-      autofocus: autofocus,
     );
   }
 }

@@ -442,6 +442,30 @@ class MediaNaming {
         .trim();
   }
 
+  static String stripTrailingLookupYear(
+    String value, {
+    required int year,
+  }) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty || year <= 0) {
+      return trimmed;
+    }
+    final match = RegExp(
+      '(?:[\\s._-]*[\\(（\\[]?)${RegExp.escape('$year')}[\\)）\\]]?\\s*\$',
+    ).firstMatch(trimmed);
+    if (match == null) {
+      return trimmed;
+    }
+    final prefix = trimmed
+        .substring(0, match.start)
+        .replaceFirst(RegExp(r'[\s._\-（(\[]+$'), '')
+        .trim();
+    if (prefix.isEmpty || !RegExp(r'[a-zA-Z\u4e00-\u9fff]').hasMatch(prefix)) {
+      return trimmed;
+    }
+    return prefix;
+  }
+
   static String normalizeLookupTitle(String value) {
     return cleanLookupQuery(value)
         .toLowerCase()

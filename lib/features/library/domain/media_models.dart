@@ -48,8 +48,6 @@ class MediaSourceConfig {
     this.webDavSeriesScrapeUsesDirectoryTitleOnly = false,
     this.webDavExcludedPathKeywords = const [],
     this.webDavSeriesTitleFilterKeywords = const [],
-    this.webDavSpecialEpisodeKeywords = const [],
-    this.webDavExtraKeywords = const [],
   });
 
   final String id;
@@ -70,8 +68,6 @@ class MediaSourceConfig {
   final bool webDavSeriesScrapeUsesDirectoryTitleOnly;
   final List<String> webDavExcludedPathKeywords;
   final List<String> webDavSeriesTitleFilterKeywords;
-  final List<String> webDavSpecialEpisodeKeywords;
-  final List<String> webDavExtraKeywords;
 
   bool get hasAccessToken => accessToken.trim().isNotEmpty;
 
@@ -122,8 +118,6 @@ class MediaSourceConfig {
     bool? webDavSeriesScrapeUsesDirectoryTitleOnly,
     List<String>? webDavExcludedPathKeywords,
     List<String>? webDavSeriesTitleFilterKeywords,
-    List<String>? webDavSpecialEpisodeKeywords,
-    List<String>? webDavExtraKeywords,
   }) {
     return MediaSourceConfig(
       id: id ?? this.id,
@@ -150,9 +144,6 @@ class MediaSourceConfig {
           webDavExcludedPathKeywords ?? this.webDavExcludedPathKeywords,
       webDavSeriesTitleFilterKeywords: webDavSeriesTitleFilterKeywords ??
           this.webDavSeriesTitleFilterKeywords,
-      webDavSpecialEpisodeKeywords:
-          webDavSpecialEpisodeKeywords ?? this.webDavSpecialEpisodeKeywords,
-      webDavExtraKeywords: webDavExtraKeywords ?? this.webDavExtraKeywords,
     );
   }
 
@@ -177,8 +168,6 @@ class MediaSourceConfig {
           webDavSeriesScrapeUsesDirectoryTitleOnly,
       'webDavExcludedPathKeywords': webDavExcludedPathKeywords,
       'webDavSeriesTitleFilterKeywords': webDavSeriesTitleFilterKeywords,
-      'webDavSpecialEpisodeKeywords': webDavSpecialEpisodeKeywords,
-      'webDavExtraKeywords': webDavExtraKeywords,
     };
   }
 
@@ -215,16 +204,6 @@ class MediaSourceConfig {
       webDavSeriesTitleFilterKeywords:
           (json['webDavSeriesTitleFilterKeywords'] as List<dynamic>? ??
                   const [])
-              .map((item) => '$item')
-              .where((item) => item.trim().isNotEmpty)
-              .toList(),
-      webDavSpecialEpisodeKeywords:
-          (json['webDavSpecialEpisodeKeywords'] as List<dynamic>? ?? const [])
-              .map((item) => '$item')
-              .where((item) => item.trim().isNotEmpty)
-              .toList(),
-      webDavExtraKeywords:
-          (json['webDavExtraKeywords'] as List<dynamic>? ?? const [])
               .map((item) => '$item')
               .where((item) => item.trim().isNotEmpty)
               .toList(),
@@ -309,8 +288,6 @@ extension MediaSourceConfigWebDavFilterX on MediaSourceConfig {
   }
 
   List<String> get normalizedWebDavSpecialEpisodeKeywords {
-    // Special / extras keywords are now code-defined so hidden legacy per-source
-    // values do not keep affecting scans after the settings UI removes them.
     return _normalizeDistinctLowerKeywords(
       kDefaultVarietySpecialEpisodeKeywords,
     );

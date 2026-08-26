@@ -46,13 +46,6 @@ class _LoggingSettingsPageState extends ConsumerState<LoggingSettingsPage> {
       onBack: () => Navigator.of(context).pop(),
       children: [
         Text('日志', style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Text(
-          '管理本地记录、容量、筛选、预览与导出。',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-        ),
         const SizedBox(height: 18),
         SectionPanel(
           title: '日志设置',

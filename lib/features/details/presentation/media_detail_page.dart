@@ -36,6 +36,7 @@ import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
 import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
+import 'package:starflow/features/metadata/data/metadata_network_guard.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
@@ -1289,7 +1290,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       _isRefreshingMetadata = false;
       _isCheckingOnlineResourceUpdate = false;
       _isSavingOnlineResourceUpdate = false;
-      _showDeferredDetailContent = false;
       _deferredDetailContentScheduled = false;
     });
     _updateLibraryMatchView(isMatching: false);
@@ -1679,7 +1679,11 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     for (final target in targets) {
       ref.invalidate(enrichedDetailTargetProvider(target));
       if (target.isSeries) {
-        ref.invalidate(detailSeriesBrowserProvider(target));
+        ref.invalidate(
+          detailSeriesBrowserProvider(
+            DetailSeriesBrowserRequest.fromTarget(target),
+          ),
+        );
       }
     }
   }
@@ -1826,7 +1830,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       unawaited(ref.read(enrichedDetailTargetProvider(currentTarget).future));
     }
     if (runtimePlan.shouldWarmSeriesBrowser && !isTelevision) {
-      unawaited(ref.read(detailSeriesBrowserProvider(currentTarget).future));
+      unawaited(
+        ref.read(
+          detailSeriesBrowserProvider(
+            DetailSeriesBrowserRequest.fromTarget(currentTarget),
+          ).future,
+        ),
+      );
     }
 
     if (!runtimePlan.shouldAttemptAutoLibraryMatch) {
@@ -2434,6 +2444,11 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     }
 
     _isRefreshingMetadata = true;
+    if (showFeedback) {
+      ref
+          .read(metadataNetworkGuardProvider)
+          .allowManualProbe(reason: 'manual-detail-metadata-refresh');
+    }
     final foregroundLease = ref
         .read(metadataPrefetchConcurrencyLimiterProvider)
         .beginForegroundWork(
@@ -2872,6 +2887,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+    final pageRenderingEnabled = TickerMode.valuesOf(context).enabled;
     final slimDetailHeroEnabled = ref.watch(
       appSettingsProvider.select(
         (settings) => settings.effectiveSlimDetailHeroEnabled(
@@ -2912,8 +2928,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                       _pageController.manualOverrideTargetListenable,
                   builder: (context, manualOverrideTarget, _) {
                     final seedTarget = manualOverrideTarget ?? widget.target;
-                    final watchedTargetAsync =
-                        ref.watch(enrichedDetailTargetProvider(seedTarget));
+                    final watchedTargetAsync = pageRenderingEnabled
+                        ? ref.watch(enrichedDetailTargetProvider(seedTarget))
+                        : null;
                     final targetAsync = _retainedTargetAsync.resolve(
                       activeValue: watchedTargetAsync,
                       fallbackValue: AsyncValue.data(seedTarget),
@@ -2922,15 +2939,21 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                     if (!target.isSeries) {
                       _retainedSeriesAsync.clear();
                     }
-                    final showDeferredDetailContent =
-                        !isTelevision || _showDeferredDetailContent;
-                    if (isTelevision && !_showDeferredDetailContent) {
+                    final showDeferredDetailContent = pageRenderingEnabled &&
+                        (!isTelevision || _showDeferredDetailContent);
+                    if (isTelevision &&
+                        pageRenderingEnabled &&
+                        !_showDeferredDetailContent) {
                       _scheduleDeferredDetailContent();
                     }
                     final watchedSeriesAsync = target.isSeries &&
                             isPageVisible &&
                             showDeferredDetailContent
-                        ? ref.watch(detailSeriesBrowserProvider(target))
+                        ? ref.watch(
+                            detailSeriesBrowserProvider(
+                              DetailSeriesBrowserRequest.fromTarget(target),
+                            ),
+                          )
                         : null;
                     final seriesAsync = target.isSeries
                         ? _retainedSeriesAsync.resolve(

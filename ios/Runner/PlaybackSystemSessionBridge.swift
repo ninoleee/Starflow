@@ -7,6 +7,7 @@ import UIKit
 final class PlaybackSystemSessionBridge {
   private weak var channel: FlutterMethodChannel?
   private let topViewControllerProvider: () -> UIViewController?
+  private let artworkLoader = StarflowNowPlayingArtworkLoader()
   private var isActive = false
   private var observers: [NSObjectProtocol] = []
 
@@ -61,6 +62,7 @@ final class PlaybackSystemSessionBridge {
     } else {
       unregisterSystemObservers()
       uninstallRemoteCommands()
+      artworkLoader.reset()
       MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
       UIApplication.shared.endReceivingRemoteControlEvents()
       configureAudioSession(enabled: false)
@@ -68,20 +70,10 @@ final class PlaybackSystemSessionBridge {
   }
 
   private func configureAudioSession(enabled: Bool) {
-    let session = AVAudioSession.sharedInstance()
-    do {
-      if enabled {
-        try session.setCategory(
-          .playback,
-          mode: .moviePlayback,
-          options: [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
-        )
-        try session.setActive(true)
-      } else {
-        try session.setActive(false, options: [.notifyOthersOnDeactivation])
-      }
-    } catch {
-    }
+    StarflowAudioSession.configurePlayback(
+      enabled: enabled,
+      owner: "playback-system-session"
+    )
   }
 
   private func registerSystemObservers() {
@@ -200,6 +192,9 @@ final class PlaybackSystemSessionBridge {
     let playing = arguments["playing"] as? Bool ?? false
     let buffering = arguments["buffering"] as? Bool ?? false
     let speed = (arguments["speed"] as? NSNumber)?.doubleValue ?? 1
+    let artworkUrl =
+      (arguments["artworkUrl"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let artworkHeaders = normalizedStringMap(arguments["artworkHeaders"] as? [String: Any])
     let hasPrevious = arguments["hasPrevious"] as? Bool ?? false
     let hasNext = arguments["hasNext"] as? Bool ?? false
     let canSeek = arguments["canSeek"] as? Bool ?? true
@@ -222,6 +217,13 @@ final class PlaybackSystemSessionBridge {
     info[MPNowPlayingInfoPropertyPlaybackRate] =
       playing && !buffering ? max(speed, 0.1) : 0.0
     info[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
+    artworkLoader.applyArtwork(
+      to: &info,
+      urlString: artworkUrl,
+      headers: artworkHeaders
+    ) { [weak self] in
+      self?.updateNowPlayingInfo(arguments)
+    }
     MPNowPlayingInfoCenter.default().nowPlayingInfo = info
 
     let commandCenter = MPRemoteCommandCenter.shared()
@@ -306,5 +308,206 @@ final class PlaybackSystemSessionBridge {
     }
     control.sendActions(for: .touchUpInside)
     return true
+  }
+}
+
+final class StarflowNowPlayingArtworkLoader {
+  private var artworkUrl = ""
+  private var artworkHeaders: [String: String] = [:]
+  private var artwork: MPMediaItemArtwork?
+  private var dataTask: URLSessionDataTask?
+  private var generation = 0
+
+  func applyArtwork(
+    to info: inout [String: Any],
+    urlString: String,
+    headers: [String: String] = [:],
+    refresh: @escaping () -> Void
+  ) {
+    let normalizedUrl = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+    let normalizedHeaders = normalizedStringMap(headers)
+    if normalizedUrl != artworkUrl || normalizedHeaders != artworkHeaders {
+      startLoading(urlString: normalizedUrl, headers: normalizedHeaders, refresh: refresh)
+    }
+
+    if let artwork {
+      info[MPMediaItemPropertyArtwork] = artwork
+    } else {
+      info.removeValue(forKey: MPMediaItemPropertyArtwork)
+    }
+  }
+
+  func reset() {
+    dataTask?.cancel()
+    dataTask = nil
+    artworkUrl = ""
+    artworkHeaders = [:]
+    artwork = nil
+    generation += 1
+  }
+
+  private func startLoading(
+    urlString: String,
+    headers: [String: String],
+    refresh: @escaping () -> Void
+  ) {
+    dataTask?.cancel()
+    dataTask = nil
+    artworkUrl = urlString
+    artworkHeaders = headers
+    artwork = nil
+    generation += 1
+
+    guard !urlString.isEmpty,
+      let url = URL(string: urlString),
+      url.scheme != nil
+    else {
+      return
+    }
+
+    let requestGeneration = generation
+    var request = URLRequest(
+      url: url,
+      cachePolicy: .returnCacheDataElseLoad,
+      timeoutInterval: 12
+    )
+    for (name, value) in headers where !name.isEmpty && !value.isEmpty {
+      request.setValue(value, forHTTPHeaderField: name)
+    }
+
+    dataTask = URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+      DispatchQueue.main.async {
+        guard let self,
+          self.generation == requestGeneration,
+          self.artworkUrl == urlString,
+          self.artworkHeaders == headers
+        else {
+          return
+        }
+        self.dataTask = nil
+        guard let data,
+          let image = UIImage(data: data)
+        else {
+          return
+        }
+        self.artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        refresh()
+      }
+    }
+    dataTask?.resume()
+  }
+}
+
+func normalizedStringMap(_ raw: [String: Any]?) -> [String: String] {
+  return (raw ?? [:]).reduce(into: [String: String]()) { result, item in
+    let key = item.key.trimmingCharacters(in: .whitespacesAndNewlines)
+    let value = "\(item.value)".trimmingCharacters(in: .whitespacesAndNewlines)
+    if !key.isEmpty && !value.isEmpty {
+      result[key] = value
+    }
+  }
+}
+
+func normalizedStringMap(_ raw: [String: String]) -> [String: String] {
+  return raw.reduce(into: [String: String]()) { result, item in
+    let key = item.key.trimmingCharacters(in: .whitespacesAndNewlines)
+    let value = item.value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !key.isEmpty && !value.isEmpty {
+      result[key] = value
+    }
+  }
+}
+
+enum StarflowAudioSession {
+  static func configurePlayback(
+    enabled: Bool,
+    owner: String,
+    options: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
+  ) {
+    let session = AVAudioSession.sharedInstance()
+    if enabled {
+      do {
+        try session.setCategory(.playback, mode: .moviePlayback, options: options)
+      } catch {
+        StarflowNativeLog.error(
+          category: "ios.audio-session",
+          message: "Failed to set playback audio session category",
+          fields: [
+            "owner": owner,
+            "enabled": enabled,
+            "operation": "setCategory",
+          ],
+          error: error
+        )
+        return
+      }
+      do {
+        try session.setActive(true)
+      } catch {
+        StarflowNativeLog.error(
+          category: "ios.audio-session",
+          message: "Failed to activate playback audio session",
+          fields: [
+            "owner": owner,
+            "enabled": enabled,
+            "operation": "setActive",
+          ],
+          error: error
+        )
+      }
+      return
+    }
+
+    do {
+      try session.setActive(false, options: [.notifyOthersOnDeactivation])
+    } catch {
+      StarflowNativeLog.error(
+        category: "ios.audio-session",
+        message: "Failed to deactivate playback audio session",
+        fields: [
+          "owner": owner,
+          "enabled": enabled,
+          "operation": "setActive",
+        ],
+        error: error
+      )
+    }
+  }
+}
+
+enum StarflowNativeLog {
+  static func error(
+    category: String,
+    message: String,
+    fields: [String: Any] = [:],
+    error: Error? = nil
+  ) {
+    write(level: "error", category: category, message: message, fields: fields, error: error)
+  }
+
+  private static func write(
+    level: String,
+    category: String,
+    message: String,
+    fields: [String: Any],
+    error: Error?
+  ) {
+    var payload = fields
+    if let error {
+      payload["error"] = String(describing: error)
+    }
+    payload["level"] = level
+    payload["category"] = category
+    payload["message"] = message
+
+    let line: String
+    if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+      let json = String(data: data, encoding: .utf8)
+    {
+      line = json
+    } else {
+      line = "\(payload)"
+    }
+    NSLog("[Starflow] %@", line)
   }
 }

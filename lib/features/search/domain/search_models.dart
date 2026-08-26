@@ -211,11 +211,6 @@ class SearchProviderConfig {
     this.parserHint = '',
     this.username = '',
     this.password = '',
-    this.quarkCookie = '',
-    this.quarkSaveFolderId = '0',
-    this.quarkSaveFolderPath = '/',
-    this.smartStrmWebhookUrl = '',
-    this.smartStrmTaskName = '',
     this.allowedCloudTypes = const [],
     this.blockedKeywords = const [],
     this.strongMatchEnabled = false,
@@ -231,11 +226,6 @@ class SearchProviderConfig {
   final String parserHint;
   final String username;
   final String password;
-  final String quarkCookie;
-  final String quarkSaveFolderId;
-  final String quarkSaveFolderPath;
-  final String smartStrmWebhookUrl;
-  final String smartStrmTaskName;
   final List<String> allowedCloudTypes;
   final List<String> blockedKeywords;
   final bool strongMatchEnabled;
@@ -251,11 +241,6 @@ class SearchProviderConfig {
     String? parserHint,
     String? username,
     String? password,
-    String? quarkCookie,
-    String? quarkSaveFolderId,
-    String? quarkSaveFolderPath,
-    String? smartStrmWebhookUrl,
-    String? smartStrmTaskName,
     List<String>? allowedCloudTypes,
     List<String>? blockedKeywords,
     bool? strongMatchEnabled,
@@ -271,11 +256,6 @@ class SearchProviderConfig {
       parserHint: parserHint ?? this.parserHint,
       username: username ?? this.username,
       password: password ?? this.password,
-      quarkCookie: quarkCookie ?? this.quarkCookie,
-      quarkSaveFolderId: quarkSaveFolderId ?? this.quarkSaveFolderId,
-      quarkSaveFolderPath: quarkSaveFolderPath ?? this.quarkSaveFolderPath,
-      smartStrmWebhookUrl: smartStrmWebhookUrl ?? this.smartStrmWebhookUrl,
-      smartStrmTaskName: smartStrmTaskName ?? this.smartStrmTaskName,
       allowedCloudTypes: allowedCloudTypes ?? this.allowedCloudTypes,
       blockedKeywords: blockedKeywords ?? this.blockedKeywords,
       strongMatchEnabled: strongMatchEnabled ?? this.strongMatchEnabled,
@@ -294,11 +274,6 @@ class SearchProviderConfig {
       'parserHint': parserHint,
       'username': username,
       'password': password,
-      'quarkCookie': quarkCookie,
-      'quarkSaveFolderId': quarkSaveFolderId,
-      'quarkSaveFolderPath': quarkSaveFolderPath,
-      'smartStrmWebhookUrl': smartStrmWebhookUrl,
-      'smartStrmTaskName': smartStrmTaskName,
       'allowedCloudTypes': allowedCloudTypes,
       'blockedKeywords': blockedKeywords,
       'strongMatchEnabled': strongMatchEnabled,
@@ -320,11 +295,6 @@ class SearchProviderConfig {
       parserHint: json['parserHint'] as String? ?? '',
       username: json['username'] as String? ?? '',
       password: json['password'] as String? ?? '',
-      quarkCookie: json['quarkCookie'] as String? ?? '',
-      quarkSaveFolderId: json['quarkSaveFolderId'] as String? ?? '0',
-      quarkSaveFolderPath: json['quarkSaveFolderPath'] as String? ?? '/',
-      smartStrmWebhookUrl: json['smartStrmWebhookUrl'] as String? ?? '',
-      smartStrmTaskName: json['smartStrmTaskName'] as String? ?? '',
       allowedCloudTypes:
           (json['allowedCloudTypes'] as List<dynamic>? ?? const [])
               .map((value) => '$value')

@@ -8,6 +8,26 @@ import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 
 void main() {
   group('TmdbMetadataClient', () {
+    test('removes a duplicated trailing year from title search queries',
+        () async {
+      final client = TmdbMetadataClient(
+        MockClient((request) async {
+          expect(request.url.path, '/3/search/multi');
+          expect(request.url.queryParameters['query'], '披荆斩棘');
+          return http.Response(jsonEncode({'results': const []}), 200);
+        }),
+      );
+
+      final result = await client.matchTitle(
+        query: '披荆斩棘2026',
+        readAccessToken: 'tmdb-token',
+        year: 2026,
+        preferSeries: true,
+      );
+
+      expect(result, isNull);
+    });
+
     test('maps movie metadata from search and details response', () async {
       final client = TmdbMetadataClient(
         MockClient((request) async {

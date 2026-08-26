@@ -31,7 +31,7 @@ final homeFeedLoadLimitsProvider = Provider<
   return ref.watch(
     appSettingsProvider.select(
       (settings) => (
-        maxConcurrency: settings.homeFeedMaxConcurrency,
+        maxConcurrency: settings.taskMaxConcurrency,
         initialBatchSize: settings.homeFeedInitialBatchSize,
         batchDelayMs: settings.homeFeedBatchDelayMs,
       ),

@@ -118,7 +118,7 @@ void main() {
       'performanceLightweightHomeHeroEnabled': true,
       'performanceLiveItemHeroOverlayEnabled': false,
       'performanceAggressivePlaybackTuningEnabled': true,
-      'metadataPrefetchMaxConcurrency': 4,
+      'taskMaxConcurrency': 4,
       'metadataPrefetchInitialBatchSize': 18,
     });
     final container = ProviderContainer(
@@ -143,18 +143,13 @@ void main() {
         configuredLiveItemHeroOverlayEnabled: false,
         effectiveLiveItemHeroOverlayEnabled: false,
         aggressivePlaybackTuningEnabled: true,
-        metadataPrefetchMaxConcurrency: 4,
+        taskMaxConcurrency: 4,
         metadataPrefetchInitialBatchSize: 18,
         metadataPrefetchBatchDelayMs: kMetadataPrefetchBatchDelayMsDefault,
         metadataPrefetchForegroundResumeDelayMs:
             kMetadataPrefetchForegroundResumeDelayMsDefault,
-        homeFeedMaxConcurrency: kHomeFeedMaxConcurrencyDefault,
         homeFeedInitialBatchSize: kHomeFeedInitialBatchSizeDefault,
         homeFeedBatchDelayMs: kHomeFeedBatchDelayMsDefault,
-        nasSourceRefreshConcurrency: kNasSourceRefreshConcurrencyDefault,
-        nasCollectionRefreshConcurrency:
-            kNasCollectionRefreshConcurrencyDefault,
-        nasEnrichmentConcurrency: kNasEnrichmentConcurrencyDefault,
       ),
     );
   });

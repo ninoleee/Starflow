@@ -44,26 +44,20 @@ void main() {
     await container.read(settingsControllerProvider.future);
     final controller = container.read(settingsControllerProvider.notifier);
 
-    await controller.setHomeFeedMaxConcurrency(4);
+    await controller.setTaskMaxConcurrency(4);
     await controller.setHomeFeedInitialBatchSize(3);
     await controller.setHomeFeedBatchDelayMs(250);
     await controller.setMetadataPrefetchBatchDelayMs(300);
     await controller.setMetadataPrefetchForegroundResumeDelayMs(400);
-    await controller.setNasSourceRefreshConcurrency(2);
-    await controller.setNasCollectionRefreshConcurrency(3);
-    await controller.setNasEnrichmentConcurrency(2);
     await controller.setSimplifiedVisualEffectsEnabled(true);
     await controller.setReducedInterfaceMotionEnabled(true);
     await controller.setSimplifiedHomeHeroEnabled(true);
 
-    expect(repository.settings.homeFeedMaxConcurrency, 4);
+    expect(repository.settings.taskMaxConcurrency, 4);
     expect(repository.settings.homeFeedInitialBatchSize, 3);
     expect(repository.settings.homeFeedBatchDelayMs, 250);
     expect(repository.settings.metadataPrefetchBatchDelayMs, 300);
     expect(repository.settings.metadataPrefetchForegroundResumeDelayMs, 400);
-    expect(repository.settings.nasSourceRefreshConcurrency, 2);
-    expect(repository.settings.nasCollectionRefreshConcurrency, 3);
-    expect(repository.settings.nasEnrichmentConcurrency, 2);
     expect(repository.settings.translucentEffectsEnabled, isFalse);
     expect(repository.settings.performanceReduceDecorationsEnabled, isTrue);
     expect(repository.settings.performanceReduceMotionEnabled, isTrue);
@@ -71,7 +65,7 @@ void main() {
     expect(repository.settings.performanceStaticHomeHeroEnabled, isTrue);
     expect(repository.settings.performanceLightweightHomeHeroEnabled, isTrue);
     expect(
-      container.read(appSettingsProvider).homeFeedMaxConcurrency,
+      container.read(appSettingsProvider).taskMaxConcurrency,
       4,
     );
     expect(

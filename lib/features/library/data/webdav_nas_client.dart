@@ -47,6 +47,11 @@ class WebDavNasClient {
       <String, List<_WebDavEntry>>{};
   final Map<String, Future<List<_WebDavEntry>>> _directoryInflight =
       <String, Future<List<_WebDavEntry>>>{};
+  final Map<String, _WebDavSidecarDirectoryContext> _sidecarDirectoryCache =
+      <String, _WebDavSidecarDirectoryContext>{};
+  final Map<String, Future<_WebDavSidecarDirectoryContext>>
+      _sidecarDirectoryInflight =
+      <String, Future<_WebDavSidecarDirectoryContext>>{};
   final Map<String, _DirectorySubtreeCacheEntry> _directorySubtreeCache =
       <String, _DirectorySubtreeCacheEntry>{};
 

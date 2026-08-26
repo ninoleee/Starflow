@@ -9,17 +9,18 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 void main() {
   test('app settings persist and clamp scheduling limits', () {
     final settings = AppSettings.fromJson(const <String, dynamic>{
-      'metadataPrefetchMaxConcurrency': 4,
+      'taskMaxConcurrency': 4,
       'metadataPrefetchInitialBatchSize': 18,
       'metadataPrefetchBatchDelayMs': 250,
       'metadataPrefetchForegroundResumeDelayMs': 500,
     });
 
-    expect(settings.metadataPrefetchMaxConcurrency, 4);
+    expect(settings.taskMaxConcurrency, 4);
     expect(settings.metadataPrefetchInitialBatchSize, 18);
     expect(settings.metadataPrefetchBatchDelayMs, 250);
     expect(settings.metadataPrefetchForegroundResumeDelayMs, 500);
-    expect(settings.toJson()['metadataPrefetchMaxConcurrency'], 4);
+    expect(settings.toJson()['schemaVersion'], kAppSettingsSchemaVersion);
+    expect(settings.toJson()['taskMaxConcurrency'], 4);
     expect(settings.toJson()['metadataPrefetchInitialBatchSize'], 18);
     expect(settings.toJson()['metadataPrefetchBatchDelayMs'], 250);
     expect(
@@ -27,9 +28,8 @@ void main() {
       500,
     );
     expect(
-      AppSettings.fromJson(const <String, dynamic>{})
-          .metadataPrefetchMaxConcurrency,
-      kMetadataPrefetchMaxConcurrencyDefault,
+      AppSettings.fromJson(const <String, dynamic>{}).taskMaxConcurrency,
+      kTaskMaxConcurrencyDefault,
     );
     expect(
       AppSettings.fromJson(const <String, dynamic>{})
@@ -38,9 +38,9 @@ void main() {
     );
     expect(
       AppSettings.fromJson(const <String, dynamic>{
-        'metadataPrefetchMaxConcurrency': 99,
-      }).metadataPrefetchMaxConcurrency,
-      kMetadataPrefetchMaxConcurrencyMax,
+        'taskMaxConcurrency': 99,
+      }).taskMaxConcurrency,
+      kTaskMaxConcurrencyMax,
     );
     expect(
       AppSettings.fromJson(const <String, dynamic>{
@@ -49,10 +49,8 @@ void main() {
       kMetadataPrefetchInitialBatchSizeMax,
     );
     expect(
-      settings
-          .copyWith(metadataPrefetchMaxConcurrency: 0)
-          .metadataPrefetchMaxConcurrency,
-      kMetadataPrefetchMaxConcurrencyMin,
+      settings.copyWith(taskMaxConcurrency: 0).taskMaxConcurrency,
+      kTaskMaxConcurrencyMin,
     );
     expect(
       settings
@@ -61,37 +59,45 @@ void main() {
       kMetadataPrefetchInitialBatchSizeMin,
     );
     final feedSettings = AppSettings.fromJson(const <String, dynamic>{
-      'homeFeedMaxConcurrency': 4,
+      'taskMaxConcurrency': 4,
       'homeFeedInitialBatchSize': 3,
       'homeFeedBatchDelayMs': 250,
-      'nasSourceRefreshConcurrency': 2,
-      'nasCollectionRefreshConcurrency': 3,
-      'nasEnrichmentConcurrency': 4,
     });
 
-    expect(feedSettings.homeFeedMaxConcurrency, 4);
+    expect(feedSettings.taskMaxConcurrency, 4);
     expect(feedSettings.homeFeedInitialBatchSize, 3);
     expect(feedSettings.homeFeedBatchDelayMs, 250);
-    expect(feedSettings.nasSourceRefreshConcurrency, 2);
-    expect(feedSettings.nasCollectionRefreshConcurrency, 3);
-    expect(feedSettings.nasEnrichmentConcurrency, 4);
-    expect(feedSettings.toJson()['homeFeedMaxConcurrency'], 4);
+    expect(feedSettings.toJson()['taskMaxConcurrency'], 4);
+    expect(feedSettings.toJson(), isNot(contains('homeFeedMaxConcurrency')));
+    expect(
+      feedSettings.toJson(),
+      isNot(contains('metadataPrefetchMaxConcurrency')),
+    );
+    expect(
+      feedSettings.toJson(),
+      isNot(contains('nasSourceRefreshConcurrency')),
+    );
+    expect(
+      feedSettings.toJson(),
+      isNot(contains('nasCollectionRefreshConcurrency')),
+    );
+    expect(
+      feedSettings.toJson(),
+      isNot(contains('nasEnrichmentConcurrency')),
+    );
     expect(feedSettings.toJson()['homeFeedInitialBatchSize'], 3);
     expect(feedSettings.toJson()['homeFeedBatchDelayMs'], 250);
-    expect(feedSettings.toJson()['nasSourceRefreshConcurrency'], 2);
-    expect(feedSettings.toJson()['nasCollectionRefreshConcurrency'], 3);
-    expect(feedSettings.toJson()['nasEnrichmentConcurrency'], 4);
     expect(
-      AppSettings.fromJson(const <String, dynamic>{}).homeFeedMaxConcurrency,
-      kHomeFeedMaxConcurrencyDefault,
+      AppSettings.fromJson(const <String, dynamic>{}).taskMaxConcurrency,
+      kTaskMaxConcurrencyDefault,
     );
     expect(
       AppSettings.fromJson(const <String, dynamic>{}).homeFeedInitialBatchSize,
       kHomeFeedInitialBatchSizeDefault,
     );
     expect(
-      feedSettings.copyWith(homeFeedMaxConcurrency: 99).homeFeedMaxConcurrency,
-      kHomeFeedMaxConcurrencyMax,
+      feedSettings.copyWith(taskMaxConcurrency: 99).taskMaxConcurrency,
+      kTaskMaxConcurrencyMax,
     );
     expect(
       feedSettings
@@ -101,36 +107,23 @@ void main() {
     );
   });
 
-  test('legacy high performance minimum scheduling migrates to balanced', () {
-    final migrated = AppSettings.fromJson(const <String, dynamic>{
-      'highPerformanceModeEnabled': true,
-      'metadataPrefetchMaxConcurrency': 1,
-      'metadataPrefetchInitialBatchSize': 6,
-      'homeFeedMaxConcurrency': 1,
-      'homeFeedInitialBatchSize': 1,
-    });
-
+  test('current settings schema rejects unversioned or mismatched JSON', () {
     expect(
-      migrated.metadataPrefetchMaxConcurrency,
-      kMetadataPrefetchMaxConcurrencyDefault,
+      () => AppSettings.fromCurrentJson(const <String, dynamic>{}),
+      throwsFormatException,
     );
     expect(
-      migrated.metadataPrefetchInitialBatchSize,
-      kMetadataPrefetchInitialBatchSizeDefault,
+      () => AppSettings.fromCurrentJson(const <String, dynamic>{
+        'schemaVersion': kAppSettingsSchemaVersion - 1,
+      }),
+      throwsFormatException,
     );
-    expect(migrated.homeFeedMaxConcurrency, kHomeFeedMaxConcurrencyDefault);
-    expect(migrated.homeFeedInitialBatchSize, kHomeFeedInitialBatchSizeDefault);
-
-    final explicitNewSettings = AppSettings.fromJson(const <String, dynamic>{
-      'highPerformanceModeEnabled': true,
-      'metadataPrefetchMaxConcurrency': 1,
-      'metadataPrefetchInitialBatchSize': 6,
-      'metadataPrefetchBatchDelayMs': 300,
-      'homeFeedMaxConcurrency': 1,
-      'homeFeedInitialBatchSize': 1,
-    });
-    expect(explicitNewSettings.metadataPrefetchMaxConcurrency, 1);
-    expect(explicitNewSettings.homeFeedMaxConcurrency, 1);
+    expect(
+      AppSettings.fromCurrentJson(const <String, dynamic>{
+        'schemaVersion': kAppSettingsSchemaVersion,
+      }).toJson()['schemaVersion'],
+      kAppSettingsSchemaVersion,
+    );
   });
 
   test('app settings persist local logging preferences', () {
@@ -352,35 +345,6 @@ void main() {
     expect(defaults.detailAutoLibraryMatchEnabled, isFalse);
   });
 
-  test('legacy high performance marker is ignored at runtime and export', () {
-    final settings = AppSettings.fromJson({
-      'highPerformanceModeEnabled': true,
-      'translucentEffectsEnabled': true,
-      'autoHideNavigationBarEnabled': true,
-      'performanceReduceMotionEnabled': false,
-      'performanceStaticNavigationEnabled': false,
-      'performanceLeanPlaybackUiEnabled': true,
-      'playbackStartupProbeEnabled': false,
-    });
-
-    expect(settings.effectiveTranslucentEffectsEnabled, isTrue);
-    expect(settings.effectiveNavigationAutoHideEnabled, isTrue);
-    expect(
-      settings.effectiveLeanPlaybackUiEnabled(isTelevision: false),
-      isFalse,
-    );
-    expect(
-      settings.toJson().containsKey('performanceLeanPlaybackUiEnabled'),
-      isFalse,
-    );
-    expect(
-      settings.toJson().containsKey('playbackStartupProbeEnabled'),
-      isFalse,
-    );
-    expect(
-        settings.toJson().containsKey('highPerformanceModeEnabled'), isFalse);
-  });
-
   test('performance switches are independent and TV protections stay fixed',
       () {
     final settings = AppSettings.fromJson(const <String, dynamic>{
@@ -453,17 +417,6 @@ void main() {
     );
   });
 
-  test('legacy poster hero style migrates to poster artwork style', () {
-    final settings = AppSettings.fromJson({
-      'homeHeroStyle': 'poster',
-    });
-
-    expect(settings.homeHeroStyle, HomeHeroStyle.poster);
-    expect(settings.homeHeroDisplayMode, HomeHeroDisplayMode.normal);
-    expect(settings.toJson()['homeHeroStyle'], 'poster');
-    expect(settings.toJson()['homeHeroDisplayMode'], 'normal');
-  });
-
   test('app settings persist native playback container engine', () {
     final settings = AppSettings.fromJson({
       'playbackEngine': 'nativeContainer',
@@ -477,21 +430,6 @@ void main() {
     );
     expect(settings.toJson()['playbackEngine'], 'nativeContainer');
     expect(settings.toJson()['playbackDecodeMode'], 'hardwarePreferred');
-  });
-
-  test('legacy hero display mode and module settings migrate', () {
-    final settings = AppSettings.fromJson({
-      'homeHeroEnabled': false,
-      'homeHeroStyle': 'borderless',
-      'homeModules': const [],
-    });
-
-    final heroModule = settings.homeModules
-        .firstWhere((item) => item.type == HomeModuleType.hero);
-
-    expect(heroModule.enabled, isFalse);
-    expect(settings.homeHeroDisplayMode, HomeHeroDisplayMode.borderless);
-    expect(settings.homeHeroStyle, HomeHeroStyle.composite);
   });
 
   test('app settings persist metadata match preferences', () {
@@ -707,16 +645,12 @@ void main() {
       searchProviders: [],
       doubanAccount: DoubanAccountConfig(enabled: false),
       homeModules: [],
-      metadataPrefetchMaxConcurrency: 3,
+      taskMaxConcurrency: 3,
       metadataPrefetchInitialBatchSize: 18,
       metadataPrefetchBatchDelayMs: 250,
       metadataPrefetchForegroundResumeDelayMs: 500,
-      homeFeedMaxConcurrency: 3,
       homeFeedInitialBatchSize: 3,
       homeFeedBatchDelayMs: 250,
-      nasSourceRefreshConcurrency: 2,
-      nasCollectionRefreshConcurrency: 3,
-      nasEnrichmentConcurrency: 2,
     ).applyStartupCrashRecoveryPreset();
 
     expect(
@@ -724,7 +658,7 @@ void main() {
       isTrue,
     );
     expect(
-      schedulingSettings.metadataPrefetchMaxConcurrency,
+      schedulingSettings.taskMaxConcurrency,
       3,
     );
     expect(
@@ -733,12 +667,8 @@ void main() {
     );
     expect(schedulingSettings.metadataPrefetchBatchDelayMs, 250);
     expect(schedulingSettings.metadataPrefetchForegroundResumeDelayMs, 500);
-    expect(schedulingSettings.homeFeedMaxConcurrency, 3);
     expect(schedulingSettings.homeFeedInitialBatchSize, 3);
     expect(schedulingSettings.homeFeedBatchDelayMs, 250);
-    expect(schedulingSettings.nasSourceRefreshConcurrency, 2);
-    expect(schedulingSettings.nasCollectionRefreshConcurrency, 3);
-    expect(schedulingSettings.nasEnrichmentConcurrency, 2);
 
     final safeSettings = const AppSettings(
       mediaSources: [],

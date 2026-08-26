@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/utils/metadata_search_trace.dart';
+import 'package:starflow/features/library/domain/media_naming.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/metadata/data/metadata_network_guard.dart';
 
@@ -104,7 +105,11 @@ class WmdbMetadataClient {
     bool preferSeries = false,
     List<String> actors = const [],
   }) async {
-    final normalizedQuery = _normalizeTitle(query);
+    final cleanedQuery = MediaNaming.stripTrailingLookupYear(
+      MediaNaming.cleanLookupQuery(query),
+      year: year,
+    );
+    final normalizedQuery = _normalizeTitle(cleanedQuery);
     final actorHint = actors
         .map((item) => item.trim())
         .firstWhere((item) => item.isNotEmpty, orElse: () => '');
@@ -172,7 +177,7 @@ class WmdbMetadataClient {
       },
     );
     final future = _matchTitleUncached(
-      query: query.trim(),
+      query: cleanedQuery,
       actorHint: actorHint,
       year: year,
       preferSeries: preferSeries,
@@ -208,7 +213,11 @@ class WmdbMetadataClient {
     List<String> actors = const [],
     int maxResults = 3,
   }) async {
-    final normalizedQuery = _normalizeTitle(query);
+    final cleanedQuery = MediaNaming.stripTrailingLookupYear(
+      MediaNaming.cleanLookupQuery(query),
+      year: year,
+    );
+    final normalizedQuery = _normalizeTitle(cleanedQuery);
     final actorHint = actors
         .map((item) => item.trim())
         .firstWhere((item) => item.isNotEmpty, orElse: () => '');
@@ -220,7 +229,7 @@ class WmdbMetadataClient {
       'limit': '10',
       'skip': '0',
       'lang': 'Cn',
-      if (query.trim().isNotEmpty) 'q': query.trim(),
+      if (cleanedQuery.isNotEmpty) 'q': cleanedQuery,
       if (actorHint.isNotEmpty) 'actor': actorHint,
       if (year > 0) 'year': '$year',
     };

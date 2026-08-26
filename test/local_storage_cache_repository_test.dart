@@ -15,6 +15,116 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  test('persists Emby cache as scoped shards', () async {
+    final preferences = _TrackingPreferencesStore();
+    final repository = LocalStorageCacheRepository(preferences: preferences);
+    final movieItem = _embyCacheItem(
+      id: 'movie-1',
+      sectionId: 'movies',
+      title: 'Movie One',
+    );
+    final showItem = _embyCacheItem(
+      id: 'show-1',
+      sectionId: 'shows',
+      title: 'Show One',
+    );
+
+    await repository.saveEmbyLibrarySnapshot(
+      sourceId: 'emby-main',
+      refreshedAt: DateTime.utc(2026, 8, 24),
+      collections: const <MediaCollection>[
+        MediaCollection(
+          id: 'movies',
+          title: 'Movies',
+          sourceId: 'emby-main',
+          sourceName: 'Living Room',
+          sourceKind: MediaSourceKind.emby,
+        ),
+        MediaCollection(
+          id: 'shows',
+          title: 'Shows',
+          sourceId: 'emby-main',
+          sourceName: 'Living Room',
+          sourceKind: MediaSourceKind.emby,
+        ),
+      ],
+      fallbackItems: <MediaItem>[movieItem, showItem],
+      itemsBySection: <String, List<MediaItem>>{
+        'movies': <MediaItem>[movieItem],
+        'shows': <MediaItem>[showItem],
+      },
+    );
+
+    final reloaded = LocalStorageCacheRepository(preferences: preferences);
+    final scoped = await reloaded.loadEmbyLibrarySnapshot(
+      'emby-main',
+      sectionId: 'movies',
+    );
+    final full = await reloaded.loadEmbyLibrarySnapshot('emby-main');
+    final summary = await reloaded.loadEmbyLibrarySnapshot(
+      'emby-main',
+      preferSourceSummary: true,
+    );
+
+    expect(scoped.itemsBySection.keys, <String>['movies']);
+    expect(scoped.itemsBySection['movies']?.single.id, 'movie-1');
+    expect(scoped.fallbackItems, isEmpty);
+    expect(full.itemsBySection.keys, containsAll(<String>['movies', 'shows']));
+    expect(full.fallbackItems, isEmpty);
+    expect(
+      summary.itemsBySection.keys,
+      containsAll(<String>['movies', 'shows']),
+    );
+    expect(
+      preferences._values.keys.where(
+        (key) => key.contains('emby_library_cache.shard.v2'),
+      ),
+      hasLength(4),
+    );
+    final fallbackRaw = preferences._values.entries
+        .singleWhere((entry) => entry.key.endsWith('.fallback'))
+        .value;
+    expect(fallbackRaw, isNot(contains('movie-1')));
+    expect(fallbackRaw, isNot(contains('show-1')));
+  });
+
+  test('coalesces concurrent Emby snapshot reads', () async {
+    final preferences = _TrackingPreferencesStore();
+    final repository = LocalStorageCacheRepository(preferences: preferences);
+    final item = _embyCacheItem(
+      id: 'movie-1',
+      sectionId: 'movies',
+      title: 'Movie One',
+    );
+    await repository.saveEmbyLibrarySnapshot(
+      sourceId: 'emby-main',
+      refreshedAt: DateTime.utc(2026, 8, 24),
+      fallbackItems: <MediaItem>[item],
+      itemsBySection: <String, List<MediaItem>>{
+        'movies': <MediaItem>[item],
+      },
+    );
+
+    preferences.getStringCounts.clear();
+    final reloaded = LocalStorageCacheRepository(preferences: preferences);
+    final snapshots = await Future.wait([
+      reloaded.loadEmbyLibrarySnapshot(
+        'emby-main',
+        preferSourceSummary: true,
+      ),
+      reloaded.loadEmbyLibrarySnapshot(
+        'emby-main',
+        preferSourceSummary: true,
+      ),
+    ]);
+
+    expect(snapshots.every((snapshot) => snapshot.hasData), isTrue);
+    expect(
+      preferences.getStringCounts.values,
+      everyElement(1),
+    );
+  });
+
   test('persists matched and enriched detail targets for later reuse',
       () async {
     final prefs = await SharedPreferences.getInstance();
@@ -222,6 +332,12 @@ void main() {
     expect(
         restored[1]?.posterUrl, 'https://image.example.com/concurrent-2.jpg');
     expect(preferences.peakConcurrentWrites, 1);
+    expect(
+      preferences.setStringCounts.entries
+          .singleWhere((entry) => entry.key.contains('detail_cache'))
+          .value,
+      1,
+    );
   });
 
   test('round trips a large detail cache through background serialization',
@@ -266,7 +382,7 @@ void main() {
     final notifications = <LocalStorageDetailCacheChangeEvent>[];
     final repository = LocalStorageCacheRepository(
       sharedPreferences: prefs,
-      detailCacheChangeNotificationDelay: const Duration(milliseconds: 20),
+      detailCacheChangeNotificationDelay: const Duration(milliseconds: 80),
       notifyDetailCacheChanged: notifications.add,
     );
     addTearDown(repository.dispose);
@@ -312,7 +428,7 @@ void main() {
       ),
     );
 
-    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await Future<void>.delayed(const Duration(milliseconds: 160));
 
     expect(notifications, hasLength(1));
     expect(notifications.single.invalidateAll, isFalse);
@@ -688,13 +804,42 @@ void main() {
   });
 }
 
+MediaItem _embyCacheItem({
+  required String id,
+  required String sectionId,
+  required String title,
+  String overview = '',
+}) {
+  return MediaItem(
+    id: id,
+    title: title,
+    overview: overview,
+    posterUrl: '',
+    year: 2026,
+    durationLabel: '',
+    genres: const <String>[],
+    sectionId: sectionId,
+    sectionName: sectionId,
+    sourceId: 'emby-main',
+    sourceName: 'Living Room',
+    sourceKind: MediaSourceKind.emby,
+    streamUrl: '',
+    addedAt: DateTime.utc(2026, 8, 24),
+  );
+}
+
 class _TrackingPreferencesStore implements PreferencesStore {
   final Map<String, Object> _values = <String, Object>{};
+  final Map<String, int> getStringCounts = <String, int>{};
+  final Map<String, int> setStringCounts = <String, int>{};
   int _activeWrites = 0;
   int peakConcurrentWrites = 0;
 
   @override
-  Future<String?> getString(String key) async => _values[key] as String?;
+  Future<String?> getString(String key) async {
+    getStringCounts[key] = (getStringCounts[key] ?? 0) + 1;
+    return _values[key] as String?;
+  }
 
   @override
   Future<List<String>?> getStringList(String key) async {
@@ -704,6 +849,7 @@ class _TrackingPreferencesStore implements PreferencesStore {
 
   @override
   Future<void> setString(String key, String value) async {
+    setStringCounts[key] = (setStringCounts[key] ?? 0) + 1;
     _activeWrites += 1;
     if (_activeWrites > peakConcurrentWrites) {
       peakConcurrentWrites = _activeWrites;
