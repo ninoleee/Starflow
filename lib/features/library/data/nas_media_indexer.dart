@@ -287,6 +287,19 @@ class NasMediaIndexer {
         scopedCollections: scopedCollections,
       );
 
+  Future<List<MediaItem>> loadMovieVariants(
+    MediaSourceConfig source, {
+    required String itemId,
+    String sectionId = '',
+    List<MediaCollection>? scopedCollections,
+  }) =>
+      _NasMediaIndexerRefreshFlowX(this).loadMovieVariants(
+        source,
+        itemId: itemId,
+        sectionId: sectionId,
+        scopedCollections: scopedCollections,
+      );
+
   Future<List<MediaItem>> loadCachedLibraryMatchItems(
     MediaSourceConfig source, {
     String doubanId = '',
@@ -392,6 +405,18 @@ class NasMediaIndexer {
     List<NasMediaIndexRecord> records,
   ) {
     return _NasMediaIndexerGroupingSupportX(this).groupSeriesRecords(records);
+  }
+
+  List<_MovieVariantRecordGroup> _groupMovieVariantRecords(
+    List<NasMediaIndexRecord> records,
+  ) {
+    return _NasMediaIndexerGroupingSupportX(this)
+        .groupMovieVariantRecords(records);
+  }
+
+  int _movieVariantRepresentativeScore(NasMediaIndexRecord record) {
+    return _NasMediaIndexerGroupingSupportX(this)
+        .movieVariantRepresentativeScore(record);
   }
 
   MediaItem _buildSeriesItem(_SeriesRecordGroup group) {
@@ -770,13 +795,19 @@ class NasMediaIndexer {
     required String resourcePath,
     required DateTime? modifiedAt,
     required int fileSizeBytes,
+    String structureSignature = '',
   }) =>
       _NasMediaIndexerIndexingX(this)._buildFingerprint(
         sourceId: sourceId,
         resourcePath: resourcePath,
         modifiedAt: modifiedAt,
         fileSizeBytes: fileSizeBytes,
+        structureSignature: structureSignature,
       );
+
+  String _buildStructureFingerprintSignature(WebDavScannedItem scannedItem) =>
+      _NasMediaIndexerIndexingX(this)
+          .buildStructureFingerprintSignature(scannedItem);
   static List<String> _dedupe(Iterable<String> values) {
     final seen = <String>{};
     final result = <String>[];

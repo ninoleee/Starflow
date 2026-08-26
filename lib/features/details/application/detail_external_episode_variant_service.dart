@@ -51,15 +51,25 @@ class DetailExternalEpisodeVariantService {
         embyApiClient: embyApiClient,
       );
     }
-    if (!_supportsIndexedEpisodeTarget(target)) {
+    if (!_supportsIndexedVariantTarget(target)) {
       return null;
     }
 
-    final items = await nasMediaIndexer.loadEpisodeVariants(
-      source,
-      itemId: target.itemId,
-      sectionId: target.sectionId,
-    );
+    final itemType = target.itemType.trim().toLowerCase();
+    final playbackItemType =
+        target.playbackTarget?.normalizedItemType.trim().toLowerCase() ?? '';
+    final isMovie = itemType == 'movie' || playbackItemType == 'movie';
+    final items = isMovie
+        ? await nasMediaIndexer.loadMovieVariants(
+            source,
+            itemId: target.itemId,
+            sectionId: target.sectionId,
+          )
+        : await nasMediaIndexer.loadEpisodeVariants(
+            source,
+            itemId: target.itemId,
+            sectionId: target.sectionId,
+          );
     if (items.length <= 1) {
       return null;
     }
@@ -77,12 +87,14 @@ class DetailExternalEpisodeVariantService {
     );
   }
 
-  bool _supportsIndexedEpisodeTarget(MediaDetailTarget target) {
+  bool _supportsIndexedVariantTarget(MediaDetailTarget target) {
     final itemType = target.itemType.trim().toLowerCase();
     final playback = target.playbackTarget;
     final isEpisodeLike =
         itemType == 'episode' || playback?.normalizedItemType == 'episode';
-    return isEpisodeLike &&
+    final isMovie =
+        itemType == 'movie' || playback?.normalizedItemType == 'movie';
+    return (isEpisodeLike || isMovie) &&
         target.sourceId.trim().isNotEmpty &&
         target.itemId.trim().isNotEmpty &&
         (target.sourceKind == MediaSourceKind.nas ||

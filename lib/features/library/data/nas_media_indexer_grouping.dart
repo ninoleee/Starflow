@@ -11,9 +11,15 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
     List<_SeriesRecordGroup> groups,
   ) {
     final nonSeriesItems = <MediaItem>[];
-    final groupedResourceIds = groups
-        .expand((group) => group.records.map((record) => record.resourceId))
-        .toSet();
+    final movieVariantGroups = groupMovieVariantRecords(records);
+    final groupedResourceIds = <String>{
+      ...groups.expand(
+        (group) => group.records.map((record) => record.resourceId),
+      ),
+      ...movieVariantGroups.expand(
+        (group) => group.records.map((record) => record.resourceId),
+      ),
+    };
 
     for (final record in records) {
       if (!groupedResourceIds.contains(record.resourceId)) {
@@ -22,9 +28,139 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
     }
 
     final seriesItems = groups.map(buildSeriesItem);
-    final allItems = [...nonSeriesItems, ...seriesItems];
+    final movieVariantItems = movieVariantGroups.map(buildMovieVariantItem);
+    final allItems = [
+      ...nonSeriesItems,
+      ...movieVariantItems,
+      ...seriesItems,
+    ];
     allItems.sort((left, right) => right.addedAt.compareTo(left.addedAt));
     return allItems;
+  }
+
+  List<_MovieVariantRecordGroup> groupMovieVariantRecords(
+    List<NasMediaIndexRecord> records,
+  ) {
+    final grouped = <String, List<NasMediaIndexRecord>>{};
+    final titleByKey = <String, String>{};
+    final versionDirectoriesByKey = <String, Set<String>>{};
+    for (final record in records) {
+      if (!_isMovieVariantRecord(record)) {
+        continue;
+      }
+      final pathInfo = _movieVariantPathInfo(record.resourcePath);
+      if (pathInfo == null) {
+        continue;
+      }
+      final rootTitle = _cleanIndexedTitleLabel(pathInfo.rootSegments.last);
+      final itemTitle = _cleanIndexedTitleLabel(record.item.title);
+      final title = rootTitle.isNotEmpty ? rootTitle : itemTitle;
+      if (title.isEmpty) {
+        continue;
+      }
+      final normalizedRoot = pathInfo.rootSegments
+          .map((segment) => segment.trim().toLowerCase())
+          .join('/');
+      final key = '${record.sectionId.trim()}|$normalizedRoot';
+      grouped.putIfAbsent(key, () => <NasMediaIndexRecord>[]).add(record);
+      versionDirectoriesByKey
+          .putIfAbsent(key, () => <String>{})
+          .add(pathInfo.versionDirectory.trim().toLowerCase());
+      titleByKey.putIfAbsent(key, () => title);
+    }
+
+    return grouped.entries
+        .where(
+          (entry) =>
+              entry.value.length >= 2 &&
+              (versionDirectoriesByKey[entry.key]?.length ?? 0) >= 2,
+        )
+        .map(
+          (entry) => _MovieVariantRecordGroup(
+            title: titleByKey[entry.key] ?? entry.value.first.item.title,
+            records: entry.value,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  MediaItem buildMovieVariantItem(_MovieVariantRecordGroup group) {
+    final records = [...group.records]..sort((left, right) {
+        final scoreCompare = movieVariantRepresentativeScore(right)
+            .compareTo(movieVariantRepresentativeScore(left));
+        if (scoreCompare != 0) {
+          return scoreCompare;
+        }
+        return right.item.addedAt.compareTo(left.item.addedAt);
+      });
+    final base = records.first.item;
+    final latestAddedAt = records
+        .map((record) => record.item.addedAt)
+        .reduce((left, right) => left.isAfter(right) ? left : right);
+    return base.copyWith(
+      title: group.title,
+      sortTitle: group.title,
+      itemType: 'movie',
+      durationLabel:
+          base.durationLabel.trim() == '剧集' ? '文件' : base.durationLabel,
+      addedAt: latestAddedAt,
+    );
+  }
+
+  bool _isMovieVariantRecord(NasMediaIndexRecord record) {
+    final itemType = record.item.itemType.trim().toLowerCase();
+    final recognizedItemType = record.recognizedItemType.trim().toLowerCase();
+    if (itemType == 'episode' ||
+        itemType == 'series' ||
+        itemType == 'season' ||
+        recognizedItemType == 'episode' ||
+        recognizedItemType == 'series' ||
+        recognizedItemType == 'season') {
+      return false;
+    }
+    if (itemType != 'movie' &&
+        recognizedItemType != 'movie' &&
+        record.preferSeries) {
+      return false;
+    }
+    return record.item.seasonNumber == null &&
+        record.item.episodeNumber == null &&
+        record.recognizedSeasonNumber == null &&
+        record.recognizedEpisodeNumber == null;
+  }
+
+  _MovieVariantPathInfo? _movieVariantPathInfo(String resourcePath) {
+    final segments = _pathSegments(resourcePath);
+    if (segments.length < 3) {
+      return null;
+    }
+    // A version directory can contain one or more organization layers below
+    // it. Find the outermost matching ancestor so every file in that version
+    // still shares the movie root with its sibling versions.
+    for (var index = 1; index < segments.length - 1; index++) {
+      if (NasMediaRecognizer.matchesMovieVersionFolderLabel(segments[index])) {
+        final rootSegments = segments.sublist(0, index);
+        if (rootSegments.isEmpty) {
+          return null;
+        }
+        return _MovieVariantPathInfo(
+          rootSegments: rootSegments,
+          versionDirectory: segments[index],
+        );
+      }
+    }
+    return null;
+  }
+
+  int movieVariantRepresentativeScore(NasMediaIndexRecord record) {
+    final item = record.item;
+    var score = item.isPlayable ? 1000 : 0;
+    score += item.posterUrl.trim().isNotEmpty ? 100 : 0;
+    score += item.backdropUrl.trim().isNotEmpty ? 50 : 0;
+    score += item.overview.trim().isNotEmpty ? 25 : 0;
+    score += (item.width ?? 0) ~/ 100;
+    score += (item.bitrate ?? 0) ~/ 1000000;
+    return score;
   }
 
   List<_SeriesRecordGroup> groupSeriesRecords(
@@ -1594,6 +1730,26 @@ class _SeriesRecordGroup {
     }
     return grouped;
   }
+}
+
+class _MovieVariantRecordGroup {
+  const _MovieVariantRecordGroup({
+    required this.title,
+    required this.records,
+  });
+
+  final String title;
+  final List<NasMediaIndexRecord> records;
+}
+
+class _MovieVariantPathInfo {
+  const _MovieVariantPathInfo({
+    required this.rootSegments,
+    required this.versionDirectory,
+  });
+
+  final List<String> rootSegments;
+  final String versionDirectory;
 }
 
 class _ParsedSeasonGroupId {

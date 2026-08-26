@@ -190,18 +190,22 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
             (entries: grandParentEntries, baseUri: grandParentDirectoryUri),
         ],
       );
-      appLogTrace(
-        'library.scan-cache',
-        'WebDAV sidecar directory context prepared',
-        fields: <String, Object?>{
-          'sourceId': source.id,
-          'directory': currentDirectoryUri.toString(),
-          'siblingCount': siblings.length,
-          'hasSeasonNfo': seasonNfoMetadata != null,
-          'hasSeriesNfo': seriesNfoMetadata != null,
-          'extraBackdropCount': extraBackdropEntries.length,
-        },
-      );
+      if (seasonNfoMetadata != null ||
+          seriesNfoMetadata != null ||
+          extraBackdropEntries.isNotEmpty) {
+        appLogTrace(
+          'library.scan-cache',
+          'WebDAV sidecar directory context prepared',
+          fields: <String, Object?>{
+            'sourceId': source.id,
+            'directory': currentDirectoryUri.toString(),
+            'siblingCount': siblings.length,
+            'hasSeasonNfo': seasonNfoMetadata != null,
+            'hasSeriesNfo': seriesNfoMetadata != null,
+            'extraBackdropCount': extraBackdropEntries.length,
+          },
+        );
+      }
       return _WebDavSidecarDirectoryContext(
         seasonNfoMetadata: seasonNfoMetadata,
         seriesNfoMetadata: seriesNfoMetadata,

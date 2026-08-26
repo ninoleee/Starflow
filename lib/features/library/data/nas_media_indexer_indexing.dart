@@ -514,6 +514,11 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       preferSeries = false;
     }
     final normalizedItemType = itemType.trim().toLowerCase();
+    if (normalizedItemType == 'movie') {
+      seasonNumber = null;
+      episodeNumber = null;
+      preferSeries = false;
+    }
     final resolvedRecognizedItemType = switch (normalizedItemType) {
       'movie' => 'movie',
       'series' => 'series',
@@ -630,6 +635,20 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     required String fallbackTitle,
   }) {
     final baseTitle = _cleanIndexedTitleLabel(fallbackTitle);
+
+    // A movie version folder is a presentation detail, not a title.  The
+    // basic WebDAV seed intentionally starts with the file name, so using it
+    // here would submit queries such as `...2160p.iTunes.WEB-DL...` to every
+    // provider.  Resolve the outer movie directory once and reuse that title
+    // for all versions (and for files nested below a version directory).
+    if (!scannedItem.metadataSeed.hasSidecarMatch &&
+        !_hasEpisodeMetadataHint(scannedItem, recognition)) {
+      final movieRootTitle = _movieVersionRootTitle(scannedItem.actualAddress);
+      if (movieRootTitle.isNotEmpty) {
+        return movieRootTitle;
+      }
+    }
+
     if (!_isStructureInferredEpisodeLike(source, scannedItem)) {
       return baseTitle;
     }
@@ -651,6 +670,54 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     // series match across every episode. Episode numbers are still used later
     // when a per-episode still is requested.
     return seriesTitle;
+  }
+
+  bool _hasEpisodeMetadataHint(
+    WebDavScannedItem scannedItem,
+    NasMediaRecognition recognition,
+  ) {
+    final seedType = scannedItem.metadataSeed.itemType.trim().toLowerCase();
+    final recognizedType = recognition.itemType.trim().toLowerCase();
+    if (seedType == 'movie' || recognizedType == 'movie') {
+      return false;
+    }
+    if (const {'episode', 'series', 'season'}.contains(seedType) ||
+        const {'episode', 'series', 'season'}.contains(recognizedType)) {
+      return true;
+    }
+    return (scannedItem.metadataSeed.seasonNumber ?? 0) > 0 ||
+        scannedItem.metadataSeed.episodeNumber != null ||
+        (recognition.seasonNumber ?? 0) > 0 ||
+        recognition.episodeNumber != null;
+  }
+
+  String _movieVersionRootTitle(String actualAddress) {
+    final segments = _pathSegments(_uriPath(actualAddress));
+    if (segments.length < 3) {
+      return '';
+    }
+
+    // Match the outermost version directory.  This keeps nested `Disc`,
+    // `BDMV`, `Remux`, and similar organization folders inside the same movie
+    // root instead of treating one of them as a separate title.
+    for (var index = 1; index < segments.length - 1; index++) {
+      if (!NasMediaRecognizer.matchesMovieVersionFolderLabel(segments[index])) {
+        continue;
+      }
+      final rootIndex = index - 1;
+      if (rootIndex < 0) {
+        return '';
+      }
+      final candidate = _cleanIndexedTitleLabel(segments[rootIndex]);
+      if (candidate.isEmpty ||
+          NasMediaRecognizer.isGenericLibraryFolderLabel(candidate) ||
+          _looksLikeSeasonFolderLabel(candidate) ||
+          NasMediaRecognizer.matchesMovieVersionFolderLabel(candidate)) {
+        return '';
+      }
+      return candidate;
+    }
+    return '';
   }
 
   String _normalizeMetadataQueryToken(String value) {
@@ -875,12 +942,43 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     required String resourcePath,
     required DateTime? modifiedAt,
     required int fileSizeBytes,
+    String structureSignature = '',
   }) {
-    return [
+    final components = <String>[
       sourceId.trim(),
       resourcePath.trim(),
       modifiedAt?.toUtc().toIso8601String() ?? '',
       '$fileSizeBytes',
-    ].join('|');
+    ];
+    final normalizedStructureSignature = structureSignature.trim();
+    if (normalizedStructureSignature.isNotEmpty) {
+      components.add(normalizedStructureSignature);
+    }
+    return components.join('|');
+  }
+
+  String buildStructureFingerprintSignature(WebDavScannedItem scannedItem) {
+    final seed = scannedItem.metadataSeed;
+    if (seed.itemType.trim().toLowerCase() != 'movie' ||
+        seed.seasonNumber != null ||
+        seed.episodeNumber != null) {
+      return '';
+    }
+    final segments = _pathSegments(_uriPath(scannedItem.actualAddress));
+    if (segments.length < 3) {
+      return '';
+    }
+    var versionDirectoryIndex = -1;
+    for (var index = 1; index < segments.length - 1; index++) {
+      if (NasMediaRecognizer.matchesMovieVersionFolderLabel(segments[index])) {
+        versionDirectoryIndex = index;
+        break;
+      }
+    }
+    if (versionDirectoryIndex < 1) {
+      return '';
+    }
+    final normalizedTitle = seed.title.trim().toLowerCase();
+    return 'movie-version-v1:$normalizedTitle';
   }
 }

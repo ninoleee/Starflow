@@ -65,6 +65,7 @@ class _ExternalScanStructureModule {
     final seriesRootForResource = _mapSeriesRootForResource(
       items: items,
       seriesRootPlans: seriesRootPlans,
+      movieVersionResourceIds: context.movieVersionResourceIds,
     );
     final assignment = _assignItemsToStructure(
       items: items,
@@ -131,13 +132,69 @@ class _ExternalScanStructureModule {
       }
     }
 
+    final movieVersionResourceIds = _resolveMovieVersionResourceIds(
+      childItemsByDirectory: childItemsByDirectory,
+      recognitionByResource: recognitionByResource,
+    );
+
     return _StructureInferenceContext(
       filesByDirectory: filesByDirectory,
       childVideoCountsByDirectory: childVideoCountsByDirectory,
       childItemsByDirectory: childItemsByDirectory,
       recognitionByResource: recognitionByResource,
+      movieVersionResourceIds: movieVersionResourceIds,
       specialEpisodeKeywords: specialEpisodeKeywords,
     );
+  }
+
+  Set<String> _resolveMovieVersionResourceIds({
+    required Map<String, Map<String, List<_PendingWebDavScannedItem>>>
+        childItemsByDirectory,
+    required Map<String, NasMediaRecognition> recognitionByResource,
+  }) {
+    final resourceIds = <String>{};
+    for (final parentEntry in childItemsByDirectory.entries) {
+      final parentDepth = _segmentsFromKey(parentEntry.key).length;
+      final movieVersionGroups = parentEntry.value.entries.where((entry) {
+        if (!NasMediaRecognizer.matchesMovieVersionFolderLabel(entry.key)) {
+          return false;
+        }
+        return entry.value.every((item) {
+          final directories = item.relativeDirectories;
+          // A version folder may contain another organization layer (for
+          // example Disc 1, CD 2, or a release subdirectory).  The child map
+          // already contains every descendant item, so only require that the
+          // version directory is the first child below this parent.
+          if (directories.length <= parentDepth ||
+              directories[parentDepth] != entry.key) {
+            return false;
+          }
+          final seed = item.metadataSeed;
+          final recognition = recognitionByResource[item.resourceId];
+          final seedType = seed.itemType.trim().toLowerCase();
+          final recognitionType = recognition?.itemType.trim().toLowerCase();
+          return seedType != 'episode' &&
+              seedType != 'series' &&
+              seedType != 'season' &&
+              recognitionType != 'episode' &&
+              recognitionType != 'series' &&
+              recognitionType != 'season' &&
+              seed.seasonNumber == null &&
+              seed.episodeNumber == null &&
+              recognition?.seasonNumber == null &&
+              recognition?.episodeNumber == null;
+        });
+      }).toList(growable: false);
+      if (movieVersionGroups.length < 2) {
+        continue;
+      }
+      resourceIds.addAll(
+        movieVersionGroups.expand(
+          (entry) => entry.value.map((item) => item.resourceId),
+        ),
+      );
+    }
+    return resourceIds;
   }
 
   Map<String, _SeriesRootInferencePlan> _buildSeriesRootPlans(
@@ -167,9 +224,13 @@ class _ExternalScanStructureModule {
   Map<String, String> _mapSeriesRootForResource({
     required List<_PendingWebDavScannedItem> items,
     required Map<String, _SeriesRootInferencePlan> seriesRootPlans,
+    required Set<String> movieVersionResourceIds,
   }) {
     final seriesRootForResource = <String, String>{};
     for (final item in items) {
+      if (movieVersionResourceIds.contains(item.resourceId)) {
+        continue;
+      }
       String? matchedRootKey;
       for (var length = item.relativeDirectories.length;
           length >= 0;
@@ -349,6 +410,22 @@ class _ExternalScanStructureModule {
   ) {
     final seed = item.metadataSeed;
     final recognition = context.recognitionByResource[item.resourceId];
+    if (context.movieVersionResourceIds.contains(item.resourceId)) {
+      final recognizedTitle = _movieVersionParentTitle(item) ??
+          (recognition?.parentTitle.trim().isNotEmpty == true
+              ? recognition!.parentTitle.trim()
+              : recognition?.title.trim() ?? '');
+      return item.copyWith(
+        metadataSeed: seed.copyWith(
+          title: recognizedTitle.isNotEmpty ? recognizedTitle : seed.title,
+          durationLabel: seed.durationLabel.trim().isEmpty ||
+                  seed.durationLabel.trim() == '剧集'
+              ? '文件'
+              : seed.durationLabel,
+          itemType: 'movie',
+        ),
+      );
+    }
     final explicitSeasonNumber = seed.seasonNumber ?? recognition?.seasonNumber;
     final explicitEpisodeNumber =
         seed.episodeNumber ?? recognition?.episodeNumber;
@@ -385,6 +462,22 @@ class _ExternalScanStructureModule {
                 : null),
       ),
     );
+  }
+
+  String? _movieVersionParentTitle(_PendingWebDavScannedItem item) {
+    final directories = item.relativeDirectories;
+    for (var index = 1; index < directories.length; index++) {
+      if (!NasMediaRecognizer.matchesMovieVersionFolderLabel(
+        directories[index],
+      )) {
+        continue;
+      }
+      final parentTitle = directories[index - 1].trim();
+      if (parentTitle.isNotEmpty) {
+        return parentTitle;
+      }
+    }
+    return null;
   }
 
   Map<String, WebDavMetadataSeed> _resolveEpisodeOverrides({
@@ -845,6 +938,7 @@ class _StructureInferenceContext {
     required this.childVideoCountsByDirectory,
     required this.childItemsByDirectory,
     required this.recognitionByResource,
+    required this.movieVersionResourceIds,
     required this.specialEpisodeKeywords,
   });
 
@@ -853,6 +947,7 @@ class _StructureInferenceContext {
   final Map<String, Map<String, List<_PendingWebDavScannedItem>>>
       childItemsByDirectory;
   final Map<String, NasMediaRecognition> recognitionByResource;
+  final Set<String> movieVersionResourceIds;
   final List<String> specialEpisodeKeywords;
 }
 

@@ -63,33 +63,18 @@ class TmdbMetadataClient {
       preferSeries: preferSeries,
     );
     if (_resolvedMatches.containsKey(cacheKey)) {
-      final cached = _resolvedMatches[cacheKey];
-      metadataSearchTrace(
-        'tmdb.matchTitle.cache-hit',
-        fields: <String, Object?>{
-          'query': query,
-          'cleanedQuery': cleanedQuery,
-          'year': year,
-          'preferSeries': preferSeries,
-          'matched': cached != null,
-          'title': cached?.title ?? '',
-          'tmdbId': cached?.tmdbId ?? 0,
-        },
-      );
-      return cached;
+      // Cache hits are intentionally silent: a large metadata prefetch can
+      // reuse the same series result hundreds of times, and logging each hit
+      // creates more diagnostic noise than useful information. Real requests,
+      // failures and completed matches remain observable below.
+      return _resolvedMatches[cacheKey];
     }
 
     final inflight = _inflightMatches[cacheKey];
     if (inflight != null) {
-      metadataSearchTrace(
-        'tmdb.matchTitle.inflight-hit',
-        fields: <String, Object?>{
-          'query': query,
-          'cleanedQuery': cleanedQuery,
-          'year': year,
-          'preferSeries': preferSeries,
-        },
-      );
+      // Joining an existing request is also a normal fast path; keep the
+      // request/finish pair as the diagnostic boundary instead of emitting a
+      // line for every waiter.
       return inflight;
     }
 

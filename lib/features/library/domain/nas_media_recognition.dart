@@ -83,6 +83,15 @@ class NasMediaRecognizer {
       MediaNaming.sharedDescriptorKeywords;
   static const List<String> _wrapperOnlyDescriptorKeywords =
       MediaNaming.wrapperOnlyDescriptorKeywords;
+  // These short labels are useful inside technical version directories, but
+  // are deliberately excluded from general title cleanup to avoid changing
+  // legitimate movie and series names.
+  static const List<String> _wrapperRecognitionOnlyDescriptorKeywords = [
+    '国英双语',
+    '英语',
+    '高码',
+    '特效',
+  ];
 
   // Technical/release tokens that usually indicate wrappers rather than title.
   static const List<String> _sharedTechnicalTokenPatterns =
@@ -132,6 +141,9 @@ class NasMediaRecognizer {
           ..._wrapperOnlyTokenPatterns,
           ...MediaNaming.escapePatternKeywords(_sharedDescriptorKeywords),
           ...MediaNaming.escapePatternKeywords(_wrapperOnlyDescriptorKeywords),
+          ...MediaNaming.escapePatternKeywords(
+            _wrapperRecognitionOnlyDescriptorKeywords,
+          ),
         ])})+\$',
     caseSensitive: false,
   );
@@ -208,6 +220,23 @@ class NasMediaRecognizer {
       return true;
     }
     return _wrapperDescriptorPattern.hasMatch(compact);
+  }
+
+  static bool matchesMovieVersionFolderLabel(String input) {
+    if (looksLikeSeasonFolderLabel(input) ||
+        looksLikeQualityEpisodeCountFolderLabel(input)) {
+      return false;
+    }
+    return matchesWrapperFolderLabel(input);
+  }
+
+  /// Returns whether [input] is a transport/library directory rather than a
+  /// title-bearing media directory.  Indexing uses this when walking upwards
+  /// from a movie version folder so paths such as `movies/4K/...` do not turn
+  /// the library root into the movie title.
+  static bool isGenericLibraryFolderLabel(String input) {
+    final normalized = _cleanTitle(input).trim().toLowerCase();
+    return normalized.isNotEmpty && _genericLibraryFolders.contains(normalized);
   }
 
   static NasMediaRecognition recognize(

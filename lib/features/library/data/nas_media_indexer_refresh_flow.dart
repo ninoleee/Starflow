@@ -562,6 +562,53 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     return sortedRecords.map((record) => record.item).toList(growable: false);
   }
 
+  Future<List<MediaItem>> loadMovieVariants(
+    MediaSourceConfig source, {
+    required String itemId,
+    String sectionId = '',
+    List<MediaCollection>? scopedCollections,
+  }) async {
+    final normalizedItemId = itemId.trim();
+    if (normalizedItemId.isEmpty) {
+      return const [];
+    }
+
+    final records = await _loadScopedRecords(
+      source,
+      sectionId: sectionId,
+      scopedCollections: scopedCollections,
+    );
+    final exactRecord = records
+        .where((record) => record.resourceId == normalizedItemId)
+        .firstOrNull;
+    if (exactRecord == null) {
+      return const [];
+    }
+
+    final group = _groupMovieVariantRecords(records)
+        .where(
+          (candidate) => candidate.records.any(
+            (record) => record.resourceId == normalizedItemId,
+          ),
+        )
+        .firstOrNull;
+    if (group == null) {
+      return [exactRecord.item];
+    }
+
+    final sortedRecords = [...group.records]..sort((left, right) {
+        final scoreCompare = _movieVariantRepresentativeScore(right)
+            .compareTo(_movieVariantRepresentativeScore(left));
+        if (scoreCompare != 0) {
+          return scoreCompare;
+        }
+        return left.resourcePath.toLowerCase().compareTo(
+              right.resourcePath.toLowerCase(),
+            );
+      });
+    return sortedRecords.map((record) => record.item).toList(growable: false);
+  }
+
   Future<List<MediaItem>> loadCachedLibraryMatchItems(
     MediaSourceConfig source, {
     String doubanId = '',
@@ -1106,6 +1153,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         resourcePath: scannedItem.actualAddress,
         modifiedAt: scannedItem.modifiedAt,
         fileSizeBytes: scannedItem.fileSizeBytes,
+        structureSignature: _buildStructureFingerprintSignature(scannedItem),
       );
       final existing = existingRecords[scannedItem.resourceId];
       final preserveManualMetadata = existing?.manualMetadataLocked == true;
@@ -1465,6 +1513,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         resourcePath: effectiveItem.actualAddress,
         modifiedAt: effectiveItem.modifiedAt,
         fileSizeBytes: effectiveItem.fileSizeBytes,
+        structureSignature: _buildStructureFingerprintSignature(effectiveItem),
       );
       final updatedRecord = await _indexScannedItem(
         source,

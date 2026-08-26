@@ -49,6 +49,14 @@ String detailLibraryMatchOptionLabel(MediaDetailTarget target) {
   return _detailLibraryMatchService.libraryMatchOptionLabel(target);
 }
 
+String detailLibrarySourceOptionLabel(MediaDetailTarget target) {
+  final source = target.sourceName.trim();
+  if (source.isNotEmpty) {
+    return source;
+  }
+  return target.sourceKind?.label ?? '本地资源';
+}
+
 String detailPlayableVariantOptionLabel(MediaDetailTarget target) {
   final source = target.sourceName.trim();
   final fileLabel = resolveDetailPathTail(
@@ -75,7 +83,6 @@ class DetailResourceInfoSection extends StatelessWidget {
     required this.playbackEngine,
     required this.libraryView,
     required this.onSearchOnline,
-    required this.onOpenTelevisionPlayableVariantPicker,
     required this.onLibraryMatchSelected,
     required this.onOpenTelevisionLibraryMatchPicker,
     required this.onMatchLocalResource,
@@ -91,7 +98,6 @@ class DetailResourceInfoSection extends StatelessWidget {
   final PlaybackEngine playbackEngine;
   final DetailLibraryMatchViewState libraryView;
   final VoidCallback onSearchOnline;
-  final VoidCallback onOpenTelevisionPlayableVariantPicker;
   final ValueChanged<int> onLibraryMatchSelected;
   final VoidCallback onOpenTelevisionLibraryMatchPicker;
   final VoidCallback? onMatchLocalResource;
@@ -112,20 +118,7 @@ class DetailResourceInfoSection extends StatelessWidget {
         : PlaybackEngine.embeddedMpv;
     final resourceFacts = _buildDetailResourceFacts(target);
     final doubanSourceUri = _resolveDoubanSourceUri(target);
-    final showPlayableVariantSwitcher = _shouldShowPlayableVariantSwitcher(
-      target,
-      libraryView,
-    );
-    final playableChoiceCount =
-        libraryView.choices.where((choice) => choice.isPlayable).length;
-    final episodeLikeChoiceCount = libraryView.choices.where((choice) {
-      final itemType = choice.itemType.trim().toLowerCase();
-      final playbackItemType =
-          choice.playbackTarget?.normalizedItemType.trim().toLowerCase() ?? '';
-      return itemType == 'episode' || playbackItemType == 'episode';
-    }).length;
-    final showLibrarySwitcher =
-        libraryView.choices.length > 1 && !showPlayableVariantSwitcher;
+    final showLibrarySwitcher = libraryView.choices.length > 1;
     detailResourceSwitchTrace(
       'resource.ui.visibility',
       dedupeKey: _detailResourceTraceKey(target),
@@ -135,11 +128,8 @@ class DetailResourceInfoSection extends StatelessWidget {
         'isPlayable': target.isPlayable,
         'availability': target.availabilityLabel,
         'choices': libraryView.choices.length,
-        'playableChoices': playableChoiceCount,
-        'episodeLikeChoices': episodeLikeChoiceCount,
         'selectedIndex': libraryView.selectedIndex,
         'effectiveIndex': libraryView.effectiveSelectedIndex,
-        'showPlayable': showPlayableVariantSwitcher,
         'showLibrary': showLibrarySwitcher,
         'selectedChoice': _detailResourceSelectedChoiceLabel(libraryView),
         'choiceSample': _detailResourceChoiceSample(libraryView.choices),
@@ -154,36 +144,7 @@ class DetailResourceInfoSection extends StatelessWidget {
             label: '状态',
             value: target.availabilityLabel,
           ),
-        if (showPlayableVariantSwitcher) ...[
-          const SizedBox(height: 12),
-          const InfoLabel('播放版本'),
-          const SizedBox(height: 8),
-          _DetailLibraryMatchSelectionControl(
-            isTelevision: isTelevision,
-            title: '播放版本',
-            focusId: 'detail:resource:playable-selector',
-            televisionOnPressed: onOpenTelevisionPlayableVariantPicker,
-            viewData: libraryView,
-            onSelected: onLibraryMatchSelected,
-            labelBuilder: detailPlayableVariantOptionLabel,
-          ),
-          if (detailMovieVariantOptionSubtitle(
-            libraryView.choices[libraryView.effectiveSelectedIndex],
-          ).trim().isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              detailMovieVariantOptionSubtitle(
-                libraryView.choices[libraryView.effectiveSelectedIndex],
-              ).trim(),
-              style: const TextStyle(
-                color: Color(0xFF9DB0CF),
-                fontSize: 13,
-                height: 1.45,
-              ),
-            ),
-          ],
-        ],
-        if (libraryView.choices.length > 1 && !showPlayableVariantSwitcher) ...[
+        if (showLibrarySwitcher) ...[
           const SizedBox(height: 12),
           const InfoLabel('本地资源'),
           const SizedBox(height: 8),
@@ -194,6 +155,7 @@ class DetailResourceInfoSection extends StatelessWidget {
             televisionOnPressed: onOpenTelevisionLibraryMatchPicker,
             viewData: libraryView,
             onSelected: onLibraryMatchSelected,
+            labelBuilder: detailLibrarySourceOptionLabel,
           ),
         ],
         if (target.searchQuery.trim().isNotEmpty) ...[
@@ -576,6 +538,59 @@ String _detailResourceChoiceSample(List<MediaDetailTarget> choices) {
   return choices.take(4).map(detailPlayableVariantOptionLabel).join(' || ');
 }
 
+class DetailPlayableVariantSelector extends StatelessWidget {
+  const DetailPlayableVariantSelector({
+    super.key,
+    required this.isTelevision,
+    required this.televisionOnPressed,
+    required this.viewData,
+    required this.onSelected,
+  });
+
+  final bool isTelevision;
+  final VoidCallback televisionOnPressed;
+  final DetailLibraryMatchViewState viewData;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    if (viewData.choices.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final selectedIndex = viewData.effectiveSelectedIndex;
+    final selectedChoice = viewData.choices[selectedIndex];
+    final subtitle = detailMovieVariantOptionSubtitle(selectedChoice).trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const InfoLabel('播放版本'),
+        const SizedBox(height: 8),
+        _DetailLibraryMatchSelectionControl(
+          isTelevision: isTelevision,
+          title: '播放版本',
+          focusId: 'detail:resource:playable-selector',
+          televisionOnPressed: televisionOnPressed,
+          viewData: viewData,
+          onSelected: onSelected,
+          labelBuilder: detailPlayableVariantOptionLabel,
+        ),
+        if (subtitle.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: const TextStyle(
+              color: Color(0xFF9DB0CF),
+              fontSize: 13,
+              height: 1.45,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _DetailLibraryMatchSelectionControl extends StatelessWidget {
   const _DetailLibraryMatchSelectionControl({
     required this.isTelevision,
@@ -657,7 +672,7 @@ class _DetailResourceFact {
   final bool selectable;
 }
 
-bool _shouldShowPlayableVariantSwitcher(
+bool shouldShowDetailPlayableVariantSwitcher(
   MediaDetailTarget target,
   DetailLibraryMatchViewState viewData,
 ) {

@@ -130,7 +130,8 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('播放版本'), findsOneWidget);
+    expect(find.text('播放版本'), findsNothing);
+    expect(find.text('本地资源'), findsOneWidget);
     final dropdown = tester.widget<DropdownButton<int>>(
       find.byType(DropdownButton<int>),
     );
@@ -138,8 +139,8 @@ void main() {
         .map((item) => (item.child as Text).data ?? '')
         .toList(growable: false);
     expect(dropdown.value, 1);
-    expect(labels, contains('nas-A · 测试影片 · 版本A'));
-    expect(labels, contains('nas-B · 测试影片 · 版本B'));
+    expect(labels, contains('nas-A'));
+    expect(labels, contains('nas-B'));
   });
 
   testWidgets(
@@ -242,7 +243,8 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('播放版本'), findsOneWidget);
+    expect(find.text('播放版本'), findsNothing);
+    expect(find.text('本地资源'), findsOneWidget);
     final dropdown = tester.widget<DropdownButton<int>>(
       find.byType(DropdownButton<int>),
     );
@@ -250,8 +252,8 @@ void main() {
         .map((item) => (item.child as Text).data ?? '')
         .toList(growable: false);
     expect(dropdown.value, 0);
-    expect(labels.first, '客厅 Emby · 测试影片 · Emby 版本');
-    expect(labels.last, '夸克 · 测试影片 · Quark 版本');
+    expect(labels.first, '客厅 Emby');
+    expect(labels.last, '夸克');
   });
 
   testWidgets(
@@ -340,8 +342,8 @@ void main() {
         .map((item) => (item.child as Text).data ?? '')
         .toList(growable: false);
     expect(dropdown.value, 0);
-    expect(labels.first, '客厅 Emby · 测试影片 · Emby 版本');
-    expect(labels.last, '夸克 · 测试影片 · Quark 版本');
+    expect(labels.first, '客厅 Emby');
+    expect(labels.last, '夸克');
   });
 
   testWidgets(
@@ -444,8 +446,8 @@ void main() {
         .map((item) => (item.child as Text).data ?? '')
         .toList(growable: false);
     expect(dropdown.value, 0);
-    expect(labels.first, '客厅 Emby · 测试影片 · Emby 版本');
-    expect(labels.last, '夸克 · 测试影片 · Quark 版本');
+    expect(labels.first, '客厅 Emby');
+    expect(labels.last, '夸克');
     expect(cacheRepository.lastSavedState?.libraryMatchChoices.length, 2);
     expect(cacheRepository.lastSavedState?.target.sourceId, 'emby-main');
   });
@@ -556,8 +558,8 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('播放版本'), findsOneWidget);
-    expect(find.text('本地资源'), findsNothing);
+    expect(find.text('播放版本'), findsNothing);
+    expect(find.text('本地资源'), findsOneWidget);
     final dropdown = tester.widget<DropdownButton<int>>(
       find.byType(DropdownButton<int>),
     );
@@ -565,8 +567,8 @@ void main() {
         .map((item) => (item.child as Text).data ?? '')
         .toList(growable: false);
     expect(dropdown.value, 1);
-    expect(labels, contains('nas-A · 第 1 集 · 版本A'));
-    expect(labels, contains('nas-B · 第 1 集 · 版本B'));
+    expect(labels, contains('nas-A'));
+    expect(labels, contains('nas-B'));
   });
 
   testWidgets('detail page restores indexed episode file variants',
@@ -670,6 +672,11 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(
+      find.text('资源信息'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('资源信息'), findsOneWidget);
     expect(find.text('播放版本'), findsOneWidget);
     final dropdown = tester.widget<DropdownButton<int>>(
@@ -844,7 +851,7 @@ void main() {
         .toList(growable: false);
     expect(labels, contains('nas-A · 第1集-A.mkv'));
     expect(labels, contains('nas-A · 第1集-A-备用.mkv'));
-    expect(labels, contains('nas-B · 第1集-B.mkv'));
+    expect(labels, isNot(contains('nas-B · 第1集-B.mkv')));
     expect(cacheRepository.lastSavedState?.libraryMatchChoices.length, 3);
   });
 
@@ -1487,7 +1494,7 @@ void main() {
 
     await tester.tap(find.byType(DropdownButton<int>).first);
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('夸克 · 乘风2026').last);
+    await tester.tap(find.text('夸克').last);
     await tester.pump();
     await tester.pumpAndSettle();
 

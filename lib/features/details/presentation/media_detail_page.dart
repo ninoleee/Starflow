@@ -959,6 +959,82 @@ List<MediaDetailTarget> _mergeExpandedLibraryChoices(
   return merged;
 }
 
+String _detailLibrarySourceKey(MediaDetailTarget target) {
+  final kind = (target.sourceKind ?? MediaSourceKind.nas).name;
+  final sourceId = target.sourceId.trim();
+  if (sourceId.isNotEmpty) {
+    return '$kind|id:$sourceId';
+  }
+  return '$kind|name:${target.sourceName.trim().toLowerCase()}';
+}
+
+List<MediaDetailTarget> _buildDetailSourceChoices(
+  DetailLibraryMatchViewState viewData,
+) {
+  final choices = viewData.choices;
+  if (choices.length <= 1) {
+    return choices;
+  }
+
+  final grouped = <String, List<MediaDetailTarget>>{};
+  for (final choice in choices) {
+    grouped.putIfAbsent(_detailLibrarySourceKey(choice), () => []).add(choice);
+  }
+  final selectedChoice = choices[viewData.effectiveSelectedIndex];
+  final selectedSourceKey = _detailLibrarySourceKey(selectedChoice);
+  return [
+    for (final entry in grouped.entries)
+      entry.key == selectedSourceKey ? selectedChoice : entry.value.first,
+  ];
+}
+
+DetailLibraryMatchViewState _buildDetailSourceView(
+  DetailLibraryMatchViewState viewData,
+) {
+  final choices = _buildDetailSourceChoices(viewData);
+  if (choices.isEmpty) {
+    return viewData.copyWith(choices: choices, selectedIndex: 0);
+  }
+  final selectedSourceKey = _detailLibrarySourceKey(
+    viewData.choices[viewData.effectiveSelectedIndex],
+  );
+  final selectedIndex = choices.indexWhere(
+    (choice) => _detailLibrarySourceKey(choice) == selectedSourceKey,
+  );
+  return viewData.copyWith(
+    choices: choices,
+    selectedIndex: selectedIndex < 0 ? 0 : selectedIndex,
+  );
+}
+
+DetailLibraryMatchViewState _buildDetailPlayableVariantView(
+  DetailLibraryMatchViewState viewData,
+) {
+  if (viewData.choices.isEmpty) {
+    return viewData;
+  }
+  final selectedChoice = viewData.choices[viewData.effectiveSelectedIndex];
+  final selectedSourceKey = _detailLibrarySourceKey(selectedChoice);
+  final choices = viewData.choices
+      .where(
+        (choice) =>
+            choice.isPlayable &&
+            _detailLibrarySourceKey(choice) == selectedSourceKey,
+      )
+      .toList(growable: false);
+  if (choices.isEmpty) {
+    return viewData.copyWith(choices: choices, selectedIndex: 0);
+  }
+  final selectedChoiceKey = _libraryMatchTargetKey(selectedChoice);
+  final selectedIndex = choices.indexWhere(
+    (choice) => _libraryMatchTargetKey(choice) == selectedChoiceKey,
+  );
+  return viewData.copyWith(
+    choices: choices,
+    selectedIndex: selectedIndex < 0 ? 0 : selectedIndex,
+  );
+}
+
 int _resolveExpandedLibraryMatchIndex({
   required MediaDetailTarget target,
   required List<MediaDetailTarget> choices,
@@ -2566,8 +2642,35 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     );
   }
 
-  int get _currentLibraryMatchIndex {
-    return _pageController.currentLibraryMatchIndex;
+  void _applySelectedLibraryChoice(MediaDetailTarget choice) {
+    if (_libraryMatchChoices.isEmpty) {
+      return;
+    }
+    final index = _resolveExpandedLibraryMatchIndex(
+      target: choice,
+      choices: _libraryMatchChoices,
+    );
+    _applySelectedLibraryMatchIndex(index);
+  }
+
+  void _applySelectedSourceIndex(int index) {
+    final sourceView = _buildDetailSourceView(
+      _pageController.libraryMatchView,
+    );
+    if (index < 0 || index >= sourceView.choices.length) {
+      return;
+    }
+    _applySelectedLibraryChoice(sourceView.choices[index]);
+  }
+
+  void _applySelectedPlayableVariantIndex(int index) {
+    final variantView = _buildDetailPlayableVariantView(
+      _pageController.libraryMatchView,
+    );
+    if (index < 0 || index >= variantView.choices.length) {
+      return;
+    }
+    _applySelectedLibraryChoice(variantView.choices[index]);
   }
 
   void _applySelectedLibraryMatchIndex(int index) {
@@ -2653,7 +2756,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   Future<void> _openTelevisionLibraryMatchPicker() async {
     await _openTelevisionLibraryMatchPickerDialog(
       title: '选择本地资源',
-      labelBuilder: detailLibraryMatchOptionLabel,
+      labelBuilder: detailLibrarySourceOptionLabel,
+      viewData: _buildDetailSourceView(_pageController.libraryMatchView),
+      onSelected: _applySelectedSourceIndex,
     );
   }
 
@@ -2661,18 +2766,24 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     await _openTelevisionLibraryMatchPickerDialog(
       title: '选择播放版本',
       labelBuilder: detailPlayableVariantOptionLabel,
+      viewData: _buildDetailPlayableVariantView(
+        _pageController.libraryMatchView,
+      ),
+      onSelected: _applySelectedPlayableVariantIndex,
     );
   }
 
   Future<void> _openTelevisionLibraryMatchPickerDialog({
     required String title,
     required String Function(MediaDetailTarget target) labelBuilder,
+    required DetailLibraryMatchViewState viewData,
+    required ValueChanged<int> onSelected,
   }) async {
-    if (_libraryMatchChoices.length <= 1 || _isMatchingLocalResource) {
+    if (viewData.choices.length <= 1 || _isMatchingLocalResource) {
       return;
     }
 
-    final selectedIndex = _currentLibraryMatchIndex;
+    final selectedIndex = viewData.effectiveSelectedIndex;
     final nextIndex = await showDetailTelevisionPickerDialog<int>(
       context: context,
       enabled: ref.read(isTelevisionProvider).value ?? false,
@@ -2682,11 +2793,11 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       closeFocusDebugLabel: 'detail-library-match-close',
       closeFocusId: 'detail:resource:library-close',
       options: [
-        for (var index = 0; index < _libraryMatchChoices.length; index++)
+        for (var index = 0; index < viewData.choices.length; index++)
           DetailTelevisionPickerOption<int>(
             value: index,
-            title: labelBuilder(_libraryMatchChoices[index]),
-            subtitle: _libraryMatchChoices[index].availabilityLabel,
+            title: labelBuilder(viewData.choices[index]),
+            subtitle: viewData.choices[index].availabilityLabel,
             focusId: 'detail:resource:library-option:$index',
           ),
       ],
@@ -2694,7 +2805,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     if (!mounted || nextIndex == null || nextIndex == selectedIndex) {
       return;
     }
-    _applySelectedLibraryMatchIndex(nextIndex);
+    onSelected(nextIndex);
   }
 
   Widget _buildSeriesSection(
@@ -2761,13 +2872,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     return ValueListenableBuilder<DetailLibraryMatchViewState>(
       valueListenable: _pageController.libraryMatchViewListenable,
       builder: (context, libraryMatchView, _) {
+        final sourceView = _buildDetailSourceView(libraryMatchView);
         return DetailBlock(
           title: '资源信息',
           child: DetailResourceInfoSection(
             target: target,
             isTelevision: isTelevision,
             playbackEngine: playbackEngine,
-            libraryView: libraryMatchView,
+            libraryView: sourceView,
             onSearchOnline: () {
               context.pushNamed(
                 'detail-search',
@@ -2776,9 +2888,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                 },
               );
             },
-            onOpenTelevisionPlayableVariantPicker:
-                _openTelevisionPlayableVariantPicker,
-            onLibraryMatchSelected: _applySelectedLibraryMatchIndex,
+            onLibraryMatchSelected: _applySelectedSourceIndex,
             onOpenTelevisionLibraryMatchPicker:
                 _openTelevisionLibraryMatchPicker,
             onMatchLocalResource: libraryMatchView.isMatching
@@ -2988,6 +3098,36 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                           artworkFocusNode: _heroArtworkFocusNode,
                           playFocusNode: _heroPlayFocusNode,
                           onHeroFocused: _scrollDetailHeroToTop,
+                        ),
+                        ValueListenableBuilder<DetailLibraryMatchViewState>(
+                          valueListenable:
+                              _pageController.libraryMatchViewListenable,
+                          builder: (context, libraryMatchView, _) {
+                            final variantView = _buildDetailPlayableVariantView(
+                              libraryMatchView,
+                            );
+                            if (!shouldShowDetailPlayableVariantSwitcher(
+                              target,
+                              variantView,
+                            )) {
+                              return const SizedBox.shrink();
+                            }
+                            return Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                kAppPageHorizontalPadding,
+                                0,
+                                kAppPageHorizontalPadding,
+                                8,
+                              ),
+                              child: DetailPlayableVariantSelector(
+                                isTelevision: isTelevision,
+                                televisionOnPressed:
+                                    _openTelevisionPlayableVariantPicker,
+                                viewData: variantView,
+                                onSelected: _applySelectedPlayableVariantIndex,
+                              ),
+                            );
+                          },
                         ),
                         Padding(
                           padding: const EdgeInsets.symmetric(

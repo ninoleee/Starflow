@@ -181,6 +181,209 @@ void main() {
       1,
     );
   });
+
+  test('keeps movie version directories as movies instead of seasons', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'basterds-1080p',
+          address:
+              '/movies/strm/quark/无耻混蛋/1080P.国英双语.双语特效字幕/无耻混蛋.2009.1080p.strm',
+          directories: const [
+            'strm',
+            'quark',
+            '无耻混蛋',
+            '1080P.国英双语.双语特效字幕',
+          ],
+        ),
+        _pendingItem(
+          id: 'basterds-4k',
+          address:
+              '/movies/strm/quark/无耻混蛋/4K.国英双语.双语特效字幕/无耻混蛋.2009.2160p.strm',
+          directories: const [
+            'strm',
+            'quark',
+            '无耻混蛋',
+            '4K.国英双语.双语特效字幕',
+          ],
+        ),
+        _pendingItem(
+          id: 'basterds-english',
+          address:
+              '/movies/strm/quark/无耻混蛋/4K.英语.外挂简繁特效/无耻混蛋.2009.english.strm',
+          directories: const [
+            'strm',
+            'quark',
+            '无耻混蛋',
+            '4K.英语.外挂简繁特效',
+          ],
+        ),
+        _pendingItem(
+          id: 'basterds-high-bitrate',
+          address:
+              '/movies/strm/quark/无耻混蛋/4K.高码.国英双语.双语特效字幕/无耻混蛋.2009.high-bitrate.strm',
+          directories: const [
+            'strm',
+            'quark',
+            '无耻混蛋',
+            '4K.高码.国英双语.双语特效字幕',
+          ],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(resolved, hasLength(4));
+    expect(
+      resolved.map((item) => item.metadataSeed.itemType),
+      everyElement('movie'),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.title),
+      everyElement('无耻混蛋'),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.seasonNumber),
+      everyElement(isNull),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.episodeNumber),
+      everyElement(isNull),
+    );
+  });
+
+  test('keeps episode-marked files inside quality wrappers as episodes', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'show-1080p-s01e01',
+          address: '/movies/strm/quark/示例剧/1080P.国语版/示例剧.S01E01.1080p.strm',
+          directories: const ['strm', 'quark', '示例剧', '1080P.国语版'],
+        ),
+        _pendingItem(
+          id: 'show-4k-s01e01',
+          address: '/movies/strm/quark/示例剧/4K.国语版/示例剧.S01E01.2160p.strm',
+          directories: const ['strm', 'quark', '示例剧', '4K.国语版'],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(
+      resolved.map((item) => item.metadataSeed.itemType),
+      everyElement('episode'),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.episodeNumber),
+      everyElement(1),
+    );
+  });
+
+  test('merges nested files below each movie version directory', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'shameless-1080p-part1',
+          address: '/movies/strm/quark/无耻之徒/1080P.国语版/Disc 1/part-1.strm',
+          directories: const [
+            'strm',
+            'quark',
+            '无耻之徒',
+            '1080P.国语版',
+            'Disc 1',
+          ],
+        ),
+        _pendingItem(
+          id: 'shameless-1080p-part2',
+          address: '/movies/strm/quark/无耻之徒/1080P.国语版/Disc 1/part-2.strm',
+          directories: const [
+            'strm',
+            'quark',
+            '无耻之徒',
+            '1080P.国语版',
+            'Disc 1',
+          ],
+        ),
+        _pendingItem(
+          id: 'shameless-4k-part1',
+          address: '/movies/strm/quark/无耻之徒/4K.国英双语/Remux/part-1.strm',
+          directories: const [
+            'strm',
+            'quark',
+            '无耻之徒',
+            '4K.国英双语',
+            'Remux',
+          ],
+        ),
+        _pendingItem(
+          id: 'shameless-4k-part2',
+          address: '/movies/strm/quark/无耻之徒/4K.国英双语/Remux/part-2.strm',
+          directories: const [
+            'strm',
+            'quark',
+            '无耻之徒',
+            '4K.国英双语',
+            'Remux',
+          ],
+        ),
+        _pendingItem(
+          id: 'shameless-web-part1',
+          address: '/movies/strm/quark/无耻之徒/1080P.英语.外挂字幕/WEB/part-1.strm',
+          directories: const [
+            'strm',
+            'quark',
+            '无耻之徒',
+            '1080P.英语.外挂字幕',
+            'WEB',
+          ],
+        ),
+        _pendingItem(
+          id: 'shameless-web-part2',
+          address: '/movies/strm/quark/无耻之徒/1080P.英语.外挂字幕/WEB/part-2.strm',
+          directories: const [
+            'strm',
+            'quark',
+            '无耻之徒',
+            '1080P.英语.外挂字幕',
+            'WEB',
+          ],
+        ),
+        _pendingItem(
+          id: 'shameless-hdr-part1',
+          address: '/movies/strm/quark/无耻之徒/4K.高码.国英双语/BDMV/part-1.strm',
+          directories: const [
+            'strm',
+            'quark',
+            '无耻之徒',
+            '4K.高码.国英双语',
+            'BDMV',
+          ],
+        ),
+        _pendingItem(
+          id: 'shameless-hdr-part2',
+          address: '/movies/strm/quark/无耻之徒/4K.高码.国英双语/BDMV/part-2.strm',
+          directories: const [
+            'strm',
+            'quark',
+            '无耻之徒',
+            '4K.高码.国英双语',
+            'BDMV',
+          ],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(resolved, hasLength(8));
+    expect(
+      resolved.map((item) => item.metadataSeed.itemType),
+      everyElement('movie'),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.title),
+      everyElement('无耻之徒'),
+    );
+  });
 }
 
 ExternalScanPendingItem _pendingItem({

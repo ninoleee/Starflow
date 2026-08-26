@@ -2826,6 +2826,234 @@ void main() {
   });
 
   test(
+      'NasMediaIndexer collapses movie version folders into one playable movie with variants',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-basterds-variants',
+      name: 'WebDAV Movies',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/movies/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'basterds-1080p',
+          path: 'strm/quark/无耻混蛋/1080P.国英双语.双语特效字幕/无耻混蛋.2009.1080p.strm',
+          title: '无耻混蛋',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+          year: 2009,
+        ),
+        _PendingTestItem(
+          id: 'basterds-4k',
+          path: 'strm/quark/无耻混蛋/4K.国英双语.双语特效字幕/无耻混蛋.2009.2160p.strm',
+          title: '无耻混蛋',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+          year: 2009,
+        ),
+        _PendingTestItem(
+          id: 'basterds-english',
+          path: 'strm/quark/无耻混蛋/4K.英语.外挂简繁特效/无耻混蛋.2009.english.strm',
+          title: '无耻混蛋',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+          year: 2009,
+        ),
+        _PendingTestItem(
+          id: 'basterds-high-bitrate',
+          path: 'strm/quark/无耻混蛋/4K.高码.国英双语.双语特效字幕/无耻混蛋.2009.high-bitrate.strm',
+          title: '无耻混蛋',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+          year: 2009,
+        ),
+        _PendingTestItem(
+          id: 'basterds-1080p-part2',
+          path: 'strm/quark/无耻混蛋/1080P.国英双语.双语特效字幕/Disc 1/part-2.strm',
+          title: '无耻混蛋',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+          year: 2009,
+        ),
+        _PendingTestItem(
+          id: 'basterds-4k-part2',
+          path: 'strm/quark/无耻混蛋/4K.国英双语.双语特效字幕/Remux/part-2.strm',
+          title: '无耻混蛋',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+          year: 2009,
+        ),
+        _PendingTestItem(
+          id: 'basterds-english-part2',
+          path: 'strm/quark/无耻混蛋/4K.英语.外挂简繁特效/WEB/part-2.strm',
+          title: '无耻混蛋',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+          year: 2009,
+        ),
+        _PendingTestItem(
+          id: 'basterds-high-bitrate-part2',
+          path: 'strm/quark/无耻混蛋/4K.高码.国英双语.双语特效字幕/BDMV/part-2.strm',
+          title: '无耻混蛋',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+          year: 2009,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+
+    final library = await indexer.loadLibrary(source, limit: 20);
+    expect(library, hasLength(1));
+    final movie = library.single;
+    expect(movie.title, '无耻混蛋');
+    expect(movie.itemType, 'movie');
+    expect(movie.isPlayable, isTrue);
+
+    final variants = await indexer.loadMovieVariants(
+      source,
+      itemId: movie.id,
+    );
+    expect(variants, hasLength(8));
+    expect(variants.every((item) => item.itemType == 'movie'), isTrue);
+    expect(variants.every((item) => item.isPlayable), isTrue);
+    expect(
+      variants.map((item) => item.actualAddress),
+      containsAll(<String>[
+        'strm/quark/无耻混蛋/1080P.国英双语.双语特效字幕/无耻混蛋.2009.1080p.strm',
+        'strm/quark/无耻混蛋/4K.国英双语.双语特效字幕/无耻混蛋.2009.2160p.strm',
+        'strm/quark/无耻混蛋/4K.英语.外挂简繁特效/无耻混蛋.2009.english.strm',
+        'strm/quark/无耻混蛋/4K.高码.国英双语.双语特效字幕/无耻混蛋.2009.high-bitrate.strm',
+        'strm/quark/无耻混蛋/1080P.国英双语.双语特效字幕/Disc 1/part-2.strm',
+        'strm/quark/无耻混蛋/4K.国英双语.双语特效字幕/Remux/part-2.strm',
+        'strm/quark/无耻混蛋/4K.英语.外挂简繁特效/WEB/part-2.strm',
+        'strm/quark/无耻混蛋/4K.高码.国英双语.双语特效字幕/BDMV/part-2.strm',
+      ]),
+    );
+  });
+
+  test(
+      'NasMediaIndexer repairs cached series records when version folders become movie variants',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-basterds-migration',
+      name: 'WebDAV Movies',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/movies/',
+      enabled: true,
+      webDavStructureInferenceEnabled: false,
+    );
+    const paths = <String>[
+      'strm/quark/无耻混蛋/1080P.国英双语.双语特效字幕/无耻混蛋.2009.1080p.strm',
+      'strm/quark/无耻混蛋/4K.英语.外挂简繁特效/无耻混蛋.2009.english.strm',
+    ];
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    NasMediaIndexer buildIndexer(List<_PendingTestItem> items) {
+      return NasMediaIndexer(
+        store: store,
+        webDavNasClient: _FakeWebDavNasClient(scannedItems: items),
+        wmdbMetadataClient: WmdbMetadataClient(
+          MockClient((request) async => http.Response('', 500)),
+        ),
+        tmdbMetadataClient: TmdbMetadataClient(
+          MockClient((request) async => http.Response('', 500)),
+        ),
+        imdbRatingClient: ImdbRatingClient(
+          MockClient((request) async => http.Response('', 500)),
+        ),
+        readSettings: () => settings,
+        progressController: WebDavScrapeProgressController(),
+      );
+    }
+
+    final oldIndexer = buildIndexer([
+      for (var index = 0; index < paths.length; index++)
+        _PendingTestItem(
+          id: 'basterds-migration-$index',
+          path: paths[index],
+          title: index == 0 ? '1080P.国英双语.双语特效字幕' : '4K.英语.外挂简繁特效',
+          itemType: 'series',
+          seasonNumber: 0,
+          episodeNumber: null,
+        ),
+    ]);
+    await oldIndexer.refreshSource(source);
+    expect(
+      (await store.loadSourceRecords(source.id))
+          .every((record) => record.item.itemType == 'series'),
+      isTrue,
+    );
+
+    final repairedIndexer = buildIndexer([
+      for (var index = 0; index < paths.length; index++)
+        _PendingTestItem(
+          id: 'basterds-migration-$index',
+          path: paths[index],
+          title: '无耻混蛋',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+          year: 2009,
+        ),
+    ]);
+    await repairedIndexer.refreshSource(source);
+
+    final repairedRecords = await store.loadSourceRecords(source.id);
+    expect(repairedRecords, hasLength(2));
+    expect(
+      repairedRecords.every(
+        (record) =>
+            record.item.itemType == 'movie' &&
+            record.item.title == '无耻混蛋' &&
+            record.item.seasonNumber == null &&
+            record.fingerprint.contains('movie-version-v1:'),
+      ),
+      isTrue,
+    );
+    final library = await repairedIndexer.loadLibrary(source, limit: 20);
+    expect(library, hasLength(1));
+    expect(library.single.title, '无耻混蛋');
+  });
+
+  test(
       'NasMediaIndexer manual movie metadata converts misgrouped single-resource series back to movie',
       () async {
     final store = _MemoryNasMediaIndexStore();
@@ -3409,6 +3637,73 @@ void main() {
       reason:
           'Episode display title should not be overwritten by series match.',
     );
+  });
+
+  test(
+      'NasMediaIndexer matches movie versions by the movie root instead of the file name',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-movie-root-query',
+      name: 'WebDAV Movie Root Query',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/movies/',
+      enabled: true,
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: true,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    var wmdbRequestCount = 0;
+    var lastWmdbQuery = '';
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'basterds-root-query',
+          path:
+              'movies/strm/quark/无耻混蛋/4K.英语.外挂简繁特效/Inglourious.Basterds.2009.2160p.iTunes.WEB-DL.DD5.1.H.265-SuperMiao.(mkv).strm',
+          title:
+              'Inglourious.Basterds.2009.2160p.iTunes.WEB-DL.DD5.1.H.265-SuperMiao',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+          year: 2009,
+          hasSidecarMatch: false,
+        ),
+      ],
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async {
+          wmdbRequestCount += 1;
+          lastWmdbQuery = request.url.queryParameters['q'] ?? '';
+          return http.Response(
+            '{"data":[{"name":"无耻混蛋","originalName":"无耻混蛋","type":"movie","year":"2009","doubanVotes":1000}]}',
+            200,
+          );
+        }),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    await _drainAsyncTasks();
+
+    expect(wmdbRequestCount, 1);
+    expect(lastWmdbQuery, '无耻混蛋');
+    final records = await store.loadSourceRecords(source.id);
+    expect(records, hasLength(1));
+    expect(records.single.searchQuery, '无耻混蛋');
   });
 
   test(

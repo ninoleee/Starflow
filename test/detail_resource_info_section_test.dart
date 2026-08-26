@@ -40,7 +40,6 @@ void main() {
               playbackEngine: PlaybackEngine.embeddedMpv,
               libraryView: const DetailLibraryMatchViewState(),
               onSearchOnline: () {},
-              onOpenTelevisionPlayableVariantPicker: () {},
               onLibraryMatchSelected: (_) {},
               onOpenTelevisionLibraryMatchPicker: () {},
               onMatchLocalResource: () {},

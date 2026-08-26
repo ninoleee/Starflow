@@ -127,6 +127,32 @@ void main() {
       NasMediaRecognizer.matchesWrapperFolderLabel('4K 12集'),
       isTrue,
     );
+    for (final label in const [
+      '1080P.国英双语.双语特效字幕',
+      '4K.国英双语.双语特效字幕',
+      '4K.英语.外挂简繁特效',
+      '4K.高码.国英双语.双语特效字幕',
+    ]) {
+      expect(
+        NasMediaRecognizer.matchesMovieVersionFolderLabel(label),
+        isTrue,
+        reason: label,
+      );
+    }
+    expect(
+      NasMediaRecognizer.matchesMovieVersionFolderLabel('4K 12集'),
+      isFalse,
+    );
+  });
+
+  test('NasMediaRecognizer uses the movie folder above a version wrapper', () {
+    final result = NasMediaRecognizer.recognize(
+      'movies/strm/quark/无耻混蛋/4K.国英双语.双语特效字幕/无耻混蛋.2009.2160p.strm',
+    );
+
+    expect(result.parentTitle, '无耻混蛋');
+    expect(result.preferSeries, isFalse);
+    expect(result.itemType, isEmpty);
   });
 
   test('MediaSourceConfig matches expanded extras keywords ignoring case', () {
