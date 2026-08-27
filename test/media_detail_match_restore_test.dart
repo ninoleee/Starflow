@@ -372,40 +372,42 @@ void main() {
 
     final mediaRepository = _PreferredEntrySourceMatchMediaRepository();
     final cacheRepository = _RecordingRestoreCacheRepository();
+    final settings = AppSettings.fromJson({
+      'mediaSources': const [
+        {
+          'id': 'emby-main',
+          'name': '客厅 Emby',
+          'kind': 'emby',
+          'endpoint': 'https://emby.example',
+          'enabled': true,
+        },
+        {
+          'id': 'quark-main',
+          'name': '夸克',
+          'kind': 'quark',
+          'endpoint': 'folder-1',
+          'enabled': true,
+        },
+      ],
+      'searchProviders': const [],
+      'doubanAccount': const {'enabled': false},
+      'homeModules': const [],
+      'tmdbMetadataMatchEnabled': false,
+      'wmdbMetadataMatchEnabled': false,
+      'imdbRatingMatchEnabled': false,
+      'detailAutoLibraryMatchEnabled': false,
+    });
+    final indexer = _buildNoopNasMediaIndexer(settings);
+    addTearDown(indexer.dispose);
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          appSettingsProvider.overrideWithValue(
-            AppSettings.fromJson({
-              'mediaSources': const [
-                {
-                  'id': 'emby-main',
-                  'name': '客厅 Emby',
-                  'kind': 'emby',
-                  'endpoint': 'https://emby.example',
-                  'enabled': true,
-                },
-                {
-                  'id': 'quark-main',
-                  'name': '夸克',
-                  'kind': 'quark',
-                  'endpoint': 'folder-1',
-                  'enabled': true,
-                },
-              ],
-              'searchProviders': const [],
-              'doubanAccount': const {'enabled': false},
-              'homeModules': const [],
-              'tmdbMetadataMatchEnabled': false,
-              'wmdbMetadataMatchEnabled': false,
-              'imdbRatingMatchEnabled': false,
-              'detailAutoLibraryMatchEnabled': false,
-            }),
-          ),
+          appSettingsProvider.overrideWithValue(settings),
           mediaRepositoryProvider.overrideWithValue(mediaRepository),
           localStorageCacheRepositoryProvider
               .overrideWithValue(cacheRepository),
+          nasMediaIndexerProvider.overrideWithValue(indexer),
         ],
         child: const MaterialApp(
           home: MediaDetailPage(target: seedTarget),
@@ -414,6 +416,7 @@ void main() {
     );
 
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
     await tester.scrollUntilVisible(
       find.text('匹配资源库'),
       200,
@@ -426,7 +429,12 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.pumpAndSettle();
+    for (var attempt = 0;
+        attempt < 20 &&
+            cacheRepository.lastSavedState?.libraryMatchChoices.length != 2;
+        attempt++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
 
     expect(
       mediaRepository.calls
