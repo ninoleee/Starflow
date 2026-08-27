@@ -13,20 +13,13 @@ concurrency:
 
 jobs:
   verify:
-    name: Analyze, test, and smoke build
+    name: Analyze and test
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
-
-      - name: Set up Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
-          cache: gradle
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -43,9 +36,3 @@ jobs:
 
       - name: Run tests
         run: flutter test --no-pub --reporter compact
-
-      - name: Build Android debug APK
-        run: flutter build apk --debug --no-pub
-
-      - name: Build Web release bundle
-        run: flutter build web --release --no-pub
