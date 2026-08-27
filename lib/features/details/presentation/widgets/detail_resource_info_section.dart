@@ -544,12 +544,14 @@ class DetailPlayableVariantSelector extends StatelessWidget {
     required this.isTelevision,
     required this.televisionOnPressed,
     required this.viewData,
+    required this.selectedTarget,
     required this.onSelected,
   });
 
   final bool isTelevision;
   final VoidCallback televisionOnPressed;
   final DetailLibraryMatchViewState viewData;
+  final MediaDetailTarget selectedTarget;
   final ValueChanged<int> onSelected;
 
   @override
@@ -558,9 +560,7 @@ class DetailPlayableVariantSelector extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final selectedIndex = viewData.effectiveSelectedIndex;
-    final selectedChoice = viewData.choices[selectedIndex];
-    final subtitle = detailMovieVariantOptionSubtitle(selectedChoice).trim();
+    final subtitle = detailMovieVariantOptionSubtitle(selectedTarget).trim();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -784,8 +784,10 @@ List<_DetailResourceFact> _buildDetailResourceFacts(MediaDetailTarget target) {
       : resourcePath.isNotEmpty
           ? resourcePath
           : streamUrl;
-  final format = playback?.formatLabel.trim() ?? '';
-  final fileSize = playback?.fileSizeLabel.trim() ?? '';
+  final format =
+      _detailLibraryMatchService.playbackFormatLabelForDisplay(target);
+  final fileSize =
+      _detailLibraryMatchService.playbackFileSizeLabelForDisplay(target);
   final resolution = playback?.resolutionLabel.trim() ?? '';
   final bitrate = playback?.bitrateLabel.trim() ?? '';
   final duration = target.durationLabel.trim();

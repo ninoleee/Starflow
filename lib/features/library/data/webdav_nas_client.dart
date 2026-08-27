@@ -541,6 +541,10 @@ class WebDavNasClient {
       source,
       streamUrl: resolvedPlayableUrl,
     );
+    final resolvedContainer = _resolvePlayableContainer(
+      target.container,
+      resolvedPlayableUrl,
+    );
 
     return PlaybackTarget(
       title: target.title,
@@ -557,7 +561,7 @@ class WebDavNasClient {
       preferredMediaSourceId: target.preferredMediaSourceId,
       subtitle: target.subtitle,
       headers: _headersForResolvedStream(source, resolvedPlayableUrl),
-      container: target.container,
+      container: resolvedContainer,
       videoCodec: target.videoCodec,
       audioCodec: target.audioCodec,
       seasonNumber: target.seasonNumber,
@@ -567,6 +571,22 @@ class WebDavNasClient {
       bitrate: target.bitrate,
       fileSizeBytes: resolvedFileSizeBytes,
     );
+  }
+
+  String _resolvePlayableContainer(String current, String streamUrl) {
+    final normalizedCurrent = current.trim();
+    if (normalizedCurrent.isNotEmpty &&
+        normalizedCurrent.toLowerCase() != 'strm') {
+      return normalizedCurrent;
+    }
+    final uri = Uri.tryParse(streamUrl.trim());
+    final path = (uri?.path ?? streamUrl).trim();
+    final fileName = path.split('/').last;
+    final extensionIndex = fileName.lastIndexOf('.');
+    if (extensionIndex < 0 || extensionIndex == fileName.length - 1) {
+      return '';
+    }
+    return fileName.substring(extensionIndex + 1).trim();
   }
 
   Future<String> resolveStrmTargetUrl({

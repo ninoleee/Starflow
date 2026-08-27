@@ -5,6 +5,73 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 void main() {
+  group('DetailLibraryMatchService.movieVariantOptionSubtitle', () {
+    const service = DetailLibraryMatchService();
+
+    test('keeps only source resolution primary format and size', () {
+      const target = MediaDetailTarget(
+        title: '测试影片',
+        posterUrl: '',
+        overview: '',
+        sourceKind: MediaSourceKind.nas,
+        sourceName: '家庭 NAS',
+        availabilityLabel: '资源已就绪：WebDAV · 家庭 NAS · 按标题 + 年份匹配',
+        playbackTarget: PlaybackTarget(
+          title: '测试影片',
+          sourceId: 'nas-main',
+          streamUrl: 'https://nas.example.com/movie.mkv',
+          sourceName: '家庭 NAS',
+          sourceKind: MediaSourceKind.nas,
+          container: 'mkv',
+          videoCodec: 'hevc',
+          audioCodec: 'truehd',
+          width: 3840,
+          height: 2160,
+          fileSizeBytes: 25769803776,
+        ),
+      );
+
+      expect(
+        service.movieVariantOptionSubtitle(target),
+        '家庭 NAS · 3840x2160 · MKV · 24.0 GB',
+      );
+      expect(
+        service.playbackFormatLabelForDisplay(target),
+        'MKV · HEVC · TrueHD',
+      );
+      expect(service.playbackFileSizeLabelForDisplay(target), '24.0 GB');
+    });
+
+    test('hides the wrapper format and file size for unresolved strm', () {
+      const target = MediaDetailTarget(
+        title: '测试影片',
+        posterUrl: '',
+        overview: '',
+        sourceKind: MediaSourceKind.nas,
+        sourceName: '家庭 NAS',
+        playbackTarget: PlaybackTarget(
+          title: '测试影片',
+          sourceId: 'nas-main',
+          streamUrl: 'https://nas.example.com/movie.strm',
+          actualAddress: '/movies/movie.strm',
+          sourceName: '家庭 NAS',
+          sourceKind: MediaSourceKind.nas,
+          container: 'strm',
+          width: 3840,
+          height: 2160,
+          fileSizeBytes: 128,
+        ),
+      );
+
+      expect(
+        service.movieVariantOptionSubtitle(target),
+        '家庭 NAS · 3840x2160',
+      );
+      expect(service.playbackFormatLabelForDisplay(target), isEmpty);
+      expect(service.playbackFileSizeLabelForDisplay(target), isEmpty);
+    });
+  });
+
   group('DetailLibraryMatchService.preserveSeriesStructuralTargetIfNeeded', () {
     const service = DetailLibraryMatchService();
 

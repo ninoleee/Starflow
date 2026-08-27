@@ -129,33 +129,66 @@ class DetailLibraryMatchService {
   }
 
   String movieVariantOptionSubtitle(MediaDetailTarget target) {
-    final playback = target.playbackTarget;
-    final parts = <String>[];
-    final availability =
-        availabilityFeedbackLabel(target.availabilityLabel).trim();
-    if (availability.isNotEmpty && availability != '无') {
-      parts.add(availability);
-    }
-    final format = playback?.formatLabel.trim() ?? '';
-    if (format.isNotEmpty) {
-      parts.add(format);
-    }
-    final resolution = playback?.resolutionLabel.trim() ?? '';
-    if (resolution.isNotEmpty) {
-      parts.add(resolution);
-    }
-    final fileSize = playback?.fileSizeLabel.trim() ?? '';
-    if (fileSize.isNotEmpty) {
-      parts.add(fileSize);
-    }
+    final sourceName = target.sourceName.trim();
+    final source = sourceName.isNotEmpty
+        ? sourceName
+        : (target.sourceKind?.label.trim() ?? '');
+    final resolution = target.playbackTarget?.resolutionLabel.trim() ?? '';
+    final format = playbackFormatLabelForDisplay(
+      target,
+      primaryOnly: true,
+    );
+    final fileSize = playbackFileSizeLabelForDisplay(target);
+    final parts = <String>[
+      if (source.isNotEmpty) source,
+      if (resolution.isNotEmpty) resolution,
+      if (format.isNotEmpty) format,
+      if (fileSize.isNotEmpty) fileSize,
+    ];
     if (parts.isNotEmpty) {
       return parts.join(' · ');
     }
-    final actualAddress = playback?.actualAddress.trim() ?? '';
+    final actualAddress = target.playbackTarget?.actualAddress.trim() ?? '';
     if (actualAddress.isNotEmpty) {
       return actualAddress;
     }
     return target.resourcePath.trim();
+  }
+
+  String playbackFormatLabelForDisplay(
+    MediaDetailTarget target, {
+    bool primaryOnly = false,
+  }) {
+    final playback = target.playbackTarget;
+    if (playback == null) {
+      return '';
+    }
+    final parts = playback.formatLabel
+        .split('·')
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .where(
+          (part) =>
+              !(_isUnresolvedNasStrm(target) && part.toLowerCase() == 'strm'),
+        )
+        .toList(growable: false);
+    if (parts.isEmpty) {
+      return '';
+    }
+    return primaryOnly ? parts.first : parts.join(' · ');
+  }
+
+  String playbackFileSizeLabelForDisplay(MediaDetailTarget target) {
+    if (_isUnresolvedNasStrm(target)) {
+      return '';
+    }
+    return target.playbackTarget?.fileSizeLabel.trim() ?? '';
+  }
+
+  bool _isUnresolvedNasStrm(MediaDetailTarget target) {
+    final playback = target.playbackTarget;
+    return playback?.sourceKind == MediaSourceKind.nas &&
+        playback?.needsResolution == true;
   }
 
   List<String> buildManualMatchTitles({

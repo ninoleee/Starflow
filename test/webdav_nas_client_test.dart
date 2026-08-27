@@ -1536,6 +1536,7 @@ void main() {
         resolved.streamUrl,
         'https://media.example.com/lazy/e01.mkv',
       );
+      expect(resolved.container, 'mkv');
       expect(resolved.fileSizeBytes, 2147483648);
       expect(
         requests,

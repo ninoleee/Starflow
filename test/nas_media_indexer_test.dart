@@ -2837,6 +2837,13 @@ void main() {
       enabled: true,
       webDavStructureInferenceEnabled: true,
     );
+    const collection = MediaCollection(
+      id: 'https://nas.example.com/movies/strm/quark/',
+      title: '电影',
+      sourceId: 'webdav-basterds-variants',
+      sourceName: 'WebDAV Movies',
+      sourceKind: MediaSourceKind.nas,
+    );
     final client = _FakeWebDavNasClient(
       scannedItems: const [
         _PendingTestItem(
@@ -2934,9 +2941,16 @@ void main() {
       progressController: WebDavScrapeProgressController(),
     );
 
-    await indexer.refreshSource(source);
+    await indexer.refreshSource(
+      source,
+      scopedCollections: const [collection],
+    );
 
-    final library = await indexer.loadLibrary(source, limit: 20);
+    final library = await indexer.loadLibrary(
+      source,
+      scopedCollections: const [collection],
+      limit: 20,
+    );
     expect(library, hasLength(1));
     final movie = library.single;
     expect(movie.title, '无耻混蛋');
@@ -2946,6 +2960,7 @@ void main() {
     final variants = await indexer.loadMovieVariants(
       source,
       itemId: movie.id,
+      sectionId: movie.sectionId,
     );
     expect(variants, hasLength(8));
     expect(variants.every((item) => item.itemType == 'movie'), isTrue);

@@ -508,7 +508,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       return const [];
     }
 
-    final records = await _loadScopedRecords(
+    final records = await _loadIndexedVariantRecords(
       source,
       sectionId: sectionId,
       scopedCollections: scopedCollections,
@@ -573,7 +573,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       return const [];
     }
 
-    final records = await _loadScopedRecords(
+    final records = await _loadIndexedVariantRecords(
       source,
       sectionId: sectionId,
       scopedCollections: scopedCollections,
@@ -607,6 +607,37 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
             );
       });
     return sortedRecords.map((record) => record.item).toList(growable: false);
+  }
+
+  Future<List<NasMediaIndexRecord>> _loadIndexedVariantRecords(
+    MediaSourceConfig source, {
+    required String sectionId,
+    List<MediaCollection>? scopedCollections,
+  }) async {
+    if (scopedCollections != null) {
+      return _loadScopedRecords(
+        source,
+        sectionId: sectionId,
+        scopedCollections: scopedCollections,
+      );
+    }
+
+    // Detail routes already carry a concrete source/section/item identity.
+    // A source may have been indexed from selected collections, while the
+    // detail route does not retain that collection list. Recomputing the root
+    // scope here would reject the valid indexed record and hide variants.
+    final state = await _store.loadSourceState(source.id);
+    if (state == null) {
+      return const <NasMediaIndexRecord>[];
+    }
+    final normalizedSectionId = sectionId.trim();
+    if (normalizedSectionId.isNotEmpty) {
+      return _store.loadSourceRecords(
+        source.id,
+        sectionId: normalizedSectionId,
+      );
+    }
+    return _loadSourceRecordsCached(source.id);
   }
 
   Future<List<MediaItem>> loadCachedLibraryMatchItems(

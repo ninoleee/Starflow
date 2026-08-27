@@ -2766,6 +2766,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     await _openTelevisionLibraryMatchPickerDialog(
       title: '选择播放版本',
       labelBuilder: detailPlayableVariantOptionLabel,
+      subtitleBuilder: detailMovieVariantOptionSubtitle,
       viewData: _buildDetailPlayableVariantView(
         _pageController.libraryMatchView,
       ),
@@ -2776,6 +2777,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   Future<void> _openTelevisionLibraryMatchPickerDialog({
     required String title,
     required String Function(MediaDetailTarget target) labelBuilder,
+    String Function(MediaDetailTarget target)? subtitleBuilder,
     required DetailLibraryMatchViewState viewData,
     required ValueChanged<int> onSelected,
   }) async {
@@ -2797,7 +2799,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           DetailTelevisionPickerOption<int>(
             value: index,
             title: labelBuilder(viewData.choices[index]),
-            subtitle: viewData.choices[index].availabilityLabel,
+            subtitle: subtitleBuilder?.call(viewData.choices[index]) ??
+                viewData.choices[index].availabilityLabel,
             focusId: 'detail:resource:library-option:$index',
           ),
       ],
@@ -3112,6 +3115,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                             )) {
                               return const SizedBox.shrink();
                             }
+                            final selectedVariant = variantView
+                                .choices[variantView.effectiveSelectedIndex];
+                            final displayedSelectedTarget =
+                                _libraryMatchTargetKey(target) ==
+                                        _libraryMatchTargetKey(selectedVariant)
+                                    ? target
+                                    : selectedVariant;
                             return Padding(
                               padding: const EdgeInsets.fromLTRB(
                                 kAppPageHorizontalPadding,
@@ -3124,6 +3134,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                 televisionOnPressed:
                                     _openTelevisionPlayableVariantPicker,
                                 viewData: variantView,
+                                selectedTarget: displayedSelectedTarget,
                                 onSelected: _applySelectedPlayableVariantIndex,
                               ),
                             );
