@@ -1469,6 +1469,9 @@ void main() {
           sourceKind: MediaSourceKind.nas,
           actualAddress: '/dav/Shows/LazyStrm/Episode 01.strm',
           container: 'strm',
+          posterUrl: 'https://images.example.com/poster.jpg',
+          posterHeaders: {'Authorization': 'Bearer poster'},
+          backdropUrl: 'https://images.example.com/backdrop.jpg',
         ),
       );
 
@@ -1477,6 +1480,9 @@ void main() {
         'https://media.example.com/lazy/e01.m3u8',
       );
       expect(resolved.headers, isEmpty);
+      expect(resolved.posterUrl, 'https://images.example.com/poster.jpg');
+      expect(resolved.posterHeaders['Authorization'], 'Bearer poster');
+      expect(resolved.backdropUrl, 'https://images.example.com/backdrop.jpg');
     });
 
     test('resolves deferred nas strm direct-link file size', () async {

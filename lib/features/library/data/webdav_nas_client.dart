@@ -547,29 +547,10 @@ class WebDavNasClient {
       resolvedPlayableUrl,
     );
 
-    return PlaybackTarget(
-      title: target.title,
-      sourceId: target.sourceId,
+    return target.copyWith(
       streamUrl: resolvedPlayableUrl,
-      sourceName: target.sourceName,
-      sourceKind: target.sourceKind,
-      actualAddress: target.actualAddress,
-      itemId: target.itemId,
-      itemType: target.itemType,
-      year: target.year,
-      seriesId: target.seriesId,
-      seriesTitle: target.seriesTitle,
-      preferredMediaSourceId: target.preferredMediaSourceId,
-      subtitle: target.subtitle,
       headers: _headersForResolvedStream(source, resolvedPlayableUrl),
       container: resolvedContainer,
-      videoCodec: target.videoCodec,
-      audioCodec: target.audioCodec,
-      seasonNumber: target.seasonNumber,
-      episodeNumber: target.episodeNumber,
-      width: target.width,
-      height: target.height,
-      bitrate: target.bitrate,
       fileSizeBytes: resolvedFileSizeBytes,
     );
   }

@@ -1,6 +1,7 @@
 import AVFoundation
 import AVKit
 import Flutter
+import ImageIO
 import MediaPlayer
 import UIKit
 
@@ -9,6 +10,9 @@ final class PlaybackSystemSessionBridge {
   private let topViewControllerProvider: () -> UIViewController?
   private let artworkLoader = StarflowNowPlayingArtworkLoader()
   private var isActive = false
+  private var latestIsPlaying = false
+  private var interruptionWasPlaying = false
+  private var latestNowPlayingArguments: [String: Any] = [:]
   private var observers: [NSObjectProtocol] = []
 
   init(topViewControllerProvider: @escaping () -> UIViewController?) {
@@ -55,7 +59,7 @@ final class PlaybackSystemSessionBridge {
 
     isActive = active
     if active {
-      configureAudioSession(enabled: true)
+      configureAudioSession(enabled: latestIsPlaying)
       installRemoteCommands()
       registerSystemObservers()
       UIApplication.shared.beginReceivingRemoteControlEvents()
@@ -63,6 +67,9 @@ final class PlaybackSystemSessionBridge {
       unregisterSystemObservers()
       uninstallRemoteCommands()
       artworkLoader.reset()
+      latestIsPlaying = false
+      interruptionWasPlaying = false
+      latestNowPlayingArguments = [:]
       MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
       UIApplication.shared.endReceivingRemoteControlEvents()
       configureAudioSession(enabled: false)
@@ -116,7 +123,7 @@ final class PlaybackSystemSessionBridge {
     commandCenter.playCommand.isEnabled = true
     commandCenter.pauseCommand.isEnabled = true
     commandCenter.togglePlayPauseCommand.isEnabled = true
-    commandCenter.stopCommand.isEnabled = true
+    commandCenter.stopCommand.isEnabled = false
     commandCenter.skipForwardCommand.isEnabled = true
     commandCenter.skipBackwardCommand.isEnabled = true
     commandCenter.changePlaybackPositionCommand.isEnabled = true
@@ -135,10 +142,6 @@ final class PlaybackSystemSessionBridge {
     }
     commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
       self?.dispatchRemoteCommand("toggle")
-      return .success
-    }
-    commandCenter.stopCommand.addTarget { [weak self] _ in
-      self?.dispatchRemoteCommand("stop")
       return .success
     }
     commandCenter.skipForwardCommand.addTarget { [weak self] _ in
@@ -183,6 +186,10 @@ final class PlaybackSystemSessionBridge {
   }
 
   private func updateNowPlayingInfo(_ arguments: [String: Any]) {
+    guard isActive else {
+      return
+    }
+    latestNowPlayingArguments = arguments
     let title =
       (arguments["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let subtitle =
@@ -192,12 +199,17 @@ final class PlaybackSystemSessionBridge {
     let playing = arguments["playing"] as? Bool ?? false
     let buffering = arguments["buffering"] as? Bool ?? false
     let speed = (arguments["speed"] as? NSNumber)?.doubleValue ?? 1
-    let artworkUrl =
-      (arguments["artworkUrl"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    let artworkHeaders = normalizedStringMap(arguments["artworkHeaders"] as? [String: Any])
+    let artworkCandidates = normalizedNowPlayingArtworkCandidates(
+      arguments["artworkCandidates"] as? [[String: Any]]
+    )
     let hasPrevious = arguments["hasPrevious"] as? Bool ?? false
     let hasNext = arguments["hasNext"] as? Bool ?? false
     let canSeek = arguments["canSeek"] as? Bool ?? true
+
+    latestIsPlaying = playing
+    if isActive {
+      configureAudioSession(enabled: playing)
+    }
 
     var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
     info[MPMediaItemPropertyTitle] = title.isEmpty ? "Starflow" : title
@@ -219,10 +231,12 @@ final class PlaybackSystemSessionBridge {
     info[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
     artworkLoader.applyArtwork(
       to: &info,
-      urlString: artworkUrl,
-      headers: artworkHeaders
+      candidates: artworkCandidates
     ) { [weak self] in
-      self?.updateNowPlayingInfo(arguments)
+      guard let self, !self.latestNowPlayingArguments.isEmpty else {
+        return
+      }
+      self.updateNowPlayingInfo(self.latestNowPlayingArguments)
     }
     MPNowPlayingInfoCenter.default().nowPlayingInfo = info
 
@@ -235,6 +249,19 @@ final class PlaybackSystemSessionBridge {
   }
 
   private func dispatchRemoteCommand(_ command: String, positionMs: Int64? = nil) {
+    switch command {
+    case "play", "interruptionResume":
+      latestIsPlaying = true
+      configureAudioSession(enabled: true)
+    case "pause", "stop", "becomingNoisy", "interruptionPause":
+      latestIsPlaying = false
+      configureAudioSession(enabled: false)
+    case "toggle":
+      latestIsPlaying.toggle()
+      configureAudioSession(enabled: latestIsPlaying)
+    default:
+      break
+    }
     var payload: [String: Any] = ["command": command]
     if let positionMs {
       payload["positionMs"] = NSNumber(value: positionMs)
@@ -250,11 +277,16 @@ final class PlaybackSystemSessionBridge {
 
     switch interruptionType {
     case .began:
-      dispatchRemoteCommand("interruptionPause")
+      interruptionWasPlaying = latestIsPlaying
+      if interruptionWasPlaying {
+        dispatchRemoteCommand("interruptionPause")
+      }
     case .ended:
       let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
       let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
-      if options.contains(.shouldResume) {
+      let shouldResume = interruptionWasPlaying && options.contains(.shouldResume)
+      interruptionWasPlaying = false
+      if shouldResume {
         dispatchRemoteCommand("interruptionResume")
       }
     @unknown default:
@@ -311,23 +343,38 @@ final class PlaybackSystemSessionBridge {
   }
 }
 
-final class StarflowNowPlayingArtworkLoader {
-  private var artworkUrl = ""
-  private var artworkHeaders: [String: String] = [:]
+struct StarflowNowPlayingArtworkCandidate: Equatable {
+  let urlString: String
+  let headers: [String: String]
+}
+
+final class StarflowNowPlayingArtworkLoader: NSObject, URLSessionDataDelegate {
+  private static let maxDownloadBytes = 8 * 1024 * 1024
+  private static let maxPixelSize = 1200
+  private var candidates: [StarflowNowPlayingArtworkCandidate] = []
   private var artwork: MPMediaItemArtwork?
   private var dataTask: URLSessionDataTask?
+  private var activeData = Data()
+  private var activeTaskIdentifier: Int?
+  private var activeCandidateIndex: Int?
+  private var activeRefresh: (() -> Void)?
   private var generation = 0
+  private lazy var session = URLSession(
+    configuration: .default,
+    delegate: self,
+    delegateQueue: .main
+  )
 
   func applyArtwork(
     to info: inout [String: Any],
-    urlString: String,
-    headers: [String: String] = [:],
+    candidates rawCandidates: [StarflowNowPlayingArtworkCandidate],
     refresh: @escaping () -> Void
   ) {
-    let normalizedUrl = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-    let normalizedHeaders = normalizedStringMap(headers)
-    if normalizedUrl != artworkUrl || normalizedHeaders != artworkHeaders {
-      startLoading(urlString: normalizedUrl, headers: normalizedHeaders, refresh: refresh)
+    let normalizedCandidates = normalizedNowPlayingArtworkCandidates(rawCandidates)
+    if normalizedCandidates != candidates {
+      startLoading(candidates: normalizedCandidates, refresh: refresh)
+    } else if dataTask != nil {
+      activeRefresh = refresh
     }
 
     if let artwork {
@@ -340,61 +387,200 @@ final class StarflowNowPlayingArtworkLoader {
   func reset() {
     dataTask?.cancel()
     dataTask = nil
-    artworkUrl = ""
-    artworkHeaders = [:]
+    activeData.removeAll(keepingCapacity: false)
+    activeTaskIdentifier = nil
+    activeCandidateIndex = nil
+    activeRefresh = nil
+    candidates = []
     artwork = nil
     generation += 1
   }
 
   private func startLoading(
-    urlString: String,
-    headers: [String: String],
+    candidates: [StarflowNowPlayingArtworkCandidate],
     refresh: @escaping () -> Void
   ) {
     dataTask?.cancel()
     dataTask = nil
-    artworkUrl = urlString
-    artworkHeaders = headers
+    self.candidates = candidates
     artwork = nil
     generation += 1
+    loadCandidate(at: 0, refresh: refresh, generation: generation)
+  }
 
-    guard !urlString.isEmpty,
-      let url = URL(string: urlString),
+  private func loadCandidate(
+    at index: Int,
+    refresh: @escaping () -> Void,
+    generation requestGeneration: Int
+  ) {
+    guard generation == requestGeneration, candidates.indices.contains(index) else {
+      activeCandidateIndex = nil
+      activeRefresh = nil
+      return
+    }
+    let candidate = candidates[index]
+    guard let url = URL(string: candidate.urlString),
       url.scheme != nil
     else {
+      loadCandidate(at: index + 1, refresh: refresh, generation: requestGeneration)
       return
     }
 
-    let requestGeneration = generation
     var request = URLRequest(
       url: url,
       cachePolicy: .returnCacheDataElseLoad,
       timeoutInterval: 12
     )
-    for (name, value) in headers where !name.isEmpty && !value.isEmpty {
+    for (name, value) in candidate.headers where !name.isEmpty && !value.isEmpty {
       request.setValue(value, forHTTPHeaderField: name)
     }
 
-    dataTask = URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+    activeData.removeAll(keepingCapacity: false)
+    activeCandidateIndex = index
+    activeRefresh = refresh
+    let task = session.dataTask(with: request)
+    dataTask = task
+    activeTaskIdentifier = task.taskIdentifier
+    task.resume()
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    dataTask: URLSessionDataTask,
+    didReceive response: URLResponse,
+    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+  ) {
+    guard dataTask.taskIdentifier == activeTaskIdentifier else {
+      completionHandler(.cancel)
+      return
+    }
+    let expectedLength = response.expectedContentLength
+    let responseIsTooLarge =
+      expectedLength > 0 && expectedLength > Int64(Self.maxDownloadBytes)
+    let statusIsValid =
+      (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? true
+    guard !responseIsTooLarge, statusIsValid else {
+      completionHandler(.cancel)
+      return
+    }
+    activeData.removeAll(keepingCapacity: true)
+    completionHandler(.allow)
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    dataTask: URLSessionDataTask,
+    didReceive data: Data
+  ) {
+    guard dataTask.taskIdentifier == activeTaskIdentifier else {
+      return
+    }
+    guard activeData.count + data.count <= Self.maxDownloadBytes else {
+      activeData.removeAll(keepingCapacity: false)
+      dataTask.cancel()
+      return
+    }
+    activeData.append(data)
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    task: URLSessionTask,
+    didCompleteWithError error: Error?
+  ) {
+    guard task.taskIdentifier == activeTaskIdentifier else {
+      return
+    }
+    let data = activeData
+    let requestGeneration = generation
+    let candidateIndex = activeCandidateIndex
+    let refresh = activeRefresh
+    dataTask = nil
+    activeTaskIdentifier = nil
+    activeCandidateIndex = nil
+    activeRefresh = nil
+    activeData.removeAll(keepingCapacity: false)
+    guard let candidateIndex else {
+      return
+    }
+    guard error == nil, !data.isEmpty else {
+      if let refresh {
+        loadCandidate(
+          at: candidateIndex + 1,
+          refresh: refresh,
+          generation: requestGeneration
+        )
+      }
+      return
+    }
+
+    DispatchQueue.global(qos: .utility).async { [weak self] in
+      let image = Self.downsampledImage(from: data)
       DispatchQueue.main.async {
         guard let self,
-          self.generation == requestGeneration,
-          self.artworkUrl == urlString,
-          self.artworkHeaders == headers
+          self.generation == requestGeneration
         else {
           return
         }
-        self.dataTask = nil
-        guard let data,
-          let image = UIImage(data: data)
-        else {
+        guard let image else {
+          if let refresh {
+            self.loadCandidate(
+              at: candidateIndex + 1,
+              refresh: refresh,
+              generation: requestGeneration
+            )
+          }
           return
         }
         self.artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-        refresh()
+        refresh?()
       }
     }
-    dataTask?.resume()
+  }
+
+  private static func downsampledImage(from data: Data) -> UIImage? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+      return nil
+    }
+    let options: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+      kCGImageSourceShouldCacheImmediately: true,
+    ]
+    guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+      return nil
+    }
+    return UIImage(cgImage: image)
+  }
+}
+
+func normalizedNowPlayingArtworkCandidates(
+  _ raw: [[String: Any]]?
+) -> [StarflowNowPlayingArtworkCandidate] {
+  return normalizedNowPlayingArtworkCandidates(
+    (raw ?? []).map { item in
+      StarflowNowPlayingArtworkCandidate(
+        urlString: (item["url"] as? String) ?? "",
+        headers: normalizedStringMap(item["headers"] as? [String: Any])
+      )
+    }
+  )
+}
+
+func normalizedNowPlayingArtworkCandidates(
+  _ raw: [StarflowNowPlayingArtworkCandidate]
+) -> [StarflowNowPlayingArtworkCandidate] {
+  var seenUrls = Set<String>()
+  return raw.compactMap { candidate in
+    let urlString = candidate.urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !urlString.isEmpty, seenUrls.insert(urlString).inserted else {
+      return nil
+    }
+    return StarflowNowPlayingArtworkCandidate(
+      urlString: urlString,
+      headers: normalizedStringMap(candidate.headers)
+    )
   }
 }
 
@@ -424,7 +610,11 @@ enum StarflowAudioSession {
   static func configurePlayback(
     enabled: Bool,
     owner: String,
-    options: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
+    options: AVAudioSession.CategoryOptions = [
+      .allowAirPlay,
+      .allowBluetoothHFP,
+      .allowBluetoothA2DP,
+    ]
   ) {
     let session = AVAudioSession.sharedInstance()
     if enabled {

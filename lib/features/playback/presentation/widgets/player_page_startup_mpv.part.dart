@@ -239,6 +239,9 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         },
       );
       unawaited(_syncBackgroundPlayback(enabled: true));
+      if (!_playbackPageInForeground) {
+        unawaited(_setIosBackgroundAudioOnly(true));
+      }
       unawaited(_syncPlaybackSystemSession(force: true));
     } catch (error, stackTrace) {
       _traceQuarkPlaybackStartup(

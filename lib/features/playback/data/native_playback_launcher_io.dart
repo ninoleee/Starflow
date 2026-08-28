@@ -23,6 +23,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
     PlaybackTarget target, {
     required PlaybackDecodeMode decodeMode,
     required double subtitleScale,
+    required bool backgroundPlaybackEnabled,
     required PlaybackSubtitlePreference subtitlePreference,
     required List<String> subtitlePreferredLanguages,
     PlaybackEpisodeQueue? episodeQueue,
@@ -60,6 +61,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
           'headersJson': jsonEncode(target.headers),
           'decodeMode': decodeMode.name,
           'subtitleScale': clampPlaybackSubtitleScale(subtitleScale),
+          'backgroundPlaybackEnabled': backgroundPlaybackEnabled,
           'subtitlePreference': subtitlePreference.name,
           'subtitlePreferredLanguages': subtitlePreferredLanguages,
           'playbackTargetJson': jsonEncode(target.toJson()),

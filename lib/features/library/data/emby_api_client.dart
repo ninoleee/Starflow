@@ -281,20 +281,10 @@ class EmbyApiClient {
         ? resolvedSourcePath
         : target.actualAddress;
 
-    return PlaybackTarget(
-      title: target.title,
-      sourceId: target.sourceId,
-      itemId: target.itemId,
-      itemType: target.itemType,
-      year: target.year,
-      seriesId: target.seriesId,
-      seriesTitle: target.seriesTitle,
+    return target.copyWith(
       preferredMediaSourceId: mediaSource['Id'] as String? ?? '',
       streamUrl: resolvedUri.toString(),
       actualAddress: actualAddress,
-      sourceName: target.sourceName,
-      sourceKind: target.sourceKind,
-      subtitle: target.subtitle,
       container: mediaSource['Container'] as String? ?? '',
       videoCodec: videoStream?['Codec'] as String? ?? '',
       audioCodec: audioStream?['Codec'] as String? ?? '',

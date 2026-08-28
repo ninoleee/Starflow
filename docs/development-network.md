@@ -18,8 +18,9 @@
 - 持久化图片缓存 identity 已升级成 `URL + headers`，并增加磁盘 metadata、`30` 天过期和 stale fallback；这会减少不同鉴权图片串 cache，也减少短期失败时的重复拉图
 - “空库自动重建”已经转到后台调度器；当前读链路不再同步等待一次重建任务完成
 - 播放启动链已经收口到 `PlaybackStartupCoordinator / PlaybackTargetResolver / PlaybackEngineRouter / PlaybackStartupExecutor`；播放器打开前会先读取本地续播 / 跳过规则并按用户选择的内核做路线判断；这只调整本地准备顺序，不引入新的网络协议
-- iOS 锁屏 / 控制中心封面只复用播放目标里已有的 `posterUrl / backdropUrl` 与对应 headers；Now Playing 由单一发布方持续同步，首次展示封面时可能发起一次图片加载，不新增元数据来源或播放预检请求
+- iOS 锁屏 / 控制中心封面只复用播放目标里已有的 `posterUrl / backdropUrl` 与对应 headers；按海报、背景图顺序请求，首个候选遇到非 `2xx`、超时、超过 `8 MB` 或解码失败时自动尝试下一候选。Emby 与 NAS / WebDAV STRM 解析最终播放地址时保留图片及其鉴权头；图片随后在本地后台线程降采样到最长边 `1200 px`，不新增元数据来源或播放预检请求
 - iOS 后台播放的音频会话配置已收口到 native helper，并按调用方追踪共享会话持有状态；释放未持有的调用方不会停用其他播放器仍在使用的音频会话。失败只写结构化 native 日志，不触发额外重试或业务请求
+- iOS 关闭后台播放后进入后台会清除 Now Playing 和锁屏遥控入口，不再接受由锁屏触发的重新播放；回前台后才重新发布媒体信息
 - 播放页 presentation 现在继续拆到 `player_page.dart` + `player_page_*.part.dart` + 独立 overlay/dialog widgets；这属于本地代码组织与重建范围收口，不改变任何线上请求协议
 - 进入播放器时会更早切到“播放优先”模式；从网络侧看，首页 Hero 补数、详情页自动补全和隐藏页图片加载会更快被压住
 - `MPV` 的远程流调优和 `ISO` 设备源判断已经收口到本地策略层；重型视频不再自动切换播放器或降级质量预设

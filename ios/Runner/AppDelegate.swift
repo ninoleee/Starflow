@@ -121,6 +121,8 @@ import UIKit
           (arguments?["subtitlePreferredLanguages"] as? [String] ?? [])
           .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
           .filter { !$0.isEmpty }
+        let backgroundPlaybackEnabled =
+          arguments?["backgroundPlaybackEnabled"] as? Bool ?? false
         self?.launchNativePlaybackContainer(
           rawUrl: rawUrl,
           title: title,
@@ -129,6 +131,7 @@ import UIKit
           playbackItemKey: playbackItemKey,
           seriesKey: seriesKey,
           episodeQueueJson: episodeQueueJson,
+          backgroundPlaybackEnabled: backgroundPlaybackEnabled,
           subtitlePreference: subtitlePreference,
           subtitlePreferredLanguages: subtitlePreferredLanguages,
           result: result
@@ -321,6 +324,7 @@ import UIKit
     playbackItemKey: String,
     seriesKey: String,
     episodeQueueJson: String,
+    backgroundPlaybackEnabled: Bool,
     subtitlePreference: String,
     subtitlePreferredLanguages: [String],
     result: @escaping FlutterResult
@@ -353,6 +357,7 @@ import UIKit
       let controller = NativePlaybackViewController(
         request: request,
         episodeQueue: NativeEpisodeQueue.fromJsonString(episodeQueueJson),
+        backgroundPlaybackEnabled: backgroundPlaybackEnabled,
         subtitlePreference: subtitlePreference,
         subtitlePreferredLanguages: subtitlePreferredLanguages,
         playbackStore: self.nativePlaybackStore
@@ -681,6 +686,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   private static let playbackStartupTimeoutSeconds: TimeInterval = 30
 
   private let playbackStore: NativePlaybackMemoryStore
+  private let backgroundPlaybackEnabled: Bool
   private let subtitlePreference: String
   private let subtitlePreferredLanguages: [String]
   private let isoFormatter = ISO8601DateFormatter()
@@ -699,16 +705,21 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   private var appObservers: [NSObjectProtocol] = []
   private var lastSavedPositionMs: Int64 = -1
   private var remoteCommandsInstalled = false
+  private var interruptionWasPlaying = false
+  private var backgroundDisabledVideoTracks: [AVPlayerItemTrack] = []
+  private var appIsInBackground = false
 
   init(
     request: NativePlaybackRequest,
     episodeQueue: NativeEpisodeQueue?,
+    backgroundPlaybackEnabled: Bool,
     subtitlePreference: String,
     subtitlePreferredLanguages: [String],
     playbackStore: NativePlaybackMemoryStore
   ) {
     self.request = request
     self.episodeQueue = episodeQueue
+    self.backgroundPlaybackEnabled = backgroundPlaybackEnabled
     self.subtitlePreference = subtitlePreference
     self.subtitlePreferredLanguages = subtitlePreferredLanguages
     self.playbackStore = playbackStore
@@ -992,7 +1003,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     commandCenter.playCommand.isEnabled = true
     commandCenter.pauseCommand.isEnabled = true
     commandCenter.togglePlayPauseCommand.isEnabled = true
-    commandCenter.stopCommand.isEnabled = true
+    commandCenter.stopCommand.isEnabled = false
     commandCenter.skipForwardCommand.isEnabled = true
     commandCenter.skipBackwardCommand.isEnabled = true
     commandCenter.nextTrackCommand.isEnabled = false
@@ -1002,12 +1013,17 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     commandCenter.skipBackwardCommand.preferredIntervals = [10]
 
     commandCenter.playCommand.addTarget { [weak self] _ in
-      self?.player?.play()
-      self?.updateNowPlayingInfo()
+      guard let self, self.canStartPlaybackFromCurrentAppState else {
+        return .commandFailed
+      }
+      self.configureAudioSession(enabled: true)
+      self.player?.play()
+      self.updateNowPlayingInfo()
       return .success
     }
     commandCenter.pauseCommand.addTarget { [weak self] _ in
       self?.player?.pause()
+      self?.configureAudioSession(enabled: false)
       self?.updateNowPlayingInfo()
       return .success
     }
@@ -1016,16 +1032,16 @@ private final class NativePlaybackViewController: AVPlayerViewController {
         return .commandFailed
       }
       if player.timeControlStatus == .paused {
+        guard self.canStartPlaybackFromCurrentAppState else {
+          return .commandFailed
+        }
+        self.configureAudioSession(enabled: true)
         player.play()
       } else {
         player.pause()
+        self.configureAudioSession(enabled: false)
       }
       self.updateNowPlayingInfo()
-      return .success
-    }
-    commandCenter.stopCommand.addTarget { [weak self] _ in
-      self?.player?.pause()
-      self?.updateNowPlayingInfo()
       return .success
     }
     commandCenter.skipForwardCommand.addTarget { [weak self] _ in
@@ -1133,6 +1149,10 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   }
 
   private func updateNowPlayingInfo() {
+    guard backgroundPlaybackEnabled || !appIsInBackground else {
+      MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+      return
+    }
     guard let player else {
       return
     }
@@ -1140,7 +1160,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     let targetObject = playbackStore.decodeTargetJson(request.playbackTargetJson)
     let seriesTitle = (targetObject["seriesTitle"] as? String)?.nonEmptyTrimmed ?? ""
     let sourceName = (targetObject["sourceName"] as? String)?.nonEmptyTrimmed ?? ""
-    let artwork = resolveNowPlayingArtwork(from: targetObject)
+    let artworkCandidates = resolveNowPlayingArtworkCandidates(from: targetObject)
     var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
     info[MPMediaItemPropertyTitle] = request.title.isEmpty ? "Starflow" : request.title
 
@@ -1163,39 +1183,45 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     let elapsedSeconds = player.currentTime().seconds
     info[MPNowPlayingInfoPropertyElapsedPlaybackTime] =
       elapsedSeconds.isFinite ? max(elapsedSeconds, 0.0) : 0.0
+    let playbackRate = Double(player.rate)
     info[MPNowPlayingInfoPropertyPlaybackRate] =
-      player.timeControlStatus == .playing ? max(Double(player.rate), 1.0) : 0.0
-    info[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
+      player.timeControlStatus == .playing ? max(playbackRate, 0.01) : 0.0
+    info[MPNowPlayingInfoPropertyDefaultPlaybackRate] =
+      playbackRate > 0 ? playbackRate : 1.0
     artworkLoader.applyArtwork(
       to: &info,
-      urlString: artwork.url,
-      headers: artwork.headers
+      candidates: artworkCandidates
     ) { [weak self] in
       self?.updateNowPlayingInfo()
     }
     MPNowPlayingInfoCenter.default().nowPlayingInfo = info
   }
 
-  private func resolveNowPlayingArtwork(
+  private func resolveNowPlayingArtworkCandidates(
     from targetObject: [String: Any]
-  ) -> (url: String, headers: [String: String]) {
+  ) -> [StarflowNowPlayingArtworkCandidate] {
+    var candidates: [StarflowNowPlayingArtworkCandidate] = []
     let posterUrl = (targetObject["posterUrl"] as? String)?.nonEmptyTrimmed ?? ""
     if !posterUrl.isEmpty {
-      return (
-        posterUrl,
-        normalizedStringMap(targetObject["posterHeaders"] as? [String: Any])
+      candidates.append(
+        StarflowNowPlayingArtworkCandidate(
+          urlString: posterUrl,
+          headers: normalizedStringMap(targetObject["posterHeaders"] as? [String: Any])
+        )
       )
     }
 
     let backdropUrl = (targetObject["backdropUrl"] as? String)?.nonEmptyTrimmed ?? ""
     if !backdropUrl.isEmpty {
-      return (
-        backdropUrl,
-        normalizedStringMap(targetObject["backdropHeaders"] as? [String: Any])
+      candidates.append(
+        StarflowNowPlayingArtworkCandidate(
+          urlString: backdropUrl,
+          headers: normalizedStringMap(targetObject["backdropHeaders"] as? [String: Any])
+        )
       )
     }
 
-    return ("", [:])
+    return normalizedNowPlayingArtworkCandidates(candidates)
   }
 
   private func installPlaybackStateObserver(for player: AVPlayer) {
@@ -1204,6 +1230,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
       options: [.initial, .new]
     ) { [weak self] player, _ in
       DispatchQueue.main.async {
+        self?.syncAudioSessionForPlaybackState(player)
         self?.updateNowPlayingInfo()
       }
     }
@@ -1220,7 +1247,35 @@ private final class NativePlaybackViewController: AVPlayerViewController {
         object: nil,
         queue: .main
       ) { [weak self] _ in
-        self?.persistPlaybackProgress(force: true)
+        guard let self else {
+          return
+        }
+        self.appIsInBackground = true
+        self.persistPlaybackProgress(force: true)
+        if self.backgroundPlaybackEnabled {
+          self.setBackgroundAudioOnly(self.player?.timeControlStatus != .paused)
+        } else {
+          self.player?.pause()
+          self.configureAudioSession(enabled: false)
+          self.uninstallRemoteCommands()
+          self.artworkLoader.reset()
+          MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        }
+      }
+    )
+    appObservers.append(
+      center.addObserver(
+        forName: UIApplication.willEnterForegroundNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        guard let self else {
+          return
+        }
+        self.appIsInBackground = false
+        self.setBackgroundAudioOnly(false)
+        self.installRemoteCommands()
+        self.updateNowPlayingInfo()
       }
     )
     appObservers.append(
@@ -1260,12 +1315,19 @@ private final class NativePlaybackViewController: AVPlayerViewController {
 
     switch interruptionType {
     case .began:
-      player?.pause()
-      updateNowPlayingInfo()
+      interruptionWasPlaying = player?.timeControlStatus != .paused
+      if interruptionWasPlaying {
+        player?.pause()
+        configureAudioSession(enabled: false)
+        updateNowPlayingInfo()
+      }
     case .ended:
       let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
       let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
-      if options.contains(.shouldResume) {
+      let shouldResume = interruptionWasPlaying && options.contains(.shouldResume)
+      interruptionWasPlaying = false
+      if shouldResume && (backgroundPlaybackEnabled || !appIsInBackground) {
+        configureAudioSession(enabled: true)
         player?.play()
         updateNowPlayingInfo()
       }
@@ -1294,8 +1356,48 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     }) ?? false
     if shouldPause {
       player?.pause()
+      configureAudioSession(enabled: false)
       updateNowPlayingInfo()
     }
+  }
+
+  private func syncAudioSessionForPlaybackState(_ player: AVPlayer) {
+    guard canStartPlaybackFromCurrentAppState else {
+      if player.timeControlStatus != .paused {
+        player.pause()
+      }
+      configureAudioSession(enabled: false)
+      return
+    }
+    configureAudioSession(enabled: player.timeControlStatus != .paused)
+  }
+
+  private var canStartPlaybackFromCurrentAppState: Bool {
+    return backgroundPlaybackEnabled || !appIsInBackground
+  }
+
+  private func setBackgroundAudioOnly(_ enabled: Bool) {
+    guard let item = player?.currentItem else {
+      backgroundDisabledVideoTracks.removeAll()
+      return
+    }
+    if enabled {
+      guard backgroundDisabledVideoTracks.isEmpty else {
+        return
+      }
+      let activeVideoTracks = item.tracks.filter { track in
+        track.isEnabled && track.assetTrack?.mediaType == .video
+      }
+      backgroundDisabledVideoTracks = activeVideoTracks
+      for track in activeVideoTracks {
+        track.isEnabled = false
+      }
+      return
+    }
+    for track in backgroundDisabledVideoTracks where item.tracks.contains(where: { $0 === track }) {
+      track.isEnabled = true
+    }
+    backgroundDisabledVideoTracks.removeAll()
   }
 
   private func installTimeObserver(for player: AVPlayer) {
@@ -1431,7 +1533,10 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     }
     appObservers.removeAll()
 
+    setBackgroundAudioOnly(false)
     player?.pause()
+    interruptionWasPlaying = false
+    appIsInBackground = false
     uninstallRemoteCommands()
     artworkLoader.reset()
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil

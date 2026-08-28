@@ -1,6 +1,38 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+const playbackSystemSessionBackgroundPositionInterval = Duration(seconds: 4);
+
+bool shouldExposePlaybackSystemSession({
+  required bool isForeground,
+  required bool backgroundPlaybackEnabled,
+}) {
+  return isForeground || backgroundPlaybackEnabled;
+}
+
+bool shouldPublishPlaybackSystemSessionUpdate({
+  required bool force,
+  required bool isForeground,
+  required bool positionChanged,
+  required bool hasNonPositionChange,
+  required DateTime? lastPublishedAt,
+  required DateTime now,
+  Duration backgroundPositionInterval =
+      playbackSystemSessionBackgroundPositionInterval,
+}) {
+  if (force || hasNonPositionChange) {
+    return true;
+  }
+  if (!positionChanged) {
+    return false;
+  }
+  if (isForeground || lastPublishedAt == null) {
+    return true;
+  }
+  final elapsed = now.difference(lastPublishedAt);
+  return elapsed.isNegative || elapsed >= backgroundPositionInterval;
+}
+
 typedef PlaybackRemoteCommandListener = Future<void> Function(
   PlaybackRemoteCommand command,
 );
@@ -36,8 +68,7 @@ class PlaybackSystemSessionState {
     required this.playing,
     this.buffering = false,
     this.speed = 1.0,
-    this.artworkUrl = '',
-    this.artworkHeaders = const {},
+    this.artworkCandidates = const [],
     this.canSeek = true,
     this.hasPrevious = false,
     this.hasNext = false,
@@ -50,8 +81,7 @@ class PlaybackSystemSessionState {
   final bool playing;
   final bool buffering;
   final double speed;
-  final String artworkUrl;
-  final Map<String, String> artworkHeaders;
+  final List<PlaybackSystemSessionArtworkCandidate> artworkCandidates;
   final bool canSeek;
   final bool hasPrevious;
   final bool hasNext;
@@ -65,13 +95,45 @@ class PlaybackSystemSessionState {
       'playing': playing,
       'buffering': buffering,
       'speed': speed,
-      'artworkUrl': artworkUrl,
-      'artworkHeaders': artworkHeaders,
+      'artworkCandidates': [
+        for (final candidate in artworkCandidates) candidate.toMap(),
+      ],
       'canSeek': canSeek,
       'hasPrevious': hasPrevious,
       'hasNext': hasNext,
     };
   }
+}
+
+@immutable
+class PlaybackSystemSessionArtworkCandidate {
+  const PlaybackSystemSessionArtworkCandidate({
+    required this.url,
+    this.headers = const {},
+  });
+
+  final String url;
+  final Map<String, String> headers;
+
+  Map<String, Object?> toMap() => {
+        'url': url,
+        'headers': headers,
+      };
+
+  @override
+  bool operator ==(Object other) {
+    return other is PlaybackSystemSessionArtworkCandidate &&
+        other.url == url &&
+        mapEquals(other.headers, headers);
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        url,
+        Object.hashAllUnordered(
+          headers.entries.map((entry) => Object.hash(entry.key, entry.value)),
+        ),
+      );
 }
 
 class PlaybackSystemSessionController {

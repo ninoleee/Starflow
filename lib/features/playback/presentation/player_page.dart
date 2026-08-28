@@ -236,12 +236,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Duration _lastPlaybackSystemSessionDuration = Duration.zero;
   bool _lastPlaybackSystemSessionPlaying = false;
   bool _lastPlaybackSystemSessionBuffering = false;
+  double _lastPlaybackSystemSessionSpeed = 1.0;
   bool _lastPlaybackSystemSessionHasPrevious = false;
   bool _lastPlaybackSystemSessionHasNext = false;
   String _lastPlaybackSystemSessionTitle = '';
   String _lastPlaybackSystemSessionSubtitle = '';
-  String _lastPlaybackSystemSessionArtworkUrl = '';
-  Map<String, String> _lastPlaybackSystemSessionArtworkHeaders = const {};
+  List<PlaybackSystemSessionArtworkCandidate>
+      _lastPlaybackSystemSessionArtworkCandidates = const [];
+  DateTime? _lastPlaybackSystemSessionPublishedAt;
+  bool _iosBackgroundAudioOnlyRequested = false;
+  Player? _iosBackgroundAudioOnlyPlayer;
+  VideoTrack? _iosBackgroundPreviousVideoTrack;
+  Future<void> _iosBackgroundAudioOnlyQueue = Future<void>.value();
   int? _lastTracedVideoWidth;
   int? _lastTracedVideoHeight;
   bool? _lastTracedBufferingState;
@@ -400,6 +406,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _playbackPageInForeground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       unawaited(_bindAdaptiveGestureSystemLevels());
+      unawaited(_setIosBackgroundAudioOnly(false));
+      unawaited(_syncPlaybackSystemSession(force: true));
       _syncPlaybackVisualStateFromPlayer();
     }
     if (state == AppLifecycleState.paused ||
@@ -410,7 +418,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       return;
     }
     if (!_backgroundPlaybackEnabled) {
+      unawaited(_setPlayWhenReady(false));
+      unawaited(PlaybackSystemSessionController.setActive(false));
       return;
+    }
+    if (_isActivelyPlaying) {
+      unawaited(_setIosBackgroundAudioOnly(true));
     }
     if (!_pictureInPictureSupported || _isInPictureInPictureMode) {
       return;

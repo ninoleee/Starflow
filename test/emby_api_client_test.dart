@@ -715,6 +715,9 @@ void main() {
           sourceKind: MediaSourceKind.emby,
           itemId: 'episode-1',
           preferredMediaSourceId: 'media-source-2',
+          posterUrl: 'https://images.example.com/poster.jpg',
+          posterHeaders: {'Authorization': 'Bearer poster'},
+          backdropUrl: 'https://images.example.com/backdrop.jpg',
         ),
       );
 
@@ -728,6 +731,9 @@ void main() {
       expect(target.videoCodec, 'hevc');
       expect(target.audioCodec, 'truehd');
       expect(target.width, 3840);
+      expect(target.posterUrl, 'https://images.example.com/poster.jpg');
+      expect(target.posterHeaders['Authorization'], 'Bearer poster');
+      expect(target.backdropUrl, 'https://images.example.com/backdrop.jpg');
       expect(target.height, 2160);
       expect(target.bitrate, 28400000);
       expect(target.fileSizeBytes, 25769803776);

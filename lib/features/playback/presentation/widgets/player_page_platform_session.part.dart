@@ -51,10 +51,63 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
       );
     }
     if (BackgroundPlaybackController.isAppleMobilePlatform) {
-      if (shouldEnable) {
-        await BackgroundPlaybackController.setEnabled(true);
+      await BackgroundPlaybackController.setEnabled(shouldEnable);
+      return;
+    }
+  }
+
+  Future<void> _setIosBackgroundAudioOnly(bool enabled) {
+    if (!BackgroundPlaybackController.isAppleMobilePlatform) {
+      return Future<void>.value();
+    }
+    _iosBackgroundAudioOnlyRequested = enabled;
+    _iosBackgroundAudioOnlyQueue = _iosBackgroundAudioOnlyQueue
+        .catchError((_) {})
+        .then((_) => _applyIosBackgroundAudioOnlyRequest());
+    return _iosBackgroundAudioOnlyQueue;
+  }
+
+  Future<void> _applyIosBackgroundAudioOnlyRequest() async {
+    if (_iosBackgroundAudioOnlyRequested) {
+      final player = _player;
+      if (!_backgroundPlaybackEnabled ||
+          !_isReady ||
+          player == null ||
+          !player.state.playing ||
+          identical(player, _iosBackgroundAudioOnlyPlayer)) {
+        return;
+      }
+      final currentTrack = player.state.track.video;
+      if (currentTrack.id == 'no') {
+        return;
+      }
+      _iosBackgroundAudioOnlyPlayer = player;
+      _iosBackgroundPreviousVideoTrack = currentTrack;
+      try {
+        await player.setVideoTrack(VideoTrack.no());
+      } catch (_) {
+        if (identical(player, _iosBackgroundAudioOnlyPlayer)) {
+          _iosBackgroundAudioOnlyPlayer = null;
+          _iosBackgroundPreviousVideoTrack = null;
+        }
       }
       return;
+    }
+
+    final player = _iosBackgroundAudioOnlyPlayer;
+    final previousTrack = _iosBackgroundPreviousVideoTrack;
+    _iosBackgroundAudioOnlyPlayer = null;
+    _iosBackgroundPreviousVideoTrack = null;
+    if (player == null ||
+        previousTrack == null ||
+        !identical(player, _player)) {
+      return;
+    }
+    try {
+      await player.setVideoTrack(previousTrack);
+    } catch (_) {
+      // Playback remains usable even if the decoder cannot restore a video
+      // track immediately after returning from the background.
     }
   }
 
@@ -79,6 +132,13 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
     if (!PlaybackSystemSessionController.isSupportedPlatform) {
       return;
     }
+    if (!shouldExposePlaybackSystemSession(
+      isForeground: _playbackPageInForeground,
+      backgroundPlaybackEnabled: _backgroundPlaybackEnabled,
+    )) {
+      await PlaybackSystemSessionController.setActive(false);
+      return;
+    }
 
     final player = _player;
     if (!_isReady || player == null) {
@@ -99,8 +159,7 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
       playing: player.state.playing,
       buffering: player.state.buffering,
       speed: player.state.rate,
-      artworkUrl: _buildPlaybackSystemSessionArtworkUrl(),
-      artworkHeaders: _buildPlaybackSystemSessionArtworkHeaders(),
+      artworkCandidates: _buildPlaybackSystemSessionArtworkCandidates(),
       canSeek: true,
       hasPrevious: _episodeQueue?.hasPrevious ?? false,
       hasNext: _episodeQueue?.hasNext ?? false,
@@ -113,29 +172,35 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
     final playingChanged = state.playing != _lastPlaybackSystemSessionPlaying;
     final bufferingChanged =
         state.buffering != _lastPlaybackSystemSessionBuffering;
+    final speedChanged = state.speed != _lastPlaybackSystemSessionSpeed;
     final hasPreviousChanged =
         state.hasPrevious != _lastPlaybackSystemSessionHasPrevious;
     final hasNextChanged = state.hasNext != _lastPlaybackSystemSessionHasNext;
     final titleChanged = title != _lastPlaybackSystemSessionTitle;
     final subtitleChanged = subtitle != _lastPlaybackSystemSessionSubtitle;
-    final artworkUrlChanged =
-        state.artworkUrl != _lastPlaybackSystemSessionArtworkUrl;
-    final artworkHeadersChanged = !mapEquals(
-      state.artworkHeaders,
-      _lastPlaybackSystemSessionArtworkHeaders,
+    final artworkCandidatesChanged = !listEquals(
+      state.artworkCandidates,
+      _lastPlaybackSystemSessionArtworkCandidates,
     );
 
-    if (!force &&
-        !positionChanged &&
-        !durationChanged &&
-        !playingChanged &&
-        !bufferingChanged &&
-        !hasPreviousChanged &&
-        !hasNextChanged &&
-        !titleChanged &&
-        !subtitleChanged &&
-        !artworkUrlChanged &&
-        !artworkHeadersChanged) {
+    final hasNonPositionChange = durationChanged ||
+        playingChanged ||
+        bufferingChanged ||
+        speedChanged ||
+        hasPreviousChanged ||
+        hasNextChanged ||
+        titleChanged ||
+        subtitleChanged ||
+        artworkCandidatesChanged;
+    final now = DateTime.now();
+    if (!shouldPublishPlaybackSystemSessionUpdate(
+      force: force,
+      isForeground: _playbackPageInForeground,
+      positionChanged: positionChanged,
+      hasNonPositionChange: hasNonPositionChange,
+      lastPublishedAt: _lastPlaybackSystemSessionPublishedAt,
+      now: now,
+    )) {
       return;
     }
 
@@ -143,12 +208,13 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
     _lastPlaybackSystemSessionDuration = state.duration;
     _lastPlaybackSystemSessionPlaying = state.playing;
     _lastPlaybackSystemSessionBuffering = state.buffering;
+    _lastPlaybackSystemSessionSpeed = state.speed;
     _lastPlaybackSystemSessionHasPrevious = state.hasPrevious;
     _lastPlaybackSystemSessionHasNext = state.hasNext;
     _lastPlaybackSystemSessionTitle = state.title;
     _lastPlaybackSystemSessionSubtitle = state.subtitle;
-    _lastPlaybackSystemSessionArtworkUrl = state.artworkUrl;
-    _lastPlaybackSystemSessionArtworkHeaders = state.artworkHeaders;
+    _lastPlaybackSystemSessionArtworkCandidates = state.artworkCandidates;
+    _lastPlaybackSystemSessionPublishedAt = now;
 
     await PlaybackSystemSessionController.setActive(true);
     await PlaybackSystemSessionController.update(state);
@@ -157,6 +223,14 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
   Future<void> _handlePlaybackRemoteCommand(
     PlaybackRemoteCommand command,
   ) async {
+    if (!shouldExposePlaybackSystemSession(
+      isForeground: _playbackPageInForeground,
+      backgroundPlaybackEnabled: _backgroundPlaybackEnabled,
+    )) {
+      await _setPlayWhenReady(false);
+      await PlaybackSystemSessionController.setActive(false);
+      return;
+    }
     switch (command.type) {
       case PlaybackRemoteCommandType.play:
         await _setPlayWhenReady(true);
@@ -248,23 +322,23 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
     return parts.join(' · ');
   }
 
-  String _buildPlaybackSystemSessionArtworkUrl() {
+  List<PlaybackSystemSessionArtworkCandidate>
+      _buildPlaybackSystemSessionArtworkCandidates() {
     final target = _resolvedTarget ?? widget.target;
-    final posterUrl = target.posterUrl.trim();
-    if (posterUrl.isNotEmpty) {
-      return posterUrl;
-    }
-    return target.backdropUrl.trim();
-  }
+    final candidates = <PlaybackSystemSessionArtworkCandidate>[];
 
-  Map<String, String> _buildPlaybackSystemSessionArtworkHeaders() {
-    final target = _resolvedTarget ?? widget.target;
-    if (target.posterUrl.trim().isNotEmpty) {
-      return target.posterHeaders;
+    void add(String rawUrl, Map<String, String> headers) {
+      final url = rawUrl.trim();
+      if (url.isEmpty || candidates.any((candidate) => candidate.url == url)) {
+        return;
+      }
+      candidates.add(
+        PlaybackSystemSessionArtworkCandidate(url: url, headers: headers),
+      );
     }
-    if (target.backdropUrl.trim().isNotEmpty) {
-      return target.backdropHeaders;
-    }
-    return const {};
+
+    add(target.posterUrl, target.posterHeaders);
+    add(target.backdropUrl, target.backdropHeaders);
+    return List.unmodifiable(candidates);
   }
 }
