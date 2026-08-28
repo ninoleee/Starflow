@@ -32,7 +32,7 @@ class SearchServiceSettingsPage extends ConsumerWidget {
         Text('搜索服务管理', style: theme.textTheme.headlineSmall),
         const SettingsSectionTitle(label: '搜索来源'),
         SettingsSelectionTile(
-          title: '选择搜索来源',
+          title: '搜索页来源标签',
           subtitle: _sourceSummary(
             mediaSources: mediaSources,
             providers: providers,
@@ -106,10 +106,10 @@ class SearchServiceSettingsPage extends ConsumerWidget {
     }
     final selected = await showSettingsCheckboxSelectionDialog<String>(
       context: context,
-      title: '选择搜索来源',
+      title: '选择搜索页来源标签',
       initialSelection: selectedIds.toSet(),
-      allLabel: '全部已启用来源',
-      allSubtitle: '清空单独选择，搜索时使用全部已启用本地源和搜索服务',
+      allLabel: '展示全部已启用来源',
+      allSubtitle: '清空单独选择，在搜索页展示全部已启用来源标签',
       sections: [
         if (localSources.isNotEmpty)
           SettingsCheckboxDialogSection<String>(
@@ -150,7 +150,7 @@ class SearchServiceSettingsPage extends ConsumerWidget {
     required List<String> selectedIds,
   }) {
     if (selectedIds.isEmpty) {
-      return '全部已启用来源';
+      return '展示全部已启用来源';
     }
     final availableIds = <String>{
       for (final source in mediaSources.where(_isSelectableLocalSource))
@@ -159,7 +159,7 @@ class SearchServiceSettingsPage extends ConsumerWidget {
         searchSourceSettingIdForProvider(provider.id),
     };
     final count = selectedIds.where(availableIds.contains).length;
-    return count == 0 ? '全部已启用来源' : '已选择 $count 个来源';
+    return count == 0 ? '展示全部已启用来源' : '展示 $count 个来源标签';
   }
 }
 

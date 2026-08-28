@@ -233,6 +233,22 @@ void main() {
     final validationResponse = Completer<http.Response>();
     final quarkClient = QuarkSaveClient(
       MockClient((request) {
+        if (request.url.path == '/1/clouddrive/share/sharepage/token') {
+          return Future.value(
+            http.Response.bytes(
+              utf8.encode(
+                jsonEncode({
+                  'code': 0,
+                  'data': {'stoken': 'st-valid'},
+                }),
+              ),
+              200,
+              headers: const {
+                'content-type': 'application/json; charset=utf-8',
+              },
+            ),
+          );
+        }
         if (!validationStarted.isCompleted) {
           validationStarted.complete();
         }
@@ -305,7 +321,11 @@ void main() {
         utf8.encode(
           jsonEncode({
             'code': 0,
-            'data': {'stoken': 'st-valid'},
+            'data': {
+              'list': [
+                {'fid': 'file-1', 'dir': false, 'file_name': 'movie.mkv'},
+              ],
+            },
           }),
         ),
         200,

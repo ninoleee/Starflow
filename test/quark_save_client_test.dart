@@ -111,15 +111,27 @@ void main() {
       expect(resolved.headers['Origin'], 'https://drive-pc.quark.cn');
     });
 
-    test('validates an active share with the token endpoint only', () async {
+    test('validates an active share with token and one detail request',
+        () async {
       var requestCount = 0;
       final client = QuarkSaveClient(
         MockClient((request) async {
           requestCount += 1;
-          expect(request.url.path, '/1/clouddrive/share/sharepage/token');
+          if (request.url.path == '/1/clouddrive/share/sharepage/token') {
+            return _jsonResponse({
+              'code': 0,
+              'data': {'stoken': 'st-valid'},
+            });
+          }
+          expect(request.url.path, '/1/clouddrive/share/sharepage/detail');
+          expect(request.url.queryParameters['_size'], '1');
           return _jsonResponse({
             'code': 0,
-            'data': {'stoken': 'st-valid'},
+            'data': {
+              'list': [
+                {'fid': 'file-1', 'dir': false, 'file_name': 'movie.mkv'},
+              ],
+            },
           });
         }),
       );
@@ -130,7 +142,29 @@ void main() {
       );
 
       expect(result.status, QuarkShareValidationStatus.valid);
-      expect(requestCount, 1);
+      expect(requestCount, 2);
+    });
+
+    test('rejects a stale token when share detail returns 404', () async {
+      final client = QuarkSaveClient(
+        MockClient((request) async {
+          if (request.url.path == '/1/clouddrive/share/sharepage/token') {
+            return _jsonResponse({
+              'code': 0,
+              'data': {'stoken': 'st-stale'},
+            });
+          }
+          return _jsonResponse(const {}, statusCode: 404);
+        }),
+      );
+
+      final result = await client.validateShareLink(
+        shareUrl: 'https://pan.quark.cn/s/stale',
+        cookie: 'kps=test;',
+      );
+
+      expect(result.status, QuarkShareValidationStatus.invalid);
+      expect(result.reason, contains('已失效'));
     });
 
     test('classifies cancelled shares as permanently invalid', () async {

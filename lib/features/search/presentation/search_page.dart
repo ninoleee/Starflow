@@ -774,6 +774,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
       localSources: localSources,
       providers: enabledProviders,
     );
+    final effectiveSelectedTargetIds =
+        _resolveSelectedTargets(targets).map((item) => item.id).toSet();
 
     return AppPrimaryScrollController(
       controller: _scrollController,
@@ -905,7 +907,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                             index++)
                                           _SearchTargetChip(
                                             target: targets[index],
-                                            selected: _selectedTargetIds
+                                            selected: effectiveSelectedTargetIds
                                                 .contains(targets[index].id),
                                             isTelevision: true,
                                             focusId:
@@ -935,7 +937,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                           final target = targets[index];
                                           return _SearchTargetChip(
                                             target: target,
-                                            selected: _selectedTargetIds
+                                            selected: effectiveSelectedTargetIds
                                                 .contains(target.id),
                                             isTelevision: false,
                                             onPressed: () {
@@ -1405,6 +1407,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
     final selected = targets
         .where((item) => _selectedTargetIds.contains(item.id))
         .toList(growable: false);
+    if (selected.isEmpty) {
+      return [targets.first];
+    }
     return selected;
   }
 

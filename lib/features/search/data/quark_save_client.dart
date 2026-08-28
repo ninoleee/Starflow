@@ -56,11 +56,20 @@ class QuarkSaveClient {
     }
 
     try {
-      await _fetchShareToken(
-        pwdId: parsed.pwdId,
-        passcode: parsed.passcode,
-        cookie: trimmedCookie,
-      ).timeout(timeout);
+      await (() async {
+        final stoken = await _fetchShareToken(
+          pwdId: parsed.pwdId,
+          passcode: parsed.passcode,
+          cookie: trimmedCookie,
+        );
+        await _validateShareDetail(
+          pwdId: parsed.pwdId,
+          stoken: stoken,
+          pdirFid: parsed.pdirFid,
+          cookie: trimmedCookie,
+        );
+      })()
+          .timeout(timeout);
       return const QuarkShareValidationResult.valid();
     } on QuarkSaveException catch (error) {
       if (_isPermanentlyInvalidShareMessage(error.message)) {
@@ -723,23 +732,12 @@ class QuarkSaveClient {
 
     while (true) {
       final response = await _client.get(
-        Uri.parse('$_baseUrl/1/clouddrive/share/sharepage/detail').replace(
-          queryParameters: {
-            'pr': 'ucpro',
-            'fr': 'pc',
-            'pwd_id': pwdId,
-            'stoken': stoken,
-            'pdir_fid': pdirFid,
-            'force': '0',
-            '_page': '$page',
-            '_size': '50',
-            '_fetch_banner': '0',
-            '_fetch_share': '0',
-            '_fetch_total': '1',
-            '_sort': 'file_type:asc,updated_at:desc',
-            'ver': '2',
-            'fetch_share_full_path': '0',
-          },
+        _buildShareDetailUri(
+          pwdId: pwdId,
+          stoken: stoken,
+          pdirFid: pdirFid,
+          page: page,
+          size: 50,
         ),
         headers: _headers(cookie),
       );
@@ -774,6 +772,71 @@ class QuarkSaveClient {
     }
 
     return entries;
+  }
+
+  Future<void> _validateShareDetail({
+    required String pwdId,
+    required String stoken,
+    required String pdirFid,
+    required String cookie,
+  }) async {
+    final response = await _client.get(
+      _buildShareDetailUri(
+        pwdId: pwdId,
+        stoken: stoken,
+        pdirFid: pdirFid,
+        page: 1,
+        size: 1,
+      ),
+      headers: _headers(cookie),
+    );
+    if (response.statusCode == 404 || response.statusCode == 410) {
+      throw const QuarkSaveException('分享地址不存在或已失效');
+    }
+    final payload = _decode(response);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw QuarkSaveException(
+        _resolveErrorMessage(payload, response.statusCode),
+      );
+    }
+    final code = payload['code'] as int? ?? -1;
+    if (code != 0) {
+      throw QuarkSaveException(
+        _resolveErrorMessage(payload, response.statusCode),
+      );
+    }
+    final data = payload['data'] as Map<String, dynamic>? ?? const {};
+    final list = data['list'] as List<dynamic>? ?? const [];
+    if (list.isEmpty) {
+      throw const QuarkSaveException('分享内容为空');
+    }
+  }
+
+  Uri _buildShareDetailUri({
+    required String pwdId,
+    required String stoken,
+    required String pdirFid,
+    required int page,
+    required int size,
+  }) {
+    return Uri.parse('$_baseUrl/1/clouddrive/share/sharepage/detail').replace(
+      queryParameters: {
+        'pr': 'ucpro',
+        'fr': 'pc',
+        'pwd_id': pwdId,
+        'stoken': stoken,
+        'pdir_fid': pdirFid,
+        'force': '0',
+        '_page': '$page',
+        '_size': '$size',
+        '_fetch_banner': '0',
+        '_fetch_share': '0',
+        '_fetch_total': '1',
+        '_sort': 'file_type:asc,updated_at:desc',
+        'ver': '2',
+        'fetch_share_full_path': '0',
+      },
+    );
   }
 
   Future<List<_QuarkShareEntry>> _flattenTopDirectory({
@@ -1117,6 +1180,7 @@ class QuarkSaveClient {
       '已过期',
       '链接过期',
       '分享过期',
+      '分享内容为空',
       '已删除',
       '被删除',
       '违规',
