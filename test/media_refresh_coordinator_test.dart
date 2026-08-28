@@ -207,7 +207,8 @@ void main() {
       expect(updatedItems.single.playbackItemId, 'new-file');
     });
 
-    test('save-triggered refresh invalidates persistent WebDAV scan cache',
+    test(
+        'incremental refresh invalidates persistent WebDAV scan cache by default',
         () async {
       final database = await databaseFactoryMemory.openDatabase(
         'media-refresh-cache-invalidation-test',
@@ -251,7 +252,6 @@ void main() {
           .read(mediaRefreshCoordinatorProvider)
           .refreshSelectedSources(
         sourceIds: const ['nas-main'],
-        invalidateWebDavDirectoryCache: true,
       );
 
       expect(repository.refreshSourceIds, const ['nas-main']);

@@ -251,6 +251,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Timer? _tvPlaybackChromeHideTimer;
   Timer? _mpvStallWatchdogTimer;
   Future<void>? _exitPlaybackFuture;
+  bool _platformStateTornDownBeforePop = false;
   int? _activePlaybackCleanupToken;
   MpvStallWatchdog? _mpvStallWatchdog;
   bool _mpvStallRecoveryInProgress = false;
@@ -306,7 +307,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         player,
         reason: 'player-page-dispose',
         persistProgress: true,
-        teardownPlatformState: true,
+        teardownPlatformState: !_platformStateTornDownBeforePop,
       ),
     );
     _tvPlaybackStateNotifier.dispose();
@@ -626,11 +627,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         reason: '$reason-before-exit',
       );
     }
-    if (!_backgroundPlaybackEnabled) {
-      await _stopPlaybackBeforeExit(reason: reason);
-    } else {
-      await _persistPlaybackProgress(force: true);
-    }
+    await _stopPlaybackBeforeExit(reason: reason);
+    _platformStateTornDownBeforePop = true;
     if (!mounted) {
       return;
     }

@@ -231,7 +231,7 @@ class PlaybackTarget {
       streamUrl: item.streamUrl,
       sourceName: item.sourceName,
       sourceKind: item.sourceKind,
-      actualAddress: item.actualAddress,
+      actualAddress: normalizePlaybackActualAddress(item.actualAddress),
       originalTitle: item.originalTitle,
       itemId: item.playbackItemId,
       itemType: item.itemType,
@@ -269,7 +269,10 @@ class PlaybackTarget {
       'sourceName': sourceName,
       'sourceKind': sourceKind.name,
       'allowResume': allowResume,
-      'actualAddress': actualAddress,
+      // A few old index records contained a literal `null:///` URI. Keep the
+      // display path usable, but never forward that invalid scheme to native
+      // playback or external-player integrations.
+      'actualAddress': normalizePlaybackActualAddress(actualAddress),
       'originalTitle': originalTitle,
       'itemId': itemId,
       'itemType': itemType,
@@ -308,7 +311,9 @@ class PlaybackTarget {
       sourceKind:
           MediaSourceKindX.fromName(json['sourceKind'] as String? ?? ''),
       allowResume: json['allowResume'] as bool? ?? true,
-      actualAddress: json['actualAddress'] as String? ?? '',
+      actualAddress: normalizePlaybackActualAddress(
+        json['actualAddress'] as String? ?? '',
+      ),
       originalTitle: json['originalTitle'] as String? ?? '',
       itemId: json['itemId'] as String? ?? '',
       itemType: json['itemType'] as String? ?? '',
@@ -430,4 +435,23 @@ String _prettyMediaToken(String value) {
     'EAC3' => 'EAC3',
     _ => upper,
   };
+}
+
+/// Removes the invalid URI scheme emitted by older NAS index records.
+///
+/// `null:///path` is not a playable address; it is the string form of a
+/// malformed URI created while a source URI was unavailable. The stream URL
+/// remains authoritative for playback, while this address is used for display
+/// and diagnostics only.
+String normalizePlaybackActualAddress(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  final parsed = Uri.tryParse(trimmed);
+  if (parsed != null && parsed.scheme.toLowerCase() == 'null') {
+    final path = parsed.path.trim();
+    return path.isNotEmpty ? path : '';
+  }
+  return trimmed;
 }

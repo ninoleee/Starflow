@@ -89,7 +89,9 @@ class NasMediaIndexer {
   static const int _defaultRefreshLimitPerCollection = 1200;
   static const String _seriesGroupPrefix = 'webdav-series';
   static const String _seasonGroupPrefix = 'webdav-season';
-  static const String _webDavMetadataSchemaVersion = 'webdav-v6';
+  // Bump whenever structure classification changes so an existing index is
+  // re-evaluated instead of reusing stale `webdav-series` records.
+  static const String _webDavMetadataSchemaVersion = 'webdav-v9';
   final NasMediaIndexStore _store;
   final WebDavNasClient _webDavNasClient;
   final QuarkExternalStorageClient? _quarkExternalStorageClient;
@@ -873,6 +875,14 @@ class NasMediaIndexer {
       return false;
     }
     return true;
+  }
+
+  bool _requiresMovieMetadataTypeCorrection(NasMediaIndexRecord? record) {
+    if (record == null || record.manualMetadataLocked) {
+      return false;
+    }
+    return record.item.itemType.trim().toLowerCase() == 'movie' &&
+        record.preferSeries;
   }
 
   NasMetadataFetchStatus _metadataFailureStatus(Object error) {

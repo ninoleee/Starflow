@@ -1188,6 +1188,8 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       );
       final existing = existingRecords[scannedItem.resourceId];
       final preserveManualMetadata = existing?.manualMetadataLocked == true;
+      final requiresMovieMetadataTypeCorrection =
+          _requiresMovieMetadataTypeCorrection(existing);
       final hasRequiredSidecar = !includeSidecarMetadata ||
           preserveManualMetadata ||
           _hasAttemptStatus(existing?.sidecarStatus);
@@ -1195,12 +1197,14 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
           _hasCompletedOnlineAttempts(existing, settings);
       final canReuse = existing != null &&
           existing.fingerprint == fingerprint &&
+          !requiresMovieMetadataTypeCorrection &&
           hasRequiredSidecar &&
           hasRequiredOnlineMetadata;
       final isIncrementalCandidate =
           existing == null || existing.fingerprint != fingerprint;
       final needsFurtherEnrichment = collectEnrichmentCandidates &&
           (isIncrementalCandidate ||
+              requiresMovieMetadataTypeCorrection ||
               (source.webDavSidecarScrapingEnabled &&
                   !_hasAttemptStatus(existing.sidecarStatus)) ||
               !_hasCompletedOnlineAttempts(existing, settings));

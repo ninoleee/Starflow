@@ -1131,6 +1131,24 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       return _cleanIndexedTitleLabel(sectionSegments.last);
     }
 
+    // Structure inference already marked this item as an episode (or supplied
+    // a season hint).  In that case the first title-bearing directory is the
+    // series root; a deeper unrecognised folder is an implicit season, not a
+    // second series title.  This matters for layouts such as
+    // `我的事说来话长/剧版/01.(mkv).strm`, where `剧版` must stay under the
+    // `我的事说来话长` series.
+    if (hasSeasonHint || itemType == 'episode') {
+      final firstStructureRootIndex = _firstUsableSeriesDirectoryIndex(
+        relativeDirectories,
+        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+      );
+      if (firstStructureRootIndex >= 0) {
+        return _cleanIndexedTitleLabel(
+          relativeDirectories[firstStructureRootIndex],
+        );
+      }
+    }
+
     final trailingStructureRoot =
         _nearestNonSeasonDirectory(relativeDirectories);
     if (trailingStructureRoot.isNotEmpty &&
@@ -1235,6 +1253,16 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       return const [];
     }
 
+    if (hasSeasonHint || itemType == 'episode') {
+      final firstRootIndex = _firstUsableSeriesDirectoryIndex(
+        relativeDirectories,
+        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+      );
+      if (firstRootIndex >= 0) {
+        return relativeDirectories.sublist(firstRootIndex, firstRootIndex + 1);
+      }
+    }
+
     final trailingRootIndex = _lastNonSeasonDirectoryIndex(relativeDirectories);
     if (trailingRootIndex >= 0 &&
         (hasSeasonHint || record.preferSeries || itemType == 'episode')) {
@@ -1258,6 +1286,68 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
 
   int _lastNonSeasonDirectoryIndex(List<String> directories) {
     return _lastUsableSeriesDirectoryIndex(directories);
+  }
+
+  int _firstUsableSeriesDirectoryIndex(
+    List<String> directories, {
+    List<String> seriesTitleFilterKeywords = const [],
+  }) {
+    // A matching directory is a grouping boundary.  Only directories below
+    // the last boundary may provide the series title; otherwise a parent on
+    // the transport side of the boundary can leak into the group key.
+    var firstCandidateIndex = 0;
+    for (var index = 0; index < directories.length; index++) {
+      final rawDirectory = directories[index].trim();
+      final cleanedDirectory = _cleanIndexedTitleLabel(rawDirectory);
+      if (_matchesSeriesTitleFilterKeyword(
+        rawDirectory,
+        cleanedValue: cleanedDirectory,
+        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+      )) {
+        firstCandidateIndex = index + 1;
+      }
+    }
+    for (var index = firstCandidateIndex; index < directories.length; index++) {
+      final rawDirectory = directories[index].trim();
+      if (rawDirectory.isEmpty) {
+        continue;
+      }
+      final cleanedDirectory = _cleanIndexedTitleLabel(rawDirectory);
+      if (cleanedDirectory.isEmpty ||
+          _matchesSeriesTitleFilterKeyword(
+            rawDirectory,
+            cleanedValue: cleanedDirectory,
+            seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+          ) ||
+          NasMediaRecognizer.isGenericLibraryFolderLabel(cleanedDirectory) ||
+          const {
+            'dav',
+            'media',
+            'nas',
+            'quark',
+            'strm',
+            'video',
+            'videos',
+            'webdav',
+          }.contains(cleanedDirectory.trim().toLowerCase())) {
+        continue;
+      }
+      final parentMatchesFilter =
+          _parentDirectoryMatchesSeriesTitleFilterKeyword(
+        relativeDirectories: directories,
+        childIndex: index,
+        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+      );
+      if (_shouldSkipStructureSeriesDirectory(
+        rawDirectory,
+        parentMatchesFilter: parentMatchesFilter,
+        seriesParent: index > 0 ? directories[index - 1] : '',
+      )) {
+        continue;
+      }
+      return index;
+    }
+    return -1;
   }
 
   int _lastUsableSeriesDirectoryIndex(
@@ -1461,49 +1551,66 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
     if (seriesTitleFilterKeywords.isEmpty || relativeDirectories.isEmpty) {
       return null;
     }
-    var lastInferredTitle = '';
-    var hitFilteredDirectory = false;
-    for (var index = relativeDirectories.length - 1; index >= 0; index--) {
+    var filteredIndex = -1;
+    for (var index = 0; index < relativeDirectories.length; index++) {
       final rawDirectory = relativeDirectories[index].trim();
       if (rawDirectory.isEmpty) {
         continue;
       }
       final cleanedDirectory = _cleanIndexedTitleLabel(rawDirectory);
-      final parentMatchesFilter =
-          _parentDirectoryMatchesSeriesTitleFilterKeyword(
-        relativeDirectories: relativeDirectories,
-        childIndex: index,
-        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-      );
       if (_matchesSeriesTitleFilterKeyword(
         rawDirectory,
         cleanedValue: cleanedDirectory,
         seriesTitleFilterKeywords: seriesTitleFilterKeywords,
       )) {
-        hitFilteredDirectory = true;
-        break;
+        filteredIndex = index;
       }
-      if (_shouldSkipStructureSeriesDirectory(
-        rawDirectory,
-        parentMatchesFilter: parentMatchesFilter,
-        seriesParent: index > 0 ? relativeDirectories[index - 1] : '',
-      )) {
+    }
+    if (filteredIndex < 0) {
+      return null;
+    }
+
+    // The first usable directory after the boundary is the work root.  A
+    // deeper unrecognised directory represents a season, not another series.
+    for (var index = filteredIndex + 1;
+        index < relativeDirectories.length;
+        index++) {
+      final rawDirectory = relativeDirectories[index].trim();
+      if (rawDirectory.isEmpty) {
+        continue;
+      }
+      final cleanedDirectory = _cleanIndexedTitleLabel(rawDirectory);
+      final parentMatchesFilter = index == filteredIndex + 1 ||
+          _parentDirectoryMatchesSeriesTitleFilterKeyword(
+            relativeDirectories: relativeDirectories,
+            childIndex: index,
+            seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+          );
+      if (NasMediaRecognizer.isGenericLibraryFolderLabel(cleanedDirectory) ||
+          const {
+            'dav',
+            'media',
+            'nas',
+            'quark',
+            'strm',
+            'video',
+            'videos',
+            'webdav',
+          }.contains(cleanedDirectory.trim().toLowerCase()) ||
+          _shouldSkipStructureSeriesDirectory(
+            rawDirectory,
+            parentMatchesFilter: parentMatchesFilter,
+            seriesParent: index > 0 ? relativeDirectories[index - 1] : '',
+          )) {
         continue;
       }
       if (cleanedDirectory.isEmpty) {
         continue;
       }
-      if (lastInferredTitle.isEmpty) {
-        lastInferredTitle = cleanedDirectory;
-      }
+      return cleanedDirectory;
     }
-    if (lastInferredTitle.isEmpty) {
-      lastInferredTitle = fileFallbackTitle.trim();
-    }
-    if (!hitFilteredDirectory || lastInferredTitle.isEmpty) {
-      return null;
-    }
-    return lastInferredTitle;
+    final fallbackTitle = fileFallbackTitle.trim();
+    return fallbackTitle.isEmpty ? null : fallbackTitle;
   }
 
   List<String>? _stoppedSeriesRootSegmentsByFilteredDirectory({
@@ -1513,47 +1620,62 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
     if (seriesTitleFilterKeywords.isEmpty || relativeDirectories.isEmpty) {
       return null;
     }
-    int? filteredIndex;
-    int? lastUsableIndex;
-    for (var index = relativeDirectories.length - 1; index >= 0; index--) {
+    var filteredIndex = -1;
+    for (var index = 0; index < relativeDirectories.length; index++) {
       final rawDirectory = relativeDirectories[index].trim();
       if (rawDirectory.isEmpty) {
         continue;
       }
       final cleanedDirectory = _cleanIndexedTitleLabel(rawDirectory);
-      final parentMatchesFilter =
-          _parentDirectoryMatchesSeriesTitleFilterKeyword(
-        relativeDirectories: relativeDirectories,
-        childIndex: index,
-        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-      );
       if (_matchesSeriesTitleFilterKeyword(
         rawDirectory,
         cleanedValue: cleanedDirectory,
         seriesTitleFilterKeywords: seriesTitleFilterKeywords,
       )) {
         filteredIndex = index;
-        break;
       }
-      if (_shouldSkipStructureSeriesDirectory(
-        rawDirectory,
-        parentMatchesFilter: parentMatchesFilter,
-        seriesParent: index > 0 ? relativeDirectories[index - 1] : '',
-      )) {
+    }
+    if (filteredIndex < 0) {
+      return null;
+    }
+    for (var index = filteredIndex + 1;
+        index < relativeDirectories.length;
+        index++) {
+      final rawDirectory = relativeDirectories[index].trim();
+      if (rawDirectory.isEmpty) {
+        continue;
+      }
+      final cleanedDirectory = _cleanIndexedTitleLabel(rawDirectory);
+      final parentMatchesFilter = index == filteredIndex + 1 ||
+          _parentDirectoryMatchesSeriesTitleFilterKeyword(
+            relativeDirectories: relativeDirectories,
+            childIndex: index,
+            seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+          );
+      if (NasMediaRecognizer.isGenericLibraryFolderLabel(cleanedDirectory) ||
+          const {
+            'dav',
+            'media',
+            'nas',
+            'quark',
+            'strm',
+            'video',
+            'videos',
+            'webdav',
+          }.contains(cleanedDirectory.trim().toLowerCase()) ||
+          _shouldSkipStructureSeriesDirectory(
+            rawDirectory,
+            parentMatchesFilter: parentMatchesFilter,
+            seriesParent: index > 0 ? relativeDirectories[index - 1] : '',
+          )) {
         continue;
       }
       if (cleanedDirectory.isEmpty) {
         continue;
       }
-      lastUsableIndex ??= index;
+      return relativeDirectories.sublist(index, index + 1);
     }
-    if (filteredIndex == null) {
-      return null;
-    }
-    if (lastUsableIndex == null || lastUsableIndex <= filteredIndex) {
-      return const [];
-    }
-    return relativeDirectories.sublist(lastUsableIndex, lastUsableIndex + 1);
+    return const [];
   }
 
   bool _matchesSeriesTitleFilterKeyword(

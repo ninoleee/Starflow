@@ -439,6 +439,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
   }) {
     final video = Video(
       controller: videoController,
+      pauseUponEnteringBackgroundMode: !_backgroundPlaybackEnabled,
       controls: isTelevision
           ? NoVideoControls
           : (state) {

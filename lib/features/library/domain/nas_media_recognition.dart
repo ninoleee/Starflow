@@ -89,6 +89,8 @@ class NasMediaRecognizer {
   static const List<String> _wrapperRecognitionOnlyDescriptorKeywords = [
     '国英双语',
     '英语',
+    '日语',
+    '韩语',
     '高码',
     '特效',
   ];

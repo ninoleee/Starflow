@@ -66,6 +66,13 @@ update_pubspec_version() {
 VERSION="$(update_pubspec_version pubspec.yaml)"
 BUILD_DATE="$(date +%Y-%m-%d)"
 
+# integration_test is required by performance tests but must not be part of
+# the production Android plugin graph. Flutter can otherwise generate a
+# release registrant for it without adding its test-only classpath.
+PUBSPEC_BUILD_BACKUP="$(mktemp)"
+cp -f pubspec.yaml "$PUBSPEC_BUILD_BACKUP"
+perl -0pi -e 's/\n  integration_test:\n    sdk: flutter\n//' pubspec.yaml
+
 SETTINGS_JSON_PATH="${1:-}"
 
 # Embedded settings handling (mirrors Set-EmbeddedSettings / Remove-EmbeddedSettings)
@@ -73,7 +80,11 @@ EMBEDDED_DIR="$PROJECT_ROOT/assets/bootstrap"
 EMBEDDED_PATH="$EMBEDDED_DIR/embedded_settings.json"
 mkdir -p "$EMBEDDED_DIR"
 rm -f "$EMBEDDED_PATH"   # clean start, mirrors the empty-settings branch
-trap 'rm -f "$EMBEDDED_PATH"' EXIT
+cleanup() {
+  cp -f "$PUBSPEC_BUILD_BACKUP" pubspec.yaml
+  rm -f "$PUBSPEC_BUILD_BACKUP" "$EMBEDDED_PATH"
+}
+trap cleanup EXIT
 
 NAME_PREFIX="starflow-tv"
 if [[ -n "$SETTINGS_JSON_PATH" ]]; then

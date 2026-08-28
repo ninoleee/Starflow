@@ -419,6 +419,8 @@ func normalizedStringMap(_ raw: [String: String]) -> [String: String] {
 }
 
 enum StarflowAudioSession {
+  private static var activeOwners = Set<String>()
+
   static func configurePlayback(
     enabled: Bool,
     owner: String,
@@ -426,6 +428,7 @@ enum StarflowAudioSession {
   ) {
     let session = AVAudioSession.sharedInstance()
     if enabled {
+      activeOwners.insert(owner)
       do {
         try session.setCategory(.playback, mode: .moviePlayback, options: options)
       } catch {
@@ -455,6 +458,10 @@ enum StarflowAudioSession {
           error: error
         )
       }
+      return
+    }
+
+    guard activeOwners.remove(owner) != nil, activeOwners.isEmpty else {
       return
     }
 

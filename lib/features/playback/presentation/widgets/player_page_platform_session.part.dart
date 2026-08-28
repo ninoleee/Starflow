@@ -38,7 +38,6 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
       aspectRatioHeight: 9,
     );
     await AndroidPictureInPictureController.detach();
-    await BackgroundPlaybackController.setEnabled(false);
   }
 
   Future<void> _syncBackgroundPlayback({required bool enabled}) async {
@@ -57,7 +56,6 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
       }
       return;
     }
-    await BackgroundPlaybackController.setEnabled(shouldEnable);
   }
 
   Future<void> _bindPlaybackSystemSession() async {

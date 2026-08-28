@@ -62,10 +62,15 @@ class _ExternalScanStructureModule {
       source: source,
     );
     final seriesRootPlans = _buildSeriesRootPlans(context);
+    final singleVideoMovieResourceIds = _resolveSingleVideoMovieResourceIds(
+      context,
+      seriesRootPlans: seriesRootPlans,
+    );
     final seriesRootForResource = _mapSeriesRootForResource(
       items: items,
       seriesRootPlans: seriesRootPlans,
       movieVersionResourceIds: context.movieVersionResourceIds,
+      singleVideoMovieResourceIds: singleVideoMovieResourceIds,
     );
     final assignment = _assignItemsToStructure(
       items: items,
@@ -144,6 +149,7 @@ class _ExternalScanStructureModule {
       recognitionByResource: recognitionByResource,
       movieVersionResourceIds: movieVersionResourceIds,
       specialEpisodeKeywords: specialEpisodeKeywords,
+      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
     );
   }
 
@@ -154,9 +160,15 @@ class _ExternalScanStructureModule {
   }) {
     final resourceIds = <String>{};
     for (final parentEntry in childItemsByDirectory.entries) {
-      final parentDepth = _segmentsFromKey(parentEntry.key).length;
+      final parentSegments = _segmentsFromKey(parentEntry.key);
+      final parentDepth = parentSegments.length;
+      final parentTitle = parentSegments.isEmpty ? '' : parentSegments.last;
       final movieVersionGroups = parentEntry.value.entries.where((entry) {
-        if (!NasMediaRecognizer.matchesMovieVersionFolderLabel(entry.key)) {
+        if (!NasMediaRecognizer.matchesMovieVersionFolderLabel(entry.key) &&
+            !_looksLikeNestedMovieReleaseFolder(
+              parentTitle: parentTitle,
+              childDirectoryName: entry.key,
+            )) {
           return false;
         }
         return entry.value.every((item) {
@@ -186,6 +198,16 @@ class _ExternalScanStructureModule {
         });
       }).toList(growable: false);
       if (movieVersionGroups.length < 2) {
+        final isSingleNestedMovieWrapper = movieVersionGroups.length == 1 &&
+            parentEntry.value.length == 1 &&
+            movieVersionGroups.single.value.length == 1 &&
+            parentTitle.trim().isNotEmpty &&
+            !NasMediaRecognizer.isGenericLibraryFolderLabel(parentTitle);
+        if (isSingleNestedMovieWrapper) {
+          resourceIds.addAll(
+            movieVersionGroups.single.value.map((item) => item.resourceId),
+          );
+        }
         continue;
       }
       resourceIds.addAll(
@@ -197,6 +219,266 @@ class _ExternalScanStructureModule {
     return resourceIds;
   }
 
+  Set<String> _resolveSingleVideoMovieResourceIds(
+    _StructureInferenceContext context, {
+    required Map<String, _SeriesRootInferencePlan> seriesRootPlans,
+  }) {
+    final resourceIds = <String>{};
+    for (final scannedItem in context.filesByDirectory.values.expand(
+      (items) => items,
+    )) {
+      final resourceId = scannedItem.resourceId;
+      final directoryKey = _segmentsKey(scannedItem.relativeDirectories);
+      final directItems = context.filesByDirectory[directoryKey] ?? const [];
+      final childGroups = context.childItemsByDirectory[directoryKey] ??
+          const <String, List<_PendingWebDavScannedItem>>{};
+      final seed = scannedItem.metadataSeed;
+      final recognition = context.recognitionByResource[resourceId];
+      if (directItems.length != 1 || childGroups.isNotEmpty) {
+        continue;
+      }
+      if (seed.itemType.trim().isNotEmpty ||
+          seed.seasonNumber != null ||
+          seed.episodeNumber != null ||
+          recognition?.itemType.trim().toLowerCase() == 'episode' ||
+          recognition?.seasonNumber != null ||
+          recognition?.episodeNumber != null) {
+        continue;
+      }
+      if (context.movieVersionResourceIds.contains(resourceId)) {
+        continue;
+      }
+      if (seriesRootPlans.containsKey(directoryKey)) {
+        // A direct file under a planned root belongs to that root (for
+        // example a special or an implicit episode), not to a standalone
+        // movie fallback.
+        continue;
+      }
+      if (_hasSeriesAncestor(
+        scannedItem,
+        context: context,
+        seriesRootPlans: seriesRootPlans,
+      )) {
+        continue;
+      }
+      resourceIds.add(resourceId);
+    }
+    return resourceIds;
+  }
+
+  bool _hasSeriesAncestor(
+    _PendingWebDavScannedItem item, {
+    required _StructureInferenceContext context,
+    required Map<String, _SeriesRootInferencePlan> seriesRootPlans,
+  }) {
+    final directories = item.relativeDirectories;
+    for (var ancestorLength = 0;
+        ancestorLength < directories.length;
+        ancestorLength++) {
+      final ancestorKey = _segmentsKey(
+        directories.take(ancestorLength),
+      );
+      final childGroups = context.childItemsByDirectory[ancestorKey];
+      if (childGroups == null || childGroups.isEmpty) {
+        continue;
+      }
+
+      final plan = seriesRootPlans[ancestorKey];
+      final ancestorSegments = _segmentsFromKey(ancestorKey);
+      if (ancestorSegments.isEmpty) {
+        // The scan root itself is a library scope, not a title-bearing media
+        // directory, when this item enters through a transport wrapper.  A
+        // different series directly beside that wrapper must not promote the
+        // single movie below it.
+        if (directories.isNotEmpty &&
+            _isTransportDirectoryLabel(
+              directories.first,
+              configuredKeywords: context.seriesTitleFilterKeywords,
+            )) {
+          continue;
+        }
+        // A scoped scan may itself start at a series directory, so an empty
+        // relative root can be a real media root.  Only suppress it when all
+        // of its child directories are transport wrappers.
+        final isTransportRoot = childGroups.keys.every(
+          (childName) => _isTransportDirectoryLabel(
+            childName,
+            configuredKeywords: context.seriesTitleFilterKeywords,
+          ),
+        );
+        if (isTransportRoot) {
+          continue;
+        }
+      }
+      final ancestorTitle = ancestorSegments.isEmpty
+          ? ''
+          : ancestorSegments.last.trim().toLowerCase();
+      final isTransportDirectory = ancestorSegments.isNotEmpty &&
+          _isTransportDirectoryLabel(
+            ancestorTitle,
+            configuredKeywords: context.seriesTitleFilterKeywords,
+          );
+      // Transport/library wrappers (for example `strm/quark`) are shared by
+      // unrelated movies and series.  Episode evidence from a sibling under
+      // such a wrapper must never promote a one-file movie directory into a
+      // `webdav-series` group.  Only a real, title-bearing ancestor can own
+      // descendant series evidence.
+      if (isTransportDirectory) {
+        continue;
+      }
+      if (plan != null && !isTransportDirectory) {
+        // A non-transport directory with child media directories owns those
+        // descendants.  Recognized movie-version resources are excluded
+        // before this check; every other unclassified child becomes an
+        // implicit season of the parent series.
+        return true;
+      }
+
+      final descendantItems = childGroups.values.expand((items) => items);
+      if (descendantItems.any(
+        (descendant) => _hasExplicitSeriesEvidence(
+          descendant,
+          recognition: context.recognitionByResource[descendant.resourceId],
+        ),
+      )) {
+        return true;
+      }
+
+      // Multiple non-version child directories are a useful fallback signal
+      // for layouts such as `Show/Disc 1` and `Show/Disc 2` only when their
+      // files themselves carry episode/season evidence.  Release/quality
+      // directories are deliberately excluded to avoid treating movie
+      // versions as seasons.
+      if (childGroups.length >= 2) {
+        final parentSegments = _segmentsFromKey(ancestorKey);
+        final parentTitle = parentSegments.isEmpty ? '' : parentSegments.last;
+        final nonVersionGroups = childGroups.entries.where((entry) {
+          return !NasMediaRecognizer.matchesMovieVersionFolderLabel(
+                entry.key,
+              ) &&
+              !_looksLikeNestedMovieReleaseFolder(
+                parentTitle: parentTitle,
+                childDirectoryName: entry.key,
+              );
+        });
+        if (nonVersionGroups.length >= 2 &&
+            nonVersionGroups.any(
+              (entry) => entry.value.any(
+                (descendant) => _hasExplicitSeriesEvidence(
+                  descendant,
+                  recognition:
+                      context.recognitionByResource[descendant.resourceId],
+                ),
+              ),
+            )) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  bool _isTransportDirectoryLabel(
+    String value, {
+    required List<String> configuredKeywords,
+  }) {
+    if (value.trim().isEmpty) {
+      return true;
+    }
+    if (NasMediaRecognizer.isGenericLibraryFolderLabel(value) ||
+        configuredKeywords.contains(value.trim().toLowerCase())) {
+      return true;
+    }
+    return const <String>{
+      'dav',
+      'media',
+      'nas',
+      'quark',
+      'strm',
+      'video',
+      'videos',
+      'webdav',
+    }.contains(value.trim().toLowerCase());
+  }
+
+  bool _hasExplicitSeriesEvidence(
+    _PendingWebDavScannedItem item, {
+    required NasMediaRecognition? recognition,
+  }) {
+    final seed = item.metadataSeed;
+    final itemType = seed.itemType.trim().toLowerCase();
+    if (itemType == 'episode' || itemType == 'series' || itemType == 'season') {
+      return true;
+    }
+    final recognitionType = recognition?.itemType.trim().toLowerCase();
+    return recognitionType == 'episode' ||
+        recognitionType == 'series' ||
+        recognitionType == 'season' ||
+        seed.seasonNumber != null ||
+        seed.episodeNumber != null ||
+        recognition?.seasonNumber != null ||
+        recognition?.episodeNumber != null;
+  }
+
+  bool _looksLikeNestedMovieReleaseFolder({
+    required String parentTitle,
+    required String childDirectoryName,
+  }) {
+    if (parentTitle.trim().isEmpty ||
+        NasMediaRecognizer.isGenericLibraryFolderLabel(parentTitle) ||
+        looksLikeSeasonFolderLabel(childDirectoryName)) {
+      return false;
+    }
+    final normalizedParent = parentTitle.toLowerCase().replaceAll(
+          RegExp(r'[\s\-_.·:：/\\|()（）\[\]【】{}《》]+'),
+          '',
+        );
+    final normalizedChild = childDirectoryName.toLowerCase().replaceAll(
+          RegExp(r'[\s\-_.·:：/\\|()（）\[\]【】{}《》]+'),
+          '',
+        );
+    if (normalizedParent.isEmpty ||
+        normalizedChild == normalizedParent ||
+        !normalizedChild.startsWith(normalizedParent)) {
+      return false;
+    }
+    final suffix = normalizedChild.substring(normalizedParent.length);
+    final yearMatch = RegExp(r'^(?:19\d{2}|20\d{2})').firstMatch(suffix);
+    if (yearMatch != null) {
+      final remainder = suffix.substring(yearMatch.end);
+      return remainder.isEmpty ||
+          NasMediaRecognizer.matchesMovieVersionFolderLabel(remainder) ||
+          _containsMovieReleaseDescriptor(remainder);
+    }
+    return NasMediaRecognizer.matchesMovieVersionFolderLabel(suffix) ||
+        _containsMovieReleaseDescriptor(suffix);
+  }
+
+  bool _containsMovieReleaseDescriptor(String value) {
+    const descriptorKeywords = <String>[
+      '国语',
+      '粤语',
+      '英语',
+      '日语',
+      '韩语',
+      '中字',
+      '字幕',
+      '双语',
+      '简繁',
+      '外挂',
+      '内封',
+      '蓝光',
+      '原盘',
+      '高码',
+      'hdr',
+      '4k',
+      '2160p',
+      '1080p',
+      'web',
+    ];
+    return descriptorKeywords.any(value.contains);
+  }
+
   Map<String, _SeriesRootInferencePlan> _buildSeriesRootPlans(
     _StructureInferenceContext context,
   ) {
@@ -206,12 +488,30 @@ class _ExternalScanStructureModule {
       ...context.childVideoCountsByDirectory.keys,
     };
     for (final directoryKey in candidateDirectoryKeys) {
+      final directorySegments = _segmentsFromKey(directoryKey);
+      if (directorySegments.isNotEmpty &&
+          _isTransportDirectoryLabel(
+            directorySegments.last,
+            configuredKeywords: context.seriesTitleFilterKeywords,
+          )) {
+        continue;
+      }
+      final childGroups = context.childItemsByDirectory[directoryKey] ??
+          const <String, List<_PendingWebDavScannedItem>>{};
+      final promoteAllChildDirectories = directorySegments.isNotEmpty ||
+          !childGroups.keys.every(
+            (childName) => _isTransportDirectoryLabel(
+              childName,
+              configuredKeywords: context.seriesTitleFilterKeywords,
+            ),
+          );
       final plan = _buildSeriesRootPlan(
         directoryKey: directoryKey,
         filesByDirectory: context.filesByDirectory,
         childItemsByDirectory: context.childItemsByDirectory,
         recognitionByResource: context.recognitionByResource,
         specialEpisodeKeywords: context.specialEpisodeKeywords,
+        promoteAllChildDirectories: promoteAllChildDirectories,
       );
       if (plan == null) {
         continue;
@@ -225,10 +525,14 @@ class _ExternalScanStructureModule {
     required List<_PendingWebDavScannedItem> items,
     required Map<String, _SeriesRootInferencePlan> seriesRootPlans,
     required Set<String> movieVersionResourceIds,
+    required Set<String> singleVideoMovieResourceIds,
   }) {
     final seriesRootForResource = <String, String>{};
     for (final item in items) {
       if (movieVersionResourceIds.contains(item.resourceId)) {
+        continue;
+      }
+      if (singleVideoMovieResourceIds.contains(item.resourceId)) {
         continue;
       }
       String? matchedRootKey;
@@ -468,8 +772,12 @@ class _ExternalScanStructureModule {
     final directories = item.relativeDirectories;
     for (var index = 1; index < directories.length; index++) {
       if (!NasMediaRecognizer.matchesMovieVersionFolderLabel(
-        directories[index],
-      )) {
+            directories[index],
+          ) &&
+          !_looksLikeNestedMovieReleaseFolder(
+            parentTitle: directories[index - 1],
+            childDirectoryName: directories[index],
+          )) {
         continue;
       }
       final parentTitle = directories[index - 1].trim();
@@ -637,6 +945,7 @@ class _ExternalScanStructureModule {
         childItemsByDirectory,
     required Map<String, NasMediaRecognition> recognitionByResource,
     required List<String> specialEpisodeKeywords,
+    required bool promoteAllChildDirectories,
   }) {
     final directItems = filesByDirectory[directoryKey] ?? const [];
     final childGroups = childItemsByDirectory[directoryKey] ??
@@ -646,7 +955,11 @@ class _ExternalScanStructureModule {
     }
 
     final seasonHintsByChildDirectory = <String, _SeasonDirectoryHint>{};
-    final structuralChildDirectories = <String>{};
+    // Every child media directory belongs to this root.  Explicit season
+    // hints refine the season number, while an unrecognized child remains an
+    // implicit season instead of becoming a deeper standalone series root.
+    final structuralChildDirectories =
+        promoteAllChildDirectories ? <String>{...childGroups.keys} : <String>{};
     final collapseChildDirectoriesToRoot = <String>{};
     for (final entry in childGroups.entries) {
       final hint = _resolveSeasonDirectoryHint(
@@ -940,6 +1253,7 @@ class _StructureInferenceContext {
     required this.recognitionByResource,
     required this.movieVersionResourceIds,
     required this.specialEpisodeKeywords,
+    required this.seriesTitleFilterKeywords,
   });
 
   final Map<String, List<_PendingWebDavScannedItem>> filesByDirectory;
@@ -949,6 +1263,7 @@ class _StructureInferenceContext {
   final Map<String, NasMediaRecognition> recognitionByResource;
   final Set<String> movieVersionResourceIds;
   final List<String> specialEpisodeKeywords;
+  final List<String> seriesTitleFilterKeywords;
 }
 
 class _StructureAssignment {

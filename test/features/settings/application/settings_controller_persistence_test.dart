@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/core/utils/seed_data.dart';
+import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -72,6 +73,51 @@ void main() {
       container.read(appSettingsProvider).homeFeedInitialBatchSize,
       3,
     );
+  });
+
+  test('subtitle preferences persist without replacing other playback fields',
+      () async {
+    final initial = SeedData.defaultSettings.copyWith(
+      playbackOpenTimeoutSeconds: 90,
+      playbackDefaultSpeed: 1.5,
+    );
+    final repository = _OutOfOrderSettingsRepository(initial);
+    final container = ProviderContainer(
+      overrides: [
+        appSettingsRepositoryProvider.overrideWithValue(repository),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container.read(settingsControllerProvider.future);
+
+    await container
+        .read(settingsControllerProvider.notifier)
+        .savePlaybackSubtitlePreferences(
+          subtitlePreference: PlaybackSubtitlePreference.off,
+          subtitleScale: 40,
+          onlineSubtitleSources: const [OnlineSubtitleSource.assrt],
+          assrtToken: ' token ',
+          opensubtitlesEnabled: true,
+          opensubtitlesUsername: ' user ',
+          opensubtitlesPassword: 'password',
+          subdlEnabled: true,
+          subdlApiKey: ' key ',
+          subtitlePreferredLanguages: const ['ZH-CN', 'en'],
+          subtitleSearchMaxValidatedCandidates: 8,
+        );
+
+    expect(repository.settings.playbackSubtitlePreference,
+        PlaybackSubtitlePreference.off);
+    expect(repository.settings.playbackSubtitleScale, 40);
+    expect(repository.settings.onlineSubtitleSources,
+        const [OnlineSubtitleSource.assrt]);
+    expect(repository.settings.assrtToken, 'token');
+    expect(repository.settings.opensubtitlesUsername, 'user');
+    expect(repository.settings.subdlApiKey, 'key');
+    expect(repository.settings.subtitlePreferredLanguages, ['zh-cn', 'en']);
+    expect(repository.settings.subtitleSearchMaxValidatedCandidates, 8);
+    expect(repository.settings.playbackOpenTimeoutSeconds, 90);
+    expect(repository.settings.playbackDefaultSpeed, 1.5);
   });
 }
 

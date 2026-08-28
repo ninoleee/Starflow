@@ -108,6 +108,35 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
 
     var title =
         seed.title.trim().isNotEmpty ? seed.title.trim() : recognition.title;
+    final seedItemType = seed.itemType.trim().toLowerCase();
+    if (source.webDavStructureInferenceEnabled &&
+        !seed.hasSidecarMatch &&
+        (seedItemType.isEmpty || seedItemType == 'movie')) {
+      // A failed structure classification must not turn a media item into its
+      // release filename.  Keep the first directory below the configured
+      // source section as the stable library title, and only use the filename
+      // when the file is directly at the section root.
+      final structureFallbackTitle = _firstLibraryDirectoryTitle(
+            scannedItem,
+            seriesTitleFilterKeywords:
+                source.normalizedWebDavSeriesTitleFilterKeywords,
+          ) ??
+          _seriesTitleFromScannedItem(
+            scannedItem,
+            fileFallbackTitle: title,
+            seriesTitleFilterKeywords:
+                source.normalizedWebDavSeriesTitleFilterKeywords,
+          );
+      final normalizedStructureTitle =
+          _normalizeIndexedPathToken(structureFallbackTitle);
+      final normalizedFileTitle = _normalizeIndexedPathToken(title);
+      if (structureFallbackTitle.trim().isNotEmpty &&
+          (seedItemType == 'movie' ||
+              normalizedFileTitle.isEmpty ||
+              !normalizedFileTitle.contains(normalizedStructureTitle))) {
+        title = structureFallbackTitle.trim();
+      }
+    }
     var originalTitle = '';
     var overview = seed.overview.trim();
     var posterUrl = seed.posterUrl.trim();
@@ -136,14 +165,24 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
         : recognition.itemType.trim();
     var seasonNumber = seed.seasonNumber ?? recognition.seasonNumber;
     var episodeNumber = seed.episodeNumber ?? recognition.episodeNumber;
-    var doubanId = existingRecord?.item.doubanId.trim() ?? '';
+    final requiresMovieMetadataTypeCorrection =
+        _requiresMovieMetadataTypeCorrection(existingRecord) ||
+            _hasStaleSeriesMetadataForResolvedMovie(
+              source: source,
+              seed: seed,
+              existingRecord: existingRecord,
+            );
+    var doubanId = requiresMovieMetadataTypeCorrection
+        ? ''
+        : existingRecord?.item.doubanId.trim() ?? '';
     var imdbId = seed.imdbId.trim().isNotEmpty
         ? seed.imdbId.trim()
-        : (existingRecord?.item.imdbId.trim().isNotEmpty == true
+        : (!requiresMovieMetadataTypeCorrection &&
+                existingRecord?.item.imdbId.trim().isNotEmpty == true
             ? existingRecord!.item.imdbId.trim()
             : recognition.imdbId.trim());
     var tmdbId = seed.tmdbId.trim();
-    if (tmdbId.isEmpty) {
+    if (tmdbId.isEmpty && !requiresMovieMetadataTypeCorrection) {
       tmdbId = existingRecord?.item.tmdbId.trim() ?? '';
     }
     final container = seed.container.trim();
@@ -189,6 +228,13 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     var imdbStatus = existingRecord?.imdbStatus ?? NasMetadataFetchStatus.never;
     var metadataFailureCount = existingRecord?.metadataFailureCount ?? 0;
     var metadataRetryAfter = existingRecord?.metadataRetryAfter;
+    if (requiresMovieMetadataTypeCorrection) {
+      wmdbStatus = NasMetadataFetchStatus.never;
+      tmdbStatus = NasMetadataFetchStatus.never;
+      imdbStatus = NasMetadataFetchStatus.never;
+      metadataFailureCount = 0;
+      metadataRetryAfter = null;
+    }
     var transientFailureOccurred = false;
 
     if (markSidecarAttempt) {
@@ -213,9 +259,12 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     );
     final metadataMatchActors =
         useSeriesLevelScrape ? const <String>[] : actors;
-    var preferSeries = recognition.preferSeries ||
-        itemType.trim().toLowerCase() == 'episode' ||
-        itemType.trim().toLowerCase() == 'series';
+    final metadataItemType = itemType.trim().toLowerCase();
+    var preferSeries = metadataItemType == 'movie'
+        ? false
+        : recognition.preferSeries ||
+            metadataItemType == 'episode' ||
+            metadataItemType == 'series';
     var resolvedOnlineMovieType = false;
 
     if (applyOnlineMetadata &&
@@ -628,6 +677,85 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     );
   }
 
+  String? _firstLibraryDirectoryTitle(
+    WebDavScannedItem item, {
+    required List<String> seriesTitleFilterKeywords,
+  }) {
+    final resourceSegments = _pathSegments(item.actualAddress);
+    if (resourceSegments.isEmpty) {
+      return null;
+    }
+    final sectionSegments = _pathSegments(_uriPath(item.sectionId));
+    var commonLength = 0;
+    while (commonLength < sectionSegments.length &&
+        commonLength < resourceSegments.length &&
+        sectionSegments[commonLength] == resourceSegments[commonLength]) {
+      commonLength += 1;
+    }
+    if (resourceSegments.length <= commonLength + 1) {
+      return null;
+    }
+    final normalizedFilters = seriesTitleFilterKeywords
+        .map(_normalizeIndexedPathToken)
+        .where((value) => value.isNotEmpty)
+        .toSet()
+      ..addAll(const {'strm', 'quark', 'nas', 'webdav'});
+    final relativeDirectories = resourceSegments.sublist(
+      commonLength,
+      resourceSegments.length - 1,
+    );
+    for (final directory in relativeDirectories) {
+      // This value is presented as the movie title, so preserve meaningful
+      // bracketed directory content such as a release year.  The general
+      // metadata cleaner intentionally removes bracket groups and is too
+      // destructive for a user-authored directory label.
+      final cleaned = stripEmbeddedExternalIdTags(directory)
+          .replaceAll(RegExp(r'[_\.]+'), ' ')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      final normalized = _normalizeIndexedPathToken(cleaned);
+      if (cleaned.isEmpty ||
+          normalizedFilters.contains(normalized) ||
+          NasMediaRecognizer.isGenericLibraryFolderLabel(cleaned)) {
+        continue;
+      }
+      return cleaned;
+    }
+    return null;
+  }
+
+  bool _hasStaleSeriesMetadataForResolvedMovie({
+    required MediaSourceConfig source,
+    required WebDavMetadataSeed seed,
+    required NasMediaIndexRecord? existingRecord,
+  }) {
+    if (!source.webDavStructureInferenceEnabled ||
+        existingRecord == null ||
+        existingRecord.manualMetadataLocked ||
+        seed.itemType.trim().toLowerCase() != 'movie' ||
+        seed.seasonNumber != null ||
+        seed.episodeNumber != null) {
+      return false;
+    }
+    final existingItemType = existingRecord.item.itemType.trim().toLowerCase();
+    final existingRecognizedType =
+        existingRecord.recognizedItemType.trim().toLowerCase();
+    return existingItemType != 'movie' ||
+        existingRecognizedType != 'movie' ||
+        existingRecord.preferSeries ||
+        existingRecord.item.seasonNumber != null ||
+        existingRecord.item.episodeNumber != null ||
+        existingRecord.recognizedSeasonNumber != null ||
+        existingRecord.recognizedEpisodeNumber != null;
+  }
+
+  String _normalizeIndexedPathToken(String value) {
+    return value.trim().toLowerCase().replaceAll(
+          RegExp(r'[\s\-_.·:：/\\|()（）\[\]【】{}《》]+'),
+          '',
+        );
+  }
+
   String _buildMetadataMatchQuery({
     required MediaSourceConfig source,
     required WebDavScannedItem scannedItem,
@@ -842,6 +970,18 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       return _cleanIndexedTitleLabel(sectionSegments.last);
     }
 
+    if (hasSeasonHint || itemType == 'episode') {
+      final firstStructureRootIndex = _firstUsableSeriesDirectoryIndex(
+        relativeDirectories,
+        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+      );
+      if (firstStructureRootIndex >= 0) {
+        return _cleanIndexedTitleLabel(
+          relativeDirectories[firstStructureRootIndex],
+        );
+      }
+    }
+
     final trailingStructureRoot =
         _nearestNonSeasonDirectory(relativeDirectories);
     if (trailingStructureRoot.isNotEmpty &&
@@ -874,8 +1014,7 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       return null;
     }
 
-    var lastInferredTitle = '';
-    for (var index = relativeDirectories.length - 1; index >= 0; index--) {
+    for (var index = 0; index < relativeDirectories.length; index++) {
       final rawDirectory = relativeDirectories[index].trim();
       final canUseSeasonDirectory = index == 0 &&
           _canUseSeasonDirectoryAsSeriesRoot(
@@ -888,20 +1027,27 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
         continue;
       }
       final cleanedDirectory = _cleanIndexedTitleLabel(rawDirectory);
-      if (cleanedDirectory.isEmpty) {
+      if (cleanedDirectory.isEmpty ||
+          NasMediaRecognizer.isGenericLibraryFolderLabel(cleanedDirectory) ||
+          const {
+            'dav',
+            'media',
+            'nas',
+            'quark',
+            'strm',
+            'video',
+            'videos',
+            'webdav',
+          }.contains(cleanedDirectory.trim().toLowerCase())) {
         continue;
       }
-      if (lastInferredTitle.isEmpty) {
-        lastInferredTitle = cleanedDirectory;
-      }
+      return cleanedDirectory;
     }
-    if (lastInferredTitle.isEmpty) {
-      lastInferredTitle = fileFallbackTitle.trim();
-    }
-    if (lastInferredTitle.isEmpty) {
+    final fallbackTitle = fileFallbackTitle.trim();
+    if (fallbackTitle.isEmpty) {
       return null;
     }
-    return lastInferredTitle;
+    return fallbackTitle;
   }
 
   String _buildScopeKey(
@@ -959,26 +1105,74 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
 
   String buildStructureFingerprintSignature(WebDavScannedItem scannedItem) {
     final seed = scannedItem.metadataSeed;
-    if (seed.itemType.trim().toLowerCase() != 'movie' ||
+    final normalizedItemType = seed.itemType.trim().toLowerCase();
+    final season = seed.seasonNumber?.toString() ?? '';
+    final episode = seed.episodeNumber?.toString() ?? '';
+    // Include the resolved structure classification in the fingerprint.  A
+    // path and file size can stay unchanged while a newer inference rule
+    // changes a stale series record into a movie (or vice versa); without
+    // this marker the refresh path would keep reusing that old record.
+    final classification =
+        'structure-classification-v2:$normalizedItemType:$season:$episode';
+    if (normalizedItemType != 'movie' ||
         seed.seasonNumber != null ||
         seed.episodeNumber != null) {
-      return '';
+      return classification;
     }
     final segments = _pathSegments(_uriPath(scannedItem.actualAddress));
     if (segments.length < 3) {
-      return '';
+      return classification;
     }
     var versionDirectoryIndex = -1;
     for (var index = 1; index < segments.length - 1; index++) {
-      if (NasMediaRecognizer.matchesMovieVersionFolderLabel(segments[index])) {
+      if (NasMediaRecognizer.matchesMovieVersionFolderLabel(segments[index]) ||
+          _looksLikeNestedMovieVersionDirectory(segments, index)) {
         versionDirectoryIndex = index;
         break;
       }
     }
     if (versionDirectoryIndex < 1) {
-      return '';
+      return classification;
     }
     final normalizedTitle = seed.title.trim().toLowerCase();
-    return 'movie-version-v1:$normalizedTitle';
+    return '$classification|movie-version-v1:$normalizedTitle';
+  }
+
+  bool _looksLikeNestedMovieVersionDirectory(
+    List<String> segments,
+    int index,
+  ) {
+    if (index <= 0 || index >= segments.length - 1) {
+      return false;
+    }
+    final parent = segments[index - 1].trim();
+    final child = segments[index].trim();
+    if (parent.isEmpty ||
+        child.isEmpty ||
+        NasMediaRecognizer.isGenericLibraryFolderLabel(parent)) {
+      return false;
+    }
+    final separatorPattern = RegExp(
+      r'[\s\-_.·:：/\\|()（）\[\]【】{}《》]+',
+    );
+    final normalizedParent = parent.toLowerCase().replaceAll(
+          separatorPattern,
+          '',
+        );
+    final normalizedChild = child.toLowerCase().replaceAll(
+          separatorPattern,
+          '',
+        );
+    if (normalizedParent.isEmpty ||
+        normalizedChild == normalizedParent ||
+        !normalizedChild.startsWith(normalizedParent)) {
+      return false;
+    }
+    final suffix = normalizedChild.substring(normalizedParent.length);
+    final yearMatch = RegExp(r'^(?:19\d{2}|20\d{2})').firstMatch(suffix);
+    final remainder =
+        yearMatch == null ? suffix : suffix.substring(yearMatch.end);
+    return remainder.isEmpty ||
+        NasMediaRecognizer.matchesMovieVersionFolderLabel(remainder);
   }
 }

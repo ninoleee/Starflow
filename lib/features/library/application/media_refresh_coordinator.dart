@@ -66,7 +66,7 @@ class MediaRefreshCoordinator {
   Future<void> refreshSelectedSources({
     required List<String> sourceIds,
     int delaySeconds = 0,
-    bool invalidateWebDavDirectoryCache = false,
+    bool invalidateWebDavDirectoryCache = true,
     bool allowNetworkProbe = false,
   }) async {
     if (allowNetworkProbe) {

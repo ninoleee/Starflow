@@ -234,6 +234,45 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(playbackSubtitleScale: subtitleScale));
   }
 
+  Future<void> savePlaybackSubtitlePreferences({
+    required PlaybackSubtitlePreference subtitlePreference,
+    required double subtitleScale,
+    required List<OnlineSubtitleSource> onlineSubtitleSources,
+    required String assrtToken,
+    required bool opensubtitlesEnabled,
+    required String opensubtitlesUsername,
+    required String opensubtitlesPassword,
+    required bool subdlEnabled,
+    required String subdlApiKey,
+    required List<String> subtitlePreferredLanguages,
+    required int subtitleSearchMaxValidatedCandidates,
+  }) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(
+        playbackSubtitlePreference: subtitlePreference,
+        playbackSubtitleScale: subtitleScale,
+        onlineSubtitleSources:
+            onlineSubtitleSources.toSet().toList(growable: false),
+        assrtToken: assrtToken.trim(),
+        opensubtitlesEnabled: opensubtitlesEnabled,
+        opensubtitlesUsername: opensubtitlesUsername.trim(),
+        opensubtitlesPassword: opensubtitlesPassword,
+        subdlEnabled: subdlEnabled,
+        subdlApiKey: subdlApiKey.trim(),
+        subtitlePreferredLanguages: subtitlePreferredLanguages
+            .map((item) => item.trim().toLowerCase())
+            .where((item) => item.isNotEmpty)
+            .toSet()
+            .toList(growable: false),
+        subtitleSearchMaxValidatedCandidates:
+            clampSubtitleSearchMaxValidatedCandidates(
+          subtitleSearchMaxValidatedCandidates,
+        ),
+      ),
+    );
+  }
+
   Future<void> savePlaybackPreferences({
     required int openTimeoutSeconds,
     required double defaultSpeed,

@@ -114,6 +114,13 @@ import UIKit
         let episodeQueueJson =
           (arguments?["episodeQueueJson"] as? String)?
           .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let subtitlePreference =
+          (arguments?["subtitlePreference"] as? String)?
+          .trimmingCharacters(in: .whitespacesAndNewlines) ?? "auto"
+        let subtitlePreferredLanguages =
+          (arguments?["subtitlePreferredLanguages"] as? [String] ?? [])
+          .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+          .filter { !$0.isEmpty }
         self?.launchNativePlaybackContainer(
           rawUrl: rawUrl,
           title: title,
@@ -122,6 +129,8 @@ import UIKit
           playbackItemKey: playbackItemKey,
           seriesKey: seriesKey,
           episodeQueueJson: episodeQueueJson,
+          subtitlePreference: subtitlePreference,
+          subtitlePreferredLanguages: subtitlePreferredLanguages,
           result: result
         )
       case "launchSystemVideoPlayer":
@@ -312,6 +321,8 @@ import UIKit
     playbackItemKey: String,
     seriesKey: String,
     episodeQueueJson: String,
+    subtitlePreference: String,
+    subtitlePreferredLanguages: [String],
     result: @escaping FlutterResult
   ) {
     guard !rawUrl.isEmpty,
@@ -342,6 +353,8 @@ import UIKit
       let controller = NativePlaybackViewController(
         request: request,
         episodeQueue: NativeEpisodeQueue.fromJsonString(episodeQueueJson),
+        subtitlePreference: subtitlePreference,
+        subtitlePreferredLanguages: subtitlePreferredLanguages,
         playbackStore: self.nativePlaybackStore
       )
       controller.modalPresentationStyle = .fullScreen
@@ -668,6 +681,8 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   private static let playbackStartupTimeoutSeconds: TimeInterval = 30
 
   private let playbackStore: NativePlaybackMemoryStore
+  private let subtitlePreference: String
+  private let subtitlePreferredLanguages: [String]
   private let isoFormatter = ISO8601DateFormatter()
   private var request: NativePlaybackRequest
   private var episodeQueue: NativeEpisodeQueue?
@@ -688,10 +703,14 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   init(
     request: NativePlaybackRequest,
     episodeQueue: NativeEpisodeQueue?,
+    subtitlePreference: String,
+    subtitlePreferredLanguages: [String],
     playbackStore: NativePlaybackMemoryStore
   ) {
     self.request = request
     self.episodeQueue = episodeQueue
+    self.subtitlePreference = subtitlePreference
+    self.subtitlePreferredLanguages = subtitlePreferredLanguages
     self.playbackStore = playbackStore
     super.init(nibName: nil, bundle: nil)
   }
@@ -708,7 +727,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     view.backgroundColor = .black
     showsPlaybackControls = true
     allowsPictureInPicturePlayback = true
-    updatesNowPlayingInfoCenter = true
+    updatesNowPlayingInfoCenter = false
     title = request.title
     cleanupCustomOverlayIfNeeded()
     configurePlayer()
@@ -736,6 +755,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
       : ["AVURLAssetHTTPHeaderFieldsKey": request.headers]
     let asset = AVURLAsset(url: request.url, options: assetOptions)
     let item = AVPlayerItem(asset: asset)
+    applyAutomaticSubtitleSelection(to: item, asset: asset)
 
     if !request.title.isEmpty {
       let metadataItem = AVMutableMetadataItem()
@@ -803,6 +823,104 @@ private final class NativePlaybackViewController: AVPlayerViewController {
       }
     }
     refreshRemoteCommandAvailability()
+  }
+
+  private func applyAutomaticSubtitleSelection(
+    to item: AVPlayerItem,
+    asset: AVURLAsset
+  ) {
+    asset.loadValuesAsynchronously(
+      forKeys: ["availableMediaCharacteristicsWithMediaSelectionOptions"]
+    ) { [weak self, weak item] in
+      DispatchQueue.main.async {
+        guard let self, let item,
+          let group = asset.mediaSelectionGroup(forMediaCharacteristic: .legible)
+        else {
+          return
+        }
+        if self.subtitlePreference == "off" {
+          item.select(nil, in: group)
+          return
+        }
+
+        let preferredLanguages = self.subtitlePreferredLanguages.isEmpty
+          ? Array(Locale.preferredLanguages.prefix(1))
+          : self.subtitlePreferredLanguages
+        let preferredOption = preferredLanguages.lazy.compactMap { language in
+          group.options.first { option in
+            self.subtitleOption(option, matches: language)
+          }
+        }.first
+        let forcedOption = group.options.first { option in
+          option.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
+            || self.isForcedSubtitleLabel(option.displayName)
+        }
+        item.select(preferredOption ?? forcedOption ?? group.defaultOption, in: group)
+      }
+    }
+  }
+
+  private func subtitleOption(
+    _ option: AVMediaSelectionOption,
+    matches rawPreference: String
+  ) -> Bool {
+    let preference = canonicalSubtitleLanguage(rawPreference)
+    guard !preference.isEmpty else {
+      return false
+    }
+    let optionLanguage = canonicalSubtitleLanguage(option.locale?.identifier ?? "")
+    if optionLanguage == preference {
+      return true
+    }
+    let optionRoot = optionLanguage.split(separator: "-").first.map(String.init) ?? ""
+    let preferenceRoot = preference.split(separator: "-").first.map(String.init) ?? ""
+    if !optionRoot.isEmpty, optionRoot == preferenceRoot,
+      optionRoot != "zh" || optionLanguage == "zh" || preference == "zh"
+    {
+      return true
+    }
+
+    let label = normalizedSubtitleLabel(option.displayName)
+    return subtitleLanguageTokens(preference).contains { label.contains($0) }
+  }
+
+  private func canonicalSubtitleLanguage(_ raw: String) -> String {
+    let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+      .replacingOccurrences(of: "_", with: "-")
+    switch normalized {
+    case "english", "eng": return "en"
+    case "japanese", "jpn": return "ja"
+    case "korean", "kor": return "ko"
+    case "chinese", "chi", "zho": return "zh"
+    case "zh-hans", "zh-sg": return "zh-cn"
+    case "zh-hant", "zh-hk", "zh-mo": return "zh-tw"
+    default: return normalized
+    }
+  }
+
+  private func subtitleLanguageTokens(_ language: String) -> [String] {
+    switch language {
+    case "zh-cn": return ["zhcn", "zhhans", "chs", "简体", "簡體", "简中"]
+    case "zh-tw": return ["zhtw", "zhhant", "cht", "繁体", "繁體", "繁中"]
+    case "zh": return ["chinese", "中文", "国语", "國語"]
+    case "en": return ["english", " eng ", "英语", "英語", "英文"]
+    case "ja": return ["japanese", " jpn ", "日语", "日語", "日本語"]
+    case "ko": return ["korean", " kor ", "韩语", "韓語", "한국어"]
+    default: return [language.replacingOccurrences(of: "-", with: "")]
+    }
+  }
+
+  private func isForcedSubtitleLabel(_ label: String) -> Bool {
+    let normalized = normalizedSubtitleLabel(label)
+    return [
+      "forced", "force", "signs", "强制", "強制", "强迫",
+      "仅外语", "僅外語", "外语对白", "外語對白",
+    ].contains { normalized.contains($0) }
+  }
+
+  private func normalizedSubtitleLabel(_ label: String) -> String {
+    return label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
   }
 
   private func makeStartupGateConfiguration(
@@ -1098,22 +1216,11 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     let center = NotificationCenter.default
     appObservers.append(
       center.addObserver(
-        forName: UIApplication.willResignActiveNotification,
-        object: nil,
-        queue: .main
-      ) { [weak self] _ in
-        self?.persistPlaybackProgress(force: true)
-        self?.updateNowPlayingInfo()
-      }
-    )
-    appObservers.append(
-      center.addObserver(
         forName: UIApplication.didEnterBackgroundNotification,
         object: nil,
         queue: .main
       ) { [weak self] _ in
         self?.persistPlaybackProgress(force: true)
-        self?.updateNowPlayingInfo()
       }
     )
     appObservers.append(
@@ -1201,7 +1308,6 @@ private final class NativePlaybackViewController: AVPlayerViewController {
         self?.markPlaybackFirstFrameReady()
       }
       self?.persistPlaybackProgress()
-      self?.updateNowPlayingInfo()
     }
   }
 

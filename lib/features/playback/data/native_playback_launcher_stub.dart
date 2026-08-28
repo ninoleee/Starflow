@@ -14,6 +14,9 @@ class UnsupportedNativePlaybackLauncher implements NativePlaybackLauncher {
   Future<NativePlaybackLaunchResult> launch(
     PlaybackTarget target, {
     required PlaybackDecodeMode decodeMode,
+    required double subtitleScale,
+    required PlaybackSubtitlePreference subtitlePreference,
+    required List<String> subtitlePreferredLanguages,
     PlaybackEpisodeQueue? episodeQueue,
   }) async {
     return const NativePlaybackLaunchResult(

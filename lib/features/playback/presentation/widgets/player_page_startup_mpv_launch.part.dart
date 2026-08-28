@@ -59,6 +59,10 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     return _providerContainer.read(nativePlaybackLauncherProvider).launch(
           target,
           decodeMode: _playbackDecodeMode,
+          subtitleScale: _playbackSettings.playbackSubtitleScale,
+          subtitlePreference: _playbackSettings.playbackSubtitlePreference,
+          subtitlePreferredLanguages:
+              _playbackSettings.subtitlePreferredLanguages,
           episodeQueue: nativeEpisodeQueue,
         );
   }

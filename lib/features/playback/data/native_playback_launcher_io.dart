@@ -22,6 +22,9 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
   Future<NativePlaybackLaunchResult> launch(
     PlaybackTarget target, {
     required PlaybackDecodeMode decodeMode,
+    required double subtitleScale,
+    required PlaybackSubtitlePreference subtitlePreference,
+    required List<String> subtitlePreferredLanguages,
     PlaybackEpisodeQueue? episodeQueue,
   }) async {
     if (!Platform.isAndroid && !Platform.isIOS) {
@@ -56,6 +59,9 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
           'title': target.title,
           'headersJson': jsonEncode(target.headers),
           'decodeMode': decodeMode.name,
+          'subtitleScale': clampPlaybackSubtitleScale(subtitleScale),
+          'subtitlePreference': subtitlePreference.name,
+          'subtitlePreferredLanguages': subtitlePreferredLanguages,
           'playbackTargetJson': jsonEncode(target.toJson()),
           'playbackItemKey': buildPlaybackItemKey(target),
           'seriesKey': buildSeriesKeyForTarget(target),

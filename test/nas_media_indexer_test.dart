@@ -120,6 +120,100 @@ void main() {
     expect(episodes.single.episodeNumber, 1);
   });
 
+  test(
+      'NasMediaIndexer keeps direct specials and nested episode folders in one series',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-parent-with-child-folder',
+      name: 'WebDAV Parent With Child Folder',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/shared-library-root/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: [
+        const _PendingTestItem(
+          id: 'watashi-special-before',
+          path:
+              '/shared-library-root/strm/quark/我的事说来话长/我的事说来话长.2025春SP.前篇.strm',
+          title: '我的事说来话长',
+          itemType: 'episode',
+          seasonNumber: 0,
+          episodeNumber: 1,
+        ),
+        const _PendingTestItem(
+          id: 'watashi-special-after',
+          path:
+              '/shared-library-root/strm/quark/我的事说来话长/我的事说来话长.2025春SP.后篇.strm',
+          title: '我的事说来话长',
+          itemType: 'episode',
+          seasonNumber: 0,
+          episodeNumber: 2,
+        ),
+        ...[
+          for (var episode = 1; episode <= 10; episode++)
+            _PendingTestItem(
+              id: 'watashi-episode-$episode',
+              path:
+                  '/shared-library-root/strm/quark/我的事说来话长/剧版/${episode.toString().padLeft(2, '0')}.(mkv).strm',
+              title: '我的事说来话长',
+              itemType: 'episode',
+              seasonNumber: 1,
+              episodeNumber: episode,
+            ),
+        ],
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    final library = await indexer.loadLibrary(source, limit: 20);
+
+    expect(library, hasLength(1));
+    expect(library.single.itemType, 'series');
+    expect(library.single.title, '我的事说来话长');
+
+    final seasons = await indexer.loadChildren(
+      source,
+      parentId: library.single.id,
+      sectionId: 'https://nas.example.com/shared-library-root/',
+      limit: 20,
+    );
+    expect(seasons, hasLength(2));
+    expect(seasons.map((item) => item.seasonNumber), containsAll([0, 1]));
+
+    final seasonOne = seasons.singleWhere((item) => item.seasonNumber == 1);
+    final episodes = await indexer.loadChildren(
+      source,
+      parentId: seasonOne.id,
+      sectionId: 'https://nas.example.com/shared-library-root/',
+      limit: 20,
+    );
+    expect(episodes, hasLength(10));
+    expect(episodes.every((item) => item.title != '剧版'), isTrue);
+  });
+
   test('NasMediaIndexer materializes Friends and Lu Yu real-world naming',
       () async {
     final store = _MemoryNasMediaIndexStore();
@@ -2682,7 +2776,7 @@ void main() {
     );
     final indexedAt = DateTime.utc(2026, 4, 5, 12);
     final scopeKey =
-        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v6';
+        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v9';
     final record = NasMediaIndexRecord(
       id: NasMediaIndexRecord.buildRecordId(
         sourceId: source.id,
@@ -2823,6 +2917,182 @@ void main() {
     expect(movie.itemType, 'movie');
     expect(movie.streamUrl, isNotEmpty);
     expect(movie.title, '星球大战：最后的绝地武士 2160p remux (2017)');
+  });
+
+  test('NasMediaIndexer uses the movie directory over a release filename',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-movie-directory-title',
+      name: 'WebDAV Movie Directory Title',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://webdav.example.com/shared-library-root/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'lock-stock-directory-title',
+          path:
+              '/shared-library-root/strm/quark/两杆大烟枪/Top026.两杆大烟枪.Lock.Stock.and.Two.Smoking.Barrels.1998.Bluray.1080p.x265.AAC.(mkv).strm',
+          title:
+              'Top026.两杆大烟枪.Lock.Stock.and.Two.Smoking.Barrels.1998.Bluray.1080p.x265.AAC.(mkv)',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+          hasSidecarMatch: false,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    final library = await indexer.loadLibrary(source, limit: 20);
+    expect(library, hasLength(1));
+    expect(library.single.itemType, 'movie');
+    expect(library.single.title, '两杆大烟枪');
+    await indexer.dispose();
+  });
+
+  test('NasMediaIndexer re-evaluates stale single-file webdav-series records',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-single-file-migration',
+      name: 'WebDAV Single File Migration',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://webdav.example.com/movies/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+
+    NasMediaIndexer buildIndexer(String itemType) {
+      return NasMediaIndexer(
+        store: store,
+        webDavNasClient: _FakeWebDavNasClient(
+          scannedItems: [
+            _PendingTestItem(
+              id: 'lock-stock-migration',
+              path:
+                  'strm/quark/两杆大烟枪/Top026.两杆大烟枪.Lock.Stock.and.Two.Smoking.Barrels.1998.Bluray.1080p.x265.AAC.(mkv).strm',
+              title: '两杆大烟枪',
+              itemType: itemType,
+              seasonNumber: null,
+              episodeNumber: null,
+              hasSidecarMatch: false,
+            ),
+          ],
+        ),
+        wmdbMetadataClient: WmdbMetadataClient(
+          MockClient((request) async => http.Response('', 500)),
+        ),
+        tmdbMetadataClient: TmdbMetadataClient(
+          MockClient((request) async => http.Response('', 500)),
+        ),
+        imdbRatingClient: ImdbRatingClient(
+          MockClient((request) async => http.Response('', 500)),
+        ),
+        readSettings: () => settings,
+        progressController: WebDavScrapeProgressController(),
+      );
+    }
+
+    final staleIndexer = buildIndexer('series');
+    await staleIndexer.refreshSource(source);
+    expect((await staleIndexer.loadLibrary(source, limit: 20)).single.itemType,
+        'series');
+    await staleIndexer.dispose();
+
+    final repairedIndexer = buildIndexer('movie');
+    await repairedIndexer.refreshSource(source);
+    final repairedLibrary =
+        await repairedIndexer.loadLibrary(source, limit: 20);
+    expect(repairedLibrary, hasLength(1));
+    expect(repairedLibrary.single.itemType, 'movie');
+    expect(repairedLibrary.single.title, '两杆大烟枪');
+    final repairedRecord = (await store.loadSourceRecords(source.id)).single;
+    expect(repairedRecord.preferSeries, isFalse);
+    expect(repairedRecord.fingerprint,
+        contains('structure-classification-v2:movie'));
+    await repairedIndexer.dispose();
+  });
+
+  test('NasMediaIndexer falls back to the first media directory title',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-directory-title-fallback',
+      name: 'WebDAV Directory Title Fallback',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://webdav.example.com/movies/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+      webDavSeriesTitleFilterKeywords: ['strm', 'quark'],
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'setouchi-unrecognized',
+          path: 'strm/quark/濑户内海/未知发布目录/Setoutsumi.2016.mkv',
+          title: 'Setoutsumi.2016.mkv',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+          hasSidecarMatch: false,
+        ),
+      ],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: false,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    final library = await indexer.loadLibrary(source, limit: 20);
+    expect(library, hasLength(1));
+    expect(library.single.itemType, 'movie');
+    expect(library.single.title, '濑户内海');
   });
 
   test(
@@ -3655,6 +3925,85 @@ void main() {
   });
 
   test(
+      'NasMediaIndexer queries the parent title instead of an implicit child season',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-implicit-child-season-query',
+      name: 'WebDAV Implicit Child Season Query',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/shared-library-root/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      mediaSources: [source],
+      wmdbMetadataMatchEnabled: true,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    var wmdbRequestCount = 0;
+    final wmdbQueries = <String>{};
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'watashi-query-special',
+          path: '/shared-library-root/strm/quark/我的事说来话长/我的事说来话长.2025春SP.strm',
+          title: '我的事说来话长.2025春SP',
+          itemType: 'episode',
+          seasonNumber: 0,
+          episodeNumber: 1,
+          hasSidecarMatch: true,
+        ),
+        _PendingTestItem(
+          id: 'watashi-query-episode',
+          path: '/shared-library-root/strm/quark/我的事说来话长/剧版/01.(mkv).strm',
+          title: '01.(mkv)',
+          itemType: 'episode',
+          seasonNumber: 1,
+          episodeNumber: 1,
+          hasSidecarMatch: true,
+        ),
+      ],
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: WmdbMetadataClient(
+        MockClient((request) async {
+          wmdbRequestCount += 1;
+          wmdbQueries.add(request.url.queryParameters['q'] ?? '');
+          return http.Response(
+            '{"data":[{"name":"我的事说来话长","type":"series","year":"2019","doubanVotes":1000}]}',
+            200,
+          );
+        }),
+      ),
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source);
+    await _drainAsyncTasks();
+
+    expect(wmdbRequestCount, greaterThan(0));
+    expect(wmdbQueries, {'我的事说来话长'});
+    final records = await store.loadSourceRecords(source.id);
+    expect(records, hasLength(2));
+    expect(
+      records.every((record) => record.searchQuery == '我的事说来话长'),
+      isTrue,
+    );
+    await indexer.dispose();
+  });
+
+  test(
       'NasMediaIndexer matches movie versions by the movie root instead of the file name',
       () async {
     final store = _MemoryNasMediaIndexStore();
@@ -3719,6 +4068,121 @@ void main() {
     final records = await store.loadSourceRecords(source.id);
     expect(records, hasLength(1));
     expect(records.single.searchQuery, '无耻混蛋');
+  });
+
+  test('NasMediaIndexer keeps inferred movies on movie metadata matches',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'webdav-inferred-movie-type',
+      name: 'WebDAV Inferred Movie Type',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/movies/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+      webDavSeriesTitleFilterKeywords: ['movies', 'strm', 'quark'],
+    );
+    final settings = SeedData.defaultSettings.copyWith(
+      wmdbMetadataMatchEnabled: true,
+      tmdbMetadataMatchEnabled: false,
+      imdbRatingMatchEnabled: false,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'setouchi-movie-type',
+          path:
+              'movies/strm/quark/濑户内海/濑户内海（2016）日语中字/Setoutsumi.2016.BluRay.1080p.strm',
+          title: '濑户内海',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+          year: 2016,
+          hasSidecarMatch: false,
+        ),
+      ],
+    );
+    var wmdbRequestCount = 0;
+    final wmdbClient = WmdbMetadataClient(
+      MockClient((request) async {
+        wmdbRequestCount += 1;
+        return http.Response(
+          '{"data":['
+          '{"originalName":"濑户内海","type":"TVSeries","year":"2017","doubanId":"tv-2017","doubanVotes":1000},'
+          '{"originalName":"濑户内海","type":"Movie","year":"2016","doubanId":"movie-2016","doubanVotes":1000}'
+          ']}',
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        );
+      }),
+    );
+    final indexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: wmdbClient,
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+
+    await indexer.refreshSource(source, forceFullRescan: true);
+    await _waitUntil(() async {
+      final records = await store.loadSourceRecords(source.id);
+      return records.length == 1 && records.single.wmdbStatus.hasAttempted;
+    });
+
+    final records = await store.loadSourceRecords(source.id);
+    expect(records, hasLength(1));
+    expect(records.single.item.itemType, 'movie');
+    expect(records.single.item.doubanId, 'movie-2016');
+    expect(records.single.preferSeries, isFalse);
+    await indexer.dispose();
+
+    final legacyRecordJson = records.single.toJson()..['preferSeries'] = true;
+    final legacyItemJson = Map<String, dynamic>.from(
+      legacyRecordJson['item'] as Map,
+    )..['doubanId'] = 'tv-2017';
+    legacyRecordJson['item'] = legacyItemJson;
+    await store.replaceSourceRecords(
+      sourceId: source.id,
+      records: [NasMediaIndexRecord.fromJson(legacyRecordJson)],
+      state: (await store.loadSourceState(source.id))!,
+    );
+
+    final repairIndexer = NasMediaIndexer(
+      store: store,
+      webDavNasClient: client,
+      wmdbMetadataClient: wmdbClient,
+      tmdbMetadataClient: TmdbMetadataClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      imdbRatingClient: ImdbRatingClient(
+        MockClient((request) async => http.Response('', 500)),
+      ),
+      readSettings: () => settings,
+      progressController: WebDavScrapeProgressController(),
+    );
+    addTearDown(repairIndexer.dispose);
+
+    await repairIndexer.refreshSource(source);
+    await _waitUntil(() async {
+      final refreshed = await store.loadSourceRecords(source.id);
+      return refreshed.length == 1 &&
+          refreshed.single.item.doubanId == 'movie-2016' &&
+          !refreshed.single.preferSeries;
+    });
+
+    final correctedRecords = await store.loadSourceRecords(source.id);
+    expect(correctedRecords, hasLength(1));
+    expect(correctedRecords.single.item.doubanId, 'movie-2016');
+    expect(correctedRecords.single.preferSeries, isFalse);
+    expect(wmdbRequestCount, 1,
+        reason: 'The movie-biased cache may be reused.');
   });
 
   test(

@@ -47,6 +47,8 @@ class _PlaybackSubtitleSettingsPageState
       _subtitleSearchMaxValidatedCandidatesController;
   late bool _draftOpensubtitlesEnabled;
   late bool _draftSubdlEnabled;
+  Timer? _autoSaveTimer;
+  Future<void> _saveQueue = Future<void>.value();
   bool _closingWithResult = false;
 
   @override
@@ -63,16 +65,22 @@ class _PlaybackSubtitleSettingsPageState
     _opensubtitlesUsernameController = TextEditingController(
       text: widget.initialOpensubtitlesUsername,
     );
+    _opensubtitlesUsernameController.addListener(_scheduleAutoSave);
     _opensubtitlesPasswordController = TextEditingController(
       text: widget.initialOpensubtitlesPassword,
     );
+    _opensubtitlesPasswordController.addListener(_scheduleAutoSave);
     _subdlApiKeyController = TextEditingController(
       text: widget.initialSubdlApiKey,
     );
+    _subdlApiKeyController.addListener(_scheduleAutoSave);
     _draftSubtitlePreferredLanguageValues =
         widget.initialSubtitlePreferredLanguages.toList(growable: false);
     _subtitleSearchMaxValidatedCandidatesController = TextEditingController(
       text: '${widget.initialSubtitleSearchMaxValidatedCandidates}',
+    );
+    _subtitleSearchMaxValidatedCandidatesController.addListener(
+      _scheduleAutoSave,
     );
     _draftOpensubtitlesEnabled = widget.initialOpensubtitlesEnabled;
     _draftSubdlEnabled = widget.initialSubdlEnabled;
@@ -80,7 +88,14 @@ class _PlaybackSubtitleSettingsPageState
 
   @override
   void dispose() {
+    _autoSaveTimer?.cancel();
     _assrtTokenController.removeListener(_handleAssrtTokenChanged);
+    _opensubtitlesUsernameController.removeListener(_scheduleAutoSave);
+    _opensubtitlesPasswordController.removeListener(_scheduleAutoSave);
+    _subdlApiKeyController.removeListener(_scheduleAutoSave);
+    _subtitleSearchMaxValidatedCandidatesController.removeListener(
+      _scheduleAutoSave,
+    );
     _assrtTokenController.dispose();
     _opensubtitlesUsernameController.dispose();
     _opensubtitlesPasswordController.dispose();
@@ -94,6 +109,7 @@ class _PlaybackSubtitleSettingsPageState
       return;
     }
     setState(() {});
+    _scheduleAutoSave();
   }
 
   List<String> _draftSubtitlePreferredLanguages() {
@@ -125,12 +141,53 @@ class _PlaybackSubtitleSettingsPageState
     );
   }
 
-  void _closeWithResult() {
+  Future<void> _persistDraft() async {
+    final draft = _buildDraft();
+    await ref
+        .read(settingsControllerProvider.notifier)
+        .savePlaybackSubtitlePreferences(
+          subtitlePreference: draft.preference,
+          subtitleScale: draft.scale,
+          onlineSubtitleSources: draft.onlineSubtitleSources,
+          assrtToken: draft.assrtToken,
+          opensubtitlesEnabled: draft.opensubtitlesEnabled,
+          opensubtitlesUsername: draft.opensubtitlesUsername,
+          opensubtitlesPassword: draft.opensubtitlesPassword,
+          subdlEnabled: draft.subdlEnabled,
+          subdlApiKey: draft.subdlApiKey,
+          subtitlePreferredLanguages: draft.subtitlePreferredLanguages,
+          subtitleSearchMaxValidatedCandidates:
+              draft.subtitleSearchMaxValidatedCandidates,
+        );
+  }
+
+  void _scheduleAutoSave() {
+    if (!mounted || _closingWithResult) {
+      return;
+    }
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = Timer(const Duration(milliseconds: 250), _enqueueSave);
+  }
+
+  void _enqueueSave() {
+    _autoSaveTimer = null;
+    _saveQueue = _saveQueue.then((_) => _persistDraft());
+  }
+
+  Future<void> _closeWithResult() async {
     if (_closingWithResult || !mounted) {
       return;
     }
     _closingWithResult = true;
-    Navigator.of(context).pop(_buildDraft());
+    _autoSaveTimer?.cancel();
+    _enqueueSave();
+    try {
+      await _saveQueue;
+    } finally {
+      if (mounted) {
+        Navigator.of(context).pop(_buildDraft());
+      }
+    }
   }
 
   @override
@@ -141,15 +198,10 @@ class _PlaybackSubtitleSettingsPageState
         if (didPop || _closingWithResult) {
           return;
         }
-        _closeWithResult();
+        unawaited(_closeWithResult());
       },
       child: SettingsPageScaffold(
-        onBack: _closeWithResult,
-        trailing: SettingsToolbarButton(
-          label: '完成',
-          icon: Icons.check_rounded,
-          onPressed: _closeWithResult,
-        ),
+        onBack: () => unawaited(_closeWithResult()),
         children: [
           Text(
             '字幕',
@@ -175,7 +227,7 @@ class _PlaybackSubtitleSettingsPageState
           const SizedBox(height: 18),
           SettingsStepperTile(
             title: '字幕大小',
-            subtitle: '按数字微调字号，播放器里会直接按这个字号渲染。',
+            subtitle: '用于内置 MPV 和 Android 原生播放器；系统无障碍字幕启用时优先跟随系统。',
             value: formatPlaybackSubtitleScaleLabel(_draftSubtitleScale),
             onDecrease: _draftSubtitleScale > kPlaybackSubtitleScaleMin
                 ? () {
@@ -185,6 +237,7 @@ class _PlaybackSubtitleSettingsPageState
                         -1,
                       );
                     });
+                    _scheduleAutoSave();
                   }
                 : null,
             onIncrease: _draftSubtitleScale < kPlaybackSubtitleScaleMax
@@ -195,6 +248,7 @@ class _PlaybackSubtitleSettingsPageState
                         1,
                       );
                     });
+                    _scheduleAutoSave();
                   }
                 : null,
           ),
@@ -222,6 +276,7 @@ class _PlaybackSubtitleSettingsPageState
                 }
                 _draftOnlineSubtitleSources = next.toList(growable: false);
               });
+              _scheduleAutoSave();
             },
           ),
           if (_draftOnlineSubtitleSources
@@ -244,6 +299,7 @@ class _PlaybackSubtitleSettingsPageState
               setState(() {
                 _draftOpensubtitlesEnabled = value;
               });
+              _scheduleAutoSave();
             },
           ),
           if (_draftOpensubtitlesEnabled) ...[
@@ -272,6 +328,7 @@ class _PlaybackSubtitleSettingsPageState
               setState(() {
                 _draftSubdlEnabled = value;
               });
+              _scheduleAutoSave();
             },
           ),
           if (_draftSubdlEnabled) ...[
@@ -324,6 +381,7 @@ class _PlaybackSubtitleSettingsPageState
     setState(() {
       _draftSubtitlePreference = selection;
     });
+    _scheduleAutoSave();
   }
 
   Future<void> _openSubtitlePreferredLanguagePicker() async {
@@ -357,6 +415,7 @@ class _PlaybackSubtitleSettingsPageState
       _draftSubtitlePreferredLanguageValues =
           orderCommonSubtitlePreferredLanguages(selected);
     });
+    _scheduleAutoSave();
   }
 }
 
@@ -386,31 +445,4 @@ class _PlaybackSubtitleDraft {
   final String subdlApiKey;
   final List<String> subtitlePreferredLanguages;
   final int subtitleSearchMaxValidatedCandidates;
-}
-
-bool _sameSubtitleSources(
-  List<OnlineSubtitleSource> left,
-  List<OnlineSubtitleSource> right,
-) {
-  if (left.length != right.length) {
-    return false;
-  }
-  final leftSet = left.toSet();
-  final rightSet = right.toSet();
-  if (leftSet.length != rightSet.length) {
-    return false;
-  }
-  return leftSet.containsAll(rightSet);
-}
-
-bool _sameStringSet(List<String> left, List<String> right) {
-  if (left.length != right.length) {
-    return false;
-  }
-  final leftSet = left.toSet();
-  final rightSet = right.toSet();
-  if (leftSet.length != rightSet.length) {
-    return false;
-  }
-  return leftSet.containsAll(rightSet);
 }

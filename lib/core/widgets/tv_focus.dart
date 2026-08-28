@@ -103,7 +103,28 @@ bool handleTvDirectionalFocusBoundary(
     return false;
   }
 
-  final moved = primaryFocus.focusInDirection(direction);
+  bool moved;
+  try {
+    moved = primaryFocus.focusInDirection(direction);
+  } on StateError {
+    // Directional traversal reads every candidate's RenderBox rect. During a
+    // route refresh or a scroll, one candidate can briefly exist before its
+    // render object has a size; Flutter then throws from FocusNode.rect. Do a
+    // single post-layout retry and keep the key event contained so TV focus
+    // cannot poison the global key handler.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (primaryFocus.context == null ||
+          FocusManager.instance.primaryFocus != primaryFocus) {
+        return;
+      }
+      try {
+        primaryFocus.focusInDirection(direction);
+      } on StateError {
+        // The candidate may still be offstage; wait for the next user input.
+      }
+    });
+    moved = false;
+  }
   if (moved) {
     return true;
   }

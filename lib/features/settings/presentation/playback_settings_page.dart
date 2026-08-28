@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -85,15 +87,13 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   late bool _draftBackgroundPlaybackEnabled;
   late PlaybackEngine _draftPlaybackEngine;
   late PlaybackDecodeMode _draftPlaybackDecodeMode;
-  late final bool _initialMpvDoubleTapToSeekEnabled;
-  late final bool _initialMpvSwipeToSeekEnabled;
-  late final bool _initialMpvLongPressSpeedBoostEnabled;
-  late final bool _initialMpvStallAutoRecoveryEnabled;
   late bool _draftMpvDoubleTapToSeekEnabled;
   late bool _draftMpvSwipeToSeekEnabled;
   late bool _draftMpvLongPressSpeedBoostEnabled;
   late bool _draftMpvStallAutoRecoveryEnabled;
-  bool _skipAutoSaveOnPop = false;
+  Timer? _autoSaveTimer;
+  Future<void> _saveQueue = Future<void>.value();
+  bool _closing = false;
 
   @override
   void initState() {
@@ -133,21 +133,18 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
       platform: defaultTargetPlatform,
     );
     _draftPlaybackDecodeMode = widget.initialPlaybackDecodeMode;
-    _initialMpvDoubleTapToSeekEnabled =
+    _draftMpvDoubleTapToSeekEnabled =
         widget.initialPlaybackMpvDoubleTapToSeekEnabled;
-    _initialMpvSwipeToSeekEnabled = widget.initialPlaybackMpvSwipeToSeekEnabled;
-    _initialMpvLongPressSpeedBoostEnabled =
+    _draftMpvSwipeToSeekEnabled = widget.initialPlaybackMpvSwipeToSeekEnabled;
+    _draftMpvLongPressSpeedBoostEnabled =
         widget.initialPlaybackMpvLongPressSpeedBoostEnabled;
-    _initialMpvStallAutoRecoveryEnabled =
+    _draftMpvStallAutoRecoveryEnabled =
         widget.initialPlaybackMpvStallAutoRecoveryEnabled;
-    _draftMpvDoubleTapToSeekEnabled = _initialMpvDoubleTapToSeekEnabled;
-    _draftMpvSwipeToSeekEnabled = _initialMpvSwipeToSeekEnabled;
-    _draftMpvLongPressSpeedBoostEnabled = _initialMpvLongPressSpeedBoostEnabled;
-    _draftMpvStallAutoRecoveryEnabled = _initialMpvStallAutoRecoveryEnabled;
   }
 
   @override
   void dispose() {
+    _autoSaveTimer?.cancel();
     _assrtTokenController.removeListener(_handleAssrtTokenChanged);
     _timeoutController.dispose();
     _assrtTokenController.dispose();
@@ -163,6 +160,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
       return;
     }
     setState(() {});
+    _scheduleAutoSave();
   }
 
   int _draftSeconds() {
@@ -182,7 +180,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     return _draftSubtitlePreferredLanguageValues.toList(growable: false);
   }
 
-  Future<void> _saveDraft({bool popAfterSave = true}) async {
+  Future<void> _persistDraft() async {
     await ref.read(settingsControllerProvider.notifier).savePlaybackPreferences(
           openTimeoutSeconds: _draftSeconds(),
           defaultSpeed: _draftPlaybackSpeed,
@@ -208,67 +206,31 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
           playbackMpvStallAutoRecoveryEnabled:
               _draftMpvStallAutoRecoveryEnabled,
         );
-    if (popAfterSave && mounted) {
-      _skipAutoSaveOnPop = true;
-      Navigator.of(context).pop();
-    }
   }
 
-  bool _hasUnsavedChanges() {
-    return _draftSeconds() != widget.initialTimeoutSeconds.clamp(1, 600) ||
-        (_draftPlaybackSpeed - widget.initialDefaultSpeed).abs() > 0.0001 ||
-        _draftSubtitlePreference != widget.initialSubtitlePreference ||
-        _draftSubtitleScale != widget.initialSubtitleScale ||
-        !_sameSubtitleSources(
-          _draftOnlineSubtitleSources,
-          widget.initialOnlineSubtitleSources,
-        ) ||
-        _assrtTokenController.text != widget.initialAssrtToken ||
-        _draftOpensubtitlesEnabled != widget.initialOpensubtitlesEnabled ||
-        _opensubtitlesUsernameController.text !=
-            widget.initialOpensubtitlesUsername ||
-        _opensubtitlesPasswordController.text !=
-            widget.initialOpensubtitlesPassword ||
-        _draftSubdlEnabled != widget.initialSubdlEnabled ||
-        _subdlApiKeyController.text != widget.initialSubdlApiKey ||
-        !_sameStringSet(
-          _draftSubtitlePreferredLanguages(),
-          widget.initialSubtitlePreferredLanguages,
-        ) ||
-        _draftSubtitleSearchMaxValidatedCandidates() !=
-            widget.initialSubtitleSearchMaxValidatedCandidates ||
-        _draftBackgroundPlaybackEnabled !=
-            widget.initialBackgroundPlaybackEnabled ||
-        _draftPlaybackEngine != widget.initialPlaybackEngine ||
-        _draftPlaybackDecodeMode != widget.initialPlaybackDecodeMode ||
-        _draftMpvDoubleTapToSeekEnabled != _initialMpvDoubleTapToSeekEnabled ||
-        _draftMpvSwipeToSeekEnabled != _initialMpvSwipeToSeekEnabled ||
-        _draftMpvLongPressSpeedBoostEnabled !=
-            _initialMpvLongPressSpeedBoostEnabled ||
-        _draftMpvStallAutoRecoveryEnabled !=
-            _initialMpvStallAutoRecoveryEnabled;
+  void _scheduleAutoSave() {
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = Timer(const Duration(milliseconds: 250), _enqueueSave);
   }
 
-  Future<void> _discardAndClose() async {
-    _skipAutoSaveOnPop = true;
-    if (mounted) {
-      Navigator.of(context).pop();
-    }
+  void _enqueueSave() {
+    _autoSaveTimer = null;
+    _saveQueue = _saveQueue.then((_) => _persistDraft());
   }
 
   Future<void> _handleCloseRequest() async {
-    if (_skipAutoSaveOnPop) {
+    if (_closing) {
       return;
     }
-    if (!_hasUnsavedChanges()) {
-      await _discardAndClose();
-      return;
-    }
-    final action = await showSettingsCloseConfirmDialog(context);
-    if (action == SettingsCloseAction.discard) {
-      await _discardAndClose();
-    } else if (action == SettingsCloseAction.save) {
-      await _saveDraft();
+    _closing = true;
+    _autoSaveTimer?.cancel();
+    _enqueueSave();
+    try {
+      await _saveQueue;
+    } finally {
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
     }
   }
 
@@ -278,18 +240,13 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     return PopScope<void>(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop || _skipAutoSaveOnPop) {
+        if (didPop || _closing) {
           return;
         }
-        _handleCloseRequest();
+        unawaited(_handleCloseRequest());
       },
       child: SettingsPageScaffold(
-        onBack: _handleCloseRequest,
-        trailing: SettingsToolbarButton(
-          label: '保存',
-          icon: Icons.save_rounded,
-          onPressed: _saveDraft,
-        ),
+        onBack: () => unawaited(_handleCloseRequest()),
         children: [
           Text(
             '播放设置',
@@ -349,6 +306,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
                   setState(() {
                     _draftMpvDoubleTapToSeekEnabled = value;
                   });
+                  _scheduleAutoSave();
                 },
               ),
               SettingsToggleTile(
@@ -359,6 +317,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
                   setState(() {
                     _draftMpvSwipeToSeekEnabled = value;
                   });
+                  _scheduleAutoSave();
                 },
               ),
               SettingsToggleTile(
@@ -369,6 +328,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
                   setState(() {
                     _draftMpvLongPressSpeedBoostEnabled = value;
                   });
+                  _scheduleAutoSave();
                 },
               ),
             ],
@@ -392,6 +352,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
               setState(() {
                 _draftMpvStallAutoRecoveryEnabled = value;
               });
+              _scheduleAutoSave();
             },
           ),
           const SizedBox(height: 8),
@@ -418,6 +379,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
                 setState(() {
                   _draftBackgroundPlaybackEnabled = value;
                 });
+                _scheduleAutoSave();
               },
             ),
           const SizedBox(height: 18),
@@ -453,6 +415,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     setState(() {
       _timeoutController.text = '$selection';
     });
+    _scheduleAutoSave();
   }
 
   Future<void> _openSpeedPicker() async {
@@ -469,6 +432,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     setState(() {
       _draftPlaybackSpeed = selection;
     });
+    _scheduleAutoSave();
   }
 
   Future<void> _openSubtitleSettingsPage() async {
@@ -509,6 +473,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
       _subtitleSearchMaxValidatedCandidatesController.text =
           '${result.subtitleSearchMaxValidatedCandidates}';
     });
+    _scheduleAutoSave();
   }
 
   Future<void> _openPlaybackEnginePicker() async {
@@ -528,6 +493,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     setState(() {
       _draftPlaybackEngine = selection;
     });
+    _scheduleAutoSave();
   }
 
   Future<void> _openPlaybackDecodeModePicker() async {
@@ -544,6 +510,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     setState(() {
       _draftPlaybackDecodeMode = selection;
     });
+    _scheduleAutoSave();
   }
 
   static String _formatSpeedLabel(double speed) {

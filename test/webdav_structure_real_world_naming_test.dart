@@ -252,6 +252,244 @@ void main() {
     );
   });
 
+  test('uses the outer movie folder for one nested release wrapper', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'setouchi-single-release',
+          address:
+              '/movies/strm/quark/濑户内海/濑户内海（2016）日语中字/Seto.Utsumi.2016.mkv.strm',
+          directories: const [
+            'strm',
+            'quark',
+            '濑户内海',
+            '濑户内海（2016）日语中字',
+          ],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(resolved, hasLength(1));
+    expect(resolved.single.metadataSeed.itemType, 'movie');
+    expect(resolved.single.metadataSeed.title, '濑户内海');
+    expect(resolved.single.metadataSeed.seasonNumber, isNull);
+    expect(resolved.single.metadataSeed.episodeNumber, isNull);
+  });
+
+  test('keeps a single video in a first-level movie folder as a movie', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'lock-stock-single',
+          address: '/movies/strm/quark/两杆大烟枪/Lock.Stock.1998.mkv.strm',
+          directories: const ['strm', 'quark', '两杆大烟枪'],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(resolved, hasLength(1));
+    expect(resolved.single.metadataSeed.itemType, 'movie');
+    expect(resolved.single.metadataSeed.seasonNumber, isNull);
+    expect(resolved.single.metadataSeed.episodeNumber, isNull);
+  });
+
+  test(
+      'does not promote a single movie because a transport sibling is a series',
+      () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'lock-stock-real-name',
+          address:
+              '/movies/strm/quark/两杆大烟枪/Top026.两杆大烟枪.Lock.Stock.and.Two.Smoking.Barrels.1998.Bluray.1080p.x265.AAC.(mkv).strm',
+          directories: const ['strm', 'quark', '两杆大烟枪'],
+        ),
+        _pendingItem(
+          id: 'series-s01e01',
+          address: '/movies/strm/quark/示例剧/S01/示例剧.S01E01.mkv.strm',
+          directories: const ['strm', 'quark', '示例剧', 'S01'],
+        ),
+        _pendingItem(
+          id: 'root-series-s01e01',
+          address: '/movies/独立剧/S01/独立剧.S01E01.mkv.strm',
+          directories: const ['独立剧', 'S01'],
+        ),
+      ],
+      source: source,
+    );
+
+    final movie = resolved.singleWhere(
+      (item) => item.resourceId == 'lock-stock-real-name',
+    );
+    expect(movie.metadataSeed.itemType, 'movie');
+    expect(movie.metadataSeed.seasonNumber, isNull);
+    expect(movie.metadataSeed.episodeNumber, isNull);
+
+    final episode = resolved.singleWhere(
+      (item) => item.resourceId == 'series-s01e01',
+    );
+    expect(episode.metadataSeed.itemType, 'episode');
+    expect(episode.metadataSeed.seasonNumber, 1);
+    expect(episode.metadataSeed.episodeNumber, 1);
+
+    final rootEpisode = resolved.singleWhere(
+      (item) => item.resourceId == 'root-series-s01e01',
+    );
+    expect(rootEpisode.metadataSeed.itemType, 'episode');
+  });
+
+  test('keeps 偶然与想象 single-file directory as a movie', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'wheel-of-fortune-single',
+          address:
+              '/movies/strm/quark/偶然与想象/Wheel.of.Fortune.and.Fantasy.2021.1080p.BluRay.DTS-HD.MA.5.1.x265.10bit-DreamHD.(mkv).strm',
+          directories: const ['strm', 'quark', '偶然与想象'],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(resolved, hasLength(1));
+    expect(resolved.single.metadataSeed.itemType, 'movie');
+    expect(resolved.single.metadataSeed.seasonNumber, isNull);
+    expect(resolved.single.metadataSeed.episodeNumber, isNull);
+  });
+
+  test('keeps a single video under an explicit season as an episode', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'single-season-episode',
+          address: '/movies/strm/quark/示例剧/Season 1/示例剧.S01E01.mkv.strm',
+          directories: const ['strm', 'quark', '示例剧', 'Season 1'],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(resolved, hasLength(1));
+    expect(resolved.single.metadataSeed.itemType, 'episode');
+    expect(resolved.single.metadataSeed.seasonNumber, 1);
+    expect(resolved.single.metadataSeed.episodeNumber, 1);
+  });
+
+  test('treats unknown child directories as seasons of the parent series', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'unknown-season-a',
+          address: '/movies/strm/quark/示例剧/内容A/video-a.mkv.strm',
+          directories: const ['strm', 'quark', '示例剧', '内容A'],
+        ),
+        _pendingItem(
+          id: 'unknown-season-b',
+          address: '/movies/strm/quark/示例剧/内容B/video-b.mkv.strm',
+          directories: const ['strm', 'quark', '示例剧', '内容B'],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(resolved, hasLength(2));
+    expect(
+      resolved.map((item) => item.metadataSeed.itemType),
+      everyElement('episode'),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.seasonNumber).toSet(),
+      {1, 2},
+    );
+  });
+
+  test('keeps direct specials and a child episode folder under one series', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'watashi-special-before',
+          address: '/movies/strm/quark/我的事说来话长/我的事说来话长.2025春SP.前篇.strm',
+          directories: const ['strm', 'quark', '我的事说来话长'],
+        ),
+        _pendingItem(
+          id: 'watashi-special-after',
+          address: '/movies/strm/quark/我的事说来话长/我的事说来话长.2025春SP.后篇.strm',
+          directories: const ['strm', 'quark', '我的事说来话长'],
+        ),
+        ...List.generate(
+          10,
+          (index) => _pendingItem(
+            id: 'watashi-episode-${index + 1}',
+            address:
+                '/movies/strm/quark/我的事说来话长/剧版/${(index + 1).toString().padLeft(2, '0')}.(mkv).strm',
+            directories: const ['strm', 'quark', '我的事说来话长', '剧版'],
+          ),
+        ),
+      ],
+      source: source,
+    );
+
+    expect(resolved, hasLength(12));
+    expect(
+      resolved.map((item) => item.metadataSeed.itemType),
+      everyElement('episode'),
+    );
+    expect(
+      resolved
+          .where((item) => item.resourceId.startsWith('watashi-episode-'))
+          .map((item) => item.metadataSeed.seasonNumber),
+      everyElement(1),
+    );
+    expect(
+      resolved
+          .where((item) => item.resourceId.startsWith('watashi-special-'))
+          .map((item) => item.metadataSeed.seasonNumber),
+      everyElement(0),
+    );
+  });
+
+  test('keeps the outer title across multiple nested release wrappers', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'setouchi-1080p',
+          address:
+              '/movies/strm/quark/濑户内海/濑户内海（2016）日语中字/Setoutsumi.2016.BluRay.1080p.x265.10bit-MiniHD.(mkv).strm',
+          directories: const [
+            'strm',
+            'quark',
+            '濑户内海',
+            '濑户内海（2016）日语中字',
+          ],
+        ),
+        _pendingItem(
+          id: 'setouchi-2160p',
+          address:
+              '/movies/strm/quark/濑户内海/4K.日语.外挂字幕/Setoutsumi.2016.BluRay.2160p.strm',
+          directories: const [
+            'strm',
+            'quark',
+            '濑户内海',
+            '4K.日语.外挂字幕',
+          ],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(resolved, hasLength(2));
+    expect(
+      resolved.map((item) => item.metadataSeed.itemType),
+      everyElement('movie'),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.title),
+      everyElement('濑户内海'),
+    );
+  });
+
   test('keeps episode-marked files inside quality wrappers as episodes', () {
     final resolved = applyExternalDirectoryStructureInference(
       [

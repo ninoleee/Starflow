@@ -137,6 +137,16 @@ class MainActivity : FlutterActivity() {
                     val title = call.argument<String>("title")?.trim().orEmpty()
                     val headersJson = call.argument<String>("headersJson")?.trim().orEmpty()
                     val decodeMode = call.argument<String>("decodeMode")?.trim().orEmpty()
+                    val subtitleScale = call.argument<Double>("subtitleScale")
+                        ?: NativeSubtitleStylePolicy.DEFAULT_SCALE
+                    val subtitlePreference =
+                        call.argument<String>("subtitlePreference")?.trim().orEmpty()
+                    val subtitlePreferredLanguages =
+                        call.argument<List<String>>("subtitlePreferredLanguages")
+                            ?.map(String::trim)
+                            ?.filter(String::isNotEmpty)
+                            ?.toTypedArray()
+                            ?: emptyArray()
                     val playbackTargetJson = call.argument<String>("playbackTargetJson")?.trim().orEmpty()
                     val playbackItemKey = call.argument<String>("playbackItemKey")?.trim().orEmpty()
                     val seriesKey = call.argument<String>("seriesKey")?.trim().orEmpty()
@@ -172,6 +182,15 @@ class MainActivity : FlutterActivity() {
                             putExtra(NativePlaybackActivity.EXTRA_TITLE, title)
                             putExtra(NativePlaybackActivity.EXTRA_HEADERS_JSON, headersJson)
                             putExtra(NativePlaybackActivity.EXTRA_DECODE_MODE, decodeMode)
+                            putExtra(NativePlaybackActivity.EXTRA_SUBTITLE_SCALE, subtitleScale)
+                            putExtra(
+                                NativePlaybackActivity.EXTRA_SUBTITLE_PREFERENCE,
+                                subtitlePreference,
+                            )
+                            putExtra(
+                                NativePlaybackActivity.EXTRA_SUBTITLE_PREFERRED_LANGUAGES,
+                                subtitlePreferredLanguages,
+                            )
                             putExtra(NativePlaybackActivity.EXTRA_PLAYBACK_TARGET_JSON, playbackTargetJson)
                             putExtra(NativePlaybackActivity.EXTRA_PLAYBACK_ITEM_KEY, playbackItemKey)
                             putExtra(NativePlaybackActivity.EXTRA_SERIES_KEY, seriesKey)
@@ -270,10 +289,17 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun updatePictureInPictureAspectRatio(width: Int?, height: Int?) {
-        if ((width ?: 0) > 0 && (height ?: 0) > 0) {
-            playbackPictureInPictureAspectRatio = Rational(width!!, height!!)
-        } else {
+        val resolvedWidth = width ?: 0
+        val resolvedHeight = height ?: 0
+        if (resolvedWidth <= 0 || resolvedHeight <= 0) {
             playbackPictureInPictureAspectRatio = Rational(16, 9)
+            return
+        }
+        val ratio = resolvedWidth.toDouble() / resolvedHeight.toDouble()
+        playbackPictureInPictureAspectRatio = when {
+            ratio < 0.42 -> Rational(42, 100)
+            ratio > 2.39 -> Rational(239, 100)
+            else -> Rational(resolvedWidth, resolvedHeight)
         }
     }
 
@@ -293,7 +319,15 @@ class MainActivity : FlutterActivity() {
         if (!isPictureInPictureSupported()) {
             return
         }
-        setPictureInPictureParams(buildPictureInPictureParams())
+        try {
+            setPictureInPictureParams(buildPictureInPictureParams())
+        } catch (error: IllegalArgumentException) {
+            NativeAppLogger.warning(
+                "native.pip",
+                "PIP parameters rejected by platform",
+                error,
+            )
+        }
     }
 
     private fun enterPlaybackPictureInPicture(): Boolean {
@@ -303,7 +337,16 @@ class MainActivity : FlutterActivity() {
         if (isInPictureInPictureMode) {
             return true
         }
-        return enterPictureInPictureMode(buildPictureInPictureParams())
+        return try {
+            enterPictureInPictureMode(buildPictureInPictureParams())
+        } catch (error: IllegalArgumentException) {
+            NativeAppLogger.warning(
+                "native.pip",
+                "PIP enter rejected by platform",
+                error,
+            )
+            false
+        }
     }
 
     private fun buildPlaybackContentIntent(): PendingIntent? {

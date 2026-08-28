@@ -88,31 +88,19 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     List<SubtitleTrack> tracks, {
     required List<String> configuredLanguages,
   }) {
-    SubtitleTrack? bestTrack;
-    var bestScore = 0;
-
-    for (final track in tracks) {
-      if (_isSyntheticSubtitleTrack(track)) {
-        continue;
-      }
-      final score = scorePreferredSubtitleText(
-            [
-              track.title ?? '',
-              track.language ?? '',
-            ].where((item) => item.trim().isNotEmpty).join(' '),
-            configuredLanguages: configuredLanguages,
-          ) +
-          (track.isDefault == true ? 6 : 0);
-      if (score <= 0) {
-        continue;
-      }
-      if (bestTrack == null || score > bestScore) {
-        bestTrack = track;
-        bestScore = score;
-      }
-    }
-
-    return bestTrack;
+    return selectAutomaticSubtitleTrack(
+      tracks.where((track) => !_isSyntheticSubtitleTrack(track)).map(
+            (track) => AutomaticSubtitleCandidate<SubtitleTrack>(
+              value: track,
+              searchableText: [
+                track.title ?? '',
+                track.language ?? '',
+              ].where((item) => item.trim().isNotEmpty).join(' '),
+              isDefault: track.isDefault == true,
+            ),
+          ),
+      configuredLanguages: configuredLanguages,
+    );
   }
 
   Future<void> _persistPlaybackProgress({

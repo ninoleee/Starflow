@@ -165,4 +165,18 @@ void main() {
       expect(restored.backdropHeaders, target.backdropHeaders);
     });
   });
+
+  test('normalizes invalid null scheme in persisted actual addresses', () {
+    final target = PlaybackTarget.fromJson({
+      'title': 'Movie',
+      'sourceId': 'nas-main',
+      'streamUrl': 'https://example.com/movie.mkv',
+      'sourceName': 'NAS',
+      'sourceKind': 'nas',
+      'actualAddress': 'null:///movies/Movie.mkv',
+    });
+
+    expect(target.actualAddress, '/movies/Movie.mkv');
+    expect(target.toJson()['actualAddress'], '/movies/Movie.mkv');
+  });
 }

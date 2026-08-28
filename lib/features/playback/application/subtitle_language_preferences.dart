@@ -12,6 +12,20 @@ class SubtitlePreferredLanguageOption {
   final String subtitle;
 }
 
+class AutomaticSubtitleCandidate<T> {
+  const AutomaticSubtitleCandidate({
+    required this.value,
+    required this.searchableText,
+    this.isForced = false,
+    this.isDefault = false,
+  });
+
+  final T value;
+  final String searchableText;
+  final bool isForced;
+  final bool isDefault;
+}
+
 const List<SubtitlePreferredLanguageOption>
     commonSubtitlePreferredLanguageOptions = <SubtitlePreferredLanguageOption>[
   SubtitlePreferredLanguageOption(
@@ -174,6 +188,7 @@ int scorePreferredSubtitleText(
       _subtitleMatchTokensForPreferenceKey(preferenceKeys[index]),
     )) {
       score += weight;
+      break;
     }
   }
 
@@ -184,14 +199,69 @@ int scorePreferredSubtitleText(
   )) {
     score += 12;
   }
-  if (_containsPreferredToken(
-    normalizedText,
-    normalizedTokens,
-    const ['commentary', 'sdh', 'forced', 'signs'],
-  )) {
-    score -= 18;
-  }
   return score;
+}
+
+bool isForcedSubtitleText(String text) {
+  final normalizedText = normalizeSubtitlePreferenceText(text);
+  if (normalizedText.isEmpty) {
+    return false;
+  }
+  return const <String>[
+    'forced',
+    'force',
+    'signs',
+    '强制',
+    '強制',
+    '强迫',
+    '僅外語',
+    '仅外语',
+    '外语对白',
+    '外語對白',
+  ].any(
+    (marker) =>
+        normalizedText.contains(normalizeSubtitlePreferenceText(marker)),
+  );
+}
+
+T? selectAutomaticSubtitleTrack<T>(
+  Iterable<AutomaticSubtitleCandidate<T>> candidates, {
+  Iterable<String> configuredLanguages = const <String>[],
+  Locale? systemLocale,
+}) {
+  AutomaticSubtitleCandidate<T>? selected;
+  var selectedPriority = 0;
+  var selectedLanguageScore = 0;
+
+  for (final candidate in candidates) {
+    final languageScore = scorePreferredSubtitleText(
+      candidate.searchableText,
+      configuredLanguages: configuredLanguages,
+      systemLocale: systemLocale,
+    );
+    final forced =
+        candidate.isForced || isForcedSubtitleText(candidate.searchableText);
+    final priority = languageScore > 0
+        ? 3
+        : forced
+            ? 2
+            : candidate.isDefault
+                ? 1
+                : 0;
+    if (priority == 0) {
+      continue;
+    }
+    if (selected == null ||
+        priority > selectedPriority ||
+        (priority == selectedPriority &&
+            languageScore > selectedLanguageScore)) {
+      selected = candidate;
+      selectedPriority = priority;
+      selectedLanguageScore = languageScore;
+    }
+  }
+
+  return selected?.value;
 }
 
 String normalizeSubtitlePreferenceText(String value) {
@@ -219,14 +289,16 @@ List<String> _buildSubtitlePreferenceKeys(
     keys.add(normalized);
   }
 
-  final locale = _resolvePrimarySystemLocale(systemLocale);
-  if (locale != null) {
-    for (final key in _subtitlePreferenceKeysForLocale(locale)) {
-      addKey(key);
-    }
-  }
   for (final language in configuredLanguages) {
     addKey(language);
+  }
+  if (keys.isEmpty) {
+    final locale = _resolvePrimarySystemLocale(systemLocale);
+    if (locale != null) {
+      for (final key in _subtitlePreferenceKeysForLocale(locale)) {
+        addKey(key);
+      }
+    }
   }
   return keys;
 }

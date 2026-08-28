@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.content.SharedPreferences
 import android.graphics.Color
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -22,6 +23,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.accessibility.CaptioningManager
 import android.widget.TextView
 import android.widget.Toast
 import android.util.Rational
@@ -31,6 +33,8 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -42,8 +46,10 @@ import androidx.media3.exoplayer.upstream.DefaultAllocator
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.R as Media3UiR
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import androidx.media3.ui.TrackSelectionDialogBuilder
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.android.FlutterActivityLaunchConfigs
@@ -80,6 +86,7 @@ class NativePlaybackActivity : Activity() {
     }
     private var restoredResumePositionMs: Long = 0L
     private var subtitleDelayMs: Long = 0L
+    private var automaticSubtitleSelectionApplied = false
     private var externalSubtitleSource: ExternalSubtitleSource? = null
     private var lastSavedPositionMs: Long = -1L
     private var subtitleSearchActive = false
@@ -207,6 +214,10 @@ class NativePlaybackActivity : Activity() {
             )
             handlePlayerError(error)
         }
+
+        override fun onTracksChanged(tracks: Tracks) {
+            applyAutomaticSubtitleSelection(tracks)
+        }
     }
     private val isTelevisionDevice: Boolean by lazy {
         val currentMode = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
@@ -251,6 +262,7 @@ class NativePlaybackActivity : Activity() {
             setControllerHideOnTouch(!isTelevisionDevice)
             setControllerShowTimeoutMs(4_000)
         }
+        configureSubtitleRendering()
         bindControllerChrome()
         configureRemoteControls()
         findViewById<View>(Media3UiR.id.exo_subtitle)?.setOnClickListener {
@@ -291,6 +303,7 @@ class NativePlaybackActivity : Activity() {
         setIntent(newIntent)
         resetPlaybackStateForNewIntent()
         applyPlaybackIntent(newIntent)
+        configureSubtitleRendering()
         bindControllerChrome()
         updateProgressMarkers()
         initializePlayer()
@@ -963,6 +976,15 @@ class NativePlaybackActivity : Activity() {
                     ),
             )
             .build()
+        automaticSubtitleSelectionApplied = false
+        if (subtitlePreferenceIsOff()) {
+            exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                .buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                .build()
+        }
+        player = exoPlayer
+        exoPlayer.addListener(playerListener)
         val initialMediaItemBuilder = MediaItem.Builder()
             .setUri(url)
             .setMediaMetadata(
@@ -996,10 +1018,8 @@ class NativePlaybackActivity : Activity() {
             }
             prepare()
         }
-        exoPlayer.addListener(playerListener)
         logPlayback("native.initialize.prepare-called playWhenReady=${exoPlayer.playWhenReady}")
 
-        player = exoPlayer
         playerView.player = exoPlayer
         playbackSystemSessionManager.setActive(true)
         if (externalSubtitleSource != null) {
@@ -1018,6 +1038,63 @@ class NativePlaybackActivity : Activity() {
         startPlaybackWatchdog()
         startPlaybackRuntimeLoop()
         schedulePlaybackLaunchTimeout()
+    }
+
+    private fun subtitlePreferenceIsOff(): Boolean =
+        intent.getStringExtra(EXTRA_SUBTITLE_PREFERENCE)?.trim() == "off"
+
+    private fun preferredSubtitleLanguages(): List<String> {
+        val configured = intent.getStringArrayExtra(EXTRA_SUBTITLE_PREFERRED_LANGUAGES)
+            ?.map(String::trim)
+            ?.filter(String::isNotEmpty)
+            .orEmpty()
+        return configured.ifEmpty { listOf(Locale.getDefault().toLanguageTag()) }
+    }
+
+    private fun applyAutomaticSubtitleSelection(tracks: Tracks) {
+        if (automaticSubtitleSelectionApplied) {
+            return
+        }
+        val currentPlayer = player ?: return
+        val candidates = tracks.groups.flatMap { group ->
+            if (group.type != C.TRACK_TYPE_TEXT) {
+                return@flatMap emptyList()
+            }
+            (0 until group.length).mapNotNull { trackIndex ->
+                if (!group.isTrackSupported(trackIndex)) {
+                    return@mapNotNull null
+                }
+                val format = group.getTrackFormat(trackIndex)
+                NativeSubtitleTrackCandidate(
+                    value = TrackSelectionOverride(group.mediaTrackGroup, trackIndex),
+                    language = format.language.orEmpty(),
+                    label = format.label.orEmpty(),
+                    isForced = format.selectionFlags and C.SELECTION_FLAG_FORCED != 0,
+                    isDefault = format.selectionFlags and C.SELECTION_FLAG_DEFAULT != 0,
+                )
+            }
+        }
+        if (candidates.isEmpty()) {
+            return
+        }
+
+        automaticSubtitleSelectionApplied = true
+        val selected = if (subtitlePreferenceIsOff()) {
+            null
+        } else {
+            NativeSubtitleTrackSelectionPolicy.select(
+                candidates = candidates,
+                preferredLanguages = preferredSubtitleLanguages(),
+            )
+        }
+        val parameters = currentPlayer.trackSelectionParameters
+            .buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, selected == null)
+        if (selected != null) {
+            parameters.addOverride(selected)
+        }
+        currentPlayer.trackSelectionParameters = parameters.build()
     }
 
     private fun buildMediaCodecSelector(preferSoftware: Boolean): MediaCodecSelector {
@@ -1435,14 +1512,23 @@ class NativePlaybackActivity : Activity() {
     }
 
     private fun updatePictureInPictureParams() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+        // TV playback stays full-screen and does not use mobile PIP. Avoid
+        // sending PIP parameters to TV firmware, which may reject video
+        // dimensions reported by hardware decoders.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || isTelevisionDevice) {
             return
         }
-        setPictureInPictureParams(
-            PictureInPictureParams.Builder()
-                .setAspectRatio(buildPictureInPictureAspectRatio())
-                .build(),
-        )
+        try {
+            setPictureInPictureParams(
+                PictureInPictureParams.Builder()
+                    .setAspectRatio(buildPictureInPictureAspectRatio())
+                    .build(),
+            )
+        } catch (error: IllegalArgumentException) {
+            // Some TV firmware rejects an otherwise valid video ratio. PIP is
+            // optional, so never let this system call terminate playback.
+            logPlayback("native.pip.params-rejected", error)
+        }
     }
 
     private fun enterPictureInPictureIfPossible() {
@@ -1454,11 +1540,15 @@ class NativePlaybackActivity : Activity() {
             return
         }
         updatePictureInPictureParams()
-        enterPictureInPictureMode(
-            PictureInPictureParams.Builder()
-                .setAspectRatio(buildPictureInPictureAspectRatio())
-                .build(),
-        )
+        try {
+            enterPictureInPictureMode(
+                PictureInPictureParams.Builder()
+                    .setAspectRatio(buildPictureInPictureAspectRatio())
+                    .build(),
+            )
+        } catch (error: IllegalArgumentException) {
+            logPlayback("native.pip.enter-rejected", error)
+        }
     }
 
     private fun buildPictureInPictureAspectRatio(): Rational {
@@ -1466,10 +1556,18 @@ class NativePlaybackActivity : Activity() {
         val videoSize = currentPlayer?.videoSize
         val width = videoSize?.width ?: 0
         val height = videoSize?.height ?: 0
-        return if (width > 0 && height > 0) {
-            Rational(width, height)
-        } else {
-            Rational(16, 9)
+        if (width <= 0 || height <= 0) {
+            return Rational(16, 9)
+        }
+
+        // Android's framework only accepts ratios in [0.418410, 2.390000].
+        // Clamp unusual/corrupt stream dimensions before handing them to the
+        // system (for example a 1x8192 image reported by some TV decoders).
+        val ratio = width.toDouble() / height.toDouble()
+        return when {
+            ratio < 0.42 -> Rational(42, 100)
+            ratio > 2.39 -> Rational(239, 100)
+            else -> Rational(width, height)
         }
     }
 
@@ -2206,6 +2304,43 @@ class NativePlaybackActivity : Activity() {
             )
             playerView.requestFocus()
         }
+    }
+
+    private fun configureSubtitleRendering() {
+        val subtitleView = playerView.subtitleView ?: return
+        val style = NativeSubtitleStylePolicy.resolve(
+            rawScale = intent.getDoubleExtra(
+                EXTRA_SUBTITLE_SCALE,
+                NativeSubtitleStylePolicy.DEFAULT_SCALE,
+            ),
+            isTelevision = isTelevisionDevice,
+        )
+        subtitleView.setViewType(SubtitleView.VIEW_TYPE_CANVAS)
+        subtitleView.setBottomPaddingFraction(style.bottomPaddingFraction)
+
+        val captioningManager =
+            getSystemService(CAPTIONING_SERVICE) as? CaptioningManager
+        if (captioningManager?.isEnabled == true) {
+            subtitleView.setApplyEmbeddedStyles(false)
+            subtitleView.setApplyEmbeddedFontSizes(false)
+            subtitleView.setUserDefaultStyle()
+            subtitleView.setUserDefaultTextSize()
+            return
+        }
+
+        subtitleView.setApplyEmbeddedStyles(true)
+        subtitleView.setApplyEmbeddedFontSizes(false)
+        subtitleView.setStyle(
+            CaptionStyleCompat(
+                Color.WHITE,
+                Color.TRANSPARENT,
+                Color.TRANSPARENT,
+                CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                Color.BLACK,
+                Typeface.create("sans-serif-medium", Typeface.NORMAL),
+            ),
+        )
+        subtitleView.setFractionalTextSize(style.textSizeFraction)
     }
 
     private fun configureFocusability(ids: IntArray) {
@@ -3062,6 +3197,9 @@ class NativePlaybackActivity : Activity() {
         const val EXTRA_TITLE = "title"
         const val EXTRA_HEADERS_JSON = "headersJson"
         const val EXTRA_DECODE_MODE = "decodeMode"
+        const val EXTRA_SUBTITLE_SCALE = "subtitleScale"
+        const val EXTRA_SUBTITLE_PREFERENCE = "subtitlePreference"
+        const val EXTRA_SUBTITLE_PREFERRED_LANGUAGES = "subtitlePreferredLanguages"
         const val EXTRA_PLAYBACK_TARGET_JSON = "playbackTargetJson"
         const val EXTRA_PLAYBACK_ITEM_KEY = "playbackItemKey"
         const val EXTRA_SERIES_KEY = "seriesKey"
