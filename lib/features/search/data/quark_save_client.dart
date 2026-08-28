@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -39,6 +40,39 @@ class QuarkSaveClient {
       'Electron/24.1.3.8 Safari/537.36 Channel/pckk_other_ch';
 
   final http.Client _client;
+
+  Future<QuarkShareValidationResult> validateShareLink({
+    required String shareUrl,
+    required String cookie,
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final parsed = _parseShareUrl(shareUrl);
+    if (parsed == null) {
+      return const QuarkShareValidationResult.invalid('不是可识别的夸克分享链接');
+    }
+    final trimmedCookie = cookie.trim();
+    if (trimmedCookie.isEmpty) {
+      return const QuarkShareValidationResult.unavailable('未配置夸克 Cookie');
+    }
+
+    try {
+      await _fetchShareToken(
+        pwdId: parsed.pwdId,
+        passcode: parsed.passcode,
+        cookie: trimmedCookie,
+      ).timeout(timeout);
+      return const QuarkShareValidationResult.valid();
+    } on QuarkSaveException catch (error) {
+      if (_isPermanentlyInvalidShareMessage(error.message)) {
+        return QuarkShareValidationResult.invalid(error.message);
+      }
+      return QuarkShareValidationResult.unavailable(error.message);
+    } on TimeoutException {
+      return const QuarkShareValidationResult.unavailable('验证超时');
+    } catch (error) {
+      return QuarkShareValidationResult.unavailable('$error');
+    }
+  }
 
   Future<QuarkSaveResult> saveShareLink({
     required String shareUrl,
@@ -1063,6 +1097,37 @@ class QuarkSaveClient {
     return '夸克保存失败：HTTP $statusCode';
   }
 
+  bool _isPermanentlyInvalidShareMessage(String rawMessage) {
+    final message = rawMessage.trim().toLowerCase();
+    if (message.isEmpty) {
+      return false;
+    }
+    return const <String>[
+      '取消分享',
+      '已取消',
+      '分享已取消',
+      '分享已被取消',
+      '分享被取消',
+      '链接不存在',
+      '分享不存在',
+      '文件不存在',
+      '已失效',
+      '链接失效',
+      '分享失效',
+      '已过期',
+      '链接过期',
+      '分享过期',
+      '已删除',
+      '被删除',
+      '违规',
+      '提取码错误',
+      '密码错误',
+      'invalid share',
+      'share not found',
+      'share expired',
+    ].any(message.contains);
+  }
+
   _ParsedQuarkShare? _parseShareUrl(String rawUrl) {
     final uri = Uri.tryParse(rawUrl.trim());
     if (uri == null) {
@@ -1109,6 +1174,31 @@ class QuarkSaveResult {
   final String targetFolderPath;
 
   String get summary => '保存 $savedCount 个，略过 $skippedCount 个';
+}
+
+enum QuarkShareValidationStatus {
+  valid,
+  invalid,
+  unavailable,
+}
+
+class QuarkShareValidationResult {
+  const QuarkShareValidationResult.valid()
+      : status = QuarkShareValidationStatus.valid,
+        reason = '';
+
+  const QuarkShareValidationResult.invalid(this.reason)
+      : status = QuarkShareValidationStatus.invalid;
+
+  const QuarkShareValidationResult.unavailable(this.reason)
+      : status = QuarkShareValidationStatus.unavailable;
+
+  final QuarkShareValidationStatus status;
+  final String reason;
+
+  bool get isValid => status == QuarkShareValidationStatus.valid;
+
+  bool get isInvalid => status == QuarkShareValidationStatus.invalid;
 }
 
 class QuarkSharePreview {

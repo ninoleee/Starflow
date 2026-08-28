@@ -68,7 +68,7 @@ class TaskSchedulingSettingsPage extends ConsumerWidget {
           SettingsStepperTile(
             title: '最大并发任务数',
             subtitle:
-                '统一限制首页加载、后台元数据、Emby 刷新及 NAS / WebDAV 扫描补全的并发规模。TV 推荐 2，性能较好的设备可设为 3。',
+                '统一限制首页加载、搜索链接验证、后台元数据、Emby 刷新及 NAS / WebDAV 扫描补全的并发规模。TV 推荐 2，性能较好的设备可设为 3。',
             value: '${settings.taskMaxConcurrency}',
             onDecrease: settings.taskMaxConcurrency <= kTaskMaxConcurrencyMin
                 ? null

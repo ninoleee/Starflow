@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/navigation/page_activity_mixin.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
@@ -154,6 +155,11 @@ class _SearchPageState extends ConsumerState<SearchPage>
   int _completedSearchTaskCount = 0;
   int _filteredResultCount = 0;
   final Set<String> _savingResultIds = <String>{};
+  final Map<String, _QuarkLinkValidationState> _quarkLinkValidationStates = {};
+  final List<_QuarkLinkValidationJob> _quarkLinkValidationQueue = [];
+  final Set<String> _queuedOrRunningQuarkValidationJobs = {};
+  int _activeQuarkLinkValidationCount = 0;
+  int _quarkLinkValidationMaxConcurrency = kTaskMaxConcurrencyDefault;
   String? _pendingAutoSearchQuery;
   Timer? _searchUiCommitTimer;
   int _pendingSearchRequestId = 0;
@@ -191,6 +197,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   @override
   void dispose() {
     _cancelPendingSearchUiCommit(clearState: true);
+    _cancelQuarkLinkValidations(clearStates: true);
     _queryFocusNode.dispose();
     _scrollController.dispose();
     _controller.dispose();
@@ -483,6 +490,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   void _cancelSearchTasks({bool clearResults = false}) {
     _activeSearchRequestId += 1;
     _cancelPendingSearchUiCommit(clearState: true);
+    _cancelQuarkLinkValidations(clearStates: true);
     if (!mounted) {
       return;
     }
@@ -506,6 +514,148 @@ class _SearchPageState extends ConsumerState<SearchPage>
         _filteredResultCount = 0;
       }
     });
+  }
+
+  void _cancelQuarkLinkValidations({required bool clearStates}) {
+    for (final job in _quarkLinkValidationQueue) {
+      if (!job.completer.isCompleted) {
+        job.completer.complete(
+          const QuarkShareValidationResult.unavailable('验证已取消'),
+        );
+      }
+    }
+    _quarkLinkValidationQueue.clear();
+    _queuedOrRunningQuarkValidationJobs.removeWhere((identity) {
+      final separator = identity.indexOf('|');
+      if (separator < 0) {
+        return true;
+      }
+      final requestId = int.tryParse(identity.substring(0, separator));
+      return requestId != _activeSearchRequestId;
+    });
+    if (clearStates) {
+      _quarkLinkValidationStates.clear();
+    }
+  }
+
+  String _quarkValidationKey(SearchResult result) {
+    final normalizedUrl = normalizeSearchResourceUrl(result.resourceUrl);
+    return normalizedUrl.isEmpty ? result.id : normalizedUrl;
+  }
+
+  _QuarkLinkValidationState? _quarkValidationStateFor(SearchResult result) {
+    return _quarkLinkValidationStates[_quarkValidationKey(result)];
+  }
+
+  Future<QuarkShareValidationResult>? _enqueueQuarkLinkValidation({
+    required int requestId,
+    required SearchResult result,
+    required String cookie,
+    required int maxConcurrency,
+    required ValueChanged<QuarkShareValidationResult> onCompleted,
+  }) {
+    if (detectSearchCloudTypeFromUrl(result.resourceUrl) !=
+            SearchCloudType.quark ||
+        cookie.trim().isEmpty) {
+      return null;
+    }
+    final key = _quarkValidationKey(result);
+    final identity = '$requestId|$key';
+    if (!_queuedOrRunningQuarkValidationJobs.add(identity)) {
+      return null;
+    }
+    _quarkLinkValidationMaxConcurrency = maxConcurrency.clamp(
+      kTaskMaxConcurrencyMin,
+      kTaskMaxConcurrencyMax,
+    );
+    _quarkLinkValidationStates[key] = _QuarkLinkValidationState.pending;
+    final job = _QuarkLinkValidationJob(
+      requestId: requestId,
+      identity: identity,
+      key: key,
+      result: result,
+      cookie: cookie,
+      client: ref.read(quarkSaveClientProvider),
+      onCompleted: onCompleted,
+    );
+    _quarkLinkValidationQueue.add(job);
+    _drainQuarkLinkValidationQueue();
+    return job.completer.future;
+  }
+
+  void _drainQuarkLinkValidationQueue() {
+    while (
+        _activeQuarkLinkValidationCount < _quarkLinkValidationMaxConcurrency &&
+            _quarkLinkValidationQueue.isNotEmpty) {
+      final job = _quarkLinkValidationQueue.removeAt(0);
+      if (job.requestId != _activeSearchRequestId) {
+        _queuedOrRunningQuarkValidationJobs.remove(job.identity);
+        continue;
+      }
+      _activeQuarkLinkValidationCount += 1;
+      unawaited(_runQuarkLinkValidation(job));
+    }
+  }
+
+  Future<void> _runQuarkLinkValidation(_QuarkLinkValidationJob job) async {
+    try {
+      final validation = await job.client.validateShareLink(
+        shareUrl: job.result.resourceUrl,
+        cookie: job.cookie,
+      );
+      if (!mounted || job.requestId != _activeSearchRequestId) {
+        return;
+      }
+      switch (validation.status) {
+        case QuarkShareValidationStatus.valid:
+          _quarkLinkValidationStates[job.key] = _QuarkLinkValidationState.valid;
+          break;
+        case QuarkShareValidationStatus.invalid:
+          _quarkLinkValidationStates.remove(job.key);
+          break;
+        case QuarkShareValidationStatus.unavailable:
+          _quarkLinkValidationStates[job.key] =
+              _QuarkLinkValidationState.unavailable;
+          break;
+      }
+      job.onCompleted(validation);
+      if (!job.completer.isCompleted) {
+        job.completer.complete(validation);
+      }
+      if (validation.isInvalid) {
+        appLogInfo(
+          'search.quark-validation',
+          'Invalid Quark search result filtered',
+          fields: {
+            'providerId': job.result.providerId,
+            'reason': validation.reason,
+          },
+        );
+      } else if (validation.status == QuarkShareValidationStatus.unavailable) {
+        appLogWarning(
+          'search.quark-validation',
+          'Quark search result could not be validated',
+          fields: {
+            'providerId': job.result.providerId,
+            'reason': validation.reason,
+          },
+        );
+      }
+      if (mounted) {
+        setState(() {});
+      }
+    } finally {
+      if (!job.completer.isCompleted) {
+        job.completer.complete(
+          const QuarkShareValidationResult.unavailable('验证未完成'),
+        );
+      }
+      if (_activeQuarkLinkValidationCount > 0) {
+        _activeQuarkLinkValidationCount -= 1;
+      }
+      _queuedOrRunningQuarkValidationJobs.remove(job.identity);
+      _drainQuarkLinkValidationQueue();
+    }
   }
 
   Future<void> _performSearch() async {
@@ -556,6 +706,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
 
     final repository = ref.read(searchRepositoryProvider);
     final requestId = ++_activeSearchRequestId;
+    _cancelQuarkLinkValidations(clearStates: true);
     final operations = _buildSearchOperations(
       repository: repository,
       keyword: keyword,
@@ -616,6 +767,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
         ref.watch(_searchPageVisibleSearchProvidersProvider);
     final localSources = ref.watch(_searchPageVisibleLocalSourcesProvider);
     final displayedResults = _displayedResults;
+    final pendingLinkValidationCount = _quarkLinkValidationStates.values
+        .where((state) => state == _QuarkLinkValidationState.pending)
+        .length;
     final targets = _buildTargets(
       localSources: localSources,
       providers: enabledProviders,
@@ -809,9 +963,11 @@ class _SearchPageState extends ConsumerState<SearchPage>
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                displayedResults.isEmpty
-                                    ? '正在搜索...'
-                                    : '正在继续搜索 $_completedSearchTaskCount/$_totalSearchTaskCount',
+                                pendingLinkValidationCount > 0
+                                    ? '正在验证链接 $pendingLinkValidationCount 条...'
+                                    : displayedResults.isEmpty
+                                        ? '正在搜索...'
+                                        : '正在继续搜索 $_completedSearchTaskCount/$_totalSearchTaskCount',
                               ),
                               const SizedBox(height: 10),
                             ],
@@ -827,7 +983,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
                                 child: Text(
-                                  '结果 ${displayedResults.length} 条 · 过滤 $_filteredResultCount 条',
+                                  '结果 ${displayedResults.length} 条 · 过滤 $_filteredResultCount 条'
+                                  '${pendingLinkValidationCount > 0 ? ' · 验证 $pendingLinkValidationCount 条' : ''}',
                                 ),
                               ),
                             if (!_showFavoriteResults && _errorMessage != null)
@@ -861,6 +1018,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
                         delegate: SliverChildBuilderDelegate(
                           (context, index) {
                             final result = displayedResults[index];
+                            final validationState =
+                                _quarkValidationStateFor(result);
                             return _SearchResultCard(
                               result: result,
                               focusId: 'search:result:${result.id}',
@@ -872,6 +1031,14 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                 result: result,
                                 networkStorage: networkStorage,
                               ),
+                              isLinkValidationPending: validationState ==
+                                  _QuarkLinkValidationState.pending,
+                              linkValidationLabel: switch (validationState) {
+                                _QuarkLinkValidationState.pending => '链接验证中',
+                                _QuarkLinkValidationState.unavailable =>
+                                  '链接暂未验证',
+                                _ => '',
+                              },
                               onSave: () => _saveResultToQuark(
                                 result: result,
                                 networkStorage: networkStorage,
@@ -1139,6 +1306,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
     required ValueChanged<int> onFiltered,
     required int Function() getFiltered,
   }) async {
+    final pendingValidations = <Future<QuarkShareValidationResult>>[];
     try {
       final result = await operation.run();
       if (!mounted || requestId != _activeSearchRequestId) {
@@ -1153,9 +1321,34 @@ class _SearchPageState extends ConsumerState<SearchPage>
           duplicateCount += 1;
           continue;
         }
-        aggregated.add(item);
+        final settings = ref.read(appSettingsProvider);
+        final validationFuture = _enqueueQuarkLinkValidation(
+          requestId: requestId,
+          result: item,
+          cookie: settings.networkStorage.quarkCookie,
+          maxConcurrency: settings.taskMaxConcurrency,
+          onCompleted: (validation) {
+            if (!mounted || requestId != _activeSearchRequestId) {
+              return;
+            }
+            if (validation.isInvalid) {
+              onFiltered(1);
+              return;
+            }
+            aggregated.add(item);
+          },
+        );
+        if (validationFuture == null) {
+          aggregated.add(item);
+        } else {
+          pendingValidations.add(validationFuture);
+        }
       }
       onFiltered(result.filteredCount + duplicateCount);
+      if (pendingValidations.isNotEmpty) {
+        setState(() {});
+        await Future.wait(pendingValidations);
+      }
     } catch (error) {
       if (!mounted || requestId != _activeSearchRequestId) {
         return;
@@ -1166,15 +1359,21 @@ class _SearchPageState extends ConsumerState<SearchPage>
         onCompleted();
         final completed = getCompleted();
         final hasFinished = completed >= totalCount;
-        _scheduleSearchUiCommit(
-          requestId: requestId,
-          aggregated: aggregated,
-          errors: errors,
-          totalCount: totalCount,
-          completedCount: completed,
-          filteredCount: getFiltered(),
-          force: hasFinished,
-        );
+        if (hasFinished) {
+          _scheduleSearchUiCommit(
+            requestId: requestId,
+            aggregated: aggregated,
+            errors: errors,
+            totalCount: totalCount,
+            completedCount: completed,
+            filteredCount: getFiltered(),
+            force: true,
+          );
+        } else {
+          setState(() {
+            _completedSearchTaskCount = completed;
+          });
+        }
       }
     }
   }
@@ -1266,6 +1465,12 @@ class _SearchPageState extends ConsumerState<SearchPage>
     required SearchResult result,
     required NetworkStorageConfig networkStorage,
   }) async {
+    if (_quarkValidationStateFor(result) == _QuarkLinkValidationState.pending) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('链接正在验证，请稍候')),
+      );
+      return;
+    }
     final storage = networkStorage;
     final cookie = storage.quarkCookie.trim();
     if (cookie.isEmpty) {
@@ -1339,6 +1544,8 @@ class _SearchResultCard extends ConsumerWidget {
     required this.isSaving,
     required this.isFavorite,
     required this.showSaveAction,
+    required this.isLinkValidationPending,
+    required this.linkValidationLabel,
     required this.onSave,
     required this.onToggleFavorite,
   });
@@ -1348,6 +1555,8 @@ class _SearchResultCard extends ConsumerWidget {
   final bool isSaving;
   final bool isFavorite;
   final bool showSaveAction;
+  final bool isLinkValidationPending;
+  final String linkValidationLabel;
   final VoidCallback onSave;
   final VoidCallback onToggleFavorite;
 
@@ -1428,6 +1637,8 @@ class _SearchResultCard extends ConsumerWidget {
                   _MetaChip(label: result.sizeLabel),
                   if (result.seeders > 0)
                     _MetaChip(label: '${result.seeders} seeders'),
+                  if (linkValidationLabel.isNotEmpty)
+                    _MetaChip(label: linkValidationLabel),
                 ],
               ),
             ],
@@ -1472,7 +1683,8 @@ class _SearchResultCard extends ConsumerWidget {
                         size: 32,
                         tooltip: '保存到夸克',
                         variant: StarflowButtonVariant.ghost,
-                        onPressed: isSaving ? null : onSave,
+                        onPressed:
+                            isSaving || isLinkValidationPending ? null : onSave,
                         icon: Icons.bookmark_add_rounded,
                       ),
                     ),
@@ -1553,9 +1765,15 @@ class _SearchResultCard extends ConsumerWidget {
                       if (showSaveAction) ...[
                         const SizedBox(height: 6),
                         TvAdaptiveButton(
-                          label: isSaving ? '保存中' : '保存',
+                          label: isSaving
+                              ? '保存中'
+                              : isLinkValidationPending
+                                  ? '验证中'
+                                  : '保存',
                           icon: Icons.bookmark_add_rounded,
-                          onPressed: isSaving ? null : onSave,
+                          onPressed: isSaving || isLinkValidationPending
+                              ? null
+                              : onSave,
                           focusId: '$focusId:save',
                           variant: TvButtonVariant.text,
                         ),
@@ -1988,6 +2206,34 @@ class _MetaChip extends StatelessWidget {
       ),
     );
   }
+}
+
+enum _QuarkLinkValidationState {
+  pending,
+  valid,
+  unavailable,
+}
+
+class _QuarkLinkValidationJob {
+  _QuarkLinkValidationJob({
+    required this.requestId,
+    required this.identity,
+    required this.key,
+    required this.result,
+    required this.cookie,
+    required this.client,
+    required this.onCompleted,
+  });
+
+  final int requestId;
+  final String identity;
+  final String key;
+  final SearchResult result;
+  final String cookie;
+  final QuarkSaveClient client;
+  final ValueChanged<QuarkShareValidationResult> onCompleted;
+  final Completer<QuarkShareValidationResult> completer =
+      Completer<QuarkShareValidationResult>();
 }
 
 enum _SearchTargetKind {

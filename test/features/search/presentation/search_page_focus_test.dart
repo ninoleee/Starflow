@@ -1,14 +1,18 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
+import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/search/presentation/search_page.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -219,6 +223,99 @@ void main() {
 
     expect(find.text('测试电影 4K'), findsOneWidget);
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'search-query');
+  });
+
+  testWidgets('online Quark results are shown only after link validation',
+      (tester) async {
+    SharedPreferences.setMockInitialValues(const {});
+    final repository = _PendingSearchRepository();
+    final validationStarted = Completer<void>();
+    final validationResponse = Completer<http.Response>();
+    final quarkClient = QuarkSaveClient(
+      MockClient((request) {
+        if (!validationStarted.isCompleted) {
+          validationStarted.complete();
+        }
+        return validationResponse.future;
+      }),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => false),
+          searchRepositoryProvider.overrideWithValue(repository),
+          quarkSaveClientProvider.overrideWithValue(quarkClient),
+          appSettingsProvider.overrideWithValue(
+            const AppSettings(
+              mediaSources: <MediaSourceConfig>[],
+              searchProviders: <SearchProviderConfig>[
+                SearchProviderConfig(
+                  id: 'online',
+                  name: 'Online',
+                  kind: SearchProviderKind.panSou,
+                  endpoint: 'https://example.com',
+                  enabled: true,
+                ),
+              ],
+              doubanAccount: DoubanAccountConfig(enabled: false),
+              homeModules: <HomeModuleConfig>[],
+              networkStorage: NetworkStorageConfig(quarkCookie: 'kps=test;'),
+            ),
+          ),
+        ],
+        child: const MaterialApp(
+          home: SearchPage(initialQuery: '测试电影'),
+        ),
+      ),
+    );
+
+    for (var i = 0; i < 10 && !repository.onlineStarted.isCompleted; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    repository.onlineResult.complete(
+      SearchFetchResult(
+        filteredCount: 0,
+        items: const [
+          SearchResult(
+            id: 'quark-1',
+            title: '待验证电影',
+            posterUrl: '',
+            providerId: 'online',
+            providerName: 'Online',
+            quality: '4K',
+            sizeLabel: '10GB',
+            seeders: 0,
+            summary: 'online result',
+            resourceUrl: 'https://pan.quark.cn/s/abc123',
+          ),
+        ],
+      ),
+    );
+
+    for (var i = 0; i < 10 && !validationStarted.isCompleted; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(validationStarted.isCompleted, isTrue);
+    expect(find.text('待验证电影'), findsNothing);
+    expect(find.textContaining('正在验证链接'), findsOneWidget);
+
+    validationResponse.complete(
+      http.Response.bytes(
+        utf8.encode(
+          jsonEncode({
+            'code': 0,
+            'data': {'stoken': 'st-valid'},
+          }),
+        ),
+        200,
+        headers: const {'content-type': 'application/json; charset=utf-8'},
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('待验证电影'), findsOneWidget);
   });
 
   testWidgets('standalone favorites page hides search controls and tabs',

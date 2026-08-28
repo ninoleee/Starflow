@@ -111,6 +111,83 @@ void main() {
       expect(resolved.headers['Origin'], 'https://drive-pc.quark.cn');
     });
 
+    test('validates an active share with the token endpoint only', () async {
+      var requestCount = 0;
+      final client = QuarkSaveClient(
+        MockClient((request) async {
+          requestCount += 1;
+          expect(request.url.path, '/1/clouddrive/share/sharepage/token');
+          return _jsonResponse({
+            'code': 0,
+            'data': {'stoken': 'st-valid'},
+          });
+        }),
+      );
+
+      final result = await client.validateShareLink(
+        shareUrl: 'https://pan.quark.cn/s/abc123',
+        cookie: 'kps=test;',
+      );
+
+      expect(result.status, QuarkShareValidationStatus.valid);
+      expect(requestCount, 1);
+    });
+
+    test('classifies cancelled shares as permanently invalid', () async {
+      final client = QuarkSaveClient(
+        MockClient((request) async {
+          return _jsonResponse({
+            'code': 41001,
+            'message': '该分享已取消分享',
+          });
+        }),
+      );
+
+      final result = await client.validateShareLink(
+        shareUrl: 'https://pan.quark.cn/s/cancelled',
+        cookie: 'kps=test;',
+      );
+
+      expect(result.status, QuarkShareValidationStatus.invalid);
+      expect(result.reason, contains('取消分享'));
+    });
+
+    test('keeps results when validation fails transiently', () async {
+      final client = QuarkSaveClient(
+        MockClient((request) async {
+          return _jsonResponse({
+            'code': 429,
+            'message': '请求过于频繁，请稍后再试',
+          });
+        }),
+      );
+
+      final result = await client.validateShareLink(
+        shareUrl: 'https://pan.quark.cn/s/rate-limited',
+        cookie: 'kps=test;',
+      );
+
+      expect(result.status, QuarkShareValidationStatus.unavailable);
+    });
+
+    test('rejects malformed share urls without a network request', () async {
+      var requested = false;
+      final client = QuarkSaveClient(
+        MockClient((request) async {
+          requested = true;
+          return _jsonResponse({'code': 0});
+        }),
+      );
+
+      final result = await client.validateShareLink(
+        shareUrl: 'https://example.com/not-a-share',
+        cookie: 'kps=test;',
+      );
+
+      expect(result.status, QuarkShareValidationStatus.invalid);
+      expect(requested, isFalse);
+    });
+
     test('saves a quark share link to root directory', () async {
       final requests = <Uri>[];
       final client = QuarkSaveClient(
