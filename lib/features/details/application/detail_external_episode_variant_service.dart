@@ -290,13 +290,15 @@ class DetailExternalEpisodeVariantService {
       ),
       genres: base.genres.isNotEmpty ? base.genres : current.genres,
       directors: base.directors.isNotEmpty ? base.directors : current.directors,
-      directorProfiles: base.directorProfiles.isNotEmpty
-          ? base.directorProfiles
-          : current.directorProfiles,
+      directorProfiles: mergeMediaPersonProfiles(
+        base.directorProfiles,
+        current.directorProfiles,
+      ),
       actors: base.actors.isNotEmpty ? base.actors : current.actors,
-      actorProfiles: base.actorProfiles.isNotEmpty
-          ? base.actorProfiles
-          : current.actorProfiles,
+      actorProfiles: mergeMediaPersonProfiles(
+        base.actorProfiles,
+        current.actorProfiles,
+      ),
       platforms: base.platforms.isNotEmpty ? base.platforms : current.platforms,
       platformProfiles: base.platformProfiles.isNotEmpty
           ? base.platformProfiles

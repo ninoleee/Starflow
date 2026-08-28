@@ -698,14 +698,20 @@ class _ExternalScanStructureModule {
 
     for (final entry in episodeItemsByGroup.entries) {
       final seasonNumber = seasonNumberByGroup[entry.key];
+      final leadingEpisodeNumbers = _resolveGroupedLeadingEpisodeNumbers(
+        items: entry.value,
+        recognitionByResource: context.recognitionByResource,
+      );
       final orderedEpisodes = _orderEpisodeItemsForGroup(
         items: entry.value,
         recognitionByResource: context.recognitionByResource,
+        leadingEpisodeNumbers: leadingEpisodeNumbers,
       );
       final groupHasExplicitEpisodeNumber = orderedEpisodes.any((item) {
         final recognition = context.recognitionByResource[item.resourceId];
         return (item.metadataSeed.episodeNumber ??
-                recognition?.episodeNumber) !=
+                recognition?.episodeNumber ??
+                leadingEpisodeNumbers[item.resourceId]) !=
             null;
       });
       for (var index = 0; index < orderedEpisodes.length; index++) {
@@ -713,8 +719,9 @@ class _ExternalScanStructureModule {
         final recognition = context.recognitionByResource[item.resourceId];
         final explicitSeasonNumber =
             item.metadataSeed.seasonNumber ?? recognition?.seasonNumber;
-        final explicitEpisodeNumber =
-            item.metadataSeed.episodeNumber ?? recognition?.episodeNumber;
+        final explicitEpisodeNumber = item.metadataSeed.episodeNumber ??
+            recognition?.episodeNumber ??
+            leadingEpisodeNumbers[item.resourceId];
         final isDirectSeasonGroup =
             entry.key.endsWith('::$_directSeasonGroupKey');
         final isImplicitSeasonGroup =
@@ -742,10 +749,13 @@ class _ExternalScanStructureModule {
   List<_PendingWebDavScannedItem> _orderEpisodeItemsForGroup({
     required List<_PendingWebDavScannedItem> items,
     required Map<String, NasMediaRecognition> recognitionByResource,
+    required Map<String, int> leadingEpisodeNumbers,
   }) {
     final hasExplicitEpisodeNumber = items.any((item) {
       final recognition = recognitionByResource[item.resourceId];
-      return (item.metadataSeed.episodeNumber ?? recognition?.episodeNumber) !=
+      return (item.metadataSeed.episodeNumber ??
+              recognition?.episodeNumber ??
+              leadingEpisodeNumbers[item.resourceId]) !=
           null;
     });
     if (!hasExplicitEpisodeNumber) {
@@ -784,11 +794,68 @@ class _ExternalScanStructureModule {
       }
     }
 
-    final orderedEpisodes = [...items]
-      ..sort((left, right) => left.actualAddress.toLowerCase().compareTo(
-            right.actualAddress.toLowerCase(),
-          ));
+    final orderedEpisodes = [...items]..sort((left, right) {
+        final leftRecognition = recognitionByResource[left.resourceId];
+        final rightRecognition = recognitionByResource[right.resourceId];
+        final leftEpisodeNumber = left.metadataSeed.episodeNumber ??
+            leftRecognition?.episodeNumber ??
+            leadingEpisodeNumbers[left.resourceId];
+        final rightEpisodeNumber = right.metadataSeed.episodeNumber ??
+            rightRecognition?.episodeNumber ??
+            leadingEpisodeNumbers[right.resourceId];
+        if (leftEpisodeNumber != null || rightEpisodeNumber != null) {
+          if (leftEpisodeNumber == null) {
+            return 1;
+          }
+          if (rightEpisodeNumber == null) {
+            return -1;
+          }
+          final episodeComparison =
+              leftEpisodeNumber.compareTo(rightEpisodeNumber);
+          if (episodeComparison != 0) {
+            return episodeComparison;
+          }
+        }
+        return left.actualAddress.toLowerCase().compareTo(
+              right.actualAddress.toLowerCase(),
+            );
+      });
     return orderedEpisodes;
+  }
+
+  Map<String, int> _resolveGroupedLeadingEpisodeNumbers({
+    required List<_PendingWebDavScannedItem> items,
+    required Map<String, NasMediaRecognition> recognitionByResource,
+  }) {
+    final episodeNumbers = <String, int>{};
+    for (final item in items) {
+      final recognition = recognitionByResource[item.resourceId];
+      final explicitEpisodeNumber =
+          item.metadataSeed.episodeNumber ?? recognition?.episodeNumber;
+      if (explicitEpisodeNumber != null) {
+        continue;
+      }
+      final leadingEpisodeNumber = _parseGroupedLeadingEpisodeNumber(
+        item.fileName,
+      );
+      if (leadingEpisodeNumber == null) {
+        return const <String, int>{};
+      }
+      episodeNumbers[item.resourceId] = leadingEpisodeNumber;
+    }
+    return episodeNumbers;
+  }
+
+  int? _parseGroupedLeadingEpisodeNumber(String value) {
+    final match = RegExp(
+      r'^\s*0*(\d{1,3})(?:[ ._\-、]+)(?=\S)',
+      caseSensitive: false,
+    ).firstMatch(value.trim());
+    final episodeNumber = int.tryParse(match?.group(1) ?? '');
+    if (episodeNumber == null || episodeNumber <= 0) {
+      return null;
+    }
+    return episodeNumber;
   }
 
   Map<String, int> _resolveSeasonNumberByGroup(

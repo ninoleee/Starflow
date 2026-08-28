@@ -25,6 +25,54 @@ class MediaPersonProfile {
   }
 }
 
+List<MediaPersonProfile> mergeMediaPersonProfiles(
+  List<MediaPersonProfile> current,
+  List<MediaPersonProfile> incoming, {
+  bool preferIncoming = false,
+}) {
+  final useIncomingAsPrimary = preferIncoming && incoming.isNotEmpty;
+  final primary = useIncomingAsPrimary
+      ? incoming
+      : current.isNotEmpty
+          ? current
+          : incoming;
+  final supplemental = useIncomingAsPrimary ? current : incoming;
+  if (primary.isEmpty || supplemental.isEmpty) {
+    return primary;
+  }
+
+  final supplementalByName = <String, MediaPersonProfile>{};
+  for (final profile in supplemental) {
+    final key = profile.name.trim().toLowerCase();
+    if (key.isNotEmpty) {
+      supplementalByName.putIfAbsent(key, () => profile);
+    }
+  }
+  return primary.map((profile) {
+    if (profile.avatarUrl.trim().isNotEmpty) {
+      return profile;
+    }
+    final replacement = supplementalByName[profile.name.trim().toLowerCase()];
+    final avatarUrl = replacement?.avatarUrl.trim() ?? '';
+    if (avatarUrl.isEmpty) {
+      return profile;
+    }
+    return MediaPersonProfile(name: profile.name, avatarUrl: avatarUrl);
+  }).toList(growable: false);
+}
+
+bool _personGroupNeedsAvatar(
+  List<String> names,
+  List<MediaPersonProfile> profiles,
+) {
+  final hasNamedPerson = names.any((name) => name.trim().isNotEmpty) ||
+      profiles.any((profile) => profile.name.trim().isNotEmpty);
+  if (!hasNamedPerson) {
+    return false;
+  }
+  return !profiles.any((profile) => profile.avatarUrl.trim().isNotEmpty);
+}
+
 class MediaDetailTarget {
   const MediaDetailTarget({
     required this.title,
@@ -149,6 +197,11 @@ class MediaDetailTarget {
     final hasGenres = genres.isNotEmpty;
     final hasOverview = hasUsefulOverview;
     return !hasPoster || !(hasOverview || hasPeople || hasGenres);
+  }
+
+  bool get needsPersonProfileMatch {
+    return _personGroupNeedsAvatar(directors, directorProfiles) ||
+        _personGroupNeedsAvatar(actors, actorProfiles);
   }
 
   List<MediaPersonProfile> get resolvedDirectorProfiles {
@@ -306,15 +359,9 @@ class MediaDetailTarget {
       ratingLabels: item.ratingLabels,
       genres: item.genres,
       directors: item.directors,
-      directorProfiles: item.directors
-          .where((entry) => entry.trim().isNotEmpty)
-          .map((entry) => MediaPersonProfile(name: entry.trim()))
-          .toList(),
+      directorProfiles: const [],
       actors: item.actors,
-      actorProfiles: item.actors
-          .where((entry) => entry.trim().isNotEmpty)
-          .map((entry) => MediaPersonProfile(name: entry.trim()))
-          .toList(),
+      actorProfiles: const [],
       platforms: const [],
       platformProfiles: const [],
       availabilityLabel: availabilityLabel.isNotEmpty

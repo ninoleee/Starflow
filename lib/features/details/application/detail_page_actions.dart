@@ -269,15 +269,17 @@ MediaDetailTarget buildSeriesOverviewSourceMatchSeed({
     directors: resolvedTarget.directors.isNotEmpty
         ? resolvedTarget.directors
         : pageSeedTarget.directors,
-    directorProfiles: resolvedTarget.directorProfiles.isNotEmpty
-        ? resolvedTarget.directorProfiles
-        : pageSeedTarget.directorProfiles,
+    directorProfiles: mergeMediaPersonProfiles(
+      resolvedTarget.directorProfiles,
+      pageSeedTarget.directorProfiles,
+    ),
     actors: resolvedTarget.actors.isNotEmpty
         ? resolvedTarget.actors
         : pageSeedTarget.actors,
-    actorProfiles: resolvedTarget.actorProfiles.isNotEmpty
-        ? resolvedTarget.actorProfiles
-        : pageSeedTarget.actorProfiles,
+    actorProfiles: mergeMediaPersonProfiles(
+      resolvedTarget.actorProfiles,
+      pageSeedTarget.actorProfiles,
+    ),
     platforms: resolvedTarget.platforms.isNotEmpty
         ? resolvedTarget.platforms
         : pageSeedTarget.platforms,

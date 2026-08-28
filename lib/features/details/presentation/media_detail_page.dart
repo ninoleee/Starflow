@@ -140,8 +140,13 @@ bool _shouldAutoRefreshOverviewMetadata({
       !_isOverviewMetadataRefreshTarget(currentTarget)) {
     return false;
   }
-  if (_hasExistingMetadataRefreshMarker(pageTarget) ||
-      _hasExistingMetadataRefreshMarker(currentTarget)) {
+  final shouldRefreshPersonProfiles = settings.tmdbMetadataMatchEnabled &&
+      settings.tmdbReadAccessToken.trim().isNotEmpty &&
+      (pageTarget.needsPersonProfileMatch ||
+          currentTarget.needsPersonProfileMatch);
+  if (!shouldRefreshPersonProfiles &&
+      (_hasExistingMetadataRefreshMarker(pageTarget) ||
+          _hasExistingMetadataRefreshMarker(currentTarget))) {
     return false;
   }
   return _canAttemptDetailMetadataRefresh(

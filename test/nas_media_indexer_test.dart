@@ -2246,7 +2246,7 @@ void main() {
         '7.黄粱一梦（你还好吗，美国）',
       ]),
     );
-    expect(seasons.map((item) => item.seasonNumber), containsAll([7, 11]));
+    expect(seasons.map((item) => item.seasonNumber).toList(), [7, 11]);
   });
 
   test(
@@ -2519,7 +2519,7 @@ void main() {
       scopedCollections: [collection],
       limit: 20,
     );
-    expect(seasons.map((item) => item.seasonNumber), containsAll([0, 6, 12]));
+    expect(seasons.map((item) => item.seasonNumber).toList(), [0, 6, 12]);
     expect(seasons.firstWhere((item) => item.seasonNumber == 0).title, '特别篇');
     expect(seasons.firstWhere((item) => item.seasonNumber == 6).title, '6.');
     expect(seasons.firstWhere((item) => item.seasonNumber == 12).title, '12.');
@@ -2691,7 +2691,7 @@ void main() {
     );
     final indexedAt = DateTime.utc(2026, 4, 5, 12);
     final scopeKey =
-        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v10';
+        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v11';
     final record = NasMediaIndexRecord(
       id: NasMediaIndexRecord.buildRecordId(
         sourceId: source.id,

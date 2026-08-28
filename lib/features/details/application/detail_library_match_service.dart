@@ -583,13 +583,15 @@ class DetailLibraryMatchService {
       genres: current.genres.isNotEmpty ? current.genres : matched.genres,
       directors:
           current.directors.isNotEmpty ? current.directors : matched.directors,
-      directorProfiles: current.directorProfiles.isNotEmpty
-          ? current.directorProfiles
-          : matched.directorProfiles,
+      directorProfiles: mergeMediaPersonProfiles(
+        current.directorProfiles,
+        matched.directorProfiles,
+      ),
       actors: current.actors.isNotEmpty ? current.actors : matched.actors,
-      actorProfiles: current.actorProfiles.isNotEmpty
-          ? current.actorProfiles
-          : matched.actorProfiles,
+      actorProfiles: mergeMediaPersonProfiles(
+        current.actorProfiles,
+        matched.actorProfiles,
+      ),
       platforms:
           current.platforms.isNotEmpty ? current.platforms : matched.platforms,
       platformProfiles: current.platformProfiles.isNotEmpty
@@ -718,27 +720,19 @@ class DetailLibraryMatchService {
       directors: replaceExisting
           ? (match.directors.isNotEmpty ? match.directors : target.directors)
           : (target.directors.isNotEmpty ? target.directors : match.directors),
-      directorProfiles: replaceExisting
-          ? (resolvedDirectorProfiles.isNotEmpty
-              ? resolvedDirectorProfiles
-              : target.directorProfiles)
-          : (target.directorProfiles.isNotEmpty
-              ? target.directorProfiles
-              : resolvedDirectorProfiles.isNotEmpty
-                  ? resolvedDirectorProfiles
-                  : target.directorProfiles),
+      directorProfiles: mergeMediaPersonProfiles(
+        target.directorProfiles,
+        resolvedDirectorProfiles,
+        preferIncoming: replaceExisting,
+      ),
       actors: replaceExisting
           ? (match.actors.isNotEmpty ? match.actors : target.actors)
           : (target.actors.isNotEmpty ? target.actors : match.actors),
-      actorProfiles: replaceExisting
-          ? (resolvedActorProfiles.isNotEmpty
-              ? resolvedActorProfiles
-              : target.actorProfiles)
-          : (target.actorProfiles.isNotEmpty
-              ? target.actorProfiles
-              : resolvedActorProfiles.isNotEmpty
-                  ? resolvedActorProfiles
-                  : target.actorProfiles),
+      actorProfiles: mergeMediaPersonProfiles(
+        target.actorProfiles,
+        resolvedActorProfiles,
+        preferIncoming: replaceExisting,
+      ),
       platforms: shouldReplaceCompanies
           ? match.platforms
           : (replaceExisting

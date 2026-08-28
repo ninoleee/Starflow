@@ -36,6 +36,54 @@ void main() {
     });
   });
 
+  group('MediaDetailTarget person profiles', () {
+    test('requests profile enrichment when only person names are available',
+        () {
+      const target = MediaDetailTarget(
+        title: 'Inception',
+        posterUrl: 'https://example.com/poster.jpg',
+        overview: 'Overview',
+        directors: ['Christopher Nolan'],
+        actors: ['Leonardo DiCaprio'],
+      );
+
+      expect(target.needsPersonProfileMatch, isTrue);
+    });
+
+    test('does not request profile enrichment after avatars are available', () {
+      const target = MediaDetailTarget(
+        title: 'Inception',
+        posterUrl: 'https://example.com/poster.jpg',
+        overview: 'Overview',
+        directors: ['Christopher Nolan'],
+        directorProfiles: [
+          MediaPersonProfile(
+            name: 'Christopher Nolan',
+            avatarUrl: 'https://example.com/nolan.jpg',
+          ),
+        ],
+      );
+
+      expect(target.needsPersonProfileMatch, isFalse);
+    });
+
+    test('upgrades matching name-only profiles with incoming avatars', () {
+      final merged = mergeMediaPersonProfiles(
+        const [MediaPersonProfile(name: 'Christopher Nolan')],
+        const [
+          MediaPersonProfile(
+            name: 'Christopher Nolan',
+            avatarUrl: 'https://example.com/nolan.jpg',
+          ),
+        ],
+      );
+
+      expect(merged, hasLength(1));
+      expect(merged.single.name, 'Christopher Nolan');
+      expect(merged.single.avatarUrl, 'https://example.com/nolan.jpg');
+    });
+  });
+
   group('MediaDetailTarget.needsImdbRatingMatch', () {
     test('returns true when only non-IMDb ratings exist', () {
       const target = MediaDetailTarget(
@@ -104,6 +152,33 @@ void main() {
       );
 
       expect(target.tmdbId, '19995');
+    });
+
+    test('keeps name fallback separate from enrichable profiles', () {
+      final target = MediaDetailTarget.fromMediaItem(
+        MediaItem(
+          id: 'movie-people',
+          title: 'Inception',
+          overview: 'Overview',
+          posterUrl: 'https://example.com/poster.jpg',
+          year: 2010,
+          durationLabel: '148分钟',
+          genres: const ['科幻'],
+          directors: const ['Christopher Nolan'],
+          actors: const ['Leonardo DiCaprio'],
+          sourceId: 'nas-main',
+          sourceName: 'NAS',
+          sourceKind: MediaSourceKind.nas,
+          streamUrl: 'https://example.com/inception.mkv',
+          addedAt: DateTime(2026),
+        ),
+      );
+
+      expect(target.directorProfiles, isEmpty);
+      expect(target.actorProfiles, isEmpty);
+      expect(target.resolvedDirectorProfiles.single.name, 'Christopher Nolan');
+      expect(target.resolvedActorProfiles.single.name, 'Leonardo DiCaprio');
+      expect(target.needsPersonProfileMatch, isTrue);
     });
   });
 

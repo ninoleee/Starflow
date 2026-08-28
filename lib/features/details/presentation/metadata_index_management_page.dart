@@ -494,12 +494,17 @@ class _MetadataIndexManagementPageState
         genres: match.genres.isNotEmpty ? match.genres : nextTarget.genres,
         directors:
             match.directors.isNotEmpty ? match.directors : nextTarget.directors,
-        directorProfiles: directorProfiles.isNotEmpty
-            ? directorProfiles
-            : nextTarget.directorProfiles,
+        directorProfiles: mergeMediaPersonProfiles(
+          nextTarget.directorProfiles,
+          directorProfiles,
+          preferIncoming: directorProfiles.isNotEmpty,
+        ),
         actors: match.actors.isNotEmpty ? match.actors : nextTarget.actors,
-        actorProfiles:
-            actorProfiles.isNotEmpty ? actorProfiles : nextTarget.actorProfiles,
+        actorProfiles: mergeMediaPersonProfiles(
+          nextTarget.actorProfiles,
+          actorProfiles,
+          preferIncoming: actorProfiles.isNotEmpty,
+        ),
         platforms: match.provider == MetadataMatchProvider.tmdb
             ? match.platforms
             : (match.platforms.isNotEmpty

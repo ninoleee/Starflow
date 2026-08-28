@@ -86,6 +86,51 @@ void main() {
     );
   });
 
+  test('uses leading ordinals to order direct files in a known series', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'food-10',
+          address: '/movies/strm/quark/食贫道/10.神佑之地.(mp4).strm',
+          directories: const ['strm', 'quark', '食贫道'],
+        ),
+        _pendingItem(
+          id: 'food-2',
+          address: '/movies/strm/quark/食贫道/2.迦南孤儿.(mp4).strm',
+          directories: const ['strm', 'quark', '食贫道'],
+        ),
+        _pendingItem(
+          id: 'food-28',
+          address: '/movies/strm/quark/食贫道/28.首尔夏天.(mp4).strm',
+          directories: const ['strm', 'quark', '食贫道'],
+        ),
+        _pendingItem(
+          id: 'food-1',
+          address: '/movies/strm/quark/食贫道/1.迷失东京.(mp4).strm',
+          directories: const ['strm', 'quark', '食贫道'],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(
+      {
+        for (final item in resolved)
+          item.resourceId: item.metadataSeed.episodeNumber,
+      },
+      {
+        'food-1': 1,
+        'food-2': 2,
+        'food-10': 10,
+        'food-28': 28,
+      },
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.seasonNumber),
+      everyElement(1),
+    );
+  });
+
   test('keeps year folders but collapses unclear quality-count wrappers', () {
     final resolved = applyExternalDirectoryStructureInference(
       [

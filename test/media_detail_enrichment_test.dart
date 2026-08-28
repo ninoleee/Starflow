@@ -1153,6 +1153,123 @@ void main() {
       expect(resolved.overview, '来自本地媒体库的简介');
     });
 
+    test('enriches missing NAS director and actor avatars from tmdb', () async {
+      var tmdbRequests = 0;
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+              'wmdbMetadataMatchEnabled': false,
+              'tmdbMetadataMatchEnabled': true,
+              'tmdbReadAccessToken': 'tmdb-token',
+            }),
+          ),
+          tmdbMetadataClientProvider.overrideWithValue(
+            TmdbMetadataClient(
+              MockClient((request) async {
+                tmdbRequests += 1;
+                if (request.url.path == '/3/search/multi') {
+                  return http.Response(
+                    jsonEncode({
+                      'results': [
+                        {
+                          'id': 27205,
+                          'media_type': 'movie',
+                          'title': '盗梦空间',
+                          'original_title': 'Inception',
+                          'overview': 'Overview',
+                          'poster_path': '/poster.jpg',
+                          'release_date': '2010-07-16',
+                          'popularity': 20.0,
+                        },
+                      ],
+                    }),
+                    200,
+                    headers: const {'content-type': 'application/json'},
+                  );
+                }
+                if (request.url.path == '/3/movie/27205') {
+                  return http.Response(
+                    jsonEncode({
+                      'id': 27205,
+                      'title': '盗梦空间',
+                      'original_title': 'Inception',
+                      'overview': 'Overview',
+                      'poster_path': '/poster.jpg',
+                      'backdrop_path': '/backdrop.jpg',
+                      'release_date': '2010-07-16',
+                      'runtime': 148,
+                      'genres': [
+                        {'name': '科幻'},
+                      ],
+                      'credits': {
+                        'cast': [
+                          {
+                            'name': 'Leonardo DiCaprio',
+                            'profile_path': '/leo.jpg',
+                          },
+                        ],
+                        'crew': [
+                          {
+                            'name': 'Christopher Nolan',
+                            'job': 'Director',
+                            'department': 'Directing',
+                            'profile_path': '/nolan.jpg',
+                          },
+                        ],
+                      },
+                      'external_ids': {'imdb_id': 'tt1375666'},
+                    }),
+                    200,
+                    headers: const {'content-type': 'application/json'},
+                  );
+                }
+                return http.Response('Not found', 404);
+              }),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const target = MediaDetailTarget(
+        title: '盗梦空间',
+        posterUrl: 'https://nas.example.com/poster.jpg',
+        backdropUrl: 'https://nas.example.com/backdrop.jpg',
+        logoUrl: 'https://nas.example.com/logo.png',
+        overview: '本地简介',
+        year: 2010,
+        directors: ['Christopher Nolan'],
+        actors: ['Leonardo DiCaprio'],
+        searchQuery: '盗梦空间',
+        sourceId: 'nas-main',
+        sourceName: 'NAS',
+        sourceKind: MediaSourceKind.nas,
+        itemId: 'movie-27205',
+        itemType: 'movie',
+      );
+
+      final resolved = await container.read(
+        enrichedDetailTargetProvider(target).future,
+      );
+
+      expect(tmdbRequests, 2);
+      expect(
+        resolved.directorProfiles.single.avatarUrl,
+        'https://image.tmdb.org/t/p/w185/nolan.jpg',
+      );
+      expect(
+        resolved.actorProfiles.single.avatarUrl,
+        'https://image.tmdb.org/t/p/w185/leo.jpg',
+      );
+      expect(resolved.posterUrl, 'https://nas.example.com/poster.jpg');
+      expect(resolved.overview, '本地简介');
+    });
+
     test('skips tmdb when wmdb already satisfies remaining metadata needs',
         () async {
       var tmdbRequests = 0;

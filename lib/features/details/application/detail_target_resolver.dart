@@ -371,14 +371,17 @@ _DetailAutomaticMetadataNeeds _resolveAutomaticMetadataNeeds({
   required MediaDetailTarget target,
   required DetailEnrichmentSettings settings,
 }) {
+  final query = _detailMetadataQuery(target);
+  final canUseTmdb = settings.tmdbMetadataMatchEnabled &&
+      settings.tmdbReadAccessToken.trim().isNotEmpty &&
+      query.isNotEmpty;
   if (target.sourceKind == MediaSourceKind.nas &&
       target.sourceId.trim().isNotEmpty) {
-    return const _DetailAutomaticMetadataNeeds(
+    return _DetailAutomaticMetadataNeeds(
       needsWmdb: false,
-      needsTmdb: false,
+      needsTmdb: canUseTmdb && target.needsPersonProfileMatch,
     );
   }
-  final query = _detailMetadataQuery(target);
   if (query.isEmpty && target.doubanId.trim().isEmpty) {
     return const _DetailAutomaticMetadataNeeds(
       needsWmdb: false,
@@ -391,10 +394,9 @@ _DetailAutomaticMetadataNeeds _resolveAutomaticMetadataNeeds({
           target.needsImdbRatingMatch ||
           target.doubanId.trim().isEmpty ||
           target.imdbId.trim().isEmpty);
-  final needsTmdb = settings.tmdbMetadataMatchEnabled &&
-      settings.tmdbReadAccessToken.trim().isNotEmpty &&
-      query.isNotEmpty &&
+  final needsTmdb = canUseTmdb &&
       (target.needsMetadataMatch ||
+          target.needsPersonProfileMatch ||
           target.backdropUrl.trim().isEmpty ||
           target.logoUrl.trim().isEmpty);
   return _DetailAutomaticMetadataNeeds(
@@ -716,13 +718,15 @@ MediaDetailTarget _mergeCachedDetailTarget(
     genres: current.genres.isNotEmpty ? current.genres : cached.genres,
     directors:
         current.directors.isNotEmpty ? current.directors : cached.directors,
-    directorProfiles: current.directorProfiles.isNotEmpty
-        ? current.directorProfiles
-        : cached.directorProfiles,
+    directorProfiles: mergeMediaPersonProfiles(
+      current.directorProfiles,
+      cached.directorProfiles,
+    ),
     actors: current.actors.isNotEmpty ? current.actors : cached.actors,
-    actorProfiles: current.actorProfiles.isNotEmpty
-        ? current.actorProfiles
-        : cached.actorProfiles,
+    actorProfiles: mergeMediaPersonProfiles(
+      current.actorProfiles,
+      cached.actorProfiles,
+    ),
     platforms:
         current.platforms.isNotEmpty ? current.platforms : cached.platforms,
     platformProfiles: current.platformProfiles.isNotEmpty
@@ -1074,10 +1078,17 @@ MediaDetailTarget _applyMetadataMatchToDetailTarget(
     durationLabel: pickString(target.durationLabel, match.durationLabel),
     genres: pickList(target.genres, match.genres),
     directors: pickList(target.directors, match.directors),
-    directorProfiles:
-        pickList(target.directorProfiles, resolvedDirectorProfiles),
+    directorProfiles: mergeMediaPersonProfiles(
+      target.directorProfiles,
+      resolvedDirectorProfiles,
+      preferIncoming: replaceExisting,
+    ),
     actors: pickList(target.actors, match.actors),
-    actorProfiles: pickList(target.actorProfiles, resolvedActorProfiles),
+    actorProfiles: mergeMediaPersonProfiles(
+      target.actorProfiles,
+      resolvedActorProfiles,
+      preferIncoming: replaceExisting,
+    ),
     platforms: shouldReplaceCompanies
         ? match.platforms
         : pickList(target.platforms, match.platforms),
