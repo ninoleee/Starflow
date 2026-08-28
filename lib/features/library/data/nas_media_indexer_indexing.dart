@@ -116,20 +116,17 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       // release filename.  Keep the first directory below the configured
       // source section as the stable library title, and only use the filename
       // when the file is directly at the section root.
-      final structureFallbackTitle = _firstLibraryDirectoryTitle(
-            scannedItem,
-            seriesTitleFilterKeywords:
-                source.normalizedWebDavSeriesTitleFilterKeywords,
-          ) ??
-          _seriesTitleFromScannedItem(
-            scannedItem,
-            fileFallbackTitle: title,
-            seriesTitleFilterKeywords:
-                source.normalizedWebDavSeriesTitleFilterKeywords,
-          );
+      final structureFallbackTitle =
+          NasMediaPathPolicy.firstLibraryDirectoryTitle(
+                resourcePath: scannedItem.actualAddress,
+                sectionId: scannedItem.sectionId,
+                configuredKeywords:
+                    source.normalizedWebDavSeriesTitleFilterKeywords,
+              ) ??
+              '';
       final normalizedStructureTitle =
-          _normalizeIndexedPathToken(structureFallbackTitle);
-      final normalizedFileTitle = _normalizeIndexedPathToken(title);
+          NasMediaPathPolicy.normalizePathToken(structureFallbackTitle);
+      final normalizedFileTitle = NasMediaPathPolicy.normalizePathToken(title);
       if (structureFallbackTitle.trim().isNotEmpty &&
           (seedItemType == 'movie' ||
               normalizedFileTitle.isEmpty ||
@@ -677,53 +674,6 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     );
   }
 
-  String? _firstLibraryDirectoryTitle(
-    WebDavScannedItem item, {
-    required List<String> seriesTitleFilterKeywords,
-  }) {
-    final resourceSegments = _pathSegments(item.actualAddress);
-    if (resourceSegments.isEmpty) {
-      return null;
-    }
-    final sectionSegments = _pathSegments(_uriPath(item.sectionId));
-    var commonLength = 0;
-    while (commonLength < sectionSegments.length &&
-        commonLength < resourceSegments.length &&
-        sectionSegments[commonLength] == resourceSegments[commonLength]) {
-      commonLength += 1;
-    }
-    if (resourceSegments.length <= commonLength + 1) {
-      return null;
-    }
-    final normalizedFilters = seriesTitleFilterKeywords
-        .map(_normalizeIndexedPathToken)
-        .where((value) => value.isNotEmpty)
-        .toSet()
-      ..addAll(const {'strm', 'quark', 'nas', 'webdav'});
-    final relativeDirectories = resourceSegments.sublist(
-      commonLength,
-      resourceSegments.length - 1,
-    );
-    for (final directory in relativeDirectories) {
-      // This value is presented as the movie title, so preserve meaningful
-      // bracketed directory content such as a release year.  The general
-      // metadata cleaner intentionally removes bracket groups and is too
-      // destructive for a user-authored directory label.
-      final cleaned = stripEmbeddedExternalIdTags(directory)
-          .replaceAll(RegExp(r'[_\.]+'), ' ')
-          .replaceAll(RegExp(r'\s+'), ' ')
-          .trim();
-      final normalized = _normalizeIndexedPathToken(cleaned);
-      if (cleaned.isEmpty ||
-          normalizedFilters.contains(normalized) ||
-          NasMediaRecognizer.isGenericLibraryFolderLabel(cleaned)) {
-        continue;
-      }
-      return cleaned;
-    }
-    return null;
-  }
-
   bool _hasStaleSeriesMetadataForResolvedMovie({
     required MediaSourceConfig source,
     required WebDavMetadataSeed seed,
@@ -747,13 +697,6 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
         existingRecord.item.episodeNumber != null ||
         existingRecord.recognizedSeasonNumber != null ||
         existingRecord.recognizedEpisodeNumber != null;
-  }
-
-  String _normalizeIndexedPathToken(String value) {
-    return value.trim().toLowerCase().replaceAll(
-          RegExp(r'[\s\-_.·:：/\\|()（）\[\]【】{}《》]+'),
-          '',
-        );
   }
 
   String _buildMetadataMatchQuery({
@@ -782,12 +725,12 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     }
 
     final seriesTitle = _cleanIndexedTitleLabel(
-      _seriesTitleFromScannedItem(
+      _resolveSeriesRootForScannedItem(
         scannedItem,
         fileFallbackTitle: recognition.title,
         seriesTitleFilterKeywords:
             source.normalizedWebDavSeriesTitleFilterKeywords,
-      ),
+      ).title,
     );
     if (seriesTitle.isEmpty) {
       return baseTitle;
@@ -899,155 +842,22 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     return 0;
   }
 
-  String _seriesTitleFromScannedItem(
+  NasSeriesRootResolution _resolveSeriesRootForScannedItem(
     WebDavScannedItem item, {
     required String fileFallbackTitle,
     List<String> seriesTitleFilterKeywords = const [],
   }) {
-    final resourceSegments = _pathSegments(item.actualAddress);
-    if (resourceSegments.isEmpty) {
-      return '';
-    }
-
     final hasSeasonHint = item.metadataSeed.seasonNumber != null ||
         item.metadataSeed.episodeNumber != null;
     final itemType = item.metadataSeed.itemType.trim().toLowerCase();
-    final sectionSegments = _pathSegments(_uriPath(item.sectionId));
-    final cleanedFileFallbackTitle = _cleanIndexedTitleLabel(fileFallbackTitle);
-
-    var commonLength = 0;
-    while (commonLength < sectionSegments.length &&
-        commonLength < resourceSegments.length &&
-        sectionSegments[commonLength] == resourceSegments[commonLength]) {
-      commonLength += 1;
-    }
-
-    final relativeDirectories = resourceSegments.length <= commonLength + 1
-        ? <String>[]
-        : resourceSegments.sublist(commonLength, resourceSegments.length - 1);
-    if (relativeDirectories.isEmpty) {
-      if (hasSeasonHint && sectionSegments.isNotEmpty) {
-        final filteredSectionFallback = _fallbackTitleFromFilteredSectionRoot(
-          sectionSegments: sectionSegments,
-          relativeDirectories: relativeDirectories,
-          fileFallbackTitle: cleanedFileFallbackTitle,
-          seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-        );
-        if (filteredSectionFallback != null) {
-          return filteredSectionFallback;
-        }
-        return _cleanIndexedTitleLabel(sectionSegments.last);
-      }
-      return '';
-    }
-
-    final stoppedTitle = _stoppedSeriesTitleByFilteredDirectory(
-      relativeDirectories: relativeDirectories,
-      fileFallbackTitle: cleanedFileFallbackTitle,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+    return NasMediaPathPolicy.resolveSeriesRoot(
+      resourcePath: item.actualAddress,
+      sectionId: item.sectionId,
+      fileFallbackTitle: fileFallbackTitle,
+      seriesLike: hasSeasonHint ||
+          const {'episode', 'series', 'season'}.contains(itemType),
+      configuredKeywords: seriesTitleFilterKeywords,
     );
-    if (stoppedTitle != null && (hasSeasonHint || itemType == 'episode')) {
-      return stoppedTitle;
-    }
-
-    final seasonDirectoryIndex =
-        relativeDirectories.indexWhere(_looksLikeSeasonFolderLabel);
-    if (seasonDirectoryIndex > 0) {
-      return _cleanIndexedTitleLabel(
-        relativeDirectories[seasonDirectoryIndex - 1],
-      );
-    }
-    if (seasonDirectoryIndex == 0 && sectionSegments.isNotEmpty) {
-      final filteredSectionFallback = _fallbackTitleFromFilteredSectionRoot(
-        sectionSegments: sectionSegments,
-        relativeDirectories: relativeDirectories,
-        fileFallbackTitle: cleanedFileFallbackTitle,
-        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-      );
-      if (filteredSectionFallback != null) {
-        return filteredSectionFallback;
-      }
-      return _cleanIndexedTitleLabel(sectionSegments.last);
-    }
-
-    if (hasSeasonHint || itemType == 'episode') {
-      final firstStructureRootIndex = _firstUsableSeriesDirectoryIndex(
-        relativeDirectories,
-        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-      );
-      if (firstStructureRootIndex >= 0) {
-        return _cleanIndexedTitleLabel(
-          relativeDirectories[firstStructureRootIndex],
-        );
-      }
-    }
-
-    final trailingStructureRoot =
-        _nearestNonSeasonDirectory(relativeDirectories);
-    if (trailingStructureRoot.isNotEmpty &&
-        (hasSeasonHint || itemType == 'episode')) {
-      return _cleanIndexedTitleLabel(trailingStructureRoot);
-    }
-
-    return _cleanIndexedTitleLabel(relativeDirectories.first);
-  }
-
-  String? _fallbackTitleFromFilteredSectionRoot({
-    required List<String> sectionSegments,
-    required List<String> relativeDirectories,
-    required String fileFallbackTitle,
-    required List<String> seriesTitleFilterKeywords,
-  }) {
-    if (sectionSegments.isEmpty || seriesTitleFilterKeywords.isEmpty) {
-      return null;
-    }
-    final rawSectionRoot = sectionSegments.last.trim();
-    if (rawSectionRoot.isEmpty) {
-      return null;
-    }
-    final cleanedSectionRoot = _cleanIndexedTitleLabel(rawSectionRoot);
-    if (!_matchesSeriesTitleFilterKeyword(
-      rawSectionRoot,
-      cleanedValue: cleanedSectionRoot,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    )) {
-      return null;
-    }
-
-    for (var index = 0; index < relativeDirectories.length; index++) {
-      final rawDirectory = relativeDirectories[index].trim();
-      final canUseSeasonDirectory = index == 0 &&
-          _canUseSeasonDirectoryAsSeriesRoot(
-            rawDirectory,
-            parentMatchesFilter: true,
-          );
-      if (rawDirectory.isEmpty ||
-          (_looksLikeSeasonFolderLabel(rawDirectory) &&
-              !canUseSeasonDirectory)) {
-        continue;
-      }
-      final cleanedDirectory = _cleanIndexedTitleLabel(rawDirectory);
-      if (cleanedDirectory.isEmpty ||
-          NasMediaRecognizer.isGenericLibraryFolderLabel(cleanedDirectory) ||
-          const {
-            'dav',
-            'media',
-            'nas',
-            'quark',
-            'strm',
-            'video',
-            'videos',
-            'webdav',
-          }.contains(cleanedDirectory.trim().toLowerCase())) {
-        continue;
-      }
-      return cleanedDirectory;
-    }
-    final fallbackTitle = fileFallbackTitle.trim();
-    if (fallbackTitle.isEmpty) {
-      return null;
-    }
-    return fallbackTitle;
   }
 
   String _buildScopeKey(
@@ -1126,7 +936,10 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     var versionDirectoryIndex = -1;
     for (var index = 1; index < segments.length - 1; index++) {
       if (NasMediaRecognizer.matchesMovieVersionFolderLabel(segments[index]) ||
-          _looksLikeNestedMovieVersionDirectory(segments, index)) {
+          NasMediaPathPolicy.looksLikeNestedMovieReleaseFolder(
+            parentTitle: segments[index - 1],
+            childDirectoryName: segments[index],
+          )) {
         versionDirectoryIndex = index;
         break;
       }
@@ -1136,43 +949,5 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     }
     final normalizedTitle = seed.title.trim().toLowerCase();
     return '$classification|movie-version-v1:$normalizedTitle';
-  }
-
-  bool _looksLikeNestedMovieVersionDirectory(
-    List<String> segments,
-    int index,
-  ) {
-    if (index <= 0 || index >= segments.length - 1) {
-      return false;
-    }
-    final parent = segments[index - 1].trim();
-    final child = segments[index].trim();
-    if (parent.isEmpty ||
-        child.isEmpty ||
-        NasMediaRecognizer.isGenericLibraryFolderLabel(parent)) {
-      return false;
-    }
-    final separatorPattern = RegExp(
-      r'[\s\-_.·:：/\\|()（）\[\]【】{}《》]+',
-    );
-    final normalizedParent = parent.toLowerCase().replaceAll(
-          separatorPattern,
-          '',
-        );
-    final normalizedChild = child.toLowerCase().replaceAll(
-          separatorPattern,
-          '',
-        );
-    if (normalizedParent.isEmpty ||
-        normalizedChild == normalizedParent ||
-        !normalizedChild.startsWith(normalizedParent)) {
-      return false;
-    }
-    final suffix = normalizedChild.substring(normalizedParent.length);
-    final yearMatch = RegExp(r'^(?:19\d{2}|20\d{2})').firstMatch(suffix);
-    final remainder =
-        yearMatch == null ? suffix : suffix.substring(yearMatch.end);
-    return remainder.isEmpty ||
-        NasMediaRecognizer.matchesMovieVersionFolderLabel(remainder);
   }
 }

@@ -14,38 +14,10 @@ List<String> _relativeDirectorySegmentsFromRoot({
   required Uri fileUri,
   required Uri rootUri,
 }) {
-  final rootSegments = rootUri.pathSegments
-      .where((segment) => segment.isNotEmpty)
-      .toList(growable: false);
-  final fileSegments = fileUri.pathSegments
-      .where((segment) => segment.isNotEmpty)
-      .toList(growable: false);
-
-  var index = 0;
-  while (index < rootSegments.length &&
-      index < fileSegments.length &&
-      rootSegments[index] == fileSegments[index]) {
-    index += 1;
-  }
-  if (index >= fileSegments.length) {
-    return const [];
-  }
-  final relativeSegments = fileSegments.skip(index).toList(growable: false);
-  if (relativeSegments.length <= 1) {
-    return const [];
-  }
-  return relativeSegments
-      .take(relativeSegments.length - 1)
-      .map(_decodePathSegment)
-      .toList(growable: false);
-}
-
-String _decodePathSegment(String raw) {
-  try {
-    return Uri.decodeComponent(raw);
-  } catch (_) {
-    return raw;
-  }
+  return NasMediaPathPolicy.resolvePathContext(
+    resourcePath: fileUri.toString(),
+    sectionId: rootUri.toString(),
+  ).relativeDirectories;
 }
 
 class _ExternalScanStructureModule {
@@ -165,7 +137,7 @@ class _ExternalScanStructureModule {
       final parentTitle = parentSegments.isEmpty ? '' : parentSegments.last;
       final movieVersionGroups = parentEntry.value.entries.where((entry) {
         if (!NasMediaRecognizer.matchesMovieVersionFolderLabel(entry.key) &&
-            !_looksLikeNestedMovieReleaseFolder(
+            !NasMediaPathPolicy.looksLikeNestedMovieReleaseFolder(
               parentTitle: parentTitle,
               childDirectoryName: entry.key,
             )) {
@@ -356,7 +328,7 @@ class _ExternalScanStructureModule {
           return !NasMediaRecognizer.matchesMovieVersionFolderLabel(
                 entry.key,
               ) &&
-              !_looksLikeNestedMovieReleaseFolder(
+              !NasMediaPathPolicy.looksLikeNestedMovieReleaseFolder(
                 parentTitle: parentTitle,
                 childDirectoryName: entry.key,
               );
@@ -382,23 +354,10 @@ class _ExternalScanStructureModule {
     String value, {
     required List<String> configuredKeywords,
   }) {
-    if (value.trim().isEmpty) {
-      return true;
-    }
-    if (NasMediaRecognizer.isGenericLibraryFolderLabel(value) ||
-        configuredKeywords.contains(value.trim().toLowerCase())) {
-      return true;
-    }
-    return const <String>{
-      'dav',
-      'media',
-      'nas',
-      'quark',
-      'strm',
-      'video',
-      'videos',
-      'webdav',
-    }.contains(value.trim().toLowerCase());
+    return NasMediaPathPolicy.isPublicDirectory(
+      value,
+      configuredKeywords: configuredKeywords,
+    );
   }
 
   bool _hasExplicitSeriesEvidence(
@@ -418,65 +377,6 @@ class _ExternalScanStructureModule {
         seed.episodeNumber != null ||
         recognition?.seasonNumber != null ||
         recognition?.episodeNumber != null;
-  }
-
-  bool _looksLikeNestedMovieReleaseFolder({
-    required String parentTitle,
-    required String childDirectoryName,
-  }) {
-    if (parentTitle.trim().isEmpty ||
-        NasMediaRecognizer.isGenericLibraryFolderLabel(parentTitle) ||
-        looksLikeSeasonFolderLabel(childDirectoryName)) {
-      return false;
-    }
-    final normalizedParent = parentTitle.toLowerCase().replaceAll(
-          RegExp(r'[\s\-_.·:：/\\|()（）\[\]【】{}《》]+'),
-          '',
-        );
-    final normalizedChild = childDirectoryName.toLowerCase().replaceAll(
-          RegExp(r'[\s\-_.·:：/\\|()（）\[\]【】{}《》]+'),
-          '',
-        );
-    if (normalizedParent.isEmpty ||
-        normalizedChild == normalizedParent ||
-        !normalizedChild.startsWith(normalizedParent)) {
-      return false;
-    }
-    final suffix = normalizedChild.substring(normalizedParent.length);
-    final yearMatch = RegExp(r'^(?:19\d{2}|20\d{2})').firstMatch(suffix);
-    if (yearMatch != null) {
-      final remainder = suffix.substring(yearMatch.end);
-      return remainder.isEmpty ||
-          NasMediaRecognizer.matchesMovieVersionFolderLabel(remainder) ||
-          _containsMovieReleaseDescriptor(remainder);
-    }
-    return NasMediaRecognizer.matchesMovieVersionFolderLabel(suffix) ||
-        _containsMovieReleaseDescriptor(suffix);
-  }
-
-  bool _containsMovieReleaseDescriptor(String value) {
-    const descriptorKeywords = <String>[
-      '国语',
-      '粤语',
-      '英语',
-      '日语',
-      '韩语',
-      '中字',
-      '字幕',
-      '双语',
-      '简繁',
-      '外挂',
-      '内封',
-      '蓝光',
-      '原盘',
-      '高码',
-      'hdr',
-      '4k',
-      '2160p',
-      '1080p',
-      'web',
-    ];
-    return descriptorKeywords.any(value.contains);
   }
 
   Map<String, _SeriesRootInferencePlan> _buildSeriesRootPlans(
@@ -774,7 +674,7 @@ class _ExternalScanStructureModule {
       if (!NasMediaRecognizer.matchesMovieVersionFolderLabel(
             directories[index],
           ) &&
-          !_looksLikeNestedMovieReleaseFolder(
+          !NasMediaPathPolicy.looksLikeNestedMovieReleaseFolder(
             parentTitle: directories[index - 1],
             childDirectoryName: directories[index],
           )) {

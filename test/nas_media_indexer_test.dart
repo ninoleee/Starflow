@@ -785,27 +785,10 @@ void main() {
       ],
     );
 
-    final settings = SeedData.defaultSettings.copyWith(
-      mediaSources: [source],
-      wmdbMetadataMatchEnabled: false,
-      tmdbMetadataMatchEnabled: false,
-      imdbRatingMatchEnabled: false,
-    );
-
-    final indexer = NasMediaIndexer(
+    final indexer = _buildStructureGroupingTestIndexer(
       store: store,
-      webDavNasClient: client,
-      wmdbMetadataClient: WmdbMetadataClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      tmdbMetadataClient: TmdbMetadataClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      imdbRatingClient: ImdbRatingClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      readSettings: () => settings,
-      progressController: WebDavScrapeProgressController(),
+      client: client,
+      source: source,
     );
 
     await indexer.refreshSource(
@@ -857,27 +840,10 @@ void main() {
       ],
     );
 
-    final settings = SeedData.defaultSettings.copyWith(
-      mediaSources: [source],
-      wmdbMetadataMatchEnabled: false,
-      tmdbMetadataMatchEnabled: false,
-      imdbRatingMatchEnabled: false,
-    );
-
-    final indexer = NasMediaIndexer(
+    final indexer = _buildStructureGroupingTestIndexer(
       store: store,
-      webDavNasClient: client,
-      wmdbMetadataClient: WmdbMetadataClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      tmdbMetadataClient: TmdbMetadataClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      imdbRatingClient: ImdbRatingClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      readSettings: () => settings,
-      progressController: WebDavScrapeProgressController(),
+      client: client,
+      source: source,
     );
 
     await indexer.refreshSource(
@@ -930,27 +896,10 @@ void main() {
       ],
     );
 
-    final settings = SeedData.defaultSettings.copyWith(
-      mediaSources: [source],
-      wmdbMetadataMatchEnabled: false,
-      tmdbMetadataMatchEnabled: false,
-      imdbRatingMatchEnabled: false,
-    );
-
-    final indexer = NasMediaIndexer(
+    final indexer = _buildStructureGroupingTestIndexer(
       store: store,
-      webDavNasClient: client,
-      wmdbMetadataClient: WmdbMetadataClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      tmdbMetadataClient: TmdbMetadataClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      imdbRatingClient: ImdbRatingClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      readSettings: () => settings,
-      progressController: WebDavScrapeProgressController(),
+      client: client,
+      source: source,
     );
 
     await indexer.refreshSource(
@@ -1012,27 +961,10 @@ void main() {
       ],
     );
 
-    final settings = SeedData.defaultSettings.copyWith(
-      mediaSources: [source],
-      wmdbMetadataMatchEnabled: false,
-      tmdbMetadataMatchEnabled: false,
-      imdbRatingMatchEnabled: false,
-    );
-
-    final indexer = NasMediaIndexer(
+    final indexer = _buildStructureGroupingTestIndexer(
       store: store,
-      webDavNasClient: client,
-      wmdbMetadataClient: WmdbMetadataClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      tmdbMetadataClient: TmdbMetadataClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      imdbRatingClient: ImdbRatingClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      readSettings: () => settings,
-      progressController: WebDavScrapeProgressController(),
+      client: client,
+      source: source,
     );
 
     await indexer.refreshSource(
@@ -1113,27 +1045,10 @@ void main() {
       ],
     );
 
-    final settings = SeedData.defaultSettings.copyWith(
-      mediaSources: [source],
-      wmdbMetadataMatchEnabled: false,
-      tmdbMetadataMatchEnabled: false,
-      imdbRatingMatchEnabled: false,
-    );
-
-    final indexer = NasMediaIndexer(
+    final indexer = _buildStructureGroupingTestIndexer(
       store: store,
-      webDavNasClient: client,
-      wmdbMetadataClient: WmdbMetadataClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      tmdbMetadataClient: TmdbMetadataClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      imdbRatingClient: ImdbRatingClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      readSettings: () => settings,
-      progressController: WebDavScrapeProgressController(),
+      client: client,
+      source: source,
     );
 
     await indexer.refreshSource(
@@ -2776,7 +2691,7 @@ void main() {
     );
     final indexedAt = DateTime.utc(2026, 4, 5, 12);
     final scopeKey =
-        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v9';
+        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v10';
     final record = NasMediaIndexRecord(
       id: NasMediaIndexRecord.buildRecordId(
         sourceId: source.id,
@@ -5377,6 +5292,34 @@ void main() {
 
     expect(maxConcurrent, 2);
   });
+}
+
+NasMediaIndexer _buildStructureGroupingTestIndexer({
+  required _MemoryNasMediaIndexStore store,
+  required _FakeWebDavNasClient client,
+  required MediaSourceConfig source,
+}) {
+  final settings = SeedData.defaultSettings.copyWith(
+    mediaSources: [source],
+    wmdbMetadataMatchEnabled: false,
+    tmdbMetadataMatchEnabled: false,
+    imdbRatingMatchEnabled: false,
+  );
+  return NasMediaIndexer(
+    store: store,
+    webDavNasClient: client,
+    wmdbMetadataClient: WmdbMetadataClient(
+      MockClient((request) async => http.Response('', 500)),
+    ),
+    tmdbMetadataClient: TmdbMetadataClient(
+      MockClient((request) async => http.Response('', 500)),
+    ),
+    imdbRatingClient: ImdbRatingClient(
+      MockClient((request) async => http.Response('', 500)),
+    ),
+    readSettings: () => settings,
+    progressController: WebDavScrapeProgressController(),
+  );
 }
 
 _PendingTestItem _episodeItem({

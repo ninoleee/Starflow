@@ -8,6 +8,7 @@ import 'package:starflow/features/library/application/nas_media_index_revision.d
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
+import 'package:starflow/features/library/data/nas_media_path_policy.dart';
 import 'package:starflow/features/library/data/quark_external_storage_client.dart';
 import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
@@ -91,7 +92,7 @@ class NasMediaIndexer {
   static const String _seasonGroupPrefix = 'webdav-season';
   // Bump whenever structure classification changes so an existing index is
   // re-evaluated instead of reusing stale `webdav-series` records.
-  static const String _webDavMetadataSchemaVersion = 'webdav-v9';
+  static const String _webDavMetadataSchemaVersion = 'webdav-v10';
   final NasMediaIndexStore _store;
   final WebDavNasClient _webDavNasClient;
   final QuarkExternalStorageClient? _quarkExternalStorageClient;
@@ -525,72 +526,12 @@ class NasMediaIndexer {
     return width * height;
   }
 
-  String _nearestNonSeasonDirectory(Iterable<String> directories) {
-    return _NasMediaIndexerGroupingSupportX(this)
-        .nearestNonSeasonDirectoryForMain(directories);
-  }
-
-  String? _stoppedSeriesTitleByFilteredDirectory({
-    required List<String> relativeDirectories,
-    required String fileFallbackTitle,
-    required List<String> seriesTitleFilterKeywords,
-  }) {
-    return _NasMediaIndexerGroupingSupportX(this)
-        .stoppedSeriesTitleByFilteredDirectoryForMain(
-      relativeDirectories: relativeDirectories,
-      fileFallbackTitle: fileFallbackTitle,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    );
-  }
-
-  bool _matchesSeriesTitleFilterKeyword(
-    String rawValue, {
-    required String cleanedValue,
-    required List<String> seriesTitleFilterKeywords,
-  }) {
-    return _NasMediaIndexerGroupingSupportX(this)
-        .matchesSeriesTitleFilterKeywordForMain(
-      rawValue,
-      cleanedValue: cleanedValue,
-      seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-    );
-  }
-
-  bool _canUseSeasonDirectoryAsSeriesRoot(
-    String rawDirectory, {
-    required bool parentMatchesFilter,
-  }) {
-    return _NasMediaIndexerGroupingSupportX(this)
-        .canUseSeasonDirectoryAsSeriesRootForMain(
-      rawDirectory,
-      parentMatchesFilter: parentMatchesFilter,
-    );
-  }
-
   String _uriPath(String value) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) {
-      return '';
-    }
-    final uri = Uri.tryParse(trimmed);
-    if (uri != null && uri.path.isNotEmpty) {
-      return uri.path;
-    }
-    return trimmed;
+    return NasMediaPathPolicy.uriPath(value);
   }
 
   List<String> _pathSegments(String value) {
-    return value
-        .split('/')
-        .map((segment) => segment.trim())
-        .where((segment) => segment.isNotEmpty)
-        .map((segment) {
-      try {
-        return Uri.decodeComponent(segment);
-      } catch (_) {
-        return segment;
-      }
-    }).toList(growable: false);
+    return NasMediaPathPolicy.pathSegments(value);
   }
 
   bool _looksLikeSeasonFolderLabel(String value) {
@@ -735,11 +676,7 @@ class NasMediaIndexer {
       );
 
   String _cleanIndexedTitleLabel(String value) {
-    return stripEmbeddedExternalIdTags(value)
-        .replaceAll(RegExp(r'[_\.]+'), ' ')
-        .replaceAll(RegExp(r'[【\[\(].*?[】\]\)]'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
+    return NasMediaPathPolicy.cleanTitleLabel(value);
   }
 
   NasMediaIndexRecord _reuseRecord(
@@ -771,19 +708,6 @@ class NasMediaIndexer {
         existingRecord: existingRecord,
         applyOnlineMetadata: applyOnlineMetadata,
         markSidecarAttempt: markSidecarAttempt,
-      );
-
-  String? _fallbackTitleFromFilteredSectionRoot({
-    required List<String> sectionSegments,
-    required List<String> relativeDirectories,
-    required String fileFallbackTitle,
-    required List<String> seriesTitleFilterKeywords,
-  }) =>
-      _NasMediaIndexerIndexingX(this)._fallbackTitleFromFilteredSectionRoot(
-        sectionSegments: sectionSegments,
-        relativeDirectories: relativeDirectories,
-        fileFallbackTitle: fileFallbackTitle,
-        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
       );
 
   String _buildScopeKey(
