@@ -102,7 +102,6 @@ class HomePageController {
 
   Future<void> refreshModules(WidgetRef ref) async {
     final stopwatch = Stopwatch()..start();
-    appLogInfo('home.refresh', 'Home refresh started');
     ref.invalidate(homeRecentItemsProvider);
     ref.invalidate(homeRecentPlaybackEntriesProvider);
     ref.invalidate(homeCarouselItemsProvider);
@@ -121,7 +120,6 @@ class HomePageController {
 
   Future<void> refreshModulesFromRef(Ref ref) async {
     final stopwatch = Stopwatch()..start();
-    appLogInfo('home.refresh', 'Home refresh started');
     ref.invalidate(homeRecentItemsProvider);
     ref.invalidate(homeRecentPlaybackEntriesProvider);
     ref.invalidate(homeCarouselItemsProvider);

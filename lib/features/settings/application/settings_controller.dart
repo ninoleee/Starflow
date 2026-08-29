@@ -276,24 +276,10 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   Future<void> savePlaybackPreferences({
     required int openTimeoutSeconds,
     required double defaultSpeed,
-    required PlaybackSubtitlePreference subtitlePreference,
-    required double subtitleScale,
-    required List<OnlineSubtitleSource> onlineSubtitleSources,
-    required String assrtToken,
-    required bool opensubtitlesEnabled,
-    required String opensubtitlesUsername,
-    required String opensubtitlesPassword,
-    required bool subdlEnabled,
-    required String subdlApiKey,
-    required List<String> subtitlePreferredLanguages,
-    required int subtitleSearchMaxValidatedCandidates,
     required bool backgroundPlaybackEnabled,
     required PlaybackEngine playbackEngine,
     required PlaybackDecodeMode playbackDecodeMode,
-    bool? playbackMpvDoubleTapToSeekEnabled,
-    bool? playbackMpvSwipeToSeekEnabled,
-    bool? playbackMpvLongPressSpeedBoostEnabled,
-    bool? playbackMpvStallAutoRecoveryEnabled,
+    required NativeAudioOutputMode nativeAudioOutputMode,
   }) async {
     final current = state.value ?? await _repository.load();
     if (current.playbackBackgroundPlaybackEnabled &&
@@ -306,39 +292,29 @@ class SettingsController extends AsyncNotifier<AppSettings> {
       current.copyWith(
         playbackOpenTimeoutSeconds: openTimeoutSeconds.clamp(1, 600),
         playbackDefaultSpeed: defaultSpeed.clamp(0.75, 2.0),
-        playbackSubtitlePreference: subtitlePreference,
-        playbackSubtitleScale: subtitleScale,
-        onlineSubtitleSources:
-            onlineSubtitleSources.toSet().toList(growable: false),
-        assrtToken: assrtToken.trim(),
-        opensubtitlesEnabled: opensubtitlesEnabled,
-        opensubtitlesUsername: opensubtitlesUsername.trim(),
-        opensubtitlesPassword: opensubtitlesPassword,
-        subdlEnabled: subdlEnabled,
-        subdlApiKey: subdlApiKey.trim(),
-        subtitlePreferredLanguages: subtitlePreferredLanguages
-            .map((item) => item.trim().toLowerCase())
-            .where((item) => item.isNotEmpty)
-            .toSet()
-            .toList(growable: false),
-        subtitleSearchMaxValidatedCandidates:
-            clampSubtitleSearchMaxValidatedCandidates(
-          subtitleSearchMaxValidatedCandidates,
-        ),
         playbackBackgroundPlaybackEnabled: backgroundPlaybackEnabled,
         playbackEngine: playbackEngine,
         playbackDecodeMode: playbackDecodeMode,
-        playbackMpvQualityPreset: PlaybackMpvQualityPreset.performanceFirst,
-        playbackMpvDoubleTapToSeekEnabled: playbackMpvDoubleTapToSeekEnabled ??
-            current.playbackMpvDoubleTapToSeekEnabled,
-        playbackMpvSwipeToSeekEnabled: playbackMpvSwipeToSeekEnabled ??
-            current.playbackMpvSwipeToSeekEnabled,
-        playbackMpvLongPressSpeedBoostEnabled:
-            playbackMpvLongPressSpeedBoostEnabled ??
-                current.playbackMpvLongPressSpeedBoostEnabled,
-        playbackMpvStallAutoRecoveryEnabled:
-            playbackMpvStallAutoRecoveryEnabled ??
-                current.playbackMpvStallAutoRecoveryEnabled,
+        nativeAudioOutputMode: nativeAudioOutputMode,
+      ),
+    );
+  }
+
+  Future<void> savePlaybackMpvPreferences({
+    required bool doubleTapToSeekEnabled,
+    required bool swipeToSeekEnabled,
+    required bool longPressSpeedBoostEnabled,
+    required bool stallAutoRecoveryEnabled,
+    required bool aggressiveTuningEnabled,
+  }) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(
+        playbackMpvDoubleTapToSeekEnabled: doubleTapToSeekEnabled,
+        playbackMpvSwipeToSeekEnabled: swipeToSeekEnabled,
+        playbackMpvLongPressSpeedBoostEnabled: longPressSpeedBoostEnabled,
+        playbackMpvStallAutoRecoveryEnabled: stallAutoRecoveryEnabled,
+        performanceAggressivePlaybackTuningEnabled: aggressiveTuningEnabled,
       ),
     );
   }

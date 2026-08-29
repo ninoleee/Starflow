@@ -1,7 +1,7 @@
 import 'package:starflow/core/logging/app_log_api.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 
-bool _metadataSearchTraceCategoryEnabled = true;
+bool _metadataSearchTraceCategoryEnabled = false;
 
 bool get metadataSearchTraceEnabled =>
     _metadataSearchTraceCategoryEnabled && appLogger.isEnabled;
@@ -16,7 +16,10 @@ void metadataSearchTrace(
   Object? error,
   StackTrace? stackTrace,
 }) {
-  if (!metadataSearchTraceEnabled) {
+  if (error == null && !metadataSearchTraceEnabled) {
+    return;
+  }
+  if (error != null && !appLogger.isEnabled) {
     return;
   }
   appLogger.log(

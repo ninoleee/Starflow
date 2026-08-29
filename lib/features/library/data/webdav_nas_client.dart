@@ -146,7 +146,7 @@ class WebDavNasClient {
         ? _displayNameFromUri(rootUri, fallback: source.name)
         : sectionName.trim();
 
-    appLogInfo(
+    appLogTrace(
       'library.scan',
       'WebDAV directory scan started',
       fields: <String, Object?>{
@@ -364,7 +364,7 @@ class WebDavNasClient {
     final walkResult = await walk(rootUri, 0, limit);
     _throwIfCancelled(shouldCancel);
     final pendingItems = walkResult.items;
-    appLogInfo(
+    appLogTrace(
       'library.scan',
       'WebDAV directory walk completed',
       fields: <String, Object?>{
@@ -379,7 +379,7 @@ class WebDavNasClient {
     var resolvedPendingItems = pendingItems;
     if (source.webDavStructureInferenceEnabled && pendingItems.isNotEmpty) {
       final structureStopwatch = Stopwatch()..start();
-      appLogInfo(
+      appLogTrace(
         'library.scan',
         'WebDAV structure inference started',
         fields: <String, Object?>{
@@ -392,7 +392,7 @@ class WebDavNasClient {
         source: source,
       );
       _throwIfCancelled(shouldCancel);
-      appLogInfo(
+      appLogTrace(
         'library.scan',
         'WebDAV structure inference completed',
         fields: <String, Object?>{

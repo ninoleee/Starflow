@@ -10,6 +10,27 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  testWidgets('TV page scope installs the safe traversal policy',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: TvPageFocusScope(
+          isTelevision: true,
+          child: SizedBox(),
+        ),
+      ),
+    );
+
+    final groupFinder = find.byWidgetPredicate(
+      (widget) =>
+          widget is FocusTraversalGroup &&
+          widget.policy is TvSafeDirectionalFocusTraversalPolicy,
+    );
+    expect(groupFinder, findsOneWidget);
+    final group = tester.widget<FocusTraversalGroup>(groupFinder);
+    expect(group.policy, isA<TvSafeDirectionalFocusTraversalPolicy>());
+  });
+
   testWidgets('StarflowChipButton keeps unified mobile geometry and selection',
       (tester) async {
     await tester.pumpWidget(

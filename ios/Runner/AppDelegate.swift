@@ -566,6 +566,15 @@ private struct NativePlaybackRequest {
   let playbackTargetJson: String
   let playbackItemKey: String
   let seriesKey: String
+
+  var allowsResume: Bool {
+    guard let data = playbackTargetJson.data(using: .utf8),
+      let target = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else {
+      return true
+    }
+    return target["allowResume"] as? Bool ?? true
+  }
 }
 
 private struct NativeEpisodeQueueEntry {
@@ -760,7 +769,9 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     teardownPlayback()
     configureAudioSession(enabled: true)
 
-    let resumePositionMs = playbackStore.loadResumePositionMs(itemKey: request.playbackItemKey)
+    let resumePositionMs = request.allowsResume
+      ? playbackStore.loadResumePositionMs(itemKey: request.playbackItemKey)
+      : 0
     let assetOptions: [String: Any]? = request.headers.isEmpty
       ? nil
       : ["AVURLAssetHTTPHeaderFieldsKey": request.headers]

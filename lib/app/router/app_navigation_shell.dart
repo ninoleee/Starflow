@@ -144,7 +144,7 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell>
     }
     try {
       if (ref.read(startupCrashRecoveryActiveProvider)) {
-        appLogInfo(
+        appLogTrace(
           'home.refresh',
           'Cold start home refresh skipped',
           fields: const <String, Object?>{
@@ -161,7 +161,7 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell>
       final startupRefreshCompleted =
           ref.read(homeExplicitRefreshRevisionProvider) > 0;
       if (startupRefreshCompleted) {
-        appLogInfo(
+        appLogTrace(
           'home.refresh',
           'Cold start home refresh skipped',
           fields: const <String, Object?>{

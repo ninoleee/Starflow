@@ -208,10 +208,61 @@ void main() {
     });
 
     test(
-        'incremental refresh invalidates persistent WebDAV scan cache by default',
+        'incremental refresh preserves persistent WebDAV scan cache by default',
         () async {
       final database = await databaseFactoryMemory.openDatabase(
         'media-refresh-cache-invalidation-test',
+      );
+      addTearDown(database.close);
+      final cacheStore = WebDavDirectoryCacheStore(
+        databaseOpener: () async => database,
+      );
+      await cacheStore.save('stale-subtree', const <String, dynamic>{
+        'sourceId': 'nas-main',
+        'items': <Object>[],
+      });
+      final repository = _ImmediateRefreshMediaRepository(
+        onRefresh: () async {
+          expect(await cacheStore.load('stale-subtree'), isNotNull);
+        },
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [
+                MediaSourceConfig(
+                  id: 'nas-main',
+                  name: 'WebDAV',
+                  kind: MediaSourceKind.nas,
+                  endpoint: 'https://dav.example.com/movies/',
+                  enabled: true,
+                ),
+              ],
+              homeModules: const [],
+            ),
+          ),
+          mediaRepositoryProvider.overrideWithValue(repository),
+          webDavDirectoryCacheStoreProvider.overrideWithValue(cacheStore),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(mediaRefreshCoordinatorProvider)
+          .refreshSelectedSources(
+        sourceIds: const ['nas-main'],
+      );
+
+      expect(repository.refreshSourceIds, const ['nas-main']);
+      expect(await cacheStore.load('stale-subtree'), isNotNull);
+    });
+
+    test(
+        'incremental refresh can explicitly invalidate persistent WebDAV cache',
+        () async {
+      final database = await databaseFactoryMemory.openDatabase(
+        'media-refresh-cache-explicit-invalidation-test',
       );
       addTearDown(database.close);
       final cacheStore = WebDavDirectoryCacheStore(
@@ -252,6 +303,7 @@ void main() {
           .read(mediaRefreshCoordinatorProvider)
           .refreshSelectedSources(
         sourceIds: const ['nas-main'],
+        invalidateWebDavDirectoryCache: true,
       );
 
       expect(repository.refreshSourceIds, const ['nas-main']);

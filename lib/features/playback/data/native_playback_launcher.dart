@@ -14,6 +14,7 @@ abstract class NativePlaybackLauncher {
   Future<NativePlaybackLaunchResult> launch(
     PlaybackTarget target, {
     required PlaybackDecodeMode decodeMode,
+    required NativeAudioOutputMode audioOutputMode,
     required double subtitleScale,
     required bool backgroundPlaybackEnabled,
     required PlaybackSubtitlePreference subtitlePreference,

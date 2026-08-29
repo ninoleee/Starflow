@@ -70,6 +70,7 @@ void main() {
       sourceId: 'quark-main',
       sourceName: 'Quark Drive',
       sourceKind: MediaSourceKind.quark,
+      allowResume: false,
       streamUrl: '',
       itemId: 'quark-file-1',
       itemType: 'episode',
@@ -86,6 +87,7 @@ void main() {
         'https://download.example.com/quark-file-1.mkv');
     expect(resolved.headers['Cookie'], contains('__puus=abc'));
     expect(resolved.fileSizeBytes, 3221225472);
+    expect(resolved.allowResume, isFalse);
   });
 
   test('PlaybackTargetResolver resolves Quark resource ids to file ids',

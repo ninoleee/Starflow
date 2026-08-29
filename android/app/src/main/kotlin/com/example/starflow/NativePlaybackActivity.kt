@@ -18,6 +18,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.ResultReceiver
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.view.KeyEvent
 import android.view.View
@@ -37,20 +38,21 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.BandwidthMeter
 import androidx.media3.exoplayer.upstream.DefaultAllocator
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.ui.DefaultTrackNameProvider
 import androidx.media3.ui.R as Media3UiR
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.SubtitleView
-import androidx.media3.ui.TrackSelectionDialogBuilder
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.android.FlutterActivityLaunchConfigs
 import org.json.JSONObject
@@ -103,6 +105,8 @@ class NativePlaybackActivity : Activity() {
     private var tvSeekHoldStartedAtMs: Long? = null
     private var tvSeekHoldRepeatCount = 0
     private var pendingResumePositionOverrideMs: Long? = null
+    private var audioOutputMode = NativeAudioOutputMode.AUTO
+    private var subtitleScale: Double = NativeSubtitleStylePolicy.DEFAULT_SCALE
     private val playbackWatchdogHandler = Handler(Looper.getMainLooper())
     private val playbackRuntimeHandler = Handler(Looper.getMainLooper())
     private var playbackRuntimeActive = false
@@ -216,6 +220,7 @@ class NativePlaybackActivity : Activity() {
         }
 
         override fun onTracksChanged(tracks: Tracks) {
+            logAudioTracks(tracks)
             applyAutomaticSubtitleSelection(tracks)
         }
     }
@@ -262,7 +267,7 @@ class NativePlaybackActivity : Activity() {
             setControllerHideOnTouch(!isTelevisionDevice)
             setControllerShowTimeoutMs(4_000)
         }
-        configureSubtitleRendering()
+        applySubtitleStyle()
         bindControllerChrome()
         configureRemoteControls()
         findViewById<View>(Media3UiR.id.exo_subtitle)?.setOnClickListener {
@@ -303,7 +308,7 @@ class NativePlaybackActivity : Activity() {
         setIntent(newIntent)
         resetPlaybackStateForNewIntent()
         applyPlaybackIntent(newIntent)
-        configureSubtitleRendering()
+        applySubtitleStyle()
         bindControllerChrome()
         updateProgressMarkers()
         initializePlayer()
@@ -388,6 +393,13 @@ class NativePlaybackActivity : Activity() {
         seriesKey = playbackIntent.getStringExtra(EXTRA_SERIES_KEY)?.trim().orEmpty()
         episodeQueue = NativeEpisodeQueue.fromJsonString(
             playbackIntent.getStringExtra(EXTRA_EPISODE_QUEUE_JSON)?.trim().orEmpty(),
+        )
+        audioOutputMode = NativeAudioOutputMode.fromRaw(
+            playbackIntent.getStringExtra(EXTRA_AUDIO_OUTPUT_MODE).orEmpty(),
+        )
+        subtitleScale = playbackIntent.getDoubleExtra(
+            EXTRA_SUBTITLE_SCALE,
+            NativeSubtitleStylePolicy.DEFAULT_SCALE,
         )
         restoreExternalSubtitleSourceFromTarget()
     }
@@ -926,9 +938,25 @@ class NativePlaybackActivity : Activity() {
         val decodeMode = PlaybackDecodeMode.fromRaw(
             intent.getStringExtra(EXTRA_DECODE_MODE)?.trim().orEmpty(),
         )
+        val audioCodec = targetObject.optString("audioCodec").trim()
+        val forcePcmAudioOutput = NativePlaybackAudioPolicy.shouldForcePcmOutput(
+            isTelevision = isTelevisionDevice,
+            audioCodec = audioCodec,
+            outputMode = audioOutputMode,
+        )
+        val enableFfmpegAudioDecoder =
+            NativePlaybackAudioPolicy.shouldEnableFfmpegAudioDecoder(
+                forcePcmAudioOutput = forcePcmAudioOutput,
+                audioCodec = audioCodec,
+            )
         val guessedMimeType = guessVideoMimeType(targetObject, url).takeIf { it != "-" }
 
-        restoredResumePositionMs = pendingResumePositionOverrideMs ?: loadResumePositionMs()
+        val allowResume = targetObject.optBoolean("allowResume", true)
+        restoredResumePositionMs = NativePlaybackResumePolicy.resolveResumePositionMs(
+            allowResume = allowResume,
+            pendingOverrideMs = pendingResumePositionOverrideMs,
+            storedResumeMs = if (allowResume) loadResumePositionMs() else 0L,
+        )
         pendingResumePositionOverrideMs = null
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
@@ -952,7 +980,11 @@ class NativePlaybackActivity : Activity() {
             }
         }
 
-        val renderersFactory = DefaultRenderersFactory(this).apply {
+        val renderersFactory = NativePlaybackRenderersFactory(
+            context = this,
+            forcePcmAudioOutput = forcePcmAudioOutput,
+            enableFfmpegAudioDecoder = enableFfmpegAudioDecoder,
+        ).apply {
             setEnableDecoderFallback(true)
             when (decodeMode) {
                 PlaybackDecodeMode.AUTO -> Unit
@@ -999,7 +1031,12 @@ class NativePlaybackActivity : Activity() {
         logPlayback(
             "native.initialize.media-item " +
                 "resumeMs=$restoredResumePositionMs " +
+                "allowResume=$allowResume " +
                 "decodeMode=$decodeMode " +
+                "audioOutputMode=${audioOutputMode.rawValue} " +
+                "audioCodec=${audioCodec.ifEmpty { "-" }} " +
+                "forcePcmAudioOutput=$forcePcmAudioOutput " +
+                "ffmpegAudioDecoder=$enableFfmpegAudioDecoder " +
                 "mimeGuess=${guessedMimeType ?: "-"}",
         )
         baseMediaItem = initialMediaItem
@@ -1042,6 +1079,28 @@ class NativePlaybackActivity : Activity() {
 
     private fun subtitlePreferenceIsOff(): Boolean =
         intent.getStringExtra(EXTRA_SUBTITLE_PREFERENCE)?.trim() == "off"
+
+    private fun logAudioTracks(tracks: Tracks) {
+        val groups = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+        if (groups.isEmpty()) {
+            logPlayback("native.audio.tracks none")
+            return
+        }
+        val summaries = groups.flatMapIndexed { groupIndex, group ->
+            (0 until group.length).map { trackIndex ->
+                val format = group.getTrackFormat(trackIndex)
+                "g$groupIndex:t$trackIndex" +
+                    ":mime=${format.sampleMimeType ?: "-"}" +
+                    ":codecs=${format.codecs ?: "-"}" +
+                    ":channels=${format.channelCount}" +
+                    ":rate=${format.sampleRate}" +
+                    ":language=${format.language ?: "-"}" +
+                    ":supported=${group.isTrackSupported(trackIndex)}" +
+                    ":selected=${group.isTrackSelected(trackIndex)}"
+            }
+        }
+        logPlayback("native.audio.tracks ${summaries.joinToString("|")}")
+    }
 
     private fun preferredSubtitleLanguages(): List<String> {
         val configured = intent.getStringArrayExtra(EXTRA_SUBTITLE_PREFERRED_LANGUAGES)
@@ -1620,25 +1679,17 @@ class NativePlaybackActivity : Activity() {
             return
         }
 
-        val currentPlayer = player
         val actions = mutableListOf<Pair<String, () -> Unit>>()
-        actions +=
-            "${getString(R.string.native_playback_speed)} · " +
-                formatPlaybackSpeedLabel(currentPlayer?.playbackParameters?.speed ?: 1f) to
-                { openPlaybackSpeedPicker() }
         actions +=
             "本剧跳过片头片尾 · ${formatSeriesSkipPreferenceSummary()}" to
                 { openSeriesSkipPreferenceDialog() }
         actions += getString(R.string.native_audio_track) to { openAudioTrackSelectionDialog() }
         actions += getString(R.string.native_subtitle_track) to { openSubtitleTrackSelectionDialog() }
-        actions += getString(R.string.native_online_subtitle_search) to { openOnlineSubtitleSearch() }
-        actions += getString(R.string.native_external_subtitle) to { openExternalSubtitlePicker() }
-        actions +=
-            "${getString(R.string.native_subtitle_delay)} · ${formatSubtitleDelayLabel(subtitleDelayMs)}" to
-                { openSubtitleDelayPicker() }
         if ((episodeQueue?.entries?.size ?: 0) > 1) {
             actions += "选择剧集" to { openEpisodeSelectionDialog() }
         }
+        actions +=
+            getString(R.string.native_more_actions) to { openPlaybackMoreActionsDialog() }
 
         playbackSettingsDialog = AlertDialog.Builder(this)
             .setTitle(getString(R.string.native_playback_settings))
@@ -1655,6 +1706,108 @@ class NativePlaybackActivity : Activity() {
                 }
                 show()
             }
+    }
+
+    private fun openPlaybackMoreActionsDialog() {
+        if (subtitleSearchActive) {
+            return
+        }
+        val currentPlayer = player
+        val actions = mutableListOf<Pair<String, () -> Unit>>()
+        actions +=
+            "${getString(R.string.native_playback_speed)} · " +
+                formatPlaybackSpeedLabel(currentPlayer?.playbackParameters?.speed ?: 1f) to
+                { openPlaybackSpeedPicker() }
+        actions +=
+            "音频输出 · ${audioOutputMode.displayLabel}" to
+                { openAudioOutputModePicker() }
+        actions +=
+            "${getString(R.string.native_subtitle_scale)} · " +
+                formatSubtitleScaleLabel(subtitleScale) to
+                { openSubtitleScalePicker() }
+        actions +=
+            getString(R.string.native_online_subtitle_search) to { openOnlineSubtitleSearch() }
+        actions += getString(R.string.native_external_subtitle) to { openExternalSubtitlePicker() }
+        actions +=
+            "${getString(R.string.native_subtitle_delay)} · ${formatSubtitleDelayLabel(subtitleDelayMs)}" to
+                { openSubtitleDelayPicker() }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.native_more_actions))
+            .setItems(actions.map { it.first }.toTypedArray()) { pickerDialog, which ->
+                pickerDialog.dismiss()
+                playerView.post { actions[which].second.invoke() }
+            }
+            .setNegativeButton("关闭", null)
+            .create()
+        showTransientDialog(dialog, ControllerFocusTarget.SETTINGS)
+    }
+
+    private fun openSubtitleScalePicker() {
+        val options = SUBTITLE_SCALE_OPTIONS
+        val currentIndex = options
+            .withIndex()
+            .minByOrNull { (_, value) -> kotlin.math.abs(value - subtitleScale) }
+            ?.index ?: 0
+        val labels = options
+            .mapIndexed { index, value ->
+                val label = formatSubtitleScaleLabel(value)
+                if (index == currentIndex) "$label  当前" else label
+            }
+            .toTypedArray()
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.native_subtitle_scale))
+            .setSingleChoiceItems(labels, currentIndex) { pickerDialog, which ->
+                val selected = options[which]
+                pickerDialog.dismiss()
+                if (kotlin.math.abs(selected - subtitleScale) >= 0.5) {
+                    subtitleScale = selected
+                    applySubtitleStyle()
+                    showToast("字幕大小已设为${formatSubtitleScaleLabel(selected)}")
+                }
+            }
+            .setNegativeButton("取消", null)
+            .create()
+        showTransientDialog(dialog, ControllerFocusTarget.SETTINGS)
+    }
+
+    private fun formatSubtitleScaleLabel(value: Double): String {
+        return "${value.toInt()}号"
+    }
+
+    private fun openAudioOutputModePicker() {
+        val options = NativeAudioOutputMode.entries
+        val currentIndex = options.indexOf(audioOutputMode).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("选择音频输出")
+            .setSingleChoiceItems(
+                options.map(NativeAudioOutputMode::displayLabel).toTypedArray(),
+                currentIndex,
+            ) { dialog, which ->
+                val selected = options[which]
+                dialog.dismiss()
+                if (selected == audioOutputMode) {
+                    restoreControllerFocusIfNeeded(ControllerFocusTarget.SETTINGS)
+                    return@setSingleChoiceItems
+                }
+                playerView.post { restartPlayerWithAudioOutputMode(selected) }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun restartPlayerWithAudioOutputMode(selected: NativeAudioOutputMode) {
+        val currentPlayer = player ?: return
+        pendingResumePositionOverrideMs = currentPlayer.currentPosition.coerceAtLeast(0L)
+        nextInitializePlayWhenReady = currentPlayer.playWhenReady
+        audioOutputMode = selected
+        logPlayback(
+            "native.audio-output.changed mode=${selected.rawValue} " +
+                "resumeMs=$pendingResumePositionOverrideMs",
+        )
+        releasePlayer()
+        initializePlayer()
+        showToast("已切换为${selected.displayLabel}")
     }
 
     private fun openEpisodeSelectionDialog(): Boolean {
@@ -1932,14 +2085,62 @@ class NativePlaybackActivity : Activity() {
         focusTarget: ControllerFocusTarget,
     ) {
         val currentPlayer = player ?: return
-        if (!currentPlayer.currentTracks.containsType(trackType)) {
+        val trackNameProvider = DefaultTrackNameProvider(resources)
+        val choices = currentPlayer.currentTracks.groups.flatMap { group ->
+            if (group.type != trackType) {
+                return@flatMap emptyList()
+            }
+            (0 until group.length).mapNotNull { trackIndex ->
+                if (!group.isTrackSupported(trackIndex)) {
+                    return@mapNotNull null
+                }
+                NativeTrackChoice(
+                    label = trackNameProvider.getTrackName(group.getTrackFormat(trackIndex)),
+                    override = TrackSelectionOverride(
+                        group.mediaTrackGroup,
+                        trackIndex,
+                    ),
+                    selected = group.isTrackSelected(trackIndex),
+                )
+            }
+        }
+        if (choices.isEmpty()) {
             showToast(emptyMessage)
             restoreControllerFocusIfNeeded(focusTarget)
             return
         }
-        val dialog = TrackSelectionDialogBuilder(this, title, currentPlayer, trackType)
-            .setShowDisableOption(showDisableOption)
-            .build()
+        val choiceOffset = if (showDisableOption) 1 else 0
+        val labels = buildList {
+            if (showDisableOption) {
+                add("关闭")
+            }
+            addAll(choices.map(NativeTrackChoice::label))
+        }.toTypedArray()
+        val selectedChoiceIndex = choices.indexOfFirst(NativeTrackChoice::selected)
+        val checkedIndex = when {
+            selectedChoiceIndex >= 0 -> selectedChoiceIndex + choiceOffset
+            showDisableOption -> 0
+            else -> -1
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setSingleChoiceItems(labels, checkedIndex) { pickerDialog, which ->
+                val parameters = currentPlayer.trackSelectionParameters
+                    .buildUpon()
+                    .clearOverridesOfType(trackType)
+                if (showDisableOption && which == 0) {
+                    parameters.setTrackTypeDisabled(trackType, true)
+                } else {
+                    val choice = choices[which - choiceOffset]
+                    parameters
+                        .setTrackTypeDisabled(trackType, false)
+                        .addOverride(choice.override)
+                }
+                currentPlayer.trackSelectionParameters = parameters.build()
+                pickerDialog.dismiss()
+            }
+            .setNegativeButton("取消", null)
+            .create()
         showTransientDialog(dialog, focusTarget)
     }
 
@@ -2306,13 +2507,10 @@ class NativePlaybackActivity : Activity() {
         }
     }
 
-    private fun configureSubtitleRendering() {
+    private fun applySubtitleStyle() {
         val subtitleView = playerView.subtitleView ?: return
         val style = NativeSubtitleStylePolicy.resolve(
-            rawScale = intent.getDoubleExtra(
-                EXTRA_SUBTITLE_SCALE,
-                NativeSubtitleStylePolicy.DEFAULT_SCALE,
-            ),
+            rawScale = subtitleScale,
             isTelevision = isTelevisionDevice,
         )
         subtitleView.setViewType(SubtitleView.VIEW_TYPE_CANVAS)
@@ -3176,6 +3374,8 @@ class NativePlaybackActivity : Activity() {
         private const val PLAYBACK_MEMORY_STORAGE_KEY = "flutter.starflow.playback.memory.v1"
         private const val RECENT_ENTRY_LIMIT = 20
         private const val NATIVE_HTTP_CONNECT_TIMEOUT_MS = 15_000
+        private const val NETWORK_THROUGHPUT_LOG_INTERVAL_MS = 5_000L
+        private const val NETWORK_THROUGHPUT_LOG_MAX_COUNT = 6
         private const val NATIVE_HTTP_READ_TIMEOUT_MS = 30_000
         private const val NATIVE_LOAD_ERROR_RETRY_COUNT = 8
         private const val PLAYBACK_LAUNCH_TIMEOUT_MS = 30_000L
@@ -3192,11 +3392,14 @@ class NativePlaybackActivity : Activity() {
             listOf(-5_000L, -2_000L, -1_000L, -500L, 0L, 500L, 1_000L, 2_000L, 5_000L)
         private val PLAYBACK_SPEED_OPTIONS =
             listOf(0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
+        private val SUBTITLE_SCALE_OPTIONS =
+            listOf(20.0, 24.0, 28.0, 32.0, 36.0, 42.0, 48.0, 56.0, 64.0, 78.0)
 
         const val EXTRA_URL = "url"
         const val EXTRA_TITLE = "title"
         const val EXTRA_HEADERS_JSON = "headersJson"
         const val EXTRA_DECODE_MODE = "decodeMode"
+        const val EXTRA_AUDIO_OUTPUT_MODE = "audioOutputMode"
         const val EXTRA_SUBTITLE_SCALE = "subtitleScale"
         const val EXTRA_SUBTITLE_PREFERENCE = "subtitlePreference"
         const val EXTRA_SUBTITLE_PREFERRED_LANGUAGES = "subtitlePreferredLanguages"
@@ -3227,6 +3430,12 @@ private data class ExternalSubtitleSource(
     val originalUri: Uri,
     val mimeType: String,
     val displayName: String,
+)
+
+private data class NativeTrackChoice(
+    val label: String,
+    val override: TrackSelectionOverride,
+    val selected: Boolean,
 )
 
 private data class NativeEpisodeQueueEntry(

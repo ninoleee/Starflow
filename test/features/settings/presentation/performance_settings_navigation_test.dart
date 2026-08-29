@@ -10,7 +10,7 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/interface_settings_page.dart';
 import 'package:starflow/features/settings/presentation/metadata_match_settings_page.dart';
-import 'package:starflow/features/settings/presentation/playback_tuning_settings_page.dart';
+import 'package:starflow/features/settings/presentation/mpv_settings_page.dart';
 import 'package:starflow/features/settings/presentation/task_scheduling_settings_page.dart';
 
 void main() {
@@ -32,14 +32,14 @@ void main() {
 
     expect(find.text('单击首页时清理后台任务'), findsOneWidget);
 
-    await _pumpPage(tester, const PlaybackTuningSettingsPage());
-    expect(find.text('MPV 调优'), findsOneWidget);
-    expect(find.text('激进 MPV 性能调优'), findsOneWidget);
+    await _pumpPage(tester, const MpvSettingsPage());
+    expect(find.text('MPV'), findsOneWidget);
+    expect(find.text('激进性能调优'), findsOneWidget);
     expect(find.text('自动匹配本地资源'), findsNothing);
     expect(
       _focusAction(
         tester,
-        'performance-interaction:mpv-tuning',
+        'mpv-settings:double-tap-seek',
       ).focusNode!.hasFocus,
       isTrue,
     );

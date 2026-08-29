@@ -66,6 +66,7 @@ flutter {
 }
 
 dependencies {
+    implementation(files("libs/media3-decoder-ffmpeg-1.10.1.aar"))
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     implementation("androidx.media3:media3-ui:1.10.1")
     implementation("androidx.appcompat:appcompat:1.7.0")

@@ -157,6 +157,14 @@ void main() {
     expect(defaults.localLogMaxSizeMb, kLocalLogMaxSizeMbDefault);
     expect(defaults.localLogRecordedLevels, kDefaultLocalLogRecordedLevels);
     expect(defaults.localLogVisibleLevels, kDefaultLocalLogVisibleLevels);
+    expect(
+      defaults.localLogRecordedLevels,
+      <AppLogLevel>{
+        AppLogLevel.info,
+        AppLogLevel.warning,
+        AppLogLevel.error,
+      },
+    );
 
     final invalid = AppSettings.fromJson(const <String, dynamic>{
       'localLogMaxSizeMb': 999,
@@ -421,6 +429,7 @@ void main() {
     final settings = AppSettings.fromJson({
       'playbackEngine': 'nativeContainer',
       'playbackDecodeMode': 'hardwarePreferred',
+      'nativeAudioOutputMode': 'pcmCompatibility',
     });
 
     expect(settings.playbackEngine, PlaybackEngine.nativeContainer);
@@ -428,8 +437,13 @@ void main() {
       settings.playbackDecodeMode,
       PlaybackDecodeMode.hardwarePreferred,
     );
+    expect(
+      settings.nativeAudioOutputMode,
+      NativeAudioOutputMode.pcmCompatibility,
+    );
     expect(settings.toJson()['playbackEngine'], 'nativeContainer');
     expect(settings.toJson()['playbackDecodeMode'], 'hardwarePreferred');
+    expect(settings.toJson()['nativeAudioOutputMode'], 'pcmCompatibility');
   });
 
   test('app settings persist metadata match preferences', () {

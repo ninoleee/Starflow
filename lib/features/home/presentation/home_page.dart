@@ -517,7 +517,8 @@ class _HomePageState extends ConsumerState<HomePage>
       }
     }
 
-    FocusManager.instance.primaryFocus?.focusInDirection(
+    handleTvDirectionalFocusBoundary(
+      context,
       TraversalDirection.down,
     );
   }

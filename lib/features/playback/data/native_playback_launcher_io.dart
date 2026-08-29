@@ -22,6 +22,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
   Future<NativePlaybackLaunchResult> launch(
     PlaybackTarget target, {
     required PlaybackDecodeMode decodeMode,
+    required NativeAudioOutputMode audioOutputMode,
     required double subtitleScale,
     required bool backgroundPlaybackEnabled,
     required PlaybackSubtitlePreference subtitlePreference,
@@ -48,6 +49,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       target: target,
       fields: {
         'decodeMode': decodeMode.name,
+        'audioOutputMode': audioOutputMode.name,
         'streamUrl': target.streamUrl,
         'headers': target.headers.keys.join('|'),
       },
@@ -60,6 +62,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
           'title': target.title,
           'headersJson': jsonEncode(target.headers),
           'decodeMode': decodeMode.name,
+          'audioOutputMode': audioOutputMode.name,
           'subtitleScale': clampPlaybackSubtitleScale(subtitleScale),
           'backgroundPlaybackEnabled': backgroundPlaybackEnabled,
           'subtitlePreference': subtitlePreference.name,
@@ -76,6 +79,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
         target: target,
         fields: {
           'decodeMode': decodeMode.name,
+          'audioOutputMode': audioOutputMode.name,
           'launched': launched == true,
         },
       );
@@ -87,7 +91,10 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       _traceQuarkNativeLaunch(
         'quark.native-launch.invoke.failed',
         target: target,
-        fields: {'decodeMode': decodeMode.name},
+        fields: {
+          'decodeMode': decodeMode.name,
+          'audioOutputMode': audioOutputMode.name,
+        },
         error: error,
         stackTrace: stackTrace,
       );

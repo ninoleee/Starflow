@@ -1,0 +1,95 @@
+import java.nio.file.Files
+import java.security.MessageDigest
+
+group 'com.alexmercerind.media_kit_libs_android_video'
+version '1.0'
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.13.0'
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    if (project.android.hasProperty('namespace')) {
+        namespace 'com.alexmercerind.media_kit_libs_android_video'
+    }
+
+    compileSdkVersion 35
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    defaultConfig {
+        minSdkVersion 23
+    }
+
+    dependencies {
+        implementation fileTree(dir: "$buildDir/output", include: '*.jar')
+    }
+}
+
+tasks.register('downloadDependencies') {
+    doLast {
+        def outputDir = file("$buildDir/output")
+        delete outputDir
+        outputDir.mkdirs()
+
+        def release = 'v1.1.8'
+        def files = [
+            ['arm64-v8a', '031aa9e76de6e0dea733d382252636f6237ded0aef797a561e6fc8b85c4f3ff1'],
+            ['armeabi-v7a', 'e4875bb02d58f643950a5e0ac2d4862336fd7c0b47d65455cbc7a5ba41cfe522'],
+            ['x86', '0d9a5b68c8bad247e24111673ca10ac645606e6eee308082241d7e90bc4015ea'],
+            ['x86_64', 'ebb01a3b48c81ce78e5b7f44f89f68e30aaed169e54f7baa100e03830d4ed96f'],
+        ]
+
+        files.each { item ->
+            def abi = item[0]
+            def expectedSha256 = item[1]
+            def archive = file("$buildDir/$release/full-${abi}.jar")
+            if (!archive.exists()) {
+                archive.parentFile.mkdirs()
+                new URL(
+                    "https://github.com/media-kit/libmpv-android-video-build/releases/download/$release/full-${abi}.jar"
+                ).withInputStream { input ->
+                    archive.withOutputStream { output -> output << input }
+                }
+            }
+
+            def actualSha256 = MessageDigest
+                .getInstance('SHA-256')
+                .digest(Files.readAllBytes(archive.toPath()))
+                .encodeHex()
+                .toString()
+            if (actualSha256 != expectedSha256) {
+                archive.delete()
+                throw new GradleException("SHA-256 verification failed for $archive")
+            }
+
+            copy {
+                from archive
+                into outputDir
+            }
+        }
+    }
+}
+
+tasks.named('preBuild').configure {
+    dependsOn tasks.named('downloadDependencies')
+}

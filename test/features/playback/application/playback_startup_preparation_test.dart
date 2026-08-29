@@ -110,5 +110,32 @@ void main() {
       expect(result.skipPreference, isNull);
       expect(result.startupRoute, PlaybackStartupRouteAction.openEmbeddedMpv);
     });
+
+    test('from-start targets never load saved resume progress', () async {
+      final prefs = await SharedPreferences.getInstance();
+      final repository = PlaybackMemoryRepository(sharedPreferences: prefs);
+      await repository.saveProgress(
+        target: baseEpisodeTarget,
+        position: const Duration(minutes: 12),
+        duration: const Duration(minutes: 48),
+      );
+
+      final result = await preparePlaybackStartup(
+        PlaybackStartupPreparationInput(
+          resolvedTarget: baseEpisodeTarget.copyWith(allowResume: false),
+          settings: AppSettings.fromJson(
+            const <String, dynamic>{},
+          ).copyWith(
+            playbackEngine: PlaybackEngine.embeddedMpv,
+          ),
+          isTelevision: true,
+          isWeb: false,
+        ),
+        playbackMemoryRepository: repository,
+      );
+
+      expect(result.resolvedTarget.allowResume, isFalse);
+      expect(result.resumeEntry, isNull);
+    });
   });
 }

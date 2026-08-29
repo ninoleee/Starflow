@@ -33,6 +33,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
       fields: {
         'streamUrl': target.streamUrl,
         'decodeMode': _playbackDecodeMode.name,
+        'audioOutputMode': _playbackSettings.nativeAudioOutputMode.name,
       },
     );
     final result = await _launchNativePlaybackTarget(target);
@@ -59,6 +60,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     return _providerContainer.read(nativePlaybackLauncherProvider).launch(
           target,
           decodeMode: _playbackDecodeMode,
+          audioOutputMode: _playbackSettings.nativeAudioOutputMode,
           subtitleScale: _playbackSettings.playbackSubtitleScale,
           backgroundPlaybackEnabled: _backgroundPlaybackEnabled,
           subtitlePreference: _playbackSettings.playbackSubtitlePreference,

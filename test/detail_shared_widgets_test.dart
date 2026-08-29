@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -94,6 +95,67 @@ void main() {
       expect(image.cacheWidth, 148);
       expect(image.cacheHeight, isNull);
       expect(image.fit, BoxFit.cover);
+    });
+
+    testWidgets('PlatformRail keeps company logos in one horizontal row',
+        (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            isTelevisionProvider.overrideWith((ref) => true),
+          ],
+          child: MaterialApp(
+            home: Material(
+              child: PlatformRail(
+                platforms: [
+                  MediaPersonProfile(
+                    name: 'Company A',
+                    avatarUrl: 'https://example.com/company-a.png',
+                  ),
+                  MediaPersonProfile(
+                    name: 'Company B',
+                    avatarUrl: 'https://example.com/company-b.png',
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final listView = tester.widget<ListView>(find.byType(ListView));
+      expect(listView.scrollDirection, Axis.horizontal);
+      final delegate = listView.childrenDelegate as SliverChildBuilderDelegate;
+      expect(delegate.childCount, 3); // 2 logos plus 1 separator.
+    });
+
+    testWidgets('PlatformRail company logos expose TV focus targets',
+        (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            isTelevisionProvider.overrideWith((ref) => true),
+          ],
+          child: MaterialApp(
+            home: Material(
+              child: PlatformRail(
+                platforms: [
+                  MediaPersonProfile(
+                    name: 'Company A',
+                    avatarUrl: 'https://example.com/company-a.png',
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final focusableActions = tester
+          .widgetList<TvFocusableAction>(find.byType(TvFocusableAction))
+          .toList(growable: false);
+      expect(focusableActions, hasLength(1));
+      expect(focusableActions.single.focusId, 'detail:company:Company A');
     });
 
     testWidgets('DetailImageGallery exposes a visible TV focus style',

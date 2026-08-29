@@ -189,12 +189,25 @@ class PlatformRail extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    return Wrap(
-      spacing: 24,
-      runSpacing: 18,
-      children: visiblePlatforms
-          .map((platform) => _PlatformLogo(platform: platform))
-          .toList(growable: false),
+    return SizedBox(
+      height: _PlatformLogo._logoDisplayHeight,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        itemCount: visiblePlatforms.length,
+        separatorBuilder: (context, index) => const SizedBox(width: 24),
+        itemBuilder: (context, index) {
+          final platform = visiblePlatforms[index];
+          return TvFocusableAction(
+            onPressed: () {},
+            focusId: 'detail:company:${platform.name}',
+            visualStyle: TvFocusVisualStyle.prominent,
+            focusScale: 1.03,
+            borderRadius: BorderRadius.circular(12),
+            child: _PlatformLogo(platform: platform),
+          );
+        },
+      ),
     );
   }
 }
@@ -217,19 +230,43 @@ class _PlatformLogo extends StatelessWidget {
     return SizedBox(
       width: _logoDisplayWidth,
       height: _logoDisplayHeight,
-      child: Center(
-        child: AppNetworkImage(
-          logoUrl,
-          width: _logoDisplayWidth,
-          height: _logoDisplayHeight,
-          cacheWidth: _logoDecodeWidth,
-          cacheHeight: _logoDecodeHeight,
-          fit: BoxFit.contain,
-          alignment: Alignment.center,
-          throttleOnTelevision: false,
-          errorBuilder: (context, error, stackTrace) {
-            return const SizedBox.shrink();
-          },
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFFFFFFFF),
+              Color(0xFFECEFF4),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.82),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: AppNetworkImage(
+            logoUrl,
+            width: _logoDisplayWidth,
+            height: _logoDisplayHeight,
+            cacheWidth: _logoDecodeWidth,
+            cacheHeight: _logoDecodeHeight,
+            fit: BoxFit.contain,
+            alignment: Alignment.center,
+            throttleOnTelevision: false,
+            errorBuilder: (context, error, stackTrace) {
+              return const SizedBox.shrink();
+            },
+          ),
         ),
       ),
     );

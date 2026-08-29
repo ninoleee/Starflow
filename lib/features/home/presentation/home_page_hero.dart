@@ -630,7 +630,8 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     if (_focusPagerButton(_nextPagerButtonFocusNode)) {
       return;
     }
-    FocusManager.instance.primaryFocus?.focusInDirection(
+    handleTvDirectionalFocusBoundary(
+      context,
       TraversalDirection.right,
     );
   }
@@ -1089,7 +1090,8 @@ class _FeaturedHeroCard extends StatelessWidget {
               if (focusBelowControl != null) {
                 focusBelowControl();
               } else {
-                FocusManager.instance.primaryFocus?.focusInDirection(
+                handleTvDirectionalFocusBoundary(
+                  context,
                   TraversalDirection.down,
                 );
               }

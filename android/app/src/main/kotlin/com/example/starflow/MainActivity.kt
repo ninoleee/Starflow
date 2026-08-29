@@ -137,6 +137,8 @@ class MainActivity : FlutterActivity() {
                     val title = call.argument<String>("title")?.trim().orEmpty()
                     val headersJson = call.argument<String>("headersJson")?.trim().orEmpty()
                     val decodeMode = call.argument<String>("decodeMode")?.trim().orEmpty()
+                    val audioOutputMode =
+                        call.argument<String>("audioOutputMode")?.trim().orEmpty()
                     val subtitleScale = call.argument<Double>("subtitleScale")
                         ?: NativeSubtitleStylePolicy.DEFAULT_SCALE
                     val subtitlePreference =
@@ -182,6 +184,10 @@ class MainActivity : FlutterActivity() {
                             putExtra(NativePlaybackActivity.EXTRA_TITLE, title)
                             putExtra(NativePlaybackActivity.EXTRA_HEADERS_JSON, headersJson)
                             putExtra(NativePlaybackActivity.EXTRA_DECODE_MODE, decodeMode)
+                            putExtra(
+                                NativePlaybackActivity.EXTRA_AUDIO_OUTPUT_MODE,
+                                audioOutputMode,
+                            )
                             putExtra(NativePlaybackActivity.EXTRA_SUBTITLE_SCALE, subtitleScale)
                             putExtra(
                                 NativePlaybackActivity.EXTRA_SUBTITLE_PREFERENCE,

@@ -2889,7 +2889,8 @@ void main() {
     await indexer.dispose();
   });
 
-  test('NasMediaIndexer re-evaluates stale single-file webdav-series records',
+  test(
+      'NasMediaIndexer repairs stale single-file webdav-series records on rebuild',
       () async {
     final store = _MemoryNasMediaIndexStore();
     const source = MediaSourceConfig(
@@ -2944,7 +2945,7 @@ void main() {
     await staleIndexer.dispose();
 
     final repairedIndexer = buildIndexer('movie');
-    await repairedIndexer.refreshSource(source);
+    await repairedIndexer.refreshSource(source, forceFullRescan: true);
     final repairedLibrary =
         await repairedIndexer.loadLibrary(source, limit: 20);
     expect(repairedLibrary, hasLength(1));
@@ -3166,7 +3167,7 @@ void main() {
   });
 
   test(
-      'NasMediaIndexer repairs cached series records when version folders become movie variants',
+      'NasMediaIndexer repairs cached series records when version folders become movie variants on rebuild',
       () async {
     final store = _MemoryNasMediaIndexStore();
     const source = MediaSourceConfig(
@@ -3234,7 +3235,7 @@ void main() {
           year: 2009,
         ),
     ]);
-    await repairedIndexer.refreshSource(source);
+    await repairedIndexer.refreshSource(source, forceFullRescan: true);
 
     final repairedRecords = await store.loadSourceRecords(source.id);
     expect(repairedRecords, hasLength(2));
@@ -3438,8 +3439,7 @@ void main() {
     expect(client.scanCallCount, 2);
   });
 
-  test(
-      'NasMediaIndexer incremental refresh only enriches changed or missing-metadata items',
+  test('NasMediaIndexer incremental refresh only enriches newly added items',
       () async {
     final store = _MemoryNasMediaIndexStore();
     final source = const MediaSourceConfig(
@@ -4084,7 +4084,15 @@ void main() {
     );
     addTearDown(repairIndexer.dispose);
 
+    // Incremental refresh is append-only: legacy records are reused as-is.
     await repairIndexer.refreshSource(source);
+    final incrementalRecords = await store.loadSourceRecords(source.id);
+    expect(incrementalRecords, hasLength(1));
+    expect(incrementalRecords.single.item.doubanId, 'tv-2017');
+    expect(incrementalRecords.single.preferSeries, isTrue);
+
+    // A full rebuild is the explicit repair path for existing records.
+    await repairIndexer.refreshSource(source, forceFullRescan: true);
     await _waitUntil(() async {
       final refreshed = await store.loadSourceRecords(source.id);
       return refreshed.length == 1 &&
@@ -4096,8 +4104,12 @@ void main() {
     expect(correctedRecords, hasLength(1));
     expect(correctedRecords.single.item.doubanId, 'movie-2016');
     expect(correctedRecords.single.preferSeries, isFalse);
-    expect(wmdbRequestCount, 1,
-        reason: 'The movie-biased cache may be reused.');
+    expect(
+      wmdbRequestCount,
+      2,
+      reason:
+          'One initial lookup and one explicit rebuild lookup are expected.',
+    );
   });
 
   test(

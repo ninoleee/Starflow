@@ -161,6 +161,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   int _activeQuarkLinkValidationCount = 0;
   int _quarkLinkValidationMaxConcurrency = kTaskMaxConcurrencyDefault;
   String? _pendingAutoSearchQuery;
+  bool _searchPreferencesLoaded = false;
   Timer? _searchUiCommitTimer;
   int _pendingSearchRequestId = 0;
   List<SearchResult>? _pendingSearchResults;
@@ -268,6 +269,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
       _favoriteResultKeys =
           favoriteResults.map(searchResultFavoriteKey).toSet();
     });
+    _searchPreferencesLoaded = true;
+    _runPendingAutoSearchIfNeeded();
   }
 
   Future<void> _persistSelectedTargets() async {
@@ -405,7 +408,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
 
   void _runPendingAutoSearchIfNeeded() {
     final pendingQuery = _pendingAutoSearchQuery?.trim() ?? '';
-    if (pendingQuery.isEmpty || !isPageVisible) {
+    if (pendingQuery.isEmpty || !_searchPreferencesLoaded || !isPageVisible) {
       return;
     }
     _pendingAutoSearchQuery = null;
@@ -774,8 +777,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
       localSources: localSources,
       providers: enabledProviders,
     );
-    final effectiveSelectedTargetIds =
-        _resolveSelectedTargets(targets).map((item) => item.id).toSet();
+    final effectiveSelectedTargetIds = _searchPreferencesLoaded
+        ? _resolveSelectedTargets(targets).map((item) => item.id).toSet()
+        : const <String>{};
 
     return AppPrimaryScrollController(
       controller: _scrollController,

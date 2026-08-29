@@ -1,7 +1,7 @@
 import 'package:starflow/core/logging/app_log_api.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 
-bool _playbackTraceCategoryEnabled = true;
+bool _playbackTraceCategoryEnabled = false;
 
 bool get playbackTraceEnabled =>
     _playbackTraceCategoryEnabled && appLogger.isEnabled;
@@ -16,7 +16,10 @@ void playbackTrace(
   Object? error,
   StackTrace? stackTrace,
 }) {
-  if (!playbackTraceEnabled) {
+  if (error == null && !playbackTraceEnabled) {
+    return;
+  }
+  if (error != null && !appLogger.isEnabled) {
     return;
   }
   appLogger.log(

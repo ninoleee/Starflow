@@ -2734,7 +2734,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         for (final engine in supportedEngines)
           DetailTelevisionPickerOption<PlaybackEngine>(
             value: engine,
-            title: engine.label,
+            title: playbackEnginePlatformLabel(
+              engine,
+              platform: defaultTargetPlatform,
+            ),
             subtitle: engine.description,
             focusId: 'detail:resource:playback-engine:${engine.name}',
           ),
@@ -3251,14 +3254,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                   ),
                                 ),
                               if (showDeferredDetailContent &&
-                                  target.resolvedPlatformProfiles.isNotEmpty)
-                                DetailBlock(
-                                  title: '公司',
-                                  child: PlatformRail(
-                                    platforms: target.resolvedPlatformProfiles,
-                                  ),
-                                ),
-                              if (showDeferredDetailContent &&
                                   shouldShowDetailResourceInfo(target))
                                 _buildResourceInfoBlock(
                                   target: target,
@@ -3266,6 +3261,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                   playbackEngine: playbackEngine,
                                   canCheckFavoriteOnlineResourceUpdate:
                                       canCheckFavoriteOnlineResourceUpdate,
+                                ),
+                              if (showDeferredDetailContent &&
+                                  target.resolvedPlatformProfiles.isNotEmpty)
+                                DetailBlock(
+                                  title: '公司',
+                                  child: PlatformRail(
+                                    platforms: target.resolvedPlatformProfiles,
+                                  ),
                                 ),
                               appPageBottomSpacer(),
                             ],

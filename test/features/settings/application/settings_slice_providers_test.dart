@@ -46,6 +46,7 @@ void main() {
     final settings = AppSettings.fromJson({
       'playbackEngine': 'nativeContainer',
       'playbackDecodeMode': 'hardwarePreferred',
+      'nativeAudioOutputMode': 'pcmCompatibility',
       'playbackMpvQualityPreset': 'performanceFirst',
       'playbackOpenTimeoutSeconds': 60,
       'playbackDefaultSpeed': 1.5,
@@ -66,6 +67,7 @@ void main() {
       const SettingsPlaybackSlice(
         playbackEngine: PlaybackEngine.nativeContainer,
         playbackDecodeMode: PlaybackDecodeMode.hardwarePreferred,
+        nativeAudioOutputMode: NativeAudioOutputMode.pcmCompatibility,
         playbackMpvQualityPreset: PlaybackMpvQualityPreset.performanceFirst,
         playbackMpvDoubleTapToSeekEnabled: true,
         playbackMpvSwipeToSeekEnabled: true,
@@ -205,6 +207,7 @@ void main() {
       const SettingsPlaybackSlice(
         playbackEngine: PlaybackEngine.embeddedMpv,
         playbackDecodeMode: PlaybackDecodeMode.auto,
+        nativeAudioOutputMode: NativeAudioOutputMode.auto,
         playbackMpvQualityPreset: PlaybackMpvQualityPreset.performanceFirst,
         playbackMpvDoubleTapToSeekEnabled: true,
         playbackMpvSwipeToSeekEnabled: true,

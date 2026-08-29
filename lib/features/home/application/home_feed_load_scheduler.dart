@@ -71,7 +71,7 @@ class HomeFeedLoadScheduler {
     _pauseHoldCount += 1;
     if (_pauseHoldCount == 1) {
       _waitDiagnostics.pause();
-      appLogInfo(
+      appLogTrace(
         'home.scheduler',
         'Home module scheduler paused',
         fields: <String, Object?>{
@@ -101,7 +101,7 @@ class HomeFeedLoadScheduler {
     if (!_cycleStarted) {
       _cycleStarted = true;
       _remainingStartsInBatch = _initialBatchSize;
-      appLogInfo(
+      appLogTrace(
         'home.scheduler',
         'Home module load cycle started',
         fields: <String, Object?>{
@@ -202,7 +202,7 @@ class HomeFeedLoadScheduler {
       _remainingStartsInBatch = _maxConcurrency;
     }
 
-    appLogInfo(
+    appLogTrace(
       'home.scheduler',
       'Home module scheduler soft recovery requested',
       fields: <String, Object?>{
@@ -293,7 +293,7 @@ class HomeFeedLoadScheduler {
     if (_pauseHoldCount > 0) {
       return;
     }
-    appLogInfo(
+    appLogTrace(
       'home.scheduler',
       'Home module scheduler resumed',
       fields: <String, Object?>{

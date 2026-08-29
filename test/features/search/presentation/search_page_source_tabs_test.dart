@@ -54,11 +54,12 @@ void main() {
 
   testWidgets('hidden saved tabs fall back to all visible tabs',
       (tester) async {
-    SharedPreferences.setMockInitialValues({
-      normalizePreferencesKey(
-        SearchPreferencesRepository.selectedTargetIdsPreferenceKey,
-      ): <String>['provider:hidden-source'],
-    });
+    SharedPreferences.setMockInitialValues(const {});
+    final preferencesRepository = SearchPreferencesRepository(
+      preferences: _MemoryAppPreferencesStore(
+        selectedTargetIds: const ['provider:hidden-source'],
+      ),
+    );
     final repository = _RecordingSearchRepository();
 
     await tester.pumpWidget(
@@ -66,6 +67,9 @@ void main() {
         overrides: [
           isTelevisionProvider.overrideWith((ref) => false),
           searchRepositoryProvider.overrideWithValue(repository),
+          searchPreferencesRepositoryProvider.overrideWithValue(
+            preferencesRepository,
+          ),
           appSettingsProvider.overrideWithValue(_settings),
         ],
         child: const MaterialApp(home: SearchPage()),
@@ -78,6 +82,39 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repository.onlineProviderIds, ['source-a', 'source-b']);
+  });
+
+  testWidgets('detail entry auto-search waits for saved source tabs',
+      (tester) async {
+    SharedPreferences.setMockInitialValues(const {});
+    final preferencesRepository = SearchPreferencesRepository(
+      preferences: _MemoryAppPreferencesStore(
+        selectedTargetIds: const ['provider:source-b'],
+      ),
+    );
+    final repository = _RecordingSearchRepository();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => false),
+          searchRepositoryProvider.overrideWithValue(repository),
+          searchPreferencesRepositoryProvider.overrideWithValue(
+            preferencesRepository,
+          ),
+          appSettingsProvider.overrideWithValue(_settings),
+        ],
+        child: const MaterialApp(
+          home: SearchPage(
+            initialQuery: '详情页电影',
+            showBackButton: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(repository.onlineProviderIds, ['source-b']);
   });
 }
 
@@ -134,5 +171,26 @@ class _RecordingSearchRepository implements SearchRepository {
   }) async {
     onlineProviderIds.add(provider.id);
     return SearchFetchResult(items: const [], filteredCount: 0);
+  }
+}
+
+class _MemoryAppPreferencesStore extends AppPreferencesStore {
+  _MemoryAppPreferencesStore({required List<String> selectedTargetIds})
+      : _stringLists = <String, List<String>>{
+          SearchPreferencesRepository.selectedTargetIdsPreferenceKey:
+              selectedTargetIds,
+        };
+
+  final Map<String, List<String>> _stringLists;
+
+  @override
+  Future<String?> getString(String key) async => null;
+
+  @override
+  Future<List<String>?> getStringList(String key) async => _stringLists[key];
+
+  @override
+  Future<void> setStringList(String key, List<String> value) async {
+    _stringLists[key] = value;
   }
 }

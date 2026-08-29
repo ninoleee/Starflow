@@ -8,7 +8,6 @@ enum AppLogLevel {
 }
 
 const Set<AppLogLevel> kDefaultRecordedAppLogLevels = <AppLogLevel>{
-  AppLogLevel.trace,
   AppLogLevel.info,
   AppLogLevel.warning,
   AppLogLevel.error,

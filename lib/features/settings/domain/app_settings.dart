@@ -133,7 +133,7 @@ extension PlaybackEngineX on PlaybackEngine {
       case PlaybackEngine.embeddedMpv:
         return '内置 MPV';
       case PlaybackEngine.nativeContainer:
-        return '原生播放器（实验性）';
+        return 'App 内原生播放器';
       case PlaybackEngine.systemPlayer:
         return '外部播放器';
     }
@@ -191,6 +191,41 @@ extension PlaybackDecodeModeX on PlaybackDecodeMode {
       'softwarePreferred' => PlaybackDecodeMode.softwarePreferred,
       'auto' => PlaybackDecodeMode.auto,
       _ => PlaybackDecodeMode.auto,
+    };
+  }
+}
+
+enum NativeAudioOutputMode { auto, pcmCompatibility, devicePassthrough }
+
+extension NativeAudioOutputModeX on NativeAudioOutputMode {
+  String get label {
+    switch (this) {
+      case NativeAudioOutputMode.auto:
+        return '自动（推荐）';
+      case NativeAudioOutputMode.pcmCompatibility:
+        return 'PCM 兼容';
+      case NativeAudioOutputMode.devicePassthrough:
+        return '设备直通';
+    }
+  }
+
+  String get description {
+    switch (this) {
+      case NativeAudioOutputMode.auto:
+        return 'Android TV 上 DDP 自动转 PCM；TrueHD、DTS 等无法解码的格式自动软解出声。';
+      case NativeAudioOutputMode.pcmCompatibility:
+        return '强制解码后输出 PCM，适合电视或 HDMI 组合有画面但没有声音时使用。';
+      case NativeAudioOutputMode.devicePassthrough:
+        return '交给电视、回音壁或功放解码压缩音频；无法直通的格式（如 TrueHD）会自动软解出声。';
+    }
+  }
+
+  static NativeAudioOutputMode fromName(String raw) {
+    return switch (raw) {
+      'pcmCompatibility' => NativeAudioOutputMode.pcmCompatibility,
+      'devicePassthrough' => NativeAudioOutputMode.devicePassthrough,
+      'auto' => NativeAudioOutputMode.auto,
+      _ => NativeAudioOutputMode.auto,
     };
   }
 }
@@ -883,6 +918,7 @@ class AppSettings {
     this.playbackBackgroundPlaybackEnabled = true,
     this.playbackEngine = PlaybackEngine.embeddedMpv,
     this.playbackDecodeMode = PlaybackDecodeMode.auto,
+    this.nativeAudioOutputMode = NativeAudioOutputMode.auto,
     this.playbackMpvQualityPreset = PlaybackMpvQualityPreset.performanceFirst,
     this.playbackMpvDoubleTapToSeekEnabled = true,
     this.playbackMpvSwipeToSeekEnabled = true,
@@ -948,6 +984,7 @@ class AppSettings {
   final bool playbackBackgroundPlaybackEnabled;
   final PlaybackEngine playbackEngine;
   final PlaybackDecodeMode playbackDecodeMode;
+  final NativeAudioOutputMode nativeAudioOutputMode;
   final PlaybackMpvQualityPreset playbackMpvQualityPreset;
   final bool playbackMpvDoubleTapToSeekEnabled;
   final bool playbackMpvSwipeToSeekEnabled;
@@ -1012,6 +1049,7 @@ class AppSettings {
     bool? playbackBackgroundPlaybackEnabled,
     PlaybackEngine? playbackEngine,
     PlaybackDecodeMode? playbackDecodeMode,
+    NativeAudioOutputMode? nativeAudioOutputMode,
     PlaybackMpvQualityPreset? playbackMpvQualityPreset,
     bool? playbackMpvDoubleTapToSeekEnabled,
     bool? playbackMpvSwipeToSeekEnabled,
@@ -1138,6 +1176,8 @@ class AppSettings {
           this.playbackBackgroundPlaybackEnabled,
       playbackEngine: playbackEngine ?? this.playbackEngine,
       playbackDecodeMode: playbackDecodeMode ?? this.playbackDecodeMode,
+      nativeAudioOutputMode:
+          nativeAudioOutputMode ?? this.nativeAudioOutputMode,
       playbackMpvQualityPreset:
           playbackMpvQualityPreset ?? this.playbackMpvQualityPreset,
       playbackMpvDoubleTapToSeekEnabled: playbackMpvDoubleTapToSeekEnabled ??
@@ -1225,6 +1265,7 @@ class AppSettings {
       'playbackBackgroundPlaybackEnabled': playbackBackgroundPlaybackEnabled,
       'playbackEngine': playbackEngine.name,
       'playbackDecodeMode': playbackDecodeMode.name,
+      'nativeAudioOutputMode': nativeAudioOutputMode.name,
       'playbackMpvQualityPreset': playbackMpvQualityPreset.name,
       'playbackMpvDoubleTapToSeekEnabled': playbackMpvDoubleTapToSeekEnabled,
       'playbackMpvSwipeToSeekEnabled': playbackMpvSwipeToSeekEnabled,
@@ -1393,6 +1434,9 @@ class AppSettings {
       ),
       playbackDecodeMode: PlaybackDecodeModeX.fromName(
         json['playbackDecodeMode'] as String? ?? '',
+      ),
+      nativeAudioOutputMode: NativeAudioOutputModeX.fromName(
+        json['nativeAudioOutputMode'] as String? ?? '',
       ),
       playbackMpvQualityPreset: PlaybackMpvQualityPresetX.fromName(
         json['playbackMpvQualityPreset'] as String? ?? 'performanceFirst',

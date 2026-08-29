@@ -1,7 +1,7 @@
 import 'package:starflow/core/logging/app_log_api.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 
-bool _detailResourceSwitchTraceCategoryEnabled = true;
+bool _detailResourceSwitchTraceCategoryEnabled = false;
 
 bool get detailResourceSwitchTraceEnabled =>
     _detailResourceSwitchTraceCategoryEnabled && appLogger.isEnabled;
@@ -17,7 +17,10 @@ void detailResourceSwitchTrace(
   Object? error,
   StackTrace? stackTrace,
 }) {
-  if (!detailResourceSwitchTraceEnabled) {
+  if (error == null && !detailResourceSwitchTraceEnabled) {
+    return;
+  }
+  if (error != null && !appLogger.isEnabled) {
     return;
   }
   appLogger.log(

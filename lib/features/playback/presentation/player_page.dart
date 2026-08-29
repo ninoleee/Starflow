@@ -640,12 +640,29 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         reason: '$reason-before-exit',
       );
     }
-    await _stopPlaybackBeforeExit(reason: reason);
+
+    final player = _detachActivePlayerState();
     _platformStateTornDownBeforePop = true;
     if (!mounted) {
+      await _shutdownDetachedPlayer(
+        player,
+        reason: reason,
+        persistProgress: true,
+        teardownPlatformState: true,
+      );
       return;
     }
+
+    if (player != null) {
+      unawaited(player.pause().catchError((_) {}));
+    }
     context.pop();
+    await _shutdownDetachedPlayer(
+      player,
+      reason: reason,
+      persistProgress: true,
+      teardownPlatformState: true,
+    );
   }
 
   bool _isTvSeekKey(LogicalKeyboardKey key) {

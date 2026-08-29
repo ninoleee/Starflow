@@ -103,28 +103,7 @@ bool handleTvDirectionalFocusBoundary(
     return false;
   }
 
-  bool moved;
-  try {
-    moved = primaryFocus.focusInDirection(direction);
-  } on StateError {
-    // Directional traversal reads every candidate's RenderBox rect. During a
-    // route refresh or a scroll, one candidate can briefly exist before its
-    // render object has a size; Flutter then throws from FocusNode.rect. Do a
-    // single post-layout retry and keep the key event contained so TV focus
-    // cannot poison the global key handler.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (primaryFocus.context == null ||
-          FocusManager.instance.primaryFocus != primaryFocus) {
-        return;
-      }
-      try {
-        primaryFocus.focusInDirection(direction);
-      } on StateError {
-        // The candidate may still be offstage; wait for the next user input.
-      }
-    });
-    moved = false;
-  }
+  final moved = primaryFocus.focusInDirection(direction);
   if (moved) {
     return true;
   }
@@ -138,6 +117,26 @@ bool handleTvDirectionalFocusBoundary(
   }
 
   return false;
+}
+
+class TvSafeDirectionalFocusTraversalPolicy
+    extends ReadingOrderTraversalPolicy {
+  @override
+  bool inDirection(
+    FocusNode currentNode,
+    TraversalDirection direction,
+  ) {
+    try {
+      return super.inDirection(currentNode, direction);
+    } on StateError catch (error) {
+      if (!error.message.toString().contains('RenderBox was not laid out')) {
+        rethrow;
+      }
+      // A dynamically inserted TV focus target can exist for one frame before
+      // layout assigns its size. Ignore that key press and keep focus stable.
+      return false;
+    }
+  }
 }
 
 void requestTvFocus(
@@ -198,9 +197,12 @@ class TvPageFocusScope extends StatelessWidget {
     if (!isTelevision) {
       return child;
     }
-    return TvDirectionalFocusBoundary(
-      onMoveLeftOut: onMoveLeftOut,
-      child: child,
+    return FocusTraversalGroup(
+      policy: TvSafeDirectionalFocusTraversalPolicy(),
+      child: TvDirectionalFocusBoundary(
+        onMoveLeftOut: onMoveLeftOut,
+        child: child,
+      ),
     );
   }
 }

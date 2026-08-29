@@ -1,7 +1,7 @@
 import 'package:starflow/core/logging/app_log_api.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 
-bool _subtitleSearchTraceCategoryEnabled = true;
+bool _subtitleSearchTraceCategoryEnabled = false;
 
 bool get subtitleSearchTraceEnabled =>
     _subtitleSearchTraceCategoryEnabled && appLogger.isEnabled;
@@ -16,7 +16,10 @@ void subtitleSearchTrace(
   Object? error,
   StackTrace? stackTrace,
 }) {
-  if (!subtitleSearchTraceEnabled) {
+  if (error == null && !subtitleSearchTraceEnabled) {
+    return;
+  }
+  if (error != null && !appLogger.isEnabled) {
     return;
   }
   appLogger.log(

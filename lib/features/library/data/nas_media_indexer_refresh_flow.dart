@@ -1195,19 +1195,24 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
           _hasAttemptStatus(existing?.sidecarStatus);
       final hasRequiredOnlineMetadata = !includeOnlineMetadata ||
           _hasCompletedOnlineAttempts(existing, settings);
+      final isNewRecord = existing == null;
       final canReuse = existing != null &&
-          existing.fingerprint == fingerprint &&
-          !requiresMovieMetadataTypeCorrection &&
-          hasRequiredSidecar &&
-          hasRequiredOnlineMetadata;
-      final isIncrementalCandidate =
-          existing == null || existing.fingerprint != fingerprint;
+          (!forceFullRescan ||
+              (existing.fingerprint == fingerprint &&
+                  !requiresMovieMetadataTypeCorrection &&
+                  hasRequiredSidecar &&
+                  hasRequiredOnlineMetadata));
+      // Incremental refresh is intentionally an append-only enrichment pass:
+      // existing records are reused even when their metadata is incomplete.
+      // Rebuild is the explicit operation for repairing old records.
       final needsFurtherEnrichment = collectEnrichmentCandidates &&
-          (isIncrementalCandidate ||
-              requiresMovieMetadataTypeCorrection ||
-              (source.webDavSidecarScrapingEnabled &&
-                  !_hasAttemptStatus(existing.sidecarStatus)) ||
-              !_hasCompletedOnlineAttempts(existing, settings));
+          (isNewRecord ||
+              (forceFullRescan &&
+                  (existing.fingerprint != fingerprint ||
+                      requiresMovieMetadataTypeCorrection ||
+                      (source.webDavSidecarScrapingEnabled &&
+                          !_hasAttemptStatus(existing.sidecarStatus)) ||
+                      !_hasCompletedOnlineAttempts(existing, settings))));
       if (needsFurtherEnrichment) {
         enrichmentCandidates.add(scannedItem);
       }

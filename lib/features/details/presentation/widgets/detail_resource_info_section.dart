@@ -281,7 +281,10 @@ class DetailResourceInfoSection extends StatelessWidget {
           if (isTelevision)
             TvSelectionTile(
               title: '播放器',
-              value: effectiveEngine.label,
+              value: playbackEnginePlatformLabel(
+                effectiveEngine,
+                platform: defaultTargetPlatform,
+              ),
               onPressed: onOpenPlaybackEnginePicker,
               focusId: 'detail:resource:playback-engine',
             )
@@ -302,7 +305,10 @@ class DetailResourceInfoSection extends StatelessWidget {
                       (engine) => DropdownMenuItem<PlaybackEngine>(
                         value: engine,
                         child: Text(
-                          engine.label,
+                          playbackEnginePlatformLabel(
+                            engine,
+                            platform: defaultTargetPlatform,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),

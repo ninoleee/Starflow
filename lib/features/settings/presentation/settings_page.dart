@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -8,7 +9,7 @@ import 'package:starflow/core/widgets/no_animation_page_route.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
+import 'package:starflow/features/playback/application/playback_engine_support.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/application/settings_slice_providers.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -18,12 +19,13 @@ import 'package:starflow/features/settings/presentation/media_source_settings_pa
 import 'package:starflow/features/settings/presentation/metadata_match_settings_page.dart';
 import 'package:starflow/features/settings/presentation/local_storage_settings_page.dart';
 import 'package:starflow/features/settings/presentation/logging_settings_page.dart';
+import 'package:starflow/features/settings/presentation/mpv_settings_page.dart';
 import 'package:starflow/features/settings/presentation/network_storage_settings_page.dart';
 import 'package:starflow/features/settings/presentation/playback_settings_page.dart';
-import 'package:starflow/features/settings/presentation/playback_tuning_settings_page.dart';
 import 'package:starflow/features/settings/presentation/search_service_settings_page.dart';
 import 'package:starflow/features/settings/presentation/settings_management_page.dart';
 import 'package:starflow/features/settings/presentation/settings_version_label.dart';
+import 'package:starflow/features/settings/presentation/subtitle_settings_page.dart';
 import 'package:starflow/features/settings/presentation/task_scheduling_settings_page.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
@@ -111,11 +113,8 @@ class SettingsPage extends ConsumerStatefulWidget {
                   child: Column(
                     children: [
                       _SettingsNavigationTile(
-                        title: '播放器与字幕',
-                        subtitle: _playbackSettingsSummary(
-                          playbackSlice,
-                          isTelevision: isTelevision,
-                        ),
+                        title: '播放器',
+                        subtitle: _playbackSettingsSummary(playbackSlice),
                         onTap: () => _openPlaybackSettings(
                           context,
                           playbackSlice,
@@ -123,12 +122,18 @@ class SettingsPage extends ConsumerStatefulWidget {
                       ),
                       const SizedBox(height: 10),
                       _SettingsNavigationTile(
-                        title: 'MPV 调优',
-                        subtitle:
-                            performanceSlice.aggressivePlaybackTuningEnabled
-                                ? '激进性能调优已开启'
-                                : '使用标准播放参数',
-                        onTap: () => _openPlaybackTuningSettings(context),
+                        title: '字幕',
+                        subtitle: _subtitleSettingsSummary(playbackSlice),
+                        onTap: () => _openSubtitleSettings(context),
+                      ),
+                      const SizedBox(height: 10),
+                      _SettingsNavigationTile(
+                        title: 'MPV',
+                        subtitle: _mpvSettingsSummary(
+                          playbackSlice,
+                          performanceSlice,
+                        ),
+                        onTap: () => _openMpvSettings(context),
                       ),
                     ],
                   ),
@@ -248,40 +253,28 @@ class SettingsPage extends ConsumerStatefulWidget {
         builder: (context) => PlaybackSettingsPage(
           initialTimeoutSeconds: playbackSlice.playbackOpenTimeoutSeconds,
           initialDefaultSpeed: playbackSlice.playbackDefaultSpeed,
-          initialSubtitlePreference: playbackSlice.playbackSubtitlePreference,
-          initialSubtitleScale: playbackSlice.playbackSubtitleScale,
-          initialOnlineSubtitleSources: playbackSlice.onlineSubtitleSources,
-          initialAssrtToken: playbackSlice.assrtToken,
-          initialOpensubtitlesEnabled: playbackSlice.opensubtitlesEnabled,
-          initialOpensubtitlesUsername: playbackSlice.opensubtitlesUsername,
-          initialOpensubtitlesPassword: playbackSlice.opensubtitlesPassword,
-          initialSubdlEnabled: playbackSlice.subdlEnabled,
-          initialSubdlApiKey: playbackSlice.subdlApiKey,
-          initialSubtitlePreferredLanguages:
-              playbackSlice.subtitlePreferredLanguages,
-          initialSubtitleSearchMaxValidatedCandidates:
-              playbackSlice.subtitleSearchMaxValidatedCandidates,
           initialBackgroundPlaybackEnabled:
               playbackSlice.configuredBackgroundPlaybackEnabled,
           initialPlaybackEngine: playbackSlice.playbackEngine,
           initialPlaybackDecodeMode: playbackSlice.playbackDecodeMode,
-          initialPlaybackMpvDoubleTapToSeekEnabled:
-              playbackSlice.playbackMpvDoubleTapToSeekEnabled,
-          initialPlaybackMpvSwipeToSeekEnabled:
-              playbackSlice.playbackMpvSwipeToSeekEnabled,
-          initialPlaybackMpvLongPressSpeedBoostEnabled:
-              playbackSlice.playbackMpvLongPressSpeedBoostEnabled,
-          initialPlaybackMpvStallAutoRecoveryEnabled:
-              playbackSlice.playbackMpvStallAutoRecoveryEnabled,
+          initialNativeAudioOutputMode: playbackSlice.nativeAudioOutputMode,
         ),
       ),
     );
   }
 
-  Future<void> _openPlaybackTuningSettings(BuildContext context) {
+  Future<void> _openSubtitleSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
       NoAnimationMaterialPageRoute<void>(
-        builder: (context) => const PlaybackTuningSettingsPage(),
+        builder: (context) => const SubtitleSettingsPage(),
+      ),
+    );
+  }
+
+  Future<void> _openMpvSettings(BuildContext context) {
+    return Navigator.of(context, rootNavigator: true).push<void>(
+      NoAnimationMaterialPageRoute<void>(
+        builder: (context) => const MpvSettingsPage(),
       ),
     );
   }
@@ -474,46 +467,39 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 }
 
-String _playbackSettingsSummary(
-  SettingsPlaybackSlice playbackSlice, {
-  bool isTelevision = false,
-}) {
+String _playbackSettingsSummary(SettingsPlaybackSlice playbackSlice) {
+  final engineLabel = playbackEnginePlatformLabel(
+    playbackSlice.playbackEngine,
+    platform: defaultTargetPlatform,
+  );
+  if (playbackSlice.playbackEngine == PlaybackEngine.nativeContainer) {
+    return '$engineLabel · 音频 ${playbackSlice.nativeAudioOutputMode.label}';
+  }
+  return '$engineLabel · ${playbackSlice.playbackDecodeMode.label}';
+}
+
+String _subtitleSettingsSummary(SettingsPlaybackSlice playbackSlice) {
+  final sourceCount = playbackSlice.onlineSubtitleSources.length;
   return [
-    playbackSlice.playbackEngine.label,
-    playbackSlice.playbackDecodeMode.label,
-    if (playbackSlice.playbackEngine == PlaybackEngine.embeddedMpv)
-      playbackSlice.playbackMpvDoubleTapToSeekEnabled ||
-              playbackSlice.playbackMpvSwipeToSeekEnabled ||
-              playbackSlice.playbackMpvLongPressSpeedBoostEnabled
-          ? 'MPV 触控增强'
-          : 'MPV 触控精简',
-    if (playbackSlice.playbackEngine == PlaybackEngine.embeddedMpv)
-      playbackSlice.playbackMpvStallAutoRecoveryEnabled ? '自动恢复开' : '自动恢复关',
-    '${playbackSlice.playbackOpenTimeoutSeconds}s 超时',
-    '${_formatPlaybackSpeedLabel(playbackSlice.playbackDefaultSpeed)} 默认倍速',
-    '字幕 ${playbackSlice.playbackSubtitlePreference.label}',
+    playbackSlice.playbackSubtitlePreference.label,
     formatPlaybackSubtitleScaleLabel(playbackSlice.playbackSubtitleScale),
-    if ((playbackSlice.onlineSubtitleSources.contains(
-              OnlineSubtitleSource.assrt,
-            ) &&
-            playbackSlice.assrtToken.trim().isNotEmpty) ||
-        playbackSlice.opensubtitlesEnabled ||
-        playbackSlice.subdlEnabled)
-      [
-        if (playbackSlice.onlineSubtitleSources.contains(
-              OnlineSubtitleSource.assrt,
-            ) &&
-            playbackSlice.assrtToken.trim().isNotEmpty)
-          'ASSRT API',
-        if (playbackSlice.opensubtitlesEnabled) 'OpenSubtitles',
-        if (playbackSlice.subdlEnabled) 'SubDL',
-      ].join('/'),
-    isTelevision
-        ? 'TV 端后台播放禁用'
-        : playbackSlice.configuredBackgroundPlaybackEnabled
-            ? '后台播放开'
-            : '后台播放关',
+    if (sourceCount > 0) '$sourceCount 个在线源',
   ].join(' · ');
+}
+
+String _mpvSettingsSummary(
+  SettingsPlaybackSlice playbackSlice,
+  SettingsPerformanceSlice performanceSlice,
+) {
+  final enabled = [
+    if (playbackSlice.playbackMpvDoubleTapToSeekEnabled ||
+        playbackSlice.playbackMpvSwipeToSeekEnabled ||
+        playbackSlice.playbackMpvLongPressSpeedBoostEnabled)
+      '触控增强',
+    if (playbackSlice.playbackMpvStallAutoRecoveryEnabled) '自动恢复',
+    if (performanceSlice.aggressivePlaybackTuningEnabled) '激进调优',
+  ].join(' · ');
+  return enabled.isEmpty ? '全部关闭' : enabled;
 }
 
 String _navigationDestinationSummary(List<String> selectedIds) {
@@ -534,13 +520,6 @@ String _enabledCountSummary(List<MediaSourceConfig> sources) {
   }
   final enabledCount = sources.where((source) => source.enabled).length;
   return '已启用 $enabledCount / ${sources.length}';
-}
-
-String _formatPlaybackSpeedLabel(double speed) {
-  if (speed == speed.roundToDouble()) {
-    return '${speed.toStringAsFixed(0)}x';
-  }
-  return '${speed.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '')}x';
 }
 
 class _SettingsPageHeader extends StatelessWidget {

@@ -68,6 +68,7 @@ final settingsPlaybackSliceProvider = Provider<SettingsPlaybackSlice>(
         (settings) => SettingsPlaybackSlice(
           playbackEngine: settings.playbackEngine,
           playbackDecodeMode: settings.playbackDecodeMode,
+          nativeAudioOutputMode: settings.nativeAudioOutputMode,
           playbackMpvQualityPreset: settings.playbackMpvQualityPreset,
           playbackMpvDoubleTapToSeekEnabled:
               settings.playbackMpvDoubleTapToSeekEnabled,
@@ -209,6 +210,7 @@ class SettingsPlaybackSlice {
   const SettingsPlaybackSlice({
     required this.playbackEngine,
     required this.playbackDecodeMode,
+    required this.nativeAudioOutputMode,
     required this.playbackMpvQualityPreset,
     required this.playbackMpvDoubleTapToSeekEnabled,
     required this.playbackMpvSwipeToSeekEnabled,
@@ -233,6 +235,7 @@ class SettingsPlaybackSlice {
 
   final PlaybackEngine playbackEngine;
   final PlaybackDecodeMode playbackDecodeMode;
+  final NativeAudioOutputMode nativeAudioOutputMode;
   final PlaybackMpvQualityPreset playbackMpvQualityPreset;
   final bool playbackMpvDoubleTapToSeekEnabled;
   final bool playbackMpvSwipeToSeekEnabled;
@@ -260,6 +263,7 @@ class SettingsPlaybackSlice {
         other is SettingsPlaybackSlice &&
             other.playbackEngine == playbackEngine &&
             other.playbackDecodeMode == playbackDecodeMode &&
+            other.nativeAudioOutputMode == nativeAudioOutputMode &&
             other.playbackMpvQualityPreset == playbackMpvQualityPreset &&
             other.playbackMpvDoubleTapToSeekEnabled ==
                 playbackMpvDoubleTapToSeekEnabled &&
@@ -300,6 +304,7 @@ class SettingsPlaybackSlice {
         Object.hash(
           playbackEngine,
           playbackDecodeMode,
+          nativeAudioOutputMode,
           playbackMpvQualityPreset,
           playbackMpvDoubleTapToSeekEnabled,
           playbackMpvSwipeToSeekEnabled,
