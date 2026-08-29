@@ -125,7 +125,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       final deltaMs = (_latestPosition.inMilliseconds -
               _lastPersistedPosition.inMilliseconds)
           .abs();
-      if (deltaMs < 4000) {
+      if (deltaMs < _PlayerPageState._kProgressPersistInterval.inMilliseconds) {
         return;
       }
     }

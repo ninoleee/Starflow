@@ -512,7 +512,7 @@ class HomeEditorPage extends ConsumerWidget {
               onTap: () async {
                 Navigator.of(context).pop();
                 await Navigator.of(context, rootNavigator: true).push<void>(
-                  NoAnimationMaterialPageRoute<void>(
+                  SettingsMaterialPageRoute<void>(
                     builder: (context) => DoubanAccountEditorPage(
                       initial: doubanAccount,
                     ),

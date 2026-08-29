@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:starflow/app/app.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/logging/app_frame_performance_monitor.dart';
@@ -41,7 +42,11 @@ Future<void> main() async {
       AppFramePerformanceMonitor(
         startupStopwatch: startupStopwatch,
       ).install();
-      appLogInfo('app.lifecycle', 'Application startup');
+      appLogInfo(
+        'app.lifecycle',
+        'Application startup',
+        fields: await _resolveBuildInfoFields(),
+      );
       if (settingsLoadError != null) {
         appLogWarning(
           'app.startup',
@@ -96,6 +101,33 @@ Future<void> main() async {
   );
   if (startup != null) {
     await startup;
+  }
+}
+
+String get _buildMode {
+  if (kDebugMode) {
+    return 'debug';
+  }
+  if (kProfileMode) {
+    return 'profile';
+  }
+  return 'release';
+}
+
+/// Stamps every log file with the build it came from, so a captured log can be
+/// attributed to a specific version instead of guessing from timestamps.
+Future<Map<String, Object?>> _resolveBuildInfoFields() async {
+  try {
+    final info =
+        await PackageInfo.fromPlatform().timeout(const Duration(seconds: 2));
+    return <String, Object?>{
+      'version': info.version,
+      'buildNumber': info.buildNumber,
+      'packageName': info.packageName,
+      'buildMode': _buildMode,
+    };
+  } catch (_) {
+    return <String, Object?>{'buildMode': _buildMode};
   }
 }
 

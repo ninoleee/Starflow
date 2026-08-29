@@ -111,7 +111,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.homeEditor.path,
         name: AppRoutes.homeEditor.name,
-        pageBuilder: (context, state) => _buildAppPage(
+        pageBuilder: (context, state) => _buildSettingsPage(
           state: state,
           child: const HomeEditorPage(),
         ),
@@ -259,6 +259,18 @@ Page<void> _buildAppPage({
   required Widget child,
 }) {
   return NoAnimationMaterialPage<void>(
+    key: state.pageKey,
+    name: state.name ?? state.uri.toString(),
+    arguments: state.extra,
+    child: child,
+  );
+}
+
+Page<void> _buildSettingsPage({
+  required GoRouterState state,
+  required Widget child,
+}) {
+  return SettingsMaterialPage<void>(
     key: state.pageKey,
     name: state.name ?? state.uri.toString(),
     arguments: state.extra,

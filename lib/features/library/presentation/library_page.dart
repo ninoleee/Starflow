@@ -1163,6 +1163,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     try {
       await ref.read(mediaRefreshCoordinatorProvider).refreshSelectedSources(
             sourceIds: scope.sourceIds,
+            invalidateWebDavDirectoryCache: true,
             allowNetworkProbe: true,
           );
       if (refreshIntent != _refreshIntentSerial) {

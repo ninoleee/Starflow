@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +5,7 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/playback/application/playback_engine_support.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/presentation/settings_auto_save_coordinator.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class PlaybackSettingsPage extends ConsumerStatefulWidget {
@@ -41,9 +40,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   late PlaybackEngine _draftPlaybackEngine;
   late PlaybackDecodeMode _draftPlaybackDecodeMode;
   late NativeAudioOutputMode _draftNativeAudioOutputMode;
-  Timer? _autoSaveTimer;
-  Future<void> _saveQueue = Future<void>.value();
-  bool _closing = false;
+  final SettingsAutoSaveCoordinator _autoSave = SettingsAutoSaveCoordinator();
 
   @override
   void initState() {
@@ -60,11 +57,12 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     );
     _draftPlaybackDecodeMode = widget.initialPlaybackDecodeMode;
     _draftNativeAudioOutputMode = widget.initialNativeAudioOutputMode;
+    _autoSave.markCurrentAsSaved(_draftFingerprint());
   }
 
   @override
   void dispose() {
-    _autoSaveTimer?.cancel();
+    _autoSave.dispose();
     _timeoutController.dispose();
     super.dispose();
   }
@@ -74,56 +72,80 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     return parsed.clamp(1, 600);
   }
 
-  Future<void> _persistDraft() async {
-    await ref.read(settingsControllerProvider.notifier).savePlaybackPreferences(
-          openTimeoutSeconds: _draftSeconds(),
-          defaultSpeed: _draftPlaybackSpeed,
-          backgroundPlaybackEnabled: _draftBackgroundPlaybackEnabled,
-          playbackEngine: _draftPlaybackEngine,
-          playbackDecodeMode: _draftPlaybackDecodeMode,
-          nativeAudioOutputMode: _draftNativeAudioOutputMode,
-        );
-  }
+  String _draftFingerprint() => [
+        _draftSeconds(),
+        _draftPlaybackSpeed,
+        _draftBackgroundPlaybackEnabled,
+        _draftPlaybackEngine.name,
+        _draftPlaybackDecodeMode.name,
+        _draftNativeAudioOutputMode.name,
+      ].join('|');
 
   void _scheduleAutoSave() {
-    _autoSaveTimer?.cancel();
-    _autoSaveTimer = Timer(const Duration(milliseconds: 250), _enqueueSave);
-  }
-
-  void _enqueueSave() {
-    _autoSaveTimer = null;
-    _saveQueue = _saveQueue.then((_) => _persistDraft());
-  }
-
-  Future<void> _handleCloseRequest() async {
-    if (_closing) {
+    if (!mounted) {
       return;
     }
-    _closing = true;
-    _autoSaveTimer?.cancel();
-    _enqueueSave();
-    try {
-      await _saveQueue;
-    } finally {
-      if (mounted) {
-        Navigator.of(context).pop();
-      }
+    final controller = ref.read(settingsControllerProvider.notifier);
+    final openTimeoutSeconds = _draftSeconds();
+    final defaultSpeed = _draftPlaybackSpeed;
+    final backgroundPlaybackEnabled = _draftBackgroundPlaybackEnabled;
+    final playbackEngine = _draftPlaybackEngine;
+    final playbackDecodeMode = _draftPlaybackDecodeMode;
+    final nativeAudioOutputMode = _draftNativeAudioOutputMode;
+    _autoSave.schedule(
+      fingerprint: _draftFingerprint(),
+      save: () => controller.savePlaybackPreferences(
+        openTimeoutSeconds: openTimeoutSeconds,
+        defaultSpeed: defaultSpeed,
+        backgroundPlaybackEnabled: backgroundPlaybackEnabled,
+        playbackEngine: playbackEngine,
+        playbackDecodeMode: playbackDecodeMode,
+        nativeAudioOutputMode: nativeAudioOutputMode,
+      ),
+    );
+  }
+
+  void _flushAutoSave() {
+    if (!mounted) {
+      return;
     }
+    final controller = ref.read(settingsControllerProvider.notifier);
+    final openTimeoutSeconds = _draftSeconds();
+    final defaultSpeed = _draftPlaybackSpeed;
+    final backgroundPlaybackEnabled = _draftBackgroundPlaybackEnabled;
+    final playbackEngine = _draftPlaybackEngine;
+    final playbackDecodeMode = _draftPlaybackDecodeMode;
+    final nativeAudioOutputMode = _draftNativeAudioOutputMode;
+    _autoSave.flush(
+      fingerprint: _draftFingerprint(),
+      save: () => controller.savePlaybackPreferences(
+        openTimeoutSeconds: openTimeoutSeconds,
+        defaultSpeed: defaultSpeed,
+        backgroundPlaybackEnabled: backgroundPlaybackEnabled,
+        playbackEngine: playbackEngine,
+        playbackDecodeMode: playbackDecodeMode,
+        nativeAudioOutputMode: nativeAudioOutputMode,
+      ),
+    );
+  }
+
+  void _closePage() {
+    _flushAutoSave();
+    Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     return PopScope<void>(
-      canPop: false,
+      canPop: true,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop || _closing) {
-          return;
+        if (didPop) {
+          _flushAutoSave();
         }
-        unawaited(_handleCloseRequest());
       },
       child: SettingsPageScaffold(
-        onBack: () => unawaited(_handleCloseRequest()),
+        onBack: _closePage,
         children: [
           Text(
             '播放设置',

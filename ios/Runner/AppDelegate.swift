@@ -691,7 +691,7 @@ private struct NativeEpisodeQueue {
 }
 
 private final class NativePlaybackViewController: AVPlayerViewController {
-  private static let persistThresholdMs: Int64 = 4_000
+  private static let persistThresholdMs: Int64 = 10_000
   private static let playbackStartupTimeoutSeconds: TimeInterval = 30
 
   private let playbackStore: NativePlaybackMemoryStore

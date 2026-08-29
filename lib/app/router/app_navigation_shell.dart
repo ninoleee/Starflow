@@ -572,6 +572,37 @@ class _TelevisionNavigationShellState
         (node) => node.hasFocus || node.hasPrimaryFocus,
       );
 
+  int get _currentDestinationDisplayIndex {
+    final currentDisplayIndex = widget.items.indexWhere(
+      (item) => item.branchIndex == widget.currentIndex,
+    );
+    return (currentDisplayIndex < 0 ? 0 : currentDisplayIndex).clamp(
+      0,
+      _destinationFocusNodes.length - 1,
+    );
+  }
+
+  bool get _isCurrentDestinationFocused =>
+      _destinationFocusNodes.isNotEmpty &&
+      _destinationFocusNodes[_currentDestinationDisplayIndex].hasPrimaryFocus;
+
+  void _clearFocusAndFocusCurrentDestination() {
+    FocusManager.instance.primaryFocus?.unfocus(
+      disposition: UnfocusDisposition.scope,
+    );
+    _setSidebarVisible(true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _destinationFocusNodes.isEmpty) {
+        return;
+      }
+      final currentNode =
+          _destinationFocusNodes[_currentDestinationDisplayIndex];
+      if (currentNode.canRequestFocus) {
+        requestTvFocus(currentNode);
+      }
+    });
+  }
+
   void _handleSidebarFocusChanged(bool focused) {
     if (!widget.autoHideNavigationBarEnabled) {
       return;
@@ -592,8 +623,8 @@ class _TelevisionNavigationShellState
     if (!mounted) {
       return;
     }
-    if (!_isSidebarFocused) {
-      _focusCurrentDestination();
+    if (!_isCurrentDestinationFocused) {
+      _clearFocusAndFocusCurrentDestination();
       return;
     }
     if (_isExitDialogVisible) {

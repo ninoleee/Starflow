@@ -214,7 +214,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openMediaSourceSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => const MediaSourceSettingsPage(),
       ),
     );
@@ -222,7 +222,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openSearchServiceSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => const SearchServiceSettingsPage(),
       ),
     );
@@ -230,7 +230,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openMetadataMatchSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => const MetadataMatchSettingsPage(),
       ),
     );
@@ -238,7 +238,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openNetworkStorageSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => const NetworkStorageSettingsPage(),
       ),
     );
@@ -249,7 +249,7 @@ class SettingsPage extends ConsumerStatefulWidget {
     SettingsPlaybackSlice playbackSlice,
   ) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => PlaybackSettingsPage(
           initialTimeoutSeconds: playbackSlice.playbackOpenTimeoutSeconds,
           initialDefaultSpeed: playbackSlice.playbackDefaultSpeed,
@@ -265,7 +265,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openSubtitleSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => const SubtitleSettingsPage(),
       ),
     );
@@ -273,7 +273,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openMpvSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => const MpvSettingsPage(),
       ),
     );
@@ -281,7 +281,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openInterfaceSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => const InterfaceSettingsPage(),
       ),
     );
@@ -289,7 +289,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openBackgroundTaskSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => const TaskSchedulingSettingsPage(),
       ),
     );
@@ -297,7 +297,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openHomeSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => const HomeSettingsPage(),
       ),
     );
@@ -341,7 +341,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openLocalStorageSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => const LocalStorageSettingsPage(),
       ),
     );
@@ -349,7 +349,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openLoggingSettings(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => const LoggingSettingsPage(),
       ),
     );
@@ -357,7 +357,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 
   Future<void> _openSettingsManagement(BuildContext context) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => const SettingsManagementPage(),
       ),
     );

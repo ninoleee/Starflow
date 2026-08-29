@@ -113,6 +113,7 @@ class _HomePageState extends ConsumerState<HomePage>
   int _scheduledHeroMetadataAutoRefreshRevision = 0;
   int _scheduledHeroExplicitRefreshRevision = 0;
   bool _contentLoadingDeferralActive = false;
+  bool _missingFocusRecoveryScheduled = false;
 
   bool get _showHeroPagerButtons {
     if (kIsWeb) {
@@ -143,6 +144,7 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   void onPageBecameActive() {
     _deferPrefetchForForegroundInteraction(reason: 'home.page-active');
+    _scheduleMissingFocusRecovery();
     // Keep stable cached sections when returning to home, and only warm data
     // sources opportunistically.
     primeHomeModulesFromWidget(ref);
@@ -178,6 +180,28 @@ class _HomePageState extends ConsumerState<HomePage>
     _deferPrefetchForForegroundInteraction(reason: 'home.content-loading');
   }
 
+  void _scheduleMissingFocusRecovery() {
+    if (_missingFocusRecoveryScheduled) {
+      return;
+    }
+    _missingFocusRecoveryScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _missingFocusRecoveryScheduled = false;
+      if (!mounted || !isPageVisible) {
+        return;
+      }
+      final primaryFocus = FocusManager.instance.primaryFocus;
+      final hasActionableFocus = primaryFocus != null &&
+          primaryFocus is! FocusScopeNode &&
+          primaryFocus.context != null &&
+          primaryFocus.canRequestFocus;
+      if (hasActionableFocus) {
+        return;
+      }
+      TvMenuButtonScope.maybeOf(context)?.onMenuButtonPressed();
+    });
+  }
+
   @override
   void onPageBecameInactive() {
     // Inactive should cancel in-flight home-only work, but avoid invalidating
@@ -189,6 +213,16 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+    ref.listen<bool>(
+      homeResolvedSectionsProvider.select(
+        (state) => state.hasPendingSections,
+      ),
+      (previous, next) {
+        if (isTelevision && previous == true && !next) {
+          _scheduleMissingFocusRecovery();
+        }
+      },
+    );
     final heroModule = ref.watch(homeHeroModuleProvider);
     final enabledModules = ref.watch(homeEnabledModulesProvider);
     final resolvedSectionsState = ref.watch(homeResolvedSectionsProvider);

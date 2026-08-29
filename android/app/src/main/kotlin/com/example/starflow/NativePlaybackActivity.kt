@@ -89,6 +89,7 @@ class NativePlaybackActivity : Activity() {
     private var restoredResumePositionMs: Long = 0L
     private var subtitleDelayMs: Long = 0L
     private var automaticSubtitleSelectionApplied = false
+    private var transcodedVideoFallbackAttempted = false
     private var externalSubtitleSource: ExternalSubtitleSource? = null
     private var lastSavedPositionMs: Long = -1L
     private var subtitleSearchActive = false
@@ -110,6 +111,8 @@ class NativePlaybackActivity : Activity() {
     private val playbackWatchdogHandler = Handler(Looper.getMainLooper())
     private val playbackRuntimeHandler = Handler(Looper.getMainLooper())
     private var playbackRuntimeActive = false
+    private var playbackFirstFrameRendered = false
+    private var playbackLastRuntimeLogAtMs = 0L
     private var introSkipApplied = false
     private var outroSkipApplied = false
     private var playbackWatchdogActive = false
@@ -137,6 +140,8 @@ class NativePlaybackActivity : Activity() {
                 return
             }
             maybeApplyAutoSkip()
+            persistPlaybackProgress()
+            logPlaybackRuntimeIfNeeded()
             if (playbackRuntimeActive) {
                 playbackRuntimeHandler.postDelayed(this, PLAYBACK_RUNTIME_INTERVAL_MS)
             }
@@ -155,6 +160,8 @@ class NativePlaybackActivity : Activity() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
                 markPlaybackWatchdogActivity(player?.currentPosition ?: 0L)
+            } else if (player?.playWhenReady == false) {
+                persistPlaybackProgress(force = true)
             }
             syncPlaybackSystemSession()
             updateTelevisionControllerAutoHidePolicy()
@@ -194,6 +201,8 @@ class NativePlaybackActivity : Activity() {
         }
 
         override fun onRenderedFirstFrame() {
+            playbackFirstFrameRendered = true
+            logPlaybackRuntime(reason = "first-frame")
             cancelPlaybackLaunchTimeout()
             reportPlaybackLaunchResult(RESULT_PLAYBACK_READY)
         }
@@ -203,6 +212,11 @@ class NativePlaybackActivity : Activity() {
             newPosition: Player.PositionInfo,
             reason: Int,
         ) {
+            logPlayback(
+                "native.playback.discontinuity reason=$reason " +
+                    "oldPositionMs=${oldPosition.positionMs} " +
+                    "newPositionMs=${newPosition.positionMs}",
+            )
             resetPlaybackWatchdogProgress(newPosition.positionMs)
             syncSkipFlagsWithCurrentPosition()
             syncPlaybackSystemSession()
@@ -221,6 +235,8 @@ class NativePlaybackActivity : Activity() {
 
         override fun onTracksChanged(tracks: Tracks) {
             logAudioTracks(tracks)
+            logVideoTracks(tracks)
+            fallbackToTranscodedVideoIfNeeded(tracks)
             applyAutomaticSubtitleSelection(tracks)
         }
     }
@@ -339,7 +355,7 @@ class NativePlaybackActivity : Activity() {
         if (subtitleSearchActive) {
             hideVideoSurfaceForOverlay()
         }
-        persistPlaybackProgress()
+        persistPlaybackProgress(force = true)
         playerView.onPause()
         super.onPause()
     }
@@ -406,6 +422,7 @@ class NativePlaybackActivity : Activity() {
 
     private fun resetPlaybackStateForNewIntent() {
         baseMediaItem = null
+        transcodedVideoFallbackAttempted = false
         externalSubtitleSource = null
         subtitleDelayMs = 0L
         restoredResumePositionMs = 0L
@@ -939,6 +956,7 @@ class NativePlaybackActivity : Activity() {
             intent.getStringExtra(EXTRA_DECODE_MODE)?.trim().orEmpty(),
         )
         val audioCodec = targetObject.optString("audioCodec").trim()
+        val videoCodec = targetObject.optString("videoCodec").trim()
         val forcePcmAudioOutput = NativePlaybackAudioPolicy.shouldForcePcmOutput(
             isTelevision = isTelevisionDevice,
             audioCodec = audioCodec,
@@ -1009,6 +1027,8 @@ class NativePlaybackActivity : Activity() {
             )
             .build()
         automaticSubtitleSelectionApplied = false
+        playbackFirstFrameRendered = false
+        playbackLastRuntimeLogAtMs = 0L
         if (subtitlePreferenceIsOff()) {
             exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
                 .buildUpon()
@@ -1035,6 +1055,7 @@ class NativePlaybackActivity : Activity() {
                 "decodeMode=$decodeMode " +
                 "audioOutputMode=${audioOutputMode.rawValue} " +
                 "audioCodec=${audioCodec.ifEmpty { "-" }} " +
+                "videoCodec=${videoCodec.ifEmpty { "-" }} " +
                 "forcePcmAudioOutput=$forcePcmAudioOutput " +
                 "ffmpegAudioDecoder=$enableFfmpegAudioDecoder " +
                 "mimeGuess=${guessedMimeType ?: "-"}",
@@ -1100,6 +1121,82 @@ class NativePlaybackActivity : Activity() {
             }
         }
         logPlayback("native.audio.tracks ${summaries.joinToString("|")}")
+    }
+
+    private fun logVideoTracks(tracks: Tracks) {
+        val groups = tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
+        if (groups.isEmpty()) {
+            logPlayback("native.video.tracks none")
+            return
+        }
+        val summaries = groups.flatMapIndexed { groupIndex, group ->
+            (0 until group.length).map { trackIndex ->
+                val format = group.getTrackFormat(trackIndex)
+                "g$groupIndex:t$trackIndex" +
+                    ":mime=${format.sampleMimeType ?: "-"}" +
+                    ":codecs=${format.codecs ?: "-"}" +
+                    ":width=${format.width}" +
+                    ":height=${format.height}" +
+                    ":color=${format.colorInfo?.toString() ?: "-"}" +
+                    ":supported=${group.isTrackSupported(trackIndex)}" +
+                    ":selected=${group.isTrackSelected(trackIndex)}"
+            }
+        }
+        logPlayback("native.video.tracks ${summaries.joinToString("|")}")
+    }
+
+    private fun fallbackToTranscodedVideoIfNeeded(tracks: Tracks) {
+        if (transcodedVideoFallbackAttempted) {
+            return
+        }
+        val videoGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
+        if (videoGroups.isEmpty() ||
+            videoGroups.any { group ->
+                (0 until group.length).any { trackIndex ->
+                    group.isTrackSupported(trackIndex)
+                }
+            }
+        ) {
+            return
+        }
+
+        transcodedVideoFallbackAttempted = true
+        val currentPlayer = player ?: return
+        val fallbackUrl = buildTranscodedVideoFallbackUrl(
+            intent.getStringExtra(EXTRA_URL)?.trim().orEmpty(),
+        )
+        if (fallbackUrl == null) {
+            logPlayback("native.video.unsupported-no-transcode-fallback")
+            return
+        }
+
+        pendingResumePositionOverrideMs = currentPlayer.currentPosition.coerceAtLeast(0L)
+        nextInitializePlayWhenReady = currentPlayer.playWhenReady
+        intent.putExtra(EXTRA_URL, fallbackUrl)
+        logPlayback(
+            "native.video.unsupported-fallback " +
+                "resumeMs=$pendingResumePositionOverrideMs",
+        )
+        releasePlayer()
+        initializePlayer()
+        showToast("视频编码需要转码，正在重新连接")
+    }
+
+    private fun buildTranscodedVideoFallbackUrl(rawUrl: String): String? {
+        val uri = Uri.parse(rawUrl.trim())
+        if (!uri.isAbsolute || uri.host.isNullOrBlank()) {
+            return null
+        }
+        val queryParameters = LinkedHashMap<String, String>()
+        for (name in uri.queryParameterNames) {
+            queryParameters[name] = uri.getQueryParameter(name).orEmpty()
+        }
+        queryParameters["static"] = "false"
+        val builder = uri.buildUpon().clearQuery()
+        for ((name, value) in queryParameters) {
+            builder.appendQueryParameter(name, value)
+        }
+        return builder.build().toString()
     }
 
     private fun preferredSubtitleLanguages(): List<String> {
@@ -1213,8 +1310,42 @@ class NativePlaybackActivity : Activity() {
     private fun stopPlaybackRuntimeLoop() {
         playbackRuntimeActive = false
         playbackRuntimeHandler.removeCallbacks(playbackRuntimeRunnable)
+        playbackFirstFrameRendered = false
+        playbackLastRuntimeLogAtMs = 0L
         introSkipApplied = false
         outroSkipApplied = false
+    }
+
+    private fun logPlaybackRuntimeIfNeeded() {
+        val currentPlayer = player ?: return
+        if (!currentPlayer.playWhenReady &&
+            currentPlayer.playbackState != Player.STATE_BUFFERING
+        ) {
+            return
+        }
+        val nowMs = SystemClock.elapsedRealtime()
+        if (nowMs - playbackLastRuntimeLogAtMs < PLAYBACK_RUNTIME_LOG_INTERVAL_MS) {
+            return
+        }
+        logPlaybackRuntime(reason = "sample")
+    }
+
+    private fun logPlaybackRuntime(reason: String) {
+        val currentPlayer = player ?: return
+        playbackLastRuntimeLogAtMs = SystemClock.elapsedRealtime()
+        val videoSize = currentPlayer.videoSize
+        logPlayback(
+            "native.playback.runtime reason=$reason " +
+                "state=${playbackStateLabel(currentPlayer.playbackState)} " +
+                "positionMs=${currentPlayer.currentPosition.coerceAtLeast(0L)} " +
+                "durationMs=${currentPlayer.duration.takeIf { it > 0L } ?: 0L} " +
+                "bufferedPositionMs=${currentPlayer.bufferedPosition.coerceAtLeast(0L)} " +
+                "bufferedPercentage=${currentPlayer.bufferedPercentage.coerceIn(0, 100)} " +
+                "playing=${currentPlayer.isPlaying} " +
+                "playWhenReady=${currentPlayer.playWhenReady} " +
+                "firstFrame=$playbackFirstFrameRendered " +
+                "videoSize=${videoSize.width}x${videoSize.height}",
+        )
     }
 
     private fun resetPlaybackWatchdogProgress(positionMs: Long) {
@@ -3026,7 +3157,10 @@ class NativePlaybackActivity : Activity() {
         val currentPlayer = player ?: return
         val resolvedDuration = currentPlayer.duration.takeIf { it > 0L } ?: 0L
         val resolvedPosition = currentPlayer.currentPosition.coerceAtLeast(0L)
-        if (!force && kotlin.math.abs(resolvedPosition - lastSavedPositionMs) < 4_000L) {
+        if (!force &&
+            kotlin.math.abs(resolvedPosition - lastSavedPositionMs) <
+                PLAYBACK_PROGRESS_PERSIST_INTERVAL_MS
+        ) {
             return
         }
         lastSavedPositionMs = resolvedPosition
@@ -3387,6 +3521,8 @@ class NativePlaybackActivity : Activity() {
         private const val PLAYBACK_WATCHDOG_SOFT_RECOVERY_LIMIT = 2
         private const val PLAYBACK_RUNTIME_INITIAL_DELAY_MS = 500L
         private const val PLAYBACK_RUNTIME_INTERVAL_MS = 1_000L
+        private const val PLAYBACK_PROGRESS_PERSIST_INTERVAL_MS = 10_000L
+        private const val PLAYBACK_RUNTIME_LOG_INTERVAL_MS = 10_000L
         private const val OUTRO_SKIP_END_MARGIN_MS = 400L
         private val SUBTITLE_DELAY_OPTIONS_MS =
             listOf(-5_000L, -2_000L, -1_000L, -500L, 0L, 500L, 1_000L, 2_000L, 5_000L)

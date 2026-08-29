@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/seed_data.dart';
@@ -55,6 +56,99 @@ void main() {
     await tester.pump();
 
     expect(menuRequestCount, 1);
+  });
+
+  testWidgets('home content completion recovers only a missing TV focus',
+      (tester) async {
+    final pendingProvider = StateProvider<bool>((ref) => true);
+    var menuRequestCount = 0;
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(
+            _homeSettings,
+          ),
+          homeResolvedSectionsProvider.overrideWith(
+            (ref) => HomeResolvedSectionsState(
+              hasPendingSections: ref.watch(pendingProvider),
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          home: TvMenuButtonScope(
+            onMenuButtonPressed: () => menuRequestCount += 1,
+            child: const HomePage(),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    menuRequestCount = 0;
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(HomePage)),
+    );
+    container.read(pendingProvider.notifier).state = false;
+    await tester.pump();
+    await tester.pump();
+
+    expect(menuRequestCount, 1);
+  });
+
+  testWidgets('home content completion keeps an existing actionable focus',
+      (tester) async {
+    final pendingProvider = StateProvider<bool>((ref) => true);
+    final existingFocusNode = FocusNode(debugLabel: 'existing-action');
+    addTearDown(existingFocusNode.dispose);
+    var menuRequestCount = 0;
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(_homeSettings),
+          homeResolvedSectionsProvider.overrideWith(
+            (ref) => HomeResolvedSectionsState(
+              hasPendingSections: ref.watch(pendingProvider),
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          home: TvMenuButtonScope(
+            onMenuButtonPressed: () => menuRequestCount += 1,
+            child: Column(
+              children: [
+                Focus(
+                  focusNode: existingFocusNode,
+                  child: const SizedBox(width: 1, height: 1),
+                ),
+                const Expanded(child: HomePage()),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    existingFocusNode.requestFocus();
+    await tester.pump();
+    menuRequestCount = 0;
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(HomePage)),
+    );
+    container.read(pendingProvider.notifier).state = false;
+    await tester.pump();
+    await tester.pump();
+
+    expect(existingFocusNode.hasPrimaryFocus, isTrue);
+    expect(menuRequestCount, 0);
   });
 
   testWidgets('main library grid can opt out of a second autofocus candidate',

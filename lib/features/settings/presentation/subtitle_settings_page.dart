@@ -1,4 +1,4 @@
-import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +8,7 @@ import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/application/settings_slice_providers.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/presentation/settings_auto_save_coordinator.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
@@ -35,9 +36,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
       _subtitleSearchMaxValidatedCandidatesController;
   late bool _draftOpensubtitlesEnabled;
   late bool _draftSubdlEnabled;
-  Timer? _autoSaveTimer;
-  Future<void> _saveQueue = Future<void>.value();
-  bool _closing = false;
+  final SettingsAutoSaveCoordinator _autoSave = SettingsAutoSaveCoordinator();
 
   @override
   void initState() {
@@ -67,11 +66,12 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
     );
     _draftOpensubtitlesEnabled = slice.opensubtitlesEnabled;
     _draftSubdlEnabled = slice.subdlEnabled;
+    _autoSave.markCurrentAsSaved(_draftFingerprint());
   }
 
   @override
   void dispose() {
-    _autoSaveTimer?.cancel();
+    _autoSave.dispose();
     _assrtTokenController.removeListener(_handleAssrtTokenChanged);
     _opensubtitlesUsernameController.removeListener(_scheduleAutoSave);
     _opensubtitlesPasswordController.removeListener(_scheduleAutoSave);
@@ -107,67 +107,92 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
     return clampSubtitleSearchMaxValidatedCandidates(parsed);
   }
 
-  Future<void> _persistDraft() async {
-    await ref
-        .read(settingsControllerProvider.notifier)
-        .savePlaybackSubtitlePreferences(
-          subtitlePreference: _draftSubtitlePreference,
-          subtitleScale: _draftSubtitleScale,
-          onlineSubtitleSources: _draftOnlineSubtitleSources,
-          assrtToken: _assrtTokenController.text.trim(),
-          opensubtitlesEnabled: _draftOpensubtitlesEnabled,
-          opensubtitlesUsername: _opensubtitlesUsernameController.text.trim(),
-          opensubtitlesPassword: _opensubtitlesPasswordController.text,
-          subdlEnabled: _draftSubdlEnabled,
-          subdlApiKey: _subdlApiKeyController.text.trim(),
-          subtitlePreferredLanguages: _draftSubtitlePreferredLanguages(),
-          subtitleSearchMaxValidatedCandidates:
-              _draftSubtitleSearchMaxValidatedCandidates(),
-        );
-  }
+  String _draftFingerprint() => jsonEncode({
+        'subtitlePreference': _draftSubtitlePreference.name,
+        'subtitleScale': _draftSubtitleScale,
+        'onlineSubtitleSources': [
+          for (final source in _draftOnlineSubtitleSources) source.name,
+        ],
+        'assrtToken': _assrtTokenController.text.trim(),
+        'opensubtitlesEnabled': _draftOpensubtitlesEnabled,
+        'opensubtitlesUsername': _opensubtitlesUsernameController.text.trim(),
+        'opensubtitlesPassword': _opensubtitlesPasswordController.text,
+        'subdlEnabled': _draftSubdlEnabled,
+        'subdlApiKey': _subdlApiKeyController.text.trim(),
+        'subtitlePreferredLanguages': _draftSubtitlePreferredLanguages(),
+        'subtitleSearchMaxValidatedCandidates':
+            _draftSubtitleSearchMaxValidatedCandidates(),
+      });
 
   void _scheduleAutoSave() {
-    if (!mounted || _closing) {
-      return;
-    }
-    _autoSaveTimer?.cancel();
-    _autoSaveTimer = Timer(const Duration(milliseconds: 250), _enqueueSave);
+    _submitAutoSave(flush: false);
   }
 
-  void _enqueueSave() {
-    _autoSaveTimer = null;
-    _saveQueue = _saveQueue.then((_) => _persistDraft());
+  void _flushAutoSave() {
+    _submitAutoSave(flush: true);
   }
 
-  Future<void> _handleCloseRequest() async {
-    if (_closing) {
+  void _submitAutoSave({required bool flush}) {
+    if (!mounted) {
       return;
     }
-    _closing = true;
-    _autoSaveTimer?.cancel();
-    _enqueueSave();
-    try {
-      await _saveQueue;
-    } finally {
-      if (mounted) {
-        Navigator.of(context).pop();
-      }
+    final controller = ref.read(settingsControllerProvider.notifier);
+    final subtitlePreference = _draftSubtitlePreference;
+    final subtitleScale = _draftSubtitleScale;
+    final onlineSubtitleSources = [..._draftOnlineSubtitleSources];
+    final assrtToken = _assrtTokenController.text.trim();
+    final opensubtitlesEnabled = _draftOpensubtitlesEnabled;
+    final opensubtitlesUsername = _opensubtitlesUsernameController.text.trim();
+    final opensubtitlesPassword = _opensubtitlesPasswordController.text;
+    final subdlEnabled = _draftSubdlEnabled;
+    final subdlApiKey = _subdlApiKeyController.text.trim();
+    final subtitlePreferredLanguages = _draftSubtitlePreferredLanguages();
+    final subtitleSearchMaxValidatedCandidates =
+        _draftSubtitleSearchMaxValidatedCandidates();
+    Future<void> save() => controller.savePlaybackSubtitlePreferences(
+          subtitlePreference: subtitlePreference,
+          subtitleScale: subtitleScale,
+          onlineSubtitleSources: onlineSubtitleSources,
+          assrtToken: assrtToken,
+          opensubtitlesEnabled: opensubtitlesEnabled,
+          opensubtitlesUsername: opensubtitlesUsername,
+          opensubtitlesPassword: opensubtitlesPassword,
+          subdlEnabled: subdlEnabled,
+          subdlApiKey: subdlApiKey,
+          subtitlePreferredLanguages: subtitlePreferredLanguages,
+          subtitleSearchMaxValidatedCandidates:
+              subtitleSearchMaxValidatedCandidates,
+        );
+    if (flush) {
+      _autoSave.flush(
+        fingerprint: _draftFingerprint(),
+        save: save,
+      );
+    } else {
+      _autoSave.schedule(
+        fingerprint: _draftFingerprint(),
+        save: save,
+      );
     }
+  }
+
+  void _closePage() {
+    _flushAutoSave();
+    Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return PopScope<void>(
-      canPop: false,
+      canPop: true,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop || _closing) {
-          return;
+        if (didPop) {
+          _flushAutoSave();
         }
-        unawaited(_handleCloseRequest());
       },
       child: SettingsPageScaffold(
-        onBack: () => unawaited(_handleCloseRequest()),
+        onBack: _closePage,
         children: [
           Text(
             '字幕',

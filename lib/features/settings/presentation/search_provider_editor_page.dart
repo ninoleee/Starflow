@@ -8,6 +8,7 @@ import 'package:starflow/features/search/data/cloud_saver_api_client.dart';
 import 'package:starflow/features/search/data/pansou_api_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/presentation/settings_auto_save_coordinator.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
@@ -40,7 +41,8 @@ class _SearchProviderEditorPageState
   late bool _cloudTypesExpanded;
   late Set<SearchCloudType> _selectedCloudTypes;
   bool _didDelete = false;
-  bool _skipAutoSaveOnPop = false;
+  bool _draftHasBeenPersisted = false;
+  final SettingsAutoSaveCoordinator _autoSave = SettingsAutoSaveCoordinator();
   bool _isTestingConnection = false;
   bool? _connectionTestSucceeded;
   String _connectionTestMessage = '';
@@ -78,10 +80,19 @@ class _SearchProviderEditorPageState
     if (e == null) {
       _applyDefaultsForKind(_kind);
     }
+    _draftHasBeenPersisted = e != null;
+    for (final controller in _draftTextControllers) {
+      controller.addListener(_scheduleAutoSave);
+    }
+    _autoSave.markCurrentAsSaved(_draftFingerprint(_buildDraftConfig()));
   }
 
   @override
   void dispose() {
+    for (final controller in _draftTextControllers) {
+      controller.removeListener(_scheduleAutoSave);
+    }
+    _autoSave.dispose();
     _nameController.dispose();
     _endpointController.dispose();
     _apiKeyController.dispose();
@@ -90,6 +101,64 @@ class _SearchProviderEditorPageState
     _blockedKeywordsController.dispose();
     _maxTitleLengthController.dispose();
     super.dispose();
+  }
+
+  List<TextEditingController> get _draftTextControllers => [
+        _nameController,
+        _endpointController,
+        _apiKeyController,
+        _usernameController,
+        _passwordController,
+        _blockedKeywordsController,
+        _maxTitleLengthController,
+      ];
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _scheduleAutoSave();
+  }
+
+  String _draftFingerprint(SearchProviderConfig draft) =>
+      jsonEncode(draft.toJson());
+
+  void _scheduleAutoSave() {
+    if (!mounted ||
+        _didDelete ||
+        (!_draftHasBeenPersisted && !_hasMeaningfulDraft())) {
+      return;
+    }
+    final draft = _buildDraftConfig();
+    final controller = ref.read(settingsControllerProvider.notifier);
+    _autoSave.schedule(
+      fingerprint: _draftFingerprint(draft),
+      save: () async {
+        await controller.saveSearchProvider(draft);
+        _draftHasBeenPersisted = true;
+      },
+    );
+  }
+
+  void _flushAutoSave() {
+    if (!mounted ||
+        _didDelete ||
+        (!_draftHasBeenPersisted && !_hasMeaningfulDraft())) {
+      return;
+    }
+    final draft = _buildDraftConfig();
+    final controller = ref.read(settingsControllerProvider.notifier);
+    _autoSave.flush(
+      fingerprint: _draftFingerprint(draft),
+      save: () async {
+        await controller.saveSearchProvider(draft);
+        _draftHasBeenPersisted = true;
+      },
+    );
+  }
+
+  void _closePage() {
+    _flushAutoSave();
+    Navigator.of(context).pop();
   }
 
   bool _hasMeaningfulDraft() {
@@ -177,58 +246,6 @@ class _SearchProviderEditorPageState
       return;
     }
     setState(() => _applyDefaultsForKind(selected));
-  }
-
-  Future<void> _saveDraft({bool popAfterSave = true}) async {
-    if (_didDelete || !_hasMeaningfulDraft()) {
-      if (popAfterSave && mounted) {
-        Navigator.of(context).pop();
-      }
-      return;
-    }
-
-    await ref.read(settingsControllerProvider.notifier).saveSearchProvider(
-          _buildDraftConfig(),
-        );
-    if (popAfterSave && mounted) {
-      _skipAutoSaveOnPop = true;
-      Navigator.of(context).pop();
-    }
-  }
-
-  bool _hasUnsavedChanges() {
-    if (_didDelete) {
-      return false;
-    }
-    final initial = widget.initial;
-    if (initial == null) {
-      return _hasMeaningfulDraft();
-    }
-    return jsonEncode(_buildDraftConfig().toJson()) !=
-        jsonEncode(initial.toJson());
-  }
-
-  Future<void> _discardAndClose() async {
-    _skipAutoSaveOnPop = true;
-    if (mounted) {
-      Navigator.of(context).pop();
-    }
-  }
-
-  Future<void> _handleCloseRequest() async {
-    if (_skipAutoSaveOnPop || _didDelete) {
-      return;
-    }
-    if (!_hasUnsavedChanges()) {
-      await _discardAndClose();
-      return;
-    }
-    final action = await showSettingsCloseConfirmDialog(context);
-    if (action == SettingsCloseAction.discard) {
-      await _discardAndClose();
-    } else if (action == SettingsCloseAction.save) {
-      await _saveDraft();
-    }
   }
 
   Future<void> _testConnection() async {
@@ -340,11 +357,22 @@ class _SearchProviderEditorPageState
     if (ok != true || !mounted) {
       return;
     }
-    await ref.read(settingsControllerProvider.notifier).removeSearchProvider(
-          _providerId,
-        );
     _didDelete = true;
-    _skipAutoSaveOnPop = true;
+    _autoSave.cancelPending();
+    try {
+      await _autoSave.drain();
+      await ref.read(settingsControllerProvider.notifier).removeSearchProvider(
+            _providerId,
+          );
+    } catch (error) {
+      _didDelete = false;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('删除搜索服务失败：$error')),
+        );
+      }
+      return;
+    }
     if (!mounted) {
       return;
     }
@@ -357,20 +385,14 @@ class _SearchProviderEditorPageState
   @override
   Widget build(BuildContext context) {
     return PopScope<void>(
-      canPop: false,
+      canPop: true,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop || _skipAutoSaveOnPop || _didDelete) {
-          return;
+        if (didPop) {
+          _flushAutoSave();
         }
-        _handleCloseRequest();
       },
       child: SettingsPageScaffold(
-        onBack: _handleCloseRequest,
-        trailing: SettingsToolbarButton(
-          label: '保存',
-          icon: Icons.save_rounded,
-          onPressed: _saveDraft,
-        ),
+        onBack: _closePage,
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: [
           Text(

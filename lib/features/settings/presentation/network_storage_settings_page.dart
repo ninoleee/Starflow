@@ -11,6 +11,7 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/quark_directory_manager_page.dart';
 import 'package:starflow/features/settings/presentation/quark_folder_picker_page.dart';
+import 'package:starflow/features/settings/presentation/settings_auto_save_coordinator.dart';
 import 'package:starflow/features/settings/presentation/webdav_directory_picker_page.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
@@ -82,7 +83,7 @@ class NetworkStorageSettingsPage extends ConsumerWidget {
     NetworkStorageEditorSection section,
   ) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => NetworkStorageEditorPage(
           initial: initial,
           section: section,
@@ -119,7 +120,7 @@ class _NetworkStorageEditorPageState
   late bool _syncDeleteQuarkEnabled;
   late List<NetworkStorageWebDavDirectory> _syncDeleteQuarkWebDavDirectories;
   late Set<String> _refreshSourceIds;
-  bool _skipAutoSaveOnPop = false;
+  final SettingsAutoSaveCoordinator _autoSave = SettingsAutoSaveCoordinator();
   bool _isTestingQuarkConnection = false;
   bool _isTestingSmartStrm = false;
 
@@ -156,16 +157,70 @@ class _NetworkStorageEditorPageState
       ...widget.initial.syncDeleteQuarkWebDavDirectories,
     ];
     _refreshSourceIds = widget.initial.refreshMediaSourceIds.toSet();
+    for (final controller in _draftTextControllers) {
+      controller.addListener(_scheduleAutoSave);
+    }
+    _autoSave.markCurrentAsSaved(_draftFingerprint(widget.initial));
   }
 
   @override
   void dispose() {
+    for (final controller in _draftTextControllers) {
+      controller.removeListener(_scheduleAutoSave);
+    }
+    _autoSave.dispose();
     _quarkCookieController.dispose();
     _smartStrmWebhookController.dispose();
     _smartStrmTaskNameController.dispose();
     _smartStrmDelayController.dispose();
     _refreshDelayController.dispose();
     super.dispose();
+  }
+
+  List<TextEditingController> get _draftTextControllers => [
+        _quarkCookieController,
+        _smartStrmWebhookController,
+        _smartStrmTaskNameController,
+        _smartStrmDelayController,
+        _refreshDelayController,
+      ];
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _scheduleAutoSave();
+  }
+
+  String _draftFingerprint(NetworkStorageConfig draft) =>
+      jsonEncode(draft.toJson());
+
+  void _scheduleAutoSave() {
+    if (!mounted) {
+      return;
+    }
+    final draft = _buildDraft();
+    final controller = ref.read(settingsControllerProvider.notifier);
+    _autoSave.schedule(
+      fingerprint: _draftFingerprint(draft),
+      save: () => controller.saveNetworkStorage(draft),
+    );
+  }
+
+  void _flushAutoSave() {
+    if (!mounted) {
+      return;
+    }
+    final draft = _buildDraft();
+    final controller = ref.read(settingsControllerProvider.notifier);
+    _autoSave.flush(
+      fingerprint: _draftFingerprint(draft),
+      save: () => controller.saveNetworkStorage(draft),
+    );
+  }
+
+  void _closePage() {
+    _flushAutoSave();
+    Navigator.of(context).pop();
   }
 
   List<MediaSourceConfig> _refreshableMediaSources(AppSettings settings) {
@@ -275,44 +330,6 @@ class _NetworkStorageEditorPageState
     return '${uri.host}$path';
   }
 
-  Future<void> _saveDraft({bool popAfterSave = true}) async {
-    await ref
-        .read(settingsControllerProvider.notifier)
-        .saveNetworkStorage(_buildDraft());
-    if (popAfterSave && mounted) {
-      _skipAutoSaveOnPop = true;
-      Navigator.of(context).pop();
-    }
-  }
-
-  bool _hasUnsavedChanges() {
-    return jsonEncode(_buildDraft().toJson()) !=
-        jsonEncode(widget.initial.toJson());
-  }
-
-  Future<void> _discardAndClose() async {
-    _skipAutoSaveOnPop = true;
-    if (mounted) {
-      Navigator.of(context).pop();
-    }
-  }
-
-  Future<void> _handleCloseRequest() async {
-    if (_skipAutoSaveOnPop) {
-      return;
-    }
-    if (!_hasUnsavedChanges()) {
-      await _discardAndClose();
-      return;
-    }
-    final action = await showSettingsCloseConfirmDialog(context);
-    if (action == SettingsCloseAction.discard) {
-      await _discardAndClose();
-    } else if (action == SettingsCloseAction.save) {
-      await _saveDraft();
-    }
-  }
-
   Future<void> _testQuarkConnection() async {
     FocusScope.of(context).unfocus();
     final cookie = _quarkCookieController.text.trim();
@@ -359,7 +376,7 @@ class _NetworkStorageEditorPageState
     }
 
     final picked = await Navigator.of(context).push<QuarkDirectoryEntry>(
-      NoAnimationMaterialPageRoute(
+      SettingsMaterialPageRoute(
         builder: (context) => QuarkFolderPickerPage(
           cookie: cookie,
           initialFid: _quarkFolderId,
@@ -388,7 +405,7 @@ class _NetworkStorageEditorPageState
     }
 
     await Navigator.of(context).push<void>(
-      NoAnimationMaterialPageRoute(
+      SettingsMaterialPageRoute(
         builder: (context) => QuarkDirectoryManagerPage(
           cookie: cookie,
           initialFid: _quarkFolderId,
@@ -423,7 +440,7 @@ class _NetworkStorageEditorPageState
             .trim()
         : source.libraryPath.trim();
     final picked = await Navigator.of(context).push<String>(
-      NoAnimationMaterialPageRoute<String>(
+      SettingsMaterialPageRoute<String>(
         builder: (context) => WebDavDirectoryPickerPage(
           source: source,
           initialPath: initialPath,
@@ -510,20 +527,14 @@ class _NetworkStorageEditorPageState
         _refreshSourceIds.intersection(refreshableSourceIds);
 
     return PopScope<void>(
-      canPop: false,
+      canPop: true,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop || _skipAutoSaveOnPop) {
-          return;
+        if (didPop) {
+          _flushAutoSave();
         }
-        _handleCloseRequest();
       },
       child: SettingsPageScaffold(
-        onBack: _handleCloseRequest,
-        trailing: SettingsToolbarButton(
-          label: '保存',
-          icon: Icons.save_rounded,
-          onPressed: _saveDraft,
-        ),
+        onBack: _closePage,
         children: [
           Text(
             switch (widget.section) {

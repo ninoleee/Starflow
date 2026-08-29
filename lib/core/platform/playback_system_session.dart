@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-const playbackSystemSessionBackgroundPositionInterval = Duration(seconds: 4);
+const playbackSystemSessionBackgroundPositionInterval = Duration(seconds: 10);
 
 bool shouldExposePlaybackSystemSession({
   required bool isForeground,

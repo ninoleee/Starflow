@@ -5,15 +5,8 @@ import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
-import 'package:starflow/core/widgets/starflow_action_dialog.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/settings/presentation/settings_version_label.dart';
-
-enum SettingsCloseAction {
-  cancel,
-  discard,
-  save,
-}
 
 class SettingsPageScaffold extends StatelessWidget {
   const SettingsPageScaffold({
@@ -588,35 +581,6 @@ class SettingsCheckboxDialogSection<T> {
 
   final String title;
   final List<SettingsCheckboxDialogOption<T>> options;
-}
-
-Future<SettingsCloseAction> showSettingsCloseConfirmDialog(
-  BuildContext context,
-) async {
-  final action = await showStarflowActionDialog<SettingsCloseAction>(
-    context: context,
-    title: '保存修改？',
-    message: '当前页面有未保存的修改，返回前要怎么处理？',
-    actions: const [
-      StarflowDialogAction<SettingsCloseAction>(
-        label: '取消',
-        value: SettingsCloseAction.cancel,
-        variant: StarflowButtonVariant.ghost,
-        autofocus: true,
-      ),
-      StarflowDialogAction<SettingsCloseAction>(
-        label: '不保存',
-        value: SettingsCloseAction.discard,
-        variant: StarflowButtonVariant.secondary,
-      ),
-      StarflowDialogAction<SettingsCloseAction>(
-        label: '保存',
-        value: SettingsCloseAction.save,
-        variant: StarflowButtonVariant.secondary,
-      ),
-    ],
-  );
-  return action ?? SettingsCloseAction.cancel;
 }
 
 Future<T?> showSettingsOptionDialog<T>({

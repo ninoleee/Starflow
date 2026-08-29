@@ -10,6 +10,7 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/presentation/quark_folder_picker_page.dart';
+import 'package:starflow/features/settings/presentation/settings_auto_save_coordinator.dart';
 import 'package:starflow/features/settings/presentation/webdav_directory_picker_page.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
@@ -60,7 +61,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   late bool _webDavSidecarScrapingEnabled;
   late bool _webDavSeriesScrapeUsesDirectoryTitleOnly;
   bool _didDelete = false;
-  bool _skipAutoSaveOnPop = false;
+  bool _draftHasBeenPersisted = false;
+  final SettingsAutoSaveCoordinator _autoSave = SettingsAutoSaveCoordinator();
 
   @override
   void initState() {
@@ -104,11 +106,20 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _webDavSeriesScrapeUsesDirectoryTitleOnly =
         e?.webDavSeriesScrapeUsesDirectoryTitleOnly ?? false;
     _endpointController.addListener(_handleEndpointChanged);
+    for (final controller in _draftTextControllers) {
+      controller.addListener(_scheduleAutoSave);
+    }
+    _draftHasBeenPersisted = e != null;
+    _autoSave.markCurrentAsSaved(_draftFingerprint(_draftConfig()));
   }
 
   @override
   void dispose() {
     _endpointController.removeListener(_handleEndpointChanged);
+    for (final controller in _draftTextControllers) {
+      controller.removeListener(_scheduleAutoSave);
+    }
+    _autoSave.dispose();
     _nameController.dispose();
     _endpointController.dispose();
     _usernameController.dispose();
@@ -117,6 +128,66 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _webDavExcludedKeywordsController.dispose();
     _webDavSeriesTitleFilterKeywordsController.dispose();
     super.dispose();
+  }
+
+  List<TextEditingController> get _draftTextControllers => [
+        _nameController,
+        _endpointController,
+        _usernameController,
+        _passwordController,
+        _tokenController,
+        _webDavExcludedKeywordsController,
+        _webDavSeriesTitleFilterKeywordsController,
+      ];
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _scheduleAutoSave();
+  }
+
+  String _draftFingerprint(MediaSourceConfig draft) =>
+      jsonEncode(draft.toJson());
+
+  void _scheduleAutoSave() {
+    if (!mounted ||
+        _didDelete ||
+        (!_draftHasBeenPersisted && !_hasMeaningfulDraft())) {
+      return;
+    }
+    final draft = _draftConfig();
+    final controller = ref.read(settingsControllerProvider.notifier);
+    _autoSave.schedule(
+      fingerprint: _draftFingerprint(draft),
+      save: () async {
+        await controller.saveMediaSource(draft);
+        _draftHasBeenPersisted = true;
+        _savedFeaturedSectionIds = [...draft.featuredSectionIds];
+      },
+    );
+  }
+
+  void _flushAutoSave() {
+    if (!mounted ||
+        _didDelete ||
+        (!_draftHasBeenPersisted && !_hasMeaningfulDraft())) {
+      return;
+    }
+    final draft = _draftConfig();
+    final controller = ref.read(settingsControllerProvider.notifier);
+    _autoSave.flush(
+      fingerprint: _draftFingerprint(draft),
+      save: () async {
+        await controller.saveMediaSource(draft);
+        _draftHasBeenPersisted = true;
+        _savedFeaturedSectionIds = [...draft.featuredSectionIds];
+      },
+    );
+  }
+
+  void _closePage() {
+    _flushAutoSave();
+    Navigator.of(context).pop();
   }
 
   String get _quarkCookie {
@@ -226,24 +297,6 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         _webDavExcludedKeywordsController.text.trim().isNotEmpty ||
         _webDavSeriesTitleFilterKeywordsController.text.trim().isNotEmpty ||
         widget.initial != null;
-  }
-
-  Future<void> _saveDraft({bool popAfterSave = true}) async {
-    if (_didDelete || !_hasMeaningfulDraft()) {
-      if (popAfterSave && mounted) {
-        Navigator.of(context).pop();
-      }
-      return;
-    }
-
-    final config = _draftConfig();
-    await ref.read(settingsControllerProvider.notifier).saveMediaSource(config);
-    _savedFeaturedSectionIds = [...config.featuredSectionIds];
-
-    if (popAfterSave && mounted) {
-      _skipAutoSaveOnPop = true;
-      Navigator.of(context).pop();
-    }
   }
 
   String _defaultConnectionMessage(MediaSourceKind kind) {
@@ -499,7 +552,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     }
 
     final picked = await Navigator.of(context).push<QuarkDirectoryEntry>(
-      NoAnimationMaterialPageRoute<QuarkDirectoryEntry>(
+      SettingsMaterialPageRoute<QuarkDirectoryEntry>(
         builder: (context) => QuarkFolderPickerPage(
           cookie: cookie,
           initialFid: _selectedQuarkFolderId.trim().isEmpty
@@ -605,7 +658,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     }
 
     final pickedPath = await Navigator.of(context).push<String>(
-      NoAnimationMaterialPageRoute<String>(
+      SettingsMaterialPageRoute<String>(
         builder: (context) => WebDavDirectoryPickerPage(
           source: _draftConfig(),
           initialPath: _selectedNasPath,
@@ -708,42 +761,6 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     _applyKindSelection(selected);
   }
 
-  Future<void> _onSave() => _saveDraft();
-
-  bool _hasUnsavedChanges() {
-    if (_didDelete) {
-      return false;
-    }
-    final initial = widget.initial;
-    if (initial == null) {
-      return _hasMeaningfulDraft();
-    }
-    return jsonEncode(_draftConfig().toJson()) != jsonEncode(initial.toJson());
-  }
-
-  Future<void> _discardAndClose() async {
-    _skipAutoSaveOnPop = true;
-    if (mounted) {
-      Navigator.of(context).pop();
-    }
-  }
-
-  Future<void> _handleCloseRequest() async {
-    if (_skipAutoSaveOnPop || _didDelete) {
-      return;
-    }
-    if (!_hasUnsavedChanges()) {
-      await _discardAndClose();
-      return;
-    }
-    final action = await showSettingsCloseConfirmDialog(context);
-    if (action == SettingsCloseAction.discard) {
-      await _discardAndClose();
-    } else if (action == SettingsCloseAction.save) {
-      await _saveDraft();
-    }
-  }
-
   Future<void> _confirmDeleteMediaSource() async {
     final name = _nameController.text.trim().isEmpty
         ? '此媒体源'
@@ -772,11 +789,22 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     if (ok != true || !mounted) {
       return;
     }
-    await ref.read(settingsControllerProvider.notifier).removeMediaSource(
-          _sourceId,
-        );
     _didDelete = true;
-    _skipAutoSaveOnPop = true;
+    _autoSave.cancelPending();
+    try {
+      await _autoSave.drain();
+      await ref.read(settingsControllerProvider.notifier).removeMediaSource(
+            _sourceId,
+          );
+    } catch (error) {
+      _didDelete = false;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('删除媒体源失败：$error')),
+        );
+      }
+      return;
+    }
     if (!mounted) {
       return;
     }
@@ -799,20 +827,14 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     );
 
     return PopScope<void>(
-      canPop: false,
+      canPop: true,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop || _skipAutoSaveOnPop || _didDelete) {
-          return;
+        if (didPop) {
+          _flushAutoSave();
         }
-        _handleCloseRequest();
       },
       child: SettingsPageScaffold(
-        onBack: _handleCloseRequest,
-        trailing: SettingsToolbarButton(
-          label: '保存',
-          icon: Icons.save_rounded,
-          onPressed: _onSave,
-        ),
+        onBack: _closePage,
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: [
           Text(

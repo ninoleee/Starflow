@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/presentation/settings_auto_save_coordinator.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
@@ -24,7 +25,7 @@ class _DoubanAccountEditorPageState
   late final TextEditingController _userIdController;
   late final TextEditingController _sessionController;
   late bool _enabled;
-  bool _skipAutoSaveOnPop = false;
+  final SettingsAutoSaveCoordinator _autoSave = SettingsAutoSaveCoordinator();
 
   @override
   void initState() {
@@ -33,78 +34,78 @@ class _DoubanAccountEditorPageState
     _userIdController = TextEditingController(text: c.userId);
     _sessionController = TextEditingController(text: c.sessionCookie);
     _enabled = c.enabled;
+    _userIdController.addListener(_scheduleAutoSave);
+    _sessionController.addListener(_scheduleAutoSave);
+    _autoSave.markCurrentAsSaved(_draftFingerprint(c));
   }
 
   @override
   void dispose() {
+    _userIdController.removeListener(_scheduleAutoSave);
+    _sessionController.removeListener(_scheduleAutoSave);
+    _autoSave.dispose();
     _userIdController.dispose();
     _sessionController.dispose();
     super.dispose();
   }
 
-  Future<void> _saveDraft({bool popAfterSave = true}) async {
-    await ref.read(settingsControllerProvider.notifier).saveDoubanAccount(
-          DoubanAccountConfig(
-            enabled: _enabled,
-            userId: _userIdController.text.trim(),
-            sessionCookie: _sessionController.text.trim(),
-          ),
-        );
-    if (popAfterSave && mounted) {
-      _skipAutoSaveOnPop = true;
-      Navigator.of(context).pop();
-    }
-  }
-
-  bool _hasUnsavedChanges() {
-    final draft = DoubanAccountConfig(
+  DoubanAccountConfig _buildDraft() {
+    return DoubanAccountConfig(
       enabled: _enabled,
       userId: _userIdController.text.trim(),
       sessionCookie: _sessionController.text.trim(),
     );
-    return jsonEncode(draft.toJson()) != jsonEncode(widget.initial.toJson());
   }
 
-  Future<void> _discardAndClose() async {
-    _skipAutoSaveOnPop = true;
-    if (mounted) {
-      Navigator.of(context).pop();
-    }
+  String _draftFingerprint(DoubanAccountConfig draft) =>
+      jsonEncode(draft.toJson());
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _scheduleAutoSave();
   }
 
-  Future<void> _handleCloseRequest() async {
-    if (_skipAutoSaveOnPop) {
+  void _scheduleAutoSave() {
+    if (!mounted) {
       return;
     }
-    if (!_hasUnsavedChanges()) {
-      await _discardAndClose();
+    final draft = _buildDraft();
+    final controller = ref.read(settingsControllerProvider.notifier);
+    _autoSave.schedule(
+      fingerprint: _draftFingerprint(draft),
+      save: () => controller.saveDoubanAccount(draft),
+    );
+  }
+
+  void _flushAutoSave() {
+    if (!mounted) {
       return;
     }
-    final action = await showSettingsCloseConfirmDialog(context);
-    if (action == SettingsCloseAction.discard) {
-      await _discardAndClose();
-    } else if (action == SettingsCloseAction.save) {
-      await _saveDraft();
-    }
+    final draft = _buildDraft();
+    final controller = ref.read(settingsControllerProvider.notifier);
+    _autoSave.flush(
+      fingerprint: _draftFingerprint(draft),
+      save: () => controller.saveDoubanAccount(draft),
+    );
+  }
+
+  void _closePage() {
+    _flushAutoSave();
+    Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
     return PopScope<void>(
-      canPop: false,
+      canPop: true,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop || _skipAutoSaveOnPop) {
-          return;
+        if (didPop) {
+          _flushAutoSave();
         }
-        _handleCloseRequest();
       },
       child: SettingsPageScaffold(
-        onBack: _handleCloseRequest,
-        trailing: SettingsToolbarButton(
-          label: '保存',
-          icon: Icons.save_rounded,
-          onPressed: _saveDraft,
-        ),
+        onBack: _closePage,
         children: [
           Text('豆瓣账号', style: Theme.of(context).textTheme.headlineSmall),
           const SettingsSectionTitle(label: '账号'),

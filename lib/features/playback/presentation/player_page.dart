@@ -112,7 +112,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   static const int _maxPlaybackAttempts = 3;
   static const _kSeekStep = Duration(seconds: 10);
   static const _kSubtitleDelaySteps = <double>[-2, -1, -0.5, 0, 0.5, 1, 2];
-  static const _kProgressPersistInterval = Duration(seconds: 8);
+  static const _kProgressPersistInterval = Duration(seconds: 10);
   static const int _kDefaultMpvBufferSizeBytes = 32 * 1024 * 1024;
   static const int _kNetworkMpvBufferSizeBytes = 64 * 1024 * 1024;
   static const int _kHeavyMpvBufferSizeBytes = 96 * 1024 * 1024;

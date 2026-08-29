@@ -207,62 +207,10 @@ void main() {
       expect(updatedItems.single.playbackItemId, 'new-file');
     });
 
-    test(
-        'incremental refresh preserves persistent WebDAV scan cache by default',
+    test('manual incremental refresh invalidates persistent WebDAV scan cache',
         () async {
       final database = await databaseFactoryMemory.openDatabase(
         'media-refresh-cache-invalidation-test',
-      );
-      addTearDown(database.close);
-      final cacheStore = WebDavDirectoryCacheStore(
-        databaseOpener: () async => database,
-      );
-      await cacheStore.save('stale-subtree', const <String, dynamic>{
-        'sourceId': 'nas-main',
-        'items': <Object>[],
-      });
-      final repository = _ImmediateRefreshMediaRepository(
-        onRefresh: () async {
-          expect(await cacheStore.load('stale-subtree'), isNotNull);
-        },
-      );
-      final container = ProviderContainer(
-        overrides: [
-          appSettingsProvider.overrideWithValue(
-            SeedData.defaultSettings.copyWith(
-              mediaSources: const [
-                MediaSourceConfig(
-                  id: 'nas-main',
-                  name: 'WebDAV',
-                  kind: MediaSourceKind.nas,
-                  endpoint: 'https://dav.example.com/movies/',
-                  enabled: true,
-                ),
-              ],
-              homeModules: const [],
-            ),
-          ),
-          mediaRepositoryProvider.overrideWithValue(repository),
-          webDavDirectoryCacheStoreProvider.overrideWithValue(cacheStore),
-        ],
-      );
-      addTearDown(container.dispose);
-
-      await container
-          .read(mediaRefreshCoordinatorProvider)
-          .refreshSelectedSources(
-        sourceIds: const ['nas-main'],
-      );
-
-      expect(repository.refreshSourceIds, const ['nas-main']);
-      expect(await cacheStore.load('stale-subtree'), isNotNull);
-    });
-
-    test(
-        'incremental refresh can explicitly invalidate persistent WebDAV cache',
-        () async {
-      final database = await databaseFactoryMemory.openDatabase(
-        'media-refresh-cache-explicit-invalidation-test',
       );
       addTearDown(database.close);
       final cacheStore = WebDavDirectoryCacheStore(
@@ -308,6 +256,57 @@ void main() {
 
       expect(repository.refreshSourceIds, const ['nas-main']);
       expect(await cacheStore.load('stale-subtree'), isNull);
+    });
+
+    test('incremental refresh can explicitly preserve persistent WebDAV cache',
+        () async {
+      final database = await databaseFactoryMemory.openDatabase(
+        'media-refresh-cache-explicit-invalidation-test',
+      );
+      addTearDown(database.close);
+      final cacheStore = WebDavDirectoryCacheStore(
+        databaseOpener: () async => database,
+      );
+      await cacheStore.save('stale-subtree', const <String, dynamic>{
+        'sourceId': 'nas-main',
+        'items': <Object>[],
+      });
+      final repository = _ImmediateRefreshMediaRepository(
+        onRefresh: () async {
+          expect(await cacheStore.load('stale-subtree'), isNotNull);
+        },
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [
+                MediaSourceConfig(
+                  id: 'nas-main',
+                  name: 'WebDAV',
+                  kind: MediaSourceKind.nas,
+                  endpoint: 'https://dav.example.com/movies/',
+                  enabled: true,
+                ),
+              ],
+              homeModules: const [],
+            ),
+          ),
+          mediaRepositoryProvider.overrideWithValue(repository),
+          webDavDirectoryCacheStoreProvider.overrideWithValue(cacheStore),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(mediaRefreshCoordinatorProvider)
+          .refreshSelectedSources(
+        sourceIds: const ['nas-main'],
+        invalidateWebDavDirectoryCache: false,
+      );
+
+      expect(repository.refreshSourceIds, const ['nas-main']);
+      expect(await cacheStore.load('stale-subtree'), isNotNull);
     });
 
     test('cancelling background tasks stops remaining Emby refreshes',

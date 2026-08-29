@@ -26,7 +26,6 @@ class _WebDavDirectoryPickerPageState
   late Future<List<MediaCollection>> _foldersFuture;
   final Map<String, Future<List<MediaCollection>>> _folderFutureCache =
       <String, Future<List<MediaCollection>>>{};
-  bool _skipAutoSaveOnPop = false;
 
   @override
   void initState() {
@@ -112,89 +111,72 @@ class _WebDavDirectoryPickerPageState
   @override
   Widget build(BuildContext context) {
     final parentPath = _parentPath(_currentPath);
-    return PopScope<String>(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, result) {
-        if (didPop || _skipAutoSaveOnPop) {
-          return;
-        }
-        _skipAutoSaveOnPop = true;
-        Navigator.of(context).pop(_currentPath);
-      },
-      child: SettingsPageScaffold(
-        onBack: () {
-          _skipAutoSaveOnPop = true;
-          Navigator.of(context).pop(_currentPath);
-        },
-        trailing: SettingsToolbarButton(
-          label: '选这里',
-          icon: Icons.check_rounded,
-          onPressed: () {
-            _skipAutoSaveOnPop = true;
-            Navigator.of(context).pop(_currentPath);
-          },
+    return SettingsPageScaffold(
+      onBack: () => Navigator.of(context).pop(),
+      trailing: SettingsToolbarButton(
+        label: '选这里',
+        icon: Icons.check_rounded,
+        onPressed: () => Navigator.of(context).pop(_currentPath),
+      ),
+      children: [
+        const SettingsSectionTitle(label: '当前路径'),
+        SelectableText(
+          _pathLabel(_currentPath),
+          style: Theme.of(context).textTheme.bodyMedium,
         ),
-        children: [
-          const SettingsSectionTitle(label: '当前路径'),
-          SelectableText(
-            _pathLabel(_currentPath),
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          if (parentPath != null) ...[
-            const SizedBox(height: 16),
-            SettingsActionButton(
-              label: '返回上一级目录',
-              icon: Icons.arrow_upward_rounded,
-              autofocus: true,
-              focusId: 'webdav-directory:parent',
-              onPressed: () => _setCurrentPath(parentPath),
-            ),
-          ],
-          const SettingsSectionTitle(label: '子文件夹'),
-          FutureBuilder<List<MediaCollection>>(
-            future: _foldersFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Padding(
-                  padding: EdgeInsets.only(top: 40),
-                  child: Center(child: CircularProgressIndicator()),
-                );
-              }
-              if (snapshot.hasError) {
-                return Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text('读取路径失败：${snapshot.error}'),
-                );
-              }
-              final folders = snapshot.data ?? const <MediaCollection>[];
-              if (folders.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.only(top: 8),
-                  child: Text('当前路径下没有子文件夹，可以直接选择这里。'),
-                );
-              }
-              return Column(
-                children: [
-                  for (final folder in folders)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: SettingsSelectionTile(
-                        title: folder.title,
-                        subtitle: folder.id,
-                        value: '进入',
-                        leading: const Icon(Icons.folder_open_rounded),
-                        autofocus:
-                            parentPath == null && folder == folders.first,
-                        focusId: 'webdav-directory:${folder.id}',
-                        onPressed: () => _setCurrentPath(folder.id),
-                      ),
-                    ),
-                ],
-              );
-            },
+        if (parentPath != null) ...[
+          const SizedBox(height: 16),
+          SettingsActionButton(
+            label: '返回上一级目录',
+            icon: Icons.arrow_upward_rounded,
+            autofocus: true,
+            focusId: 'webdav-directory:parent',
+            onPressed: () => _setCurrentPath(parentPath),
           ),
         ],
-      ),
+        const SettingsSectionTitle(label: '子文件夹'),
+        FutureBuilder<List<MediaCollection>>(
+          future: _foldersFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Padding(
+                padding: EdgeInsets.only(top: 40),
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (snapshot.hasError) {
+              return Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text('读取路径失败：${snapshot.error}'),
+              );
+            }
+            final folders = snapshot.data ?? const <MediaCollection>[];
+            if (folders.isEmpty) {
+              return const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text('当前路径下没有子文件夹，可以直接选择这里。'),
+              );
+            }
+            return Column(
+              children: [
+                for (final folder in folders)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: SettingsSelectionTile(
+                      title: folder.title,
+                      subtitle: folder.id,
+                      value: '进入',
+                      leading: const Icon(Icons.folder_open_rounded),
+                      autofocus: parentPath == null && folder == folders.first,
+                      focusId: 'webdav-directory:${folder.id}',
+                      onPressed: () => _setCurrentPath(folder.id),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
     );
   }
 }

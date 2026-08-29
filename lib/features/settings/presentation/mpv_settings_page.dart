@@ -1,9 +1,8 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/application/settings_slice_providers.dart';
+import 'package:starflow/features/settings/presentation/settings_auto_save_coordinator.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 /// MPV 设置一级页。
@@ -23,9 +22,7 @@ class _MpvSettingsPageState extends ConsumerState<MpvSettingsPage> {
   late bool _draftLongPressSpeedBoostEnabled;
   late bool _draftStallAutoRecoveryEnabled;
   late bool _draftAggressiveTuningEnabled;
-  Timer? _autoSaveTimer;
-  Future<void> _saveQueue = Future<void>.value();
-  bool _closing = false;
+  final SettingsAutoSaveCoordinator _autoSave = SettingsAutoSaveCoordinator();
 
   @override
   void initState() {
@@ -41,68 +38,84 @@ class _MpvSettingsPageState extends ConsumerState<MpvSettingsPage> {
         playbackSlice.playbackMpvStallAutoRecoveryEnabled;
     _draftAggressiveTuningEnabled =
         performanceSlice.aggressivePlaybackTuningEnabled;
+    _autoSave.markCurrentAsSaved(_draftFingerprint());
   }
 
   @override
   void dispose() {
-    _autoSaveTimer?.cancel();
+    _autoSave.dispose();
     super.dispose();
   }
 
-  Future<void> _persistDraft() async {
-    await ref
-        .read(settingsControllerProvider.notifier)
-        .savePlaybackMpvPreferences(
-          doubleTapToSeekEnabled: _draftDoubleTapToSeekEnabled,
-          swipeToSeekEnabled: _draftSwipeToSeekEnabled,
-          longPressSpeedBoostEnabled: _draftLongPressSpeedBoostEnabled,
-          stallAutoRecoveryEnabled: _draftStallAutoRecoveryEnabled,
-          aggressiveTuningEnabled: _draftAggressiveTuningEnabled,
-        );
-  }
+  String _draftFingerprint() => [
+        _draftDoubleTapToSeekEnabled,
+        _draftSwipeToSeekEnabled,
+        _draftLongPressSpeedBoostEnabled,
+        _draftStallAutoRecoveryEnabled,
+        _draftAggressiveTuningEnabled,
+      ].join('|');
 
   void _scheduleAutoSave() {
-    if (!mounted || _closing) {
+    if (!mounted) {
       return;
     }
-    _autoSaveTimer?.cancel();
-    _autoSaveTimer = Timer(const Duration(milliseconds: 250), _enqueueSave);
+    final controller = ref.read(settingsControllerProvider.notifier);
+    final doubleTapToSeekEnabled = _draftDoubleTapToSeekEnabled;
+    final swipeToSeekEnabled = _draftSwipeToSeekEnabled;
+    final longPressSpeedBoostEnabled = _draftLongPressSpeedBoostEnabled;
+    final stallAutoRecoveryEnabled = _draftStallAutoRecoveryEnabled;
+    final aggressiveTuningEnabled = _draftAggressiveTuningEnabled;
+    _autoSave.schedule(
+      fingerprint: _draftFingerprint(),
+      save: () => controller.savePlaybackMpvPreferences(
+        doubleTapToSeekEnabled: doubleTapToSeekEnabled,
+        swipeToSeekEnabled: swipeToSeekEnabled,
+        longPressSpeedBoostEnabled: longPressSpeedBoostEnabled,
+        stallAutoRecoveryEnabled: stallAutoRecoveryEnabled,
+        aggressiveTuningEnabled: aggressiveTuningEnabled,
+      ),
+    );
   }
 
-  void _enqueueSave() {
-    _autoSaveTimer = null;
-    _saveQueue = _saveQueue.then((_) => _persistDraft());
-  }
-
-  Future<void> _handleCloseRequest() async {
-    if (_closing) {
+  void _flushAutoSave() {
+    if (!mounted) {
       return;
     }
-    _closing = true;
-    _autoSaveTimer?.cancel();
-    _enqueueSave();
-    try {
-      await _saveQueue;
-    } finally {
-      if (mounted) {
-        Navigator.of(context).pop();
-      }
-    }
+    final controller = ref.read(settingsControllerProvider.notifier);
+    final doubleTapToSeekEnabled = _draftDoubleTapToSeekEnabled;
+    final swipeToSeekEnabled = _draftSwipeToSeekEnabled;
+    final longPressSpeedBoostEnabled = _draftLongPressSpeedBoostEnabled;
+    final stallAutoRecoveryEnabled = _draftStallAutoRecoveryEnabled;
+    final aggressiveTuningEnabled = _draftAggressiveTuningEnabled;
+    _autoSave.flush(
+      fingerprint: _draftFingerprint(),
+      save: () => controller.savePlaybackMpvPreferences(
+        doubleTapToSeekEnabled: doubleTapToSeekEnabled,
+        swipeToSeekEnabled: swipeToSeekEnabled,
+        longPressSpeedBoostEnabled: longPressSpeedBoostEnabled,
+        stallAutoRecoveryEnabled: stallAutoRecoveryEnabled,
+        aggressiveTuningEnabled: aggressiveTuningEnabled,
+      ),
+    );
+  }
+
+  void _closePage() {
+    _flushAutoSave();
+    Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return PopScope<void>(
-      canPop: false,
+      canPop: true,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop || _closing) {
-          return;
+        if (didPop) {
+          _flushAutoSave();
         }
-        unawaited(_handleCloseRequest());
       },
       child: SettingsPageScaffold(
-        onBack: () => unawaited(_handleCloseRequest()),
+        onBack: _closePage,
         children: [
           Text(
             'MPV',

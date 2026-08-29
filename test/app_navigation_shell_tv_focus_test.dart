@@ -80,19 +80,33 @@ void main() {
         isTrue,
       );
 
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(homeNavigationNode.hasPrimaryFocus, isTrue);
+      expect(_contentNode(tester, 'home').hasFocus, isFalse);
+      expect(find.text('退出 Starflow？'), findsNothing);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
       expect(searchNavigationNode.hasPrimaryFocus, isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      expect(_contentNode(tester, 'search').hasPrimaryFocus, isTrue);
 
       final container = ProviderScope.containerOf(
         tester.element(find.byType(AppNavigationShell)),
       );
       final limiter =
           container.read(metadataPrefetchConcurrencyLimiterProvider);
+      expect(limiter.isPausedForForeground, isFalse);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(searchNavigationNode.hasPrimaryFocus, isTrue);
+      expect(_contentNode(tester, 'search').hasFocus, isFalse);
+      expect(find.text('退出 Starflow？'), findsNothing);
       expect(limiter.isPausedForForeground, isFalse);
 
       await tester.binding.handlePopRoute();

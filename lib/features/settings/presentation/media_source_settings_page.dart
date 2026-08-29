@@ -75,7 +75,7 @@ class MediaSourceSettingsPage extends ConsumerWidget {
     MediaSourceConfig? existing,
   }) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => MediaSourceEditorPage(initial: existing),
       ),
     );

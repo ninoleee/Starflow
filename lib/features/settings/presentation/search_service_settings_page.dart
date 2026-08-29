@@ -84,7 +84,7 @@ class SearchServiceSettingsPage extends ConsumerWidget {
     SearchProviderConfig? existing,
   }) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => SearchProviderEditorPage(initial: existing),
       ),
     );

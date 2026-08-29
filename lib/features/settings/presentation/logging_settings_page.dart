@@ -284,7 +284,7 @@ class _LoggingSettingsPageState extends ConsumerState<LoggingSettingsPage> {
 
   Future<void> _openLogExport() {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      NoAnimationMaterialPageRoute<void>(
+      SettingsMaterialPageRoute<void>(
         builder: (context) => const LogExportPage(),
       ),
     );
