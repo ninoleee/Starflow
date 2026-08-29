@@ -3170,6 +3170,7 @@ class NativePlaybackActivity : Activity() {
             seriesKey = seriesKey,
             positionMs = resolvedPosition,
             durationMs = resolvedDuration,
+            synchronous = force,
         )
     }
 
@@ -3200,8 +3201,12 @@ class NativePlaybackActivity : Activity() {
         seriesKey: String,
         positionMs: Long,
         durationMs: Long,
+        synchronous: Boolean,
     ) {
         if (itemKey.isBlank()) {
+            if (synchronous) {
+                logPlayback("native.playback.progress.skipped reason=empty-item-key")
+            }
             return
         }
 
@@ -3262,9 +3267,18 @@ class NativePlaybackActivity : Activity() {
             put("series", series)
             put("skipPreferences", skipPreferences)
         }
-        sharedPreferences.edit()
+        val editor = sharedPreferences.edit()
             .putString(PLAYBACK_MEMORY_STORAGE_KEY, nextSnapshot.toString())
-            .apply()
+        if (synchronous) {
+            val committed = editor.commit()
+            logPlayback(
+                "native.playback.progress.saved " +
+                    "positionMs=$safePosition durationMs=$clampedDuration " +
+                    "committed=$committed",
+            )
+        } else {
+            editor.apply()
+        }
     }
 
     private fun pruneRecentItems(items: JSONObject) {

@@ -31,6 +31,97 @@ void main() {
     expect(group.policy, isA<TvSafeDirectionalFocusTraversalPolicy>());
   });
 
+  testWidgets('safe directional action ignores only an unlaid-out render box',
+      (tester) async {
+    final focusNode = _ThrowingDirectionalFocusNode(
+      StateError('Bad state: RenderBox was not laid out: test'),
+    );
+    addTearDown(focusNode.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Focus(
+          focusNode: focusNode,
+          child: const SizedBox(width: 10, height: 10),
+        ),
+      ),
+    );
+    focusNode.requestFocus();
+    await tester.pump();
+
+    expect(
+      () => TvSafeDirectionalFocusAction().invoke(
+        const DirectionalFocusIntent(TraversalDirection.down),
+      ),
+      returnsNormally,
+    );
+    expect(focusNode.hasPrimaryFocus, isTrue);
+  });
+
+  testWidgets('unlaid-out directional warnings are rate limited',
+      (tester) async {
+    final focusNode = _ThrowingDirectionalFocusNode(
+      StateError('Bad state: RenderBox was not laid out: test'),
+    );
+    addTearDown(focusNode.dispose);
+    var now = DateTime(2026, 8, 29, 22, 0);
+    var warningCount = 0;
+    final action = TvSafeDirectionalFocusAction(
+      now: () => now,
+      onIgnoredUnlaidOutCandidate: (direction, focus, error) {
+        warningCount += 1;
+      },
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Focus(
+          focusNode: focusNode,
+          child: const SizedBox(width: 10, height: 10),
+        ),
+      ),
+    );
+    focusNode.requestFocus();
+    await tester.pump();
+
+    action.invoke(
+      const DirectionalFocusIntent(TraversalDirection.left),
+    );
+    now = now.add(const Duration(seconds: 1));
+    action.invoke(
+      const DirectionalFocusIntent(TraversalDirection.down),
+    );
+    now = now.add(const Duration(seconds: 4));
+    action.invoke(
+      const DirectionalFocusIntent(TraversalDirection.right),
+    );
+
+    expect(warningCount, 2);
+  });
+
+  testWidgets('safe directional action rethrows unrelated state errors',
+      (tester) async {
+    final focusNode = _ThrowingDirectionalFocusNode(
+      StateError('unrelated focus failure'),
+    );
+    addTearDown(focusNode.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Focus(
+          focusNode: focusNode,
+          child: const SizedBox(width: 10, height: 10),
+        ),
+      ),
+    );
+    focusNode.requestFocus();
+    await tester.pump();
+
+    expect(
+      () => TvSafeDirectionalFocusAction().invoke(
+        const DirectionalFocusIntent(TraversalDirection.down),
+      ),
+      throwsStateError,
+    );
+  });
+
   testWidgets('StarflowChipButton keeps unified mobile geometry and selection',
       (tester) async {
     await tester.pumpWidget(
@@ -97,4 +188,15 @@ void main() {
 
     expect(focusedCount, 1);
   });
+}
+
+class _ThrowingDirectionalFocusNode extends FocusNode {
+  _ThrowingDirectionalFocusNode(this.error);
+
+  final StateError error;
+
+  @override
+  bool focusInDirection(TraversalDirection direction) {
+    throw error;
+  }
 }

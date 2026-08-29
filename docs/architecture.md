@@ -92,8 +92,11 @@ lib/
 - `TV` 页面级焦点边界、页头回顶锚点和统一的上下方向焦点兜底
 - `TV` 页面级焦点壳与方向动作面板，便于首页、搜索、媒体库、详情、设置等页共用同一套焦点边界
 - `TvPageFocusScope` 安装 `TvSafeDirectionalFocusTraversalPolicy`：方向寻焦读取候选节点坐标时若遇到动态刷新产生的暂时未布局 `RenderBox`，忽略当前按键并保持原焦点；其他异常仍继续抛出
+- `StarflowApp` 仅覆盖默认 `DirectionalFocusIntent` Action，补齐页面级策略覆盖不到的路由/Overlay 焦点：只捕获 `RenderBox was not laid out` 并忽略当次按键，不做下一帧重试、候选过滤或顺序改写；警告按 Action 实例做 `5s` 限频
 - 首页在重新变为活动页以及 `hasPendingSections` 从 `true` 变为 `false` 时各安排一次下一帧检查；仅在主焦点为空、落在 `FocusScopeNode`、已卸载或不可请求时调用现有侧栏恢复入口，已有可操作焦点时不做任何处理
 - TV 主壳处理返回键时先以 `UnfocusDisposition.scope` 清理当前焦点及作用域历史，再聚焦当前页面对应的侧栏入口；仅当该入口已经持有主焦点时，再次返回才进入退出确认
+- 焦点诊断统一写入 `tv.focus-recovery`：首页实际缺焦恢复为 `info`，返回清理为 `trace`，未布局候选为限频 `warning`；正常寻焦与普通方向键不写日志
+- WebDAV STRM 文本解析在返回播放 URL 前把裸 `#` 替换为 `%23`；已编码地址保持不变，避免文件名中的集号被 URI fragment 规则截断
 - `TV` 焦点进入长列表项时，会尽量把目标控件维持在视口中线附近，并驱动页面一起滚动
 - 页面级保留态异步结果封装：`core/navigation/retained_async_value.dart` 与 `core/navigation/retained_async_controller.dart`
 - 桌面端横向列表的统一左右翻页按钮容器，供首页海报流、剧集横排、剧照横排复用
@@ -751,6 +754,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - Android 原生播放器每次轨道变化都会把音频轨的 MIME、编码标记、声道数、采样率、支持状态和选中状态写入结构化 native 日志；初始化日志同时标记 `audioOutputMode / forcePcmAudioOutput / ffmpegAudioDecoder`
 - Android 原生播放器同时记录视频轨 MIME、编码、尺寸、色彩信息与支持状态；检测到存在视频轨但当前设备全部不支持时，会以 `static=false` 重新请求 Emby 转码流并从原进度继续
 - Android 原生播放器复用每秒运行循环做续播采样，实际仍按约 `10s` 的位置差值节流落盘；内置 `MPV` 和 iOS 原生播放器使用同一量级，生命周期暂停、返回、切集和关闭路径会强制保存
+- Android / iOS 播放记忆仓库使用带 `reload()` 的 legacy SharedPreferences，与原生播放器共享物理键 `flutter.starflow.playback.memory.v1`；首次读取会按 `updatedAt` 合并并迁移旧异步存储快照，返回前台时递增播放历史 revision 使首页和详情页重新读取
 - Android 原生播放器每 `10s` 记录一次位置、时长、缓冲位置、缓冲比例、播放态、首帧状态与视频尺寸；位置不连续事件单独记录旧/新位置和 Media3 原因码
 - iOS 原生播放器容器页当前使用原生 `AVPlayerViewController` 全屏承载播放，不退出 App；它会复用同一份续播记忆，并补了在线字幕搜索入口，但解码走系统链路，当前不提供软硬解切换或字幕偏移
 - 详情页“从头播放”从当前选择生成 `allowResume=false` 的目标，“继续播放”从历史记录恢复具体目标并设置 `allowResume=true`；该字段在播放地址解析后保持不变，内置 `MPV`、Android `ExoPlayer` 和 iOS `AVPlayer` 都以它作为是否读取历史进度的唯一入口语义

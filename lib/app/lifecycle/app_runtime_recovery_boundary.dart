@@ -6,6 +6,7 @@ import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/home/application/home_feed_load_scheduler.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 
 const Duration kAppResumeBackgroundQuietPeriod = Duration(milliseconds: 400);
 const Duration kMemoryPressureBackgroundQuietPeriod = Duration(seconds: 2);
@@ -58,6 +59,7 @@ class _AppRuntimeRecoveryBoundaryState
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      ref.read(playbackHistoryRevisionProvider.notifier).state++;
       _scheduleResume();
       return;
     }

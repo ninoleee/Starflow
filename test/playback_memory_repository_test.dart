@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
@@ -41,6 +44,108 @@ void main() {
     expect(entry.position, const Duration(minutes: 36, seconds: 12));
     expect(entry.duration, const Duration(hours: 2));
     expect(entry.progress, closeTo(0.3016, 0.001));
+  });
+
+  test('reads playback progress written by the Android native player',
+      () async {
+    const target = PlaybackTarget(
+      title: '原生播放测试',
+      sourceId: 'emby-main',
+      streamUrl: 'https://emby.example/native.mkv',
+      sourceName: '客厅 Emby',
+      sourceKind: MediaSourceKind.emby,
+      itemId: 'native-movie-1',
+      itemType: 'movie',
+    );
+    final itemKey = buildPlaybackItemKey(target);
+    final snapshot = PlaybackMemorySnapshot(
+      items: {
+        itemKey: PlaybackProgressEntry(
+          key: itemKey,
+          target: target,
+          updatedAt: DateTime.utc(2026, 8, 29, 12),
+          position: const Duration(minutes: 17, seconds: 24),
+          duration: const Duration(hours: 2),
+          progress: 0.145,
+        ),
+      },
+    );
+    SharedPreferences.setMockInitialValues({
+      'flutter.starflow.playback.memory.v1': jsonEncode(snapshot.toJson()),
+    });
+    final preferences = await SharedPreferences.getInstance();
+    final repository = PlaybackMemoryRepository(
+      sharedPreferences: preferences,
+    );
+
+    final entry = await repository.loadEntryForTarget(target);
+
+    expect(entry, isNotNull);
+    expect(entry!.position, const Duration(minutes: 17, seconds: 24));
+  });
+
+  test('migrates DataStore playback history into the native store once',
+      () async {
+    const target = PlaybackTarget(
+      title: '迁移测试',
+      sourceId: 'emby-main',
+      streamUrl: 'https://emby.example/migration.mkv',
+      sourceName: '客厅 Emby',
+      sourceKind: MediaSourceKind.emby,
+      itemId: 'migration-movie-1',
+      itemType: 'movie',
+    );
+    const storageKey = 'starflow.playback.memory.v1';
+    final itemKey = buildPlaybackItemKey(target);
+    final nativeStore = _MemoryPreferencesStore();
+    final dataStore = _MemoryPreferencesStore({
+      storageKey: jsonEncode(
+        PlaybackMemorySnapshot(
+          items: {
+            itemKey: PlaybackProgressEntry(
+              key: itemKey,
+              target: target,
+              updatedAt: DateTime.utc(2026, 8, 29, 12),
+              position: const Duration(minutes: 21),
+              duration: const Duration(hours: 2),
+              progress: 0.175,
+            ),
+          },
+        ).toJson(),
+      ),
+    });
+    final repository = PlaybackMemoryRepository(
+      preferences: nativeStore,
+      migrationPreferences: dataStore,
+    );
+
+    final migrated = await repository.loadEntryForTarget(target);
+
+    expect(migrated, isNotNull);
+    expect(migrated!.position, const Duration(minutes: 21));
+    expect(nativeStore.values, contains(storageKey));
+    expect(dataStore.values, isNot(contains(storageKey)));
+
+    await dataStore.setString(
+      storageKey,
+      jsonEncode(
+        PlaybackMemorySnapshot(
+          items: {
+            itemKey: PlaybackProgressEntry(
+              key: itemKey,
+              target: target,
+              updatedAt: DateTime.utc(2026, 8, 29, 13),
+              position: const Duration(minutes: 42),
+              duration: const Duration(hours: 2),
+              progress: 0.35,
+            ),
+          },
+        ).toJson(),
+      ),
+    );
+
+    final reloaded = await repository.loadEntryForTarget(target);
+    expect(reloaded!.position, const Duration(minutes: 21));
   });
 
   test('stores series aggregate resume with latest episode target', () async {
@@ -378,5 +483,35 @@ class _CountingPlaybackMemoryRepository extends PlaybackMemoryRepository {
   Future<PlaybackMemorySnapshot> loadSnapshot() async {
     loadSnapshotCount += 1;
     return snapshot;
+  }
+}
+
+class _MemoryPreferencesStore implements PreferencesStore {
+  _MemoryPreferencesStore([Map<String, Object>? initialValues])
+      : values = <String, Object>{...?initialValues};
+
+  final Map<String, Object> values;
+
+  @override
+  Future<String?> getString(String key) async => values[key] as String?;
+
+  @override
+  Future<List<String>?> getStringList(String key) async {
+    return (values[key] as List?)?.cast<String>();
+  }
+
+  @override
+  Future<void> setString(String key, String value) async {
+    values[key] = value;
+  }
+
+  @override
+  Future<void> setStringList(String key, List<String> value) async {
+    values[key] = List<String>.from(value);
+  }
+
+  @override
+  Future<void> remove(String key) async {
+    values.remove(key);
   }
 }

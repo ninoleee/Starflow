@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -93,6 +94,14 @@ String _buildTvFocusKey({
   return '$normalizedPrefix:${normalizedSegments.join(':')}';
 }
 
+String describeTvFocusNode(FocusNode? node) {
+  if (node == null) {
+    return 'none';
+  }
+  final debugLabel = node.debugLabel?.trim() ?? '';
+  return debugLabel.isNotEmpty ? debugLabel : node.runtimeType.toString();
+}
+
 bool handleTvDirectionalFocusBoundary(
   BuildContext context,
   TraversalDirection direction, {
@@ -117,6 +126,75 @@ bool handleTvDirectionalFocusBoundary(
   }
 
   return false;
+}
+
+typedef TvDirectionalFocusWarningCallback = void Function(
+  TraversalDirection direction,
+  FocusNode? currentFocus,
+  Object error,
+);
+
+class TvSafeDirectionalFocusAction extends Action<DirectionalFocusIntent> {
+  TvSafeDirectionalFocusAction({
+    DateTime Function()? now,
+    TvDirectionalFocusWarningCallback? onIgnoredUnlaidOutCandidate,
+  })  : _now = now ?? DateTime.now,
+        _onIgnoredUnlaidOutCandidate = onIgnoredUnlaidOutCandidate ??
+            _logIgnoredUnlaidOutDirectionalCandidate;
+
+  static const Duration warningInterval = Duration(seconds: 5);
+
+  final DateTime Function() _now;
+  final TvDirectionalFocusWarningCallback _onIgnoredUnlaidOutCandidate;
+  DateTime? _lastWarningAt;
+
+  @override
+  Object? invoke(DirectionalFocusIntent intent) {
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    if (primaryFocus == null) {
+      return null;
+    }
+    try {
+      primaryFocus.focusInDirection(intent.direction);
+    } on StateError catch (error) {
+      if (!error.message.toString().contains('RenderBox was not laid out')) {
+        rethrow;
+      }
+      // A focusable widget can enter the tree one frame before its render box
+      // finishes layout. Keep the current focus and ignore only this key event.
+      final now = _now();
+      final lastWarningAt = _lastWarningAt;
+      if (lastWarningAt == null ||
+          now.isBefore(lastWarningAt) ||
+          now.difference(lastWarningAt) >= warningInterval) {
+        _lastWarningAt = now;
+        _onIgnoredUnlaidOutCandidate(
+          intent.direction,
+          primaryFocus,
+          error,
+        );
+      }
+    }
+    return null;
+  }
+}
+
+void _logIgnoredUnlaidOutDirectionalCandidate(
+  TraversalDirection direction,
+  FocusNode? currentFocus,
+  Object error,
+) {
+  appLogWarning(
+    'tv.focus-recovery',
+    'Directional focus ignored for unlaid-out candidate',
+    fields: <String, Object?>{
+      'direction': direction.name,
+      'currentFocus': describeTvFocusNode(currentFocus),
+      'currentFocusType': currentFocus?.runtimeType.toString() ?? 'none',
+      'contextAttached': currentFocus?.context != null,
+    },
+    error: error,
+  );
 }
 
 class TvSafeDirectionalFocusTraversalPolicy

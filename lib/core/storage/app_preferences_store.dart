@@ -118,32 +118,47 @@ class AppPreferencesStore implements PreferencesStore {
 }
 
 class SharedPreferencesStore implements PreferencesStore {
-  SharedPreferencesStore(this._preferences);
+  SharedPreferencesStore(SharedPreferences preferences)
+      : _preferences = preferences,
+        _reloadBeforeRead = false;
 
-  final SharedPreferences _preferences;
+  SharedPreferencesStore.reloading()
+      : _preferences = null,
+        _reloadBeforeRead = true;
+
+  SharedPreferences? _preferences;
+  final bool _reloadBeforeRead;
 
   @override
   Future<String?> getString(String key) async {
-    return _preferences.getString(normalizePreferencesKey(key));
+    return (await _resolvePreferences(forRead: true)).getString(key.trim());
   }
 
   @override
   Future<List<String>?> getStringList(String key) async {
-    return _preferences.getStringList(normalizePreferencesKey(key));
+    return (await _resolvePreferences(forRead: true)).getStringList(key.trim());
   }
 
   @override
   Future<void> setString(String key, String value) async {
-    await _preferences.setString(normalizePreferencesKey(key), value);
+    await (await _resolvePreferences()).setString(key.trim(), value);
   }
 
   @override
   Future<void> setStringList(String key, List<String> value) async {
-    await _preferences.setStringList(normalizePreferencesKey(key), value);
+    await (await _resolvePreferences()).setStringList(key.trim(), value);
   }
 
   @override
   Future<void> remove(String key) async {
-    await _preferences.remove(normalizePreferencesKey(key));
+    await (await _resolvePreferences()).remove(key.trim());
+  }
+
+  Future<SharedPreferences> _resolvePreferences({bool forRead = false}) async {
+    final preferences = _preferences ??= await SharedPreferences.getInstance();
+    if (forRead && _reloadBeforeRead) {
+      await preferences.reload();
+    }
+    return preferences;
   }
 }

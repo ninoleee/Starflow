@@ -587,7 +587,8 @@ class _TelevisionNavigationShellState
       _destinationFocusNodes[_currentDestinationDisplayIndex].hasPrimaryFocus;
 
   void _clearFocusAndFocusCurrentDestination() {
-    FocusManager.instance.primaryFocus?.unfocus(
+    final previousFocus = FocusManager.instance.primaryFocus;
+    previousFocus?.unfocus(
       disposition: UnfocusDisposition.scope,
     );
     _setSidebarVisible(true);
@@ -599,6 +600,19 @@ class _TelevisionNavigationShellState
           _destinationFocusNodes[_currentDestinationDisplayIndex];
       if (currentNode.canRequestFocus) {
         requestTvFocus(currentNode);
+        final destination = widget.items[_currentDestinationDisplayIndex];
+        appLogTrace(
+          'tv.focus-recovery',
+          'Focus cleared and moved to current sidebar destination',
+          fields: <String, Object?>{
+            'branch': destination.id,
+            'branchIndex': destination.branchIndex,
+            'previousFocus': describeTvFocusNode(previousFocus),
+            'previousFocusType':
+                previousFocus?.runtimeType.toString() ?? 'none',
+            'targetFocus': describeTvFocusNode(currentNode),
+          },
+        );
       }
     });
   }

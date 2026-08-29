@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
@@ -61,19 +62,26 @@ class PlaybackMemoryRepository {
   PlaybackMemoryRepository({
     PreferencesStore? preferences,
     SharedPreferences? sharedPreferences,
+    PreferencesStore? migrationPreferences,
     void Function()? notifyChanged,
   })  : assert(preferences == null || sharedPreferences == null),
         _preferences = preferences ??
             (sharedPreferences == null
-                ? AppPreferencesStore()
+                ? _defaultPlaybackMemoryPreferencesStore()
                 : SharedPreferencesStore(sharedPreferences)),
+        _migrationPreferences = migrationPreferences ??
+            (preferences == null && sharedPreferences == null
+                ? _defaultPlaybackMemoryMigrationStore()
+                : null),
         _notifyChanged = notifyChanged;
 
   static const _storageKey = 'starflow.playback.memory.v1';
   static const recentEntryLimit = 20;
 
   final PreferencesStore _preferences;
+  final PreferencesStore? _migrationPreferences;
   final void Function()? _notifyChanged;
+  Future<void>? _migrationFuture;
 
   Future<PlaybackProgressEntry?> loadEntryForTarget(
     PlaybackTarget target,
@@ -307,7 +315,9 @@ class PlaybackMemoryRepository {
   }
 
   Future<void> clearAll() async {
+    await _ensureMigrationCompleted();
     await _preferences.remove(_storageKey);
+    await _migrationPreferences?.remove(_storageKey);
     _notifyChanged?.call();
   }
 
@@ -400,8 +410,8 @@ class PlaybackMemoryRepository {
   }
 
   Future<LocalStorageCacheSummary> inspectSummary() async {
-    final raw = await _preferences.getString(_storageKey) ?? '';
     final snapshot = await loadSnapshot();
+    final raw = jsonEncode(snapshot.toJson());
     return LocalStorageCacheSummary(
       type: LocalStorageCacheType.playbackMemory,
       entryCount: snapshot.items.length + snapshot.skipPreferences.length,
@@ -414,7 +424,33 @@ class PlaybackMemoryRepository {
   }
 
   Future<PlaybackMemorySnapshot> _loadSnapshot() async {
-    final raw = await _preferences.getString(_storageKey);
+    await _ensureMigrationCompleted();
+    return _loadSnapshotFrom(_preferences);
+  }
+
+  Future<void> _ensureMigrationCompleted() {
+    return _migrationFuture ??= _migratePlaybackMemoryIfNeeded();
+  }
+
+  Future<void> _migratePlaybackMemoryIfNeeded() async {
+    final migrationPreferences = _migrationPreferences;
+    if (migrationPreferences == null) {
+      return;
+    }
+    final source = await _loadSnapshotFrom(migrationPreferences);
+    if (_snapshotIsEmpty(source)) {
+      return;
+    }
+    final primary = await _loadSnapshotFrom(_preferences);
+    final merged = _mergeSnapshots(primary, source);
+    await _writeSnapshot(_preferences, merged);
+    await migrationPreferences.remove(_storageKey);
+  }
+
+  Future<PlaybackMemorySnapshot> _loadSnapshotFrom(
+    PreferencesStore preferences,
+  ) async {
+    final raw = await preferences.getString(_storageKey);
     if (raw == null || raw.isEmpty) {
       return const PlaybackMemorySnapshot();
     }
@@ -429,7 +465,62 @@ class PlaybackMemoryRepository {
   }
 
   Future<void> _saveSnapshot(PlaybackMemorySnapshot snapshot) async {
-    await _preferences.setString(_storageKey, jsonEncode(snapshot.toJson()));
+    await _ensureMigrationCompleted();
+    await _writeSnapshot(_preferences, snapshot);
+  }
+
+  Future<void> _writeSnapshot(
+    PreferencesStore preferences,
+    PlaybackMemorySnapshot snapshot,
+  ) {
+    return preferences.setString(_storageKey, jsonEncode(snapshot.toJson()));
+  }
+
+  PlaybackMemorySnapshot _mergeSnapshots(
+    PlaybackMemorySnapshot primary,
+    PlaybackMemorySnapshot mirror,
+  ) {
+    final items = <String, PlaybackProgressEntry>{...primary.items};
+    for (final entry in mirror.items.entries) {
+      final existing = items[entry.key];
+      if (existing == null ||
+          entry.value.updatedAt.isAfter(existing.updatedAt)) {
+        items[entry.key] = entry.value;
+      }
+    }
+    _pruneRecentEntries(items);
+
+    final series = <String, PlaybackProgressEntry>{...primary.series};
+    for (final entry in mirror.series.entries) {
+      final existing = series[entry.key];
+      if (existing == null ||
+          entry.value.updatedAt.isAfter(existing.updatedAt)) {
+        series[entry.key] = entry.value;
+      }
+    }
+
+    final skipPreferences = <String, SeriesSkipPreference>{
+      ...primary.skipPreferences,
+    };
+    for (final entry in mirror.skipPreferences.entries) {
+      final existing = skipPreferences[entry.key];
+      if (existing == null ||
+          entry.value.updatedAt.isAfter(existing.updatedAt)) {
+        skipPreferences[entry.key] = entry.value;
+      }
+    }
+
+    return PlaybackMemorySnapshot(
+      items: items,
+      series: series,
+      skipPreferences: skipPreferences,
+    );
+  }
+
+  bool _snapshotIsEmpty(PlaybackMemorySnapshot snapshot) {
+    return snapshot.items.isEmpty &&
+        snapshot.series.isEmpty &&
+        snapshot.skipPreferences.isEmpty;
   }
 
   void _pruneRecentEntries(Map<String, PlaybackProgressEntry> items) {
@@ -535,6 +626,24 @@ class PlaybackMemoryRepository {
     }
     return true;
   }
+}
+
+PreferencesStore _defaultPlaybackMemoryPreferencesStore() {
+  if (!kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS)) {
+    return SharedPreferencesStore.reloading();
+  }
+  return AppPreferencesStore();
+}
+
+PreferencesStore? _defaultPlaybackMemoryMigrationStore() {
+  if (!kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS)) {
+    return AppPreferencesStore();
+  }
+  return null;
 }
 
 bool isLoopbackPlaybackRelayUrl(String url) {

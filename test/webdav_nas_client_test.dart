@@ -136,6 +136,41 @@ void main() {
       expect(resolvedUrl, 'https://pan.quark.cn/s/abc123');
     });
 
+    test('encodes literal hash characters in resolved strm playback urls',
+        () async {
+      final client = WebDavNasClient(
+        MockClient((request) async {
+          if (request.method == 'GET' &&
+              request.url.toString() ==
+                  'https://nas.example.com/dav/Shows/Talk.strm') {
+            return http.Response.bytes(
+              utf8.encode(
+                'https://smartstrm.example.com/陈鲁豫 · 慢谈 #23 对话.mp4\n',
+              ),
+              200,
+            );
+          }
+          return http.Response('Not Found', 404);
+        }),
+      );
+
+      final resolvedUrl = await client.resolveStrmTargetUrl(
+        source: const MediaSourceConfig(
+          id: 'nas-main',
+          name: 'Home NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/',
+          enabled: true,
+        ),
+        resourcePath: 'https://nas.example.com/dav/Shows/Talk.strm',
+      );
+
+      expect(
+        resolvedUrl,
+        'https://smartstrm.example.com/陈鲁豫 · 慢谈 %2323 对话.mp4',
+      );
+    });
+
     test('discovers iso files as playable media', () async {
       final client = WebDavNasClient(
         MockClient((request) async {

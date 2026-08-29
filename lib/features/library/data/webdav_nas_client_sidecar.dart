@@ -483,16 +483,25 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
       if (normalized.isEmpty || normalized.startsWith('#')) {
         continue;
       }
-      final parsed = Uri.tryParse(normalized);
+      final playbackUrl = _normalizeStrmPlaybackUrl(normalized);
+      final parsed = Uri.tryParse(playbackUrl);
       if (parsed != null && parsed.hasScheme) {
-        return normalized;
+        return playbackUrl;
       }
-      final resolved = uri.resolve(normalized).toString();
+      final resolved = uri.resolve(playbackUrl).toString();
 
       return resolved;
     }
 
     return '';
+  }
+
+  String _normalizeStrmPlaybackUrl(String value) {
+    final normalized = value.trim();
+    if (!normalized.contains('#')) {
+      return normalized;
+    }
+    return normalized.replaceAll('#', '%23');
   }
 
   Uri? _resolvePlaybackTargetUri(

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/navigation/page_activity_mixin.dart';
 import 'package:starflow/core/navigation/retained_async_value.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
@@ -144,7 +145,7 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   void onPageBecameActive() {
     _deferPrefetchForForegroundInteraction(reason: 'home.page-active');
-    _scheduleMissingFocusRecovery();
+    _scheduleMissingFocusRecovery(reason: 'page-active');
     // Keep stable cached sections when returning to home, and only warm data
     // sources opportunistically.
     primeHomeModulesFromWidget(ref);
@@ -180,7 +181,10 @@ class _HomePageState extends ConsumerState<HomePage>
     _deferPrefetchForForegroundInteraction(reason: 'home.content-loading');
   }
 
-  void _scheduleMissingFocusRecovery() {
+  void _scheduleMissingFocusRecovery({required String reason}) {
+    if (!(ref.read(isTelevisionProvider).value ?? false)) {
+      return;
+    }
     if (_missingFocusRecoveryScheduled) {
       return;
     }
@@ -198,7 +202,22 @@ class _HomePageState extends ConsumerState<HomePage>
       if (hasActionableFocus) {
         return;
       }
-      TvMenuButtonScope.maybeOf(context)?.onMenuButtonPressed();
+      final menuScope = TvMenuButtonScope.maybeOf(context);
+      if (menuScope == null) {
+        return;
+      }
+      appLogInfo(
+        'tv.focus-recovery',
+        'Home focus recovery requested',
+        fields: <String, Object?>{
+          'reason': reason,
+          'previousFocus': describeTvFocusNode(primaryFocus),
+          'previousFocusType': primaryFocus?.runtimeType.toString() ?? 'none',
+          'contextAttached': primaryFocus?.context != null,
+          'canRequestFocus': primaryFocus?.canRequestFocus ?? false,
+        },
+      );
+      menuScope.onMenuButtonPressed();
     });
   }
 
@@ -219,7 +238,7 @@ class _HomePageState extends ConsumerState<HomePage>
       ),
       (previous, next) {
         if (isTelevision && previous == true && !next) {
-          _scheduleMissingFocusRecovery();
+          _scheduleMissingFocusRecovery(reason: 'content-loaded');
         }
       },
     );

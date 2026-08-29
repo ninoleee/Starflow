@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/app/lifecycle/app_runtime_recovery_boundary.dart';
 import 'package:starflow/features/home/application/home_feed_load_scheduler.dart';
 import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 
 void main() {
   testWidgets(
@@ -28,6 +29,7 @@ void main() {
       final homeScheduler = container.read(homeFeedLoadSchedulerProvider);
       final metadataLimiter =
           container.read(metadataPrefetchConcurrencyLimiterProvider);
+      final playbackRevision = container.read(playbackHistoryRevisionProvider);
 
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       expect(homeScheduler.isPaused, isTrue);
@@ -35,6 +37,10 @@ void main() {
 
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump();
+      expect(
+        container.read(playbackHistoryRevisionProvider),
+        playbackRevision + 1,
+      );
       await tester.pump(
         kAppResumeBackgroundQuietPeriod - const Duration(milliseconds: 1),
       );
