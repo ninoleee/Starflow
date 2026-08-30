@@ -846,14 +846,35 @@ PlaybackTarget? _mergeCachedPlaybackTarget(
     return currentValue ?? cachedValue;
   }
 
+  final hasTransportIdentityConflict =
+      _hasPlaybackResourceIdentityConflict(current, cached);
+  final canReuseCachedTransport = !hasTransportIdentityConflict &&
+      (preferCachedSourceContext ||
+          _samePlaybackResourceIdentity(current, cached));
+
+  String preferTransportString(String currentValue, String cachedValue) {
+    if (!canReuseCachedTransport) {
+      return currentValue;
+    }
+    return currentValue.trim().isNotEmpty ? currentValue : cachedValue;
+  }
+
+  T? preferTransportValue<T>(T? currentValue, T? cachedValue) {
+    if (!canReuseCachedTransport) {
+      return currentValue;
+    }
+    return currentValue ?? cachedValue;
+  }
+
   return current.copyWith(
     title: cached.title.trim().isNotEmpty ? cached.title : current.title,
     sourceId: preferIdentity(current.sourceId, cached.sourceId),
     sourceName: preferIdentity(current.sourceName, cached.sourceName),
     sourceKind: preferNullableIdentity(current.sourceKind, cached.sourceKind),
-    actualAddress: current.actualAddress.trim().isNotEmpty
-        ? current.actualAddress
-        : cached.actualAddress,
+    actualAddress: preferTransportString(
+      current.actualAddress,
+      cached.actualAddress,
+    ),
     itemId: preferIdentity(current.itemId, cached.itemId),
     itemType: preferIdentity(current.itemType, cached.itemType),
     year: current.year > 0 ? current.year : cached.year,
@@ -861,9 +882,10 @@ PlaybackTarget? _mergeCachedPlaybackTarget(
     seriesTitle: cached.seriesTitle.trim().isNotEmpty
         ? cached.seriesTitle
         : current.seriesTitle,
-    preferredMediaSourceId: current.preferredMediaSourceId.trim().isNotEmpty
-        ? current.preferredMediaSourceId
-        : cached.preferredMediaSourceId,
+    preferredMediaSourceId: preferTransportString(
+      current.preferredMediaSourceId,
+      cached.preferredMediaSourceId,
+    ),
     posterUrl: preferIdentity(current.posterUrl, cached.posterUrl),
     posterHeaders: preferIdentityHeaders(
       currentValue: current.posterUrl,
@@ -878,28 +900,80 @@ PlaybackTarget? _mergeCachedPlaybackTarget(
       cachedValue: cached.backdropUrl,
       cachedHeaders: cached.backdropHeaders,
     ),
-    subtitle:
-        current.subtitle.trim().isNotEmpty ? current.subtitle : cached.subtitle,
-    headers: current.headers.isNotEmpty ? current.headers : cached.headers,
-    streamUrl: current.streamUrl.trim().isNotEmpty
-        ? current.streamUrl
-        : cached.streamUrl,
-    container: current.container.trim().isNotEmpty
-        ? current.container
-        : cached.container,
-    videoCodec: current.videoCodec.trim().isNotEmpty
-        ? current.videoCodec
-        : cached.videoCodec,
-    audioCodec: current.audioCodec.trim().isNotEmpty
-        ? current.audioCodec
-        : cached.audioCodec,
+    subtitle: preferTransportString(current.subtitle, cached.subtitle),
+    headers: canReuseCachedTransport && current.headers.isEmpty
+        ? cached.headers
+        : current.headers,
+    streamUrl: preferTransportString(current.streamUrl, cached.streamUrl),
+    container: preferTransportString(current.container, cached.container),
+    videoCodec: preferTransportString(current.videoCodec, cached.videoCodec),
+    audioCodec: preferTransportString(current.audioCodec, cached.audioCodec),
     seasonNumber: current.seasonNumber ?? cached.seasonNumber,
     episodeNumber: current.episodeNumber ?? cached.episodeNumber,
-    width: current.width ?? cached.width,
-    height: current.height ?? cached.height,
-    bitrate: current.bitrate ?? cached.bitrate,
-    fileSizeBytes: current.fileSizeBytes ?? cached.fileSizeBytes,
+    width: preferTransportValue(current.width, cached.width),
+    height: preferTransportValue(current.height, cached.height),
+    bitrate: preferTransportValue(current.bitrate, cached.bitrate),
+    fileSizeBytes:
+        preferTransportValue(current.fileSizeBytes, cached.fileSizeBytes),
   );
+}
+
+bool _samePlaybackResourceIdentity(
+  PlaybackTarget current,
+  PlaybackTarget cached,
+) {
+  if (_hasPlaybackResourceIdentityConflict(current, cached)) {
+    return false;
+  }
+  return current.preferredMediaSourceId.trim().isNotEmpty ||
+      current.itemId.trim().isNotEmpty ||
+      _playbackResourceAddressKey(current.actualAddress).isNotEmpty;
+}
+
+bool _hasPlaybackResourceIdentityConflict(
+  PlaybackTarget current,
+  PlaybackTarget cached,
+) {
+  final currentPreferredMediaSourceId = current.preferredMediaSourceId.trim();
+  if (currentPreferredMediaSourceId.isNotEmpty &&
+      cached.preferredMediaSourceId.trim() != currentPreferredMediaSourceId) {
+    return true;
+  }
+
+  final currentItemId = current.itemId.trim();
+  if (currentItemId.isNotEmpty && cached.itemId.trim() != currentItemId) {
+    return true;
+  }
+
+  final currentSourceId = current.sourceId.trim();
+  if (currentSourceId.isNotEmpty && cached.sourceId.trim() != currentSourceId) {
+    return true;
+  }
+  if (current.sourceKind != cached.sourceKind) {
+    return true;
+  }
+
+  final currentAddress = _playbackResourceAddressKey(current.actualAddress);
+  final cachedAddress = _playbackResourceAddressKey(cached.actualAddress);
+  if (currentAddress.isNotEmpty &&
+      cachedAddress.isNotEmpty &&
+      currentAddress != cachedAddress) {
+    return true;
+  }
+  return false;
+}
+
+String _playbackResourceAddressKey(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  final uri = Uri.tryParse(trimmed);
+  if (uri != null && uri.hasScheme) {
+    return '${uri.scheme.toLowerCase()}://${uri.host.toLowerCase()}'
+        '${uri.path.replaceAll('\\', '/')}';
+  }
+  return trimmed.replaceAll('\\', '/');
 }
 
 String _detailTraceKey(MediaDetailTarget target) {

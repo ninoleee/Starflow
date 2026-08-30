@@ -672,6 +672,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
   - 顶部标题栏、底部控制区和播放设置弹窗都收敛到更官方的 Material 组件组合：`Material + IconButton + Slider + Text + ListTile + TextButton`；手机、桌面和 TV 顶栏都从最左侧返回按钮开始，实时网速紧跟在其右侧
   - `PiP / AirPlay` 入口继续按平台能力显示
 - 内置 `MPV` 主动退出时先 detach 当前播放器并立即关闭路由，进度保存、平台会话清理和 `pause -> stop -> dispose` 在退出后继续完成；新播放器初始化前仍会等待 `_playerShutdownQueue` 清空，避免 TV 慢设备被释放流程挡住页面退出，同时防止旧实例与新实例叠音
+- 详情缓存对元数据和传输字段使用不同复用边界：同影片/同集的海报、简介、评分仍可通过 TMDB/IMDb/标题键共享；`PlaybackTarget` 的 `streamUrl / headers / subtitle / container / videoCodec / audioCodec / width / height / bitrate / fileSizeBytes` 只有资源身份一致时才能从缓存补齐。资源身份由 `sourceId / sourceKind / itemId / preferredMediaSourceId / actualAddress` 判定，明确冲突时保留新 target 的空传输字段并交给 resolver 重新解析
 - 播放器内的主动退出、关闭后台播放、外部清理请求和打开新片源统一收口到同一套 detach/shutdown 流程；后台播放只承接 App 进入后台，不让页面级播放器跨路由存活
 - `PlaybackOptionsDialog` 只订阅设置项实际需要的轨道、循环模式和倍速；底部实时“播放信息”卡片及其进度、画面尺寸、播放/缓冲状态和缓冲百分比监听已经删除，避免设置弹窗为只读信息持续重建
 - `PlaybackOptionsDialog` 一级只展示常用播放项和一个“更多”入口；主/副字幕布局、后台播放及 MPV 手势/恢复/调优开关由独立二级弹窗承载，修改仍立即写入当前会话快照

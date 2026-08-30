@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
+import 'package:starflow/features/details/application/detail_target_resolver.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
@@ -29,6 +30,109 @@ void main() {
   });
 
   group('enrichedDetailTargetProvider', () {
+    test('does not inherit cached transport from a different media variant',
+        () async {
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            AppSettings.fromJson({
+              'mediaSources': const [],
+              'searchProviders': const [],
+              'doubanAccount': const {'enabled': false},
+              'homeModules': const [],
+            }),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      const cachedVariant = MediaDetailTarget(
+        title: '测试影片',
+        posterUrl: 'https://images.example.com/poster.jpg',
+        overview: '共享影片简介',
+        year: 2026,
+        searchQuery: '测试影片',
+        sourceId: 'emby-main',
+        itemId: 'movie-a',
+        itemType: 'movie',
+        sourceKind: MediaSourceKind.emby,
+        sourceName: 'Home Emby',
+        tmdbId: 'tmdb-100',
+        playbackTarget: PlaybackTarget(
+          title: '测试影片',
+          sourceId: 'emby-main',
+          streamUrl: 'https://old.example.com/movie-a.mkv?token=old',
+          sourceName: 'Home Emby',
+          sourceKind: MediaSourceKind.emby,
+          actualAddress: '/library/movie-a.mkv',
+          itemId: 'movie-a',
+          itemType: 'movie',
+          preferredMediaSourceId: 'media-a',
+          headers: {'Authorization': 'old-token'},
+          container: 'mkv',
+          videoCodec: 'hevc',
+          audioCodec: 'truehd',
+          width: 3840,
+          height: 2160,
+          bitrate: 28000000,
+          fileSizeBytes: 24000000000,
+        ),
+      );
+      const newVariant = MediaDetailTarget(
+        title: '测试影片',
+        posterUrl: '',
+        overview: '',
+        year: 2026,
+        searchQuery: '测试影片',
+        sourceId: 'emby-main',
+        itemId: 'movie-a',
+        itemType: 'movie',
+        sourceKind: MediaSourceKind.emby,
+        sourceName: 'Home Emby',
+        tmdbId: 'tmdb-100',
+        playbackTarget: PlaybackTarget(
+          title: '测试影片',
+          sourceId: 'emby-main',
+          streamUrl: '',
+          sourceName: 'Home Emby',
+          sourceKind: MediaSourceKind.emby,
+          actualAddress: '/library/movie-b.mkv',
+          itemId: 'movie-a',
+          itemType: 'movie',
+          preferredMediaSourceId: 'media-b',
+        ),
+      );
+
+      await container
+          .read(localStorageCacheRepositoryProvider)
+          .saveDetailTarget(
+            seedTarget: cachedVariant,
+            resolvedTarget: cachedVariant,
+          );
+
+      final merged = await container.read(detailTargetResolverProvider).resolve(
+            target: newVariant,
+            backgroundWorkSuspended: true,
+          );
+      final playback = merged.playbackTarget!;
+
+      expect(merged.posterUrl, cachedVariant.posterUrl);
+      expect(merged.overview, cachedVariant.overview);
+      expect(playback.itemId, 'movie-a');
+      expect(playback.preferredMediaSourceId, 'media-b');
+      expect(playback.actualAddress, '/library/movie-b.mkv');
+      expect(playback.streamUrl, isEmpty);
+      expect(playback.headers, isEmpty);
+      expect(playback.container, isEmpty);
+      expect(playback.videoCodec, isEmpty);
+      expect(playback.audioCodec, isEmpty);
+      expect(playback.width, isNull);
+      expect(playback.height, isNull);
+      expect(playback.bitrate, isNull);
+      expect(playback.fileSizeBytes, isNull);
+      expect(playback.needsResolution, isTrue);
+    });
+
     test('keeps detail target unchanged when auto enrichment is disabled',
         () async {
       final container = ProviderContainer(
