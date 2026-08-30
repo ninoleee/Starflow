@@ -1339,10 +1339,20 @@ extension _PlayerPageStateControls on _PlayerPageState {
     final selectedTrack = selection as SubtitleTrack;
     await _disableMpvDualSubtitle(player);
 
-    await _runPlayerCommand(
+    final applied = await _runPlayerCommand(
       () => player.setSubtitleTrack(selectedTrack),
       failureMessage: '切换字幕失败',
     );
+    if (!applied) {
+      return;
+    }
+    _subtitleSessionPreference = switch (selectedTrack.id) {
+      'auto' => const PlaybackSubtitleSessionPreference.automatic(),
+      'no' => const PlaybackSubtitleSessionPreference.off(),
+      _ when !selectedTrack.uri && !selectedTrack.data =>
+        PlaybackSubtitleSessionPreference.single(selectedTrack),
+      _ => null,
+    };
   }
 
   Future<void> _selectMpvDualSubtitleTracks(
@@ -1396,7 +1406,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
       return;
     }
 
-    await _runPlayerCommand(
+    final applied = await _runPlayerCommand(
       () async {
         await player.setSubtitleTrack(primary);
         await _setMpvSubtitleProperty(player, 'secondary-sid', secondary.id);
@@ -1404,12 +1414,16 @@ extension _PlayerPageStateControls on _PlayerPageState {
       },
       failureMessage: '开启双字幕失败',
     );
-    if (!mounted) {
+    if (!applied || !mounted) {
       return;
     }
     setState(() {
       _mpvDualSubtitleEnabled = true;
     });
+    _subtitleSessionPreference = PlaybackSubtitleSessionPreference.dual(
+      primary: primary,
+      secondary: secondary,
+    );
     _showMessage('双字幕已开启：中文在上，英文在下');
   }
 
@@ -1492,19 +1506,21 @@ extension _PlayerPageStateControls on _PlayerPageState {
     );
   }
 
-  Future<void> _runPlayerCommand(
+  Future<bool> _runPlayerCommand(
     Future<void> Function() action, {
     required String failureMessage,
   }) async {
     try {
       await action();
+      return true;
     } catch (error) {
       if (!mounted) {
-        return;
+        return false;
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$failureMessage：$error')),
       );
+      return false;
     }
   }
 }

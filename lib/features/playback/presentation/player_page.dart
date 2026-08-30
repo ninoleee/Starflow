@@ -22,6 +22,7 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
+import 'package:starflow/features/playback/application/playback_subtitle_session_preference.dart';
 import 'package:starflow/features/playback/application/native_playback_episode_queue_policy.dart';
 import 'package:starflow/features/playback/application/native_playback_media_type.dart';
 import 'package:starflow/features/playback/application/playback_episode_queue_resolver.dart';
@@ -152,6 +153,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _subtitleDelaySupported = false;
   double _subtitleDelaySeconds = 0;
   bool _mpvDualSubtitleEnabled = false;
+  PlaybackSubtitleSessionPreference? _subtitleSessionPreference;
   late double _sessionPrimarySubtitlePosition;
   late double _sessionSecondarySubtitlePosition;
   late double _sessionSecondarySubtitleScale;

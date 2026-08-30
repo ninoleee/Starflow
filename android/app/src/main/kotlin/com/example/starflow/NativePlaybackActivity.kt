@@ -121,6 +121,7 @@ class NativePlaybackActivity : Activity() {
     private var secondarySubtitlePosition = 90.0
     private var secondarySubtitleScale = 75.0
     private val dualSubtitleController = NativeDualSubtitleController()
+    private var subtitleSessionPreference: NativeSubtitleSessionPreference? = null
     private val playbackWatchdogHandler = Handler(Looper.getMainLooper())
     private val playbackRuntimeHandler = Handler(Looper.getMainLooper())
     private var playbackRuntimeActive = false
@@ -485,6 +486,7 @@ class NativePlaybackActivity : Activity() {
         episodeResolutionRequestId += 1L
         externalSubtitleSource = null
         dualSubtitleController.disable()
+        subtitleSessionPreference = null
         subtitleDelayMs = 0L
         restoredResumePositionMs = 0L
         lastSavedPositionMs = -1L
@@ -1119,7 +1121,10 @@ class NativePlaybackActivity : Activity() {
         automaticSubtitleSelectionApplied = false
         playbackFirstFrameRendered = false
         playbackLastRuntimeLogAtMs = 0L
-        if (subtitlePreferenceIsOff()) {
+        val sessionSubtitleMode = subtitleSessionPreference?.mode
+        if (sessionSubtitleMode == NativeSubtitleSessionMode.OFF ||
+            (sessionSubtitleMode == null && subtitlePreferenceIsOff())
+        ) {
             exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
                 .buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
@@ -1326,36 +1331,61 @@ class NativePlaybackActivity : Activity() {
             return
         }
         val currentPlayer = player ?: return
-        val candidates = tracks.groups.flatMap { group ->
-            if (group.type != C.TRACK_TYPE_TEXT) {
-                return@flatMap emptyList()
-            }
-            (0 until group.length).mapNotNull { trackIndex ->
-                if (!group.isTrackSupported(trackIndex)) {
-                    return@mapNotNull null
-                }
-                val format = group.getTrackFormat(trackIndex)
-                NativeSubtitleTrackCandidate(
-                    value = TrackSelectionOverride(group.mediaTrackGroup, trackIndex),
-                    language = format.language.orEmpty(),
-                    label = format.label.orEmpty(),
-                    isForced = format.selectionFlags and C.SELECTION_FLAG_FORCED != 0,
-                    isDefault = format.selectionFlags and C.SELECTION_FLAG_DEFAULT != 0,
-                )
-            }
-        }
-        if (candidates.isEmpty()) {
+        val choices = buildNativeTrackChoices(
+            tracks = tracks,
+            trackType = C.TRACK_TYPE_TEXT,
+        )
+        if (choices.isEmpty()) {
             return
         }
 
         automaticSubtitleSelectionApplied = true
-        val selected = if (subtitlePreferenceIsOff()) {
-            null
-        } else {
-            NativeSubtitleTrackSelectionPolicy.select(
-                candidates = candidates,
-                preferredLanguages = preferredSubtitleLanguages(),
+        val sessionPreference = subtitleSessionPreference
+        val restored = when (sessionPreference?.mode) {
+            NativeSubtitleSessionMode.OFF -> NativeSubtitleRestoreResult.Disabled
+            NativeSubtitleSessionMode.SINGLE -> {
+                val fingerprint = sessionPreference.primary
+                val selected = fingerprint?.let { preferred ->
+                    NativeSubtitleSessionPreferencePolicy.match(
+                        choices.map(NativeTrackChoice::restoreCandidate),
+                        preferred,
+                    )
+                }
+                selected?.let(NativeSubtitleRestoreResult::Single)
+            }
+            NativeSubtitleSessionMode.DUAL -> restoreNativeDualSubtitleChoice(
+                choices,
+                sessionPreference,
             )
+            null -> null
+        }
+        if (restored is NativeSubtitleRestoreResult.Dual) {
+            enableDualSubtitleRouting(restored.primary, restored.secondary)
+        } else {
+            dualSubtitleController.disable()
+            applySubtitleStyle()
+        }
+
+        val selected = when (restored) {
+            NativeSubtitleRestoreResult.Disabled -> null
+            is NativeSubtitleRestoreResult.Single -> restored.choice.override
+            is NativeSubtitleRestoreResult.Dual -> restored.primary.override
+            null -> if (subtitlePreferenceIsOff()) {
+                null
+            } else {
+                NativeSubtitleTrackSelectionPolicy.select(
+                    candidates = choices.map { choice ->
+                        NativeSubtitleTrackCandidate(
+                            value = choice.override,
+                            language = choice.language,
+                            label = choice.sourceLabel,
+                            isForced = choice.isForced,
+                            isDefault = choice.isDefault,
+                        )
+                    },
+                    preferredLanguages = preferredSubtitleLanguages(),
+                )
+            }
         }
         val parameters = currentPlayer.trackSelectionParameters
             .buildUpon()
@@ -1365,6 +1395,94 @@ class NativePlaybackActivity : Activity() {
             parameters.addOverride(selected)
         }
         currentPlayer.trackSelectionParameters = parameters.build()
+    }
+
+    private fun buildNativeTrackChoices(
+        tracks: Tracks,
+        trackType: Int,
+        trackNameProvider: DefaultTrackNameProvider? = null,
+    ): List<NativeTrackChoice> {
+        var subtitleIndex = 0
+        return tracks.groups.flatMap { group ->
+            if (group.type != trackType) {
+                return@flatMap emptyList()
+            }
+            (0 until group.length).mapNotNull { trackIndex ->
+                if (!group.isTrackSupported(trackIndex)) {
+                    return@mapNotNull null
+                }
+                val format = group.getTrackFormat(trackIndex)
+                val isDefault = format.selectionFlags and C.SELECTION_FLAG_DEFAULT != 0
+                val isForced = format.selectionFlags and C.SELECTION_FLAG_FORCED != 0
+                val isExternal = format.id?.startsWith("external:") == true
+                val label = if (trackType == C.TRACK_TYPE_TEXT) {
+                    subtitleIndex += 1
+                    NativeSubtitleTrackLabelPolicy.format(
+                        title = format.label.orEmpty(),
+                        language = format.language.orEmpty(),
+                        isDefault = isDefault,
+                        isForced = isForced,
+                        isExternal = isExternal,
+                        fallbackIndex = subtitleIndex,
+                    )
+                } else {
+                    trackNameProvider?.getTrackName(format).orEmpty()
+                }
+                NativeTrackChoice(
+                    label = label,
+                    override = TrackSelectionOverride(
+                        group.mediaTrackGroup,
+                        trackIndex,
+                    ),
+                    selected = group.isTrackSelected(trackIndex),
+                    formatKey = if (trackType == C.TRACK_TYPE_TEXT) {
+                        NativeSubtitleFormatKey.from(format)
+                    } else {
+                        null
+                    },
+                    groupFormatKeys = if (trackType == C.TRACK_TYPE_TEXT) {
+                        (0 until group.length)
+                            .map { index ->
+                                NativeSubtitleFormatKey.from(group.getTrackFormat(index))
+                            }
+                            .toSet()
+                    } else {
+                        emptySet()
+                    },
+                    language = format.language.orEmpty(),
+                    sourceLabel = format.label.orEmpty(),
+                    sampleMimeType = format.sampleMimeType.orEmpty(),
+                    codecs = format.codecs.orEmpty(),
+                    isDefault = isDefault,
+                    isForced = isForced,
+                    isExternal = isExternal,
+                )
+            }
+        }
+    }
+
+    private fun restoreNativeDualSubtitleChoice(
+        choices: List<NativeTrackChoice>,
+        preference: NativeSubtitleSessionPreference,
+    ): NativeSubtitleRestoreResult.Dual? {
+        val primaryFingerprint = preference.primary ?: return null
+        val secondaryFingerprint = preference.secondary ?: return null
+        val candidates = choices.filter(NativeTrackChoice::canUseInDualSubtitleMode)
+        val primary = NativeSubtitleSessionPreferencePolicy.match(
+            candidates.map(NativeTrackChoice::restoreCandidate),
+            primaryFingerprint,
+        ) ?: return null
+        val primaryKey = primary.formatKey ?: return null
+        val secondaryCandidates = candidates.filter { choice ->
+            val key = choice.formatKey
+            key != null && key != primaryKey && primaryKey !in choice.groupFormatKeys
+        }
+        val secondary = NativeSubtitleSessionPreferencePolicy.match(
+            secondaryCandidates.map(NativeTrackChoice::restoreCandidate),
+            secondaryFingerprint,
+            excludedValues = setOf(primary),
+        ) ?: return null
+        return NativeSubtitleRestoreResult.Dual(primary, secondary)
     }
 
     private fun buildMediaCodecSelector(preferSoftware: Boolean): MediaCodecSelector {
@@ -2578,59 +2696,11 @@ class NativePlaybackActivity : Activity() {
     ) {
         val currentPlayer = player ?: return
         val trackNameProvider = DefaultTrackNameProvider(resources)
-        var subtitleIndex = 0
-        val choices = currentPlayer.currentTracks.groups.flatMap { group ->
-            if (group.type != trackType) {
-                return@flatMap emptyList()
-            }
-            (0 until group.length).mapNotNull { trackIndex ->
-                if (!group.isTrackSupported(trackIndex)) {
-                    return@mapNotNull null
-                }
-                val format = group.getTrackFormat(trackIndex)
-                val label = if (trackType == C.TRACK_TYPE_TEXT) {
-                    subtitleIndex += 1
-                    NativeSubtitleTrackLabelPolicy.format(
-                        title = format.label.orEmpty(),
-                        language = format.language.orEmpty(),
-                        isDefault =
-                            format.selectionFlags and C.SELECTION_FLAG_DEFAULT != 0,
-                        isForced =
-                            format.selectionFlags and C.SELECTION_FLAG_FORCED != 0,
-                        isExternal = format.id?.startsWith("external:") == true,
-                        fallbackIndex = subtitleIndex,
-                    )
-                } else {
-                    trackNameProvider.getTrackName(format)
-                }
-                NativeTrackChoice(
-                    label = label,
-                    override = TrackSelectionOverride(
-                        group.mediaTrackGroup,
-                        trackIndex,
-                    ),
-                    selected = group.isTrackSelected(trackIndex),
-                    formatKey = if (trackType == C.TRACK_TYPE_TEXT) {
-                        NativeSubtitleFormatKey.from(format)
-                    } else {
-                        null
-                    },
-                    groupFormatKeys = if (trackType == C.TRACK_TYPE_TEXT) {
-                        (0 until group.length)
-                            .map { index ->
-                                NativeSubtitleFormatKey.from(group.getTrackFormat(index))
-                            }
-                            .toSet()
-                    } else {
-                        emptySet()
-                    },
-                    language = format.language.orEmpty(),
-                    sourceLabel = format.label.orEmpty(),
-                    sampleMimeType = format.sampleMimeType.orEmpty(),
-                    codecs = format.codecs.orEmpty(),
-                )
-            }
-        }
+        val choices = buildNativeTrackChoices(
+            tracks = currentPlayer.currentTracks,
+            trackType = trackType,
+            trackNameProvider = trackNameProvider,
+        )
         if (choices.isEmpty()) {
             showToast(emptyMessage)
             restoreControllerFocusIfNeeded(focusTarget)
@@ -2674,6 +2744,11 @@ class NativePlaybackActivity : Activity() {
                     dualSubtitleController.disable()
                     applySubtitleStyle()
                     parameters.setTrackTypeDisabled(trackType, true)
+                    if (trackType == C.TRACK_TYPE_TEXT) {
+                        subtitleSessionPreference = NativeSubtitleSessionPreference(
+                            mode = NativeSubtitleSessionMode.OFF,
+                        )
+                    }
                 } else if (showDualSubtitleOption && which == 1) {
                     pickerDialog.dismiss()
                     playerView.post { openDualSubtitlePrimaryPicker(choices) }
@@ -2683,6 +2758,14 @@ class NativePlaybackActivity : Activity() {
                     if (trackType == C.TRACK_TYPE_TEXT) {
                         dualSubtitleController.disable()
                         applySubtitleStyle()
+                        subtitleSessionPreference = if (choice.isExternal) {
+                            null
+                        } else {
+                            NativeSubtitleSessionPreference(
+                                mode = NativeSubtitleSessionMode.SINGLE,
+                                primary = choice.subtitleFingerprint,
+                            )
+                        }
                     }
                     parameters
                         .setTrackTypeDisabled(trackType, false)
@@ -2774,6 +2857,33 @@ class NativePlaybackActivity : Activity() {
         secondaryChoice: NativeTrackChoice,
     ) {
         val currentPlayer = player ?: return
+        if (primaryChoice.formatKey == null || secondaryChoice.formatKey == null) {
+            return
+        }
+        enableDualSubtitleRouting(primaryChoice, secondaryChoice)
+        currentPlayer.trackSelectionParameters = currentPlayer.trackSelectionParameters
+            .buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            .addOverride(primaryChoice.override)
+            .build()
+        subtitleSessionPreference = NativeSubtitleSessionPreference(
+            mode = NativeSubtitleSessionMode.DUAL,
+            primary = primaryChoice.subtitleFingerprint,
+            secondary = secondaryChoice.subtitleFingerprint,
+        )
+        logPlayback(
+            "native.subtitle.dual-enabled " +
+                "primary=${primaryChoice.label} secondary=${secondaryChoice.label}",
+        )
+        showToast("双字幕已开启：中文在上，英文在下")
+        restoreControllerFocusIfNeeded(ControllerFocusTarget.SUBTITLE)
+    }
+
+    private fun enableDualSubtitleRouting(
+        primaryChoice: NativeTrackChoice,
+        secondaryChoice: NativeTrackChoice,
+    ) {
         val primaryKey = primaryChoice.formatKey ?: return
         val secondaryKey = secondaryChoice.formatKey ?: return
         dualSubtitleController.enable(
@@ -2782,18 +2892,6 @@ class NativePlaybackActivity : Activity() {
             secondaryGroupKeys = secondaryChoice.groupFormatKeys,
         )
         applySubtitleStyle()
-        currentPlayer.trackSelectionParameters = currentPlayer.trackSelectionParameters
-            .buildUpon()
-            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-            .addOverride(primaryChoice.override)
-            .build()
-        logPlayback(
-            "native.subtitle.dual-enabled " +
-                "primary=${primaryChoice.label} secondary=${secondaryChoice.label}",
-        )
-        showToast("双字幕已开启：中文在上，英文在下")
-        restoreControllerFocusIfNeeded(ControllerFocusTarget.SUBTITLE)
     }
 
     private fun showTransientDialog(dialog: Dialog, focusTarget: ControllerFocusTarget) {
@@ -3036,6 +3134,7 @@ class NativePlaybackActivity : Activity() {
     private fun applyExternalSubtitleConfiguration(showFeedback: Boolean = true) {
         val currentPlayer = player ?: return
         val source = externalSubtitleSource ?: return
+        subtitleSessionPreference = null
         dualSubtitleController.disable()
         applySubtitleStyle()
         val sourceMediaItem = baseMediaItem ?: currentPlayer.currentMediaItem ?: return
@@ -4157,14 +4256,48 @@ private data class NativeTrackChoice(
     val sourceLabel: String = "",
     val sampleMimeType: String = "",
     val codecs: String = "",
+    val isDefault: Boolean = false,
+    val isForced: Boolean = false,
+    val isExternal: Boolean = false,
 )
 
+private val NativeTrackChoice.subtitleFingerprint: NativeSubtitleTrackFingerprint
+    get() = NativeSubtitleTrackFingerprint(
+        id = formatKey?.id.orEmpty(),
+        label = sourceLabel,
+        language = language,
+        sampleMimeType = sampleMimeType,
+        codecs = codecs,
+        isDefault = isDefault,
+        isForced = isForced,
+        accessibilityChannel = formatKey?.accessibilityChannel ?: -1,
+    )
+
+private val NativeTrackChoice.restoreCandidate:
+    NativeSubtitleRestoreCandidate<NativeTrackChoice>
+    get() = NativeSubtitleRestoreCandidate(
+        value = this,
+        fingerprint = subtitleFingerprint,
+    )
+
 private val NativeTrackChoice.canUseInDualSubtitleMode: Boolean
-    get() = formatKey != null &&
+    get() = !isExternal &&
+        formatKey != null &&
         NativeDualSubtitleTrackPolicy.isCompatibleTextSubtitle(
             sampleMimeType = sampleMimeType,
             codecs = codecs,
         )
+
+private sealed interface NativeSubtitleRestoreResult {
+    data object Disabled : NativeSubtitleRestoreResult
+
+    data class Single(val choice: NativeTrackChoice) : NativeSubtitleRestoreResult
+
+    data class Dual(
+        val primary: NativeTrackChoice,
+        val secondary: NativeTrackChoice,
+    ) : NativeSubtitleRestoreResult
+}
 
 private data class NativeEpisodeQueueEntry(
     val playbackTargetJson: String,

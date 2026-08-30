@@ -690,6 +690,17 @@ private struct NativeEpisodeQueue {
   }
 }
 
+private struct NativeSubtitleTrackFingerprint {
+  let label: String
+  let language: String
+  let isForced: Bool
+}
+
+private enum NativeSubtitleSessionPreference {
+  case off
+  case single(NativeSubtitleTrackFingerprint)
+}
+
 private final class NativePlaybackViewController: AVPlayerViewController {
   private static let persistThresholdMs: Int64 = 10_000
   private static let playbackStartupTimeoutSeconds: TimeInterval = 30
@@ -717,6 +728,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   private var interruptionWasPlaying = false
   private var backgroundDisabledVideoTracks: [AVPlayerItemTrack] = []
   private var appIsInBackground = false
+  private var subtitleSessionPreference: NativeSubtitleSessionPreference?
 
   init(
     request: NativePlaybackRequest,
@@ -766,6 +778,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   }
 
   private func configurePlayer() {
+    captureCurrentSubtitleSessionPreference()
     teardownPlayback()
     configureAudioSession(enabled: true)
 
@@ -855,11 +868,27 @@ private final class NativePlaybackViewController: AVPlayerViewController {
       forKeys: ["availableMediaCharacteristicsWithMediaSelectionOptions"]
     ) { [weak self, weak item] in
       DispatchQueue.main.async {
-        guard let self, let item,
+        guard let self, let item, self.player?.currentItem === item,
           let group = asset.mediaSelectionGroup(forMediaCharacteristic: .legible)
         else {
           return
         }
+        if let sessionPreference = self.subtitleSessionPreference {
+          switch sessionPreference {
+          case .off:
+            item.select(nil, in: group)
+            return
+          case .single(let fingerprint):
+            if let restored = self.matchSubtitleOption(
+              in: group.options,
+              fingerprint: fingerprint
+            ) {
+              item.select(restored, in: group)
+              return
+            }
+          }
+        }
+
         if self.subtitlePreference == "off" {
           item.select(nil, in: group)
           return
@@ -880,6 +909,69 @@ private final class NativePlaybackViewController: AVPlayerViewController {
         item.select(preferredOption ?? forcedOption ?? group.defaultOption, in: group)
       }
     }
+  }
+
+  private func captureCurrentSubtitleSessionPreference() {
+    guard let item = player?.currentItem,
+      let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible)
+    else {
+      return
+    }
+    guard let selected = item.currentMediaSelection.selectedMediaOption(in: group) else {
+      subtitleSessionPreference = .off
+      return
+    }
+    subtitleSessionPreference = .single(
+      NativeSubtitleTrackFingerprint(
+        label: selected.displayName,
+        language: selected.locale?.identifier ?? "",
+        isForced: selected.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
+          || isForcedSubtitleLabel(selected.displayName)
+      )
+    )
+  }
+
+  private func matchSubtitleOption(
+    in options: [AVMediaSelectionOption],
+    fingerprint: NativeSubtitleTrackFingerprint
+  ) -> AVMediaSelectionOption? {
+    var bestOption: AVMediaSelectionOption?
+    var bestScore = 0
+    for option in options {
+      let optionLanguage = canonicalSubtitleLanguage(option.locale?.identifier ?? "")
+      let preferredLanguage = canonicalSubtitleLanguage(fingerprint.language)
+      let optionLabel = normalizedSubtitleLabel(option.displayName)
+      let preferredLabel = normalizedSubtitleLabel(fingerprint.label)
+      let optionForced = option.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
+        || isForcedSubtitleLabel(option.displayName)
+      var score = 0
+      if !optionLanguage.isEmpty, !preferredLanguage.isEmpty {
+        if optionLanguage == preferredLanguage {
+          score += 120
+        } else if optionLanguage.split(separator: "-").first
+          == preferredLanguage.split(separator: "-").first
+        {
+          score += 72
+          } else {
+            score -= 200
+        }
+      }
+      if !optionLabel.isEmpty, !preferredLabel.isEmpty {
+        if optionLabel == preferredLabel {
+          score += 100
+        } else if optionLabel.contains(preferredLabel) || preferredLabel.contains(optionLabel) {
+          score += 54
+        }
+      }
+      if optionForced == fingerprint.isForced {
+        score += 5
+      }
+      if score > bestScore {
+        bestOption = option
+        bestScore = score
+      }
+    }
+    return bestScore >= 30 ? bestOption : nil
   }
 
   private func subtitleOption(
@@ -911,6 +1003,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
       .lowercased()
       .replacingOccurrences(of: "_", with: "-")
     switch normalized {
+    case "", "und", "zxx", "null", "unknown": return ""
     case "english", "eng": return "en"
     case "japanese", "jpn": return "ja"
     case "korean", "kor": return "ko"

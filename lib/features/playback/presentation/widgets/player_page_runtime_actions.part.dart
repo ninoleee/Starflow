@@ -14,6 +14,26 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       // Ignore preference application failures to keep playback available.
     }
 
+    final sessionPreference = _subtitleSessionPreference;
+    if (sessionPreference != null) {
+      try {
+        final restored = await _restoreMpvSubtitleSessionPreference(
+          player,
+          sessionPreference,
+        );
+        if (restored) {
+          return;
+        }
+      } catch (_) {
+        try {
+          await _setMpvSubtitleProperty(player, 'secondary-sid', 'no');
+        } catch (_) {
+          // Continue with the configured automatic preference below.
+        }
+        _setMpvDualSubtitleSessionEnabled(false);
+      }
+    }
+
     if (settings.playbackSubtitlePreference == PlaybackSubtitlePreference.off) {
       try {
         await player.setSubtitleTrack(SubtitleTrack.no());
@@ -33,6 +53,82 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       } catch (_) {
         // Ignore preference application failures to keep playback available.
       }
+    }
+  }
+
+  Future<bool> _restoreMpvSubtitleSessionPreference(
+    Player player,
+    PlaybackSubtitleSessionPreference preference,
+  ) async {
+    switch (preference.mode) {
+      case PlaybackSubtitleSessionMode.automatic:
+        await _setMpvSubtitleProperty(player, 'secondary-sid', 'no');
+        await player.setSubtitleTrack(SubtitleTrack.auto());
+        _setMpvDualSubtitleSessionEnabled(false);
+        return true;
+      case PlaybackSubtitleSessionMode.off:
+        await _setMpvSubtitleProperty(player, 'secondary-sid', 'no');
+        await player.setSubtitleTrack(SubtitleTrack.no());
+        _setMpvDualSubtitleSessionEnabled(false);
+        return true;
+      case PlaybackSubtitleSessionMode.single:
+        final fingerprint = preference.primary;
+        if (fingerprint == null) {
+          return false;
+        }
+        final tracks = await _awaitAvailableSubtitleTracks(player);
+        final selected = matchPlaybackSubtitleTrack(tracks, fingerprint);
+        if (selected == null) {
+          return false;
+        }
+        await _setMpvSubtitleProperty(player, 'secondary-sid', 'no');
+        await player.setSubtitleTrack(selected);
+        _setMpvDualSubtitleSessionEnabled(false);
+        return true;
+      case PlaybackSubtitleSessionMode.dual:
+        final primaryFingerprint = preference.primary;
+        final secondaryFingerprint = preference.secondary;
+        if (primaryFingerprint == null || secondaryFingerprint == null) {
+          return false;
+        }
+        final tracks = await _awaitAvailableSubtitleTracks(player);
+        final candidates =
+            tracks.where(_canUseMpvDualSubtitleTrack).toList(growable: false);
+        final primary = matchPlaybackSubtitleTrack(
+          candidates,
+          primaryFingerprint,
+          textOnly: true,
+        );
+        if (primary == null) {
+          return false;
+        }
+        final secondary = matchPlaybackSubtitleTrack(
+          candidates,
+          secondaryFingerprint,
+          excludedIds: {primary.id},
+          textOnly: true,
+        );
+        if (secondary == null) {
+          return false;
+        }
+        await player.setSubtitleTrack(primary);
+        await _setMpvSubtitleProperty(player, 'secondary-sid', secondary.id);
+        await _applyMpvSubtitleLayout(player);
+        _setMpvDualSubtitleSessionEnabled(true);
+        return true;
+    }
+  }
+
+  void _setMpvDualSubtitleSessionEnabled(bool enabled) {
+    if (_mpvDualSubtitleEnabled == enabled) {
+      return;
+    }
+    if (mounted) {
+      setState(() {
+        _mpvDualSubtitleEnabled = enabled;
+      });
+    } else {
+      _mpvDualSubtitleEnabled = enabled;
     }
   }
 
@@ -368,8 +464,9 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     if (resolvedPath.isEmpty) {
       return;
     }
+    await _disableMpvDualSubtitle(player);
     final uri = Uri.file(resolvedPath).toString();
-    await _runPlayerCommand(
+    final applied = await _runPlayerCommand(
       () => player.setSubtitleTrack(
         SubtitleTrack.uri(
           uri,
@@ -380,6 +477,10 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       ),
       failureMessage: '加载字幕失败',
     );
+    if (!applied) {
+      return;
+    }
+    _subtitleSessionPreference = null;
     if (showFeedback) {
       _showMessage('外挂字幕已加载');
     }

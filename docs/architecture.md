@@ -664,6 +664,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - Android `TV` 从原生播放器拉起独立字幕搜索页时，会把当前 `query / title / input` 一并透传给 Flutter 路由，避免字幕搜索页空查询打开；页面只预填，不会自动发起搜索
 - 播放设置里的字幕默认项已收拢到独立二级页，和播放中临时字幕操作分开
 - 自动字幕选轨由播放器启动时统一执行：优先语言匹配 > 片源 Forced 字幕 > 片源默认字幕；明确选择“默认关闭”时保持关闭。MPV、Android Media3 和 iOS AVPlayer 都使用这套优先级，未配置优先语言时才使用系统语言作为语言匹配依据
+- 剧集队列会话额外持有字幕选择指纹：用户手动选择内封字幕或关闭字幕后，切集重建播放器时按规范化语言、标题、编码、默认/强制标记和稳定 ID 降权匹配新一集轨道，匹配不到才回退自动选轨。MPV 与 Android Media3 分别保存双字幕主、副指纹；iOS 系统播放器保存当前单字幕选择。外挂/在线字幕文件不进入跨集指纹，避免把单集时间轴套到另一集
 - 非 `TV` 的内嵌 `MPV` 当前使用 Starflow 自己的轻量播放叠层，而不是 `media_kit` 默认控制条：
   - 首层只保留返回、播放/暂停、进度、全屏和“更多”；音量、字幕、音轨与其他高级播放项统一收进播放设置弹窗
   - 顶部标题栏、底部控制区和播放设置弹窗都收敛到更官方的 Material 组件组合：`Material + IconButton + Slider + Text + ListTile + TextButton`；手机、桌面和 TV 顶栏都从最左侧返回按钮开始，实时网速紧跟在其右侧
@@ -753,7 +754,8 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - Android 原生播放器每次轨道变化都会把音频轨的 MIME、编码标记、声道数、采样率、支持状态和选中状态写入结构化 native 日志；初始化日志同时标记 `audioOutputMode / forcePcmAudioOutput / ffmpegAudioDecoder`
 - Android 原生播放器的字幕菜单不使用 Media3 泛化轨道名称，而由 `NativeSubtitleTrackLabelPolicy` 按内置 MPV 的“标题 · 语言 · 默认/强制”顺序生成；`und / zxx` 不显示为语言，外挂字幕优先显示文件名
 - Android 原生播放器的可选双字幕模式由 `NativeDualSubtitleController` 承担：同一 Exo 会话使用主/副两个文本渲染器分别解码两条分离的文本字幕轨，动态能力路由只让副渲染器认领英文轨，再按独立主/副位置输出两个 cue；副字幕字号、主位置和副位置从 Flutter 设置传入，并可在原生“更多”中覆盖当前会话。普通字幕模式仍只启用主文本渲染器，PGS/VobSub/DVB 图片字幕不进入双字幕候选
-- 非 Web 内置 MPV 使用原生 `sid / secondary-sid` 选择两条分离的内封文本轨，同时向 libmpv 写入 `sub-pos / secondary-sub-pos / secondary-sub-scale`；由于当前 `libass=false`，画面上的主/副字幕由 Starflow 自定义 Flutter 叠层分别渲染，保证窗口态与全屏态都使用独立位置和字号。图片字幕和临时外挂字幕不进入特殊模式。播放设置一级通过“更多”打开二级页，二级页同时提供字幕布局、后台播放、手势、卡顿恢复和性能调优开关
+- Android 原生播放器的跨集字幕恢复由 `NativeSubtitleSessionPreferencePolicy` 匹配新的 `TrackSelectionOverride`；双字幕恢复成功后再重新配置 `NativeDualSubtitleController` 的主/副路由，不保存上一集的 Media3 group 或 override 实例
+- 非 Web 内置 MPV 使用原生 `sid / secondary-sid` 选择两条分离的内封文本轨，同时向 libmpv 写入 `sub-pos / secondary-sub-pos / secondary-sub-scale`；由于当前 `libass=false`，画面上的主/副字幕由 Starflow 自定义 Flutter 叠层分别渲染，保证窗口态与全屏态都使用独立位置和字号。跨集时由 `PlaybackSubtitleSessionPreference` 分别匹配新的 `sid / secondary-sid`。图片字幕和临时外挂字幕不进入特殊模式。播放设置一级通过“更多”打开二级页，二级页同时提供字幕布局、后台播放、手势、卡顿恢复和性能调优开关
 - 非 Web MPV 控制层左上角以返回按钮作为第一个控件，不保留人为前置间距；其右侧网速标签使用轻量轮询读取 libmpv `cache-speed`，展示当前缓存下层 I/O 读取速度。桌面 / 手机 Adaptive 控制层和 TV chrome 复用同一排列与网速组件
 - Android 原生播放器同时记录视频轨 MIME、编码、尺寸、色彩信息与支持状态；检测到存在视频轨但当前设备全部不支持时，会以 `static=false` 重新请求 Emby 转码流并从原进度继续
 - Android 原生播放器额外包含与 Media3 同版本的 `media3-exoplayer-hls`；仅对 SmartStrm 且文件名含 `#/%23` 的原生启动执行响应头级预检，按最终 Content-Type 直接选择 MP4/HLS，不持久化短期重定向地址；预检失败时仍由 `NativePlaybackHlsFallbackPolicy` 在首次解析错误 `3003` 后保留进度切换 HLS 一次
@@ -765,6 +767,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - Android 原生播放器每 `10s` 记录一次位置、时长、缓冲位置、缓冲比例、播放态、首帧状态与视频尺寸；位置不连续事件单独记录旧/新位置和 Media3 原因码
 - Android 原生播放器为当前 Exo 会话创建独立 `DefaultBandwidthMeter`，控制层完全显示时在右上角展示最近一次真实传输采样；手机 / TV 控制布局分别覆盖 Media3 的底栏动画高度，使两阶段自动隐藏的第一阶段把剩余进度条下沉到实际底边
 - iOS 原生播放器容器页当前使用原生 `AVPlayerViewController` 全屏承载播放，不退出 App；它会复用同一份续播记忆，并补了在线字幕搜索入口，但解码走系统链路，当前不提供软硬解切换或字幕偏移
+- iOS 原生播放器切集前从 `currentMediaSelection` 读取当前系统字幕选择，下一集的 legible group 可用后按语言与显示名称恢复；没有匹配项时回退全局自动字幕策略
 - 详情页“从头播放”从当前选择生成 `allowResume=false` 的目标，“继续播放”从历史记录恢复具体目标并设置 `allowResume=true`；该字段在播放地址解析后保持不变，内置 `MPV`、Android `ExoPlayer` 和 iOS `AVPlayer` 都以它作为是否读取历史进度的唯一入口语义
 - iOS 的播放会话桥接由 `ios/Runner/PlaybackSystemSessionBridge.swift` 承担，`AppDelegate` 会把它绑定到 Flutter channel，用于原生播放会话、遥控器命令和 AirPlay 入口
 - Android 系统播放器优先调用原生 `ACTION_VIEW`，并显式标记 `video/*`
