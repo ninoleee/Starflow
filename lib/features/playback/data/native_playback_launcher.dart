@@ -10,6 +10,19 @@ final nativePlaybackLauncherProvider = Provider<NativePlaybackLauncher>((ref) {
   return impl.createNativePlaybackLauncher();
 });
 
+class NativeResolvedPlaybackTarget {
+  const NativeResolvedPlaybackTarget({
+    required this.target,
+    this.mediaMimeType = '',
+  });
+
+  final PlaybackTarget target;
+  final String mediaMimeType;
+}
+
+typedef NativePlaybackEpisodeResolver = Future<NativeResolvedPlaybackTarget>
+    Function(PlaybackTarget target);
+
 abstract class NativePlaybackLauncher {
   Future<NativePlaybackLaunchResult> launch(
     PlaybackTarget target, {
@@ -20,6 +33,8 @@ abstract class NativePlaybackLauncher {
     required PlaybackSubtitlePreference subtitlePreference,
     required List<String> subtitlePreferredLanguages,
     PlaybackEpisodeQueue? episodeQueue,
+    String mediaMimeType = '',
+    NativePlaybackEpisodeResolver? episodeResolver,
   });
 }
 

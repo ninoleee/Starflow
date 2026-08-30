@@ -70,6 +70,7 @@ class PlaybackSystemSessionState {
     this.speed = 1.0,
     this.artworkCandidates = const [],
     this.canSeek = true,
+    this.hasEpisodeQueue = false,
     this.hasPrevious = false,
     this.hasNext = false,
   });
@@ -83,6 +84,7 @@ class PlaybackSystemSessionState {
   final double speed;
   final List<PlaybackSystemSessionArtworkCandidate> artworkCandidates;
   final bool canSeek;
+  final bool hasEpisodeQueue;
   final bool hasPrevious;
   final bool hasNext;
 
@@ -99,6 +101,7 @@ class PlaybackSystemSessionState {
         for (final candidate in artworkCandidates) candidate.toMap(),
       ],
       'canSeek': canSeek,
+      'hasEpisodeQueue': hasEpisodeQueue,
       'hasPrevious': hasPrevious,
       'hasNext': hasNext,
     };

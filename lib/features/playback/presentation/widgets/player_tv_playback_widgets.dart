@@ -45,12 +45,19 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
     required this.playing,
     required this.bufferingPercentage,
     required this.backFocusNode,
+    required this.previousEpisodeFocusNode,
     required this.playPauseFocusNode,
+    required this.nextEpisodeFocusNode,
+    required this.episodePickerFocusNode,
     required this.subtitleFocusNode,
     required this.audioFocusNode,
     required this.moreFocusNode,
     required this.onBack,
+    required this.showEpisodeControls,
+    required this.onPreviousEpisode,
     required this.onTogglePlayback,
+    required this.onNextEpisode,
+    required this.onOpenEpisodePicker,
     required this.onOpenSubtitle,
     required this.onOpenAudio,
     required this.onOpenOptions,
@@ -62,12 +69,19 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
   final bool playing;
   final double bufferingPercentage;
   final FocusNode backFocusNode;
+  final FocusNode previousEpisodeFocusNode;
   final FocusNode playPauseFocusNode;
+  final FocusNode nextEpisodeFocusNode;
+  final FocusNode episodePickerFocusNode;
   final FocusNode subtitleFocusNode;
   final FocusNode audioFocusNode;
   final FocusNode moreFocusNode;
   final VoidCallback onBack;
+  final bool showEpisodeControls;
+  final VoidCallback? onPreviousEpisode;
   final VoidCallback onTogglePlayback;
+  final VoidCallback? onNextEpisode;
+  final VoidCallback onOpenEpisodePicker;
   final VoidCallback onOpenSubtitle;
   final VoidCallback onOpenAudio;
   final VoidCallback onOpenOptions;
@@ -155,6 +169,16 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
                     },
                     child: Row(
                       children: [
+                        if (showEpisodeControls) ...[
+                          StarflowIconButton(
+                            icon: Icons.skip_previous_rounded,
+                            tooltip: '上一集',
+                            variant: StarflowButtonVariant.ghost,
+                            focusNode: previousEpisodeFocusNode,
+                            onPressed: onPreviousEpisode,
+                          ),
+                          const SizedBox(width: 10),
+                        ],
                         StarflowIconButton(
                           icon: playing
                               ? Icons.pause_rounded
@@ -165,6 +189,16 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
                           focusNode: playPauseFocusNode,
                           onPressed: onTogglePlayback,
                         ),
+                        if (showEpisodeControls) ...[
+                          const SizedBox(width: 10),
+                          StarflowIconButton(
+                            icon: Icons.skip_next_rounded,
+                            tooltip: '下一集',
+                            variant: StarflowButtonVariant.ghost,
+                            focusNode: nextEpisodeFocusNode,
+                            onPressed: onNextEpisode,
+                          ),
+                        ],
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
@@ -178,6 +212,16 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 12),
+                        if (showEpisodeControls) ...[
+                          StarflowIconButton(
+                            icon: Icons.playlist_play_rounded,
+                            tooltip: '选集',
+                            variant: StarflowButtonVariant.ghost,
+                            focusNode: episodePickerFocusNode,
+                            onPressed: onOpenEpisodePicker,
+                          ),
+                          const SizedBox(width: 10),
+                        ],
                         StarflowIconButton(
                           icon: Icons.closed_caption_rounded,
                           tooltip: '字幕',

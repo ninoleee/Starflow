@@ -71,6 +71,7 @@ class NativePlaybackActivity : Activity() {
     private var playbackTargetJson = "{}"
     private var playbackItemKey = ""
     private var seriesKey = ""
+    private var resolverSessionId = ""
     private var episodeQueue: NativeEpisodeQueue? = null
     private var launchResultReceiver: ResultReceiver? = null
     private var launchRequestId = ""
@@ -90,6 +91,9 @@ class NativePlaybackActivity : Activity() {
     private var subtitleDelayMs: Long = 0L
     private var automaticSubtitleSelectionApplied = false
     private var transcodedVideoFallbackAttempted = false
+    private var smartStrmHlsFallbackAttempted = false
+    private var episodeResolutionInProgress = false
+    private var episodeResolutionRequestId = 0L
     private var externalSubtitleSource: ExternalSubtitleSource? = null
     private var lastSavedPositionMs: Long = -1L
     private var subtitleSearchActive = false
@@ -190,7 +194,7 @@ class NativePlaybackActivity : Activity() {
                 maybeApplyAutoSkip()
             }
             if (playbackState == Player.STATE_ENDED &&
-                advanceToAdjacentEpisode(forward = true, reason = "ended", showFeedback = false)
+                advanceToAdjacentEpisode(forward = true, reason = "ended")
             ) {
                 return
             }
@@ -230,6 +234,9 @@ class NativePlaybackActivity : Activity() {
                     "container=${decodePlaybackTargetObject().optString("container").trim()}",
                 error,
             )
+            if (retrySmartStrmAsHlsIfNeeded(error)) {
+                return
+            }
             handlePlayerError(error)
         }
 
@@ -380,6 +387,8 @@ class NativePlaybackActivity : Activity() {
     }
 
     override fun onDestroy() {
+        episodeResolutionRequestId += 1L
+        episodeResolutionInProgress = false
         reportPlaybackLaunchResult(
             resultCode = RESULT_PLAYBACK_CANCELLED,
             message = "原生播放器在画面就绪前已关闭",
@@ -407,9 +416,16 @@ class NativePlaybackActivity : Activity() {
             ?.trim()
             .orEmpty()
         seriesKey = playbackIntent.getStringExtra(EXTRA_SERIES_KEY)?.trim().orEmpty()
-        episodeQueue = NativeEpisodeQueue.fromJsonString(
+        resolverSessionId = playbackIntent.getStringExtra(EXTRA_RESOLVER_SESSION_ID)
+            ?.trim()
+            .orEmpty()
+        val parsedEpisodeQueue = NativeEpisodeQueue.fromJsonString(
             playbackIntent.getStringExtra(EXTRA_EPISODE_QUEUE_JSON)?.trim().orEmpty(),
         )
+        val launchMediaMimeType = playbackIntent.getStringExtra(EXTRA_MEDIA_MIME_TYPE)
+            ?.trim()
+            .orEmpty()
+        episodeQueue = parsedEpisodeQueue?.withCurrentMediaMimeType(launchMediaMimeType)
         audioOutputMode = NativeAudioOutputMode.fromRaw(
             playbackIntent.getStringExtra(EXTRA_AUDIO_OUTPUT_MODE).orEmpty(),
         )
@@ -423,6 +439,9 @@ class NativePlaybackActivity : Activity() {
     private fun resetPlaybackStateForNewIntent() {
         baseMediaItem = null
         transcodedVideoFallbackAttempted = false
+        smartStrmHlsFallbackAttempted = false
+        episodeResolutionInProgress = false
+        episodeResolutionRequestId += 1L
         externalSubtitleSource = null
         subtitleDelayMs = 0L
         restoredResumePositionMs = 0L
@@ -849,6 +868,8 @@ class NativePlaybackActivity : Activity() {
             "native.buffer-policy television=$isTelevisionDevice " +
                 "memoryClassMb=$memoryClassMb heavy=$isHeavyPlayback " +
                 "minMs=${bufferConfig.minBufferMs} maxMs=${bufferConfig.maxBufferMs} " +
+                "startMs=${bufferConfig.bufferForPlaybackMs} " +
+                "rebufferMs=${bufferConfig.bufferForPlaybackAfterRebufferMs} " +
                 "targetBytes=${bufferConfig.targetBufferBytes}",
         )
 
@@ -967,7 +988,20 @@ class NativePlaybackActivity : Activity() {
                 forcePcmAudioOutput = forcePcmAudioOutput,
                 audioCodec = audioCodec,
             )
-        val guessedMimeType = guessVideoMimeType(targetObject, url).takeIf { it != "-" }
+        val explicitMimeType = intent.getStringExtra(EXTRA_MEDIA_MIME_TYPE)?.trim().orEmpty()
+        if (explicitMimeType == MimeTypes.APPLICATION_M3U8) {
+            smartStrmHlsFallbackAttempted = true
+        }
+        val guessedMimeType = explicitMimeType.ifEmpty {
+            if (
+                smartStrmHlsFallbackAttempted &&
+                NativePlaybackHlsFallbackPolicy.isSmartStrmUrl(url)
+            ) {
+                MimeTypes.APPLICATION_M3U8
+            } else {
+                guessVideoMimeType(targetObject, url).takeIf { it != "-" }.orEmpty()
+            }
+        }.takeIf { it.isNotEmpty() }
 
         val allowResume = targetObject.optBoolean("allowResume", true)
         restoredResumePositionMs = NativePlaybackResumePolicy.resolveResumePositionMs(
@@ -1180,6 +1214,30 @@ class NativePlaybackActivity : Activity() {
         releasePlayer()
         initializePlayer()
         showToast("视频编码需要转码，正在重新连接")
+    }
+
+    private fun retrySmartStrmAsHlsIfNeeded(error: PlaybackException): Boolean {
+        val url = intent.getStringExtra(EXTRA_URL)?.trim().orEmpty()
+        if (!NativePlaybackHlsFallbackPolicy.shouldRetryAsHls(
+                errorCode = error.errorCode,
+                url = url,
+                alreadyAttempted = smartStrmHlsFallbackAttempted,
+            )
+        ) {
+            return false
+        }
+
+        smartStrmHlsFallbackAttempted = true
+        pendingResumePositionOverrideMs = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+        nextInitializePlayWhenReady = player?.playWhenReady ?: true
+        logPlayback(
+            "native.playback.smartstrm-hls-fallback " +
+                "resumeMs=$pendingResumePositionOverrideMs " +
+                "url=${summarizeUrl(url)}",
+        )
+        releasePlayer()
+        initializePlayer()
+        return true
     }
 
     private fun buildTranscodedVideoFallbackUrl(rawUrl: String): String? {
@@ -1530,6 +1588,7 @@ class NativePlaybackActivity : Activity() {
             buffering = currentPlayer.playbackState == Player.STATE_BUFFERING,
             speed = currentPlayer.playbackParameters.speed,
             canSeek = true,
+            hasEpisodeQueue = (episodeQueue?.entries?.size ?: 0) > 1,
             hasPrevious = episodeQueue?.hasPrevious() == true,
             hasNext = episodeQueue?.hasNext() == true,
         )
@@ -1549,15 +1608,11 @@ class NativePlaybackActivity : Activity() {
             "toggle" -> togglePlayback()
             "seekForward" -> seekBy(10_000L)
             "next" -> {
-                if (!advanceToAdjacentEpisode(forward = true, reason = "remote-next")) {
-                    seekBy(10_000L)
-                }
+                advanceToAdjacentEpisode(forward = true, reason = "remote-next")
             }
             "seekBackward" -> seekBy(-10_000L)
             "previous" -> {
-                if (!advanceToAdjacentEpisode(forward = false, reason = "remote-previous")) {
-                    seekBy(-10_000L)
-                }
+                advanceToAdjacentEpisode(forward = false, reason = "remote-previous")
             }
             "seekTo" -> {
                 val currentPlayer = player ?: return
@@ -1572,29 +1627,18 @@ class NativePlaybackActivity : Activity() {
     private fun advanceToAdjacentEpisode(
         forward: Boolean,
         reason: String,
-        showFeedback: Boolean = true,
     ): Boolean {
         val queue = episodeQueue ?: return false
         val nextIndex = if (forward) queue.currentIndex + 1 else queue.currentIndex - 1
         return switchToEpisodeQueueIndex(
             index = nextIndex,
             reason = reason,
-            feedbackMessage = if (showFeedback) {
-                if (forward) {
-                    "已切到下一集"
-                } else {
-                    "已切到上一集"
-                }
-            } else {
-                null
-            },
         )
     }
 
     private fun switchToEpisodeQueueIndex(
         index: Int,
         reason: String,
-        feedbackMessage: String?,
     ): Boolean {
         val queue = episodeQueue ?: return false
         if (index !in queue.entries.indices || index == queue.currentIndex) {
@@ -1602,6 +1646,168 @@ class NativePlaybackActivity : Activity() {
         }
         val nextQueue = queue.copy(currentIndex = index)
         val nextEntry = nextQueue.currentEntry() ?: return false
+        if (episodeResolutionInProgress) {
+            showToast("正在解析剧集，请稍候")
+            restoreControllerFocusIfNeeded(ControllerFocusTarget.SETTINGS)
+            return true
+        }
+        if (nextEntry.needsResolution()) {
+            return resolveAndSwitchEpisodeQueueIndex(
+                queue = queue,
+                index = index,
+                reason = reason,
+            )
+        }
+        return switchToResolvedEpisodeQueueIndex(
+            nextQueue = nextQueue,
+            nextEntry = nextEntry,
+            reason = reason,
+            mediaMimeType = nextEntry.mediaMimeType,
+        )
+    }
+
+    private fun resolveAndSwitchEpisodeQueueIndex(
+        queue: NativeEpisodeQueue,
+        index: Int,
+        reason: String,
+    ): Boolean {
+        val targetEntry = queue.entries.getOrNull(index) ?: return false
+        if (resolverSessionId.isBlank()) {
+            handleEpisodeResolutionFailure(
+                message = "当前播放器无法解析该剧集，请重新打开播放页。",
+                reason = reason,
+                index = index,
+            )
+            return true
+        }
+
+        episodeResolutionInProgress = true
+        val requestId = ++episodeResolutionRequestId
+        val sourceQueueIndex = queue.currentIndex
+        val sourcePlaybackTargetJson = playbackTargetJson
+        val requestedTargetJson = targetEntry.playbackTargetJson
+        val startedAtMs = SystemClock.elapsedRealtime()
+        showToast("正在解析 ${formatEpisodeSelectionLabel(index, targetEntry)}")
+        restoreControllerFocusIfNeeded(ControllerFocusTarget.SETTINGS)
+        logPlayback(
+            "native.queue.resolve.begin " +
+                "reason=$reason index=$index currentIndex=$sourceQueueIndex",
+        )
+
+        val dispatched = MainActivity.resolveNativePlaybackEpisode(
+            resolverSessionId = resolverSessionId,
+            playbackTargetJson = requestedTargetJson,
+        ) { result ->
+            runOnUiThread {
+                if (requestId != episodeResolutionRequestId) {
+                    return@runOnUiThread
+                }
+                episodeResolutionInProgress = false
+                if (isFinishing || isDestroyed) {
+                    return@runOnUiThread
+                }
+                val currentQueue = episodeQueue
+                val currentTargetEntry = currentQueue?.entries?.getOrNull(index)
+                if (currentQueue == null ||
+                    currentQueue.currentIndex != sourceQueueIndex ||
+                    playbackTargetJson != sourcePlaybackTargetJson ||
+                    currentTargetEntry?.playbackTargetJson != requestedTargetJson
+                ) {
+                    logPlayback(
+                        "native.queue.resolve.ignored " +
+                            "reason=playback-changed index=$index",
+                    )
+                    restoreControllerFocusIfNeeded(ControllerFocusTarget.SETTINGS)
+                    return@runOnUiThread
+                }
+
+                val resolvedEntry = NativeEpisodeQueueEntry(
+                    playbackTargetJson = result["playbackTargetJson"]
+                        ?.toString()
+                        ?.trim()
+                        .orEmpty(),
+                    playbackItemKey = result["playbackItemKey"]
+                        ?.toString()
+                        ?.trim()
+                        .orEmpty()
+                        .ifEmpty { targetEntry.playbackItemKey },
+                    seriesKey = result["seriesKey"]
+                        ?.toString()
+                        ?.trim()
+                        .orEmpty()
+                        .ifEmpty { targetEntry.seriesKey },
+                    mediaMimeType = result["mediaMimeType"]
+                        ?.toString()
+                        ?.trim()
+                        .orEmpty(),
+                )
+                if (result["ok"] != true ||
+                    resolvedEntry.url().isBlank() ||
+                    resolvedEntry.needsResolution()
+                ) {
+                    val message = result["message"]
+                        ?.toString()
+                        ?.trim()
+                        .orEmpty()
+                        .ifEmpty { "没有取得可播放地址。" }
+                    handleEpisodeResolutionFailure(
+                        message = message,
+                        reason = reason,
+                        index = index,
+                        durationMs = SystemClock.elapsedRealtime() - startedAtMs,
+                    )
+                    return@runOnUiThread
+                }
+
+                val resolvedQueue = currentQueue
+                    .replaceEntry(index, resolvedEntry)
+                    .copy(currentIndex = index)
+                logPlayback(
+                    "native.queue.resolve.success " +
+                        "reason=$reason index=$index " +
+                        "durationMs=${SystemClock.elapsedRealtime() - startedAtMs}",
+                )
+                switchToResolvedEpisodeQueueIndex(
+                    nextQueue = resolvedQueue,
+                    nextEntry = resolvedEntry,
+                    reason = reason,
+                    mediaMimeType = resolvedEntry.mediaMimeType,
+                )
+            }
+        }
+        if (!dispatched) {
+            episodeResolutionInProgress = false
+            handleEpisodeResolutionFailure(
+                message = "播放器解析服务未就绪，请重新打开播放页。",
+                reason = reason,
+                index = index,
+            )
+        }
+        return true
+    }
+
+    private fun handleEpisodeResolutionFailure(
+        message: String,
+        reason: String,
+        index: Int,
+        durationMs: Long = 0L,
+    ) {
+        val displayMessage = message.trim().ifEmpty { "解析剧集失败，请重试。" }
+        logPlayback(
+            "native.queue.resolve.failed " +
+                "reason=$reason index=$index durationMs=$durationMs " +
+                "message=$displayMessage",
+        )
+        showToast(displayMessage)
+        restoreControllerFocusIfNeeded(ControllerFocusTarget.SETTINGS)
+    }
+
+    private fun switchToResolvedEpisodeQueueIndex(
+        nextQueue: NativeEpisodeQueue,
+        nextEntry: NativeEpisodeQueueEntry,
+        reason: String,
+        mediaMimeType: String,
+    ): Boolean {
         if (nextEntry.url().isBlank()) {
             return false
         }
@@ -1610,6 +1816,9 @@ class NativePlaybackActivity : Activity() {
         releasePlayer()
 
         episodeQueue = nextQueue
+        episodeResolutionInProgress = false
+        smartStrmHlsFallbackAttempted = false
+        transcodedVideoFallbackAttempted = false
         playbackTargetJson = nextEntry.playbackTargetJson
         playbackItemKey = nextEntry.playbackItemKey
         seriesKey = nextEntry.seriesKey
@@ -1617,7 +1826,10 @@ class NativePlaybackActivity : Activity() {
         subtitleDelayMs = 0L
         restoredResumePositionMs = 0L
         lastSavedPositionMs = -1L
+        pendingResumePositionOverrideMs = null
         nextInitializePlayWhenReady = true
+        introSkipApplied = false
+        outroSkipApplied = false
 
         intent.putExtra(EXTRA_URL, nextEntry.url())
         intent.putExtra(EXTRA_TITLE, nextEntry.title())
@@ -1626,13 +1838,16 @@ class NativePlaybackActivity : Activity() {
         intent.putExtra(EXTRA_PLAYBACK_ITEM_KEY, playbackItemKey)
         intent.putExtra(EXTRA_SERIES_KEY, seriesKey)
         intent.putExtra(EXTRA_EPISODE_QUEUE_JSON, nextQueue.toJsonString())
+        if (mediaMimeType.isBlank()) {
+            intent.removeExtra(EXTRA_MEDIA_MIME_TYPE)
+        } else {
+            intent.putExtra(EXTRA_MEDIA_MIME_TYPE, mediaMimeType.trim())
+        }
 
         bindControllerChrome()
+        updateProgressMarkers()
         initializePlayer()
         syncPlaybackSystemSession()
-        if (!feedbackMessage.isNullOrBlank()) {
-            showToast(feedbackMessage)
-        }
         logPlayback(
             "native.queue.switch " +
                 "reason=$reason index=${nextQueue.currentIndex}",
@@ -1970,7 +2185,6 @@ class NativePlaybackActivity : Activity() {
                     switchToEpisodeQueueIndex(
                         index = which,
                         reason = "episode-picker",
-                        feedbackMessage = "已切到 ${labels[which]}",
                     )
                 }
             }
@@ -3551,6 +3765,8 @@ class NativePlaybackActivity : Activity() {
         const val EXTRA_DECODE_MODE = "decodeMode"
         const val EXTRA_AUDIO_OUTPUT_MODE = "audioOutputMode"
         const val EXTRA_SUBTITLE_SCALE = "subtitleScale"
+        const val EXTRA_MEDIA_MIME_TYPE = "mediaMimeType"
+        const val EXTRA_RESOLVER_SESSION_ID = "resolverSessionId"
         const val EXTRA_SUBTITLE_PREFERENCE = "subtitlePreference"
         const val EXTRA_SUBTITLE_PREFERRED_LANGUAGES = "subtitlePreferredLanguages"
         const val EXTRA_PLAYBACK_TARGET_JSON = "playbackTargetJson"
@@ -3592,6 +3808,7 @@ private data class NativeEpisodeQueueEntry(
     val playbackTargetJson: String,
     val playbackItemKey: String,
     val seriesKey: String,
+    val mediaMimeType: String = "",
 ) {
     private fun targetObject(): JSONObject {
         return try {
@@ -3604,6 +3821,19 @@ private data class NativeEpisodeQueueEntry(
     fun url(): String = targetObject().optString("streamUrl").trim()
 
     fun title(): String = targetObject().optString("title").trim()
+
+    fun needsResolution(): Boolean {
+        val target = targetObject()
+        val streamUrl = target.optString("streamUrl").trim().lowercase()
+        val actualAddress = target.optString("actualAddress").trim().lowercase()
+        val sourceKind = target.optString("sourceKind").trim().lowercase()
+        val streamPath = streamUrl.substringBefore('?').substringBefore('#')
+        return streamUrl.isBlank() ||
+            streamPath.endsWith(".strm") ||
+            (sourceKind == "nas" &&
+                streamUrl.isBlank() &&
+                actualAddress.substringBefore('?').substringBefore('#').endsWith(".strm"))
+    }
 
     fun headersJson(): String {
         return targetObject().optJSONObject("headers")?.toString() ?: "{}"
@@ -3626,6 +3856,27 @@ private data class NativeEpisodeQueue(
         return entries.getOrNull(currentIndex)
     }
 
+    fun replaceEntry(index: Int, entry: NativeEpisodeQueueEntry): NativeEpisodeQueue {
+        if (index !in entries.indices) {
+            return this
+        }
+        val nextEntries = entries.toMutableList()
+        nextEntries[index] = entry
+        return copy(entries = nextEntries)
+    }
+
+    fun withCurrentMediaMimeType(mediaMimeType: String): NativeEpisodeQueue {
+        val normalizedMimeType = mediaMimeType.trim()
+        val current = currentEntry()
+        if (normalizedMimeType.isEmpty() || current == null) {
+            return this
+        }
+        return replaceEntry(
+            currentIndex,
+            current.copy(mediaMimeType = normalizedMimeType),
+        )
+    }
+
     fun moveToNext(): NativeEpisodeQueue? {
         return if (hasNext()) copy(currentIndex = currentIndex + 1) else null
     }
@@ -3646,6 +3897,7 @@ private data class NativeEpisodeQueue(
                     })
                     put("playbackItemKey", entry.playbackItemKey)
                     put("seriesKey", entry.seriesKey)
+                    put("mediaMimeType", entry.mediaMimeType)
                 },
             )
         }
@@ -3671,6 +3923,7 @@ private data class NativeEpisodeQueue(
                             entryObject.optJSONObject("target")?.toString() ?: "{}",
                         playbackItemKey = entryObject.optString("playbackItemKey").trim(),
                         seriesKey = entryObject.optString("seriesKey").trim(),
+                        mediaMimeType = entryObject.optString("mediaMimeType").trim(),
                     )
                 }
                 if (entries.isEmpty()) {

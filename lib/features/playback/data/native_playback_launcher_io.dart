@@ -10,13 +10,19 @@ import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 NativePlaybackLauncher createNativePlaybackLauncher() {
-  return const PlatformNativePlaybackLauncher();
+  return PlatformNativePlaybackLauncher();
 }
 
 class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
-  const PlatformNativePlaybackLauncher();
+  PlatformNativePlaybackLauncher() {
+    _resolverChannel.setMethodCallHandler(_handleResolverMethodCall);
+  }
 
   static const _platformChannel = MethodChannel('starflow/platform');
+  static const _resolverChannel =
+      MethodChannel('starflow/native_playback_resolver');
+  NativePlaybackEpisodeResolver? _episodeResolver;
+  String _resolverSessionId = '';
 
   @override
   Future<NativePlaybackLaunchResult> launch(
@@ -28,6 +34,8 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
     required PlaybackSubtitlePreference subtitlePreference,
     required List<String> subtitlePreferredLanguages,
     PlaybackEpisodeQueue? episodeQueue,
+    String mediaMimeType = '',
+    NativePlaybackEpisodeResolver? episodeResolver,
   }) async {
     if (!Platform.isAndroid && !Platform.isIOS) {
       return const NativePlaybackLaunchResult(
@@ -54,6 +62,10 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
         'headers': target.headers.keys.join('|'),
       },
     );
+    _episodeResolver = episodeResolver;
+    _resolverSessionId = episodeResolver == null
+        ? ''
+        : DateTime.now().microsecondsSinceEpoch.toString();
     try {
       final launched = await _platformChannel.invokeMethod<bool>(
         'launchNativePlaybackContainer',
@@ -67,6 +79,8 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
           'backgroundPlaybackEnabled': backgroundPlaybackEnabled,
           'subtitlePreference': subtitlePreference.name,
           'subtitlePreferredLanguages': subtitlePreferredLanguages,
+          'mediaMimeType': mediaMimeType,
+          'resolverSessionId': _resolverSessionId,
           'playbackTargetJson': jsonEncode(target.toJson()),
           'playbackItemKey': buildPlaybackItemKey(target),
           'seriesKey': buildSeriesKeyForTarget(target),
@@ -102,6 +116,47 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
         launched: false,
         message: '原生播放器启动失败。',
       );
+    }
+  }
+
+  Future<Object?> _handleResolverMethodCall(MethodCall call) async {
+    if (call.method != 'resolveNativePlaybackEpisode') {
+      throw MissingPluginException('Unsupported native playback resolver call');
+    }
+    final arguments = Map<String, Object?>.from(
+      call.arguments as Map<dynamic, dynamic>? ?? const {},
+    );
+    final resolverSessionId =
+        arguments['resolverSessionId']?.toString().trim() ?? '';
+    final rawTargetJson = arguments['playbackTargetJson']?.toString() ?? '';
+    final resolver = _episodeResolver;
+    if (resolver == null ||
+        resolverSessionId.isEmpty ||
+        resolverSessionId != _resolverSessionId ||
+        rawTargetJson.trim().isEmpty) {
+      return const <String, Object?>{
+        'ok': false,
+        'message': '原生播放会话已变化，请重新选择剧集。',
+      };
+    }
+    try {
+      final target = PlaybackTarget.fromJson(
+        Map<String, dynamic>.from(jsonDecode(rawTargetJson) as Map),
+      );
+      final resolved = await resolver(target);
+      final resolvedPlaybackItemKey = buildPlaybackItemKey(resolved.target);
+      return <String, Object?>{
+        'ok': true,
+        'playbackTargetJson': jsonEncode(resolved.target.toJson()),
+        'playbackItemKey': resolvedPlaybackItemKey,
+        'seriesKey': buildSeriesKeyForTarget(resolved.target),
+        'mediaMimeType': resolved.mediaMimeType,
+      };
+    } catch (error) {
+      return <String, Object?>{
+        'ok': false,
+        'message': '解析剧集失败：$error',
+      };
     }
   }
 }

@@ -550,6 +550,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
               )
             : EdgeInsets.zero;
     return MaterialVideoControlsThemeData(
+      automaticallyImplySkipNextButton: false,
+      automaticallyImplySkipPreviousButton: false,
       volumeGesture: enableVerticalGestureControls,
       brightnessGesture: enableVerticalGestureControls,
       seekGesture: _mpvSwipeToSeekEnabled,
@@ -565,6 +567,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
           : null,
       initialBrightness: _adaptiveGestureBrightness,
       padding: controlsPadding,
+      primaryButtonBar: _buildAdaptiveMaterialPrimaryButtonBar(),
       topButtonBar: materialTopButtonBar,
       topButtonBarMargin: EdgeInsets.fromLTRB(16, isPortrait ? 12 : 0, 16, 0),
       bottomButtonBarMargin: EdgeInsets.only(
@@ -600,10 +603,13 @@ extension _PlayerPageStateControls on _PlayerPageState {
         : null;
     final bottomInset = isPortrait ? portraitBottomInset : 0.0;
     return MaterialDesktopVideoControlsThemeData(
+      automaticallyImplySkipNextButton: false,
+      automaticallyImplySkipPreviousButton: false,
       padding: controlsPadding,
       topButtonBar: desktopTopButtonBar,
       topButtonBarMargin: EdgeInsets.fromLTRB(16, isPortrait ? 12 : 0, 16, 0),
       bottomButtonBarMargin: EdgeInsets.fromLTRB(16, 0, 16, bottomInset),
+      bottomButtonBar: _buildAdaptiveDesktopBottomButtonBar(),
       seekBarMargin: EdgeInsets.fromLTRB(
         16,
         0,
@@ -740,6 +746,18 @@ extension _PlayerPageStateControls on _PlayerPageState {
         ),
       ),
       const Spacer(),
+      if (_hasPlaybackEpisodeQueue)
+        Tooltip(
+          message: '选集',
+          child: MaterialCustomButton(
+            icon: const Icon(Icons.playlist_play_rounded),
+            onPressed: () {
+              unawaited(
+                _openPlaybackEpisodePicker(isTelevision: false),
+              );
+            },
+          ),
+        ),
       Tooltip(
         message: '更多',
         child: MaterialCustomButton(
@@ -771,6 +789,18 @@ extension _PlayerPageStateControls on _PlayerPageState {
         ),
       ),
       const Spacer(),
+      if (_hasPlaybackEpisodeQueue)
+        Tooltip(
+          message: '选集',
+          child: MaterialDesktopCustomButton(
+            icon: const Icon(Icons.playlist_play_rounded),
+            onPressed: () {
+              unawaited(
+                _openPlaybackEpisodePicker(isTelevision: false),
+              );
+            },
+          ),
+        ),
       Tooltip(
         message: '更多',
         child: MaterialDesktopCustomButton(
@@ -784,6 +814,117 @@ extension _PlayerPageStateControls on _PlayerPageState {
           },
         ),
       ),
+    ];
+  }
+
+  bool get _hasPlaybackEpisodeQueue {
+    final queue = _episodeQueue;
+    return queue != null && queue.entries.length > 1 && queue.hasCurrent;
+  }
+
+  Widget _buildEpisodeQueueControlButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onPressed,
+    double iconSize = 26,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: IconButton(
+        onPressed: onPressed,
+        icon: Icon(icon),
+        iconSize: iconSize,
+        color: Colors.white,
+        disabledColor: Colors.white.withValues(alpha: 0.30),
+      ),
+    );
+  }
+
+  List<Widget> _buildAdaptiveMaterialPrimaryButtonBar() {
+    final queue = _episodeQueue;
+    final showEpisodeControls = _hasPlaybackEpisodeQueue;
+    return <Widget>[
+      const Spacer(flex: 2),
+      if (showEpisodeControls) ...[
+        _buildEpisodeQueueControlButton(
+          icon: Icons.skip_previous_rounded,
+          tooltip: '上一集',
+          onPressed: queue?.hasPrevious == true
+              ? () {
+                  unawaited(
+                    _movePlaybackQueue(
+                      forward: false,
+                      reason: 'mobile-control-previous',
+                    ),
+                  );
+                }
+              : null,
+          iconSize: 30,
+        ),
+        const Spacer(),
+      ],
+      const MaterialPlayOrPauseButton(iconSize: 48),
+      if (showEpisodeControls) ...[
+        const Spacer(),
+        _buildEpisodeQueueControlButton(
+          icon: Icons.skip_next_rounded,
+          tooltip: '下一集',
+          onPressed: queue?.hasNext == true
+              ? () {
+                  unawaited(
+                    _movePlaybackQueue(
+                      forward: true,
+                      reason: 'mobile-control-next',
+                    ),
+                  );
+                }
+              : null,
+          iconSize: 30,
+        ),
+      ],
+      const Spacer(flex: 2),
+    ];
+  }
+
+  List<Widget> _buildAdaptiveDesktopBottomButtonBar() {
+    final queue = _episodeQueue;
+    final showEpisodeControls = _hasPlaybackEpisodeQueue;
+    return <Widget>[
+      if (showEpisodeControls)
+        _buildEpisodeQueueControlButton(
+          icon: Icons.skip_previous_rounded,
+          tooltip: '上一集',
+          onPressed: queue?.hasPrevious == true
+              ? () {
+                  unawaited(
+                    _movePlaybackQueue(
+                      forward: false,
+                      reason: 'desktop-control-previous',
+                    ),
+                  );
+                }
+              : null,
+        ),
+      const MaterialDesktopPlayOrPauseButton(),
+      if (showEpisodeControls)
+        _buildEpisodeQueueControlButton(
+          icon: Icons.skip_next_rounded,
+          tooltip: '下一集',
+          onPressed: queue?.hasNext == true
+              ? () {
+                  unawaited(
+                    _movePlaybackQueue(
+                      forward: true,
+                      reason: 'desktop-control-next',
+                    ),
+                  );
+                }
+              : null,
+        ),
+      const MaterialDesktopVolumeButton(),
+      const MaterialDesktopPositionIndicator(),
+      const Spacer(),
+      const MaterialDesktopFullscreenButton(),
     ];
   }
 

@@ -32,6 +32,7 @@ class PlaybackRemotePreflightResult {
     required this.duration,
     this.requestUri,
     this.finalUri,
+    this.contentType,
     this.errorMessage,
   });
 
@@ -47,9 +48,18 @@ class PlaybackRemotePreflightResult {
   final Duration duration;
   final Uri? requestUri;
   final Uri? finalUri;
+  final String? contentType;
   final String? errorMessage;
 
   bool get hasHardFailure => !canStream || !acceptableStatus;
+
+  bool get isHlsStream {
+    final normalizedContentType = contentType?.trim().toLowerCase() ?? '';
+    if (normalizedContentType.contains('mpegurl')) {
+      return true;
+    }
+    return finalUri?.path.toLowerCase().endsWith('.m3u8') ?? false;
+  }
 
   int? get estimatedSpeedBytesPerSecond {
     if (sampledBytes <= 0 || duration.inMicroseconds <= 0) {
@@ -159,6 +169,7 @@ class PlaybackRemotePreflight {
         ),
         requestUri: uri,
         finalUri: response.request?.url,
+        contentType: response.headers['content-type'],
       );
     } on TimeoutException catch (error) {
       return _buildResult(
@@ -204,6 +215,7 @@ class PlaybackRemotePreflight {
     int sampledBytes = 0,
     Uri? requestUri,
     Uri? finalUri,
+    String? contentType,
     String? errorMessage,
   }) {
     return PlaybackRemotePreflightResult(
@@ -219,6 +231,7 @@ class PlaybackRemotePreflight {
       duration: DateTime.now().difference(startedAt),
       requestUri: requestUri,
       finalUri: finalUri,
+      contentType: contentType,
       errorMessage: errorMessage,
     );
   }

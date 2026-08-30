@@ -161,6 +161,7 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
       speed: player.state.rate,
       artworkCandidates: _buildPlaybackSystemSessionArtworkCandidates(),
       canSeek: true,
+      hasEpisodeQueue: (_episodeQueue?.entries.length ?? 0) > 1,
       hasPrevious: _episodeQueue?.hasPrevious ?? false,
       hasNext: _episodeQueue?.hasNext ?? false,
     );
@@ -173,6 +174,8 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
     final bufferingChanged =
         state.buffering != _lastPlaybackSystemSessionBuffering;
     final speedChanged = state.speed != _lastPlaybackSystemSessionSpeed;
+    final hasEpisodeQueueChanged = state.hasEpisodeQueue !=
+        _lastPlaybackSystemSessionHasEpisodeQueue;
     final hasPreviousChanged =
         state.hasPrevious != _lastPlaybackSystemSessionHasPrevious;
     final hasNextChanged = state.hasNext != _lastPlaybackSystemSessionHasNext;
@@ -187,6 +190,7 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
         playingChanged ||
         bufferingChanged ||
         speedChanged ||
+        hasEpisodeQueueChanged ||
         hasPreviousChanged ||
         hasNextChanged ||
         titleChanged ||
@@ -209,6 +213,7 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
     _lastPlaybackSystemSessionPlaying = state.playing;
     _lastPlaybackSystemSessionBuffering = state.buffering;
     _lastPlaybackSystemSessionSpeed = state.speed;
+    _lastPlaybackSystemSessionHasEpisodeQueue = state.hasEpisodeQueue;
     _lastPlaybackSystemSessionHasPrevious = state.hasPrevious;
     _lastPlaybackSystemSessionHasNext = state.hasNext;
     _lastPlaybackSystemSessionTitle = state.title;
@@ -249,27 +254,19 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
         await _seekRelative(_PlayerPageState._kSeekStep);
         break;
       case PlaybackRemoteCommandType.next:
-        if (await _movePlaybackQueue(
+        await _movePlaybackQueue(
           forward: true,
           reason: 'remote-next',
-          showFeedback: true,
-        )) {
-          break;
-        }
-        await _seekRelative(_PlayerPageState._kSeekStep);
+        );
         break;
       case PlaybackRemoteCommandType.seekBackward:
         await _seekRelative(-_PlayerPageState._kSeekStep);
         break;
       case PlaybackRemoteCommandType.previous:
-        if (await _movePlaybackQueue(
+        await _movePlaybackQueue(
           forward: false,
           reason: 'remote-previous',
-          showFeedback: true,
-        )) {
-          break;
-        }
-        await _seekRelative(-_PlayerPageState._kSeekStep);
+        );
         break;
       case PlaybackRemoteCommandType.seekTo:
         final position = command.position;

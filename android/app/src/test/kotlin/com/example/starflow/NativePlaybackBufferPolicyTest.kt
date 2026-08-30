@@ -16,6 +16,8 @@ class NativePlaybackBufferPolicyTest {
 
         assertEquals(20_000, config.minBufferMs)
         assertEquals(60_000, config.maxBufferMs)
+        assertEquals(1_500, config.bufferForPlaybackMs)
+        assertEquals(4_000, config.bufferForPlaybackAfterRebufferMs)
         assertEquals(32 * 1024 * 1024, config.targetBufferBytes)
         assertFalse(config.prioritizeTimeOverSizeThresholds)
     }
@@ -29,6 +31,7 @@ class NativePlaybackBufferPolicyTest {
         )
 
         assertEquals(80 * 1024 * 1024, config.targetBufferBytes)
+        assertEquals(2_000, config.bufferForPlaybackMs)
         assertEquals(6_000, config.bufferForPlaybackAfterRebufferMs)
         assertFalse(config.prioritizeTimeOverSizeThresholds)
     }
@@ -42,6 +45,7 @@ class NativePlaybackBufferPolicyTest {
         )
 
         assertEquals(128 * 1024 * 1024, config.targetBufferBytes)
+        assertEquals(2_500, config.bufferForPlaybackMs)
         assertEquals(120_000, config.maxBufferMs)
         assertFalse(config.prioritizeTimeOverSizeThresholds)
     }

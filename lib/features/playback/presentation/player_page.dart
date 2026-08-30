@@ -21,6 +21,8 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
+import 'package:starflow/features/playback/application/native_playback_episode_queue_policy.dart';
+import 'package:starflow/features/playback/application/native_playback_media_type.dart';
 import 'package:starflow/features/playback/application/playback_episode_queue_resolver.dart';
 import 'package:starflow/features/playback/application/playback_remote_preflight.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
@@ -41,6 +43,7 @@ import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/playback/presentation/widgets/mpv_stall_watchdog.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_adaptive_top_chrome.dart';
+import 'package:starflow/features/playback/presentation/widgets/player_episode_picker_dialog.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_dialogs.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_formatters.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_options_dialog.dart';
@@ -153,6 +156,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       FocusNode(debugLabel: 'tv-player-control-back');
   final FocusNode _tvPlayPauseControlFocusNode =
       FocusNode(debugLabel: 'tv-player-control-play');
+  final FocusNode _tvPreviousEpisodeControlFocusNode =
+      FocusNode(debugLabel: 'tv-player-control-previous-episode');
+  final FocusNode _tvNextEpisodeControlFocusNode =
+      FocusNode(debugLabel: 'tv-player-control-next-episode');
+  final FocusNode _tvEpisodePickerControlFocusNode =
+      FocusNode(debugLabel: 'tv-player-control-episode-picker');
   final FocusNode _tvSubtitleControlFocusNode =
       FocusNode(debugLabel: 'tv-player-control-subtitle');
   final FocusNode _tvAudioControlFocusNode =
@@ -173,7 +182,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   List<FocusNode> get _tvChromeControlFocusNodes => <FocusNode>[
         _tvBackControlFocusNode,
+        _tvPreviousEpisodeControlFocusNode,
         _tvPlayPauseControlFocusNode,
+        _tvNextEpisodeControlFocusNode,
+        _tvEpisodePickerControlFocusNode,
         _tvSubtitleControlFocusNode,
         _tvAudioControlFocusNode,
         _tvMoreControlFocusNode,
@@ -237,6 +249,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _lastPlaybackSystemSessionPlaying = false;
   bool _lastPlaybackSystemSessionBuffering = false;
   double _lastPlaybackSystemSessionSpeed = 1.0;
+  bool _lastPlaybackSystemSessionHasEpisodeQueue = false;
   bool _lastPlaybackSystemSessionHasPrevious = false;
   bool _lastPlaybackSystemSessionHasNext = false;
   String _lastPlaybackSystemSessionTitle = '';
@@ -888,6 +901,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                         : (_latestDuration > Duration.zero
                                             ? _latestDuration
                                             : player.state.duration);
+                                final episodeQueue = _episodeQueue;
+                                final showEpisodeControls =
+                                    episodeQueue != null &&
+                                        episodeQueue.entries.length > 1 &&
+                                        episodeQueue.hasCurrent;
                                 return PlayerTvPlaybackChrome(
                                   title:
                                       (_resolvedTarget ?? widget.target).title,
@@ -898,8 +916,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                   bufferingPercentage:
                                       state.bufferingPercentage,
                                   backFocusNode: _tvBackControlFocusNode,
+                                  previousEpisodeFocusNode:
+                                      _tvPreviousEpisodeControlFocusNode,
                                   playPauseFocusNode:
                                       _tvPlayPauseControlFocusNode,
+                                  nextEpisodeFocusNode:
+                                      _tvNextEpisodeControlFocusNode,
+                                  episodePickerFocusNode:
+                                      _tvEpisodePickerControlFocusNode,
                                   subtitleFocusNode:
                                       _tvSubtitleControlFocusNode,
                                   audioFocusNode: _tvAudioControlFocusNode,
@@ -907,7 +931,38 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                   onBack: () {
                                     unawaited(_handleTvBack());
                                   },
+                                  showEpisodeControls: showEpisodeControls,
+                                  onPreviousEpisode: showEpisodeControls &&
+                                          episodeQueue.hasPrevious
+                                      ? () {
+                                          unawaited(
+                                            _movePlaybackQueue(
+                                              forward: false,
+                                              reason: 'tv-control-previous',
+                                            ),
+                                          );
+                                        }
+                                      : null,
                                   onTogglePlayback: _togglePlayback,
+                                  onNextEpisode: showEpisodeControls &&
+                                          episodeQueue.hasNext
+                                      ? () {
+                                          unawaited(
+                                            _movePlaybackQueue(
+                                              forward: true,
+                                              reason: 'tv-control-next',
+                                            ),
+                                          );
+                                        }
+                                      : null,
+                                  onOpenEpisodePicker: () {
+                                    _showTvPlaybackChrome(autoHide: false);
+                                    unawaited(
+                                      _openPlaybackEpisodePicker(
+                                        isTelevision: true,
+                                      ),
+                                    );
+                                  },
                                   onOpenSubtitle: () {
                                     _showTvPlaybackChrome(autoHide: false);
                                     unawaited(

@@ -123,4 +123,20 @@ void main() {
       },
     ]);
   });
+
+  test('serializes episode navigation mode for native media controls', () {
+    const state = PlaybackSystemSessionState(
+      title: 'Episode',
+      position: Duration(minutes: 12),
+      duration: Duration(minutes: 45),
+      playing: true,
+      hasEpisodeQueue: true,
+      hasPrevious: true,
+      hasNext: false,
+    );
+
+    expect(state.toMap(), containsPair('hasEpisodeQueue', true));
+    expect(state.toMap(), containsPair('hasPrevious', true));
+    expect(state.toMap(), containsPair('hasNext', false));
+  });
 }

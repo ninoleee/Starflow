@@ -169,7 +169,6 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
           _movePlaybackQueue(
             forward: true,
             reason: 'playback-completed',
-            showFeedback: false,
           ),
         );
       });

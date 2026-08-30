@@ -1067,11 +1067,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
       guard let self else {
         return .commandFailed
       }
-      return self.advanceToAdjacentEpisode(
-        forward: true,
-        reason: "remote-next",
-        showFeedback: false
-      )
+      return self.advanceToAdjacentEpisode(forward: true)
         ? .success
         : .commandFailed
     }
@@ -1079,11 +1075,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
       guard let self else {
         return .commandFailed
       }
-      return self.advanceToAdjacentEpisode(
-        forward: false,
-        reason: "remote-previous",
-        showFeedback: false
-      )
+      return self.advanceToAdjacentEpisode(forward: false)
         ? .success
         : .commandFailed
     }
@@ -1120,8 +1112,13 @@ private final class NativePlaybackViewController: AVPlayerViewController {
 
   private func refreshRemoteCommandAvailability() {
     let commandCenter = MPRemoteCommandCenter.shared()
-    commandCenter.nextTrackCommand.isEnabled = episodeQueue?.hasNext == true
-    commandCenter.previousTrackCommand.isEnabled = episodeQueue?.hasPrevious == true
+    let hasEpisodeQueue = (episodeQueue?.entries.count ?? 0) > 1
+    commandCenter.skipForwardCommand.isEnabled = !hasEpisodeQueue
+    commandCenter.skipBackwardCommand.isEnabled = !hasEpisodeQueue
+    commandCenter.nextTrackCommand.isEnabled =
+      hasEpisodeQueue && episodeQueue?.hasNext == true
+    commandCenter.previousTrackCommand.isEnabled =
+      hasEpisodeQueue && episodeQueue?.hasPrevious == true
   }
 
   private func seekBy(seconds: Double) {
@@ -1136,11 +1133,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   }
 
   @discardableResult
-  private func advanceToAdjacentEpisode(
-    forward: Bool,
-    reason: String,
-    showFeedback: Bool
-  ) -> Bool {
+  private func advanceToAdjacentEpisode(forward: Bool) -> Bool {
     let nextQueue = forward ? episodeQueue?.moveToNext() : episodeQueue?.moveToPrevious()
     guard let nextQueue, let nextEntry = nextQueue.currentEntry else {
       return false
@@ -1152,10 +1145,6 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     title = request.title
     configurePlayer()
     updateNowPlayingInfo()
-    if showFeedback {
-      // AVPlayerViewController has no lightweight built-in toast; keep the
-      // transition silent and focus on uninterrupted playback.
-    }
     return true
   }
 
@@ -1500,11 +1489,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
       object: item,
       queue: .main
     ) { [weak self] _ in
-      if self?.advanceToAdjacentEpisode(
-        forward: true,
-        reason: "ended",
-        showFeedback: false
-      ) == true {
+      if self?.advanceToAdjacentEpisode(forward: true) == true {
         return
       }
       self?.persistPlaybackProgress(force: true)

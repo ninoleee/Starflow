@@ -202,6 +202,7 @@ final class PlaybackSystemSessionBridge {
     let artworkCandidates = normalizedNowPlayingArtworkCandidates(
       arguments["artworkCandidates"] as? [[String: Any]]
     )
+    let hasEpisodeQueue = arguments["hasEpisodeQueue"] as? Bool ?? false
     let hasPrevious = arguments["hasPrevious"] as? Bool ?? false
     let hasNext = arguments["hasNext"] as? Bool ?? false
     let canSeek = arguments["canSeek"] as? Bool ?? true
@@ -241,11 +242,11 @@ final class PlaybackSystemSessionBridge {
     MPNowPlayingInfoCenter.default().nowPlayingInfo = info
 
     let commandCenter = MPRemoteCommandCenter.shared()
-    commandCenter.skipForwardCommand.isEnabled = canSeek
-    commandCenter.skipBackwardCommand.isEnabled = canSeek
+    commandCenter.skipForwardCommand.isEnabled = canSeek && !hasEpisodeQueue
+    commandCenter.skipBackwardCommand.isEnabled = canSeek && !hasEpisodeQueue
     commandCenter.changePlaybackPositionCommand.isEnabled = canSeek
-    commandCenter.previousTrackCommand.isEnabled = hasPrevious
-    commandCenter.nextTrackCommand.isEnabled = hasNext
+    commandCenter.previousTrackCommand.isEnabled = hasEpisodeQueue && hasPrevious
+    commandCenter.nextTrackCommand.isEnabled = hasEpisodeQueue && hasNext
   }
 
   private func dispatchRemoteCommand(_ command: String, positionMs: Int64? = nil) {

@@ -29,6 +29,7 @@ data class PlaybackSystemSessionState(
     val buffering: Boolean = false,
     val speed: Float = 1f,
     val canSeek: Boolean = true,
+    val hasEpisodeQueue: Boolean = false,
     val hasPrevious: Boolean = false,
     val hasNext: Boolean = false,
 ) {
@@ -43,6 +44,7 @@ data class PlaybackSystemSessionState(
                 buffering = arguments["buffering"] as? Boolean ?: false,
                 speed = (arguments["speed"] as? Number)?.toFloat() ?: 1f,
                 canSeek = arguments["canSeek"] as? Boolean ?: true,
+                hasEpisodeQueue = arguments["hasEpisodeQueue"] as? Boolean ?: false,
                 hasPrevious = arguments["hasPrevious"] as? Boolean ?: false,
                 hasNext = arguments["hasNext"] as? Boolean ?: false,
             )
@@ -239,15 +241,17 @@ class PlaybackSystemSessionManager(
             PlaybackState.ACTION_PLAY_PAUSE or
             PlaybackState.ACTION_STOP
         if (state.canSeek) {
+            actions = actions or PlaybackState.ACTION_SEEK_TO
+        }
+        if (state.canSeek && !state.hasEpisodeQueue) {
             actions = actions or
                 PlaybackState.ACTION_FAST_FORWARD or
-                PlaybackState.ACTION_REWIND or
-                PlaybackState.ACTION_SEEK_TO
+                PlaybackState.ACTION_REWIND
         }
-        if (state.hasPrevious) {
+        if (state.hasEpisodeQueue && state.hasPrevious) {
             actions = actions or PlaybackState.ACTION_SKIP_TO_PREVIOUS
         }
-        if (state.hasNext) {
+        if (state.hasEpisodeQueue && state.hasNext) {
             actions = actions or PlaybackState.ACTION_SKIP_TO_NEXT
         }
 
@@ -298,11 +302,54 @@ class PlaybackSystemSessionManager(
             Notification.Builder(context)
         }
 
-        val rewindIntent = buildCommandPendingIntent("seekBackward")
         val playPauseIntent = buildCommandPendingIntent(
             if (state.playing) "pause" else "play",
         )
-        val forwardIntent = buildCommandPendingIntent("seekForward")
+
+        val actions = mutableListOf<Notification.Action>()
+        if (state.hasEpisodeQueue) {
+            if (state.hasPrevious) {
+                actions += Notification.Action.Builder(
+                    Icon.createWithResource(context, android.R.drawable.ic_media_previous),
+                    "上一集",
+                    buildCommandPendingIntent("previous"),
+                ).build()
+            }
+        } else if (state.canSeek) {
+            actions += Notification.Action.Builder(
+                Icon.createWithResource(context, android.R.drawable.ic_media_rew),
+                "后退 10 秒",
+                buildCommandPendingIntent("seekBackward"),
+            ).build()
+        }
+        actions += Notification.Action.Builder(
+            Icon.createWithResource(
+                context,
+                if (state.playing) {
+                    android.R.drawable.ic_media_pause
+                } else {
+                    android.R.drawable.ic_media_play
+                },
+            ),
+            if (state.playing) "暂停" else "播放",
+            playPauseIntent,
+        ).build()
+        if (state.hasEpisodeQueue) {
+            if (state.hasNext) {
+                actions += Notification.Action.Builder(
+                    Icon.createWithResource(context, android.R.drawable.ic_media_next),
+                    "下一集",
+                    buildCommandPendingIntent("next"),
+                ).build()
+            }
+        } else if (state.canSeek) {
+            actions += Notification.Action.Builder(
+                Icon.createWithResource(context, android.R.drawable.ic_media_ff),
+                "前进 10 秒",
+                buildCommandPendingIntent("seekForward"),
+            ).build()
+        }
+        val compactActionIndexes = actions.indices.toList().toIntArray()
 
         builder
             .setSmallIcon(R.drawable.icon_preview_sharp)
@@ -318,36 +365,10 @@ class PlaybackSystemSessionManager(
             .setStyle(
                 Notification.MediaStyle()
                     .setMediaSession(mediaSession.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2),
+                    .setShowActionsInCompactView(*compactActionIndexes),
             )
-            .addAction(
-                Notification.Action.Builder(
-                    Icon.createWithResource(context, android.R.drawable.ic_media_rew),
-                    "后退 10 秒",
-                    rewindIntent,
-                ).build(),
-            )
-            .addAction(
-                Notification.Action.Builder(
-                    Icon.createWithResource(
-                        context,
-                        if (state.playing) {
-                            android.R.drawable.ic_media_pause
-                        } else {
-                            android.R.drawable.ic_media_play
-                        },
-                    ),
-                    if (state.playing) "暂停" else "播放",
-                    playPauseIntent,
-                ).build(),
-            )
-            .addAction(
-                Notification.Action.Builder(
-                    Icon.createWithResource(context, android.R.drawable.ic_media_ff),
-                    "前进 10 秒",
-                    forwardIntent,
-                ).build(),
-            )
+
+        actions.forEach(builder::addAction)
 
         notificationManager.notify(notificationId, builder.build())
     }

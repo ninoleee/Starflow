@@ -20,6 +20,8 @@ class UnsupportedNativePlaybackLauncher implements NativePlaybackLauncher {
     required PlaybackSubtitlePreference subtitlePreference,
     required List<String> subtitlePreferredLanguages,
     PlaybackEpisodeQueue? episodeQueue,
+    String mediaMimeType = '',
+    NativePlaybackEpisodeResolver? episodeResolver,
   }) async {
     return const NativePlaybackLaunchResult(
       launched: false,

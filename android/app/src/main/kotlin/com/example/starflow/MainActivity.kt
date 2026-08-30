@@ -20,10 +20,12 @@ import kotlin.math.roundToInt
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
+import java.lang.ref.WeakReference
 import java.util.UUID
 
 class MainActivity : FlutterActivity() {
     private var platformChannel: MethodChannel? = null
+    private var nativePlaybackResolverChannel: MethodChannel? = null
     private var playbackSessionChannel: MethodChannel? = null
     private var playbackPictureInPictureEnabled = false
     private var playbackPictureInPictureAspectRatio = Rational(16, 9)
@@ -49,6 +51,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        activeInstance = WeakReference(this)
 
         platformChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -143,6 +146,10 @@ class MainActivity : FlutterActivity() {
                         ?: NativeSubtitleStylePolicy.DEFAULT_SCALE
                     val subtitlePreference =
                         call.argument<String>("subtitlePreference")?.trim().orEmpty()
+                    val mediaMimeType =
+                        call.argument<String>("mediaMimeType")?.trim().orEmpty()
+                    val resolverSessionId =
+                        call.argument<String>("resolverSessionId")?.trim().orEmpty()
                     val subtitlePreferredLanguages =
                         call.argument<List<String>>("subtitlePreferredLanguages")
                             ?.map(String::trim)
@@ -189,6 +196,11 @@ class MainActivity : FlutterActivity() {
                                 audioOutputMode,
                             )
                             putExtra(NativePlaybackActivity.EXTRA_SUBTITLE_SCALE, subtitleScale)
+                            putExtra(NativePlaybackActivity.EXTRA_MEDIA_MIME_TYPE, mediaMimeType)
+                            putExtra(
+                                NativePlaybackActivity.EXTRA_RESOLVER_SESSION_ID,
+                                resolverSessionId,
+                            )
                             putExtra(
                                 NativePlaybackActivity.EXTRA_SUBTITLE_PREFERENCE,
                                 subtitlePreference,
@@ -228,6 +240,10 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        nativePlaybackResolverChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "starflow/native_playback_resolver",
+        )
         playbackSessionChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "starflow/playback_session"
@@ -257,9 +273,67 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         completeNativePlaybackLaunch(false)
+        nativePlaybackResolverChannel = null
         playbackSessionChannel?.setMethodCallHandler(null)
         playbackSystemSessionManager.release()
+        if (activeInstance?.get() === this) {
+            activeInstance = null
+        }
         super.onDestroy()
+    }
+
+    private fun resolveNativePlaybackEpisode(
+        resolverSessionId: String,
+        playbackTargetJson: String,
+        callback: (Map<String, Any?>) -> Unit,
+    ) {
+        val channel = nativePlaybackResolverChannel
+        if (channel == null || resolverSessionId.isBlank() || playbackTargetJson.isBlank()) {
+            callback(mapOf("ok" to false, "message" to "播放器解析服务未就绪。"))
+            return
+        }
+        channel.invokeMethod(
+            "resolveNativePlaybackEpisode",
+            mapOf(
+                "resolverSessionId" to resolverSessionId,
+                "playbackTargetJson" to playbackTargetJson,
+            ),
+            object : MethodChannel.Result {
+                override fun success(result: Any?) {
+                    @Suppress("UNCHECKED_CAST")
+                    callback(result as? Map<String, Any?> ?: emptyMap())
+                }
+
+                override fun error(code: String, message: String?, details: Any?) {
+                    callback(mapOf("ok" to false, "message" to (message ?: code)))
+                }
+
+                override fun notImplemented() {
+                    callback(mapOf("ok" to false, "message" to "播放器解析服务不可用。"))
+                }
+            },
+        )
+    }
+
+    companion object {
+        @Volatile
+        private var activeInstance: WeakReference<MainActivity>? = null
+
+        fun resolveNativePlaybackEpisode(
+            resolverSessionId: String,
+            playbackTargetJson: String,
+            callback: (Map<String, Any?>) -> Unit,
+        ): Boolean {
+            val activity = activeInstance?.get() ?: return false
+            activity.runOnUiThread {
+                activity.resolveNativePlaybackEpisode(
+                    resolverSessionId = resolverSessionId,
+                    playbackTargetJson = playbackTargetJson,
+                    callback = callback,
+                )
+            }
+            return true
+        }
     }
 
     private fun completeNativePlaybackLaunch(launched: Boolean) {

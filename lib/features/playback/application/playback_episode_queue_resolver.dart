@@ -166,7 +166,6 @@ class PlaybackEpisodeQueueResolver {
     }
 
     final entries = deduped
-        .skip(currentIndex)
         .map(
           (record) => _entryFromTarget(
             _buildIndexedEpisodeTarget(
@@ -180,7 +179,10 @@ class PlaybackEpisodeQueueResolver {
     if (entries.isEmpty) {
       return null;
     }
-    return PlaybackEpisodeQueue(entries: entries);
+    return PlaybackEpisodeQueue(
+      entries: entries,
+      currentIndex: currentIndex,
+    );
   }
 
   PlaybackEpisodeQueue? _buildQueueFromEpisodes(
@@ -201,13 +203,15 @@ class PlaybackEpisodeQueueResolver {
     }
 
     final entries = sortedEpisodes
-        .skip(currentIndex)
         .map((item) => _entryFromTarget(mapTarget(item)))
         .toList(growable: false);
     if (entries.isEmpty) {
       return null;
     }
-    return PlaybackEpisodeQueue(entries: entries);
+    return PlaybackEpisodeQueue(
+      entries: entries,
+      currentIndex: currentIndex,
+    );
   }
 
   PlaybackEpisodeQueueEntry _entryFromTarget(PlaybackTarget target) {

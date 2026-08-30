@@ -56,18 +56,92 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
   Future<NativePlaybackLaunchResult> _launchNativePlaybackTarget(
     PlaybackTarget target,
   ) async {
-    final nativeEpisodeQueue = await _resolveNativePlayableEpisodeQueue();
-    return _providerContainer.read(nativePlaybackLauncherProvider).launch(
-          target,
-          decodeMode: _playbackDecodeMode,
-          audioOutputMode: _playbackSettings.nativeAudioOutputMode,
-          subtitleScale: _playbackSettings.playbackSubtitleScale,
-          backgroundPlaybackEnabled: _backgroundPlaybackEnabled,
-          subtitlePreference: _playbackSettings.playbackSubtitlePreference,
-          subtitlePreferredLanguages:
-              _playbackSettings.subtitlePreferredLanguages,
-          episodeQueue: nativeEpisodeQueue,
+    final mediaMimeType = await _resolveNativeLaunchMimeType(target);
+    final launcher = _providerContainer.read(nativePlaybackLauncherProvider);
+    final queueSnapshot = _episodeQueue;
+    final resolvedTargetSnapshot = _resolvedTarget;
+    final nativeEpisodeQueue = defaultTargetPlatform == TargetPlatform.android
+        ? buildDeferredNativeEpisodeQueue(
+            queue: queueSnapshot,
+            resolvedTarget: resolvedTargetSnapshot,
+          )
+        : await _resolveNativePlayableEpisodeQueue(
+            queue: queueSnapshot,
+            resolvedTarget: resolvedTargetSnapshot,
+          );
+    return launcher.launch(
+      target,
+      decodeMode: _playbackDecodeMode,
+      audioOutputMode: _playbackSettings.nativeAudioOutputMode,
+      subtitleScale: _playbackSettings.playbackSubtitleScale,
+      backgroundPlaybackEnabled: _backgroundPlaybackEnabled,
+      subtitlePreference: _playbackSettings.playbackSubtitlePreference,
+      subtitlePreferredLanguages: _playbackSettings.subtitlePreferredLanguages,
+      episodeQueue: nativeEpisodeQueue,
+      mediaMimeType: mediaMimeType ?? '',
+      episodeResolver: defaultTargetPlatform == TargetPlatform.android
+          ? _buildNativeEpisodeResolver()
+          : null,
+    );
+  }
+
+  NativePlaybackEpisodeResolver _buildNativeEpisodeResolver() {
+    final providerContainer = _providerContainer;
+    final remotePreflight = _playbackRemotePreflight;
+    return (target) async {
+      final resolved = await PlaybackTargetResolver(
+        read: providerContainer.read,
+      ).resolve(target);
+      if (resolved.streamUrl.trim().isEmpty || resolved.needsResolution) {
+        throw StateError('没有取得可播放地址');
+      }
+      String mediaMimeType = '';
+      if (shouldProbeNativeSmartStrmMediaType(resolved)) {
+        final preflight = await remotePreflight.probe(
+          resolved,
+          options: const PlaybackRemotePreflightOptions(
+            requestTimeout: Duration(seconds: 3),
+            streamSampleTimeout: Duration(milliseconds: 500),
+            rangeProbeBytes: 32,
+            readSampleBytes: 0,
+          ),
         );
+        mediaMimeType = resolveNativePlaybackMimeType(preflight) ?? '';
+      }
+      return NativeResolvedPlaybackTarget(
+        target: resolved,
+        mediaMimeType: mediaMimeType,
+      );
+    };
+  }
+
+  Future<String?> _resolveNativeLaunchMimeType(PlaybackTarget target) async {
+    if (defaultTargetPlatform != TargetPlatform.android ||
+        !shouldProbeNativeSmartStrmMediaType(target)) {
+      return null;
+    }
+    final preflight = await _playbackRemotePreflight.probe(
+      target,
+      options: const PlaybackRemotePreflightOptions(
+        requestTimeout: Duration(seconds: 3),
+        streamSampleTimeout: Duration(milliseconds: 500),
+        rangeProbeBytes: 32,
+        readSampleBytes: 0,
+      ),
+    );
+    final resolvedMimeType = resolveNativePlaybackMimeType(preflight);
+    playbackTrace(
+      'native.smartstrm-media-probe',
+      fields: <String, Object?>{
+        'statusCode': preflight.statusCode,
+        'contentType': preflight.contentType ?? '',
+        'finalPath': preflight.finalUri?.path ?? '',
+        'durationMs': preflight.duration.inMilliseconds,
+        'resolvedMimeType': resolvedMimeType ?? '',
+        'failureReason': preflight.failureReason.name,
+      },
+    );
+    return resolvedMimeType;
   }
 
   Future<SystemPlaybackLaunchResult> _launchSystemPlaybackTarget(
@@ -112,9 +186,10 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     }
   }
 
-  Future<PlaybackEpisodeQueue?> _resolveNativePlayableEpisodeQueue() async {
-    final queue = _episodeQueue;
-    final resolvedTarget = _resolvedTarget;
+  Future<PlaybackEpisodeQueue?> _resolveNativePlayableEpisodeQueue({
+    PlaybackEpisodeQueue? queue,
+    PlaybackTarget? resolvedTarget,
+  }) async {
     if (queue == null || resolvedTarget == null || !queue.hasCurrent) {
       return null;
     }
@@ -147,9 +222,26 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
   Future<bool> _movePlaybackQueue({
     required bool forward,
     required String reason,
-    required bool showFeedback,
+  }) async {
+    final queue = _episodeQueue;
+    if (queue == null || !queue.hasCurrent) {
+      return false;
+    }
+    final nextIndex = forward ? queue.currentIndex + 1 : queue.currentIndex - 1;
+    return _switchPlaybackQueueIndex(
+      index: nextIndex,
+      reason: reason,
+      markCurrentCompleted: reason == 'playback-completed',
+    );
+  }
+
+  Future<bool> _switchPlaybackQueueIndex({
+    required int index,
+    required String reason,
+    bool markCurrentCompleted = false,
   }) async {
     if (_episodeQueueAdvanceInProgress) {
+      _showMessage('正在解析剧集，请稍候');
       return false;
     }
     final queue = _episodeQueue;
@@ -157,16 +249,36 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     if (queue == null || player == null || !queue.hasCurrent) {
       return false;
     }
-    final nextQueue = forward ? queue.moveToNext() : queue.moveToPrevious();
-    if (identical(nextQueue, queue) || !nextQueue.hasCurrent) {
+    if (index < 0 ||
+        index >= queue.entries.length ||
+        index == queue.currentIndex) {
       return false;
     }
+    final requestedEntry = queue.entries[index];
 
     _episodeQueueAdvanceInProgress = true;
     try {
+      if (requestedEntry.target.needsResolution) {
+        _showMessage(
+          '正在解析 ${formatPlaybackEpisodePickerLabel(requestedEntry, index)}',
+        );
+      }
+      final resolvedTarget = await PlaybackTargetResolver(
+        read: _providerContainer.read,
+      ).resolve(requestedEntry.target);
+      if (resolvedTarget.streamUrl.trim().isEmpty ||
+          resolvedTarget.needsResolution) {
+        throw StateError('没有取得可播放地址');
+      }
+      if (!mounted ||
+          !identical(_player, player) ||
+          !identical(_episodeQueue, queue)) {
+        return false;
+      }
+
       final resolvedDuration = player.state.duration;
       final resolvedPosition = player.state.position;
-      if (forward && resolvedDuration > Duration.zero) {
+      if (markCurrentCompleted && resolvedDuration > Duration.zero) {
         _latestDuration = resolvedDuration;
         _latestPosition = resolvedDuration;
       } else {
@@ -189,24 +301,63 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
         return false;
       }
 
+      final nextQueue = queue
+          .copyWith(currentIndex: index)
+          .replaceCurrentTarget(resolvedTarget);
       setState(() {
         _episodeQueue = nextQueue;
         _error = null;
+        _introSkipApplied = false;
+        _outroSkipApplied = false;
+        _latestPosition = Duration.zero;
+        _latestDuration = Duration.zero;
+        _lastProgressPersistedAt = null;
+        _lastPersistedPosition = Duration.zero;
       });
-      await _initialize(initialTarget: nextQueue.currentEntry!.target);
-      if (mounted && showFeedback) {
-        _showMessage(forward ? '已切到下一集' : '已切到上一集');
-      }
-      return true;
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _error = _buildPlaybackErrorMessage(error);
+      await _initialize(initialTarget: resolvedTarget);
+      if (mounted && _isReady && _isTelevisionPlaybackDevice) {
+        _showTvPlaybackChrome(autoHide: false);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            requestTvFocus(_tvPlayPauseControlFocusNode);
+          }
         });
+      }
+      return mounted && _isReady;
+    } catch (error) {
+      if (mounted && identical(_player, player)) {
+        _showMessage('解析剧集失败：${_buildPlaybackErrorMessage(error)}');
       }
       return false;
     } finally {
       _episodeQueueAdvanceInProgress = false;
     }
+  }
+
+  Future<void> _openPlaybackEpisodePicker({
+    required bool isTelevision,
+  }) async {
+    final queue = _episodeQueue;
+    if (queue == null || queue.entries.length <= 1 || !queue.hasCurrent) {
+      return;
+    }
+    final selectedIndex = await showPlaybackEpisodePickerDialog(
+      context: context,
+      queue: queue,
+      isTelevision: isTelevision,
+    );
+    final activeQueue = _episodeQueue;
+    if (!mounted ||
+        selectedIndex == null ||
+        activeQueue == null ||
+        selectedIndex < 0 ||
+        selectedIndex >= activeQueue.entries.length ||
+        selectedIndex == activeQueue.currentIndex) {
+      return;
+    }
+    await _switchPlaybackQueueIndex(
+      index: selectedIndex,
+      reason: 'episode-picker',
+    );
   }
 }

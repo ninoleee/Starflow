@@ -143,13 +143,6 @@ class _PlaybackOptionsDialogBodyState
   StreamSubscription<Track>? _trackSubscription;
   StreamSubscription<PlaylistMode>? _playlistModeSubscription;
   StreamSubscription<double>? _rateSubscription;
-  StreamSubscription<Duration>? _durationSubscription;
-  StreamSubscription<Duration>? _positionSubscription;
-  StreamSubscription<int?>? _widthSubscription;
-  StreamSubscription<int?>? _heightSubscription;
-  StreamSubscription<bool>? _playingSubscription;
-  StreamSubscription<bool>? _bufferingSubscription;
-  StreamSubscription<double>? _bufferingPercentageSubscription;
   late _PlaybackDialogViewState _viewState;
 
   @override
@@ -209,66 +202,6 @@ class _PlaybackOptionsDialogBodyState
         _viewState = _viewState.copyWith(rate: rate);
       });
     });
-    _durationSubscription = player.stream.duration.listen((duration) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _viewState = _viewState.copyWith(duration: duration);
-      });
-    });
-    _positionSubscription = player.stream.position.listen((position) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _viewState = _viewState.copyWith(position: position);
-      });
-    });
-    _widthSubscription = player.stream.width.listen((width) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _viewState = _viewState.copyWith(width: width);
-      });
-    });
-    _heightSubscription = player.stream.height.listen((height) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _viewState = _viewState.copyWith(height: height);
-      });
-    });
-    _playingSubscription = player.stream.playing.listen((playing) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _viewState = _viewState.copyWith(playing: playing);
-      });
-    });
-    _bufferingSubscription = player.stream.buffering.listen((buffering) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _viewState = _viewState.copyWith(buffering: buffering);
-      });
-    });
-    _bufferingPercentageSubscription =
-        player.stream.bufferingPercentage.listen((
-      bufferingPercentage,
-    ) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _viewState =
-            _viewState.copyWith(bufferingPercentage: bufferingPercentage);
-      });
-    });
   }
 
   void _unbindPlayer() {
@@ -276,24 +209,10 @@ class _PlaybackOptionsDialogBodyState
     unawaited(_trackSubscription?.cancel());
     unawaited(_playlistModeSubscription?.cancel());
     unawaited(_rateSubscription?.cancel());
-    unawaited(_durationSubscription?.cancel());
-    unawaited(_positionSubscription?.cancel());
-    unawaited(_widthSubscription?.cancel());
-    unawaited(_heightSubscription?.cancel());
-    unawaited(_playingSubscription?.cancel());
-    unawaited(_bufferingSubscription?.cancel());
-    unawaited(_bufferingPercentageSubscription?.cancel());
     _tracksSubscription = null;
     _trackSubscription = null;
     _playlistModeSubscription = null;
     _rateSubscription = null;
-    _durationSubscription = null;
-    _positionSubscription = null;
-    _widthSubscription = null;
-    _heightSubscription = null;
-    _playingSubscription = null;
-    _bufferingSubscription = null;
-    _bufferingPercentageSubscription = null;
   }
 
   Future<void> _setRate(double value) => widget.player.setRate(value);
@@ -353,17 +272,6 @@ class _PlaybackOptionsDialogBodyState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final positionLabel = formatPlaybackClockDuration(_viewState.position);
-    final durationLabel = _viewState.duration > Duration.zero
-        ? formatPlaybackClockDuration(_viewState.duration)
-        : '--:--';
-    final progressLabel = '$positionLabel / $durationLabel';
-    final bufferLabel = '${_viewState.bufferingPercentage.round()}%';
-    final videoSizeLabel = _buildVideoSizeLabel(
-      _viewState.width,
-      _viewState.height,
-      fallback: widget.target.resolutionLabel,
-    );
     final body = ListView(
       shrinkWrap: true,
       children: [
@@ -441,20 +349,6 @@ class _PlaybackOptionsDialogBodyState
           title: '本剧跳过片头片尾',
           value: widget.seriesSkipLabel,
           onPressed: widget.onConfigureSeriesSkip,
-        ),
-        const SizedBox(height: 16),
-        _PlaybackInfoTile(
-          isTelevision: widget.isTelevision,
-          progressLabel: progressLabel,
-          videoSizeLabel: videoSizeLabel,
-          speedLabel: formatPlaybackSpeed(_viewState.rate),
-          playlistModeLabel: _formatPlaylistModeLabel(_viewState.playlistMode),
-          bufferingLabel: bufferLabel,
-          buffering: _viewState.buffering,
-          playing: _viewState.playing,
-          sourceLabel: widget.target.sourceName,
-          formatLabel: widget.target.formatLabel,
-          bitrateLabel: widget.target.bitrateLabel,
         ),
       ],
     );
@@ -614,14 +508,12 @@ class _PlaybackReadOnlyFocusRegion extends StatelessWidget {
     required this.child,
     this.autofocus = false,
     this.padding = EdgeInsets.zero,
-    this.borderRadius = const BorderRadius.all(Radius.circular(12)),
   });
 
   final bool isTelevision;
   final Widget child;
   final bool autofocus;
   final EdgeInsetsGeometry padding;
-  final BorderRadius borderRadius;
 
   @override
   Widget build(BuildContext context) {
@@ -637,118 +529,9 @@ class _PlaybackReadOnlyFocusRegion extends StatelessWidget {
       child: TvFocusableAction(
         autofocus: autofocus,
         onPressed: () {},
-        borderRadius: borderRadius,
+        borderRadius: const BorderRadius.all(Radius.circular(12)),
         visualStyle: TvFocusVisualStyle.subtle,
         child: content,
-      ),
-    );
-  }
-}
-
-class _PlaybackInfoTile extends StatelessWidget {
-  const _PlaybackInfoTile({
-    required this.isTelevision,
-    required this.progressLabel,
-    required this.videoSizeLabel,
-    required this.speedLabel,
-    required this.playlistModeLabel,
-    required this.bufferingLabel,
-    required this.buffering,
-    required this.playing,
-    required this.sourceLabel,
-    required this.formatLabel,
-    required this.bitrateLabel,
-  });
-
-  final bool isTelevision;
-  final String progressLabel;
-  final String videoSizeLabel;
-  final String speedLabel;
-  final String playlistModeLabel;
-  final String bufferingLabel;
-  final bool buffering;
-  final bool playing;
-  final String sourceLabel;
-  final String formatLabel;
-  final String bitrateLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    final content = Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '播放信息',
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            _InfoRow(label: '进度', value: progressLabel),
-            _InfoRow(label: '画面', value: videoSizeLabel),
-            _InfoRow(label: '速度', value: speedLabel),
-            _InfoRow(label: '循环', value: playlistModeLabel),
-            _InfoRow(
-              label: '状态',
-              value: buffering ? '缓冲中' : (playing ? '播放中' : '已暂停'),
-            ),
-            _InfoRow(label: '缓冲进度', value: bufferingLabel),
-            _InfoRow(label: '来源', value: sourceLabel),
-            if (formatLabel.isNotEmpty)
-              _InfoRow(label: '封装', value: formatLabel),
-            if (bitrateLabel.isNotEmpty)
-              _InfoRow(label: '码率', value: bitrateLabel),
-          ],
-        ),
-      ),
-    );
-    return _PlaybackReadOnlyFocusRegion(
-      isTelevision: isTelevision,
-      borderRadius: const BorderRadius.all(Radius.circular(12)),
-      child: content,
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  const _InfoRow({
-    required this.label,
-    required this.value,
-  });
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 70,
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -906,19 +689,6 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-String _buildVideoSizeLabel(int? width, int? height,
-    {required String fallback}) {
-  final resolvedWidth = width ?? 0;
-  final resolvedHeight = height ?? 0;
-  if (resolvedWidth > 0 && resolvedHeight > 0) {
-    return '${resolvedWidth}x$resolvedHeight';
-  }
-  if (fallback.trim().isNotEmpty) {
-    return fallback.trim();
-  }
-  return '识别中';
-}
-
 String _formatPlaylistModeLabel(PlaylistMode mode) {
   return switch (mode) {
     PlaylistMode.none => '关闭',
@@ -933,13 +703,6 @@ class _PlaybackDialogViewState {
     required this.currentTrack,
     required this.playlistMode,
     required this.rate,
-    required this.duration,
-    required this.position,
-    required this.width,
-    required this.height,
-    required this.playing,
-    required this.buffering,
-    required this.bufferingPercentage,
   });
 
   factory _PlaybackDialogViewState.fromPlayer(Player player) {
@@ -948,13 +711,6 @@ class _PlaybackDialogViewState {
       currentTrack: player.state.track,
       playlistMode: player.state.playlistMode,
       rate: player.state.rate,
-      duration: player.state.duration,
-      position: player.state.position,
-      width: player.state.width,
-      height: player.state.height,
-      playing: player.state.playing,
-      buffering: player.state.buffering,
-      bufferingPercentage: player.state.bufferingPercentage,
     );
   }
 
@@ -962,39 +718,18 @@ class _PlaybackDialogViewState {
   final Track currentTrack;
   final PlaylistMode playlistMode;
   final double rate;
-  final Duration duration;
-  final Duration position;
-  final int? width;
-  final int? height;
-  final bool playing;
-  final bool buffering;
-  final double bufferingPercentage;
 
   _PlaybackDialogViewState copyWith({
     Tracks? tracks,
     Track? currentTrack,
     PlaylistMode? playlistMode,
     double? rate,
-    Duration? duration,
-    Duration? position,
-    int? width,
-    int? height,
-    bool? playing,
-    bool? buffering,
-    double? bufferingPercentage,
   }) {
     return _PlaybackDialogViewState(
       tracks: tracks ?? this.tracks,
       currentTrack: currentTrack ?? this.currentTrack,
       playlistMode: playlistMode ?? this.playlistMode,
       rate: rate ?? this.rate,
-      duration: duration ?? this.duration,
-      position: position ?? this.position,
-      width: width ?? this.width,
-      height: height ?? this.height,
-      playing: playing ?? this.playing,
-      buffering: buffering ?? this.buffering,
-      bufferingPercentage: bufferingPercentage ?? this.bufferingPercentage,
     );
   }
 }
