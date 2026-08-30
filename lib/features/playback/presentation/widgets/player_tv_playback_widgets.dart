@@ -61,6 +61,7 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
     required this.onOpenSubtitle,
     required this.onOpenAudio,
     required this.onOpenOptions,
+    this.networkSpeed,
   });
 
   final String title;
@@ -85,6 +86,7 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
   final VoidCallback onOpenSubtitle;
   final VoidCallback onOpenAudio;
   final VoidCallback onOpenOptions;
+  final Widget? networkSpeed;
 
   @override
   Widget build(BuildContext context) {
@@ -117,6 +119,10 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
               },
               child: Row(
                 children: [
+                  if (networkSpeed != null) ...[
+                    networkSpeed!,
+                    const SizedBox(width: 10),
+                  ],
                   StarflowIconButton(
                     icon: Icons.arrow_back_rounded,
                     tooltip: '返回',

@@ -42,6 +42,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.BandwidthMeter
 import androidx.media3.exoplayer.upstream.DefaultAllocator
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
@@ -66,6 +67,10 @@ import java.util.TimeZone
 class NativePlaybackActivity : Activity() {
     private lateinit var sharedPreferences: SharedPreferences
     private var player: ExoPlayer? = null
+    private var playbackBandwidthMeter: DefaultBandwidthMeter? = null
+    private var latestNetworkBytesPerSecond = 0L
+    private var latestNetworkSampleAtMs = 0L
+    private var networkSpeedVisible = false
     private lateinit var playerView: PlayerView
     private var baseMediaItem: MediaItem? = null
     private var playbackTargetJson = "{}"
@@ -112,6 +117,10 @@ class NativePlaybackActivity : Activity() {
     private var pendingResumePositionOverrideMs: Long? = null
     private var audioOutputMode = NativeAudioOutputMode.AUTO
     private var subtitleScale: Double = NativeSubtitleStylePolicy.DEFAULT_SCALE
+    private var primarySubtitlePosition = 80.0
+    private var secondarySubtitlePosition = 90.0
+    private var secondarySubtitleScale = 75.0
+    private val dualSubtitleController = NativeDualSubtitleController()
     private val playbackWatchdogHandler = Handler(Looper.getMainLooper())
     private val playbackRuntimeHandler = Handler(Looper.getMainLooper())
     private var playbackRuntimeActive = false
@@ -146,10 +155,25 @@ class NativePlaybackActivity : Activity() {
             maybeApplyAutoSkip()
             persistPlaybackProgress()
             logPlaybackRuntimeIfNeeded()
+            updateNetworkSpeedLabelIfVisible()
             if (playbackRuntimeActive) {
                 playbackRuntimeHandler.postDelayed(this, PLAYBACK_RUNTIME_INTERVAL_MS)
             }
         }
+    }
+    private val bandwidthEventListener = BandwidthMeter.EventListener {
+            elapsedMs,
+            bytesTransferred,
+            bitrateEstimate,
+        ->
+        latestNetworkBytesPerSecond = when {
+            elapsedMs > 0 && bytesTransferred > 0L ->
+                (bytesTransferred * 1_000L / elapsedMs).coerceAtLeast(0L)
+            bitrateEstimate > 0L -> bitrateEstimate / 8L
+            else -> 0L
+        }
+        latestNetworkSampleAtMs = SystemClock.elapsedRealtime()
+        updateNetworkSpeedLabelIfVisible()
     }
     private val playbackSystemSessionManager by lazy {
         PlaybackSystemSessionManager(
@@ -433,6 +457,23 @@ class NativePlaybackActivity : Activity() {
             EXTRA_SUBTITLE_SCALE,
             NativeSubtitleStylePolicy.DEFAULT_SCALE,
         )
+        primarySubtitlePosition = playbackIntent.getDoubleExtra(
+            EXTRA_PRIMARY_SUBTITLE_POSITION,
+            80.0,
+        ).coerceIn(50.0, 95.0)
+        secondarySubtitlePosition = playbackIntent.getDoubleExtra(
+            EXTRA_SECONDARY_SUBTITLE_POSITION,
+            90.0,
+        ).coerceIn(50.0, 95.0)
+        secondarySubtitleScale = playbackIntent.getDoubleExtra(
+            EXTRA_SECONDARY_SUBTITLE_SCALE,
+            75.0,
+        ).coerceIn(50.0, 120.0)
+        dualSubtitleController.configureLayout(
+            primaryPositionPercent = primarySubtitlePosition,
+            secondaryPositionPercent = secondarySubtitlePosition,
+            secondaryScalePercent = secondarySubtitleScale,
+        )
         restoreExternalSubtitleSourceFromTarget()
     }
 
@@ -443,6 +484,7 @@ class NativePlaybackActivity : Activity() {
         episodeResolutionInProgress = false
         episodeResolutionRequestId += 1L
         externalSubtitleSource = null
+        dualSubtitleController.disable()
         subtitleDelayMs = 0L
         restoredResumePositionMs = 0L
         lastSavedPositionMs = -1L
@@ -1011,6 +1053,12 @@ class NativePlaybackActivity : Activity() {
         )
         pendingResumePositionOverrideMs = null
 
+        val bandwidthMeter = DefaultBandwidthMeter.Builder(this).build().also { meter ->
+            meter.addEventListener(Handler(Looper.getMainLooper()), bandwidthEventListener)
+        }
+        playbackBandwidthMeter = bandwidthMeter
+        latestNetworkBytesPerSecond = 0L
+        latestNetworkSampleAtMs = 0L
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(NATIVE_HTTP_CONNECT_TIMEOUT_MS)
@@ -1036,6 +1084,7 @@ class NativePlaybackActivity : Activity() {
             context = this,
             forcePcmAudioOutput = forcePcmAudioOutput,
             enableFfmpegAudioDecoder = enableFfmpegAudioDecoder,
+            dualSubtitleController = dualSubtitleController,
         ).apply {
             setEnableDecoderFallback(true)
             when (decodeMode) {
@@ -1050,8 +1099,15 @@ class NativePlaybackActivity : Activity() {
             }
         }
 
+        val trackSelector = DefaultTrackSelector(this).apply {
+            parameters = buildUponParameters()
+                .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
+                .build()
+        }
         val exoPlayer = ExoPlayer.Builder(this)
             .setRenderersFactory(renderersFactory)
+            .setTrackSelector(trackSelector)
+            .setBandwidthMeter(bandwidthMeter)
             .setLoadControl(buildLoadControl())
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(dataSourceFactory)
@@ -1329,12 +1385,23 @@ class NativePlaybackActivity : Activity() {
 
     private fun releasePlayer() {
         cancelPlaybackLaunchTimeout()
+        val dualSubtitleWasEnabled = dualSubtitleController.isEnabled
+        dualSubtitleController.disable()
+        if (dualSubtitleWasEnabled && ::playerView.isInitialized) {
+            applySubtitleStyle()
+        }
         stopPlaybackWatchdog()
         stopPlaybackRuntimeLoop()
         playerView.player = null
         player?.removeListener(playerListener)
         player?.release()
         player = null
+        playbackBandwidthMeter?.removeEventListener(bandwidthEventListener)
+        playbackBandwidthMeter = null
+        latestNetworkBytesPerSecond = 0L
+        latestNetworkSampleAtMs = 0L
+        networkSpeedVisible = false
+        findViewById<TextView?>(R.id.native_network_speed)?.visibility = View.GONE
         playbackSystemSessionManager.setActive(false)
     }
 
@@ -1823,6 +1890,7 @@ class NativePlaybackActivity : Activity() {
         playbackItemKey = nextEntry.playbackItemKey
         seriesKey = nextEntry.seriesKey
         externalSubtitleSource = null
+        dualSubtitleController.disable()
         subtitleDelayMs = 0L
         restoredResumePositionMs = 0L
         lastSavedPositionMs = -1L
@@ -2072,6 +2140,15 @@ class NativePlaybackActivity : Activity() {
                 formatSubtitleScaleLabel(subtitleScale) to
                 { openSubtitleScalePicker() }
         actions +=
+            "主字幕位置 · ${formatSubtitlePercentLabel(primarySubtitlePosition)}" to
+                { openPrimarySubtitlePositionPicker() }
+        actions +=
+            "副字幕位置 · ${formatSubtitlePercentLabel(secondarySubtitlePosition)}" to
+                { openSecondarySubtitlePositionPicker() }
+        actions +=
+            "副字幕大小 · ${formatSubtitlePercentLabel(secondarySubtitleScale)}" to
+                { openSecondarySubtitleScalePicker() }
+        actions +=
             getString(R.string.native_online_subtitle_search) to { openOnlineSubtitleSearch() }
         actions += getString(R.string.native_external_subtitle) to { openExternalSubtitlePicker() }
         actions +=
@@ -2119,6 +2196,76 @@ class NativePlaybackActivity : Activity() {
 
     private fun formatSubtitleScaleLabel(value: Double): String {
         return "${value.toInt()}号"
+    }
+
+    private fun formatSubtitlePercentLabel(value: Double): String {
+        return "${value.toInt()}%"
+    }
+
+    private fun openPrimarySubtitlePositionPicker() {
+        openSubtitlePercentPicker(
+            title = "主字幕位置",
+            options = SUBTITLE_POSITION_OPTIONS,
+            current = primarySubtitlePosition,
+        ) { selected ->
+            primarySubtitlePosition = selected
+            applyDualSubtitleLayoutSettings()
+        }
+    }
+
+    private fun openSecondarySubtitlePositionPicker() {
+        openSubtitlePercentPicker(
+            title = "副字幕位置",
+            options = SUBTITLE_POSITION_OPTIONS,
+            current = secondarySubtitlePosition,
+        ) { selected ->
+            secondarySubtitlePosition = selected
+            applyDualSubtitleLayoutSettings()
+        }
+    }
+
+    private fun openSecondarySubtitleScalePicker() {
+        openSubtitlePercentPicker(
+            title = "副字幕大小",
+            options = SECONDARY_SUBTITLE_SCALE_OPTIONS,
+            current = secondarySubtitleScale,
+        ) { selected ->
+            secondarySubtitleScale = selected
+            applyDualSubtitleLayoutSettings()
+        }
+    }
+
+    private fun openSubtitlePercentPicker(
+        title: String,
+        options: List<Double>,
+        current: Double,
+        onSelected: (Double) -> Unit,
+    ) {
+        val currentIndex = options
+            .withIndex()
+            .minByOrNull { (_, value) -> kotlin.math.abs(value - current) }
+            ?.index ?: 0
+        val labels = options.map(::formatSubtitlePercentLabel).toTypedArray()
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setSingleChoiceItems(labels, currentIndex) { pickerDialog, which ->
+                val selected = options[which]
+                pickerDialog.dismiss()
+                onSelected(selected)
+                showToast("$title 已设为${formatSubtitlePercentLabel(selected)}")
+            }
+            .setNegativeButton("取消", null)
+            .create()
+        showTransientDialog(dialog, ControllerFocusTarget.SETTINGS)
+    }
+
+    private fun applyDualSubtitleLayoutSettings() {
+        dualSubtitleController.configureLayout(
+            primaryPositionPercent = primarySubtitlePosition,
+            secondaryPositionPercent = secondarySubtitlePosition,
+            secondaryScalePercent = secondarySubtitleScale,
+        )
+        applySubtitleStyle()
     }
 
     private fun openAudioOutputModePicker() {
@@ -2431,6 +2578,7 @@ class NativePlaybackActivity : Activity() {
     ) {
         val currentPlayer = player ?: return
         val trackNameProvider = DefaultTrackNameProvider(resources)
+        var subtitleIndex = 0
         val choices = currentPlayer.currentTracks.groups.flatMap { group ->
             if (group.type != trackType) {
                 return@flatMap emptyList()
@@ -2439,13 +2587,47 @@ class NativePlaybackActivity : Activity() {
                 if (!group.isTrackSupported(trackIndex)) {
                     return@mapNotNull null
                 }
+                val format = group.getTrackFormat(trackIndex)
+                val label = if (trackType == C.TRACK_TYPE_TEXT) {
+                    subtitleIndex += 1
+                    NativeSubtitleTrackLabelPolicy.format(
+                        title = format.label.orEmpty(),
+                        language = format.language.orEmpty(),
+                        isDefault =
+                            format.selectionFlags and C.SELECTION_FLAG_DEFAULT != 0,
+                        isForced =
+                            format.selectionFlags and C.SELECTION_FLAG_FORCED != 0,
+                        isExternal = format.id?.startsWith("external:") == true,
+                        fallbackIndex = subtitleIndex,
+                    )
+                } else {
+                    trackNameProvider.getTrackName(format)
+                }
                 NativeTrackChoice(
-                    label = trackNameProvider.getTrackName(group.getTrackFormat(trackIndex)),
+                    label = label,
                     override = TrackSelectionOverride(
                         group.mediaTrackGroup,
                         trackIndex,
                     ),
                     selected = group.isTrackSelected(trackIndex),
+                    formatKey = if (trackType == C.TRACK_TYPE_TEXT) {
+                        NativeSubtitleFormatKey.from(format)
+                    } else {
+                        null
+                    },
+                    groupFormatKeys = if (trackType == C.TRACK_TYPE_TEXT) {
+                        (0 until group.length)
+                            .map { index ->
+                                NativeSubtitleFormatKey.from(group.getTrackFormat(index))
+                            }
+                            .toSet()
+                    } else {
+                        emptySet()
+                    },
+                    language = format.language.orEmpty(),
+                    sourceLabel = format.label.orEmpty(),
+                    sampleMimeType = format.sampleMimeType.orEmpty(),
+                    codecs = format.codecs.orEmpty(),
                 )
             }
         }
@@ -2454,15 +2636,30 @@ class NativePlaybackActivity : Activity() {
             restoreControllerFocusIfNeeded(focusTarget)
             return
         }
-        val choiceOffset = if (showDisableOption) 1 else 0
+        val showDualSubtitleOption = trackType == C.TRACK_TYPE_TEXT
+        val choiceOffset = when {
+            showDualSubtitleOption -> 2
+            showDisableOption -> 1
+            else -> 0
+        }
         val labels = buildList {
             if (showDisableOption) {
                 add("关闭")
+            }
+            if (showDualSubtitleOption) {
+                add(
+                    if (dualSubtitleController.isEnabled) {
+                        "特殊：双字幕模式（当前）"
+                    } else {
+                        "特殊：双字幕模式"
+                    },
+                )
             }
             addAll(choices.map(NativeTrackChoice::label))
         }.toTypedArray()
         val selectedChoiceIndex = choices.indexOfFirst(NativeTrackChoice::selected)
         val checkedIndex = when {
+            showDualSubtitleOption && dualSubtitleController.isEnabled -> 1
             selectedChoiceIndex >= 0 -> selectedChoiceIndex + choiceOffset
             showDisableOption -> 0
             else -> -1
@@ -2474,9 +2671,19 @@ class NativePlaybackActivity : Activity() {
                     .buildUpon()
                     .clearOverridesOfType(trackType)
                 if (showDisableOption && which == 0) {
+                    dualSubtitleController.disable()
+                    applySubtitleStyle()
                     parameters.setTrackTypeDisabled(trackType, true)
+                } else if (showDualSubtitleOption && which == 1) {
+                    pickerDialog.dismiss()
+                    playerView.post { openDualSubtitlePrimaryPicker(choices) }
+                    return@setSingleChoiceItems
                 } else {
                     val choice = choices[which - choiceOffset]
+                    if (trackType == C.TRACK_TYPE_TEXT) {
+                        dualSubtitleController.disable()
+                        applySubtitleStyle()
+                    }
                     parameters
                         .setTrackTypeDisabled(trackType, false)
                         .addOverride(choice.override)
@@ -2487,6 +2694,106 @@ class NativePlaybackActivity : Activity() {
             .setNegativeButton("取消", null)
             .create()
         showTransientDialog(dialog, focusTarget)
+    }
+
+    private fun openDualSubtitlePrimaryPicker(choices: List<NativeTrackChoice>) {
+        val textChoices = choices
+            .filter(NativeTrackChoice::canUseInDualSubtitleMode)
+            .sortedByDescending { choice ->
+                NativeDualSubtitleTrackPolicy.isLikelyChinese(
+                    choice.language,
+                    choice.sourceLabel,
+                )
+            }
+        if (textChoices.size < 2) {
+            showToast("双字幕模式至少需要两条文本字幕")
+            restoreControllerFocusIfNeeded(ControllerFocusTarget.SUBTITLE)
+            return
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("双字幕：选择上方中文")
+            .setItems(textChoices.map(NativeTrackChoice::label).toTypedArray()) {
+                    pickerDialog,
+                    which,
+                ->
+                val primaryChoice = textChoices[which]
+                pickerDialog.dismiss()
+                playerView.post {
+                    openDualSubtitleSecondaryPicker(
+                        choices = textChoices,
+                        primaryChoice = primaryChoice,
+                    )
+                }
+            }
+            .setNegativeButton("取消", null)
+            .create()
+        showTransientDialog(dialog, ControllerFocusTarget.SUBTITLE)
+    }
+
+    private fun openDualSubtitleSecondaryPicker(
+        choices: List<NativeTrackChoice>,
+        primaryChoice: NativeTrackChoice,
+    ) {
+        val primaryKey = primaryChoice.formatKey ?: return
+        val secondaryChoices = choices
+            .filter { choice ->
+                val key = choice.formatKey
+                choice.canUseInDualSubtitleMode &&
+                    key != null &&
+                    key != primaryKey &&
+                    primaryKey !in choice.groupFormatKeys
+            }
+            .sortedByDescending { choice ->
+                NativeDualSubtitleTrackPolicy.isLikelyEnglish(
+                    choice.language,
+                    choice.sourceLabel,
+                )
+            }
+        if (secondaryChoices.isEmpty()) {
+            showToast("当前字幕轨不能组成中英双字幕")
+            restoreControllerFocusIfNeeded(ControllerFocusTarget.SUBTITLE)
+            return
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("双字幕：选择下方英文")
+            .setItems(secondaryChoices.map(NativeTrackChoice::label).toTypedArray()) {
+                    pickerDialog,
+                    which,
+                ->
+                val secondaryChoice = secondaryChoices[which]
+                pickerDialog.dismiss()
+                enableDualSubtitleMode(primaryChoice, secondaryChoice)
+            }
+            .setNegativeButton("取消", null)
+            .create()
+        showTransientDialog(dialog, ControllerFocusTarget.SUBTITLE)
+    }
+
+    private fun enableDualSubtitleMode(
+        primaryChoice: NativeTrackChoice,
+        secondaryChoice: NativeTrackChoice,
+    ) {
+        val currentPlayer = player ?: return
+        val primaryKey = primaryChoice.formatKey ?: return
+        val secondaryKey = secondaryChoice.formatKey ?: return
+        dualSubtitleController.enable(
+            primaryKey = primaryKey,
+            secondaryKey = secondaryKey,
+            secondaryGroupKeys = secondaryChoice.groupFormatKeys,
+        )
+        applySubtitleStyle()
+        currentPlayer.trackSelectionParameters = currentPlayer.trackSelectionParameters
+            .buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            .addOverride(primaryChoice.override)
+            .build()
+        logPlayback(
+            "native.subtitle.dual-enabled " +
+                "primary=${primaryChoice.label} secondary=${secondaryChoice.label}",
+        )
+        showToast("双字幕已开启：中文在上，英文在下")
+        restoreControllerFocusIfNeeded(ControllerFocusTarget.SUBTITLE)
     }
 
     private fun showTransientDialog(dialog: Dialog, focusTarget: ControllerFocusTarget) {
@@ -2729,6 +3036,8 @@ class NativePlaybackActivity : Activity() {
     private fun applyExternalSubtitleConfiguration(showFeedback: Boolean = true) {
         val currentPlayer = player ?: return
         val source = externalSubtitleSource ?: return
+        dualSubtitleController.disable()
+        applySubtitleStyle()
         val sourceMediaItem = baseMediaItem ?: currentPlayer.currentMediaItem ?: return
         val currentPosition = currentPlayer.currentPosition
         val shouldResumePlayback = currentPlayer.playWhenReady
@@ -2770,6 +3079,13 @@ class NativePlaybackActivity : Activity() {
         }
         playerView.setControllerVisibilityListener(
             PlayerView.ControllerVisibilityListener { visibility ->
+                networkSpeedVisible =
+                    visibility == View.VISIBLE && playerView.isControllerFullyVisible
+                if (networkSpeedVisible) {
+                    updateNetworkSpeedLabelIfVisible()
+                } else {
+                    findViewById<TextView?>(R.id.native_network_speed)?.visibility = View.GONE
+                }
                 if (visibility == View.VISIBLE) {
                     applyPendingControllerFocus()
                     updateProgressMarkers()
@@ -2859,20 +3175,22 @@ class NativePlaybackActivity : Activity() {
             isTelevision = isTelevisionDevice,
         )
         subtitleView.setViewType(SubtitleView.VIEW_TYPE_CANVAS)
-        subtitleView.setBottomPaddingFraction(style.bottomPaddingFraction)
+        subtitleView.setBottomPaddingFraction(
+            (1.0 - (primarySubtitlePosition / 100.0)).toFloat().coerceIn(0.05f, 0.5f),
+        )
 
         val captioningManager =
             getSystemService(CAPTIONING_SERVICE) as? CaptioningManager
         if (captioningManager?.isEnabled == true) {
-            subtitleView.setApplyEmbeddedStyles(false)
-            subtitleView.setApplyEmbeddedFontSizes(false)
+            subtitleView.setApplyEmbeddedStyles(dualSubtitleController.isEnabled)
+            subtitleView.setApplyEmbeddedFontSizes(dualSubtitleController.isEnabled)
             subtitleView.setUserDefaultStyle()
             subtitleView.setUserDefaultTextSize()
             return
         }
 
         subtitleView.setApplyEmbeddedStyles(true)
-        subtitleView.setApplyEmbeddedFontSizes(false)
+        subtitleView.setApplyEmbeddedFontSizes(dualSubtitleController.isEnabled)
         subtitleView.setStyle(
             CaptionStyleCompat(
                 Color.WHITE,
@@ -2884,6 +3202,31 @@ class NativePlaybackActivity : Activity() {
             ),
         )
         subtitleView.setFractionalTextSize(style.textSizeFraction)
+    }
+
+    private fun updateNetworkSpeedLabelIfVisible() {
+        if (!networkSpeedVisible) {
+            return
+        }
+        val label = findViewById<TextView?>(R.id.native_network_speed) ?: return
+        val sampleIsFresh =
+            SystemClock.elapsedRealtime() - latestNetworkSampleAtMs <=
+                NETWORK_SPEED_STALE_AFTER_MS
+        label.text = formatNetworkSpeed(
+            if (sampleIsFresh) latestNetworkBytesPerSecond else 0L,
+        )
+        label.visibility = View.VISIBLE
+    }
+
+    private fun formatNetworkSpeed(bytesPerSecond: Long): String {
+        val safeValue = bytesPerSecond.coerceAtLeast(0L)
+        return when {
+            safeValue >= 1024L * 1024L ->
+                String.format(Locale.US, "%.1f MB/s", safeValue / (1024.0 * 1024.0))
+            safeValue >= 1024L ->
+                String.format(Locale.US, "%.0f KB/s", safeValue / 1024.0)
+            else -> "$safeValue B/s"
+        }
     }
 
     private fun configureFocusability(ids: IntArray) {
@@ -3736,8 +4079,7 @@ class NativePlaybackActivity : Activity() {
         private const val PLAYBACK_MEMORY_STORAGE_KEY = "flutter.starflow.playback.memory.v1"
         private const val RECENT_ENTRY_LIMIT = 20
         private const val NATIVE_HTTP_CONNECT_TIMEOUT_MS = 15_000
-        private const val NETWORK_THROUGHPUT_LOG_INTERVAL_MS = 5_000L
-        private const val NETWORK_THROUGHPUT_LOG_MAX_COUNT = 6
+        private const val NETWORK_SPEED_STALE_AFTER_MS = 2_500L
         private const val NATIVE_HTTP_READ_TIMEOUT_MS = 30_000
         private const val NATIVE_LOAD_ERROR_RETRY_COUNT = 8
         private const val PLAYBACK_LAUNCH_TIMEOUT_MS = 30_000L
@@ -3758,6 +4100,10 @@ class NativePlaybackActivity : Activity() {
             listOf(0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
         private val SUBTITLE_SCALE_OPTIONS =
             listOf(20.0, 24.0, 28.0, 32.0, 36.0, 42.0, 48.0, 56.0, 64.0, 78.0)
+        private val SUBTITLE_POSITION_OPTIONS =
+            listOf(50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0, 95.0)
+        private val SECONDARY_SUBTITLE_SCALE_OPTIONS =
+            listOf(50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0, 120.0)
 
         const val EXTRA_URL = "url"
         const val EXTRA_TITLE = "title"
@@ -3765,6 +4111,9 @@ class NativePlaybackActivity : Activity() {
         const val EXTRA_DECODE_MODE = "decodeMode"
         const val EXTRA_AUDIO_OUTPUT_MODE = "audioOutputMode"
         const val EXTRA_SUBTITLE_SCALE = "subtitleScale"
+        const val EXTRA_PRIMARY_SUBTITLE_POSITION = "primarySubtitlePosition"
+        const val EXTRA_SECONDARY_SUBTITLE_POSITION = "secondarySubtitlePosition"
+        const val EXTRA_SECONDARY_SUBTITLE_SCALE = "secondarySubtitleScale"
         const val EXTRA_MEDIA_MIME_TYPE = "mediaMimeType"
         const val EXTRA_RESOLVER_SESSION_ID = "resolverSessionId"
         const val EXTRA_SUBTITLE_PREFERENCE = "subtitlePreference"
@@ -3802,7 +4151,20 @@ private data class NativeTrackChoice(
     val label: String,
     val override: TrackSelectionOverride,
     val selected: Boolean,
+    val formatKey: NativeSubtitleFormatKey? = null,
+    val groupFormatKeys: Set<NativeSubtitleFormatKey> = emptySet(),
+    val language: String = "",
+    val sourceLabel: String = "",
+    val sampleMimeType: String = "",
+    val codecs: String = "",
 )
+
+private val NativeTrackChoice.canUseInDualSubtitleMode: Boolean
+    get() = formatKey != null &&
+        NativeDualSubtitleTrackPolicy.isCompatibleTextSubtitle(
+            sampleMimeType = sampleMimeType,
+            codecs = codecs,
+        )
 
 private data class NativeEpisodeQueueEntry(
     val playbackTargetJson: String,

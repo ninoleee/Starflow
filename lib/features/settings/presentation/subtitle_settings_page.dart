@@ -26,6 +26,9 @@ class SubtitleSettingsPage extends ConsumerStatefulWidget {
 class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
   late PlaybackSubtitlePreference _draftSubtitlePreference;
   late double _draftSubtitleScale;
+  late double _draftPrimarySubtitlePosition;
+  late double _draftSecondarySubtitlePosition;
+  late double _draftSecondarySubtitleScale;
   late List<OnlineSubtitleSource> _draftOnlineSubtitleSources;
   late final TextEditingController _assrtTokenController;
   late final TextEditingController _opensubtitlesUsernameController;
@@ -44,6 +47,9 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
     final slice = ref.read(settingsPlaybackSliceProvider);
     _draftSubtitlePreference = slice.playbackSubtitlePreference;
     _draftSubtitleScale = slice.playbackSubtitleScale;
+    _draftPrimarySubtitlePosition = slice.playbackPrimarySubtitlePosition;
+    _draftSecondarySubtitlePosition = slice.playbackSecondarySubtitlePosition;
+    _draftSecondarySubtitleScale = slice.playbackSecondarySubtitleScale;
     _draftOnlineSubtitleSources =
         slice.onlineSubtitleSources.toList(growable: false);
     _assrtTokenController = TextEditingController(text: slice.assrtToken);
@@ -110,6 +116,9 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
   String _draftFingerprint() => jsonEncode({
         'subtitlePreference': _draftSubtitlePreference.name,
         'subtitleScale': _draftSubtitleScale,
+        'primarySubtitlePosition': _draftPrimarySubtitlePosition,
+        'secondarySubtitlePosition': _draftSecondarySubtitlePosition,
+        'secondarySubtitleScale': _draftSecondarySubtitleScale,
         'onlineSubtitleSources': [
           for (final source in _draftOnlineSubtitleSources) source.name,
         ],
@@ -139,6 +148,9 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
     final controller = ref.read(settingsControllerProvider.notifier);
     final subtitlePreference = _draftSubtitlePreference;
     final subtitleScale = _draftSubtitleScale;
+    final primarySubtitlePosition = _draftPrimarySubtitlePosition;
+    final secondarySubtitlePosition = _draftSecondarySubtitlePosition;
+    final secondarySubtitleScale = _draftSecondarySubtitleScale;
     final onlineSubtitleSources = [..._draftOnlineSubtitleSources];
     final assrtToken = _assrtTokenController.text.trim();
     final opensubtitlesEnabled = _draftOpensubtitlesEnabled;
@@ -152,6 +164,9 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
     Future<void> save() => controller.savePlaybackSubtitlePreferences(
           subtitlePreference: subtitlePreference,
           subtitleScale: subtitleScale,
+          primarySubtitlePosition: primarySubtitlePosition,
+          secondarySubtitlePosition: secondarySubtitlePosition,
+          secondarySubtitleScale: secondarySubtitleScale,
           onlineSubtitleSources: onlineSubtitleSources,
           assrtToken: assrtToken,
           opensubtitlesEnabled: opensubtitlesEnabled,
@@ -236,6 +251,108 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
                     setState(() {
                       _draftSubtitleScale = stepPlaybackSubtitleScale(
                         _draftSubtitleScale,
+                        1,
+                      );
+                    });
+                    _scheduleAutoSave();
+                  }
+                : null,
+          ),
+          const SizedBox(height: 12),
+          SettingsStepperTile(
+            title: '主字幕位置',
+            subtitle: '双字幕模式下默认作为上方中文位置；数值越大越靠近屏幕底部。',
+            value: formatPlaybackSubtitlePositionLabel(
+              _draftPrimarySubtitlePosition,
+            ),
+            onDecrease:
+                _draftPrimarySubtitlePosition > kPlaybackSubtitlePositionMin
+                    ? () {
+                        setState(() {
+                          _draftPrimarySubtitlePosition =
+                              stepPlaybackSubtitlePosition(
+                            _draftPrimarySubtitlePosition,
+                            -1,
+                          );
+                        });
+                        _scheduleAutoSave();
+                      }
+                    : null,
+            onIncrease:
+                _draftPrimarySubtitlePosition < kPlaybackSubtitlePositionMax
+                    ? () {
+                        setState(() {
+                          _draftPrimarySubtitlePosition =
+                              stepPlaybackSubtitlePosition(
+                            _draftPrimarySubtitlePosition,
+                            1,
+                          );
+                        });
+                        _scheduleAutoSave();
+                      }
+                    : null,
+          ),
+          const SizedBox(height: 12),
+          SettingsStepperTile(
+            title: '副字幕位置',
+            subtitle: '双字幕模式下默认作为下方英文位置；数值越大越靠近屏幕底部。',
+            value: formatPlaybackSubtitlePositionLabel(
+              _draftSecondarySubtitlePosition,
+            ),
+            onDecrease:
+                _draftSecondarySubtitlePosition > kPlaybackSubtitlePositionMin
+                    ? () {
+                        setState(() {
+                          _draftSecondarySubtitlePosition =
+                              stepPlaybackSubtitlePosition(
+                            _draftSecondarySubtitlePosition,
+                            -1,
+                          );
+                        });
+                        _scheduleAutoSave();
+                      }
+                    : null,
+            onIncrease:
+                _draftSecondarySubtitlePosition < kPlaybackSubtitlePositionMax
+                    ? () {
+                        setState(() {
+                          _draftSecondarySubtitlePosition =
+                              stepPlaybackSubtitlePosition(
+                            _draftSecondarySubtitlePosition,
+                            1,
+                          );
+                        });
+                        _scheduleAutoSave();
+                      }
+                    : null,
+          ),
+          const SizedBox(height: 12),
+          SettingsStepperTile(
+            title: '副字幕大小',
+            subtitle: '相对于主字幕的字号比例；仅在双字幕模式下生效。',
+            value: formatPlaybackSecondarySubtitleScaleLabel(
+              _draftSecondarySubtitleScale,
+            ),
+            onDecrease: _draftSecondarySubtitleScale >
+                    kPlaybackSecondarySubtitleScaleMin
+                ? () {
+                    setState(() {
+                      _draftSecondarySubtitleScale =
+                          stepPlaybackSecondarySubtitleScale(
+                        _draftSecondarySubtitleScale,
+                        -1,
+                      );
+                    });
+                    _scheduleAutoSave();
+                  }
+                : null,
+            onIncrease: _draftSecondarySubtitleScale <
+                    kPlaybackSecondarySubtitleScaleMax
+                ? () {
+                    setState(() {
+                      _draftSecondarySubtitleScale =
+                          stepPlaybackSecondarySubtitleScale(
+                        _draftSecondarySubtitleScale,
                         1,
                       );
                     });

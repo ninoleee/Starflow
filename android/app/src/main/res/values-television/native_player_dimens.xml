@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="exo_styled_bottom_bar_height">102dp</dimen>
+    <dimen name="exo_styled_progress_bar_height">2dp</dimen>
+</resources>

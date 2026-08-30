@@ -95,6 +95,9 @@ void main() {
         .savePlaybackSubtitlePreferences(
           subtitlePreference: PlaybackSubtitlePreference.off,
           subtitleScale: 40,
+          primarySubtitlePosition: 75,
+          secondarySubtitlePosition: 90,
+          secondarySubtitleScale: 70,
           onlineSubtitleSources: const [OnlineSubtitleSource.assrt],
           assrtToken: ' token ',
           opensubtitlesEnabled: true,
@@ -109,6 +112,9 @@ void main() {
     expect(repository.settings.playbackSubtitlePreference,
         PlaybackSubtitlePreference.off);
     expect(repository.settings.playbackSubtitleScale, 40);
+    expect(repository.settings.playbackPrimarySubtitlePosition, 75);
+    expect(repository.settings.playbackSecondarySubtitlePosition, 90);
+    expect(repository.settings.playbackSecondarySubtitleScale, 70);
     expect(repository.settings.onlineSubtitleSources,
         const [OnlineSubtitleSource.assrt]);
     expect(repository.settings.assrtToken, 'token');

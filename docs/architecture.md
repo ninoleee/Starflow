@@ -517,7 +517,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 详情页在 inactive 时会取消当前匹配 / 刷新会话，但不会再无条件失效成功缓存；重新回到页面时优先复用已有详情结果
 - 详情页在 inactive 时也会解除详情 provider 订阅并卸载剧集、剧照等延迟内容；最近一次成功结果继续由保留态控制器持有，返回页面时无需为了释放隐藏页面负载而牺牲已取得的数据
 - 网络图片在展示层支持候选图回退，主图 `404` 或解码失败时会自动尝试下一张候选 artwork；全部候选失败会清空当前失败 Future 并有限重试，持久化图片解码失败时同时淘汰对应磁盘条目
-- 详情页已经移除内联字幕搜索与外挂字幕选择；在线字幕搜索只保留在播放器页与独立字幕搜索页，仍按 `设置 -> 播放 -> 播放器与字幕 -> 字幕` 里的配置使用 `ASSRT API / OpenSubtitles / SubDL`
+- 详情页已经移除内联字幕搜索与外挂字幕选择；在线字幕搜索只保留在播放器页与独立字幕搜索页，仍按 `设置 -> 播放 -> 字幕` 里的配置使用 `ASSRT API / OpenSubtitles / SubDL`
 - 详情页不再把字幕候选或选中项写入详情缓存，也不会在进入播放器前向播放目标注入外挂字幕；字幕选择改由播放器页会话独立持有
 - 详情页资源信息区可直接切换播放器；这个入口最终会调用 `SettingsController.setPlaybackEngine(...)`，因此会和设置页里的全局默认播放器保持同一份持久化值
 
@@ -668,10 +668,8 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
   - 首层只保留返回、播放/暂停、进度、全屏和“更多”；音量、字幕、音轨与其他高级播放项统一收进播放设置弹窗
   - 顶部标题栏、底部控制区和播放设置弹窗都收敛到更官方的 Material 组件组合：`Material + IconButton + Slider + Text + ListTile + TextButton`
   - `PiP / AirPlay` 入口继续按平台能力显示
-- 非 `TV` 叠层的 fullscreen 状态由父级先读取，再以普通 `bool` 传给 `PlayerMpvControlsOverlay`；叠层在 `dispose()` 期间不再回头查 `FullscreenInheritedWidget`，避免 Windows 全屏退出时触发 deactivated ancestor 断言
 - 内置 `MPV` 主动退出时先 detach 当前播放器并立即关闭路由，进度保存、平台会话清理和 `pause -> stop -> dispose` 在退出后继续完成；新播放器初始化前仍会等待 `_playerShutdownQueue` 清空，避免 TV 慢设备被释放流程挡住页面退出，同时防止旧实例与新实例叠音
 - 播放器内的主动退出、关闭后台播放、外部清理请求和打开新片源统一收口到同一套 detach/shutdown 流程；后台播放只承接 App 进入后台，不让页面级播放器跨路由存活
-- `PlayerMpvControlsOverlay` 的自动隐藏定时器、点击唤醒与 `setState` 现在都受 `_isDisposed / _canUpdateOverlayState` 保护；窗口态已不再响应 hover 唤醒，并会在全屏切换时重置 pointer wake 状态，减少全屏切换或返回时的 `setState after dispose`、`mouse_tracker` 异常以及窗口态闪烁
 - `PlaybackOptionsDialog` 只订阅设置项实际需要的轨道、循环模式和倍速；底部实时“播放信息”卡片及其进度、画面尺寸、播放/缓冲状态和缓冲百分比监听已经删除，避免设置弹窗为只读信息持续重建
 - 播放页 presentation 当前已分成：
   - `player_page.dart`：页面壳、字段与顶层 wiring
@@ -679,7 +677,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
   - `player_page_startup_mpv.part.dart`：播放启动、打开重试、`MPV` / ISO / 调优链
   - `player_page_runtime_actions.part.dart`：续播、跳过、字幕、外挂字幕、在线字幕、启动 probe
   - `player_page_controls.part.dart`：返回、进度、选择器、播放设置、视频 surface
-  - `player_mpv_controls_overlay.dart`、`player_playback_options_dialog.dart`、`player_playback_overlays.dart`、`player_playback_dialogs.dart`、`player_tv_playback_widgets.dart`：纯展示层组件
+  - `player_playback_options_dialog.dart`、`player_playback_overlays.dart`、`player_playback_dialogs.dart`、`player_tv_playback_widgets.dart`、`player_network_speed_label.dart`：纯展示层组件；旧自定义 `PlayerMpvControlsOverlay` 已删除，非 TV 统一使用 media_kit Adaptive 控制层
 - `lib/core/utils/playback_trace.dart`、`subtitle_search_trace.dart`、`metadata_search_trace.dart` 与 `detail_resource_switch_trace.dart` 仍保留调用点，但当前实现都已静音，不再产生运行时输出
 - 内置 `MPV` 现已把 `ISO` 打开路径统一纳入同一条执行链：本地路径 / `file://` / UNC 优先尝试 `dvd-device / bluray-device`，远程 `ISO` 则直接回退普通 `Media(...)` 打开，并在回退前清理残留的 `dvd-device / bluray-device / http-header-fields`
 - `TV` 分支当前仍保留自定义播放叠层：
@@ -692,11 +690,11 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
   - 本地续播记忆
   - 在线字幕搜索
   - Android 原生音轨/字幕选择、播放中音频输出切换、外挂字幕加载与外挂字幕偏移
-  - Android 原生播放设置弹窗一级只保留本剧跳过片头片尾、音轨、字幕和选择剧集；播放速度、音频输出、字幕大小、在线查找字幕、加载外部字幕和字幕偏移全部收进列表最下方的“更多”二级弹窗
-  - Android 原生播放器的字幕大小可在“更多”里按 `20–78号` 档位调整，改完立即重新套用 `NativeSubtitleStylePolicy`；和其它原生内调整一样只在当次播放会话生效，不回写 Flutter 设置
+  - Android 原生播放设置弹窗一级只保留本剧跳过片头片尾、音轨、字幕和选择剧集；播放速度、音频输出、主字幕大小、主/副字幕位置、副字幕大小、在线查找字幕、加载外部字幕和字幕偏移全部收进列表最下方的“更多”二级弹窗
+  - Android 原生播放器的主字幕大小可在“更多”里按 `20–78号` 调整，主/副位置和副字幕大小按百分比调整；改完立即重新套用 `NativeSubtitleStylePolicy / NativeDualSubtitleController`。Flutter 设置提供持久化默认值，原生播放中的覆盖只作用于当次会话
   - Android 原生音轨与字幕轨选择使用单选即应用的轻量弹窗；点选轨道或“关闭”会立即更新 Media3 `TrackSelectionParameters` 并关闭弹窗，不保留额外的确定步骤
 - Android `NativePlaybackActivity` 使用 `Theme.AppCompat.NoActionBar` 派生的全屏黑色主题；音轨、字幕轨与音频输出都使用原生单选对话框，选中即应用，不依赖额外确定按钮
-  - Android 原生字幕由 `NativeSubtitleStylePolicy` 把 Flutter 的 `20–78号` 设置分段映射到 `3.5%–9%` 画面高度，默认 `32号` 对应 Media3 的 `5.33%`；TV / 手机底部安全距离分别为 `8% / 10%`。`SubtitleView` 默认使用 Canvas、白色中粗字、透明背景与黑色描边，保留 cue 内嵌样式但忽略内嵌字号；检测到系统 `CaptioningManager` 已启用时则关闭内嵌覆盖并采用系统样式与字号
+  - Android 原生字幕由 `NativeSubtitleStylePolicy` 把 Flutter 的 `20–78号` 设置分段映射到 `3.5%–9%` 画面高度，默认 `32号` 对应 Media3 的 `5.33%`；主位置默认 `80%`，副位置默认 `90%`，副字幕默认主字号的 `75%`。`SubtitleView` 默认使用 Canvas、白色中粗字、透明背景与黑色描边，保留 cue 内嵌样式但忽略内嵌字号；检测到系统 `CaptioningManager` 已启用时采用系统样式与字号，同时在双字幕模式保留应用设置的主/副布局
 - 播放器页与独立字幕搜索页复用同一个 `OnlineSubtitleRepository`；仓库内部已经收口为 `searchStructured(...)` 一条结构化链路
 - `searchStructured(...)` 会基于当前播放目标、详情外部 ID 和本地文件信息组装 `OnlineSubtitleSearchRequest`，优先尝试文件哈希、`IMDb ID / TMDB ID`、季集号、年份和标题
 - 结构化源当前支持 `ASSRT API / OpenSubtitles / SubDL`；`ASSRT` Token 来自设置页，未填写时不会访问 API；`OpenSubtitles` API Key 通过 `--dart-define=STARFLOW_OPENSUBTITLES_API_KEY=...` 注入，账号密码来自设置页；`SubDL` API Key 直接来自设置页
@@ -752,6 +750,10 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 
 - Android 原生播放器容器页当前使用原生 `Activity + Media3/ExoPlayer` 承载播放，在 UI 中命名为 `ExoPlayer（原生）`；它会跟随设置选择 `自动 / 硬解优先 / 软解优先` 和独立的音频输出模式
 - Android 原生播放器每次轨道变化都会把音频轨的 MIME、编码标记、声道数、采样率、支持状态和选中状态写入结构化 native 日志；初始化日志同时标记 `audioOutputMode / forcePcmAudioOutput / ffmpegAudioDecoder`
+- Android 原生播放器的字幕菜单不使用 Media3 泛化轨道名称，而由 `NativeSubtitleTrackLabelPolicy` 按内置 MPV 的“标题 · 语言 · 默认/强制”顺序生成；`und / zxx` 不显示为语言，外挂字幕优先显示文件名
+- Android 原生播放器的可选双字幕模式由 `NativeDualSubtitleController` 承担：同一 Exo 会话使用主/副两个文本渲染器分别解码两条分离的文本字幕轨，动态能力路由只让副渲染器认领英文轨，再按独立主/副位置输出两个 cue；副字幕字号、主位置和副位置从 Flutter 设置传入，并可在原生“更多”中覆盖当前会话。普通字幕模式仍只启用主文本渲染器，PGS/VobSub/DVB 图片字幕不进入双字幕候选
+- 非 Web 内置 MPV 使用原生 `sid / secondary-sid` 选择两条分离的内封文本轨，同时向 libmpv 写入 `sub-pos / secondary-sub-pos / secondary-sub-scale`；由于当前 `libass=false`，画面上的主/副字幕由 Starflow 自定义 Flutter 叠层分别渲染，保证窗口态与全屏态都使用独立位置和字号。图片字幕和临时外挂字幕不进入特殊模式。MPV“更多”同时提供后台播放、手势、卡顿恢复和性能调优开关
+- 非 Web MPV 控制层左上角使用轻量轮询读取 libmpv `cache-speed`，展示当前缓存下层 I/O 读取速度；桌面 / 手机 Adaptive 控制层和 TV chrome 复用同一网速组件
 - Android 原生播放器同时记录视频轨 MIME、编码、尺寸、色彩信息与支持状态；检测到存在视频轨但当前设备全部不支持时，会以 `static=false` 重新请求 Emby 转码流并从原进度继续
 - Android 原生播放器额外包含与 Media3 同版本的 `media3-exoplayer-hls`；仅对 SmartStrm 且文件名含 `#/%23` 的原生启动执行响应头级预检，按最终 Content-Type 直接选择 MP4/HLS，不持久化短期重定向地址；预检失败时仍由 `NativePlaybackHlsFallbackPolicy` 在首次解析错误 `3003` 后保留进度切换 HLS 一次
 - Android 原生启动通过 `buildDeferredNativeEpisodeQueue` 携带当前季的完整未解析队列并保留真实 `currentIndex`，只用已解析目标替换当前条目；原生选集、上一集、下一集和播放结束自动续播统一通过 `starflow/native_playback_resolver` 回调 Flutter，按选中的单集执行 `PlaybackTargetResolver` 和必要的 SmartStrm MP4/HLS 探测。异步解析期间旧播放器不释放，成功后才更新队列条目并切换，失败或会话变化则保留当前视频
@@ -760,6 +762,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - Android 原生播放器复用每秒运行循环做续播采样，实际仍按约 `10s` 的位置差值节流落盘；内置 `MPV` 和 iOS 原生播放器使用同一量级，生命周期暂停、返回、切集和关闭路径会强制保存
 - Android / iOS 播放记忆仓库使用带 `reload()` 的 legacy SharedPreferences，与原生播放器共享物理键 `flutter.starflow.playback.memory.v1`；首次读取会按 `updatedAt` 合并并迁移旧异步存储快照，返回前台时递增播放历史 revision 使首页和详情页重新读取
 - Android 原生播放器每 `10s` 记录一次位置、时长、缓冲位置、缓冲比例、播放态、首帧状态与视频尺寸；位置不连续事件单独记录旧/新位置和 Media3 原因码
+- Android 原生播放器为当前 Exo 会话创建独立 `DefaultBandwidthMeter`，控制层完全显示时在右上角展示最近一次真实传输采样；手机 / TV 控制布局分别覆盖 Media3 的底栏动画高度，使两阶段自动隐藏的第一阶段把剩余进度条下沉到实际底边
 - iOS 原生播放器容器页当前使用原生 `AVPlayerViewController` 全屏承载播放，不退出 App；它会复用同一份续播记忆，并补了在线字幕搜索入口，但解码走系统链路，当前不提供软硬解切换或字幕偏移
 - 详情页“从头播放”从当前选择生成 `allowResume=false` 的目标，“继续播放”从历史记录恢复具体目标并设置 `allowResume=true`；该字段在播放地址解析后保持不变，内置 `MPV`、Android `ExoPlayer` 和 iOS `AVPlayer` 都以它作为是否读取历史进度的唯一入口语义
 - iOS 的播放会话桥接由 `ios/Runner/PlaybackSystemSessionBridge.swift` 承担，`AppDelegate` 会把它绑定到 Flutter channel，用于原生播放会话、遥控器命令和 AirPlay 入口
@@ -778,7 +781,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 默认字幕策略
   - `跟随片源`：打开视频时按片源默认字幕轨处理
   - `默认关闭`：打开视频时默认不显示字幕
-- 字幕大小
+- 主字幕大小、主字幕位置、副字幕位置和副字幕大小
 - 字幕默认项在设置页中以单独的“字幕”二级页承载，避免和播放内核、后台播放、默认倍速混在同一层
 - 后台播放
   - 设置中提供独立开关
@@ -787,7 +790,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
   - 关闭开关时两条 iOS 播放链路进入后台都会暂停、释放音频会话、清除 Now Playing 并撤销锁屏遥控入口；回前台重新发布暂停状态，避免锁屏绕过开关恢复播放。前台系统媒体会话不受后台续播开关影响
   - iOS 原生播放器关闭 `AVPlayerViewController` 的自动 Now Playing 发布，统一由 Starflow 同步播放状态和鉴权海报；开启后台播放时生命周期通知只保存进度和管理视频轨，关闭时进入后台会撤销 Now Playing、回前台恢复
   - iOS 两条播放链路都会记录中断前播放状态，只有系统允许恢复且中断前正在播放时才自动继续；暂停和耳机断开会释放对应的共享音频会话持有者。锁屏停止命令被禁用，原生播放器按真实倍速发布进度
-  - 内嵌 `MPV` 的 Now Playing 位置在后台按 `4` 秒节流，非位置状态仍立即同步；封面加载器拒绝超过 `8 MB` 的响应，并用 ImageIO 在后台线程将图片降采样到最长边 `1200 px` 后再创建 `MPMediaItemArtwork`
+  - 内嵌 `MPV` 的 Now Playing 位置在后台按 `10` 秒节流，非位置状态仍立即同步；封面加载器拒绝超过 `8 MB` 的响应，并用 ImageIO 在后台线程将图片降采样到最长边 `1200 px` 后再创建 `MPMediaItemArtwork`
   - Now Playing 封面接收有序候选，按海报、背景图回退并保留各自鉴权头；Emby 与 NAS / WebDAV STRM 的播放地址解析使用原目标 `copyWith`，避免解析后丢失图片、标题标识和其他展示字段
   - 用户主动关闭播放器时始终停止播放；后台保活只对应按 Home 或切换 App，关闭开关或切新片源也会清理当前 `MPV` 会话
 - 播放器内核
@@ -819,7 +822,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 后台播放
 - 默认字幕策略
 - 默认倍速
-- 字幕大小
+- 主字幕大小、主字幕位置、副字幕位置、副字幕大小
 - 在线字幕来源
 - 各在线字幕来源的专属配置（`ASSRT Token / OpenSubtitles 账号密码 / SubDL API Key`）
 - 优先语言（`简体中文 / 繁体中文 / 英语 / 日语 / 韩语`，可多选；不选时按字幕结果和系统语言自动处理）与单次最多验证条数
@@ -841,10 +844,10 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 播放设置在页面结构上额外做了分组：
 
 - 播放页放播放器内核、解码模式、ExoPlayer 音频输出、打开超时、后台播放、默认倍速
-- 字幕收拢到独立的“字幕”一级页：默认字幕策略、字幕大小、在线字幕来源与凭据、优先语言、单次最多验证条数
-- 内置 MPV 的触屏交互、卡顿自动恢复和激进性能调优全部收拢到独立的“MPV”一级页，不再跨播放页与性能页分散
+- 字幕收拢到独立的“字幕”一级页：默认字幕策略、主字幕大小、主/副字幕位置、副字幕大小、在线字幕来源与凭据、优先语言、单次最多验证条数
+- 内置 MPV 的触屏交互、卡顿自动恢复和激进性能调优保留在独立的“MPV”一级页；播放中的“更多”复用同一组持久化字段，并额外集中提供后台播放与主/副字幕布局
 - 三个页面都不再维护需要手动提交的页面草稿：选择、开关和步进项修改后立即排入持久化队列，文本输入使用 `250ms` 合并窗口；返回时会先把最后草稿加入有序写入队列，再立即关闭页面，不再显示保存确认框或工具栏提交按钮
-- 三个页面各自只写自己那段字段：播放页走 `savePlaybackPreferences(...)`、字幕页走 `savePlaybackSubtitlePreferences(...)`、MPV 页走 `savePlaybackMpvPreferences(...)`，避免任一页面的自动保存覆盖其它页面的偏好
+- 三个全局设置页各自只写自己那段字段：播放页走 `savePlaybackPreferences(...)`、字幕页走 `savePlaybackSubtitlePreferences(...)`、MPV 页走 `savePlaybackMpvPreferences(...)`；播放中的 MPV“更多”使用 `savePlaybackRuntimePreferences(...)` 原子保存其当前完整快照，避免连续操作互相覆盖
 - 媒体源、搜索服务、豆瓣账号和网络存储编辑页复用 `SettingsAutoSaveCoordinator`：以当前配置 JSON 作为指纹去重，连续修改使用 `250ms` 防抖并按队列顺序持久化，返回时立即冲刷最后草稿，删除前取消尚未开始的保存，避免删除后被旧任务重新创建
 - 整页编辑不再保留保存按钮或未保存确认；单个文本输入弹窗里的“保存”仍只负责把该输入提交回当前草稿。新建媒体源/搜索服务在草稿没有实际内容时不会生成空记录
 - 详情页资源信息区对播放器内核的切换会直接复用同一个 `setPlaybackEngine(...)` 写回入口，因此不会出现“详情页一种默认、设置页另一种默认”的分叉

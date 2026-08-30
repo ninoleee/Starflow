@@ -74,6 +74,11 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
       decodeMode: _playbackDecodeMode,
       audioOutputMode: _playbackSettings.nativeAudioOutputMode,
       subtitleScale: _playbackSettings.playbackSubtitleScale,
+      primarySubtitlePosition:
+          _playbackSettings.playbackPrimarySubtitlePosition,
+      secondarySubtitlePosition:
+          _playbackSettings.playbackSecondarySubtitlePosition,
+      secondarySubtitleScale: _playbackSettings.playbackSecondarySubtitleScale,
       backgroundPlaybackEnabled: _backgroundPlaybackEnabled,
       subtitlePreference: _playbackSettings.playbackSubtitlePreference,
       subtitlePreferredLanguages: _playbackSettings.subtitlePreferredLanguages,

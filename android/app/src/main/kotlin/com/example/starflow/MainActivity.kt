@@ -144,6 +144,12 @@ class MainActivity : FlutterActivity() {
                         call.argument<String>("audioOutputMode")?.trim().orEmpty()
                     val subtitleScale = call.argument<Double>("subtitleScale")
                         ?: NativeSubtitleStylePolicy.DEFAULT_SCALE
+                    val primarySubtitlePosition =
+                        call.argument<Double>("primarySubtitlePosition") ?: 80.0
+                    val secondarySubtitlePosition =
+                        call.argument<Double>("secondarySubtitlePosition") ?: 90.0
+                    val secondarySubtitleScale =
+                        call.argument<Double>("secondarySubtitleScale") ?: 75.0
                     val subtitlePreference =
                         call.argument<String>("subtitlePreference")?.trim().orEmpty()
                     val mediaMimeType =
@@ -196,6 +202,18 @@ class MainActivity : FlutterActivity() {
                                 audioOutputMode,
                             )
                             putExtra(NativePlaybackActivity.EXTRA_SUBTITLE_SCALE, subtitleScale)
+                            putExtra(
+                                NativePlaybackActivity.EXTRA_PRIMARY_SUBTITLE_POSITION,
+                                primarySubtitlePosition,
+                            )
+                            putExtra(
+                                NativePlaybackActivity.EXTRA_SECONDARY_SUBTITLE_POSITION,
+                                secondarySubtitlePosition,
+                            )
+                            putExtra(
+                                NativePlaybackActivity.EXTRA_SECONDARY_SUBTITLE_SCALE,
+                                secondarySubtitleScale,
+                            )
                             putExtra(NativePlaybackActivity.EXTRA_MEDIA_MIME_TYPE, mediaMimeType)
                             putExtra(
                                 NativePlaybackActivity.EXTRA_RESOLVER_SESSION_ID,

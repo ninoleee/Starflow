@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -44,6 +45,7 @@ import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/playback/presentation/widgets/mpv_stall_watchdog.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_adaptive_top_chrome.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_episode_picker_dialog.dart';
+import 'package:starflow/features/playback/presentation/widgets/player_network_speed_label.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_dialogs.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_formatters.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_options_dialog.dart';
@@ -149,6 +151,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _playbackSystemSessionBound = false;
   bool _subtitleDelaySupported = false;
   double _subtitleDelaySeconds = 0;
+  bool _mpvDualSubtitleEnabled = false;
+  late double _sessionPrimarySubtitlePosition;
+  late double _sessionSecondarySubtitlePosition;
+  late double _sessionSecondarySubtitleScale;
   bool _tvPlaybackChromeVisible = false;
   final ValueNotifier<_TvPlaybackState> _tvPlaybackStateNotifier =
       ValueNotifier(const _TvPlaybackState());
@@ -284,6 +290,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   void initState() {
     super.initState();
     _providerContainer = ProviderScope.containerOf(context, listen: false);
+    final initialSettings = ref.read(appSettingsProvider);
+    _sessionPrimarySubtitlePosition =
+        initialSettings.playbackPrimarySubtitlePosition;
+    _sessionSecondarySubtitlePosition =
+        initialSettings.playbackSecondarySubtitlePosition;
+    _sessionSecondarySubtitleScale =
+        initialSettings.playbackSecondarySubtitleScale;
     WidgetsBinding.instance.addObserver(this);
     _playbackPerformanceModeController = ref.read(
       playbackPerformanceModeProvider.notifier,
@@ -347,6 +360,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _videoController = null;
     _isReady = false;
     _isEmbeddedMpvFullscreen = false;
+    _mpvDualSubtitleEnabled = false;
     _stopMpvStallWatchdog(clearRecoveryFlag: clearStallRecoveryFlag);
     _lastRuntimeMpvErrorAt = null;
     _runtimeMpvErrorBurstCount = 0;
@@ -768,7 +782,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
-    final playbackSettings = _playbackSettings;
+    final playbackSettings = ref.watch(appSettingsProvider);
     final leanPlaybackUiEnabled = ref.watch(
       appSettingsProvider.select(
         (settings) =>
@@ -915,6 +929,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                       state.playing || player.state.playing,
                                   bufferingPercentage:
                                       state.bufferingPercentage,
+                                  networkSpeed: MpvNetworkSpeedLabel(
+                                    player: player,
+                                  ),
                                   backFocusNode: _tvBackControlFocusNode,
                                   previousEpisodeFocusNode:
                                       _tvPreviousEpisodeControlFocusNode,

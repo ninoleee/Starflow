@@ -440,10 +440,10 @@ extension _PlayerPageStateControls on _PlayerPageState {
     final video = Video(
       controller: videoController,
       pauseUponEnteringBackgroundMode: !_backgroundPlaybackEnabled,
-      controls: isTelevision
-          ? NoVideoControls
-          : (state) {
-              return _EmbeddedMpvFullscreenControlsBridge(
+      controls: (state) {
+        final controls = isTelevision
+            ? const SizedBox.shrink()
+            : _EmbeddedMpvFullscreenControlsBridge(
                 onFullscreenChanged:
                     _handleObservedEmbeddedMpvFullscreenChanged,
                 child: _buildAdaptiveEmbeddedVideoControls(
@@ -451,16 +451,68 @@ extension _PlayerPageStateControls on _PlayerPageState {
                   settings: settings,
                 ),
               );
-            },
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            _buildMpvSubtitleOverlay(
+              videoController.player,
+              settings: settings,
+            ),
+            controls,
+          ],
+        );
+      },
       fill: Colors.black,
       fit: _resolvedVideoBoxFit(),
       aspectRatio: _resolvedVideoAspectRatioOverride(),
-      subtitleViewConfiguration: _buildSubtitleViewConfiguration(
-        settings,
-        isTelevision: isTelevision,
+      subtitleViewConfiguration: const SubtitleViewConfiguration(
+        visible: false,
       ),
     );
     return video;
+  }
+
+  Widget _buildMpvSubtitleOverlay(
+    Player player, {
+    required AppSettings settings,
+  }) {
+    final simplifyForPerformance = settings.effectiveLeanPlaybackUiEnabled(
+      isTelevision: _isTelevisionPlaybackDevice,
+    );
+    final shadows = _buildSubtitleOutlineShadows(
+      simplifyForPerformance: simplifyForPerformance,
+    );
+    return IgnorePointer(
+      child: StreamBuilder<List<String>>(
+        stream: player.stream.subtitle,
+        initialData: player.state.subtitle,
+        builder: (context, snapshot) {
+          final subtitles = snapshot.data ?? const <String>[];
+          final primary = subtitles.isNotEmpty ? subtitles[0].trim() : '';
+          final secondary = subtitles.length > 1 ? subtitles[1].trim() : '';
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              if (primary.isNotEmpty)
+                _MpvPositionedSubtitleText(
+                  text: primary,
+                  positionPercent: _sessionPrimarySubtitlePosition,
+                  fontSize: settings.playbackSubtitleScale,
+                  shadows: shadows,
+                ),
+              if (_mpvDualSubtitleEnabled && secondary.isNotEmpty)
+                _MpvPositionedSubtitleText(
+                  text: secondary,
+                  positionPercent: _sessionSecondarySubtitlePosition,
+                  fontSize: settings.playbackSubtitleScale *
+                      (_sessionSecondarySubtitleScale / 100),
+                  shadows: shadows,
+                ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   Widget _buildAdaptiveEmbeddedVideoControls(
@@ -736,6 +788,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
     required AppSettings settings,
   }) {
     return [
+      MpvNetworkSpeedLabel(player: state.widget.controller.player),
+      const SizedBox(width: 8),
       Tooltip(
         message: '返回',
         child: MaterialCustomButton(
@@ -779,6 +833,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
     required AppSettings settings,
   }) {
     return [
+      MpvNetworkSpeedLabel(player: state.widget.controller.player),
+      const SizedBox(width: 8),
       Tooltip(
         message: '返回',
         child: MaterialDesktopCustomButton(
@@ -1137,37 +1193,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
     ];
   }
 
-  SubtitleViewConfiguration _buildSubtitleViewConfiguration(
-    AppSettings settings, {
-    required bool isTelevision,
-  }) {
-    final simplifyForPerformance = settings.effectiveLeanPlaybackUiEnabled(
-      isTelevision: isTelevision,
-    );
-    return SubtitleViewConfiguration(
-      style: TextStyle(
-        height: 1.35,
-        fontSize: settings.playbackSubtitleScale,
-        color: Colors.white,
-        fontWeight: FontWeight.w600,
-        backgroundColor: Colors.transparent,
-        shadows: _buildSubtitleOutlineShadows(
-          simplifyForPerformance: simplifyForPerformance,
-        ),
-      ),
-      padding: EdgeInsets.fromLTRB(
-        20,
-        0,
-        20,
-        simplifyForPerformance
-            ? isTelevision
-                ? 14
-                : 18
-            : 28,
-      ),
-    );
-  }
-
   Future<void> _showPlaybackOptions({
     required bool isTelevision,
   }) async {
@@ -1179,6 +1204,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
     await showDialog<void>(
       context: context,
       builder: (context) {
+        final settings = _playbackSettings;
         return PlaybackOptionsDialog(
           player: player,
           target: _resolvedTarget ?? widget.target,
@@ -1202,9 +1228,72 @@ extension _PlayerPageStateControls on _PlayerPageState {
             _resolvedTarget ?? widget.target,
           ),
           onConfigureSeriesSkip: () => _configureSeriesSkipPreference(player),
+          runtimeSettings: PlaybackMpvRuntimeSettings(
+            backgroundPlaybackEnabled: _backgroundPlaybackEnabled,
+            doubleTapToSeekEnabled: settings.playbackMpvDoubleTapToSeekEnabled,
+            swipeToSeekEnabled: settings.playbackMpvSwipeToSeekEnabled,
+            longPressSpeedBoostEnabled:
+                settings.playbackMpvLongPressSpeedBoostEnabled,
+            stallAutoRecoveryEnabled:
+                settings.playbackMpvStallAutoRecoveryEnabled,
+            aggressiveTuningEnabled:
+                settings.performanceAggressivePlaybackTuningEnabled,
+            subtitleScale: settings.playbackSubtitleScale,
+            primarySubtitlePosition: _sessionPrimarySubtitlePosition,
+            secondarySubtitlePosition: _sessionSecondarySubtitlePosition,
+            secondarySubtitleScale: _sessionSecondarySubtitleScale,
+          ),
+          onApplyRuntimeSettings: (next) =>
+              _applyMpvRuntimeSettings(player, next),
         );
       },
     );
+  }
+
+  Future<void> _applyMpvRuntimeSettings(
+    Player player,
+    PlaybackMpvRuntimeSettings next,
+  ) async {
+    final previous = _playbackSettings;
+    if (mounted) {
+      setState(() {
+        _sessionPrimarySubtitlePosition = next.primarySubtitlePosition;
+        _sessionSecondarySubtitlePosition = next.secondarySubtitlePosition;
+        _sessionSecondarySubtitleScale = next.secondarySubtitleScale;
+      });
+    }
+    await ref
+        .read(settingsControllerProvider.notifier)
+        .savePlaybackRuntimePreferences(
+          backgroundPlaybackEnabled: next.backgroundPlaybackEnabled,
+          doubleTapToSeekEnabled: next.doubleTapToSeekEnabled,
+          swipeToSeekEnabled: next.swipeToSeekEnabled,
+          longPressSpeedBoostEnabled: next.longPressSpeedBoostEnabled,
+          stallAutoRecoveryEnabled: next.stallAutoRecoveryEnabled,
+          aggressiveTuningEnabled: next.aggressiveTuningEnabled,
+          subtitleScale: next.subtitleScale,
+          primarySubtitlePosition: next.primarySubtitlePosition,
+          secondarySubtitlePosition: next.secondarySubtitlePosition,
+          secondarySubtitleScale: next.secondarySubtitleScale,
+        );
+    await _applyMpvSubtitleLayout(player);
+    if (previous.performanceAggressivePlaybackTuningEnabled !=
+        next.aggressiveTuningEnabled) {
+      await _applyMpvPerformanceTuning(
+        player,
+        _resolvedTarget ?? widget.target,
+      );
+    }
+    if (previous.playbackMpvStallAutoRecoveryEnabled !=
+        next.stallAutoRecoveryEnabled) {
+      if (next.stallAutoRecoveryEnabled) {
+        _startMpvStallWatchdog(player, _resolvedTarget ?? widget.target);
+      } else {
+        _stopMpvStallWatchdog();
+      }
+    }
+    await _syncBackgroundPlayback(enabled: player.state.playing);
+    await _syncPlaybackSystemSession(force: true);
   }
 
   Future<void> _selectSubtitleTrack(
@@ -1212,12 +1301,21 @@ extension _PlayerPageStateControls on _PlayerPageState {
     List<SubtitleTrack> tracks,
     SubtitleTrack current,
   ) async {
-    final selection = await showDialog<SubtitleTrack>(
+    final selection = await showDialog<Object>(
       context: context,
       builder: (dialogContext) {
         return SimpleDialog(
           title: const Text('字幕选择'),
           children: [
+            if (!kIsWeb)
+              SimpleDialogOption(
+                onPressed: () => Navigator.of(dialogContext).pop(
+                  _MpvSubtitleSelectionMode.dual,
+                ),
+                child: Text(
+                  _mpvDualSubtitleEnabled ? '特殊：双字幕模式  当前' : '特殊：双字幕模式',
+                ),
+              ),
             for (final track in tracks)
               SimpleDialogOption(
                 onPressed: () => Navigator.of(dialogContext).pop(track),
@@ -1235,10 +1333,131 @@ extension _PlayerPageStateControls on _PlayerPageState {
       return;
     }
 
+    if (selection == _MpvSubtitleSelectionMode.dual) {
+      await _selectMpvDualSubtitleTracks(player, tracks);
+      return;
+    }
+
+    final selectedTrack = selection as SubtitleTrack;
+    await _disableMpvDualSubtitle(player);
+
     await _runPlayerCommand(
-      () => player.setSubtitleTrack(selection),
+      () => player.setSubtitleTrack(selectedTrack),
       failureMessage: '切换字幕失败',
     );
+  }
+
+  Future<void> _selectMpvDualSubtitleTracks(
+    Player player,
+    List<SubtitleTrack> tracks,
+  ) async {
+    final candidates =
+        tracks.where(_canUseMpvDualSubtitleTrack).toList(growable: false);
+    if (candidates.length < 2) {
+      _showMessage('双字幕模式至少需要两条文本字幕');
+      return;
+    }
+
+    final primaryCandidates = [...candidates]..sort((left, right) {
+        final rightScore = scorePreferredSubtitleText(
+          '${right.title ?? ''} ${right.language ?? ''}',
+          configuredLanguages: const ['zh-cn', 'zh-tw', 'zh'],
+        );
+        final leftScore = scorePreferredSubtitleText(
+          '${left.title ?? ''} ${left.language ?? ''}',
+          configuredLanguages: const ['zh-cn', 'zh-tw', 'zh'],
+        );
+        return rightScore.compareTo(leftScore);
+      });
+    final primary = await _showMpvSubtitleTrackPicker(
+      title: '双字幕：选择上方中文',
+      tracks: primaryCandidates,
+    );
+    if (primary == null || !mounted) {
+      return;
+    }
+
+    final secondaryCandidates =
+        candidates.where((track) => track != primary).toList(growable: false)
+          ..sort((left, right) {
+            final rightScore = scorePreferredSubtitleText(
+              '${right.title ?? ''} ${right.language ?? ''}',
+              configuredLanguages: const ['en'],
+            );
+            final leftScore = scorePreferredSubtitleText(
+              '${left.title ?? ''} ${left.language ?? ''}',
+              configuredLanguages: const ['en'],
+            );
+            return rightScore.compareTo(leftScore);
+          });
+    final secondary = await _showMpvSubtitleTrackPicker(
+      title: '双字幕：选择下方英文',
+      tracks: secondaryCandidates,
+    );
+    if (secondary == null) {
+      return;
+    }
+
+    await _runPlayerCommand(
+      () async {
+        await player.setSubtitleTrack(primary);
+        await _setMpvSubtitleProperty(player, 'secondary-sid', secondary.id);
+        await _applyMpvSubtitleLayout(player);
+      },
+      failureMessage: '开启双字幕失败',
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _mpvDualSubtitleEnabled = true;
+    });
+    _showMessage('双字幕已开启：中文在上，英文在下');
+  }
+
+  Future<SubtitleTrack?> _showMpvSubtitleTrackPicker({
+    required String title,
+    required List<SubtitleTrack> tracks,
+  }) {
+    return showDialog<SubtitleTrack>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: Text(title),
+        children: [
+          for (final track in tracks)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(dialogContext).pop(track),
+              child: Text(formatPlaybackSubtitleTrackLabel(track)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  bool _canUseMpvDualSubtitleTrack(SubtitleTrack track) {
+    if (track.id == 'auto' ||
+        track.id == 'no' ||
+        track.image == true ||
+        track.uri ||
+        track.data) {
+      return false;
+    }
+    final codec = (track.codec ?? '').trim().toLowerCase();
+    return !const ['pgs', 'hdmv_pgs_subtitle', 'dvd_subtitle', 'dvb_subtitle']
+        .contains(codec);
+  }
+
+  Future<void> _disableMpvDualSubtitle(Player player) async {
+    if (!_mpvDualSubtitleEnabled) {
+      return;
+    }
+    await _setMpvSubtitleProperty(player, 'secondary-sid', 'no');
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _mpvDualSubtitleEnabled = false;
+    });
   }
 
   Future<void> _selectAudioTrack(
@@ -1340,4 +1559,51 @@ class _EmbeddedMpvFullscreenControlsBridgeState
 
   @override
   Widget build(BuildContext context) => widget.child;
+}
+
+enum _MpvSubtitleSelectionMode { dual }
+
+class _MpvPositionedSubtitleText extends StatelessWidget {
+  const _MpvPositionedSubtitleText({
+    required this.text,
+    required this.positionPercent,
+    required this.fontSize,
+    required this.shadows,
+  });
+
+  final String text;
+  final double positionPercent;
+  final double fontSize;
+  final List<Shadow> shadows;
+
+  @override
+  Widget build(BuildContext context) {
+    final alignmentY =
+        ((clampPlaybackSubtitlePosition(positionPercent) / 100) * 2) - 1;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const referenceArea = 1920.0 * 1080.0;
+        final area = constraints.maxWidth * constraints.maxHeight;
+        final scale = math.sqrt((area / referenceArea).clamp(0.0, 1.0));
+        return Align(
+          alignment: Alignment(0, alignmentY),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Text(
+              text,
+              textAlign: TextAlign.center,
+              textScaler: TextScaler.linear(scale),
+              style: TextStyle(
+                height: 1.25,
+                fontSize: fontSize,
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                shadows: shadows,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }

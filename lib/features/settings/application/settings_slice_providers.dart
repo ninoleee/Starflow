@@ -81,6 +81,12 @@ final settingsPlaybackSliceProvider = Provider<SettingsPlaybackSlice>(
           playbackDefaultSpeed: settings.playbackDefaultSpeed,
           playbackSubtitlePreference: settings.playbackSubtitlePreference,
           playbackSubtitleScale: settings.playbackSubtitleScale,
+          playbackPrimarySubtitlePosition:
+              settings.playbackPrimarySubtitlePosition,
+          playbackSecondarySubtitlePosition:
+              settings.playbackSecondarySubtitlePosition,
+          playbackSecondarySubtitleScale:
+              settings.playbackSecondarySubtitleScale,
           onlineSubtitleSources: settings.onlineSubtitleSources,
           assrtToken: settings.assrtToken,
           opensubtitlesEnabled: settings.opensubtitlesEnabled,
@@ -220,6 +226,12 @@ class SettingsPlaybackSlice {
     required this.playbackDefaultSpeed,
     required this.playbackSubtitlePreference,
     required this.playbackSubtitleScale,
+    this.playbackPrimarySubtitlePosition =
+        kPlaybackPrimarySubtitlePositionDefault,
+    this.playbackSecondarySubtitlePosition =
+        kPlaybackSecondarySubtitlePositionDefault,
+    this.playbackSecondarySubtitleScale =
+        kPlaybackSecondarySubtitleScaleDefault,
     required this.onlineSubtitleSources,
     required this.assrtToken,
     required this.opensubtitlesEnabled,
@@ -245,6 +257,9 @@ class SettingsPlaybackSlice {
   final double playbackDefaultSpeed;
   final PlaybackSubtitlePreference playbackSubtitlePreference;
   final double playbackSubtitleScale;
+  final double playbackPrimarySubtitlePosition;
+  final double playbackSecondarySubtitlePosition;
+  final double playbackSecondarySubtitleScale;
   final List<OnlineSubtitleSource> onlineSubtitleSources;
   final String assrtToken;
   final bool opensubtitlesEnabled;
@@ -277,6 +292,12 @@ class SettingsPlaybackSlice {
             other.playbackDefaultSpeed == playbackDefaultSpeed &&
             other.playbackSubtitlePreference == playbackSubtitlePreference &&
             other.playbackSubtitleScale == playbackSubtitleScale &&
+            other.playbackPrimarySubtitlePosition ==
+                playbackPrimarySubtitlePosition &&
+            other.playbackSecondarySubtitlePosition ==
+                playbackSecondarySubtitlePosition &&
+            other.playbackSecondarySubtitleScale ==
+                playbackSecondarySubtitleScale &&
             listEquals(
               other.onlineSubtitleSources,
               onlineSubtitleSources,
@@ -314,6 +335,9 @@ class SettingsPlaybackSlice {
           playbackDefaultSpeed,
           playbackSubtitlePreference,
           playbackSubtitleScale,
+          playbackPrimarySubtitlePosition,
+          playbackSecondarySubtitlePosition,
+          playbackSecondarySubtitleScale,
         ),
         Object.hash(
           Object.hashAll(onlineSubtitleSources),

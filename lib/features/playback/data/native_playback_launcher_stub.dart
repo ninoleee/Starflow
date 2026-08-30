@@ -16,6 +16,10 @@ class UnsupportedNativePlaybackLauncher implements NativePlaybackLauncher {
     required PlaybackDecodeMode decodeMode,
     required NativeAudioOutputMode audioOutputMode,
     required double subtitleScale,
+    double primarySubtitlePosition = kPlaybackPrimarySubtitlePositionDefault,
+    double secondarySubtitlePosition =
+        kPlaybackSecondarySubtitlePositionDefault,
+    double secondarySubtitleScale = kPlaybackSecondarySubtitleScaleDefault,
     required bool backgroundPlaybackEnabled,
     required PlaybackSubtitlePreference subtitlePreference,
     required List<String> subtitlePreferredLanguages,

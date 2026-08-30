@@ -192,6 +192,9 @@ void main() {
       'playbackDefaultSpeed': 1.25,
       'playbackSubtitlePreference': 'off',
       'playbackSubtitleScale': 'large',
+      'playbackPrimarySubtitlePosition': 75,
+      'playbackSecondarySubtitlePosition': 90,
+      'playbackSecondarySubtitleScale': 70,
       'onlineSubtitleSources': ['assrt'],
       'assrtToken': 'assrt-token',
       'opensubtitlesEnabled': true,
@@ -227,6 +230,9 @@ void main() {
       PlaybackSubtitlePreference.off,
     );
     expect(settings.playbackSubtitleScale, 36.0);
+    expect(settings.playbackPrimarySubtitlePosition, 75.0);
+    expect(settings.playbackSecondarySubtitlePosition, 90.0);
+    expect(settings.playbackSecondarySubtitleScale, 70.0);
     expect(settings.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
     expect(settings.assrtToken, 'assrt-token');
     expect(settings.opensubtitlesEnabled, isTrue);
@@ -273,6 +279,9 @@ void main() {
     expect(settings.toJson()['playbackDefaultSpeed'], 1.25);
     expect(settings.toJson()['playbackSubtitlePreference'], 'off');
     expect(settings.toJson()['playbackSubtitleScale'], 36.0);
+    expect(settings.toJson()['playbackPrimarySubtitlePosition'], 75.0);
+    expect(settings.toJson()['playbackSecondarySubtitlePosition'], 90.0);
+    expect(settings.toJson()['playbackSecondarySubtitleScale'], 70.0);
     expect(settings.toJson()['onlineSubtitleSources'], ['assrt']);
     expect(settings.toJson()['assrtToken'], 'assrt-token');
     expect(settings.toJson()['opensubtitlesEnabled'], isTrue);
@@ -325,6 +334,18 @@ void main() {
       PlaybackSubtitlePreference.auto,
     );
     expect(defaults.playbackSubtitleScale, 32.0);
+    expect(
+      defaults.playbackPrimarySubtitlePosition,
+      kPlaybackPrimarySubtitlePositionDefault,
+    );
+    expect(
+      defaults.playbackSecondarySubtitlePosition,
+      kPlaybackSecondarySubtitlePositionDefault,
+    );
+    expect(
+      defaults.playbackSecondarySubtitleScale,
+      kPlaybackSecondarySubtitleScaleDefault,
+    );
     expect(defaults.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
     expect(defaults.assrtToken, isEmpty);
     expect(defaults.opensubtitlesEnabled, isFalse);
@@ -599,11 +620,22 @@ void main() {
       'playbackOpenTimeoutSeconds': 0,
       'playbackDefaultSpeed': 5.0,
       'playbackSubtitleScale': 100,
+      'playbackPrimarySubtitlePosition': 0,
+      'playbackSecondarySubtitlePosition': 200,
+      'playbackSecondarySubtitleScale': 500,
     });
 
     expect(settings.playbackOpenTimeoutSeconds, 1);
     expect(settings.playbackDefaultSpeed, 2.0);
     expect(settings.playbackSubtitleScale, kPlaybackSubtitleScaleMax);
+    expect(
+        settings.playbackPrimarySubtitlePosition, kPlaybackSubtitlePositionMin);
+    expect(settings.playbackSecondarySubtitlePosition,
+        kPlaybackSubtitlePositionMax);
+    expect(
+      settings.playbackSecondarySubtitleScale,
+      kPlaybackSecondarySubtitleScaleMax,
+    );
 
     final copied = settings.copyWith(
       playbackOpenTimeoutSeconds: 900,

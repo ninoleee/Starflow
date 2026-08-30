@@ -71,7 +71,7 @@ BUILD_DATE="$(date +%Y-%m-%d)"
 # release registrant for it without adding its test-only classpath.
 PUBSPEC_BUILD_BACKUP="$(mktemp)"
 cp -f pubspec.yaml "$PUBSPEC_BUILD_BACKUP"
-perl -0pi -e 's/\n  integration_test:\n    sdk: flutter\n//' pubspec.yaml
+perl -0pi -e 's/  integration_test:\n    sdk: flutter\n//' pubspec.yaml
 
 SETTINGS_JSON_PATH="${1:-}"
 

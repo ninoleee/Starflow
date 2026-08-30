@@ -67,7 +67,7 @@
 - 页面背景 glow、桌面横向翻页按钮和海报卡片排版都已收口到更轻的重绘边界；滚动和焦点切换时只刷新真正变化的局部区域
 - `AppSettingsPerformanceX` 现在提供统一的 `effective*` 性能派生策略；路由、导航壳、首页 Hero、详情页和播放器都会按同一套有效策略决定是否启用动画、磨砂、自动隐藏和轻量叠层
 - 播放启动链已经收口到 `PlaybackStartupCoordinator / PlaybackTargetResolver / PlaybackEngineRouter / PlaybackStartupExecutor`；进入播放器时也会更早切到“播放优先”模式，尽快压住首页 Hero 补数、详情自动补元数据和隐藏页图片加载
-- 播放页 presentation 已继续收口：`player_page.dart` 主要保留页面壳、状态字段和顶层装配；`widgets/player_page_platform_session.part.dart`、`player_page_startup_mpv.part.dart`、`player_page_runtime_actions.part.dart`、`player_page_controls.part.dart` 负责平台会话、启动/MPV、运行期动作和播放器控制编排；`player_mpv_controls_overlay.dart`、`player_playback_options_dialog.dart`、`player_playback_overlays.dart`、`player_playback_dialogs.dart`、`player_tv_playback_widgets.dart` 负责播放器 UI 子树
+- 播放页 presentation 已继续收口：`player_page.dart` 主要保留页面壳、状态字段和顶层装配；`widgets/player_page_platform_session.part.dart`、`player_page_startup_mpv.part.dart`、`player_page_runtime_actions.part.dart`、`player_page_controls.part.dart` 负责平台会话、启动/MPV、运行期动作和播放器控制编排；`player_playback_options_dialog.dart`、`player_playback_overlays.dart`、`player_playback_dialogs.dart`、`player_tv_playback_widgets.dart`、`player_network_speed_label.dart` 负责播放器 UI 子树。旧自定义 `PlayerMpvControlsOverlay` 已删除，非 TV 统一使用 media_kit Adaptive 控制层
 - `TV` 播放页的控制层状态已收口到单一 notifier，减少多层 `StreamBuilder` 套娃造成的重复 rebuild
 - `NasMediaIndexer` 已按 `refresh_flow / storage_access / indexing / grouping / refresh_support` 收口成多 `part` 文件；主文件已压到约 `1k` 行以内，便于后续继续推进 isolate 化、增量查询和 source/collection/enrichment 并发预算
 - `PlaybackMemoryRepository` 现在使用单调递增的 `updatedAt` 生成策略，避免 Windows 或高频保存场景下“最近播放”因同毫秒写入而出现不稳定排序
@@ -301,7 +301,7 @@
   - 内置 MPV 在 TV、手机和桌面控制层统一提供上一集、下一集和完整选集入口；第一集/最后一集的对应按钮禁用，电影或单集内容不显示剧集控件。选集列表只展示当前季元数据，确认目标后才解析该单集，解析成功前保留当前播放器，失败只提示且不改变当前索引；手动下一集保存真实进度，只有播放自然结束触发的自动下一集才把当前集记为完成
   - 灵动岛、锁屏、Android 通知栏及其他系统媒体便捷窗口在存在完整剧集队列时使用上一集/下一集替代 10 秒快退/快进；第一集和最后一集只开放实际可用的方向，普通影片仍保留快退/快进和进度拖动。播放器内切集成功后保持安静，不再显示“已切到”提示；解析中和解析失败提示继续保留
   - Android 原生播放日志每 `10` 秒记录一次位置、缓冲、首帧状态和视频尺寸，并单独记录位置跳变的前后时间与原因码，便于区分无画面、时间戳异常和普通缓冲
-  - Android 原生字幕默认使用白色中粗字、透明背景、黑色描边和 Canvas 渲染，并复用设置中的 `20–78号` 字幕大小；字号会换算为有上下限的屏幕高度比例，TV / 手机分别保留 `8% / 10%` 底部安全距离。字幕文件的颜色、位置等内嵌样式继续保留，但内嵌字号由应用统一控制；系统无障碍字幕已启用时自动改为完全跟随系统样式和字号
+  - Android 原生字幕默认使用白色中粗字、透明背景、黑色描边和 Canvas 渲染，并复用设置中的 `20–78号` 主字幕大小和主/副字幕位置；字号会换算为有上下限的屏幕高度比例，主位置默认 `80%`、副位置默认 `90%`。字幕文件的颜色等内嵌样式继续保留，但应用统一控制字号与垂直位置；系统无障碍字幕启用时仍优先跟随系统样式和字号
   - iOS 使用系统 `AVPlayerViewController` 在 App 内原生全屏播放
 - Emby 播放前会补齐真实播放地址和播放源
 - Quark 播放前会按需解析真实下载地址，并补齐请求头
@@ -363,9 +363,13 @@
   - 原生控制条和进度条
   - 本地续播记忆
   - 在线查找字幕
-  - Android：音轨/字幕选择、音频输出模式、加载外部字幕、外挂字幕偏移；音轨、字幕、“关闭字幕”和音频输出均在点选后立即生效并自动关闭菜单，不需要再点确定
-  - Android 原生播放设置弹窗一级只保留本剧跳过片头片尾、音轨、字幕和选择剧集；播放速度、音频输出、字幕大小、在线查找字幕、加载外部字幕和字幕偏移收进列表最下方的“更多”二级菜单
-  - 原生播放器内的字幕大小可按 `20–78号` 档位调整并立即生效；和其它原生内调整一样只对当次播放会话有效，不会回写到设置
+  - Android：音轨/字幕选择、音频输出模式、加载外部字幕、外挂字幕偏移；音轨、字幕、“关闭字幕”和音频输出均在点选后立即生效并自动关闭菜单，不需要再点确定。Exo 字幕名称与 MPV 使用同一套直观顺序，显示为“标题 · 语言 · 默认/强制”
+  - Exo 与非 Web 的内置 MPV 字幕页都提供可选的“特殊：双字幕模式”；普通模式仍单选一条字幕，特殊模式分两步选择上方中文和下方英文，只接受分离的文本字幕轨。默认主位置 `80%`、副位置 `90%`、副字幕大小 `75%`，三项可在设置 -> 字幕和播放器“更多”中分别调整；图片字幕和 MPV 临时外挂字幕仍走普通单字幕
+  - 播放控制层显示时会同步显示当前读取网速：Exo 位于右上角并使用 Media3 实时带宽采样，非 Web MPV 位于左上角并读取 libmpv `cache-speed`；控制层隐藏时标签一起隐藏
+  - Exo 控制层的第一阶段收起会按手机 / TV 实际底部边距把进度条下沉到屏幕底边，不再停在完整底栏原来的高度
+  - MPV“更多”同时收拢后台播放、双击快进/快退、左右滑动调进度、长按临时倍速、卡顿自动恢复和激进性能调优；字幕选择页只保留选择、偏移、外挂和在线搜索
+  - Android 原生播放设置弹窗一级只保留本剧跳过片头片尾、音轨、字幕和选择剧集；播放速度、音频输出、主字幕大小、主/副字幕位置、副字幕大小、在线查找字幕、加载外部字幕和字幕偏移收进列表最下方的“更多”二级菜单
+  - 原生播放器“更多”里的主字幕大小、主/副位置和副字幕大小会立即作用于当前会话；全局默认值在设置 -> 字幕中持久化，原生播放中的临时覆盖不会回写设置
   - iOS：使用系统原生播放控制，当前不支持字幕偏移
 - 播放器页与独立字幕搜索页现在复用同一条手动触发的应用内字幕搜索/下载链路：
   - 在线字幕来源由设置统一控制；当前支持 `ASSRT / OpenSubtitles / SubDL`
@@ -486,7 +490,8 @@
     - 默认倍速
   - 字幕
     - 默认字幕策略
-    - 字幕大小
+    - 主字幕大小
+    - 主字幕位置 / 副字幕位置 / 副字幕大小
     - 在线字幕来源（统一配置 `ASSRT / OpenSubtitles / SubDL`）
     - 字幕源专属配置（`ASSRT Token / OpenSubtitles 账号密码 / SubDL API Key`）
     - 优先语言（`简体中文 / 繁体中文 / 英语 / 日语 / 韩语`，可多选；不选时按字幕结果和系统语言自动处理）
@@ -497,6 +502,7 @@
     - 长按临时 2 倍速
     - 卡顿自动恢复
     - 激进性能调优
+  - 播放中的 MPV“更多”会集中显示后台播放、上述 MPV 开关和主/副字幕布局；字幕子页只保留轨道选择、偏移、外挂字幕和在线搜索
 - 首页模块设置
   - `Hero` 当前主要提供来源、`normal / borderless` 展示方式、Logo 标题和背景图这些外显配置
   - 实际横版 / 竖版素材会按屏幕方向和可用图片自动选择；静态与精简效果由“简化首页 Hero”统一控制，背景图仍可单独设置
@@ -867,7 +873,7 @@ flutter test
 - `设置 -> 内容与来源 -> 搜索服务管理`
 - `设置 -> 内容与来源 -> 网络存储`
 - `设置 -> 元数据 -> 元数据匹配`
-- `设置 -> 播放 -> 播放器与字幕 / MPV 调优`
+- `设置 -> 播放 -> 播放 / 字幕 / MPV`
 - `设置 -> 界面 -> 首页设置 / 界面效果 / 菜单栏按钮`
 - `设置 -> 性能与后台 -> 任务调度`
 - `设置 -> 数据与维护 -> 本地存储 / 日志 / 配置管理`

@@ -266,6 +266,15 @@ const double kPlaybackSubtitleScaleMin = 20.0;
 const double kPlaybackSubtitleScaleMax = 78.0;
 const double kPlaybackSubtitleScaleStep = 1.0;
 const double kPlaybackSubtitleScaleDefault = 32.0;
+const double kPlaybackSubtitlePositionMin = 50.0;
+const double kPlaybackSubtitlePositionMax = 95.0;
+const double kPlaybackSubtitlePositionStep = 5.0;
+const double kPlaybackPrimarySubtitlePositionDefault = 80.0;
+const double kPlaybackSecondarySubtitlePositionDefault = 90.0;
+const double kPlaybackSecondarySubtitleScaleMin = 50.0;
+const double kPlaybackSecondarySubtitleScaleMax = 120.0;
+const double kPlaybackSecondarySubtitleScaleStep = 5.0;
+const double kPlaybackSecondarySubtitleScaleDefault = 75.0;
 const int kSubtitleSearchMaxValidatedCandidatesMin = 1;
 const int kSubtitleSearchMaxValidatedCandidatesMax = 20;
 const int kSubtitleSearchMaxValidatedCandidatesDefault = 5;
@@ -401,6 +410,55 @@ double parsePlaybackSubtitleScale(Object? raw) {
     };
   }
   return kPlaybackSubtitleScaleDefault;
+}
+
+double clampPlaybackSubtitlePosition(double value) {
+  final clamped = value.clamp(
+    kPlaybackSubtitlePositionMin,
+    kPlaybackSubtitlePositionMax,
+  );
+  final steps =
+      ((clamped - kPlaybackSubtitlePositionMin) / kPlaybackSubtitlePositionStep)
+          .round();
+  return kPlaybackSubtitlePositionMin + (steps * kPlaybackSubtitlePositionStep);
+}
+
+double stepPlaybackSubtitlePosition(double current, int delta) {
+  return clampPlaybackSubtitlePosition(
+    current + (delta * kPlaybackSubtitlePositionStep),
+  );
+}
+
+double parsePlaybackSubtitlePosition(Object? raw, double fallback) {
+  return clampPlaybackSubtitlePosition(
+    raw is num ? raw.toDouble() : fallback,
+  );
+}
+
+String formatPlaybackSubtitlePositionLabel(double value) {
+  return '${clampPlaybackSubtitlePosition(value).toStringAsFixed(0)}%';
+}
+
+double clampPlaybackSecondarySubtitleScale(double value) {
+  final clamped = value.clamp(
+    kPlaybackSecondarySubtitleScaleMin,
+    kPlaybackSecondarySubtitleScaleMax,
+  );
+  final steps = ((clamped - kPlaybackSecondarySubtitleScaleMin) /
+          kPlaybackSecondarySubtitleScaleStep)
+      .round();
+  return kPlaybackSecondarySubtitleScaleMin +
+      (steps * kPlaybackSecondarySubtitleScaleStep);
+}
+
+double stepPlaybackSecondarySubtitleScale(double current, int delta) {
+  return clampPlaybackSecondarySubtitleScale(
+    current + (delta * kPlaybackSecondarySubtitleScaleStep),
+  );
+}
+
+String formatPlaybackSecondarySubtitleScaleLabel(double value) {
+  return '${clampPlaybackSecondarySubtitleScale(value).toStringAsFixed(0)}%';
 }
 
 int clampSubtitleSearchMaxValidatedCandidates(int value) {
@@ -905,6 +963,12 @@ class AppSettings {
     this.playbackDefaultSpeed = 1.0,
     this.playbackSubtitlePreference = PlaybackSubtitlePreference.auto,
     this.playbackSubtitleScale = kPlaybackSubtitleScaleDefault,
+    this.playbackPrimarySubtitlePosition =
+        kPlaybackPrimarySubtitlePositionDefault,
+    this.playbackSecondarySubtitlePosition =
+        kPlaybackSecondarySubtitlePositionDefault,
+    this.playbackSecondarySubtitleScale =
+        kPlaybackSecondarySubtitleScaleDefault,
     this.onlineSubtitleSources = const [OnlineSubtitleSource.assrt],
     this.assrtToken = '',
     this.opensubtitlesEnabled = false,
@@ -972,6 +1036,9 @@ class AppSettings {
   final double playbackDefaultSpeed;
   final PlaybackSubtitlePreference playbackSubtitlePreference;
   final double playbackSubtitleScale;
+  final double playbackPrimarySubtitlePosition;
+  final double playbackSecondarySubtitlePosition;
+  final double playbackSecondarySubtitleScale;
   final List<OnlineSubtitleSource> onlineSubtitleSources;
   final String assrtToken;
   final bool opensubtitlesEnabled;
@@ -1037,6 +1104,9 @@ class AppSettings {
     double? playbackDefaultSpeed,
     PlaybackSubtitlePreference? playbackSubtitlePreference,
     double? playbackSubtitleScale,
+    double? playbackPrimarySubtitlePosition,
+    double? playbackSecondarySubtitlePosition,
+    double? playbackSecondarySubtitleScale,
     List<OnlineSubtitleSource>? onlineSubtitleSources,
     String? assrtToken,
     bool? opensubtitlesEnabled,
@@ -1154,6 +1224,20 @@ class AppSettings {
       playbackSubtitleScale: playbackSubtitleScale == null
           ? this.playbackSubtitleScale
           : clampPlaybackSubtitleScale(playbackSubtitleScale),
+      playbackPrimarySubtitlePosition: playbackPrimarySubtitlePosition == null
+          ? this.playbackPrimarySubtitlePosition
+          : clampPlaybackSubtitlePosition(playbackPrimarySubtitlePosition),
+      playbackSecondarySubtitlePosition:
+          playbackSecondarySubtitlePosition == null
+              ? this.playbackSecondarySubtitlePosition
+              : clampPlaybackSubtitlePosition(
+                  playbackSecondarySubtitlePosition,
+                ),
+      playbackSecondarySubtitleScale: playbackSecondarySubtitleScale == null
+          ? this.playbackSecondarySubtitleScale
+          : clampPlaybackSecondarySubtitleScale(
+              playbackSecondarySubtitleScale,
+            ),
       onlineSubtitleSources:
           onlineSubtitleSources ?? this.onlineSubtitleSources,
       assrtToken: assrtToken ?? this.assrtToken,
@@ -1251,6 +1335,9 @@ class AppSettings {
       'playbackDefaultSpeed': playbackDefaultSpeed,
       'playbackSubtitlePreference': playbackSubtitlePreference.name,
       'playbackSubtitleScale': playbackSubtitleScale,
+      'playbackPrimarySubtitlePosition': playbackPrimarySubtitlePosition,
+      'playbackSecondarySubtitlePosition': playbackSecondarySubtitlePosition,
+      'playbackSecondarySubtitleScale': playbackSecondarySubtitleScale,
       'onlineSubtitleSources':
           onlineSubtitleSources.map((item) => item.name).toList(),
       'assrtToken': assrtToken,
@@ -1409,6 +1496,18 @@ class AppSettings {
       ),
       playbackSubtitleScale: parsePlaybackSubtitleScale(
         json['playbackSubtitleScale'],
+      ),
+      playbackPrimarySubtitlePosition: parsePlaybackSubtitlePosition(
+        json['playbackPrimarySubtitlePosition'],
+        kPlaybackPrimarySubtitlePositionDefault,
+      ),
+      playbackSecondarySubtitlePosition: parsePlaybackSubtitlePosition(
+        json['playbackSecondarySubtitlePosition'],
+        kPlaybackSecondarySubtitlePositionDefault,
+      ),
+      playbackSecondarySubtitleScale: clampPlaybackSecondarySubtitleScale(
+        (json['playbackSecondarySubtitleScale'] as num?)?.toDouble() ??
+            kPlaybackSecondarySubtitleScaleDefault,
       ),
       onlineSubtitleSources: _parseOnlineSubtitleSources(
         json['onlineSubtitleSources'],

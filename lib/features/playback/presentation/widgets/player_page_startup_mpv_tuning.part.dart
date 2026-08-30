@@ -29,6 +29,42 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
     }
   }
 
+  Future<void> _setMpvSubtitleProperty(
+    Player player,
+    String name,
+    String value,
+  ) async {
+    if (kIsWeb) {
+      throw UnsupportedError('Web MPV 不支持原生字幕属性');
+    }
+    final native = player.platform;
+    if (native == null) {
+      throw UnsupportedError('当前 MPV 后端不可用');
+    }
+    await (native as dynamic).setProperty(name, value);
+  }
+
+  Future<void> _applyMpvSubtitleLayout(Player player) async {
+    await _setMpvOption(
+      player,
+      'sub-pos',
+      _sessionPrimarySubtitlePosition.toStringAsFixed(0),
+    );
+    await _setMpvOption(
+      player,
+      'secondary-sub-pos',
+      _sessionSecondarySubtitlePosition.toStringAsFixed(0),
+    );
+    await _setMpvOption(
+      player,
+      'secondary-sub-scale',
+      (_sessionSecondarySubtitleScale / 100).toStringAsFixed(2),
+    );
+    await _setMpvOption(player, 'secondary-sub-visibility', 'yes');
+    await _setMpvOption(player, 'sub-ass-override', 'force');
+    await _setMpvOption(player, 'secondary-sub-ass-override', 'force');
+  }
+
   Future<void> _applyMpvVisualQualityPreset(
     Player player,
     PlaybackMpvQualityPreset preset,
@@ -192,6 +228,7 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
       backBufferBytes.toString(),
     );
     await _setMpvOption(player, 'audio-display', 'no');
+    await _applyMpvSubtitleLayout(player);
     await _applyMpvVisualQualityPreset(player, qualityPreset);
 
     if (_isTelevisionPlaybackDevice) {

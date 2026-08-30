@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_log_api.dart';
 import 'package:starflow/core/logging/app_logger.dart';
+import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
@@ -13,7 +14,6 @@ import 'package:starflow/features/metadata/application/metadata_prefetch_concurr
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/home/application/home_feed_load_scheduler.dart';
-import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -227,16 +227,12 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(playbackEngine: playbackEngine));
   }
 
-  Future<void> setPlaybackSubtitleScale(
-    double subtitleScale,
-  ) async {
-    final current = state.value ?? await _repository.load();
-    await _persist(current.copyWith(playbackSubtitleScale: subtitleScale));
-  }
-
   Future<void> savePlaybackSubtitlePreferences({
     required PlaybackSubtitlePreference subtitlePreference,
     required double subtitleScale,
+    double? primarySubtitlePosition,
+    double? secondarySubtitlePosition,
+    double? secondarySubtitleScale,
     required List<OnlineSubtitleSource> onlineSubtitleSources,
     required String assrtToken,
     required bool opensubtitlesEnabled,
@@ -252,6 +248,9 @@ class SettingsController extends AsyncNotifier<AppSettings> {
       current.copyWith(
         playbackSubtitlePreference: subtitlePreference,
         playbackSubtitleScale: subtitleScale,
+        playbackPrimarySubtitlePosition: primarySubtitlePosition,
+        playbackSecondarySubtitlePosition: secondarySubtitlePosition,
+        playbackSecondarySubtitleScale: secondarySubtitleScale,
         onlineSubtitleSources:
             onlineSubtitleSources.toSet().toList(growable: false),
         assrtToken: assrtToken.trim(),
@@ -315,6 +314,35 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         playbackMpvLongPressSpeedBoostEnabled: longPressSpeedBoostEnabled,
         playbackMpvStallAutoRecoveryEnabled: stallAutoRecoveryEnabled,
         performanceAggressivePlaybackTuningEnabled: aggressiveTuningEnabled,
+      ),
+    );
+  }
+
+  Future<void> savePlaybackRuntimePreferences({
+    required bool backgroundPlaybackEnabled,
+    required bool doubleTapToSeekEnabled,
+    required bool swipeToSeekEnabled,
+    required bool longPressSpeedBoostEnabled,
+    required bool stallAutoRecoveryEnabled,
+    required bool aggressiveTuningEnabled,
+    required double subtitleScale,
+    required double primarySubtitlePosition,
+    required double secondarySubtitlePosition,
+    required double secondarySubtitleScale,
+  }) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(
+        playbackBackgroundPlaybackEnabled: backgroundPlaybackEnabled,
+        playbackMpvDoubleTapToSeekEnabled: doubleTapToSeekEnabled,
+        playbackMpvSwipeToSeekEnabled: swipeToSeekEnabled,
+        playbackMpvLongPressSpeedBoostEnabled: longPressSpeedBoostEnabled,
+        playbackMpvStallAutoRecoveryEnabled: stallAutoRecoveryEnabled,
+        performanceAggressivePlaybackTuningEnabled: aggressiveTuningEnabled,
+        playbackSubtitleScale: subtitleScale,
+        playbackPrimarySubtitlePosition: primarySubtitlePosition,
+        playbackSecondarySubtitlePosition: secondarySubtitlePosition,
+        playbackSecondarySubtitleScale: secondarySubtitleScale,
       ),
     );
   }

@@ -1,13 +1,71 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_formatters.dart';
-import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+
+class PlaybackMpvRuntimeSettings {
+  const PlaybackMpvRuntimeSettings({
+    required this.backgroundPlaybackEnabled,
+    required this.doubleTapToSeekEnabled,
+    required this.swipeToSeekEnabled,
+    required this.longPressSpeedBoostEnabled,
+    required this.stallAutoRecoveryEnabled,
+    required this.aggressiveTuningEnabled,
+    required this.subtitleScale,
+    required this.primarySubtitlePosition,
+    required this.secondarySubtitlePosition,
+    required this.secondarySubtitleScale,
+  });
+
+  final bool backgroundPlaybackEnabled;
+  final bool doubleTapToSeekEnabled;
+  final bool swipeToSeekEnabled;
+  final bool longPressSpeedBoostEnabled;
+  final bool stallAutoRecoveryEnabled;
+  final bool aggressiveTuningEnabled;
+  final double subtitleScale;
+  final double primarySubtitlePosition;
+  final double secondarySubtitlePosition;
+  final double secondarySubtitleScale;
+
+  PlaybackMpvRuntimeSettings copyWith({
+    bool? backgroundPlaybackEnabled,
+    bool? doubleTapToSeekEnabled,
+    bool? swipeToSeekEnabled,
+    bool? longPressSpeedBoostEnabled,
+    bool? stallAutoRecoveryEnabled,
+    bool? aggressiveTuningEnabled,
+    double? subtitleScale,
+    double? primarySubtitlePosition,
+    double? secondarySubtitlePosition,
+    double? secondarySubtitleScale,
+  }) {
+    return PlaybackMpvRuntimeSettings(
+      backgroundPlaybackEnabled:
+          backgroundPlaybackEnabled ?? this.backgroundPlaybackEnabled,
+      doubleTapToSeekEnabled:
+          doubleTapToSeekEnabled ?? this.doubleTapToSeekEnabled,
+      swipeToSeekEnabled: swipeToSeekEnabled ?? this.swipeToSeekEnabled,
+      longPressSpeedBoostEnabled:
+          longPressSpeedBoostEnabled ?? this.longPressSpeedBoostEnabled,
+      stallAutoRecoveryEnabled:
+          stallAutoRecoveryEnabled ?? this.stallAutoRecoveryEnabled,
+      aggressiveTuningEnabled:
+          aggressiveTuningEnabled ?? this.aggressiveTuningEnabled,
+      subtitleScale: subtitleScale ?? this.subtitleScale,
+      primarySubtitlePosition:
+          primarySubtitlePosition ?? this.primarySubtitlePosition,
+      secondarySubtitlePosition:
+          secondarySubtitlePosition ?? this.secondarySubtitlePosition,
+      secondarySubtitleScale:
+          secondarySubtitleScale ?? this.secondarySubtitleScale,
+    );
+  }
+}
 
 class PlaybackOptionsDialog extends StatelessWidget {
   const PlaybackOptionsDialog({
@@ -23,6 +81,8 @@ class PlaybackOptionsDialog extends StatelessWidget {
     required this.onLoadExternalSubtitle,
     required this.onSearchSubtitlesOnline,
     required this.onConfigureSeriesSkip,
+    required this.runtimeSettings,
+    required this.onApplyRuntimeSettings,
   });
 
   final Player player;
@@ -42,6 +102,9 @@ class PlaybackOptionsDialog extends StatelessWidget {
   final Future<void> Function() onLoadExternalSubtitle;
   final Future<void> Function() onSearchSubtitlesOnline;
   final Future<void> Function() onConfigureSeriesSkip;
+  final PlaybackMpvRuntimeSettings runtimeSettings;
+  final Future<void> Function(PlaybackMpvRuntimeSettings settings)
+      onApplyRuntimeSettings;
 
   Future<void> _openSubtitleOptionsDialog(
     BuildContext context,
@@ -83,6 +146,8 @@ class PlaybackOptionsDialog extends StatelessWidget {
             onOpenSubtitleOptionsDialog: _openSubtitleOptionsDialog,
             onSelectAudio: onSelectAudio,
             onConfigureSeriesSkip: onConfigureSeriesSkip,
+            runtimeSettings: runtimeSettings,
+            onApplyRuntimeSettings: onApplyRuntimeSettings,
           ),
         ),
         actions: [
@@ -106,6 +171,8 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
     required this.onOpenSubtitleOptionsDialog,
     required this.onSelectAudio,
     required this.onConfigureSeriesSkip,
+    required this.runtimeSettings,
+    required this.onApplyRuntimeSettings,
   });
 
   final Player player;
@@ -123,6 +190,9 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
     AudioTrack current,
   ) onSelectAudio;
   final Future<void> Function() onConfigureSeriesSkip;
+  final PlaybackMpvRuntimeSettings runtimeSettings;
+  final Future<void> Function(PlaybackMpvRuntimeSettings settings)
+      onApplyRuntimeSettings;
 
   @override
   State<_PlaybackOptionsDialogBody> createState() =>
@@ -144,11 +214,13 @@ class _PlaybackOptionsDialogBodyState
   StreamSubscription<PlaylistMode>? _playlistModeSubscription;
   StreamSubscription<double>? _rateSubscription;
   late _PlaybackDialogViewState _viewState;
+  late PlaybackMpvRuntimeSettings _runtimeSettings;
 
   @override
   void initState() {
     super.initState();
     _bindPlayer(widget.player);
+    _runtimeSettings = widget.runtimeSettings;
   }
 
   @override
@@ -216,6 +288,15 @@ class _PlaybackOptionsDialogBodyState
   }
 
   Future<void> _setRate(double value) => widget.player.setRate(value);
+
+  Future<void> _updateRuntimeSettings(
+    PlaybackMpvRuntimeSettings next,
+  ) async {
+    setState(() {
+      _runtimeSettings = next;
+    });
+    await widget.onApplyRuntimeSettings(next);
+  }
 
   Future<void> _selectPlaybackSpeed() async {
     final selection = await showDialog<double>(
@@ -350,13 +431,203 @@ class _PlaybackOptionsDialogBodyState
           value: widget.seriesSkipLabel,
           onPressed: widget.onConfigureSeriesSkip,
         ),
+        const SizedBox(height: 12),
+        _SectionLabel(
+          title: '字幕布局',
+          icon: Icons.subtitles_rounded,
+        ),
+        const SizedBox(height: 8),
+        _PlaybackStepperTile(
+          isTelevision: widget.isTelevision,
+          title: '主字幕大小',
+          value: formatPlaybackSubtitleScaleLabel(
+            _runtimeSettings.subtitleScale,
+          ),
+          onDecrease: _runtimeSettings.subtitleScale > kPlaybackSubtitleScaleMin
+              ? () => _updateRuntimeSettings(
+                    _runtimeSettings.copyWith(
+                      subtitleScale: stepPlaybackSubtitleScale(
+                        _runtimeSettings.subtitleScale,
+                        -1,
+                      ),
+                    ),
+                  )
+              : null,
+          onIncrease: _runtimeSettings.subtitleScale < kPlaybackSubtitleScaleMax
+              ? () => _updateRuntimeSettings(
+                    _runtimeSettings.copyWith(
+                      subtitleScale: stepPlaybackSubtitleScale(
+                        _runtimeSettings.subtitleScale,
+                        1,
+                      ),
+                    ),
+                  )
+              : null,
+        ),
+        const SizedBox(height: 8),
+        _PlaybackStepperTile(
+          isTelevision: widget.isTelevision,
+          title: '主字幕位置',
+          value: formatPlaybackSubtitlePositionLabel(
+            _runtimeSettings.primarySubtitlePosition,
+          ),
+          onDecrease: _runtimeSettings.primarySubtitlePosition >
+                  kPlaybackSubtitlePositionMin
+              ? () => _updateRuntimeSettings(
+                    _runtimeSettings.copyWith(
+                      primarySubtitlePosition: stepPlaybackSubtitlePosition(
+                        _runtimeSettings.primarySubtitlePosition,
+                        -1,
+                      ),
+                    ),
+                  )
+              : null,
+          onIncrease: _runtimeSettings.primarySubtitlePosition <
+                  kPlaybackSubtitlePositionMax
+              ? () => _updateRuntimeSettings(
+                    _runtimeSettings.copyWith(
+                      primarySubtitlePosition: stepPlaybackSubtitlePosition(
+                        _runtimeSettings.primarySubtitlePosition,
+                        1,
+                      ),
+                    ),
+                  )
+              : null,
+        ),
+        const SizedBox(height: 8),
+        _PlaybackStepperTile(
+          isTelevision: widget.isTelevision,
+          title: '副字幕位置',
+          value: formatPlaybackSubtitlePositionLabel(
+            _runtimeSettings.secondarySubtitlePosition,
+          ),
+          onDecrease: _runtimeSettings.secondarySubtitlePosition >
+                  kPlaybackSubtitlePositionMin
+              ? () => _updateRuntimeSettings(
+                    _runtimeSettings.copyWith(
+                      secondarySubtitlePosition: stepPlaybackSubtitlePosition(
+                        _runtimeSettings.secondarySubtitlePosition,
+                        -1,
+                      ),
+                    ),
+                  )
+              : null,
+          onIncrease: _runtimeSettings.secondarySubtitlePosition <
+                  kPlaybackSubtitlePositionMax
+              ? () => _updateRuntimeSettings(
+                    _runtimeSettings.copyWith(
+                      secondarySubtitlePosition: stepPlaybackSubtitlePosition(
+                        _runtimeSettings.secondarySubtitlePosition,
+                        1,
+                      ),
+                    ),
+                  )
+              : null,
+        ),
+        const SizedBox(height: 8),
+        _PlaybackStepperTile(
+          isTelevision: widget.isTelevision,
+          title: '副字幕大小',
+          value: formatPlaybackSecondarySubtitleScaleLabel(
+            _runtimeSettings.secondarySubtitleScale,
+          ),
+          onDecrease: _runtimeSettings.secondarySubtitleScale >
+                  kPlaybackSecondarySubtitleScaleMin
+              ? () => _updateRuntimeSettings(
+                    _runtimeSettings.copyWith(
+                      secondarySubtitleScale:
+                          stepPlaybackSecondarySubtitleScale(
+                        _runtimeSettings.secondarySubtitleScale,
+                        -1,
+                      ),
+                    ),
+                  )
+              : null,
+          onIncrease: _runtimeSettings.secondarySubtitleScale <
+                  kPlaybackSecondarySubtitleScaleMax
+              ? () => _updateRuntimeSettings(
+                    _runtimeSettings.copyWith(
+                      secondarySubtitleScale:
+                          stepPlaybackSecondarySubtitleScale(
+                        _runtimeSettings.secondarySubtitleScale,
+                        1,
+                      ),
+                    ),
+                  )
+              : null,
+        ),
+        const SizedBox(height: 12),
+        _SectionLabel(
+          title: 'MPV',
+          icon: Icons.memory_rounded,
+        ),
+        const SizedBox(height: 8),
+        _PlaybackToggleTile(
+          isTelevision: widget.isTelevision,
+          title: '后台播放',
+          subtitle: widget.isTelevision ? 'TV 端固定禁用' : '切换应用后继续播放',
+          value: !widget.isTelevision &&
+              _runtimeSettings.backgroundPlaybackEnabled,
+          onChanged: widget.isTelevision
+              ? null
+              : (value) => _updateRuntimeSettings(
+                    _runtimeSettings.copyWith(
+                      backgroundPlaybackEnabled: value,
+                    ),
+                  ),
+        ),
+        const SizedBox(height: 8),
+        _PlaybackToggleTile(
+          isTelevision: widget.isTelevision,
+          title: '双击快进/快退',
+          value: _runtimeSettings.doubleTapToSeekEnabled,
+          onChanged: (value) => _updateRuntimeSettings(
+            _runtimeSettings.copyWith(doubleTapToSeekEnabled: value),
+          ),
+        ),
+        const SizedBox(height: 8),
+        _PlaybackToggleTile(
+          isTelevision: widget.isTelevision,
+          title: '左右滑动调进度',
+          value: _runtimeSettings.swipeToSeekEnabled,
+          onChanged: (value) => _updateRuntimeSettings(
+            _runtimeSettings.copyWith(swipeToSeekEnabled: value),
+          ),
+        ),
+        const SizedBox(height: 8),
+        _PlaybackToggleTile(
+          isTelevision: widget.isTelevision,
+          title: '长按临时 2 倍速',
+          value: _runtimeSettings.longPressSpeedBoostEnabled,
+          onChanged: (value) => _updateRuntimeSettings(
+            _runtimeSettings.copyWith(longPressSpeedBoostEnabled: value),
+          ),
+        ),
+        const SizedBox(height: 8),
+        _PlaybackToggleTile(
+          isTelevision: widget.isTelevision,
+          title: '卡顿自动恢复',
+          value: _runtimeSettings.stallAutoRecoveryEnabled,
+          onChanged: (value) => _updateRuntimeSettings(
+            _runtimeSettings.copyWith(stallAutoRecoveryEnabled: value),
+          ),
+        ),
+        const SizedBox(height: 8),
+        _PlaybackToggleTile(
+          isTelevision: widget.isTelevision,
+          title: '激进性能调优',
+          value: _runtimeSettings.aggressiveTuningEnabled,
+          onChanged: (value) => _updateRuntimeSettings(
+            _runtimeSettings.copyWith(aggressiveTuningEnabled: value),
+          ),
+        ),
       ],
     );
     return body;
   }
 }
 
-class _PlaybackSubtitleOptionsDialog extends ConsumerWidget {
+class _PlaybackSubtitleOptionsDialog extends StatelessWidget {
   const _PlaybackSubtitleOptionsDialog({
     required this.isTelevision,
     required this.currentSubtitleLabel,
@@ -376,21 +647,7 @@ class _PlaybackSubtitleOptionsDialog extends ConsumerWidget {
   final Future<void> Function() onSearchSubtitlesOnline;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final subtitleScale = ref.watch(
-      appSettingsProvider.select(
-        (settings) => settings.playbackSubtitleScale,
-      ),
-    );
-
-    Future<void> shiftSubtitleScale(int delta) async {
-      await ref
-          .read(settingsControllerProvider.notifier)
-          .setPlaybackSubtitleScale(
-            stepPlaybackSubtitleScale(subtitleScale, delta),
-          );
-    }
-
+  Widget build(BuildContext context) {
     return wrapTelevisionDialogFieldTraversal(
       enabled: isTelevision,
       child: AlertDialog(
@@ -427,18 +684,6 @@ class _PlaybackSubtitleOptionsDialog extends ConsumerWidget {
                 title: '在线查找字幕',
                 value: '在线字幕源',
                 onPressed: onSearchSubtitlesOnline,
-              ),
-              const SizedBox(height: 10),
-              _PlaybackStepperTile(
-                isTelevision: isTelevision,
-                title: '字幕大小',
-                value: formatPlaybackSubtitleScaleLabel(subtitleScale),
-                onDecrease: subtitleScale > kPlaybackSubtitleScaleMin
-                    ? () => shiftSubtitleScale(-1)
-                    : null,
-                onIncrease: subtitleScale < kPlaybackSubtitleScaleMax
-                    ? () => shiftSubtitleScale(1)
-                    : null,
               ),
             ],
           ),
@@ -532,6 +777,52 @@ class _PlaybackReadOnlyFocusRegion extends StatelessWidget {
         borderRadius: const BorderRadius.all(Radius.circular(12)),
         visualStyle: TvFocusVisualStyle.subtle,
         child: content,
+      ),
+    );
+  }
+}
+
+class _PlaybackToggleTile extends StatelessWidget {
+  const _PlaybackToggleTile({
+    required this.isTelevision,
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.subtitle = '',
+  });
+
+  final bool isTelevision;
+  final String title;
+  final String subtitle;
+  final bool value;
+  final Future<void> Function(bool value)? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final tile = SwitchListTile.adaptive(
+      title: Text(title),
+      subtitle: subtitle.isEmpty ? null : Text(subtitle),
+      value: value,
+      onChanged: onChanged == null
+          ? null
+          : (next) {
+              unawaited(onChanged!(next));
+            },
+    );
+    if (!isTelevision) {
+      return Material(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        child: tile,
+      );
+    }
+    return TvFocusableAction(
+      onPressed: onChanged == null ? () {} : () => onChanged!(!value),
+      borderRadius: const BorderRadius.all(Radius.circular(12)),
+      child: Material(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        child: IgnorePointer(child: tile),
       ),
     );
   }
