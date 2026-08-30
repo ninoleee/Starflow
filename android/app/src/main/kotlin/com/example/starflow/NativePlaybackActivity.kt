@@ -3282,12 +3282,7 @@ class NativePlaybackActivity : Activity() {
             },
         )
         val focusableControlIds = if (isTelevisionDevice) {
-            intArrayOf(
-                Media3UiR.id.exo_play_pause,
-                Media3UiR.id.exo_subtitle,
-                R.id.native_audio_track_button,
-                R.id.native_playback_settings,
-            )
+            NativePlayerTvFocusPolicy.focusableControlIds
         } else {
             intArrayOf(
                 R.id.native_back,
@@ -3313,43 +3308,22 @@ class NativePlaybackActivity : Activity() {
                 ),
             )
         }
-        val settingsControlIds = if (isTelevisionDevice) {
-            intArrayOf(
-                Media3UiR.id.exo_subtitle,
-                R.id.native_audio_track_button,
-                R.id.native_playback_settings,
-            )
-        } else {
-            intArrayOf(
+        if (!isTelevisionDevice) {
+            val settingsControlIds = intArrayOf(
                 Media3UiR.id.exo_subtitle,
                 R.id.native_online_subtitle_search,
                 R.id.native_external_subtitle,
                 R.id.native_subtitle_delay,
                 R.id.native_playback_settings,
             )
+            configureHorizontalFocusChain(settingsControlIds)
         }
-        configureHorizontalFocusChain(
-            settingsControlIds,
-        )
         if (!isTelevisionDevice) {
             configureHorizontalFocusChain(intArrayOf(R.id.native_back))
         }
         if (isTelevisionDevice) {
-            configureVerticalFocusLink(
-                Media3UiR.id.exo_play_pause,
-                downId = R.id.native_audio_track_button,
-            )
-            configureVerticalFocusLink(
-                Media3UiR.id.exo_subtitle,
-                upId = Media3UiR.id.exo_play_pause,
-            )
-            configureVerticalFocusLink(
-                R.id.native_audio_track_button,
-                upId = Media3UiR.id.exo_play_pause,
-            )
-            configureVerticalFocusLink(
-                R.id.native_playback_settings,
-                upId = Media3UiR.id.exo_play_pause,
+            configureDisabledFocusability(
+                NativePlayerTvFocusPolicy.removedBottomRightControlIds,
             )
             playerView.requestFocus()
         }
@@ -3421,6 +3395,19 @@ class NativePlaybackActivity : Activity() {
             findViewById<View?>(id)?.apply {
                 isFocusable = true
                 isFocusableInTouchMode = true
+            }
+        }
+    }
+
+    private fun configureDisabledFocusability(ids: IntArray) {
+        ids.forEach { id ->
+            findViewById<View?>(id)?.apply {
+                isFocusable = false
+                isFocusableInTouchMode = false
+                nextFocusLeftId = View.NO_ID
+                nextFocusRightId = View.NO_ID
+                nextFocusUpId = View.NO_ID
+                nextFocusDownId = View.NO_ID
             }
         }
     }
@@ -3593,11 +3580,7 @@ class NativePlaybackActivity : Activity() {
             ControllerFocusTarget.PLAYER -> playerView.requestFocus()
             ControllerFocusTarget.PRIMARY -> requestFocusForAny(
                 if (isTelevisionDevice) {
-                    intArrayOf(
-                        Media3UiR.id.exo_play_pause,
-                        R.id.native_playback_settings,
-                        Media3UiR.id.exo_subtitle,
-                    )
+                    NativePlayerTvFocusPolicy.primaryFocusOrder
                 } else {
                     intArrayOf(
                         Media3UiR.id.exo_play_pause,
@@ -3610,12 +3593,7 @@ class NativePlaybackActivity : Activity() {
 
             ControllerFocusTarget.SETTINGS -> requestFocusForAny(
                 if (isTelevisionDevice) {
-                    intArrayOf(
-                        R.id.native_playback_settings,
-                        R.id.native_audio_track_button,
-                        Media3UiR.id.exo_subtitle,
-                        Media3UiR.id.exo_play_pause,
-                    )
+                    NativePlayerTvFocusPolicy.primaryFocusOrder
                 } else {
                     intArrayOf(
                         R.id.native_playback_settings,
@@ -3629,12 +3607,7 @@ class NativePlaybackActivity : Activity() {
 
             ControllerFocusTarget.AUDIO -> requestFocusForAny(
                 if (isTelevisionDevice) {
-                    intArrayOf(
-                        R.id.native_audio_track_button,
-                        R.id.native_playback_settings,
-                        Media3UiR.id.exo_subtitle,
-                        Media3UiR.id.exo_play_pause,
-                    )
+                    NativePlayerTvFocusPolicy.primaryFocusOrder
                 } else {
                     intArrayOf(
                         R.id.native_playback_settings,
@@ -3646,12 +3619,7 @@ class NativePlaybackActivity : Activity() {
 
             ControllerFocusTarget.SUBTITLE -> requestFocusForAny(
                 if (isTelevisionDevice) {
-                    intArrayOf(
-                        Media3UiR.id.exo_subtitle,
-                        R.id.native_audio_track_button,
-                        R.id.native_playback_settings,
-                        Media3UiR.id.exo_play_pause,
-                    )
+                    NativePlayerTvFocusPolicy.primaryFocusOrder
                 } else {
                     intArrayOf(
                         Media3UiR.id.exo_subtitle,
@@ -4387,6 +4355,16 @@ private enum class ControllerFocusTarget {
     SETTINGS,
     AUDIO,
     SUBTITLE,
+}
+
+internal object NativePlayerTvFocusPolicy {
+    val focusableControlIds: IntArray = intArrayOf(Media3UiR.id.exo_play_pause)
+    val primaryFocusOrder: IntArray = intArrayOf(Media3UiR.id.exo_play_pause)
+    val removedBottomRightControlIds: IntArray = intArrayOf(
+        Media3UiR.id.exo_subtitle,
+        R.id.native_audio_track_button,
+        R.id.native_playback_settings,
+    )
 }
 
 private data class ExternalSubtitleSource(
