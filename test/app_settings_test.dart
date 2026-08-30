@@ -667,6 +667,11 @@ void main() {
     expect(stepPlaybackSubtitlePosition(81, -1), 80);
     expect(clampPlaybackSubtitlePosition(80.4), 80);
     expect(clampPlaybackSubtitlePosition(80.6), 81);
+    expect(stepPlaybackSubtitlePosition(99, 1), 100);
+    expect(stepPlaybackSubtitlePosition(100, 1), 100);
+    expect(kPlaybackSubtitlePositionQuickStep, 5.0);
+    expect(stepPlaybackSubtitlePositionQuick(83, 1), 88);
+    expect(stepPlaybackSubtitlePositionQuick(83, -1), 78);
   });
 
   test('default subtitle falls back to system language for missing values', () {

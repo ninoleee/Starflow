@@ -462,11 +462,11 @@ class NativePlaybackActivity : Activity() {
         primarySubtitlePosition = playbackIntent.getDoubleExtra(
             EXTRA_PRIMARY_SUBTITLE_POSITION,
             80.0,
-        ).coerceIn(50.0, 95.0)
+        ).coerceIn(50.0, 100.0)
         secondarySubtitlePosition = playbackIntent.getDoubleExtra(
             EXTRA_SECONDARY_SUBTITLE_POSITION,
             90.0,
-        ).coerceIn(50.0, 95.0)
+        ).coerceIn(50.0, 100.0)
         secondarySubtitleScale = playbackIntent.getDoubleExtra(
             EXTRA_SECONDARY_SUBTITLE_SCALE,
             NativeDualSubtitleLayoutPolicy.SECONDARY_TEXT_SCALE_PERCENT,
@@ -4368,7 +4368,7 @@ internal object NativePlayerTvFocusPolicy {
 }
 
 internal object NativeSubtitlePositionPolicy {
-    val options: List<Double> = (50..95).map(Int::toDouble)
+    val options: List<Double> = (50..100 step 5).map(Int::toDouble)
 }
 
 private data class ExternalSubtitleSource(

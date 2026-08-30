@@ -356,8 +356,9 @@ const double kPlaybackSubtitleScaleMax = 78.0;
 const double kPlaybackSubtitleScaleStep = 1.0;
 const double kPlaybackSubtitleScaleDefault = 32.0;
 const double kPlaybackSubtitlePositionMin = 50.0;
-const double kPlaybackSubtitlePositionMax = 95.0;
+const double kPlaybackSubtitlePositionMax = 100.0;
 const double kPlaybackSubtitlePositionStep = 1.0;
+const double kPlaybackSubtitlePositionQuickStep = 5.0;
 const double kPlaybackPrimarySubtitlePositionDefault = 80.0;
 const double kPlaybackSecondarySubtitlePositionDefault = 90.0;
 const double kPlaybackSecondarySubtitleScaleMin = 50.0;
@@ -516,6 +517,12 @@ double clampPlaybackSubtitlePosition(double value) {
 double stepPlaybackSubtitlePosition(double current, int delta) {
   return clampPlaybackSubtitlePosition(
     current + (delta * kPlaybackSubtitlePositionStep),
+  );
+}
+
+double stepPlaybackSubtitlePositionQuick(double current, int delta) {
+  return clampPlaybackSubtitlePosition(
+    current + (delta * kPlaybackSubtitlePositionQuickStep),
   );
 }
 

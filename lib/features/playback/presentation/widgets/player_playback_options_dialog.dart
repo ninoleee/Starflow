@@ -550,7 +550,7 @@ class _PlaybackMoreOptionsDialogState
                     ? () => _updateRuntimeSettings(
                           _runtimeSettings.copyWith(
                             primarySubtitlePosition:
-                                stepPlaybackSubtitlePosition(
+                                stepPlaybackSubtitlePositionQuick(
                               _runtimeSettings.primarySubtitlePosition,
                               -1,
                             ),
@@ -562,7 +562,7 @@ class _PlaybackMoreOptionsDialogState
                     ? () => _updateRuntimeSettings(
                           _runtimeSettings.copyWith(
                             primarySubtitlePosition:
-                                stepPlaybackSubtitlePosition(
+                                stepPlaybackSubtitlePositionQuick(
                               _runtimeSettings.primarySubtitlePosition,
                               1,
                             ),
@@ -582,7 +582,7 @@ class _PlaybackMoreOptionsDialogState
                     ? () => _updateRuntimeSettings(
                           _runtimeSettings.copyWith(
                             secondarySubtitlePosition:
-                                stepPlaybackSubtitlePosition(
+                                stepPlaybackSubtitlePositionQuick(
                               _runtimeSettings.secondarySubtitlePosition,
                               -1,
                             ),
@@ -594,7 +594,7 @@ class _PlaybackMoreOptionsDialogState
                     ? () => _updateRuntimeSettings(
                           _runtimeSettings.copyWith(
                             secondarySubtitlePosition:
-                                stepPlaybackSubtitlePosition(
+                                stepPlaybackSubtitlePositionQuick(
                               _runtimeSettings.secondarySubtitlePosition,
                               1,
                             ),
