@@ -73,6 +73,6 @@ class NativeDualSubtitleTrackPolicyTest {
 
     @Test
     fun `uses a smaller default English subtitle scale`() {
-        assertTrue(NativeDualSubtitleLayoutPolicy.SECONDARY_TEXT_SCALE == 0.75f)
+        assertTrue(NativeDualSubtitleLayoutPolicy.SECONDARY_TEXT_SCALE == 0.50f)
     }
 }

@@ -119,7 +119,8 @@ class NativePlaybackActivity : Activity() {
     private var subtitleScale: Double = NativeSubtitleStylePolicy.DEFAULT_SCALE
     private var primarySubtitlePosition = 80.0
     private var secondarySubtitlePosition = 90.0
-    private var secondarySubtitleScale = 75.0
+    private var secondarySubtitleScale =
+        NativeDualSubtitleLayoutPolicy.SECONDARY_TEXT_SCALE_PERCENT
     private val dualSubtitleController = NativeDualSubtitleController()
     private var subtitleSessionPreference: NativeSubtitleSessionPreference? = null
     private val playbackWatchdogHandler = Handler(Looper.getMainLooper())
@@ -468,7 +469,7 @@ class NativePlaybackActivity : Activity() {
         ).coerceIn(50.0, 95.0)
         secondarySubtitleScale = playbackIntent.getDoubleExtra(
             EXTRA_SECONDARY_SUBTITLE_SCALE,
-            75.0,
+            NativeDualSubtitleLayoutPolicy.SECONDARY_TEXT_SCALE_PERCENT,
         ).coerceIn(50.0, 120.0)
         dualSubtitleController.configureLayout(
             primaryPositionPercent = primarySubtitlePosition,
@@ -1001,6 +1002,10 @@ class NativePlaybackActivity : Activity() {
             return
         }
 
+        if (externalSubtitleSource == null) {
+            subtitleSessionPreference = loadSeriesSubtitlePreference()
+        }
+
         val url = intent.getStringExtra(EXTRA_URL)?.trim().orEmpty()
         if (url.isEmpty()) {
             finish()
@@ -1318,12 +1323,10 @@ class NativePlaybackActivity : Activity() {
         return builder.build().toString()
     }
 
-    private fun preferredSubtitleLanguages(): List<String> {
-        val configured = intent.getStringArrayExtra(EXTRA_SUBTITLE_PREFERRED_LANGUAGES)
-            ?.map(String::trim)
-            ?.filter(String::isNotEmpty)
-            .orEmpty()
-        return configured.ifEmpty { listOf(Locale.getDefault().toLanguageTag()) }
+    private fun defaultSubtitleMode(): NativeDefaultSubtitle {
+        return NativeDefaultSubtitle.fromRaw(
+            intent.getStringExtra(EXTRA_DEFAULT_SUBTITLE).orEmpty(),
+        )
     }
 
     private fun applyAutomaticSubtitleSelection(tracks: Tracks) {
@@ -1341,7 +1344,7 @@ class NativePlaybackActivity : Activity() {
 
         automaticSubtitleSelectionApplied = true
         val sessionPreference = subtitleSessionPreference
-        val restored = when (sessionPreference?.mode) {
+        val restoredSession = when (sessionPreference?.mode) {
             NativeSubtitleSessionMode.OFF -> NativeSubtitleRestoreResult.Disabled
             NativeSubtitleSessionMode.SINGLE -> {
                 val fingerprint = sessionPreference.primary
@@ -1359,6 +1362,14 @@ class NativePlaybackActivity : Activity() {
             )
             null -> null
         }
+        val restored = restoredSession ?: if (
+            !subtitlePreferenceIsOff() &&
+            defaultSubtitleMode() == NativeDefaultSubtitle.DUAL
+        ) {
+            buildDefaultNativeDualSubtitleChoice(choices)
+        } else {
+            null
+        }
         if (restored is NativeSubtitleRestoreResult.Dual) {
             enableDualSubtitleRouting(restored.primary, restored.secondary)
         } else {
@@ -1373,7 +1384,7 @@ class NativePlaybackActivity : Activity() {
             null -> if (subtitlePreferenceIsOff()) {
                 null
             } else {
-                NativeSubtitleTrackSelectionPolicy.select(
+                NativeSubtitleTrackSelectionPolicy.selectWithSystemFallback(
                     candidates = choices.map { choice ->
                         NativeSubtitleTrackCandidate(
                             value = choice.override,
@@ -1383,7 +1394,8 @@ class NativePlaybackActivity : Activity() {
                             isDefault = choice.isDefault,
                         )
                     },
-                    preferredLanguages = preferredSubtitleLanguages(),
+                    preferredLanguages = defaultSubtitleMode().preferredLanguages,
+                    systemLanguage = Locale.getDefault().toLanguageTag(),
                 )
             }
         }
@@ -1481,6 +1493,26 @@ class NativePlaybackActivity : Activity() {
             secondaryCandidates.map(NativeTrackChoice::restoreCandidate),
             secondaryFingerprint,
             excludedValues = setOf(primary),
+        ) ?: return null
+        return NativeSubtitleRestoreResult.Dual(primary, secondary)
+    }
+
+    private fun buildDefaultNativeDualSubtitleChoice(
+        choices: List<NativeTrackChoice>,
+    ): NativeSubtitleRestoreResult.Dual? {
+        val candidates = choices.filter(NativeTrackChoice::canUseInDualSubtitleMode)
+        val primary = NativeSubtitleTrackSelectionPolicy.selectLanguage(
+            candidates = candidates.map(NativeTrackChoice::subtitleCandidate),
+            preferredLanguages = listOf("zh-cn", "zh-tw", "zh"),
+        ) ?: return null
+        val primaryKey = primary.formatKey ?: return null
+        val secondaryCandidates = candidates.filter { choice ->
+            val key = choice.formatKey
+            key != null && key != primaryKey && primaryKey !in choice.groupFormatKeys
+        }
+        val secondary = NativeSubtitleTrackSelectionPolicy.selectLanguage(
+            candidates = secondaryCandidates.map(NativeTrackChoice::subtitleCandidate),
+            preferredLanguages = listOf("en"),
         ) ?: return null
         return NativeSubtitleRestoreResult.Dual(primary, secondary)
     }
@@ -2304,7 +2336,8 @@ class NativePlaybackActivity : Activity() {
                 if (kotlin.math.abs(selected - subtitleScale) >= 0.5) {
                     subtitleScale = selected
                     applySubtitleStyle()
-                    showToast("字幕大小已设为${formatSubtitleScaleLabel(selected)}")
+                    persistGlobalSubtitleStyle()
+                    showToast("主字幕大小已设为${formatSubtitleScaleLabel(selected)}")
                 }
             }
             .setNegativeButton("取消", null)
@@ -2370,6 +2403,7 @@ class NativePlaybackActivity : Activity() {
                 val selected = options[which]
                 pickerDialog.dismiss()
                 onSelected(selected)
+                persistGlobalSubtitleStyle()
                 showToast("$title 已设为${formatSubtitlePercentLabel(selected)}")
             }
             .setNegativeButton("取消", null)
@@ -2384,6 +2418,18 @@ class NativePlaybackActivity : Activity() {
             secondaryScalePercent = secondarySubtitleScale,
         )
         applySubtitleStyle()
+    }
+
+    private fun persistGlobalSubtitleStyle() {
+        val dispatched = MainActivity.saveNativePlaybackSubtitleStyle(
+            subtitleScale = subtitleScale,
+            primarySubtitlePosition = primarySubtitlePosition,
+            secondarySubtitlePosition = secondarySubtitlePosition,
+            secondarySubtitleScale = secondarySubtitleScale,
+        )
+        if (!dispatched) {
+            logPlayback("native.subtitle-style.persist-dispatch-failed")
+        }
     }
 
     private fun openAudioOutputModePicker() {
@@ -2604,6 +2650,7 @@ class NativePlaybackActivity : Activity() {
         val items = snapshot.optJSONObject("items") ?: JSONObject()
         val series = snapshot.optJSONObject("series") ?: JSONObject()
         val skipPreferences = snapshot.optJSONObject("skipPreferences") ?: JSONObject()
+        val subtitlePreferences = snapshot.optJSONObject("subtitlePreferences") ?: JSONObject()
         skipPreferences.put(
             normalizedSeriesKey,
             JSONObject().apply {
@@ -2623,6 +2670,7 @@ class NativePlaybackActivity : Activity() {
                     put("items", items)
                     put("series", series)
                     put("skipPreferences", skipPreferences)
+                    put("subtitlePreferences", subtitlePreferences)
                 }.toString(),
             )
             .apply()
@@ -2707,14 +2755,18 @@ class NativePlaybackActivity : Activity() {
             return
         }
         val showDualSubtitleOption = trackType == C.TRACK_TYPE_TEXT
+        val showGlobalDefaultOption = trackType == C.TRACK_TYPE_TEXT
         val choiceOffset = when {
-            showDualSubtitleOption -> 2
+            showDualSubtitleOption && showGlobalDefaultOption -> 3
             showDisableOption -> 1
             else -> 0
         }
         val labels = buildList {
             if (showDisableOption) {
                 add("关闭")
+            }
+            if (showGlobalDefaultOption) {
+                add("使用全局默认")
             }
             if (showDualSubtitleOption) {
                 add(
@@ -2729,7 +2781,9 @@ class NativePlaybackActivity : Activity() {
         }.toTypedArray()
         val selectedChoiceIndex = choices.indexOfFirst(NativeTrackChoice::selected)
         val checkedIndex = when {
-            showDualSubtitleOption && dualSubtitleController.isEnabled -> 1
+            showDualSubtitleOption && dualSubtitleController.isEnabled -> 2
+            showGlobalDefaultOption && subtitleSessionPreference == null -> 1
+            subtitleSessionPreference?.mode == NativeSubtitleSessionMode.OFF -> 0
             selectedChoiceIndex >= 0 -> selectedChoiceIndex + choiceOffset
             showDisableOption -> 0
             else -> -1
@@ -2748,8 +2802,20 @@ class NativePlaybackActivity : Activity() {
                         subtitleSessionPreference = NativeSubtitleSessionPreference(
                             mode = NativeSubtitleSessionMode.OFF,
                         )
+                        saveSeriesSubtitlePreference(subtitleSessionPreference)
                     }
-                } else if (showDualSubtitleOption && which == 1) {
+                } else if (showGlobalDefaultOption && which == 1) {
+                    pickerDialog.dismiss()
+                    subtitleSessionPreference = null
+                    clearSeriesSubtitlePreference()
+                    dualSubtitleController.disable()
+                    applySubtitleStyle()
+                    automaticSubtitleSelectionApplied = false
+                    playerView.post {
+                        applyAutomaticSubtitleSelection(currentPlayer.currentTracks)
+                    }
+                    return@setSingleChoiceItems
+                } else if (showDualSubtitleOption && which == 2) {
                     pickerDialog.dismiss()
                     playerView.post { openDualSubtitlePrimaryPicker(choices) }
                     return@setSingleChoiceItems
@@ -2765,6 +2831,9 @@ class NativePlaybackActivity : Activity() {
                                 mode = NativeSubtitleSessionMode.SINGLE,
                                 primary = choice.subtitleFingerprint,
                             )
+                        }
+                        if (!choice.isExternal) {
+                            saveSeriesSubtitlePreference(subtitleSessionPreference)
                         }
                     }
                     parameters
@@ -2872,6 +2941,7 @@ class NativePlaybackActivity : Activity() {
             primary = primaryChoice.subtitleFingerprint,
             secondary = secondaryChoice.subtitleFingerprint,
         )
+        saveSeriesSubtitlePreference(subtitleSessionPreference)
         logPlayback(
             "native.subtitle.dual-enabled " +
                 "primary=${primaryChoice.label} secondary=${secondaryChoice.label}",
@@ -3851,6 +3921,63 @@ class NativePlaybackActivity : Activity() {
         }
     }
 
+    private fun loadSeriesSubtitlePreference(): NativeSubtitleSessionPreference? {
+        val normalizedSeriesKey = seriesKey.trim()
+        if (normalizedSeriesKey.isEmpty()) {
+            return null
+        }
+        val raw = loadPlaybackSnapshot()
+            .optJSONObject("subtitlePreferences")
+            ?.optJSONObject(normalizedSeriesKey)
+            ?: return null
+        val mode = when (raw.optString("mode")) {
+            "off" -> NativeSubtitleSessionMode.OFF
+            "dual" -> NativeSubtitleSessionMode.DUAL
+            else -> NativeSubtitleSessionMode.SINGLE
+        }
+        return NativeSubtitleSessionPreference(
+            mode = mode,
+            primary = raw.optJSONObject("primary")?.toSubtitleFingerprint(),
+            secondary = raw.optJSONObject("secondary")?.toSubtitleFingerprint(),
+        )
+    }
+
+    private fun saveSeriesSubtitlePreference(
+        preference: NativeSubtitleSessionPreference?,
+    ) {
+        val normalizedSeriesKey = seriesKey.trim()
+        if (normalizedSeriesKey.isEmpty() || preference == null) {
+            return
+        }
+        val snapshot = loadPlaybackSnapshot()
+        val subtitlePreferences = snapshot.optJSONObject("subtitlePreferences") ?: JSONObject()
+        subtitlePreferences.put(
+            normalizedSeriesKey,
+            preference.toJson(
+                seriesKey = normalizedSeriesKey,
+                updatedAt = isoNow(),
+            ),
+        )
+        snapshot.put("subtitlePreferences", subtitlePreferences)
+        sharedPreferences.edit()
+            .putString(PLAYBACK_MEMORY_STORAGE_KEY, snapshot.toString())
+            .apply()
+    }
+
+    private fun clearSeriesSubtitlePreference() {
+        val normalizedSeriesKey = seriesKey.trim()
+        if (normalizedSeriesKey.isEmpty()) {
+            return
+        }
+        val snapshot = loadPlaybackSnapshot()
+        val subtitlePreferences = snapshot.optJSONObject("subtitlePreferences") ?: return
+        subtitlePreferences.remove(normalizedSeriesKey)
+        snapshot.put("subtitlePreferences", subtitlePreferences)
+        sharedPreferences.edit()
+            .putString(PLAYBACK_MEMORY_STORAGE_KEY, snapshot.toString())
+            .apply()
+    }
+
     private fun savePlaybackEntry(
         targetJson: String,
         itemKey: String,
@@ -3887,6 +4014,7 @@ class NativePlaybackActivity : Activity() {
         val items = snapshot.optJSONObject("items") ?: JSONObject()
         val series = snapshot.optJSONObject("series") ?: JSONObject()
         val skipPreferences = snapshot.optJSONObject("skipPreferences") ?: JSONObject()
+        val subtitlePreferences = snapshot.optJSONObject("subtitlePreferences") ?: JSONObject()
         val targetObject = try {
             JSONObject(targetJson)
         } catch (_: Throwable) {
@@ -3922,6 +4050,7 @@ class NativePlaybackActivity : Activity() {
             put("items", items)
             put("series", series)
             put("skipPreferences", skipPreferences)
+            put("subtitlePreferences", subtitlePreferences)
         }
         val editor = sharedPreferences.edit()
             .putString(PLAYBACK_MEMORY_STORAGE_KEY, nextSnapshot.toString())
@@ -4216,7 +4345,7 @@ class NativePlaybackActivity : Activity() {
         const val EXTRA_MEDIA_MIME_TYPE = "mediaMimeType"
         const val EXTRA_RESOLVER_SESSION_ID = "resolverSessionId"
         const val EXTRA_SUBTITLE_PREFERENCE = "subtitlePreference"
-        const val EXTRA_SUBTITLE_PREFERRED_LANGUAGES = "subtitlePreferredLanguages"
+        const val EXTRA_DEFAULT_SUBTITLE = "defaultSubtitle"
         const val EXTRA_PLAYBACK_TARGET_JSON = "playbackTargetJson"
         const val EXTRA_PLAYBACK_ITEM_KEY = "playbackItemKey"
         const val EXTRA_SERIES_KEY = "seriesKey"
@@ -4280,6 +4409,16 @@ private val NativeTrackChoice.restoreCandidate:
         fingerprint = subtitleFingerprint,
     )
 
+private val NativeTrackChoice.subtitleCandidate:
+    NativeSubtitleTrackCandidate<NativeTrackChoice>
+    get() = NativeSubtitleTrackCandidate(
+        value = this,
+        language = language,
+        label = sourceLabel,
+        isForced = isForced,
+        isDefault = isDefault,
+    )
+
 private val NativeTrackChoice.canUseInDualSubtitleMode: Boolean
     get() = !isExternal &&
         formatKey != null &&
@@ -4297,6 +4436,72 @@ private sealed interface NativeSubtitleRestoreResult {
         val primary: NativeTrackChoice,
         val secondary: NativeTrackChoice,
     ) : NativeSubtitleRestoreResult
+}
+
+private fun NativeSubtitleSessionPreference.toJson(
+    seriesKey: String,
+    updatedAt: String,
+): JSONObject = JSONObject().apply {
+    put("seriesKey", seriesKey)
+    put("updatedAt", updatedAt)
+    put(
+        "mode",
+        when (mode) {
+            NativeSubtitleSessionMode.OFF -> "off"
+            NativeSubtitleSessionMode.SINGLE -> "single"
+            NativeSubtitleSessionMode.DUAL -> "dual"
+        },
+    )
+    primary?.let { put("primary", it.toJson()) }
+    secondary?.let { put("secondary", it.toJson()) }
+}
+
+private fun NativeSubtitleTrackFingerprint.toJson(): JSONObject = JSONObject().apply {
+    put("id", id)
+    put("label", label)
+    put("language", language)
+    put("codec", sampleMimeType.ifEmpty { codecs })
+    put("sampleMimeType", sampleMimeType)
+    put("codecs", codecs)
+    put("isDefault", isDefault)
+    put("isForced", isForced)
+    put("accessibilityChannel", accessibilityChannel)
+}
+
+private fun JSONObject.toSubtitleFingerprint(): NativeSubtitleTrackFingerprint =
+    NativeSubtitleTrackFingerprint(
+        id = optString("id"),
+        label = optString("label"),
+        language = optString("language"),
+        sampleMimeType = optString("sampleMimeType").ifEmpty { optString("codec") },
+        codecs = optString("codecs"),
+        isDefault = optBoolean("isDefault", false),
+        isForced = optBoolean("isForced", false),
+        accessibilityChannel = optInt("accessibilityChannel", -1),
+    )
+
+private enum class NativeDefaultSubtitle(
+    val preferredLanguages: List<String>,
+) {
+    DUAL(emptyList()),
+    SIMPLIFIED_CHINESE(listOf("zh-cn")),
+    TRADITIONAL_CHINESE(listOf("zh-tw")),
+    ENGLISH(listOf("en")),
+    JAPANESE(listOf("ja")),
+    KOREAN(listOf("ko")),
+    SYSTEM_LANGUAGE(emptyList());
+
+    companion object {
+        fun fromRaw(raw: String): NativeDefaultSubtitle = when (raw.trim()) {
+            "dual" -> DUAL
+            "simplifiedChinese" -> SIMPLIFIED_CHINESE
+            "traditionalChinese" -> TRADITIONAL_CHINESE
+            "english" -> ENGLISH
+            "japanese" -> JAPANESE
+            "korean" -> KOREAN
+            else -> SYSTEM_LANGUAGE
+        }
+    }
 }
 
 private data class NativeEpisodeQueueEntry(

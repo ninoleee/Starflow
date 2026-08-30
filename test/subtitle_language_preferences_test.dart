@@ -88,4 +88,40 @@ void main() {
     expect(isForcedSubtitleText('中文强制字幕'), isTrue);
     expect(isForcedSubtitleText('English SDH'), isFalse);
   });
+
+  test('missing configured language falls back to system language', () {
+    const english = AutomaticSubtitleCandidate<String>(
+      value: 'english',
+      searchableText: 'English',
+    );
+    const japanese = AutomaticSubtitleCandidate<String>(
+      value: 'japanese',
+      searchableText: '日本語',
+    );
+
+    expect(
+      selectSubtitleTrackWithSystemFallback(
+        const [english, japanese],
+        preferredLanguages: const ['ko'],
+        systemLocale: const Locale('ja', 'JP'),
+      ),
+      'japanese',
+    );
+  });
+
+  test('forced and default tracks remain the final fallback', () {
+    const forced = AutomaticSubtitleCandidate<String>(
+      value: 'forced',
+      searchableText: 'French Forced',
+      isForced: true,
+    );
+    expect(
+      selectSubtitleTrackWithSystemFallback(
+        const [forced],
+        preferredLanguages: const ['ko'],
+        systemLocale: const Locale('ja', 'JP'),
+      ),
+      'forced',
+    );
+  });
 }

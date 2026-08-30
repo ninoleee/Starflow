@@ -80,6 +80,7 @@ final settingsPlaybackSliceProvider = Provider<SettingsPlaybackSlice>(
           playbackOpenTimeoutSeconds: settings.playbackOpenTimeoutSeconds,
           playbackDefaultSpeed: settings.playbackDefaultSpeed,
           playbackSubtitlePreference: settings.playbackSubtitlePreference,
+          playbackDefaultSubtitle: settings.playbackDefaultSubtitle,
           playbackSubtitleScale: settings.playbackSubtitleScale,
           playbackPrimarySubtitlePosition:
               settings.playbackPrimarySubtitlePosition,
@@ -225,6 +226,7 @@ class SettingsPlaybackSlice {
     required this.playbackOpenTimeoutSeconds,
     required this.playbackDefaultSpeed,
     required this.playbackSubtitlePreference,
+    this.playbackDefaultSubtitle = PlaybackDefaultSubtitle.systemLanguage,
     required this.playbackSubtitleScale,
     this.playbackPrimarySubtitlePosition =
         kPlaybackPrimarySubtitlePositionDefault,
@@ -256,6 +258,7 @@ class SettingsPlaybackSlice {
   final int playbackOpenTimeoutSeconds;
   final double playbackDefaultSpeed;
   final PlaybackSubtitlePreference playbackSubtitlePreference;
+  final PlaybackDefaultSubtitle playbackDefaultSubtitle;
   final double playbackSubtitleScale;
   final double playbackPrimarySubtitlePosition;
   final double playbackSecondarySubtitlePosition;
@@ -291,6 +294,7 @@ class SettingsPlaybackSlice {
             other.playbackOpenTimeoutSeconds == playbackOpenTimeoutSeconds &&
             other.playbackDefaultSpeed == playbackDefaultSpeed &&
             other.playbackSubtitlePreference == playbackSubtitlePreference &&
+            other.playbackDefaultSubtitle == playbackDefaultSubtitle &&
             other.playbackSubtitleScale == playbackSubtitleScale &&
             other.playbackPrimarySubtitlePosition ==
                 playbackPrimarySubtitlePosition &&
@@ -334,6 +338,7 @@ class SettingsPlaybackSlice {
           playbackOpenTimeoutSeconds,
           playbackDefaultSpeed,
           playbackSubtitlePreference,
+          playbackDefaultSubtitle,
           playbackSubtitleScale,
           playbackPrimarySubtitlePosition,
           playbackSecondarySubtitlePosition,

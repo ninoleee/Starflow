@@ -81,7 +81,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
       secondarySubtitleScale: _playbackSettings.playbackSecondarySubtitleScale,
       backgroundPlaybackEnabled: _backgroundPlaybackEnabled,
       subtitlePreference: _playbackSettings.playbackSubtitlePreference,
-      subtitlePreferredLanguages: _playbackSettings.subtitlePreferredLanguages,
+      defaultSubtitle: _playbackSettings.playbackDefaultSubtitle,
       episodeQueue: nativeEpisodeQueue,
       mediaMimeType: mediaMimeType ?? '',
       episodeResolver: defaultTargetPlatform == TargetPlatform.android

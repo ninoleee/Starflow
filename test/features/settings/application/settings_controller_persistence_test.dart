@@ -94,6 +94,7 @@ void main() {
         .read(settingsControllerProvider.notifier)
         .savePlaybackSubtitlePreferences(
           subtitlePreference: PlaybackSubtitlePreference.off,
+          defaultSubtitle: PlaybackDefaultSubtitle.dual,
           subtitleScale: 40,
           primarySubtitlePosition: 75,
           secondarySubtitlePosition: 90,
@@ -111,6 +112,10 @@ void main() {
 
     expect(repository.settings.playbackSubtitlePreference,
         PlaybackSubtitlePreference.off);
+    expect(
+      repository.settings.playbackDefaultSubtitle,
+      PlaybackDefaultSubtitle.dual,
+    );
     expect(repository.settings.playbackSubtitleScale, 40);
     expect(repository.settings.playbackPrimarySubtitlePosition, 75);
     expect(repository.settings.playbackSecondarySubtitlePosition, 90);
@@ -124,6 +129,42 @@ void main() {
     expect(repository.settings.subtitleSearchMaxValidatedCandidates, 8);
     expect(repository.settings.playbackOpenTimeoutSeconds, 90);
     expect(repository.settings.playbackDefaultSpeed, 1.5);
+  });
+
+  test('subtitle style saves globally without replacing subtitle services',
+      () async {
+    final initial = SeedData.defaultSettings.copyWith(
+      assrtToken: 'keep-token',
+      playbackDefaultSpeed: 1.5,
+    );
+    final repository = _OutOfOrderSettingsRepository(initial);
+    final container = ProviderContainer(
+      overrides: [
+        appSettingsRepositoryProvider.overrideWithValue(repository),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container.read(settingsControllerProvider.future);
+
+    await container
+        .read(settingsControllerProvider.notifier)
+        .savePlaybackSubtitleStylePreferences(
+          subtitleScale: 38,
+          primarySubtitlePosition: 75,
+          secondarySubtitlePosition: 85,
+          secondarySubtitleScale: 55,
+        );
+
+    expect(repository.settings.playbackSubtitleScale, 38);
+    expect(repository.settings.playbackPrimarySubtitlePosition, 75);
+    expect(repository.settings.playbackSecondarySubtitlePosition, 85);
+    expect(repository.settings.playbackSecondarySubtitleScale, 55);
+    expect(repository.settings.assrtToken, 'keep-token');
+    expect(repository.settings.playbackDefaultSpeed, 1.5);
+    expect(
+      container.read(appSettingsProvider).playbackSecondarySubtitleScale,
+      55,
+    );
   });
 }
 

@@ -45,4 +45,21 @@ class NativeSubtitleTrackSelectionPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun `missing configured language falls back to system language`() {
+        val candidates = listOf(
+            NativeSubtitleTrackCandidate("english", language = "en"),
+            NativeSubtitleTrackCandidate("japanese", language = "ja"),
+        )
+
+        assertEquals(
+            "japanese",
+            NativeSubtitleTrackSelectionPolicy.selectWithSystemFallback(
+                candidates = candidates,
+                preferredLanguages = listOf("ko"),
+                systemLanguage = "ja-JP",
+            ),
+        )
+    }
 }

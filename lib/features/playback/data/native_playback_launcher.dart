@@ -7,7 +7,7 @@ import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 final nativePlaybackLauncherProvider = Provider<NativePlaybackLauncher>((ref) {
-  return impl.createNativePlaybackLauncher();
+  return impl.createNativePlaybackLauncher(ref);
 });
 
 class NativeResolvedPlaybackTarget {
@@ -35,7 +35,7 @@ abstract class NativePlaybackLauncher {
     double secondarySubtitleScale = kPlaybackSecondarySubtitleScaleDefault,
     required bool backgroundPlaybackEnabled,
     required PlaybackSubtitlePreference subtitlePreference,
-    required List<String> subtitlePreferredLanguages,
+    required PlaybackDefaultSubtitle defaultSubtitle,
     PlaybackEpisodeQueue? episodeQueue,
     String mediaMimeType = '',
     NativePlaybackEpisodeResolver? episodeResolver,

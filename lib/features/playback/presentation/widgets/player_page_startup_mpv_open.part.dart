@@ -191,7 +191,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
       resolvedTarget,
       timeout: timeout,
     );
-    await _applyStartupPlaybackPreferences(playback.player);
+    await _applyStartupPlaybackPreferences(playback.player, resolvedTarget);
     await _applyStartupExternalSubtitle(playback.player, resolvedTarget);
     return playback;
   }
@@ -474,7 +474,8 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     if (!mounted) {
       return;
     }
-    if (!identical(_player, player) || !identical(_videoController, videoController)) {
+    if (!identical(_player, player) ||
+        !identical(_videoController, videoController)) {
       return;
     }
     setState(() {

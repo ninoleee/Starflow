@@ -1346,13 +1346,19 @@ extension _PlayerPageStateControls on _PlayerPageState {
     if (!applied) {
       return;
     }
-    _subtitleSessionPreference = switch (selectedTrack.id) {
-      'auto' => const PlaybackSubtitleSessionPreference.automatic(),
-      'no' => const PlaybackSubtitleSessionPreference.off(),
-      _ when !selectedTrack.uri && !selectedTrack.data =>
-        PlaybackSubtitleSessionPreference.single(selectedTrack),
-      _ => null,
-    };
+    if (!selectedTrack.uri && !selectedTrack.data) {
+      _subtitleSessionPreference = switch (selectedTrack.id) {
+        'auto' => null,
+        'no' => const PlaybackSubtitleSessionPreference.off(),
+        _ => PlaybackSubtitleSessionPreference.single(selectedTrack),
+      };
+      await _persistMpvSeriesSubtitlePreference(
+        _resolvedTarget ?? widget.target,
+        _subtitleSessionPreference,
+      );
+    } else {
+      _subtitleSessionPreference = null;
+    }
   }
 
   Future<void> _selectMpvDualSubtitleTracks(
@@ -1423,6 +1429,10 @@ extension _PlayerPageStateControls on _PlayerPageState {
     _subtitleSessionPreference = PlaybackSubtitleSessionPreference.dual(
       primary: primary,
       secondary: secondary,
+    );
+    await _persistMpvSeriesSubtitlePreference(
+      _resolvedTarget ?? widget.target,
+      _subtitleSessionPreference,
     );
     _showMessage('双字幕已开启：中文在上，英文在下');
   }

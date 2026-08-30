@@ -117,10 +117,9 @@ import UIKit
         let subtitlePreference =
           (arguments?["subtitlePreference"] as? String)?
           .trimmingCharacters(in: .whitespacesAndNewlines) ?? "auto"
-        let subtitlePreferredLanguages =
-          (arguments?["subtitlePreferredLanguages"] as? [String] ?? [])
-          .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-          .filter { !$0.isEmpty }
+        let defaultSubtitle =
+          (arguments?["defaultSubtitle"] as? String)?
+          .trimmingCharacters(in: .whitespacesAndNewlines) ?? "systemLanguage"
         let backgroundPlaybackEnabled =
           arguments?["backgroundPlaybackEnabled"] as? Bool ?? false
         self?.launchNativePlaybackContainer(
@@ -133,7 +132,7 @@ import UIKit
           episodeQueueJson: episodeQueueJson,
           backgroundPlaybackEnabled: backgroundPlaybackEnabled,
           subtitlePreference: subtitlePreference,
-          subtitlePreferredLanguages: subtitlePreferredLanguages,
+          defaultSubtitle: defaultSubtitle,
           result: result
         )
       case "launchSystemVideoPlayer":
@@ -326,7 +325,7 @@ import UIKit
     episodeQueueJson: String,
     backgroundPlaybackEnabled: Bool,
     subtitlePreference: String,
-    subtitlePreferredLanguages: [String],
+    defaultSubtitle: String,
     result: @escaping FlutterResult
   ) {
     guard !rawUrl.isEmpty,
@@ -359,7 +358,7 @@ import UIKit
         episodeQueue: NativeEpisodeQueue.fromJsonString(episodeQueueJson),
         backgroundPlaybackEnabled: backgroundPlaybackEnabled,
         subtitlePreference: subtitlePreference,
-        subtitlePreferredLanguages: subtitlePreferredLanguages,
+        defaultSubtitle: defaultSubtitle,
         playbackStore: self.nativePlaybackStore
       )
       controller.modalPresentationStyle = .fullScreen
@@ -690,15 +689,63 @@ private struct NativeEpisodeQueue {
   }
 }
 
-private struct NativeSubtitleTrackFingerprint {
+private struct NativeSubtitleTrackFingerprint: Equatable {
   let label: String
   let language: String
   let isForced: Bool
+
+  var jsonObject: [String: Any] {
+    return [
+      "label": label,
+      "language": language,
+      "isForced": isForced,
+    ]
+  }
+
+  init(label: String, language: String, isForced: Bool) {
+    self.label = label
+    self.language = language
+    self.isForced = isForced
+  }
+
+  init?(json: [String: Any]) {
+    self.label = json["label"] as? String ?? ""
+    self.language = json["language"] as? String ?? ""
+    self.isForced = json["isForced"] as? Bool ?? false
+    if label.isEmpty, language.isEmpty {
+      return nil
+    }
+  }
 }
 
-private enum NativeSubtitleSessionPreference {
+private enum NativeSubtitleSessionPreference: Equatable {
   case off
   case single(NativeSubtitleTrackFingerprint)
+
+  var jsonObject: [String: Any] {
+    switch self {
+    case .off:
+      return ["mode": "off"]
+    case .single(let fingerprint):
+      return ["mode": "single", "primary": fingerprint.jsonObject]
+    }
+  }
+
+  init?(json: [String: Any]) {
+    if json["mode"] as? String == "off" {
+      self = .off
+      return
+    }
+    if json["mode"] as? String == "dual" {
+      return nil
+    }
+    guard let primary = json["primary"] as? [String: Any],
+      let fingerprint = NativeSubtitleTrackFingerprint(json: primary)
+    else {
+      return nil
+    }
+    self = .single(fingerprint)
+  }
 }
 
 private final class NativePlaybackViewController: AVPlayerViewController {
@@ -708,7 +755,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   private let playbackStore: NativePlaybackMemoryStore
   private let backgroundPlaybackEnabled: Bool
   private let subtitlePreference: String
-  private let subtitlePreferredLanguages: [String]
+  private let defaultSubtitle: String
   private let isoFormatter = ISO8601DateFormatter()
   private var request: NativePlaybackRequest
   private var episodeQueue: NativeEpisodeQueue?
@@ -729,20 +776,21 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   private var backgroundDisabledVideoTracks: [AVPlayerItemTrack] = []
   private var appIsInBackground = false
   private var subtitleSessionPreference: NativeSubtitleSessionPreference?
+  private var automaticallyAppliedSubtitlePreference: NativeSubtitleSessionPreference?
 
   init(
     request: NativePlaybackRequest,
     episodeQueue: NativeEpisodeQueue?,
     backgroundPlaybackEnabled: Bool,
     subtitlePreference: String,
-    subtitlePreferredLanguages: [String],
+    defaultSubtitle: String,
     playbackStore: NativePlaybackMemoryStore
   ) {
     self.request = request
     self.episodeQueue = episodeQueue
     self.backgroundPlaybackEnabled = backgroundPlaybackEnabled
     self.subtitlePreference = subtitlePreference
-    self.subtitlePreferredLanguages = subtitlePreferredLanguages
+    self.defaultSubtitle = defaultSubtitle
     self.playbackStore = playbackStore
     super.init(nibName: nil, bundle: nil)
   }
@@ -767,6 +815,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
 
   override func viewWillDisappear(_ animated: Bool) {
     super.viewWillDisappear(animated)
+    captureCurrentSubtitleSessionPreference()
     persistPlaybackProgress(force: true)
   }
 
@@ -780,6 +829,10 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   private func configurePlayer() {
     captureCurrentSubtitleSessionPreference()
     teardownPlayback()
+    subtitleSessionPreference = playbackStore.loadSubtitlePreference(
+      seriesKey: request.seriesKey
+    )
+    automaticallyAppliedSubtitlePreference = nil
     configureAudioSession(enabled: true)
 
     let resumePositionMs = request.allowsResume
@@ -891,13 +944,16 @@ private final class NativePlaybackViewController: AVPlayerViewController {
 
         if self.subtitlePreference == "off" {
           item.select(nil, in: group)
+          self.automaticallyAppliedSubtitlePreference = .off
           return
         }
 
-        let preferredLanguages = self.subtitlePreferredLanguages.isEmpty
-          ? Array(Locale.preferredLanguages.prefix(1))
-          : self.subtitlePreferredLanguages
-        let preferredOption = preferredLanguages.lazy.compactMap { language in
+        let configuredOption = self.defaultSubtitleLanguages.lazy.compactMap { language in
+          group.options.first { option in
+            self.subtitleOption(option, matches: language)
+          }
+        }.first
+        let systemOption = Locale.preferredLanguages.prefix(1).lazy.compactMap { language in
           group.options.first { option in
             self.subtitleOption(option, matches: language)
           }
@@ -906,7 +962,11 @@ private final class NativePlaybackViewController: AVPlayerViewController {
           option.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
             || self.isForcedSubtitleLabel(option.displayName)
         }
-        item.select(preferredOption ?? forcedOption ?? group.defaultOption, in: group)
+        let selected = configuredOption ?? systemOption ?? forcedOption ?? group.defaultOption
+        item.select(selected, in: group)
+        self.automaticallyAppliedSubtitlePreference = selected.map {
+          .single(self.subtitleFingerprint(for: $0))
+        } ?? .off
       }
     }
   }
@@ -917,17 +977,28 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     else {
       return
     }
-    guard let selected = item.currentMediaSelection.selectedMediaOption(in: group) else {
-      subtitleSessionPreference = .off
+    let selectedPreference = item.currentMediaSelection
+      .selectedMediaOption(in: group)
+      .map { NativeSubtitleSessionPreference.single(subtitleFingerprint(for: $0)) }
+      ?? .off
+    if selectedPreference == automaticallyAppliedSubtitlePreference {
       return
     }
-    subtitleSessionPreference = .single(
-      NativeSubtitleTrackFingerprint(
-        label: selected.displayName,
-        language: selected.locale?.identifier ?? "",
-        isForced: selected.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
-          || isForcedSubtitleLabel(selected.displayName)
-      )
+    subtitleSessionPreference = selectedPreference
+    playbackStore.saveSubtitlePreference(
+      selectedPreference,
+      seriesKey: request.seriesKey
+    )
+  }
+
+  private func subtitleFingerprint(
+    for option: AVMediaSelectionOption
+  ) -> NativeSubtitleTrackFingerprint {
+    return NativeSubtitleTrackFingerprint(
+      label: option.displayName,
+      language: option.locale?.identifier ?? "",
+      isForced: option.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
+        || isForcedSubtitleLabel(option.displayName)
     )
   }
 
@@ -952,8 +1023,8 @@ private final class NativePlaybackViewController: AVPlayerViewController {
           == preferredLanguage.split(separator: "-").first
         {
           score += 72
-          } else {
-            score -= 200
+        } else {
+          score -= 200
         }
       }
       if !optionLabel.isEmpty, !preferredLabel.isEmpty {
@@ -996,6 +1067,17 @@ private final class NativePlaybackViewController: AVPlayerViewController {
 
     let label = normalizedSubtitleLabel(option.displayName)
     return subtitleLanguageTokens(preference).contains { label.contains($0) }
+  }
+
+  private var defaultSubtitleLanguages: [String] {
+    switch defaultSubtitle {
+    case "simplifiedChinese": return ["zh-cn"]
+    case "traditionalChinese": return ["zh-tw"]
+    case "english": return ["en"]
+    case "japanese": return ["ja"]
+    case "korean": return ["ko"]
+    default: return []
+    }
   }
 
   private func canonicalSubtitleLanguage(_ raw: String) -> String {
@@ -1745,6 +1827,37 @@ private final class NativePlaybackMemoryStore {
     snapshot["items"] = items
     snapshot["series"] = series
     snapshot["skipPreferences"] = skipPreferences
+    savePlaybackSnapshot(snapshot)
+  }
+
+  func loadSubtitlePreference(
+    seriesKey: String
+  ) -> NativeSubtitleSessionPreference? {
+    guard !seriesKey.isEmpty else {
+      return nil
+    }
+    let snapshot = loadPlaybackSnapshot()
+    let preferences = snapshot["subtitlePreferences"] as? [String: Any] ?? [:]
+    guard let raw = preferences[seriesKey] as? [String: Any] else {
+      return nil
+    }
+    return NativeSubtitleSessionPreference(json: raw)
+  }
+
+  func saveSubtitlePreference(
+    _ preference: NativeSubtitleSessionPreference,
+    seriesKey: String
+  ) {
+    guard !seriesKey.isEmpty else {
+      return
+    }
+    var snapshot = loadPlaybackSnapshot()
+    var preferences = snapshot["subtitlePreferences"] as? [String: Any] ?? [:]
+    var value = preference.jsonObject
+    value["seriesKey"] = seriesKey
+    value["updatedAt"] = ISO8601DateFormatter().string(from: Date())
+    preferences[seriesKey] = value
+    snapshot["subtitlePreferences"] = preferences
     savePlaybackSnapshot(snapshot)
   }
 

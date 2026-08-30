@@ -25,6 +25,7 @@ class SubtitleSettingsPage extends ConsumerStatefulWidget {
 
 class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
   late PlaybackSubtitlePreference _draftSubtitlePreference;
+  late PlaybackDefaultSubtitle _draftDefaultSubtitle;
   late double _draftSubtitleScale;
   late double _draftPrimarySubtitlePosition;
   late double _draftSecondarySubtitlePosition;
@@ -46,6 +47,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
     super.initState();
     final slice = ref.read(settingsPlaybackSliceProvider);
     _draftSubtitlePreference = slice.playbackSubtitlePreference;
+    _draftDefaultSubtitle = slice.playbackDefaultSubtitle;
     _draftSubtitleScale = slice.playbackSubtitleScale;
     _draftPrimarySubtitlePosition = slice.playbackPrimarySubtitlePosition;
     _draftSecondarySubtitlePosition = slice.playbackSecondarySubtitlePosition;
@@ -115,6 +117,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
 
   String _draftFingerprint() => jsonEncode({
         'subtitlePreference': _draftSubtitlePreference.name,
+        'defaultSubtitle': _draftDefaultSubtitle.name,
         'subtitleScale': _draftSubtitleScale,
         'primarySubtitlePosition': _draftPrimarySubtitlePosition,
         'secondarySubtitlePosition': _draftSecondarySubtitlePosition,
@@ -147,6 +150,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
     }
     final controller = ref.read(settingsControllerProvider.notifier);
     final subtitlePreference = _draftSubtitlePreference;
+    final defaultSubtitle = _draftDefaultSubtitle;
     final subtitleScale = _draftSubtitleScale;
     final primarySubtitlePosition = _draftPrimarySubtitlePosition;
     final secondarySubtitlePosition = _draftSecondarySubtitlePosition;
@@ -163,6 +167,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
         _draftSubtitleSearchMaxValidatedCandidates();
     Future<void> save() => controller.savePlaybackSubtitlePreferences(
           subtitlePreference: subtitlePreference,
+          defaultSubtitle: defaultSubtitle,
           subtitleScale: subtitleScale,
           primarySubtitlePosition: primarySubtitlePosition,
           secondarySubtitlePosition: secondarySubtitlePosition,
@@ -217,7 +222,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
           ),
           const SizedBox(height: 18),
           SettingsSelectionTile(
-            title: '默认字幕策略',
+            title: '字幕默认状态',
             value: _draftSubtitlePreference.label,
             autofocus: true,
             focusId: 'subtitle-settings:preference',
@@ -230,9 +235,23 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
+          const SizedBox(height: 12),
+          SettingsSelectionTile(
+            title: '默认字幕',
+            subtitle: '所选语言不可用时回退系统语言。',
+            value: _draftDefaultSubtitle.label,
+            onPressed: _openDefaultSubtitlePicker,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _draftDefaultSubtitle.description,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
           const SizedBox(height: 18),
           SettingsStepperTile(
-            title: '字幕大小',
+            title: '主字幕大小',
             subtitle: '用于内置 MPV 和 Android 原生播放器；系统无障碍字幕启用时优先跟随系统。',
             value: formatPlaybackSubtitleScaleLabel(_draftSubtitleScale),
             onDecrease: _draftSubtitleScale > kPlaybackSubtitleScaleMin
@@ -243,7 +262,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
                         -1,
                       );
                     });
-                    _scheduleAutoSave();
+                    _flushAutoSave();
                   }
                 : null,
             onIncrease: _draftSubtitleScale < kPlaybackSubtitleScaleMax
@@ -254,7 +273,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
                         1,
                       );
                     });
-                    _scheduleAutoSave();
+                    _flushAutoSave();
                   }
                 : null,
           ),
@@ -275,7 +294,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
                             -1,
                           );
                         });
-                        _scheduleAutoSave();
+                        _flushAutoSave();
                       }
                     : null,
             onIncrease:
@@ -288,7 +307,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
                             1,
                           );
                         });
-                        _scheduleAutoSave();
+                        _flushAutoSave();
                       }
                     : null,
           ),
@@ -309,7 +328,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
                             -1,
                           );
                         });
-                        _scheduleAutoSave();
+                        _flushAutoSave();
                       }
                     : null,
             onIncrease:
@@ -322,7 +341,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
                             1,
                           );
                         });
-                        _scheduleAutoSave();
+                        _flushAutoSave();
                       }
                     : null,
           ),
@@ -343,7 +362,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
                         -1,
                       );
                     });
-                    _scheduleAutoSave();
+                    _flushAutoSave();
                   }
                 : null,
             onIncrease: _draftSecondarySubtitleScale <
@@ -356,7 +375,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
                         1,
                       );
                     });
-                    _scheduleAutoSave();
+                    _flushAutoSave();
                   }
                 : null,
           ),
@@ -451,7 +470,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
           ],
           const SizedBox(height: 12),
           SettingsSelectionTile(
-            title: '优先语言',
+            title: '在线字幕优先语言',
             subtitle: '可多选；不选时按字幕结果和系统语言自动处理。',
             value: formatSubtitlePreferredLanguageSummary(
               _draftSubtitlePreferredLanguages(),
@@ -478,7 +497,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
     final selection =
         await showSettingsOptionDialog<PlaybackSubtitlePreference>(
       context: context,
-      title: '选择默认字幕策略',
+      title: '选择字幕默认状态',
       options: PlaybackSubtitlePreference.values,
       currentValue: _draftSubtitlePreference,
       labelBuilder: (preference) => preference.label,
@@ -524,5 +543,22 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
           orderCommonSubtitlePreferredLanguages(selected);
     });
     _scheduleAutoSave();
+  }
+
+  Future<void> _openDefaultSubtitlePicker() async {
+    final selection = await showSettingsOptionDialog<PlaybackDefaultSubtitle>(
+      context: context,
+      title: '选择默认字幕',
+      options: PlaybackDefaultSubtitle.values,
+      currentValue: _draftDefaultSubtitle,
+      labelBuilder: (option) => option.label,
+    );
+    if (selection == null) {
+      return;
+    }
+    setState(() {
+      _draftDefaultSubtitle = selection;
+    });
+    _flushAutoSave();
   }
 }

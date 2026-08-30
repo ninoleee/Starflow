@@ -1,5 +1,6 @@
 import 'package:media_kit/media_kit.dart';
 import 'package:starflow/features/playback/application/subtitle_language_preferences.dart';
+import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 
 enum PlaybackSubtitleSessionMode {
   automatic,
@@ -29,12 +30,36 @@ class PlaybackSubtitleTrackFingerprint {
     );
   }
 
+  factory PlaybackSubtitleTrackFingerprint.fromSeriesPreference(
+    SeriesSubtitleTrackPreference preference,
+  ) {
+    return PlaybackSubtitleTrackFingerprint(
+      id: preference.id,
+      title: preference.label,
+      language: preference.language,
+      codec: preference.codec,
+      isDefault: preference.isDefault,
+      isImage: preference.isImage,
+    );
+  }
+
   final String id;
   final String title;
   final String language;
   final String codec;
   final bool isDefault;
   final bool isImage;
+
+  SeriesSubtitleTrackPreference toSeriesPreference() {
+    return SeriesSubtitleTrackPreference(
+      id: id,
+      label: title,
+      language: language,
+      codec: codec,
+      isDefault: isDefault,
+      isImage: isImage,
+    );
+  }
 }
 
 class PlaybackSubtitleSessionPreference {
@@ -65,9 +90,51 @@ class PlaybackSubtitleSessionPreference {
           secondary: PlaybackSubtitleTrackFingerprint.fromTrack(secondary),
         );
 
+  factory PlaybackSubtitleSessionPreference.fromSeriesPreference(
+    SeriesSubtitlePreference preference,
+  ) {
+    final primary = preference.primary;
+    final secondary = preference.secondary;
+    return PlaybackSubtitleSessionPreference._(
+      mode: switch (preference.mode) {
+        SeriesSubtitlePreferenceMode.off => PlaybackSubtitleSessionMode.off,
+        SeriesSubtitlePreferenceMode.single =>
+          PlaybackSubtitleSessionMode.single,
+        SeriesSubtitlePreferenceMode.dual => PlaybackSubtitleSessionMode.dual,
+      },
+      primary: primary == null
+          ? null
+          : PlaybackSubtitleTrackFingerprint.fromSeriesPreference(primary),
+      secondary: secondary == null
+          ? null
+          : PlaybackSubtitleTrackFingerprint.fromSeriesPreference(secondary),
+    );
+  }
+
   final PlaybackSubtitleSessionMode mode;
   final PlaybackSubtitleTrackFingerprint? primary;
   final PlaybackSubtitleTrackFingerprint? secondary;
+
+  SeriesSubtitlePreference? toSeriesPreference(String seriesKey) {
+    if (seriesKey.trim().isEmpty ||
+        mode == PlaybackSubtitleSessionMode.automatic) {
+      return null;
+    }
+    return SeriesSubtitlePreference(
+      seriesKey: seriesKey.trim(),
+      updatedAt: DateTime.now(),
+      mode: switch (mode) {
+        PlaybackSubtitleSessionMode.off => SeriesSubtitlePreferenceMode.off,
+        PlaybackSubtitleSessionMode.single =>
+          SeriesSubtitlePreferenceMode.single,
+        PlaybackSubtitleSessionMode.dual => SeriesSubtitlePreferenceMode.dual,
+        PlaybackSubtitleSessionMode.automatic =>
+          SeriesSubtitlePreferenceMode.single,
+      },
+      primary: primary?.toSeriesPreference(),
+      secondary: secondary?.toSeriesPreference(),
+    );
+  }
 }
 
 SubtitleTrack? matchPlaybackSubtitleTrack(

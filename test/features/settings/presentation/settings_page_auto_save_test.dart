@@ -10,6 +10,7 @@ import 'package:starflow/features/settings/data/app_settings_repository.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/douban_account_editor_page.dart';
 import 'package:starflow/features/settings/presentation/mpv_settings_page.dart';
+import 'package:starflow/features/settings/presentation/subtitle_settings_page.dart';
 
 void main() {
   testWidgets('MPV setting auto-saves when system back immediately pops page',
@@ -108,6 +109,48 @@ void main() {
 
     expect(find.text('打开豆瓣设置'), findsOneWidget);
     expect(repository.settings.doubanAccount.userId, 'updated-user');
+  });
+
+  testWidgets('default subtitle exposes seven options and saves immediately',
+      (tester) async {
+    final initial = SeedData.defaultSettings.copyWith(
+      playbackDefaultSubtitle: PlaybackDefaultSubtitle.systemLanguage,
+    );
+    final repository = _MemorySettingsRepository(initial);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsRepositoryProvider.overrideWithValue(repository),
+          appSettingsProvider.overrideWithValue(initial),
+        ],
+        child: const MaterialApp(home: SubtitleSettingsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('默认字幕'));
+    await tester.pumpAndSettle();
+
+    for (final label in const [
+      '双字幕',
+      '简体中文',
+      '繁体中文',
+      '英语',
+      '日语',
+      '韩语',
+      '系统语言',
+    ]) {
+      expect(find.text(label), findsOneWidget);
+    }
+
+    await tester.tap(find.text('双字幕'));
+    await tester.pumpAndSettle();
+
+    expect(
+      repository.settings.playbackDefaultSubtitle,
+      PlaybackDefaultSubtitle.dual,
+    );
   });
 }
 

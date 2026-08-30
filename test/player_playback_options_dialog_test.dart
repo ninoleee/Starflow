@@ -45,7 +45,7 @@ void main() {
               subtitleScale: 32,
               primarySubtitlePosition: 80,
               secondarySubtitlePosition: 90,
-              secondarySubtitleScale: 75,
+              secondarySubtitleScale: 50,
             ),
             onApplyRuntimeSettings: (settings) async {},
           ),

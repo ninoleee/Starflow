@@ -264,6 +264,57 @@ T? selectAutomaticSubtitleTrack<T>(
   return selected?.value;
 }
 
+T? selectSubtitleTrackWithSystemFallback<T>(
+  Iterable<AutomaticSubtitleCandidate<T>> candidates, {
+  Iterable<String> preferredLanguages = const <String>[],
+  Locale? systemLocale,
+}) {
+  final snapshot = candidates.toList(growable: false);
+  for (final language in preferredLanguages) {
+    final preferred = selectSubtitleTrackForLanguages(
+      snapshot,
+      configuredLanguages: [language],
+      systemLocale: systemLocale,
+    );
+    if (preferred != null) {
+      return preferred;
+    }
+  }
+  final systemLanguage = selectSubtitleTrackForLanguages(
+    snapshot,
+    systemLocale: systemLocale,
+  );
+  if (systemLanguage != null) {
+    return systemLanguage;
+  }
+  return selectAutomaticSubtitleTrack(
+    snapshot,
+    configuredLanguages: const <String>[],
+    systemLocale: systemLocale,
+  );
+}
+
+T? selectSubtitleTrackForLanguages<T>(
+  Iterable<AutomaticSubtitleCandidate<T>> candidates, {
+  Iterable<String> configuredLanguages = const <String>[],
+  Locale? systemLocale,
+}) {
+  AutomaticSubtitleCandidate<T>? selected;
+  var selectedScore = 0;
+  for (final candidate in candidates) {
+    final score = scorePreferredSubtitleText(
+      candidate.searchableText,
+      configuredLanguages: configuredLanguages,
+      systemLocale: systemLocale,
+    );
+    if (score > selectedScore) {
+      selected = candidate;
+      selectedScore = score;
+    }
+  }
+  return selected?.value;
+}
+
 String normalizeSubtitlePreferenceText(String value) {
   return value.trim().toLowerCase().replaceAll(
         RegExp(r'[\s\-_.,:;!?/\\|()\[\]{}<>《》【】"“”·]+'),

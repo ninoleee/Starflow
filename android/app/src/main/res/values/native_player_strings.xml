@@ -8,7 +8,7 @@
     <string name="native_more_actions">更多</string>
     <string name="native_audio_track">音轨</string>
     <string name="native_subtitle_track">字幕</string>
-    <string name="native_subtitle_scale">字幕大小</string>
+    <string name="native_subtitle_scale">主字幕大小</string>
     <string name="native_playback_speed">播放速度</string>
     <string name="native_no_audio_tracks">暂无可选音轨</string>
     <string name="native_no_subtitle_tracks">暂无可选字幕</string>

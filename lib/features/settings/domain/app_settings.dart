@@ -101,7 +101,7 @@ extension PlaybackSubtitlePreferenceX on PlaybackSubtitlePreference {
   String get label {
     switch (this) {
       case PlaybackSubtitlePreference.auto:
-        return '跟随片源';
+        return '默认开启';
       case PlaybackSubtitlePreference.off:
         return '默认关闭';
     }
@@ -110,7 +110,7 @@ extension PlaybackSubtitlePreferenceX on PlaybackSubtitlePreference {
   String get description {
     switch (this) {
       case PlaybackSubtitlePreference.auto:
-        return '打开视频时按片源默认字幕轨处理';
+        return '打开视频时按“默认字幕”自动选择字幕轨';
       case PlaybackSubtitlePreference.off:
         return '打开视频时默认不显示字幕';
     }
@@ -121,6 +121,58 @@ extension PlaybackSubtitlePreferenceX on PlaybackSubtitlePreference {
       'off' => PlaybackSubtitlePreference.off,
       'auto' => PlaybackSubtitlePreference.auto,
       _ => PlaybackSubtitlePreference.auto,
+    };
+  }
+}
+
+enum PlaybackDefaultSubtitle {
+  dual,
+  simplifiedChinese,
+  traditionalChinese,
+  english,
+  japanese,
+  korean,
+  systemLanguage,
+}
+
+extension PlaybackDefaultSubtitleX on PlaybackDefaultSubtitle {
+  String get label => switch (this) {
+        PlaybackDefaultSubtitle.dual => '双字幕',
+        PlaybackDefaultSubtitle.simplifiedChinese => '简体中文',
+        PlaybackDefaultSubtitle.traditionalChinese => '繁体中文',
+        PlaybackDefaultSubtitle.english => '英语',
+        PlaybackDefaultSubtitle.japanese => '日语',
+        PlaybackDefaultSubtitle.korean => '韩语',
+        PlaybackDefaultSubtitle.systemLanguage => '系统语言',
+      };
+
+  String get description => switch (this) {
+        PlaybackDefaultSubtitle.dual => '默认使用中文主字幕和英文副字幕；缺少对应轨道或播放器不支持时回退系统语言。',
+        PlaybackDefaultSubtitle.systemLanguage => '按设备当前系统语言选择字幕。',
+        _ => '优先选择$label；片源没有对应轨道时回退系统语言。',
+      };
+
+  List<String> get preferredLanguages => switch (this) {
+        PlaybackDefaultSubtitle.simplifiedChinese => const ['zh-cn'],
+        PlaybackDefaultSubtitle.traditionalChinese => const ['zh-tw'],
+        PlaybackDefaultSubtitle.english => const ['en'],
+        PlaybackDefaultSubtitle.japanese => const ['ja'],
+        PlaybackDefaultSubtitle.korean => const ['ko'],
+        PlaybackDefaultSubtitle.dual ||
+        PlaybackDefaultSubtitle.systemLanguage =>
+          const [],
+      };
+
+  static PlaybackDefaultSubtitle fromName(String raw) {
+    return switch (raw.trim()) {
+      'dual' => PlaybackDefaultSubtitle.dual,
+      'simplifiedChinese' => PlaybackDefaultSubtitle.simplifiedChinese,
+      'traditionalChinese' => PlaybackDefaultSubtitle.traditionalChinese,
+      'english' => PlaybackDefaultSubtitle.english,
+      'japanese' => PlaybackDefaultSubtitle.japanese,
+      'korean' => PlaybackDefaultSubtitle.korean,
+      'systemLanguage' => PlaybackDefaultSubtitle.systemLanguage,
+      _ => PlaybackDefaultSubtitle.systemLanguage,
     };
   }
 }
@@ -274,7 +326,8 @@ const double kPlaybackSecondarySubtitlePositionDefault = 90.0;
 const double kPlaybackSecondarySubtitleScaleMin = 50.0;
 const double kPlaybackSecondarySubtitleScaleMax = 120.0;
 const double kPlaybackSecondarySubtitleScaleStep = 5.0;
-const double kPlaybackSecondarySubtitleScaleDefault = 75.0;
+const double kPlaybackSecondarySubtitleScaleDefault = 50.0;
+const int kPlaybackSubtitleStyleDefaultsVersion = 1;
 const int kSubtitleSearchMaxValidatedCandidatesMin = 1;
 const int kSubtitleSearchMaxValidatedCandidatesMax = 20;
 const int kSubtitleSearchMaxValidatedCandidatesDefault = 5;
@@ -962,6 +1015,7 @@ class AppSettings {
     this.playbackOpenTimeoutSeconds = 20,
     this.playbackDefaultSpeed = 1.0,
     this.playbackSubtitlePreference = PlaybackSubtitlePreference.auto,
+    this.playbackDefaultSubtitle = PlaybackDefaultSubtitle.systemLanguage,
     this.playbackSubtitleScale = kPlaybackSubtitleScaleDefault,
     this.playbackPrimarySubtitlePosition =
         kPlaybackPrimarySubtitlePositionDefault,
@@ -1035,6 +1089,7 @@ class AppSettings {
   final int playbackOpenTimeoutSeconds;
   final double playbackDefaultSpeed;
   final PlaybackSubtitlePreference playbackSubtitlePreference;
+  final PlaybackDefaultSubtitle playbackDefaultSubtitle;
   final double playbackSubtitleScale;
   final double playbackPrimarySubtitlePosition;
   final double playbackSecondarySubtitlePosition;
@@ -1103,6 +1158,7 @@ class AppSettings {
     int? playbackOpenTimeoutSeconds,
     double? playbackDefaultSpeed,
     PlaybackSubtitlePreference? playbackSubtitlePreference,
+    PlaybackDefaultSubtitle? playbackDefaultSubtitle,
     double? playbackSubtitleScale,
     double? playbackPrimarySubtitlePosition,
     double? playbackSecondarySubtitlePosition,
@@ -1221,6 +1277,8 @@ class AppSettings {
           : playbackDefaultSpeed.clamp(0.75, 2.0),
       playbackSubtitlePreference:
           playbackSubtitlePreference ?? this.playbackSubtitlePreference,
+      playbackDefaultSubtitle:
+          playbackDefaultSubtitle ?? this.playbackDefaultSubtitle,
       playbackSubtitleScale: playbackSubtitleScale == null
           ? this.playbackSubtitleScale
           : clampPlaybackSubtitleScale(playbackSubtitleScale),
@@ -1334,10 +1392,13 @@ class AppSettings {
       'playbackOpenTimeoutSeconds': playbackOpenTimeoutSeconds,
       'playbackDefaultSpeed': playbackDefaultSpeed,
       'playbackSubtitlePreference': playbackSubtitlePreference.name,
+      'playbackDefaultSubtitle': playbackDefaultSubtitle.name,
       'playbackSubtitleScale': playbackSubtitleScale,
       'playbackPrimarySubtitlePosition': playbackPrimarySubtitlePosition,
       'playbackSecondarySubtitlePosition': playbackSecondarySubtitlePosition,
       'playbackSecondarySubtitleScale': playbackSecondarySubtitleScale,
+      'playbackSubtitleStyleDefaultsVersion':
+          kPlaybackSubtitleStyleDefaultsVersion,
       'onlineSubtitleSources':
           onlineSubtitleSources.map((item) => item.name).toList(),
       'assrtToken': assrtToken,
@@ -1494,6 +1555,9 @@ class AppSettings {
       playbackSubtitlePreference: PlaybackSubtitlePreferenceX.fromName(
         json['playbackSubtitlePreference'] as String? ?? '',
       ),
+      playbackDefaultSubtitle: PlaybackDefaultSubtitleX.fromName(
+        json['playbackDefaultSubtitle'] as String? ?? '',
+      ),
       playbackSubtitleScale: parsePlaybackSubtitleScale(
         json['playbackSubtitleScale'],
       ),
@@ -1505,10 +1569,7 @@ class AppSettings {
         json['playbackSecondarySubtitlePosition'],
         kPlaybackSecondarySubtitlePositionDefault,
       ),
-      playbackSecondarySubtitleScale: clampPlaybackSecondarySubtitleScale(
-        (json['playbackSecondarySubtitleScale'] as num?)?.toDouble() ??
-            kPlaybackSecondarySubtitleScaleDefault,
-      ),
+      playbackSecondarySubtitleScale: _parseSecondarySubtitleScale(json),
       onlineSubtitleSources: _parseOnlineSubtitleSources(
         json['onlineSubtitleSources'],
       ),
@@ -1574,6 +1635,17 @@ class AppSettings {
     }
     return AppSettings.fromJson(json);
   }
+}
+
+double _parseSecondarySubtitleScale(Map<String, dynamic> json) {
+  final version =
+      (json['playbackSubtitleStyleDefaultsVersion'] as num?)?.toInt() ?? 0;
+  final raw = (json['playbackSecondarySubtitleScale'] as num?)?.toDouble() ??
+      kPlaybackSecondarySubtitleScaleDefault;
+  if (version < kPlaybackSubtitleStyleDefaultsVersion && raw == 75.0) {
+    return kPlaybackSecondarySubtitleScaleDefault;
+  }
+  return clampPlaybackSecondarySubtitleScale(raw);
 }
 
 extension AppSettingsPerformanceX on AppSettings {

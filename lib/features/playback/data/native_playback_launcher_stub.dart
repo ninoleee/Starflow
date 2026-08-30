@@ -1,9 +1,10 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
 import 'package:starflow/features/playback/domain/playback_episode_queue.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
-NativePlaybackLauncher createNativePlaybackLauncher() {
+NativePlaybackLauncher createNativePlaybackLauncher(Ref ref) {
   return const UnsupportedNativePlaybackLauncher();
 }
 
@@ -22,7 +23,7 @@ class UnsupportedNativePlaybackLauncher implements NativePlaybackLauncher {
     double secondarySubtitleScale = kPlaybackSecondarySubtitleScaleDefault,
     required bool backgroundPlaybackEnabled,
     required PlaybackSubtitlePreference subtitlePreference,
-    required List<String> subtitlePreferredLanguages,
+    required PlaybackDefaultSubtitle defaultSubtitle,
     PlaybackEpisodeQueue? episodeQueue,
     String mediaMimeType = '',
     NativePlaybackEpisodeResolver? episodeResolver,

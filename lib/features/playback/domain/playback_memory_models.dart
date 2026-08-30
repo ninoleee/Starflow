@@ -169,22 +169,120 @@ class SeriesSkipPreference {
   }
 }
 
+enum SeriesSubtitlePreferenceMode { off, single, dual }
+
+class SeriesSubtitleTrackPreference {
+  const SeriesSubtitleTrackPreference({
+    this.id = '',
+    this.label = '',
+    this.language = '',
+    this.codec = '',
+    this.isDefault = false,
+    this.isForced = false,
+    this.isImage = false,
+  });
+
+  final String id;
+  final String label;
+  final String language;
+  final String codec;
+  final bool isDefault;
+  final bool isForced;
+  final bool isImage;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'label': label,
+        'language': language,
+        'codec': codec,
+        'isDefault': isDefault,
+        'isForced': isForced,
+        'isImage': isImage,
+      };
+
+  factory SeriesSubtitleTrackPreference.fromJson(Map<String, dynamic> json) {
+    return SeriesSubtitleTrackPreference(
+      id: json['id'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      language: json['language'] as String? ?? '',
+      codec: json['codec'] as String? ?? '',
+      isDefault: json['isDefault'] as bool? ?? false,
+      isForced: json['isForced'] as bool? ?? false,
+      isImage: json['isImage'] as bool? ?? false,
+    );
+  }
+}
+
+class SeriesSubtitlePreference {
+  const SeriesSubtitlePreference({
+    required this.seriesKey,
+    required this.updatedAt,
+    required this.mode,
+    this.primary,
+    this.secondary,
+  });
+
+  final String seriesKey;
+  final DateTime updatedAt;
+  final SeriesSubtitlePreferenceMode mode;
+  final SeriesSubtitleTrackPreference? primary;
+  final SeriesSubtitleTrackPreference? secondary;
+
+  Map<String, dynamic> toJson() => {
+        'seriesKey': seriesKey,
+        'updatedAt': updatedAt.toIso8601String(),
+        'mode': mode.name,
+        if (primary != null) 'primary': primary!.toJson(),
+        if (secondary != null) 'secondary': secondary!.toJson(),
+      };
+
+  factory SeriesSubtitlePreference.fromJson(Map<String, dynamic> json) {
+    final rawPrimary = json['primary'];
+    final rawSecondary = json['secondary'];
+    return SeriesSubtitlePreference(
+      seriesKey: json['seriesKey'] as String? ?? '',
+      updatedAt: DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      mode: switch (json['mode'] as String? ?? '') {
+        'off' => SeriesSubtitlePreferenceMode.off,
+        'dual' => SeriesSubtitlePreferenceMode.dual,
+        _ => SeriesSubtitlePreferenceMode.single,
+      },
+      primary: rawPrimary is Map
+          ? SeriesSubtitleTrackPreference.fromJson(
+              Map<String, dynamic>.from(rawPrimary),
+            )
+          : null,
+      secondary: rawSecondary is Map
+          ? SeriesSubtitleTrackPreference.fromJson(
+              Map<String, dynamic>.from(rawSecondary),
+            )
+          : null,
+    );
+  }
+}
+
 class PlaybackMemorySnapshot {
   const PlaybackMemorySnapshot({
     this.items = const {},
     this.series = const {},
     this.skipPreferences = const {},
+    this.subtitlePreferences = const {},
   });
 
   final Map<String, PlaybackProgressEntry> items;
   final Map<String, PlaybackProgressEntry> series;
   final Map<String, SeriesSkipPreference> skipPreferences;
+  final Map<String, SeriesSubtitlePreference> subtitlePreferences;
 
   Map<String, dynamic> toJson() {
     return {
       'items': items.map((key, value) => MapEntry(key, value.toJson())),
       'series': series.map((key, value) => MapEntry(key, value.toJson())),
       'skipPreferences': skipPreferences.map(
+        (key, value) => MapEntry(key, value.toJson()),
+      ),
+      'subtitlePreferences': subtitlePreferences.map(
         (key, value) => MapEntry(key, value.toJson()),
       ),
     };
@@ -213,6 +311,16 @@ class PlaybackMemorySnapshot {
         (key, value) => MapEntry(
           '$key',
           SeriesSkipPreference.fromJson(
+            Map<String, dynamic>.from(value as Map),
+          ),
+        ),
+      ),
+      subtitlePreferences:
+          (json['subtitlePreferences'] as Map<dynamic, dynamic>? ?? const {})
+              .map(
+        (key, value) => MapEntry(
+          '$key',
+          SeriesSubtitlePreference.fromJson(
             Map<String, dynamic>.from(value as Map),
           ),
         ),

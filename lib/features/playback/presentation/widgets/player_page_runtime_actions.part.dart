@@ -3,8 +3,12 @@
 part of '../player_page.dart';
 
 extension _PlayerPageStateRuntimeActions on _PlayerPageState {
-  Future<void> _applyStartupPlaybackPreferences(Player player) async {
+  Future<void> _applyStartupPlaybackPreferences(
+    Player player,
+    PlaybackTarget target,
+  ) async {
     final settings = _providerContainer.read(appSettingsProvider);
+    _subtitleSessionPreference = await _loadMpvSeriesSubtitlePreference(target);
 
     try {
       if ((settings.playbackDefaultSpeed - 1.0).abs() > 0.0001) {
@@ -46,14 +50,93 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     if (settings.playbackSubtitlePreference ==
         PlaybackSubtitlePreference.auto) {
       try {
+        final defaultSubtitle = settings.playbackDefaultSubtitle;
+        if (defaultSubtitle == PlaybackDefaultSubtitle.dual) {
+          final restored = await _applyDefaultMpvDualSubtitleTracks(player);
+          if (restored) {
+            return;
+          }
+        }
         await _applyAutoPreferredSubtitleTrack(
           player,
-          configuredLanguages: settings.subtitlePreferredLanguages,
+          configuredLanguages: defaultSubtitle.preferredLanguages,
         );
       } catch (_) {
         // Ignore preference application failures to keep playback available.
       }
     }
+  }
+
+  Future<PlaybackSubtitleSessionPreference?> _loadMpvSeriesSubtitlePreference(
+    PlaybackTarget target,
+  ) async {
+    final preference = await _providerContainer
+        .read(playbackMemoryRepositoryProvider)
+        .loadSubtitlePreference(target);
+    return preference == null
+        ? null
+        : PlaybackSubtitleSessionPreference.fromSeriesPreference(preference);
+  }
+
+  Future<void> _persistMpvSeriesSubtitlePreference(
+    PlaybackTarget target,
+    PlaybackSubtitleSessionPreference? preference,
+  ) async {
+    final repository =
+        _providerContainer.read(playbackMemoryRepositoryProvider);
+    if (preference == null) {
+      await repository.removeSubtitlePreference(target);
+      return;
+    }
+    final seriesKey = buildSeriesKeyForTarget(target);
+    final persisted = preference.toSeriesPreference(seriesKey);
+    if (persisted != null) {
+      await repository.saveSubtitlePreference(persisted);
+    }
+  }
+
+  Future<bool> _applyDefaultMpvDualSubtitleTracks(Player player) async {
+    final tracks = await _awaitAvailableSubtitleTracks(player);
+    final candidates =
+        tracks.where(_canUseMpvDualSubtitleTrack).toList(growable: false);
+    final primary = _selectMpvSubtitleTrackForLanguages(
+      candidates,
+      const ['zh-cn', 'zh-tw', 'zh'],
+    );
+    if (primary == null) {
+      return false;
+    }
+    final secondary = _selectMpvSubtitleTrackForLanguages(
+      candidates.where((track) => track.id != primary.id).toList(),
+      const ['en'],
+    );
+    if (secondary == null) {
+      return false;
+    }
+    await player.setSubtitleTrack(primary);
+    await _setMpvSubtitleProperty(player, 'secondary-sid', secondary.id);
+    await _applyMpvSubtitleLayout(player);
+    _setMpvDualSubtitleSessionEnabled(true);
+    return true;
+  }
+
+  SubtitleTrack? _selectMpvSubtitleTrackForLanguages(
+    List<SubtitleTrack> tracks,
+    List<String> languages,
+  ) {
+    return selectSubtitleTrackForLanguages(
+      tracks.where((track) => !_isSyntheticSubtitleTrack(track)).map(
+            (track) => AutomaticSubtitleCandidate<SubtitleTrack>(
+              value: track,
+              searchableText: [
+                track.title ?? '',
+                track.language ?? '',
+              ].where((item) => item.trim().isNotEmpty).join(' '),
+              isDefault: track.isDefault == true,
+            ),
+          ),
+      configuredLanguages: languages,
+    );
   }
 
   Future<bool> _restoreMpvSubtitleSessionPreference(
@@ -184,7 +267,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     List<SubtitleTrack> tracks, {
     required List<String> configuredLanguages,
   }) {
-    return selectAutomaticSubtitleTrack(
+    return selectSubtitleTrackWithSystemFallback(
       tracks.where((track) => !_isSyntheticSubtitleTrack(track)).map(
             (track) => AutomaticSubtitleCandidate<SubtitleTrack>(
               value: track,
@@ -195,7 +278,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
               isDefault: track.isDefault == true,
             ),
           ),
-      configuredLanguages: configuredLanguages,
+      preferredLanguages: configuredLanguages,
     );
   }
 

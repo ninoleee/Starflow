@@ -230,6 +230,62 @@ class PlaybackMemoryRepository {
     return snapshot.skipPreferences[seriesKey];
   }
 
+  Future<SeriesSubtitlePreference?> loadSubtitlePreference(
+    PlaybackTarget target,
+  ) async {
+    final seriesKey = buildSeriesKeyForTarget(target);
+    if (seriesKey.isEmpty) {
+      return null;
+    }
+    final snapshot = await loadSnapshot();
+    return snapshot.subtitlePreferences[seriesKey];
+  }
+
+  Future<void> saveSubtitlePreference(
+    SeriesSubtitlePreference preference,
+  ) async {
+    final seriesKey = preference.seriesKey.trim();
+    if (seriesKey.isEmpty) {
+      return;
+    }
+    final snapshot = await loadSnapshot();
+    await _saveSnapshot(
+      PlaybackMemorySnapshot(
+        items: snapshot.items,
+        series: snapshot.series,
+        skipPreferences: snapshot.skipPreferences,
+        subtitlePreferences: {
+          ...snapshot.subtitlePreferences,
+          seriesKey: preference,
+        },
+      ),
+    );
+    _notifyChanged?.call();
+  }
+
+  Future<void> removeSubtitlePreference(PlaybackTarget target) async {
+    final seriesKey = buildSeriesKeyForTarget(target);
+    if (seriesKey.isEmpty) {
+      return;
+    }
+    final snapshot = await loadSnapshot();
+    if (!snapshot.subtitlePreferences.containsKey(seriesKey)) {
+      return;
+    }
+    final nextPreferences = <String, SeriesSubtitlePreference>{
+      ...snapshot.subtitlePreferences,
+    }..remove(seriesKey);
+    await _saveSnapshot(
+      PlaybackMemorySnapshot(
+        items: snapshot.items,
+        series: snapshot.series,
+        skipPreferences: snapshot.skipPreferences,
+        subtitlePreferences: nextPreferences,
+      ),
+    );
+    _notifyChanged?.call();
+  }
+
   Future<void> saveProgress({
     required PlaybackTarget target,
     required Duration position,
@@ -289,6 +345,7 @@ class PlaybackMemoryRepository {
         items: nextItems,
         series: nextSeries,
         skipPreferences: snapshot.skipPreferences,
+        subtitlePreferences: snapshot.subtitlePreferences,
       ),
     );
     _notifyChanged?.call();
@@ -309,6 +366,7 @@ class PlaybackMemoryRepository {
         items: snapshot.items,
         series: snapshot.series,
         skipPreferences: nextPreferences,
+        subtitlePreferences: snapshot.subtitlePreferences,
       ),
     );
     _notifyChanged?.call();
@@ -338,7 +396,8 @@ class PlaybackMemoryRepository {
     final snapshot = await loadSnapshot();
     if (snapshot.items.isEmpty &&
         snapshot.series.isEmpty &&
-        snapshot.skipPreferences.isEmpty) {
+        snapshot.skipPreferences.isEmpty &&
+        snapshot.subtitlePreferences.isEmpty) {
       return;
     }
 
@@ -394,6 +453,15 @@ class PlaybackMemoryRepository {
       }
       nextSkipPreferences[entry.key] = entry.value;
     }
+    final nextSubtitlePreferences = <String, SeriesSubtitlePreference>{};
+    for (final entry in snapshot.subtitlePreferences.entries) {
+      final seriesKey = entry.key.trim();
+      if (seriesKey.isNotEmpty && removedSeriesKeys.contains(seriesKey)) {
+        changed = true;
+        continue;
+      }
+      nextSubtitlePreferences[entry.key] = entry.value;
+    }
 
     if (!changed) {
       return;
@@ -404,6 +472,7 @@ class PlaybackMemoryRepository {
         items: nextItems,
         series: nextSeries,
         skipPreferences: nextSkipPreferences,
+        subtitlePreferences: nextSubtitlePreferences,
       ),
     );
     _notifyChanged?.call();
@@ -414,7 +483,9 @@ class PlaybackMemoryRepository {
     final raw = jsonEncode(snapshot.toJson());
     return LocalStorageCacheSummary(
       type: LocalStorageCacheType.playbackMemory,
-      entryCount: snapshot.items.length + snapshot.skipPreferences.length,
+      entryCount: snapshot.items.length +
+          snapshot.skipPreferences.length +
+          snapshot.subtitlePreferences.length,
       totalBytes: utf8.encode(raw).length,
     );
   }
@@ -510,17 +581,30 @@ class PlaybackMemoryRepository {
       }
     }
 
+    final subtitlePreferences = <String, SeriesSubtitlePreference>{
+      ...primary.subtitlePreferences,
+    };
+    for (final entry in mirror.subtitlePreferences.entries) {
+      final existing = subtitlePreferences[entry.key];
+      if (existing == null ||
+          entry.value.updatedAt.isAfter(existing.updatedAt)) {
+        subtitlePreferences[entry.key] = entry.value;
+      }
+    }
+
     return PlaybackMemorySnapshot(
       items: items,
       series: series,
       skipPreferences: skipPreferences,
+      subtitlePreferences: subtitlePreferences,
     );
   }
 
   bool _snapshotIsEmpty(PlaybackMemorySnapshot snapshot) {
     return snapshot.items.isEmpty &&
         snapshot.series.isEmpty &&
-        snapshot.skipPreferences.isEmpty;
+        snapshot.skipPreferences.isEmpty &&
+        snapshot.subtitlePreferences.isEmpty;
   }
 
   void _pruneRecentEntries(Map<String, PlaybackProgressEntry> items) {

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
@@ -8,19 +9,21 @@ import 'package:starflow/features/playback/data/playback_memory_repository.dart'
 import 'package:starflow/features/playback/domain/playback_episode_queue.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
 
-NativePlaybackLauncher createNativePlaybackLauncher() {
-  return PlatformNativePlaybackLauncher();
+NativePlaybackLauncher createNativePlaybackLauncher(Ref ref) {
+  return PlatformNativePlaybackLauncher(ref);
 }
 
 class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
-  PlatformNativePlaybackLauncher() {
+  PlatformNativePlaybackLauncher(this._ref) {
     _resolverChannel.setMethodCallHandler(_handleResolverMethodCall);
   }
 
   static const _platformChannel = MethodChannel('starflow/platform');
   static const _resolverChannel =
       MethodChannel('starflow/native_playback_resolver');
+  final Ref _ref;
   NativePlaybackEpisodeResolver? _episodeResolver;
   String _resolverSessionId = '';
 
@@ -36,7 +39,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
     double secondarySubtitleScale = kPlaybackSecondarySubtitleScaleDefault,
     required bool backgroundPlaybackEnabled,
     required PlaybackSubtitlePreference subtitlePreference,
-    required List<String> subtitlePreferredLanguages,
+    required PlaybackDefaultSubtitle defaultSubtitle,
     PlaybackEpisodeQueue? episodeQueue,
     String mediaMimeType = '',
     NativePlaybackEpisodeResolver? episodeResolver,
@@ -88,7 +91,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
               clampPlaybackSecondarySubtitleScale(secondarySubtitleScale),
           'backgroundPlaybackEnabled': backgroundPlaybackEnabled,
           'subtitlePreference': subtitlePreference.name,
-          'subtitlePreferredLanguages': subtitlePreferredLanguages,
+          'defaultSubtitle': defaultSubtitle.name,
           'mediaMimeType': mediaMimeType,
           'resolverSessionId': _resolverSessionId,
           'playbackTargetJson': jsonEncode(target.toJson()),
@@ -130,6 +133,36 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
   }
 
   Future<Object?> _handleResolverMethodCall(MethodCall call) async {
+    if (call.method == 'saveNativePlaybackSubtitleStyle') {
+      final arguments = Map<String, Object?>.from(
+        call.arguments as Map<dynamic, dynamic>? ?? const {},
+      );
+      await _ref
+          .read(settingsControllerProvider.notifier)
+          .savePlaybackSubtitleStylePreferences(
+            subtitleScale: _readDouble(
+              arguments,
+              'subtitleScale',
+              kPlaybackSubtitleScaleDefault,
+            ),
+            primarySubtitlePosition: _readDouble(
+              arguments,
+              'primarySubtitlePosition',
+              kPlaybackPrimarySubtitlePositionDefault,
+            ),
+            secondarySubtitlePosition: _readDouble(
+              arguments,
+              'secondarySubtitlePosition',
+              kPlaybackSecondarySubtitlePositionDefault,
+            ),
+            secondarySubtitleScale: _readDouble(
+              arguments,
+              'secondarySubtitleScale',
+              kPlaybackSecondarySubtitleScaleDefault,
+            ),
+          );
+      return true;
+    }
     if (call.method != 'resolveNativePlaybackEpisode') {
       throw MissingPluginException('Unsupported native playback resolver call');
     }
@@ -169,6 +202,14 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       };
     }
   }
+}
+
+double _readDouble(
+  Map<String, Object?> values,
+  String key,
+  double fallback,
+) {
+  return (values[key] as num?)?.toDouble() ?? fallback;
 }
 
 void _traceQuarkNativeLaunch(

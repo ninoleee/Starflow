@@ -88,7 +88,8 @@ object NativeDualSubtitleTrackPolicy {
 }
 
 object NativeDualSubtitleLayoutPolicy {
-    const val SECONDARY_TEXT_SCALE = 0.75f
+    const val SECONDARY_TEXT_SCALE_PERCENT = 50.0
+    const val SECONDARY_TEXT_SCALE = 0.50f
 }
 
 class NativeDualSubtitleController {

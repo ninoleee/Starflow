@@ -149,19 +149,16 @@ class MainActivity : FlutterActivity() {
                     val secondarySubtitlePosition =
                         call.argument<Double>("secondarySubtitlePosition") ?: 90.0
                     val secondarySubtitleScale =
-                        call.argument<Double>("secondarySubtitleScale") ?: 75.0
+                        call.argument<Double>("secondarySubtitleScale")
+                            ?: NativeDualSubtitleLayoutPolicy.SECONDARY_TEXT_SCALE_PERCENT
                     val subtitlePreference =
                         call.argument<String>("subtitlePreference")?.trim().orEmpty()
+                    val defaultSubtitle =
+                        call.argument<String>("defaultSubtitle")?.trim().orEmpty()
                     val mediaMimeType =
                         call.argument<String>("mediaMimeType")?.trim().orEmpty()
                     val resolverSessionId =
                         call.argument<String>("resolverSessionId")?.trim().orEmpty()
-                    val subtitlePreferredLanguages =
-                        call.argument<List<String>>("subtitlePreferredLanguages")
-                            ?.map(String::trim)
-                            ?.filter(String::isNotEmpty)
-                            ?.toTypedArray()
-                            ?: emptyArray()
                     val playbackTargetJson = call.argument<String>("playbackTargetJson")?.trim().orEmpty()
                     val playbackItemKey = call.argument<String>("playbackItemKey")?.trim().orEmpty()
                     val seriesKey = call.argument<String>("seriesKey")?.trim().orEmpty()
@@ -224,8 +221,8 @@ class MainActivity : FlutterActivity() {
                                 subtitlePreference,
                             )
                             putExtra(
-                                NativePlaybackActivity.EXTRA_SUBTITLE_PREFERRED_LANGUAGES,
-                                subtitlePreferredLanguages,
+                                NativePlaybackActivity.EXTRA_DEFAULT_SUBTITLE,
+                                defaultSubtitle,
                             )
                             putExtra(NativePlaybackActivity.EXTRA_PLAYBACK_TARGET_JSON, playbackTargetJson)
                             putExtra(NativePlaybackActivity.EXTRA_PLAYBACK_ITEM_KEY, playbackItemKey)
@@ -333,6 +330,55 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    private fun saveNativePlaybackSubtitleStyle(
+        subtitleScale: Double,
+        primarySubtitlePosition: Double,
+        secondarySubtitlePosition: Double,
+        secondarySubtitleScale: Double,
+    ) {
+        val channel = nativePlaybackResolverChannel
+        if (channel == null) {
+            NativeAppLogger.warning(
+                "native.subtitle-style",
+                "Flutter settings channel is unavailable",
+            )
+            return
+        }
+        channel.invokeMethod(
+            "saveNativePlaybackSubtitleStyle",
+            mapOf(
+                "subtitleScale" to subtitleScale,
+                "primarySubtitlePosition" to primarySubtitlePosition,
+                "secondarySubtitlePosition" to secondarySubtitlePosition,
+                "secondarySubtitleScale" to secondarySubtitleScale,
+            ),
+            object : MethodChannel.Result {
+                override fun success(result: Any?) {
+                    if (result != true) {
+                        NativeAppLogger.warning(
+                            "native.subtitle-style",
+                            "Flutter rejected subtitle style persistence",
+                        )
+                    }
+                }
+
+                override fun error(code: String, message: String?, details: Any?) {
+                    NativeAppLogger.warning(
+                        "native.subtitle-style",
+                        "Could not persist subtitle style: ${message ?: code}",
+                    )
+                }
+
+                override fun notImplemented() {
+                    NativeAppLogger.warning(
+                        "native.subtitle-style",
+                        "Subtitle style persistence is not implemented",
+                    )
+                }
+            },
+        )
+    }
+
     companion object {
         @Volatile
         private var activeInstance: WeakReference<MainActivity>? = null
@@ -348,6 +394,24 @@ class MainActivity : FlutterActivity() {
                     resolverSessionId = resolverSessionId,
                     playbackTargetJson = playbackTargetJson,
                     callback = callback,
+                )
+            }
+            return true
+        }
+
+        fun saveNativePlaybackSubtitleStyle(
+            subtitleScale: Double,
+            primarySubtitlePosition: Double,
+            secondarySubtitlePosition: Double,
+            secondarySubtitleScale: Double,
+        ): Boolean {
+            val activity = activeInstance?.get() ?: return false
+            activity.runOnUiThread {
+                activity.saveNativePlaybackSubtitleStyle(
+                    subtitleScale = subtitleScale,
+                    primarySubtitlePosition = primarySubtitlePosition,
+                    secondarySubtitlePosition = secondarySubtitlePosition,
+                    secondarySubtitleScale = secondarySubtitleScale,
                 )
             }
             return true

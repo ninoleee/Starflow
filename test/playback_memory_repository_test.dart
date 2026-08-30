@@ -268,6 +268,83 @@ void main() {
     expect(preference.seriesTitle, '请回答1988');
   });
 
+  test('persists subtitle choice per series without affecting other shows',
+      () async {
+    final prefs = await SharedPreferences.getInstance();
+    final repository = PlaybackMemoryRepository(sharedPreferences: prefs);
+    const firstEpisode = PlaybackTarget(
+      title: '第一集',
+      sourceId: 'emby-main',
+      streamUrl: 'https://emby.example/series-11-episode-1.mkv',
+      sourceName: '客厅 Emby',
+      sourceKind: MediaSourceKind.emby,
+      itemId: 'episode-1',
+      itemType: 'episode',
+      seriesId: 'series-11',
+      seriesTitle: '请回答1988',
+      seasonNumber: 1,
+      episodeNumber: 1,
+    );
+    const secondEpisode = PlaybackTarget(
+      title: '第二集',
+      sourceId: 'emby-main',
+      streamUrl: 'https://emby.example/series-11-episode-2.mkv',
+      sourceName: '客厅 Emby',
+      sourceKind: MediaSourceKind.emby,
+      itemId: 'episode-2',
+      itemType: 'episode',
+      seriesId: 'series-11',
+      seriesTitle: '请回答1988',
+      seasonNumber: 1,
+      episodeNumber: 2,
+    );
+    const otherSeries = PlaybackTarget(
+      title: '第一集',
+      sourceId: 'emby-main',
+      streamUrl: 'https://emby.example/series-12-episode-1.mkv',
+      sourceName: '客厅 Emby',
+      sourceKind: MediaSourceKind.emby,
+      itemId: 'other-episode-1',
+      itemType: 'episode',
+      seriesId: 'series-12',
+      seriesTitle: '机智医生生活',
+      seasonNumber: 1,
+      episodeNumber: 1,
+    );
+    final seriesKey = buildSeriesKeyForTarget(firstEpisode);
+    await repository.saveSubtitlePreference(
+      SeriesSubtitlePreference(
+        seriesKey: seriesKey,
+        updatedAt: DateTime.utc(2026, 8, 30),
+        mode: SeriesSubtitlePreferenceMode.dual,
+        primary: const SeriesSubtitleTrackPreference(
+          label: '简体中文',
+          language: 'zh-CN',
+        ),
+        secondary: const SeriesSubtitleTrackPreference(
+          label: 'English',
+          language: 'en',
+        ),
+      ),
+    );
+
+    await repository.saveProgress(
+      target: firstEpisode,
+      position: const Duration(minutes: 8),
+      duration: const Duration(minutes: 45),
+    );
+
+    final restored = await repository.loadSubtitlePreference(secondEpisode);
+    expect(restored, isNotNull);
+    expect(restored!.mode, SeriesSubtitlePreferenceMode.dual);
+    expect(restored.primary?.language, 'zh-CN');
+    expect(restored.secondary?.language, 'en');
+    expect(await repository.loadSubtitlePreference(otherSeries), isNull);
+
+    await repository.removeSubtitlePreference(secondEpisode);
+    expect(await repository.loadSubtitlePreference(firstEpisode), isNull);
+  });
+
   test('does not persist loopback relay url in playback history', () async {
     final prefs = await SharedPreferences.getInstance();
     final repository = PlaybackMemoryRepository(sharedPreferences: prefs);

@@ -38,6 +38,39 @@ object NativeSubtitleTrackSelectionPolicy {
         return selected?.value
     }
 
+    fun <T> selectWithSystemFallback(
+        candidates: Iterable<NativeSubtitleTrackCandidate<T>>,
+        preferredLanguages: List<String>,
+        systemLanguage: String,
+    ): T? {
+        val snapshot = candidates.toList()
+        val preferred = selectLanguage(snapshot, preferredLanguages)
+        if (preferred != null) {
+            return preferred
+        }
+        val system = selectLanguage(snapshot, listOf(systemLanguage))
+        if (system != null) {
+            return system
+        }
+        return select(snapshot, emptyList())
+    }
+
+    fun <T> selectLanguage(
+        candidates: Iterable<NativeSubtitleTrackCandidate<T>>,
+        preferredLanguages: List<String>,
+    ): T? {
+        var selected: NativeSubtitleTrackCandidate<T>? = null
+        var selectedScore = 0
+        candidates.forEach { candidate ->
+            val score = languageScore(candidate, preferredLanguages)
+            if (score > selectedScore) {
+                selected = candidate
+                selectedScore = score
+            }
+        }
+        return selected?.value
+    }
+
     private fun <T> languageScore(
         candidate: NativeSubtitleTrackCandidate<T>,
         preferredLanguages: List<String>,

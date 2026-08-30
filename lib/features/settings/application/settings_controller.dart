@@ -229,6 +229,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   Future<void> savePlaybackSubtitlePreferences({
     required PlaybackSubtitlePreference subtitlePreference,
+    required PlaybackDefaultSubtitle defaultSubtitle,
     required double subtitleScale,
     double? primarySubtitlePosition,
     double? secondarySubtitlePosition,
@@ -247,6 +248,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(
       current.copyWith(
         playbackSubtitlePreference: subtitlePreference,
+        playbackDefaultSubtitle: defaultSubtitle,
         playbackSubtitleScale: subtitleScale,
         playbackPrimarySubtitlePosition: primarySubtitlePosition,
         playbackSecondarySubtitlePosition: secondarySubtitlePosition,
@@ -268,6 +270,23 @@ class SettingsController extends AsyncNotifier<AppSettings> {
             clampSubtitleSearchMaxValidatedCandidates(
           subtitleSearchMaxValidatedCandidates,
         ),
+      ),
+    );
+  }
+
+  Future<void> savePlaybackSubtitleStylePreferences({
+    required double subtitleScale,
+    required double primarySubtitlePosition,
+    required double secondarySubtitlePosition,
+    required double secondarySubtitleScale,
+  }) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(
+        playbackSubtitleScale: subtitleScale,
+        playbackPrimarySubtitlePosition: primarySubtitlePosition,
+        playbackSecondarySubtitlePosition: secondarySubtitlePosition,
+        playbackSecondarySubtitleScale: secondarySubtitleScale,
       ),
     );
   }

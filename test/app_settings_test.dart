@@ -333,6 +333,10 @@ void main() {
       defaults.playbackSubtitlePreference,
       PlaybackSubtitlePreference.auto,
     );
+    expect(
+      defaults.playbackDefaultSubtitle,
+      PlaybackDefaultSubtitle.systemLanguage,
+    );
     expect(defaults.playbackSubtitleScale, 32.0);
     expect(
       defaults.playbackPrimarySubtitlePosition,
@@ -346,6 +350,7 @@ void main() {
       defaults.playbackSecondarySubtitleScale,
       kPlaybackSecondarySubtitleScaleDefault,
     );
+    expect(kPlaybackSecondarySubtitleScaleDefault, 50.0);
     expect(defaults.onlineSubtitleSources, [OnlineSubtitleSource.assrt]);
     expect(defaults.assrtToken, isEmpty);
     expect(defaults.opensubtitlesEnabled, isFalse);
@@ -646,6 +651,43 @@ void main() {
     expect(copied.playbackOpenTimeoutSeconds, 900);
     expect(copied.playbackDefaultSpeed, 0.75);
     expect(copied.playbackSubtitleScale, kPlaybackSubtitleScaleMin);
+  });
+
+  test('default subtitle falls back to system language for missing values', () {
+    expect(
+      AppSettings.fromJson(const {}).playbackDefaultSubtitle,
+      PlaybackDefaultSubtitle.systemLanguage,
+    );
+    expect(
+      AppSettings.fromJson(
+        const {'playbackDefaultSubtitle': 'traditionalChinese'},
+      ).playbackDefaultSubtitle,
+      PlaybackDefaultSubtitle.traditionalChinese,
+    );
+    expect(
+      AppSettings.fromJson(
+        const {'playbackDefaultSubtitle': 'removed-option'},
+      ).playbackDefaultSubtitle,
+      PlaybackDefaultSubtitle.systemLanguage,
+    );
+  });
+
+  test('legacy secondary subtitle default migrates once from 75 to 50', () {
+    final migrated = AppSettings.fromJson(
+      const {'playbackSecondarySubtitleScale': 75},
+    );
+    expect(migrated.playbackSecondarySubtitleScale, 50);
+
+    final explicitAfterUpgrade = AppSettings.fromJson(const {
+      'playbackSecondarySubtitleScale': 75,
+      'playbackSubtitleStyleDefaultsVersion':
+          kPlaybackSubtitleStyleDefaultsVersion,
+    });
+    expect(explicitAfterUpgrade.playbackSecondarySubtitleScale, 75);
+    expect(
+      migrated.toJson()['playbackSubtitleStyleDefaultsVersion'],
+      kPlaybackSubtitleStyleDefaultsVersion,
+    );
   });
 
   test('subtitle provider settings normalize invalid and missing values', () {
