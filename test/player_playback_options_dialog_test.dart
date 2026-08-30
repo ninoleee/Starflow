@@ -6,7 +6,8 @@ import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_options_dialog.dart';
 
 void main() {
-  testWidgets('MPV playback settings omit the live playback information card',
+  testWidgets(
+      'MPV playback settings keep subtitle layout and MPV options under More',
       (tester) async {
     final player = Player(platformPlayer: _FakePlatformPlayer());
     addTearDown(player.dispose);
@@ -64,10 +65,45 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('本剧跳过片头片尾'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('更多'),
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('更多'), findsOneWidget);
+    expect(find.text('字幕布局'), findsNothing);
+    expect(find.text('主字幕大小'), findsNothing);
+    expect(find.text('后台播放'), findsNothing);
+    expect(find.text('双击快进/快退'), findsNothing);
     expect(find.text('播放信息'), findsNothing);
     expect(find.text('缓冲进度'), findsNothing);
     expect(find.text('画面'), findsNothing);
     expect(find.text('状态'), findsNothing);
+
+    await tester.tap(find.text('更多'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('字幕布局'), findsOneWidget);
+    expect(find.text('主字幕大小'), findsOneWidget);
+    expect(find.text('主字幕位置'), findsOneWidget);
+    expect(find.text('副字幕位置'), findsOneWidget);
+    expect(find.text('副字幕大小'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('MPV'),
+      180,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('MPV'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('后台播放'),
+      180,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('后台播放'), findsOneWidget);
+    expect(find.text('双击快进/快退'), findsOneWidget);
   });
 }
 

@@ -621,7 +621,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
       padding: controlsPadding,
       primaryButtonBar: _buildAdaptiveMaterialPrimaryButtonBar(),
       topButtonBar: materialTopButtonBar,
-      topButtonBarMargin: EdgeInsets.fromLTRB(16, isPortrait ? 12 : 0, 16, 0),
+      topButtonBarMargin: EdgeInsets.fromLTRB(0, isPortrait ? 12 : 0, 16, 0),
       bottomButtonBarMargin: EdgeInsets.only(
         left: 16,
         right: 8,
@@ -659,7 +659,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
       automaticallyImplySkipPreviousButton: false,
       padding: controlsPadding,
       topButtonBar: desktopTopButtonBar,
-      topButtonBarMargin: EdgeInsets.fromLTRB(16, isPortrait ? 12 : 0, 16, 0),
+      topButtonBarMargin: EdgeInsets.fromLTRB(0, isPortrait ? 12 : 0, 16, 0),
       bottomButtonBarMargin: EdgeInsets.fromLTRB(16, 0, 16, bottomInset),
       bottomButtonBar: _buildAdaptiveDesktopBottomButtonBar(),
       seekBarMargin: EdgeInsets.fromLTRB(
@@ -788,8 +788,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
     required AppSettings settings,
   }) {
     return [
-      MpvNetworkSpeedLabel(player: state.widget.controller.player),
-      const SizedBox(width: 8),
       Tooltip(
         message: '返回',
         child: MaterialCustomButton(
@@ -799,6 +797,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
           },
         ),
       ),
+      MpvNetworkSpeedLabel(player: state.widget.controller.player),
       const Spacer(),
       if (_hasPlaybackEpisodeQueue)
         Tooltip(
@@ -833,8 +832,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
     required AppSettings settings,
   }) {
     return [
-      MpvNetworkSpeedLabel(player: state.widget.controller.player),
-      const SizedBox(width: 8),
       Tooltip(
         message: '返回',
         child: MaterialDesktopCustomButton(
@@ -844,6 +841,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
           },
         ),
       ),
+      MpvNetworkSpeedLabel(player: state.widget.controller.player),
       const Spacer(),
       if (_hasPlaybackEpisodeQueue)
         Tooltip(

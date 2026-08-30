@@ -117,8 +117,8 @@
 - `ExoPlayer（原生）` 与解码/音频输出设置不引入新的网络协议，仍然复用同一条播放地址和请求头链路
 - “从头播放 / 继续播放”的差异只由本地播放目标中的 `allowResume` 控制，并贯穿地址解析、内置 `MPV`、Android `ExoPlayer` 和 iOS `AVPlayer`；切换这两个入口不会增加预检、测速或其它网络请求
 - Android TV 对 `DDP / E-AC-3` 启用的 PCM 兼容输出只调整设备本地 Media3 音频渲染，并由随 APK 打包的 FFmpeg 扩展解码音频；不改变 Emby 播放地址、鉴权请求头、直连/转码选择或网络重试行为
-- 非 `TV` 内嵌 `MPV` 改为 Starflow 自己的轻量播放叠层，也只是本地播放器 UI 收敛；首层现在只保留返回 / 播放 / 进度 / 全屏 / 更多，字幕、音轨、外挂字幕、在线字幕、字幕偏移、后台播放和 MPV 运行参数仍然复用现有播放链路，不新增新的服务端接口
-- Exo 右上角网速来自 Media3 当前会话已有传输事件，MPV 左上角网速来自本地 libmpv `cache-speed` 属性；两者都不额外发起测速或网络请求。控制栏隐藏只隐藏标签，MPV 的属性读取也只发生在本地进程
+- 非 `TV` 内嵌 `MPV` 改为 Starflow 自己的轻量播放叠层，也只是本地播放器 UI 收敛；控制首层只保留返回 / 播放 / 进度 / 全屏 / 更多，播放设置一级再以“更多”进入字幕布局和 MPV 参数二级页。字幕、音轨、外挂字幕、在线字幕、字幕偏移、后台播放和 MPV 运行参数仍然复用现有播放链路，不新增新的服务端接口
+- Exo 右上角网速来自 Media3 当前会话已有传输事件；MPV 顶栏以左上角返回按钮起始，右侧网速来自本地 libmpv `cache-speed` 属性。两者都不额外发起测速或网络请求；控制栏隐藏只隐藏标签，MPV 的属性读取也只发生在本地进程
 - 内置 `MPV` 主动退出时会先立即关闭播放页，再在后台保存进度并完成 `pause -> stop -> dispose`；下一次打开前仍串行等待上一实例释放，关闭后台播放和打开新片源也复用同一套本地清理流程，不新增网络请求
 - `lib/core/utils/playback_trace.dart`、`lib/core/utils/subtitle_search_trace.dart`、`lib/core/utils/metadata_search_trace.dart`、`lib/core/utils/detail_resource_switch_trace.dart` 当前都已静音；保留这些 helper 主要是为了兼容已有调用点
 - 非 `TV` 叠层里的 fullscreen 状态透传、窗口态 click-only 唤醒、auto-hide 定时器取消、播放设置弹窗 Material 化和 dispose 保护也都属于本地 widget 生命周期修正，不涉及新的网络协议

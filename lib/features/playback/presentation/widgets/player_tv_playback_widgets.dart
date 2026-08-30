@@ -107,7 +107,7 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
       children: [
         Positioned(
           top: 16,
-          left: 16,
+          left: 0,
           right: 16,
           child: SafeArea(
             bottom: false,
@@ -119,10 +119,6 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
               },
               child: Row(
                 children: [
-                  if (networkSpeed != null) ...[
-                    networkSpeed!,
-                    const SizedBox(width: 10),
-                  ],
                   StarflowIconButton(
                     icon: Icons.arrow_back_rounded,
                     tooltip: '返回',
@@ -130,6 +126,7 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
                     focusNode: backFocusNode,
                     onPressed: onBack,
                   ),
+                  if (networkSpeed != null) networkSpeed!,
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(

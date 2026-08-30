@@ -129,6 +129,73 @@ void main() {
     expect(find.byIcon(Icons.skip_next_rounded), findsNothing);
     expect(find.byIcon(Icons.playlist_play_rounded), findsNothing);
   });
+
+  testWidgets('TV chrome starts with Back and places network speed after it',
+      (tester) async {
+    tester.view
+      ..physicalSize = const Size(1280, 720)
+      ..devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final focusNodes = _focusNodes();
+    addTearDown(() {
+      for (final node in focusNodes) {
+        node.dispose();
+      }
+    });
+
+    const networkSpeedKey = ValueKey<String>('tv-network-speed');
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [isTelevisionProvider.overrideWith((ref) => true)],
+        child: MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: PlayerTvPlaybackChrome(
+              title: 'Movie',
+              position: Duration.zero,
+              duration: const Duration(hours: 2),
+              playing: false,
+              bufferingPercentage: 0,
+              backFocusNode: focusNodes[0],
+              previousEpisodeFocusNode: focusNodes[1],
+              playPauseFocusNode: focusNodes[2],
+              nextEpisodeFocusNode: focusNodes[3],
+              episodePickerFocusNode: focusNodes[4],
+              subtitleFocusNode: focusNodes[5],
+              audioFocusNode: focusNodes[6],
+              moreFocusNode: focusNodes[7],
+              onBack: () {},
+              showEpisodeControls: false,
+              onPreviousEpisode: null,
+              onTogglePlayback: () {},
+              onNextEpisode: null,
+              onOpenEpisodePicker: () {},
+              onOpenSubtitle: () {},
+              onOpenAudio: () {},
+              onOpenOptions: () {},
+              networkSpeed: const SizedBox(
+                key: networkSpeedKey,
+                width: 80,
+                height: 28,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final backButton = find.byWidgetPredicate(
+      (widget) =>
+          widget is StarflowIconButton &&
+          widget.icon == Icons.arrow_back_rounded,
+    );
+    final backRect = tester.getRect(backButton);
+    final networkRect = tester.getRect(find.byKey(networkSpeedKey));
+    expect(backRect.left, 0);
+    expect(networkRect.left, backRect.right);
+  });
 }
 
 List<FocusNode> _focusNodes() {

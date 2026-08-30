@@ -666,11 +666,12 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 自动字幕选轨由播放器启动时统一执行：优先语言匹配 > 片源 Forced 字幕 > 片源默认字幕；明确选择“默认关闭”时保持关闭。MPV、Android Media3 和 iOS AVPlayer 都使用这套优先级，未配置优先语言时才使用系统语言作为语言匹配依据
 - 非 `TV` 的内嵌 `MPV` 当前使用 Starflow 自己的轻量播放叠层，而不是 `media_kit` 默认控制条：
   - 首层只保留返回、播放/暂停、进度、全屏和“更多”；音量、字幕、音轨与其他高级播放项统一收进播放设置弹窗
-  - 顶部标题栏、底部控制区和播放设置弹窗都收敛到更官方的 Material 组件组合：`Material + IconButton + Slider + Text + ListTile + TextButton`
+  - 顶部标题栏、底部控制区和播放设置弹窗都收敛到更官方的 Material 组件组合：`Material + IconButton + Slider + Text + ListTile + TextButton`；手机、桌面和 TV 顶栏都从最左侧返回按钮开始，实时网速紧跟在其右侧
   - `PiP / AirPlay` 入口继续按平台能力显示
 - 内置 `MPV` 主动退出时先 detach 当前播放器并立即关闭路由，进度保存、平台会话清理和 `pause -> stop -> dispose` 在退出后继续完成；新播放器初始化前仍会等待 `_playerShutdownQueue` 清空，避免 TV 慢设备被释放流程挡住页面退出，同时防止旧实例与新实例叠音
 - 播放器内的主动退出、关闭后台播放、外部清理请求和打开新片源统一收口到同一套 detach/shutdown 流程；后台播放只承接 App 进入后台，不让页面级播放器跨路由存活
 - `PlaybackOptionsDialog` 只订阅设置项实际需要的轨道、循环模式和倍速；底部实时“播放信息”卡片及其进度、画面尺寸、播放/缓冲状态和缓冲百分比监听已经删除，避免设置弹窗为只读信息持续重建
+- `PlaybackOptionsDialog` 一级只展示常用播放项和一个“更多”入口；主/副字幕布局、后台播放及 MPV 手势/恢复/调优开关由独立二级弹窗承载，修改仍立即写入当前会话快照
 - 播放页 presentation 当前已分成：
   - `player_page.dart`：页面壳、字段与顶层 wiring
   - `player_page_platform_session.part.dart`：PiP、后台播放、系统播放会话
@@ -752,8 +753,8 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - Android 原生播放器每次轨道变化都会把音频轨的 MIME、编码标记、声道数、采样率、支持状态和选中状态写入结构化 native 日志；初始化日志同时标记 `audioOutputMode / forcePcmAudioOutput / ffmpegAudioDecoder`
 - Android 原生播放器的字幕菜单不使用 Media3 泛化轨道名称，而由 `NativeSubtitleTrackLabelPolicy` 按内置 MPV 的“标题 · 语言 · 默认/强制”顺序生成；`und / zxx` 不显示为语言，外挂字幕优先显示文件名
 - Android 原生播放器的可选双字幕模式由 `NativeDualSubtitleController` 承担：同一 Exo 会话使用主/副两个文本渲染器分别解码两条分离的文本字幕轨，动态能力路由只让副渲染器认领英文轨，再按独立主/副位置输出两个 cue；副字幕字号、主位置和副位置从 Flutter 设置传入，并可在原生“更多”中覆盖当前会话。普通字幕模式仍只启用主文本渲染器，PGS/VobSub/DVB 图片字幕不进入双字幕候选
-- 非 Web 内置 MPV 使用原生 `sid / secondary-sid` 选择两条分离的内封文本轨，同时向 libmpv 写入 `sub-pos / secondary-sub-pos / secondary-sub-scale`；由于当前 `libass=false`，画面上的主/副字幕由 Starflow 自定义 Flutter 叠层分别渲染，保证窗口态与全屏态都使用独立位置和字号。图片字幕和临时外挂字幕不进入特殊模式。MPV“更多”同时提供后台播放、手势、卡顿恢复和性能调优开关
-- 非 Web MPV 控制层左上角使用轻量轮询读取 libmpv `cache-speed`，展示当前缓存下层 I/O 读取速度；桌面 / 手机 Adaptive 控制层和 TV chrome 复用同一网速组件
+- 非 Web 内置 MPV 使用原生 `sid / secondary-sid` 选择两条分离的内封文本轨，同时向 libmpv 写入 `sub-pos / secondary-sub-pos / secondary-sub-scale`；由于当前 `libass=false`，画面上的主/副字幕由 Starflow 自定义 Flutter 叠层分别渲染，保证窗口态与全屏态都使用独立位置和字号。图片字幕和临时外挂字幕不进入特殊模式。播放设置一级通过“更多”打开二级页，二级页同时提供字幕布局、后台播放、手势、卡顿恢复和性能调优开关
+- 非 Web MPV 控制层左上角以返回按钮作为第一个控件，不保留人为前置间距；其右侧网速标签使用轻量轮询读取 libmpv `cache-speed`，展示当前缓存下层 I/O 读取速度。桌面 / 手机 Adaptive 控制层和 TV chrome 复用同一排列与网速组件
 - Android 原生播放器同时记录视频轨 MIME、编码、尺寸、色彩信息与支持状态；检测到存在视频轨但当前设备全部不支持时，会以 `static=false` 重新请求 Emby 转码流并从原进度继续
 - Android 原生播放器额外包含与 Media3 同版本的 `media3-exoplayer-hls`；仅对 SmartStrm 且文件名含 `#/%23` 的原生启动执行响应头级预检，按最终 Content-Type 直接选择 MP4/HLS，不持久化短期重定向地址；预检失败时仍由 `NativePlaybackHlsFallbackPolicy` 在首次解析错误 `3003` 后保留进度切换 HLS 一次
 - Android 原生启动通过 `buildDeferredNativeEpisodeQueue` 携带当前季的完整未解析队列并保留真实 `currentIndex`，只用已解析目标替换当前条目；原生选集、上一集、下一集和播放结束自动续播统一通过 `starflow/native_playback_resolver` 回调 Flutter，按选中的单集执行 `PlaybackTargetResolver` 和必要的 SmartStrm MP4/HLS 探测。异步解析期间旧播放器不释放，成功后才更新队列条目并切换，失败或会话变化则保留当前视频
@@ -845,9 +846,9 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 
 - 播放页放播放器内核、解码模式、ExoPlayer 音频输出、打开超时、后台播放、默认倍速
 - 字幕收拢到独立的“字幕”一级页：默认字幕策略、主字幕大小、主/副字幕位置、副字幕大小、在线字幕来源与凭据、优先语言、单次最多验证条数
-- 内置 MPV 的触屏交互、卡顿自动恢复和激进性能调优保留在独立的“MPV”一级页；播放中的“更多”复用同一组持久化字段，并额外集中提供后台播放与主/副字幕布局
+- 内置 MPV 的触屏交互、卡顿自动恢复和激进性能调优保留在全局设置的独立“MPV”一级页；播放器内的播放设置一级只提供“更多”入口，二级页复用同一组持久化字段，并额外集中提供后台播放与主/副字幕布局
 - 三个页面都不再维护需要手动提交的页面草稿：选择、开关和步进项修改后立即排入持久化队列，文本输入使用 `250ms` 合并窗口；返回时会先把最后草稿加入有序写入队列，再立即关闭页面，不再显示保存确认框或工具栏提交按钮
-- 三个全局设置页各自只写自己那段字段：播放页走 `savePlaybackPreferences(...)`、字幕页走 `savePlaybackSubtitlePreferences(...)`、MPV 页走 `savePlaybackMpvPreferences(...)`；播放中的 MPV“更多”使用 `savePlaybackRuntimePreferences(...)` 原子保存其当前完整快照，避免连续操作互相覆盖
+- 三个全局设置页各自只写自己那段字段：播放页走 `savePlaybackPreferences(...)`、字幕页走 `savePlaybackSubtitlePreferences(...)`、MPV 页走 `savePlaybackMpvPreferences(...)`；播放器内二级“更多”使用 `savePlaybackRuntimePreferences(...)` 原子保存其当前完整快照，避免连续操作互相覆盖
 - 媒体源、搜索服务、豆瓣账号和网络存储编辑页复用 `SettingsAutoSaveCoordinator`：以当前配置 JSON 作为指纹去重，连续修改使用 `250ms` 防抖并按队列顺序持久化，返回时立即冲刷最后草稿，删除前取消尚未开始的保存，避免删除后被旧任务重新创建
 - 整页编辑不再保留保存按钮或未保存确认；单个文本输入弹窗里的“保存”仍只负责把该输入提交回当前草稿。新建媒体源/搜索服务在草稿没有实际内容时不会生成空记录
 - 详情页资源信息区对播放器内核的切换会直接复用同一个 `setPlaybackEngine(...)` 写回入口，因此不会出现“详情页一种默认、设置页另一种默认”的分叉
